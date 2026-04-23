@@ -453,10 +453,8 @@ export function RecordingClient({
           setEvents([]);
           lastSequenceRef.current = 0;
 
-          // Clear any stream URL from a prior attempt — otherwise the
-          // BrowserViewer keeps reconnecting to the old (possibly deleted)
-          // EB until the poll below resolves, producing a phantom "Connecting
-          // to browser..." loop against a target that no longer exists.
+          // Stale URL from a prior attempt would keep the BrowserViewer
+          // reconnecting to the old target until the poll below resolves.
           setEmbeddedStreamUrl(null);
 
           // Fetch embedded stream URL if recording via an embedded runner.

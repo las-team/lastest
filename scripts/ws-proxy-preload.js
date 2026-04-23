@@ -6,26 +6,16 @@
  * handler runs, and forwards /api/embedded/stream/ws + /api/activity-feed/ws
  * to their respective upstream TCP endpoints.
  *
- * Previous behaviour (the 10–40s recording-start stalls observed in prod HAR):
- *   Next.js registers its own 'upgrade' listener after our preload. When our
- *   handler ran first and began forwarding, Next.js's fallback fired next,
- *   wrote "HTTP/1.1 404 Not Found\r\n\r\n" to the client socket, and called
- *   socket.destroy(). Our `socket.end = noop` only blocked `end()` — the raw
- *   `socket.write()` and `socket.destroy()` still went through and corrupted
- *   the handshake. The browser retried until it happened to catch a race
- *   where the upstream's 101 arrived before Next.js's 404 — hence the ~40s
- *   eventual "success".
- *
- * Fix:
- *   1. prependListener so we run first (cheap insurance).
- *   2. On match, immediately `removeAllListeners('upgrade')` — re-register
- *      only our top-level handler — so Next.js's fallback can never fire for
- *      this or subsequent upgrades on this server.
- *   3. Override `socket.write` (not just end/destroy) while we own the
- *      handshake, so anything that slipped through cannot corrupt the stream.
- *   4. Read the upstream's 101 response manually, forward it, THEN enable
- *      piping. Guarantees the handshake bytes are in order.
- *   5. Handshake watchdog (15s) + explicit teardown covers edge cases.
+ * Next's fallback upgrade handler fires synchronously after ours and can
+ * schedule socket.destroy/end via microtasks. Two guards keep those from
+ * corrupting our tunnel:
+ *   - `claimed` — blocks socket.write until the upstream 101 arrives, so
+ *     Next can't inject a 404 body into the handshake.
+ *   - `sessionOver` — blocks socket.end/destroy for the socket's lifetime;
+ *     only OUR teardown flips it, so latent Next cleanup calls are ignored
+ *     and the pipe stays up until TCP naturally closes.
+ * Upstream's 101 + any trailing WS frame are read manually and forwarded
+ * before piping begins, guaranteeing handshake bytes are in order.
  */
 
 const http = require('http');
@@ -68,21 +58,11 @@ function parseTarget(url) {
 }
 
 function forwardUpgrade(server, req, socket, head, cfg) {
-  // We're the first listener (prependListener). Other listeners — notably
-  // Next.js's own upgrade fallback — still fire after us AND may schedule
-  // destroy/end via microtasks that only run AFTER we've set up piping.
-  // Previously we released the claim once the upgrade completed, which let
-  // those latent cleanup calls through and closed the WS instantly (observed
-  // as code=1006 at ~10ms, no keepalive frames reaching the browser). Fix:
-  // keep destroy/end blocked for the socket's lifetime — only our own
-  // `teardown` flips `sessionOver` to release the block, so the pipe stays
-  // up until TCP naturally closes. `claimed` still gates pre-upgrade writes
-  // so Next's potential 404 body can't corrupt the handshake.
   const realWrite = socket.write.bind(socket);
   const realEnd = socket.end.bind(socket);
   const realDestroy = socket.destroy.bind(socket);
-  let claimed = true;           // blocks ALL socket.write pre-upgrade
-  let sessionOver = false;      // only set by OUR teardown — gates end/destroy
+  let claimed = true;           // blocks socket.write pre-upgrade
+  let sessionOver = false;      // only our teardown flips this — gates end/destroy
   socket.write = (...a) => {
     if (claimed) { dlog(cfg.label, 'blocked external socket.write', a[0] && a[0].length); return true; }
     return realWrite(...a);
@@ -116,10 +96,6 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
     if (!clientClosed) {
       clientClosed = true;
-      // Flip `sessionOver` right before our end/destroy so the socket
-      // override lets them through. External callers that hit the override
-      // after this still pass through — we've already decided the session
-      // is done, so their redundant destroy is harmless.
       sessionOver = true;
       try { hadError ? realDestroy() : realEnd(); } catch { /* ignore */ }
     }
@@ -194,12 +170,7 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
 
     upgraded = true;
-    // Release the pre-upgrade write guard so our overridden `socket.write`
-    // delegates to `realWrite` from here on — that's what `pipe(upstream→socket)`
-    // uses internally. We leave the override in place (not restored to the raw
-    // bound function) so `socket.end`/`socket.destroy` stay gated by
-    // `sessionOver` against Next.js's latent cleanup calls.
-    claimed = false;
+    claimed = false;  // pipe(upstream→socket) needs socket.write to pass through
 
     try { realWrite(hbytes); if (trailing.length) realWrite(trailing); } catch { /* ignore */ }
 

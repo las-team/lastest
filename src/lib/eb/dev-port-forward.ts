@@ -10,11 +10,7 @@
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process';
 import net from 'net';
 
-// Read at call time, not module-load time. Next.js loads `.env.local` via
-// `@next/env` before handlers run, but module top-level evaluation can race
-// that in edge cases (especially after a dev-server restart). Reading per-call
-// guarantees the flag we wrote in `.env.local` is honored.
-const isEnabled = () => process.env.EB_DEV_PORT_FORWARD === '1';
+const ENABLED = process.env.EB_DEV_PORT_FORWARD === '1';
 const NAMESPACE = process.env.EB_NAMESPACE || 'lastest';
 const STREAM_PORT = 9223;
 const CDP_PORT = 9232;
@@ -127,47 +123,33 @@ async function getOrStart(instanceId: string): Promise<Forward> {
     return existing;
   }
   installExitHooks();
-  const fw = await startForward(instanceId);
-  try {
-    await fw.ready;
-  } catch (err) {
-    try { fw.child.kill('SIGTERM'); } catch { /* ignore */ }
-    forwards.delete(instanceId);
-    throw err;
-  }
-  return fw;
-}
-
-/**
- * Rewrite `ws://<podIP>:9223` to `ws://127.0.0.1:<forwardedPort>` so the host
- * dev server can reach the EB. Returns the original URL unchanged in prod or
- * when the flag is off.
- */
-async function rewriteWithRetry(instanceId: string): Promise<Forward> {
-  // Port-forward spawns race each other on concurrent auto-registers (two fresh
-  // pods registering in the same second hit the kubectl CLI + port alloc at the
-  // same time). A single transient failure used to silently fall back to the
-  // raw pod IP, which isn't routable from the host — the DB ended up with a
-  // permanently-broken streamUrl and recording never showed a stream. Retry
-  // with backoff so concurrent registers both succeed.
+  // The EB container calls auto-register as soon as its HTTP server is up,
+  // but `kubectl port-forward` hits the Kubernetes API which can briefly see
+  // `pod.status=Pending` during that window and exits with "pod is not
+  // running". Retry a few times with short backoff so the normal startup
+  // race resolves itself instead of returning 500 to the EB.
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return await getOrStart(instanceId);
+      const fw = await startForward(instanceId);
+      await fw.ready;
+      return fw;
     } catch (err) {
       lastErr = err;
-      await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
     }
   }
   throw lastErr;
 }
 
+/**
+ * Rewrite `ws://<podIP>:9223` to `ws://127.0.0.1:<forwardedPort>` so the host
+ * dev server can reach the EB. Throws on failure — a raw pod IP in the DB is
+ * unroutable from the host and silently breaks recording.
+ */
 export async function rewriteDevStreamUrl(instanceId: string, streamUrl: string | undefined): Promise<string | undefined> {
-  if (!isEnabled() || !streamUrl) return streamUrl;
-  // In dev with EB_DEV_PORT_FORWARD=1 we MUST rewrite — the raw pod IP is
-  // unroutable from the host, so letting a raw URL land in the DB guarantees
-  // broken recording. Surface the failure instead of papering over it.
-  const fw = await rewriteWithRetry(instanceId);
+  if (!ENABLED || !streamUrl) return streamUrl;
+  const fw = await getOrStart(instanceId);
   const u = new URL(streamUrl);
   u.hostname = '127.0.0.1';
   u.port = String(fw.streamPort);
@@ -175,8 +157,8 @@ export async function rewriteDevStreamUrl(instanceId: string, streamUrl: string 
 }
 
 export async function rewriteDevCdpUrl(instanceId: string, cdpUrl: string | undefined): Promise<string | undefined> {
-  if (!isEnabled() || !cdpUrl) return cdpUrl;
-  const fw = await rewriteWithRetry(instanceId);
+  if (!ENABLED || !cdpUrl) return cdpUrl;
+  const fw = await getOrStart(instanceId);
   const u = new URL(cdpUrl);
   u.hostname = '127.0.0.1';
   u.port = String(fw.cdpPort);
@@ -185,7 +167,7 @@ export async function rewriteDevCdpUrl(instanceId: string, cdpUrl: string | unde
 
 /** Kill the port-forward for an instance (on session delete / pod teardown). */
 export function stopDevPortForward(instanceId: string): void {
-  if (!isEnabled()) return;
+  if (!ENABLED) return;
   const fw = forwards.get(instanceId);
   if (!fw) return;
   try { fw.child.kill('SIGTERM'); } catch { /* ignore */ }
@@ -193,41 +175,15 @@ export function stopDevPortForward(instanceId: string): void {
 }
 
 /**
- * On dev-server boot, orphan port-forward children from a previous run may
- * still hold the free ports we want. `pkill` them defensively. Safe no-op if
- * none are running. Only runs when the flag is enabled.
- */
-export function reapOrphanDevPortForwards(): void {
-  if (!isEnabled()) return;
-  try {
-    execFileSync('pkill', ['-f', `kubectl.*-n ${NAMESPACE} port-forward pod/`], { stdio: 'ignore' });
-  } catch { /* no matches → exit 1, fine */ }
-}
-
-/**
- * On dev-server restart, every existing system EB is stale:
- *   - Its `ws://127.0.0.1:<port>` stream URL points to a port-forward that
- *     died with the previous dev process.
- *   - The pod's own auto-register only runs once at container start — it will
- *     never re-register against the new dev server on its own.
- *
- * Delete the pods so their Jobs respawn them, which triggers fresh
- * `POST /api/embedded/auto-register` → fresh `kubectl port-forward` → fresh
- * DB row with a reachable URL. Also mark the old runner/session rows
- * offline/stopped immediately so the warm-pool top-up (which runs right after
- * this) doesn't hand out a dead EB before the new pods finish registering.
- *
- * No-op in prod (flag off) and in non-k8s local dev.
+ * On `pnpm dev` restart, every system EB in the DB is stale — its
+ * `ws://127.0.0.1:<port>` URL points to a port-forward that died with the
+ * previous Node process, and pods only auto-register once at container start.
+ * Delete the Jobs so `reconcileOrphanedPoolEBs` can prune the phantom rows
+ * and `ensureWarmPool` can provision fresh ones against this dev server.
  */
 export async function refreshDevPoolAfterRestart(): Promise<void> {
-  if (!isEnabled()) return;
+  if (!ENABLED) return;
   try {
-    // Delete Jobs (not just pods) — deleting only pods lets the Job respawn
-    // them with the same instanceId, so the DB runner row sticks around with
-    // its dead `ws://127.0.0.1:<port>` URL until the new pod re-registers.
-    // Deleting Jobs cascades to their pods AND leaves phantom rows for
-    // `reconcileOrphanedPoolEBs` (which runs next in the boot sequence) to
-    // prune cleanly. `ensureWarmPool` then provisions fresh Jobs.
     execFileSync('kubectl', [
       '-n', NAMESPACE,
       'delete', 'job',
@@ -235,7 +191,7 @@ export async function refreshDevPoolAfterRestart(): Promise<void> {
       '--wait=false',
       '--ignore-not-found=true',
     ], { stdio: 'pipe' });
-    console.log('[EB dev-pf] Deleted existing EB Jobs (warm-pool top-up will provision fresh ones against this dev server)');
+    console.log('[EB dev-pf] Deleted existing EB Jobs (warm-pool will provision fresh ones)');
   } catch (err) {
     console.warn('[EB dev-pf] Failed to delete stale EB Jobs:', (err as Error).message);
   }
