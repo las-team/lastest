@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
+// View counting happens server-side on page render (see page.tsx).
+
 export interface ClientDiff {
   id: string;
   stepLabel: string | null;
@@ -27,7 +29,6 @@ export interface ClientTestGroup {
 }
 
 export interface ShareViewerProps {
-  slug: string;
   videos: Array<{ src: string; testName: string; durationMs: number | null }>;
   testGroups: ClientTestGroup[];
   catalog: Array<{ src: string; label: string; testName: string }>;
@@ -49,23 +50,12 @@ type LightboxPayload =
     };
 
 export function ShareViewer({
-  slug,
   videos,
   testGroups,
   catalog,
   claimLink,
 }: ShareViewerProps) {
   const [lightbox, setLightbox] = useState<LightboxPayload | null>(null);
-
-  // Beacon a view count once per mount (page uses ISR, so server-side counting
-  // wouldn't fire on cached renders).
-  useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon(`/api/share/${slug}/view`);
-    } else {
-      fetch(`/api/share/${slug}/view`, { method: 'POST', keepalive: true }).catch(() => {});
-    }
-  }, [slug]);
 
   const totalDiffs = testGroups.reduce((acc, g) => acc + g.diffs.length, 0);
 

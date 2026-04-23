@@ -5,6 +5,7 @@ import { CheckCircle, XCircle, AlertTriangle, FileCheck2 } from 'lucide-react';
 import {
   getPublicShareContext,
   getShareDataBySlug,
+  incrementPublicShareView,
   type ShareVisualDiff,
 } from '@/lib/db/queries/public-shares';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
@@ -66,12 +67,23 @@ export default async function PublicSharePage({ params }: PageProps) {
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
 
+  // View counter runs once per ISR regeneration (revalidate = 60s). Rough
+  // count rather than per-visit, but good enough for a share link — the
+  // alternative (a dedicated POST endpoint hit via beacon) forced a separate
+  // cold-compile under /api/share/[slug]/ that tripped the dev-server.
+  await incrementPublicShareView(slug);
+
   const { share, build, test, testRun, diffs, results: scopedResults } = data;
 
-  const mediaBase = `/api/share/${slug}/media`;
+  // Public share media piggybacks on the authenticated /api/media/[...path]
+  // route via the existing /screenshots /videos /diffs /baselines rewrites
+  // (next.config.ts). The `?share=<slug>` query authorizes access without
+  // needing a session. This keeps every share request on a route the dev
+  // server already has warm, so no dynamic [slug] route ever cold-compiles.
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
-    return mediaBase + (p.startsWith('/') ? p : `/${p}`);
+    const normalized = p.startsWith('/') ? p : `/${p}`;
+    return `${normalized}?share=${slug}`;
   };
 
   // Group diffs by test
@@ -251,7 +263,6 @@ export default async function PublicSharePage({ params }: PageProps) {
         </section>
 
         <ShareViewer
-          slug={slug}
           videos={videos}
           testGroups={clientTestGroups}
           catalog={catalog}
