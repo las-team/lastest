@@ -5,6 +5,18 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
+  // Dev-only: a restart of `pnpm dev` kills every `kubectl port-forward` child
+  // of the previous process, leaving all system EB sessions in DB pointing at
+  // dead local ports. Delete the backing Jobs here so phantom-reconcile can
+  // prune the stale rows and the warm-pool top-up provisions fresh EBs that
+  // auto-register against the current dev server. No-op in prod.
+  try {
+    const { refreshDevPoolAfterRestart } = await import('@/lib/eb/dev-port-forward');
+    await refreshDevPoolAfterRestart();
+  } catch (err) {
+    console.error('[Boot] refreshDevPoolAfterRestart failed:', err);
+  }
+
   try {
     const { reconcileOrphanedPoolEBs } = await import('@/server/actions/embedded-sessions');
     await reconcileOrphanedPoolEBs();

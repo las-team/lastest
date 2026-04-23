@@ -7,6 +7,7 @@ import { promises as fs } from 'fs';
 import * as queries from '@/lib/db/queries';
 import { requireAuth, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import { generateShareSlug, buildShareUrl } from '@/lib/share/slug';
+import { removeShareSymlinks } from '@/lib/share/sync-media';
 import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import type { PublicShare } from '@/lib/db/schema';
 
@@ -124,6 +125,7 @@ export async function revokePublicShare(shareId: string): Promise<void> {
   await requireRepoAccess(share.repositoryId);
 
   await queries.revokePublicShareById(shareId);
+  await removeShareSymlinks(share.slug);
   revalidatePath(`/builds/${share.buildId}`);
   revalidatePath(`/r/${share.slug}`);
 }

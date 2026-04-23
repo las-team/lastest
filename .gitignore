@@ -52,6 +52,7 @@ next-env.d.ts
 /public/screenshots/
 /public/diffs/
 /public/traces/
+/public/share/
 /storage/
 
 # test results

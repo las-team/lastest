@@ -6,8 +6,6 @@ import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { resolveStoragePath } from '@/lib/storage/paths';
 import { getRepository } from '@/lib/db/queries/repositories';
-import { getShareAllowlist } from '@/lib/db/share-public';
-import { isValidShareSlug } from '@/lib/share/slug';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -40,42 +38,27 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const segments = (await params).path;
-  const urlPath = '/' + segments.join('/');
 
-  // Share-scoped access: `?share=<slug>` authorizes a specific set of paths
-  // without requiring a session. This is the public share read path and
-  // intentionally piggybacks on this route so no separate dynamic route
-  // under /api/share/[slug]/ exists to cold-compile in dev.
-  const shareSlug = request.nextUrl.searchParams.get('share');
-  if (shareSlug) {
-    if (!isValidShareSlug(shareSlug)) {
-      return new Response('Bad Request', { status: 400 });
+  // Skip auth for traces — they're fetched cross-origin by trace.playwright.dev
+  // and are auto-cleaned after 1 hour.
+  const isTrace = segments[0] === 'traces';
+  if (!isTrace) {
+    const session = await verifyAuth(request);
+    if (!session) {
+      return new Response('Unauthorized', { status: 401 });
     }
-    const allowlist = await getShareAllowlist(shareSlug);
-    if (!allowlist || !allowlist.has(urlPath)) {
-      return new Response('Not Found', { status: 404 });
-    }
-  } else {
-    // Authenticated access. Skip auth for traces — they're fetched
-    // cross-origin by trace.playwright.dev and auto-clean after 1 hour.
-    const isTrace = segments[0] === 'traces';
-    if (!isTrace) {
-      const session = await verifyAuth(request);
-      if (!session) {
-        return new Response('Unauthorized', { status: 401 });
-      }
 
-      // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
-      if (segments[0] === 'screenshots' && segments[1]) {
-        const repoId = segments[1];
-        const repo = await getRepository(repoId);
-        if (!repo || repo.teamId !== session.team?.id) {
-          return new Response('Forbidden', { status: 403 });
-        }
+    // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
+    if (segments[0] === 'screenshots' && segments[1]) {
+      const repoId = segments[1];
+      const repo = await getRepository(repoId);
+      if (!repo || repo.teamId !== session.team?.id) {
+        return new Response('Forbidden', { status: 403 });
       }
     }
   }
 
+  const urlPath = '/' + segments.join('/');
   const filePath = resolveStoragePath(urlPath);
   if (!filePath) {
     return new Response('Bad Request', { status: 400 });

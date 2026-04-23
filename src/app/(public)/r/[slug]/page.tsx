@@ -9,6 +9,7 @@ import {
   type ShareVisualDiff,
 } from '@/lib/db/queries/public-shares';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
+import { ensureShareSymlinks } from '@/lib/share/sync-media';
 import { ShareViewer } from './share-viewer-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,23 +68,39 @@ export default async function PublicSharePage({ params }: PageProps) {
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
 
-  // View counter runs once per ISR regeneration (revalidate = 60s). Rough
-  // count rather than per-visit, but good enough for a share link — the
-  // alternative (a dedicated POST endpoint hit via beacon) forced a separate
-  // cold-compile under /api/share/[slug]/ that tripped the dev-server.
+  // View counter runs once per ISR regeneration (revalidate = 60s).
   await incrementPublicShareView(slug);
 
   const { share, build, test, testRun, diffs, results: scopedResults } = data;
 
-  // Public share media piggybacks on the authenticated /api/media/[...path]
-  // route via the existing /screenshots /videos /diffs /baselines rewrites
-  // (next.config.ts). The `?share=<slug>` query authorizes access without
-  // needing a session. This keeps every share request on a route the dev
-  // server already has warm, so no dynamic [slug] route ever cold-compiles.
+  // Materialise every allowed media path as a symlink under public/share/<slug>/
+  // before emitting the HTML. Share image/video URLs resolve to files under
+  // public/ that Next serves via its static-file handler — no API route runs,
+  // so nothing about share traffic can stall the dev-server compile pipeline.
+  const allowedPaths: string[] = [];
+  for (const d of diffs) {
+    if (d.baselineImagePath) allowedPaths.push(d.baselineImagePath);
+    if (d.currentImagePath) allowedPaths.push(d.currentImagePath);
+    if (d.diffImagePath) allowedPaths.push(d.diffImagePath);
+    if (d.plannedImagePath) allowedPaths.push(d.plannedImagePath);
+    if (d.plannedDiffImagePath) allowedPaths.push(d.plannedDiffImagePath);
+    if (d.mainBaselineImagePath) allowedPaths.push(d.mainBaselineImagePath);
+    if (d.mainDiffImagePath) allowedPaths.push(d.mainDiffImagePath);
+  }
+  for (const r of scopedResults) {
+    if (r.screenshotPath) allowedPaths.push(r.screenshotPath);
+    if (r.videoPath) allowedPaths.push(r.videoPath);
+    const captured = (r.screenshots ?? []) as Array<{ path: string }>;
+    for (const s of captured) {
+      if (s.path) allowedPaths.push(s.path);
+    }
+  }
+  await ensureShareSymlinks(slug, allowedPaths);
+
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
-    const normalized = p.startsWith('/') ? p : `/${p}`;
-    return `${normalized}?share=${slug}`;
+    const rel = p.replace(/^\/+/, '');
+    return `/share/${slug}/${rel}`;
   };
 
   // Group diffs by test

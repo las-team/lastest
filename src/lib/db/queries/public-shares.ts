@@ -209,6 +209,3 @@ export async function getShareDataBySlug(slug: string): Promise<ShareData | null
   const [diffs, results] = await Promise.all([diffsQuery, resultsQuery]);
   return { ...ctx, diffs, results };
 }
-
-// NOTE: getShareAllowlist was moved to `@/lib/db/share-public` so the media
-// route can stay on a minimal module graph (no drizzle, no ./schema).
