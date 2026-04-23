@@ -5,6 +5,8 @@ const PUBLIC_PATHS = [
   '/login',
   '/register',
   '/invite',
+  '/r/',         // Public share pages
+  '/share/',     // Static share media (public/share/<slug>/...)
   '/api/auth/',
   '/api/health',
   '/api/webhooks/',

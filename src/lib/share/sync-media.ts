@@ -17,6 +17,16 @@ export async function ensureShareSymlinks(
   if (!isValidShareSlug(slug)) return;
   const base = path.join(SHARE_ROOT, slug);
 
+  // Fast path: if the slug dir already exists, assume it's fully populated
+  // from a prior publish call and skip every mkdir/link here. This stops
+  // re-publish or page-render code paths from causing a chokidar storm.
+  try {
+    const s = await stat(base);
+    if (s.isDirectory()) return;
+  } catch {
+    // ENOENT — proceed to create.
+  }
+
   for (const raw of allowedPaths) {
     if (!raw) continue;
     const source = resolveStoragePath(raw);

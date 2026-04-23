@@ -7,7 +7,7 @@ import { promises as fs } from 'fs';
 import * as queries from '@/lib/db/queries';
 import { requireAuth, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import { generateShareSlug, buildShareUrl } from '@/lib/share/slug';
-import { removeShareSymlinks } from '@/lib/share/sync-media';
+import { ensureShareSymlinks, removeShareSymlinks } from '@/lib/share/sync-media';
 import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import type { PublicShare } from '@/lib/db/schema';
 
@@ -65,8 +65,47 @@ export async function publishBuildShare(
     targetDomain,
   });
 
+  // Materialise hard links once, at publish time. Page render stays pure
+  // read-only (no fs writes = no chokidar storm during render).
+  await materialiseShareMedia(slug, buildId, scopedTest?.id ?? null);
+
   revalidatePath(`/builds/${buildId}`);
   return { shareId: share.id, slug: share.slug, url: buildShareUrl(share.slug) };
+}
+
+async function materialiseShareMedia(
+  slug: string,
+  buildId: string,
+  scopedTestId: string | null,
+): Promise<void> {
+  const build = await queries.getBuild(buildId);
+  if (!build) return;
+
+  const diffsRaw = await queries.getVisualDiffsByBuild(buildId);
+  const diffs = scopedTestId ? diffsRaw.filter((d) => d.testId === scopedTestId) : diffsRaw;
+  const resultsRaw = build.testRunId ? await queries.getTestResultsByRun(build.testRunId) : [];
+  const results = scopedTestId ? resultsRaw.filter((r) => r.testId === scopedTestId) : resultsRaw;
+
+  const paths: string[] = [];
+  for (const d of diffs) {
+    if (d.baselineImagePath) paths.push(d.baselineImagePath);
+    if (d.currentImagePath) paths.push(d.currentImagePath);
+    if (d.diffImagePath) paths.push(d.diffImagePath);
+    if (d.plannedImagePath) paths.push(d.plannedImagePath);
+    if (d.plannedDiffImagePath) paths.push(d.plannedDiffImagePath);
+    if (d.mainBaselineImagePath) paths.push(d.mainBaselineImagePath);
+    if (d.mainDiffImagePath) paths.push(d.mainDiffImagePath);
+  }
+  for (const r of results) {
+    if (r.screenshotPath) paths.push(r.screenshotPath);
+    if (r.videoPath) paths.push(r.videoPath);
+    const captured = (r.screenshots ?? []) as Array<{ path: string }>;
+    for (const s of captured) {
+      if (s.path) paths.push(s.path);
+    }
+  }
+
+  await ensureShareSymlinks(slug, paths);
 }
 
 export async function publishLatestTestShare(testId: string): Promise<PublishShareResult> {
