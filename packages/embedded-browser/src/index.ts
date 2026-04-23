@@ -616,6 +616,18 @@ async function startup(): Promise<void> {
           console.error(`[Command] Failed to start recording:`, err);
           isRecording = false;
           if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
+          // Surface the failure to the server so the client polling recording
+          // status can unblock and show the error instead of spinning forever.
+          runnerClient.sendMessage({
+            id: crypto.randomUUID(),
+            type: 'response:error',
+            timestamp: Date.now(),
+            payload: {
+              correlationId: payload.sessionId,
+              code: 'INTERNAL_ERROR',
+              message: err instanceof Error ? err.message : String(err),
+            },
+          });
           // Force cleanup recorder if it partially started
           await recorder.forceCleanup();
           // Restore screencast/input on idle page

@@ -14,7 +14,7 @@ import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, delet
 import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
 import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
 import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
@@ -504,6 +504,24 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:error': {
+        // Runner-side failure (e.g. EB setup step threw during command:start_recording).
+        // If the correlationId matches an active recording session, mark it failed
+        // so getRecordingStatus() surfaces the error to the client instead of
+        // leaving it spinning on isRecording=true.
+        const errMsg = message as ErrorResponse;
+        const { correlationId, message: errorMessage } = errMsg.payload;
+        if (correlationId) {
+          const session = findRemoteSessionBySessionId(correlationId);
+          if (session) {
+            session.isRecording = false;
+            session.errorMessage = errorMessage;
+            console.log(`[Recording] Session ${correlationId} failed: ${errorMessage}`);
+          }
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       case 'response:debug_state': {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const debugPayload = (message as any).payload as DebugStateResponsePayload;
@@ -717,6 +735,7 @@ export interface RemoteRecordingSession {
   startedAt: Date;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
+  errorMessage?: string;
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {

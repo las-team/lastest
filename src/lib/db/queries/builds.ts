@@ -36,8 +36,11 @@ export async function getBuildsByComparisonPairId(pairId: string) {
 
 export async function createBuild(data: Omit<NewBuild, 'id'>) {
   const id = uuid();
-  await db.insert(builds).values({ ...data, id, createdAt: new Date() });
-  return { id, ...data, createdAt: new Date() };
+  const [row] = await db
+    .insert(builds)
+    .values({ ...data, id, createdAt: new Date() })
+    .returning();
+  return row;
 }
 
 export async function updateBuild(id: string, data: Partial<NewBuild>) {

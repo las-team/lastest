@@ -261,6 +261,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
         id: remoteSession.sessionId,
         generatedCode: remoteSession.generatedCode!,
       } : null,
+      errorMessage: remoteSession.errorMessage ?? null,
     };
   }
 
@@ -272,6 +273,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
     session: null,
     lastCompletedSession: null,
+    errorMessage: null,
   };
 }
 
