@@ -129,7 +129,7 @@ fi
 echo "==> Applying app deployment"
 envsubst '${APP_IMAGE} ${EB_IMAGE}' < k8s/app-deployment.yaml | kubectl apply -f -
 kubectl -n "${NAMESPACE}" rollout restart deploy/lastest-app >/dev/null 2>&1 || true
-kubectl -n "${NAMESPACE}" rollout status deploy/lastest-app --timeout=300s
+bash scripts/_rollout-wait.sh "${NAMESPACE}" lastest-app 600s
 
 # 8. Schema is auto-pushed by the app's docker-entrypoint (drizzle-kit push --force).
 #    No manual db:push needed.

@@ -53,19 +53,27 @@ spec:
           env:
             - name: EB_IMAGE
               value: ${EB_IMAGE}
+          # Cold starts run `drizzle-kit push --force` against a ~1680-line
+          # schema which can take several minutes. A startupProbe gates
+          # readiness/liveness so they don't fire mid-migration.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 120   # 120 * 5s = 10 min max startup
           readinessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 15
             periodSeconds: 5
             timeoutSeconds: 5
-            failureThreshold: 12
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3

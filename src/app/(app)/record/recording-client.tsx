@@ -328,6 +328,12 @@ export function RecordingClient({
             setDomSnapshot((status.lastCompletedSession as Record<string, unknown>).domSnapshot as typeof domSnapshot ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
+          } else if (status.errorMessage) {
+            // Recording start failed (e.g. setup step threw on the EB) — surface
+            // the error and unblock the UI instead of spinning forever.
+            setStep('setup');
+            setError(`Recording failed: ${status.errorMessage}`);
+            await clearLastCompletedSession(repositoryId);
           } else {
             // Recording was stopped but no session - go back to setup
             setStep('setup');
@@ -447,23 +453,33 @@ export function RecordingClient({
           setEvents([]);
           lastSequenceRef.current = 0;
 
-          // Fetch embedded stream URL if recording via an embedded runner
+          // Fetch embedded stream URL if recording via an embedded runner.
+          // A freshly-provisioned EB may not have completed auto-register
+          // by the time startRecording returns, so poll briefly until the
+          // session shows up with a streamUrl rather than failing silently.
           const resolvedTarget = result.resolvedRunnerId || executionTarget;
           if (resolvedTarget && resolvedTarget !== 'auto') {
-            fetch(`/api/embedded/stream`)
-              .then(res => res.ok ? res.json() : null)
-              .then(data => {
-                if (data?.sessions) {
-                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
-                  if (session?.streamUrl) {
-                    const token = data.streamAuthToken;
-                    setEmbeddedStreamUrl(
-                      token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
-                    );
+            (async () => {
+              for (let attempt = 0; attempt < 10; attempt++) {
+                try {
+                  const res = await fetch(`/api/embedded/stream`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    const session = data?.sessions?.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
+                    if (session?.streamUrl) {
+                      const token = data.streamAuthToken;
+                      setEmbeddedStreamUrl(
+                        token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+                      );
+                      return;
+                    }
                   }
+                } catch {
+                  // ignore transient fetch errors and retry
                 }
-              })
-              .catch(() => {});
+                await new Promise(r => setTimeout(r, 500));
+              }
+            })();
           }
         }
       }

@@ -28,7 +28,7 @@ k3d image import "${EB_IMAGE}" "lastest-embedded-browser:latest" -c "${CLUSTER_N
 
 echo "==> kubectl set env EB_IMAGE=${EB_IMAGE}"
 kubectl -n "${NAMESPACE}" set env deploy/lastest-app EB_IMAGE="${EB_IMAGE}"
-kubectl -n "${NAMESPACE}" rollout status deploy/lastest-app --timeout=300s
+bash scripts/_rollout-wait.sh "${NAMESPACE}" lastest-app 600s
 
 echo ""
 echo "==> Done. To force existing EB pods to rotate onto the new image:"

@@ -15,6 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   title: "Lastest - Visual Regression Testing",
   description: "AI-powered visual regression testing tool",
   manifest: "/manifest.webmanifest",

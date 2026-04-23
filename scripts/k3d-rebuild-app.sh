@@ -34,6 +34,6 @@ kubectl apply -f .k8s-secrets.yaml
 
 echo "==> kubectl set image"
 kubectl -n "${NAMESPACE}" set image deploy/lastest-app app="${APP_IMAGE}"
-kubectl -n "${NAMESPACE}" rollout status deploy/lastest-app --timeout=300s
+bash scripts/_rollout-wait.sh "${NAMESPACE}" lastest-app 600s
 
 echo "==> Done: ${APP_IMAGE}"
