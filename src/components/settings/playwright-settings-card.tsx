@@ -78,9 +78,9 @@ export function PlaywrightSettingsCard({
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [enableA11y, setEnableA11y] = useState(settings.enableA11y ?? false);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
-  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
+  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'warn');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
-  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
+  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'warn');
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);

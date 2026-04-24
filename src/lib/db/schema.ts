@@ -708,9 +708,9 @@ export const playwrightSettings = pgTable('playwright_settings', {
   ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
-  networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  networkErrorMode: text('network_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
   ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(false), // skip errors from different origins
-  consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  consoleErrorMode: text('console_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking

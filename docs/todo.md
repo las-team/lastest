@@ -17,7 +17,8 @@ captures only cursor IF record path is enabled
 ## features
 stream back on headed play
 check tabs and enters
-Select focus areas and evaluation criteria (assertions)
+Select focus areas of a screenshot that need to be checked and evaluation criteria (assertions)
+time delay in validation
 Openrouter agent sdk parity
 Asset management
 mcp-oauth flow
