@@ -14,16 +14,14 @@ a11y
 DOM delta
 ## bugs
 captures only cursor IF record path is enabled
+area cant be drawn over slider
 ## features
 implement designs
-check tabs and enters
-Select focus areas of a screenshot that need to be checked and evaluation criteria (assertions)
-time delay in validation
 Openrouter agent sdk parity
 Asset management
 mcp-oauth flow
-(low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
+check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
   Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
@@ -75,62 +73,6 @@ Video recording
 Run online or on your pc?
 Pont erre van szükségünk
 Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
-
-Does BackstopJS support Docker for visual diff?
-
-Not probed yet
-
-No results
-0%
-
-How to choose visual regression testing for startups?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-Cheapest visual regression testing alternative to Chromatic?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-What visual testing tool integrates well with GitHub Actions?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-How to catch visual bugs in CI/CD pipeline?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-Best open-source visual regression testing tools for Playwright?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-How does Percy compare to Applitools for visual testing?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
-
-What's the best visual regression testing tool for enterprise?
-
-Appears in 0 of 1 platforms
-
-ChatGPT
-0%
 
 Re-fetch search volume, CPC & competition from DataForSEO
 

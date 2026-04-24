@@ -1075,7 +1075,7 @@ export function DefinitionPageClient({
                         Generate
                       </Button>
                     )}
-                    <Button asChild size="sm" className="h-8 text-sm">
+                    <Button asChild variant={isEditingArea ? 'outline' : 'default'} size="sm" className="h-8 text-sm">
                       <Link href="/record">
                         <Plus className="h-4 w-4 mr-1.5" />
                         Record
