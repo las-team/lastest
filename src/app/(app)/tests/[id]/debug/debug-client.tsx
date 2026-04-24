@@ -109,19 +109,17 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // longer re-run this effect — mid-build reassignments don't affect an
   // already-launched debug session.
   useEffect(() => {
-    console.log('[DebugClient] session-init effect RUN (isRunnerHydrated=', isRunnerHydrated, ')');
     if (!isRunnerHydrated) return;
 
     let cancelled = false;
     const previous = initPromiseRef.current;
     const run = (async () => {
       if (previous) await previous.catch(() => {});
-      if (cancelled) { console.log('[DebugClient] session-init: cancelled before work'); return; }
+      if (cancelled) return;
 
       // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
       if (prevSessionId && hasMountedRef.current) {
-        console.log('[DebugClient] session-init: stopping prev session', prevSessionId);
         await stopDebugSession(prevSessionId).catch(() => {});
         if (cancelled) return;
         setSessionId(null);
@@ -129,11 +127,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
       hasMountedRef.current = true;
       const target = executionTargetRef.current;
-      console.log('[DebugClient] session-init: calling startDebugSession, target=', target);
       const result = await startDebugSession(test.id, repositoryId, target === 'local' ? null : target);
-      console.log('[DebugClient] session-init: startDebugSession returned', result);
       if (cancelled) {
-        console.log('[DebugClient] session-init: CANCELLED after start — will call stopDebugSession(', result.sessionId, ')');
         // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
         // in dev, or fast unmount). Release it so subsequent claims can succeed.
         if (result.sessionId) {
@@ -153,7 +148,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     initPromiseRef.current = run;
 
     return () => {
-      console.log('[DebugClient] session-init cleanup fired — cancelled=true');
       cancelled = true;
     };
   }, [test.id, repositoryId, isRunnerHydrated]);
@@ -189,11 +183,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   // Cleanup on unmount (covers SPA route changes — other exit paths handled separately)
   useEffect(() => {
-    console.log('[DebugClient] unmount-cleanup effect registered');
     return () => {
-      console.log('[DebugClient] unmount-cleanup fired. sessionIdRef=', sessionIdRef.current, 'releasedRef=', releasedRef.current);
       if (sessionIdRef.current && !releasedRef.current) {
-        console.log('[DebugClient] unmount-cleanup calling stopDebugSession(', sessionIdRef.current, ')');
         releasedRef.current = true;
         stopDebugSession(sessionIdRef.current).catch(() => {});
       }

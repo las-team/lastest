@@ -40,6 +40,7 @@ interface BrowserViewerProps {
   readOnlyUrl?: boolean;
   interactive?: boolean;
   inspectMode?: boolean;
+  fit?: boolean;
   onInspectResult?: (result: InspectElementResult | null) => void;
   onDomSnapshot?: (result: DomSnapshotResult) => void;
 }
@@ -49,7 +50,7 @@ export interface BrowserViewerHandle {
   sendInspectMode: (enabled: boolean) => void;
 }
 
-export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, onInspectResult, onDomSnapshot }, ref) {
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -330,8 +331,10 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const x = Math.round(e.clientX - rect.left);
-      const y = Math.round(e.clientY - rect.top);
+      const scaleX = rect.width ? canvas.width / rect.width : 1;
+      const scaleY = rect.height ? canvas.height / rect.height : 1;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
 
       // In inspect mode: forward moves (for CDP overlay highlighting),
       // intercept clicks to send inspect request instead
@@ -376,8 +379,10 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const x = Math.round(e.clientX - rect.left);
-      const y = Math.round(e.clientY - rect.top);
+      const scaleX = rect.width ? canvas.width / rect.width : 1;
+      const scaleY = rect.height ? canvas.height / rect.height : 1;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
 
       sendWs({
         type: 'stream:input',
@@ -565,9 +570,11 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     const canvas = canvasRef.current;
     if (!canvas) return [];
     const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width ? canvas.width / rect.width : 1;
+    const scaleY = rect.height ? canvas.height / rect.height : 1;
     return Array.from(e.touches).map((t) => ({
-      x: Math.round(t.clientX - rect.left),
-      y: Math.round(t.clientY - rect.top),
+      x: Math.round((t.clientX - rect.left) * scaleX),
+      y: Math.round((t.clientY - rect.top) * scaleY),
       id: t.identifier,
     }));
   }, []);
@@ -677,8 +684,8 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         readOnly={readOnlyUrl}
       />
 
-      {/* Canvas container — 1:1 pixel rendering, scrollable if larger than available space */}
-      <div className="relative overflow-auto rounded-b-lg border bg-black">
+      {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
+      <div className={`relative rounded-b-lg border bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
@@ -719,10 +726,21 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         <canvas
           ref={canvasRef}
           className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
-          style={{
-            width: viewport.width,
-            height: viewport.height,
-          }}
+          style={
+            fit
+              ? {
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  width: 'auto',
+                  height: 'auto',
+                  aspectRatio: `${viewport.width} / ${viewport.height}`,
+                  objectFit: 'contain',
+                }
+              : {
+                  width: viewport.width,
+                  height: viewport.height,
+                }
+          }
           onMouseMove={(e) => handleMouseEvent(e, 'move')}
           onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
           onMouseUp={(e) => handleMouseEvent(e, 'up')}

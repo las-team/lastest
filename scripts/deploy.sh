@@ -23,6 +23,10 @@ OLARES_HOST="ewyctorlab.olares.local"
 OLARES_USER="root"
 OLARES_NS="lastest-dev-ewyctorlab"
 OLARES_DEPLOY="lastest-dev"
+# Companion envoy-less Deployment that EB Jobs call via LASTEST_URL.
+# MUST be rolled alongside OLARES_DEPLOY — otherwise EB POSTs land in
+# a stale pod running an older build.
+OLARES_INTERNAL_DEPLOY="lastest-internal-dev"
 
 IMAGE_APP="ewyc/lastest"
 IMAGE_EB="ewyc/lastest-eb"
@@ -249,13 +253,17 @@ deploy_olares() {
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ok "Images imported on Olares"
 
-  log "Restarting deployment..."
+  log "Restarting deployments ($OLARES_DEPLOY + $OLARES_INTERNAL_DEPLOY)..."
+  # Both Deployments must be rolled: the envoy-fronted one serves the UI,
+  # the envoy-less `-internal` one is what EB Jobs POST into via LASTEST_URL.
+  # Skipping the internal one leaves EB traffic on a stale build.
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+    "kubectl rollout restart deployment/$OLARES_DEPLOY deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS"
 
   log "Waiting for rollout..."
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s && \
+     kubectl rollout status deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS --timeout=180s"
 
   log "Verifying deployment..."
   bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
@@ -318,9 +326,10 @@ deploy_olares_transfer() {
   docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+    "kubectl rollout restart deployment/$OLARES_DEPLOY deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS"
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s && \
+     kubectl rollout status deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS --timeout=180s"
   bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
 }
 

@@ -56,7 +56,7 @@ export async function startDebugSession(
   const steps = parseSteps(cleanBody);
   const sessionId = crypto.randomUUID();
 
-  createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
+  await createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
 
   const targetUrl = envConfig?.baseUrl || 'about:blank';
   const viewport = settings?.viewportWidth && settings?.viewportHeight
@@ -89,7 +89,7 @@ export async function startDebugSession(
       storageState = setupResult.storageStateJson ?? setupResult.storageState;
       setupVariables = setupResult.variables;
     } catch (err) {
-      clearRemoteDebugSession(sessionId);
+      await clearRemoteDebugSession(sessionId);
       await releasePoolEB(runnerId);
       return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
     }
@@ -120,7 +120,7 @@ export async function getDebugState(
   sessionId: string
 ): Promise<DebugState | null> {
   // Check remote session
-  const remoteSession = getRemoteDebugSession(sessionId);
+  const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
     if (!remoteSession.state) {
       // Session exists but no state yet — return initializing placeholder
@@ -159,7 +159,7 @@ export async function sendDebugCommand(
 ): Promise<{ ok: boolean; error?: string }> {
 
   // Check remote session
-  const remoteSession = getRemoteDebugSession(sessionId);
+  const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
     if (command.type === 'update_code' && 'code' in command) {
       // Re-parse steps on server
@@ -203,13 +203,8 @@ export async function stopDebugSession(
   sessionId: string
 ): Promise<void> {
   // Check remote session
-  const remoteSession = getRemoteDebugSession(sessionId);
+  const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
-    // Diagnostic: log the call stack so we can see WHICH client path is stopping
-    // a session that still looks alive to the user. Only useful while hunting
-    // the "Launching browser..." → instant-stop bug; remove once identified.
-    const stack = new Error().stack?.split('\n').slice(1, 5).join(' | ') ?? '(no stack)';
-    console.log(`[Debug] stopDebugSession(${sessionId.slice(0, 8)}) called — stack: ${stack}`);
     await queueCommandToDB(remoteSession.runnerId, {
       id: crypto.randomUUID(),
       type: 'command:stop_debug',
@@ -220,7 +215,7 @@ export async function stopDebugSession(
     // Release the EB back to the pool
     await releasePoolEB(remoteSession.runnerId);
 
-    clearRemoteDebugSession(sessionId);
+    await clearRemoteDebugSession(sessionId);
     return;
   }
 }

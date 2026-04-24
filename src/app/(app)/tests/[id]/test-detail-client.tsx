@@ -868,10 +868,12 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <div ref={viewerLayoutRef} className={isViewerFullscreen ? 'flex-1 flex flex-col h-full overflow-hidden bg-muted/50' : ''}>
             {isViewerFullscreen ? (
               <>
-                <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+                <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
                   <BrowserViewer
                     streamUrl={streamUrl}
                     hideControls
+                    fit
+                    className="flex-1 min-h-0"
                   />
                 </div>
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
@@ -918,7 +920,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 {showViewer && (
                   <BrowserViewer
                     streamUrl={streamUrl}
-                    className="max-h-[500px]"
+                    className="h-[500px]"
+                    fit
                     hideFullscreenToggle
                     hideScreenshot
                     hideViewportSelector

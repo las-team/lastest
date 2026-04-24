@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import {
   getPublicShareContext,
   getShareDataBySlug,
+  type PublicShareContext,
   type ShareVisualDiff,
   type ShareTestResult,
 } from '@/lib/db/queries/public-shares';
@@ -12,6 +13,8 @@ import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
+
+type Build = PublicShareContext['build'];
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -52,7 +55,7 @@ export default async function PublicSharePage({ params }: PageProps) {
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
 
-  const { share, test, testRun, diffs, results: scopedResults } = data;
+  const { share, build, test, testRun, diffs, results: scopedResults } = data;
 
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
@@ -72,15 +75,26 @@ export default async function PublicSharePage({ params }: PageProps) {
     ? await resolveTestVideoUrl(share.repositoryId, share.testId)
     : null;
 
+  const shareUrl = buildShareUrl(slug);
+  const primaryResult: ShareTestResult | null = isTestShare
+    ? (scopedResults.find((r) => r.testId === share.testId) ?? scopedResults[0] ?? null)
+    : null;
+
+  const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
 
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-10">
-        <Hero
+      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-8">
+        <OutcomeHeader
+          variant={isTestShare ? 'test' : 'build'}
           domain={displayDomain}
           targetDomain={share.targetDomain}
           testName={isTestShare ? test?.name ?? null : null}
+          build={build}
+          testResult={primaryResult}
+          pixelsChanged={totalPixelsChanged}
           branch={testRun?.gitBranch ?? null}
           commit={testRun?.gitCommit ?? null}
         />
@@ -91,15 +105,29 @@ export default async function PublicSharePage({ params }: PageProps) {
             results={scopedResults}
             toUrl={toUrl}
             fallbackVideoUrl={fallbackVideoUrl}
+            build={build}
+            testResult={primaryResult}
+            shareUrl={shareUrl}
+            testName={test?.name ?? displayDomain}
+            pixelsChanged={totalPixelsChanged}
           />
-        ) : null}
+        ) : (
+          <>
+            <BuildSummary
+              build={build}
+              targetDomain={share.targetDomain}
+              branch={testRun?.gitBranch ?? null}
+            />
+            <BuildDiffsGallery diffs={diffs} results={scopedResults} toUrl={toUrl} />
+          </>
+        )}
 
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
 
         <ShareFooter slug={slug} />
       </main>
 
-      {/* Server-emitted inline script: slider wiring + video speed-up.
+      {/* Server-emitted inline script: slider wiring + video speed-up + step seek.
           Zero hydration cost, no React client boundary, no Turbopack
           client-chunk graph. */}
       <script
@@ -167,37 +195,174 @@ function LastestLogo() {
   );
 }
 
-function Hero({
+type Verdict = {
+  label: string;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+};
+
+function buildVerdict(status: string | null | undefined): Verdict {
+  switch (status) {
+    case 'safe_to_merge':
+      return { label: 'Safe to merge', tone: 'ok' };
+    case 'review_required':
+      return { label: 'Review required', tone: 'warn' };
+    case 'blocked':
+      return { label: 'Blocked', tone: 'danger' };
+    default:
+      return { label: status ? humanize(status) : 'Run complete', tone: 'neutral' };
+  }
+}
+
+function testVerdict(status: string | null | undefined): Verdict {
+  switch (status) {
+    case 'passed':
+    case 'approved':
+      return { label: 'Passed', tone: 'ok' };
+    case 'failed':
+    case 'regression':
+      return { label: 'Failed', tone: 'danger' };
+    case 'changed':
+    case 'pending_review':
+      return { label: 'Changed', tone: 'warn' };
+    case 'skipped':
+      return { label: 'Skipped', tone: 'neutral' };
+    default:
+      return { label: status ? humanize(status) : 'Run complete', tone: 'neutral' };
+  }
+}
+
+function humanize(s: string): string {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function toneClasses(tone: Verdict['tone']): {
+  card: string;
+  pill: string;
+  title: string;
+} {
+  switch (tone) {
+    case 'ok':
+      return {
+        card: 'border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900',
+        pill: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+        title: 'text-emerald-900 dark:text-emerald-100',
+      };
+    case 'warn':
+      return {
+        card: 'border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900',
+        pill: 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100',
+        title: 'text-amber-900 dark:text-amber-100',
+      };
+    case 'danger':
+      return {
+        card: 'border-rose-200 bg-rose-50/60 dark:bg-rose-950/20 dark:border-rose-900',
+        pill: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200',
+        title: 'text-rose-900 dark:text-rose-100',
+      };
+    default:
+      return {
+        card: 'border bg-muted/40',
+        pill: 'bg-muted text-foreground',
+        title: 'text-foreground',
+      };
+  }
+}
+
+function formatDuration(ms: number | null | undefined): string | null {
+  if (!ms || ms < 0) return null;
+  if (ms < 1000) return `${ms} ms`;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
+}
+
+function OutcomeHeader({
+  variant,
   domain,
   targetDomain,
   testName,
+  build,
+  testResult,
+  pixelsChanged,
   branch,
   commit,
 }: {
+  variant: 'build' | 'test';
   domain: string;
   targetDomain: string | null;
   testName: string | null;
+  build: Build;
+  testResult: ShareTestResult | null;
+  pixelsChanged: number;
   branch: string | null;
   commit: string | null;
 }) {
+  const verdict =
+    variant === 'test'
+      ? testVerdict(testResult?.status ?? null)
+      : buildVerdict(build.overallStatus);
+  const tone = toneClasses(verdict.tone);
+
+  const title = variant === 'test' ? (testName ?? domain) : domain;
+
+  const metaBits: string[] = [];
+  if (variant === 'build') {
+    const total = build.totalTests ?? 0;
+    if (total > 0) metaBits.push(`${total} test${total === 1 ? '' : 's'}`);
+    if (branch) metaBits.push(branch);
+    if (commit && commit !== 'unknown') metaBits.push(commit.slice(0, 7));
+    const dur = formatDuration(build.elapsedMs);
+    if (dur) metaBits.push(dur);
+  } else {
+    const dur = testResult?.durationMs;
+    if (dur != null) metaBits.push(`${dur.toLocaleString()} ms`);
+    metaBits.push(
+      pixelsChanged > 0
+        ? `${pixelsChanged.toLocaleString()} pixels changed`
+        : '0 pixels changed · matches baseline',
+    );
+  }
+
+  const shortCommit =
+    commit && commit !== 'unknown' ? commit.slice(0, 7).toUpperCase() : null;
+
   return (
-    <section className="flex flex-col sm:flex-row sm:items-center gap-4">
-      <CustomerFavicon domain={targetDomain} />
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          We visually tested
-        </p>
-        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight break-words">
-          {domain}
-        </h1>
-        {(testName || branch || (commit && commit !== 'unknown')) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground pt-1">
-            {testName && <span className="truncate">{testName}</span>}
-            {testName && branch && <span>·</span>}
-            {branch && <span className="font-mono">{branch}</span>}
-            {branch && commit && commit !== 'unknown' && <span>·</span>}
-            {commit && commit !== 'unknown' && (
-              <span className="font-mono">{commit.slice(0, 7)}</span>
+    <section className={`rounded-xl border p-5 sm:p-6 ${tone.card}`}>
+      <div className="flex items-start gap-4">
+        <CustomerFavicon domain={targetDomain} />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone.pill}`}
+            >
+              {verdict.label}
+              {verdict.tone === 'ok' ? ' ✓' : ''}
+            </span>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              {variant === 'test' ? 'Test recording' : 'Build summary'}
+            </p>
+          </div>
+          <h1
+            className={`text-2xl sm:text-3xl font-semibold tracking-tight break-words ${tone.title}`}
+          >
+            {title}
+          </h1>
+          {metaBits.length > 0 && (
+            <p className="text-sm text-muted-foreground font-mono break-words">
+              {metaBits.join(' · ')}
+            </p>
+          )}
+        </div>
+        {shortCommit && (
+          <div className="hidden sm:flex flex-col items-end shrink-0 text-right">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              {variant === 'test' ? 'Run' : 'Build'}
+            </span>
+            <span className="text-sm font-mono">{shortCommit}</span>
+            {branch && (
+              <span className="text-xs font-mono text-muted-foreground">{branch}</span>
             )}
           </div>
         )}
@@ -209,16 +374,16 @@ function Hero({
 function CustomerFavicon({ domain }: { domain: string | null }) {
   const letter = (domain ?? '?').charAt(0).toUpperCase();
   return (
-    <div className="relative w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-xl border bg-card shadow-sm flex items-center justify-center overflow-hidden">
-      <span className="text-2xl font-semibold text-muted-foreground">{letter}</span>
+    <div className="relative w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-lg border bg-card shadow-sm flex items-center justify-center overflow-hidden">
+      <span className="text-xl font-semibold text-muted-foreground">{letter}</span>
       {domain && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`}
           alt=""
-          width={64}
-          height={64}
-          className="absolute inset-0 w-full h-full object-contain p-2"
+          width={56}
+          height={56}
+          className="absolute inset-0 w-full h-full object-contain p-1.5"
           referrerPolicy="no-referrer"
           loading="lazy"
         />
@@ -227,16 +392,207 @@ function CustomerFavicon({ domain }: { domain: string | null }) {
   );
 }
 
+// --- Build share: tick bar + stat grid + diffs ------------------------------
+
+function BuildSummary({
+  build,
+  targetDomain,
+  branch,
+}: {
+  build: Build;
+  targetDomain: string | null;
+  branch: string | null;
+}) {
+  const total = build.totalTests ?? 0;
+  const passed = build.passedCount ?? 0;
+  const failed = build.failedCount ?? 0;
+  const changed = build.changesDetected ?? 0;
+  const pending = Math.max(0, total - passed - failed - changed);
+  const a11y = build.a11yScore;
+
+  const configBits: string[] = [];
+  if (build.triggerType) configBits.push(humanize(build.triggerType));
+  if (branch) configBits.push(branch);
+  if (targetDomain) configBits.push(`→ ${targetDomain}`);
+  if (total > 0) configBits.push(`${total} test${total === 1 ? '' : 's'}`);
+
+  return (
+    <section className="space-y-4">
+      {configBits.length > 0 && (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono text-muted-foreground truncate">
+          {configBits.join(' · ')}
+        </div>
+      )}
+
+      <TickBar total={total} passed={passed} failed={failed} changed={changed} />
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard value={passed} label="Passed" tone="ok" />
+        <StatCard value={failed} label="Failed" tone="danger" />
+        <StatCard value={changed} label="Changed" tone="warn" />
+        <StatCard
+          value={a11y == null ? '—' : a11y}
+          label="A11y"
+          sublabel={a11y == null ? undefined : 'WCAG 2.2'}
+          tone="neutral"
+        />
+      </div>
+
+      {pending > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {pending} test{pending === 1 ? '' : 's'} did not report a status.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function TickBar({
+  total,
+  passed,
+  failed,
+  changed,
+}: {
+  total: number;
+  passed: number;
+  failed: number;
+  changed: number;
+}) {
+  if (total <= 0) return null;
+  // Cap visible ticks so very large builds still read.
+  const visible = Math.min(total, 120);
+  const scale = visible / total;
+  const pOk = Math.round(passed * scale);
+  const pFail = Math.round(failed * scale);
+  const pChg = Math.round(changed * scale);
+  const pNone = Math.max(0, visible - pOk - pFail - pChg);
+  const cells: Array<'ok' | 'fail' | 'chg' | 'none'> = [
+    ...Array(pOk).fill('ok' as const),
+    ...Array(pChg).fill('chg' as const),
+    ...Array(pFail).fill('fail' as const),
+    ...Array(pNone).fill('none' as const),
+  ];
+  return (
+    <div
+      className="flex h-4 w-full overflow-hidden rounded border bg-muted"
+      role="img"
+      aria-label={`${passed} passed, ${changed} changed, ${failed} failed, of ${total}`}
+    >
+      {cells.map((c, i) => (
+        <div
+          key={i}
+          className={`flex-1 border-r border-background last:border-r-0 ${
+            c === 'ok'
+              ? 'bg-emerald-500/80'
+              : c === 'fail'
+                ? 'bg-rose-500/80'
+                : c === 'chg'
+                  ? 'bg-amber-500/80'
+                  : ''
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function StatCard({
+  value,
+  label,
+  sublabel,
+  tone,
+}: {
+  value: number | string;
+  label: string;
+  sublabel?: string;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+}) {
+  const color =
+    tone === 'ok'
+      ? 'text-emerald-700 dark:text-emerald-300'
+      : tone === 'danger'
+        ? 'text-rose-700 dark:text-rose-300'
+        : tone === 'warn'
+          ? 'text-amber-700 dark:text-amber-300'
+          : 'text-foreground';
+  return (
+    <div className="rounded-md border bg-card p-3 text-center">
+      <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
+      <div className="text-[11px] uppercase tracking-wide font-medium text-muted-foreground mt-0.5">
+        {label}
+      </div>
+      {sublabel && (
+        <div className="text-[11px] text-muted-foreground mt-0.5">{sublabel}</div>
+      )}
+    </div>
+  );
+}
+
+// Diffs + gallery for build-scoped shares (no video, no step strip).
+function BuildDiffsGallery({
+  diffs,
+  results,
+  toUrl,
+}: {
+  diffs: ShareVisualDiff[];
+  results: ShareTestResult[];
+  toUrl: (p: string | null | undefined) => string | null;
+}) {
+  const sliderDiffs = buildSliderDiffs(diffs, toUrl);
+  const gallery = buildGallery(diffs, results, toUrl, new Set<string>());
+
+  if (sliderDiffs.length === 0 && gallery.length === 0) return null;
+
+  return (
+    <>
+      {sliderDiffs.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {sliderDiffs.length === 1
+              ? 'Visual change'
+              : `${sliderDiffs.length} visual changes`}
+          </h2>
+          {sliderDiffs.map((d) => (
+            <DiffSlider
+              key={d.id}
+              baseline={d.baseline}
+              current={d.current}
+              stepLabel={d.stepLabel}
+              pixelDifference={d.pixelDifference}
+            />
+          ))}
+        </section>
+      )}
+
+      {gallery.length > 0 && (
+        <GallerySection items={gallery} />
+      )}
+    </>
+  );
+}
+
+// --- Test share: video + step strip + stats + pull quote + diffs + socials --
+
 function TestShareBody({
   diffs,
   results,
   toUrl,
   fallbackVideoUrl,
+  build,
+  testResult,
+  shareUrl,
+  testName,
+  pixelsChanged,
 }: {
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
   toUrl: (p: string | null | undefined) => string | null;
   fallbackVideoUrl: string | null;
+  build: Build;
+  testResult: ShareTestResult | null;
+  shareUrl: string;
+  testName: string;
+  pixelsChanged: number;
 }) {
   const videos = results
     .map((r) => (r.videoPath ? toUrl(r.videoPath) : null))
@@ -246,49 +602,31 @@ function TestShareBody({
     videos.push(fallbackVideoUrl);
   }
 
-  const sliderDiffs = diffs
-    .map((d) => {
-      const baseline = toUrl(d.baselineImagePath);
-      const current = toUrl(d.currentImagePath);
-      if (!baseline || !current) return null;
-      return {
-        id: d.id,
-        baseline,
-        current,
-        stepLabel: d.stepLabel,
-        pixelDifference: d.pixelDifference ?? 0,
-      };
-    })
-    .filter((d): d is NonNullable<typeof d> => !!d);
+  const steps = collectSteps(testResult, results, toUrl);
+  const stepPaths = new Set<string>(
+    collectStepPaths(testResult, results),
+  );
 
-  // Gallery = screenshots NOT already shown as a slider.
-  const shownPaths = new Set<string>();
-  for (const d of diffs) {
-    if (d.baselineImagePath) shownPaths.add(d.baselineImagePath);
-    if (d.currentImagePath) shownPaths.add(d.currentImagePath);
-  }
-  const gallery: Array<{ src: string; label: string }> = [];
-  const seenGallery = new Set<string>();
-  for (const r of results) {
-    if (r.screenshotPath && !shownPaths.has(r.screenshotPath) && !seenGallery.has(r.screenshotPath)) {
-      seenGallery.add(r.screenshotPath);
-      const url = toUrl(r.screenshotPath);
-      if (url) gallery.push({ src: url, label: 'Primary' });
-    }
-    const captured = (r.screenshots ?? []) as Array<{ path: string; label?: string }>;
-    for (const s of captured) {
-      if (!s.path || shownPaths.has(s.path) || seenGallery.has(s.path)) continue;
-      seenGallery.add(s.path);
-      const url = toUrl(s.path);
-      if (url) gallery.push({ src: url, label: s.label || 'Step' });
-    }
-  }
+  const durationMs = testResult?.durationMs ?? null;
+  const approxSecPerStep =
+    steps.length > 0 && durationMs && durationMs > 0
+      ? durationMs / 1000 / steps.length
+      : null;
+
+  const sliderDiffs = buildSliderDiffs(diffs, toUrl);
+  const gallery = buildGallery(diffs, results, toUrl, stepPaths);
+
+  const pullQuote =
+    pixelsChanged > 0
+      ? `${pixelsChanged.toLocaleString()} pixels changed — review before ship.`
+      : durationMs
+        ? `Recorded once. Ran in ${durationMs.toLocaleString()} ms. Zero regressions.`
+        : 'Recorded once. Runs on every build. Zero regressions.';
 
   return (
     <>
       {videos.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Test recording</h2>
           {videos.map((src, i) => (
             <video
               key={i}
@@ -305,10 +643,37 @@ function TestShareBody({
         </section>
       )}
 
+      {steps.length > 0 && (
+        <StepStrip steps={steps} secPerStep={approxSecPerStep} />
+      )}
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard
+          value={pixelsChanged > 0 ? pixelsChanged.toLocaleString() : '0'}
+          label="Diff px"
+          tone={pixelsChanged > 0 ? 'warn' : 'ok'}
+        />
+        <StatCard
+          value={durationMs != null ? formatDuration(durationMs) ?? `${durationMs}` : '—'}
+          label="Duration"
+          tone="neutral"
+        />
+        <StatCard
+          value={build.a11yScore == null ? '—' : build.a11yScore}
+          label="A11y"
+          sublabel={build.a11yScore == null ? undefined : 'WCAG 2.2'}
+          tone="neutral"
+        />
+      </div>
+
+      <PullQuote text={pullQuote} />
+
       {sliderDiffs.length > 0 && (
-        <section className="space-y-6">
+        <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            {sliderDiffs.length === 1 ? 'Visual change' : `${sliderDiffs.length} visual changes`}
+            {sliderDiffs.length === 1
+              ? 'Visual change'
+              : `${sliderDiffs.length} visual changes`}
           </h2>
           {sliderDiffs.map((d) => (
             <DiffSlider
@@ -322,33 +687,254 @@ function TestShareBody({
         </section>
       )}
 
-      {gallery.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            {gallery.length === 1 ? 'Screenshot' : `${gallery.length} screenshots`}
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {gallery.map((g, i) => (
-              <figure key={i} className="space-y-1.5">
-                <div className="relative aspect-[4/3] rounded-md border bg-muted overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={g.src}
-                    alt={g.label}
-                    loading="lazy"
-                    decoding="async"
-                    className="absolute inset-0 w-full h-full object-cover object-top"
-                  />
-                </div>
-                <figcaption className="text-xs text-muted-foreground truncate">
-                  {g.label}
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        </section>
-      )}
+      {gallery.length > 0 && <GallerySection items={gallery} />}
+
+      <SocialShareRow shareUrl={shareUrl} testName={testName} />
     </>
+  );
+}
+
+type Step = { src: string; label: string };
+
+function collectStepPaths(
+  primary: ShareTestResult | null,
+  all: ShareTestResult[],
+): string[] {
+  const seen: string[] = [];
+  const source = primary ?? all[0] ?? null;
+  if (!source) return seen;
+  if (source.screenshotPath) seen.push(source.screenshotPath);
+  for (const s of source.screenshots ?? []) {
+    if (s.path) seen.push(s.path);
+  }
+  return seen;
+}
+
+function collectSteps(
+  primary: ShareTestResult | null,
+  all: ShareTestResult[],
+  toUrl: (p: string | null | undefined) => string | null,
+): Step[] {
+  const source = primary ?? all[0] ?? null;
+  if (!source) return [];
+  const out: Step[] = [];
+  const seen = new Set<string>();
+  const captured = source.screenshots ?? [];
+  for (const s of captured) {
+    if (!s.path || seen.has(s.path)) continue;
+    seen.add(s.path);
+    const url = toUrl(s.path);
+    if (!url) continue;
+    out.push({ src: url, label: s.label || `Step ${out.length + 1}` });
+  }
+  if (source.screenshotPath && !seen.has(source.screenshotPath)) {
+    const url = toUrl(source.screenshotPath);
+    if (url) out.push({ src: url, label: 'Final' });
+  }
+  return out;
+}
+
+function StepStrip({
+  steps,
+  secPerStep,
+}: {
+  steps: Step[];
+  secPerStep: number | null;
+}) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium text-muted-foreground">
+        {steps.length} step{steps.length === 1 ? '' : 's'} captured
+      </h2>
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {steps.map((s, i) => {
+          const seek =
+            secPerStep != null ? (i * secPerStep).toFixed(2) : undefined;
+          return (
+            <button
+              type="button"
+              key={s.src + i}
+              data-seek={seek}
+              className="group relative shrink-0 w-28 rounded-md border bg-card p-1 text-left hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
+              aria-label={`Jump to step ${i + 1}: ${s.label}`}
+            >
+              <div className="relative aspect-[4/3] rounded-sm bg-muted overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={s.src}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 w-full h-full object-cover object-top"
+                />
+                <span className="absolute top-1 left-1 rounded bg-background/85 px-1 text-[10px] font-mono border">
+                  {i + 1}
+                </span>
+              </div>
+              <div
+                className="mt-1 text-[11px] truncate text-muted-foreground group-hover:text-foreground"
+                title={s.label}
+              >
+                {s.label}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function PullQuote({ text }: { text: string }) {
+  return (
+    <section className="rounded-xl border bg-muted/40 px-6 py-5 text-center">
+      <p className="text-lg sm:text-xl font-medium tracking-tight italic">
+        &ldquo;{text}&rdquo;
+      </p>
+      <p className="text-xs text-muted-foreground mt-2">
+        Built with Lastest — open-source visual regression testing.
+      </p>
+    </section>
+  );
+}
+
+function SocialShareRow({
+  shareUrl,
+  testName,
+}: {
+  shareUrl: string;
+  testName: string;
+}) {
+  const text = `Visual regression test for ${testName} — ran on Lastest.`;
+  const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+    text,
+  )}&url=${encodeURIComponent(shareUrl)}`;
+  const linkedin = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
+    shareUrl,
+  )}`;
+  return (
+    <section className="flex flex-wrap items-center gap-2 pt-2 border-t">
+      <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1">
+        Share
+      </span>
+      <a
+        href={tweet}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+      >
+        Post to X
+      </a>
+      <a
+        href={linkedin}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+      >
+        Share on LinkedIn
+      </a>
+      <a
+        href={shareUrl}
+        className="inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+      >
+        Copy link
+      </a>
+    </section>
+  );
+}
+
+// --- diff + gallery helpers (shared between build and test modes) -----------
+
+type SliderDiff = {
+  id: string;
+  baseline: string;
+  current: string;
+  stepLabel: string | null;
+  pixelDifference: number;
+};
+
+function buildSliderDiffs(
+  diffs: ShareVisualDiff[],
+  toUrl: (p: string | null | undefined) => string | null,
+): SliderDiff[] {
+  return diffs
+    .map((d) => {
+      const baseline = toUrl(d.baselineImagePath);
+      const current = toUrl(d.currentImagePath);
+      if (!baseline || !current) return null;
+      return {
+        id: d.id,
+        baseline,
+        current,
+        stepLabel: d.stepLabel,
+        pixelDifference: d.pixelDifference ?? 0,
+      };
+    })
+    .filter((d): d is SliderDiff => !!d);
+}
+
+type GalleryItem = { src: string; label: string };
+
+function buildGallery(
+  diffs: ShareVisualDiff[],
+  results: ShareTestResult[],
+  toUrl: (p: string | null | undefined) => string | null,
+  alreadyShown: Set<string>,
+): GalleryItem[] {
+  const shownPaths = new Set<string>(alreadyShown);
+  for (const d of diffs) {
+    if (d.baselineImagePath) shownPaths.add(d.baselineImagePath);
+    if (d.currentImagePath) shownPaths.add(d.currentImagePath);
+  }
+  const gallery: GalleryItem[] = [];
+  const seenGallery = new Set<string>();
+  for (const r of results) {
+    if (
+      r.screenshotPath &&
+      !shownPaths.has(r.screenshotPath) &&
+      !seenGallery.has(r.screenshotPath)
+    ) {
+      seenGallery.add(r.screenshotPath);
+      const url = toUrl(r.screenshotPath);
+      if (url) gallery.push({ src: url, label: 'Primary' });
+    }
+    const captured = r.screenshots ?? [];
+    for (const s of captured) {
+      if (!s.path || shownPaths.has(s.path) || seenGallery.has(s.path)) continue;
+      seenGallery.add(s.path);
+      const url = toUrl(s.path);
+      if (url) gallery.push({ src: url, label: s.label || 'Step' });
+    }
+  }
+  return gallery;
+}
+
+function GallerySection({ items }: { items: GalleryItem[] }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">
+        {items.length === 1 ? 'Screenshot' : `${items.length} screenshots`}
+      </h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {items.map((g, i) => (
+          <figure key={i} className="space-y-1.5">
+            <div className="relative aspect-[4/3] rounded-md border bg-muted overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={g.src}
+                alt={g.label}
+                loading="lazy"
+                decoding="async"
+                className="absolute inset-0 w-full h-full object-cover object-top"
+              />
+            </div>
+            <figcaption className="text-xs text-muted-foreground truncate">
+              {g.label}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -493,11 +1079,25 @@ const SHARE_SCRIPT = `
       v.addEventListener('play', setRate);
       v.addEventListener('ratechange', function(){
         if (v.playbackRate !== 2 && !v.dataset.userRate) {
-          // user may have changed it — respect their choice after first change.
           v.dataset.userRate = '1';
         }
       });
     })(videos[j]);
+  }
+  var seekers = document.querySelectorAll('[data-seek]');
+  for (var k = 0; k < seekers.length; k++) {
+    (function(el){
+      el.addEventListener('click', function(){
+        var sec = parseFloat(el.getAttribute('data-seek'));
+        if (isNaN(sec)) return;
+        var video = document.querySelector('video.share-video');
+        if (!video) return;
+        try {
+          video.currentTime = sec;
+          if (video.paused) video.play();
+        } catch (e) {}
+      });
+    })(seekers[k]);
   }
 })();
 `;

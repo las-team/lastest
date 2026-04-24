@@ -2041,3 +2041,24 @@ export const publicShares = pgTable('public_shares', {
 
 export type PublicShare = typeof publicShares.$inferSelect;
 export type NewPublicShare = typeof publicShares.$inferInsert;
+
+// Shared state for an in-flight remote debug session. Previously a per-pod
+// `globalThis` Map; moved to DB because the Olares deployment runs TWO app
+// pods (envoy-fronted `lastest-dev` for the UI + envoy-less
+// `lastest-internal-dev` that receives EB POSTs), and they can't share
+// in-process memory. The UI reads state via polling from pod A while the
+// EB writes state via `response:debug_state` POSTs that land on pod B.
+export const remoteDebugSessions = pgTable('remote_debug_sessions', {
+  sessionId: text('session_id').primaryKey(),
+  runnerId: text('runner_id').notNull(),
+  repositoryId: text('repository_id'),
+  testId: text('test_id').notNull(),
+  state: jsonb('state'),
+  startedAt: timestamp('started_at').$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_remote_debug_sessions_runner').on(table.runnerId),
+]));
+
+export type RemoteDebugSessionRow = typeof remoteDebugSessions.$inferSelect;
+export type NewRemoteDebugSessionRow = typeof remoteDebugSessions.$inferInsert;
