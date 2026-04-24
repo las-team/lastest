@@ -31,6 +31,10 @@ export interface CodeGenEvent {
     downloadWrap?: boolean;
     autoDetected?: boolean;
     downloadFilename?: string;
+    waitType?: 'duration' | 'selector';
+    durationMs?: number;
+    condition?: 'visible' | 'hidden';
+    timeoutMs?: number;
   };
 }
 
@@ -367,6 +371,22 @@ export function eventsToCodeLines(
       lines.push(`${indent}await page.keyboard.up('${escapedKey}');`);
     } else if (event.type === 'insert-timestamp') {
       lines.push(`${indent}await page.keyboard.type(new Date().toISOString());`);
+    } else if (event.type === 'wait') {
+      const { waitType, durationMs, selector, selectors, condition, timeoutMs } = event.data;
+      if (waitType === 'duration' && typeof durationMs === 'number' && durationMs >= 0) {
+        lines.push(`${indent}await page.waitForTimeout(${Math.floor(durationMs)});`);
+      } else if (waitType === 'selector') {
+        const state = condition === 'hidden' ? 'hidden' : 'visible';
+        const timeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? Math.floor(timeoutMs) : 30000;
+        const validFromList = selectors?.find(s => s.value && s.value.trim() && !s.value.includes('undefined'));
+        const sel = (selector && selector.trim()) || validFromList?.value || '';
+        if (sel) {
+          const escapedSel = sel.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          lines.push(`${indent}await page.waitForSelector('${escapedSel}', { state: '${state}', timeout: ${timeout} });`);
+        } else {
+          lines.push(`${indent}// Skipped wait: no valid selector provided`);
+        }
+      }
     } else if (event.type === 'scroll') {
       const deltaX = (event.data.deltaX as number) || 0;
       const deltaY = (event.data.deltaY as number) || 0;

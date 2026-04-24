@@ -87,6 +87,23 @@ export async function syncTestAssertions(id: string, assertions: import('@/lib/d
   revalidatePath(`/tests/${id}`);
 }
 
+export async function saveStepCriteria(
+  testId: string,
+  stepLabel: string,
+  rules: import('@/lib/db/schema').StepRule[],
+) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+  const next = await queries.updateStepCriteria(testId, stepLabel, rules);
+  revalidatePath(`/tests/${testId}`);
+  return next;
+}
+
 export async function toggleAssertionSoftness(testId: string, assertionId: string, makeSoft: boolean) {
   const session = await requireTeamAccess();
   const test = await queries.getTest(testId);

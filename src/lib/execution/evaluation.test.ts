@@ -1,0 +1,193 @@
+import { describe, it, expect } from 'vitest';
+import { evaluateRules, evaluateRulesForStep, type StepObservations } from './evaluation';
+import type { StepCriterion, VisualDiff } from '@/lib/db/schema';
+
+function makeDiff(overrides: Partial<VisualDiff> = {}): VisualDiff {
+  return {
+    id: 'diff-1',
+    buildId: 'b1',
+    testResultId: 'tr1',
+    testId: 't1',
+    stepLabel: 'screenshot-1',
+    baselineImagePath: null,
+    currentImagePath: null,
+    diffImagePath: null,
+    status: 'pending',
+    pixelDifference: 0,
+    percentageDifference: '0',
+    classification: 'changed',
+    metadata: null,
+    approvedBy: null,
+    approvedAt: null,
+    createdAt: null,
+    plannedImagePath: null,
+    plannedDiffImagePath: null,
+    plannedPixelDifference: null,
+    plannedPercentageDifference: null,
+    mainBaselineImagePath: null,
+    mainDiffImagePath: null,
+    mainPixelDifference: null,
+    mainPercentageDifference: null,
+    mainClassification: null,
+    aiAnalysis: null,
+    aiRecommendation: null,
+    aiAnalysisStatus: null,
+    browser: 'chromium',
+    ...overrides,
+  };
+}
+
+const emptyObservations: StepObservations = {
+  visualDiffs: [],
+  consoleErrors: [],
+  assertionResults: [],
+};
+
+describe('evaluateRulesForStep — screenshot_changed', () => {
+  it('does not trip when there are no diffs', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+    };
+    expect(evaluateRulesForStep(criterion, emptyObservations)).toEqual([]);
+  });
+
+  it('trips when a changed diff is pending', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+    };
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      visualDiffs: [makeDiff({ classification: 'changed', status: 'pending' })],
+    });
+    expect(triggered).toHaveLength(1);
+    expect(triggered[0].rule.kind).toBe('screenshot_changed');
+    expect(triggered[0].stepLabel).toBe('screenshot-1');
+  });
+
+  it('does not trip when the changed diff is approved', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+    };
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      visualDiffs: [makeDiff({ classification: 'changed', status: 'approved' })],
+    });
+    expect(triggered).toEqual([]);
+  });
+
+  it('does not trip when the diff is unchanged', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+    };
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      visualDiffs: [makeDiff({ classification: 'unchanged', status: 'pending' })],
+    });
+    expect(triggered).toEqual([]);
+  });
+});
+
+describe('evaluateRules', () => {
+  it('returns no override when criteria list is empty', () => {
+    const result = evaluateRules([], new Map());
+    expect(result.triggeredRules).toEqual([]);
+    expect(result.overriddenStatus).toBeUndefined();
+  });
+
+  it('returns no override when criterion targets a non-existent step (no observations)', () => {
+    const criteria: StepCriterion[] = [
+      {
+        stepLabel: 'never-captured',
+        rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+      },
+    ];
+    // observationsByStep map empty for that label → handler defaults to empty obs
+    const result = evaluateRules(criteria, new Map());
+    expect(result.triggeredRules).toEqual([]);
+    expect(result.overriddenStatus).toBeUndefined();
+  });
+
+  it('promotes status to failed when any fail-severity rule fires', () => {
+    const criteria: StepCriterion[] = [
+      {
+        stepLabel: 'screenshot-1',
+        rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+      },
+    ];
+    const obs = new Map<string, StepObservations>([
+      [
+        'screenshot-1',
+        {
+          ...emptyObservations,
+          visualDiffs: [makeDiff({ classification: 'changed', status: 'pending' })],
+        },
+      ],
+    ]);
+    const result = evaluateRules(criteria, obs);
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules).toHaveLength(1);
+  });
+
+  it('does not promote when only warn-severity rules fire', () => {
+    const criteria: StepCriterion[] = [
+      {
+        stepLabel: 'screenshot-1',
+        rules: [{ kind: 'screenshot_changed', severity: 'warn' }],
+      },
+    ];
+    const obs = new Map<string, StepObservations>([
+      [
+        'screenshot-1',
+        {
+          ...emptyObservations,
+          visualDiffs: [makeDiff({ classification: 'changed', status: 'pending' })],
+        },
+      ],
+    ]);
+    const result = evaluateRules(criteria, obs);
+    expect(result.overriddenStatus).toBeUndefined();
+    expect(result.triggeredRules).toHaveLength(1);
+  });
+});
+
+describe('evaluateRulesForStep — other rule kinds', () => {
+  it('console_error trips when there is at least one console error', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'console_error', severity: 'fail' }],
+    };
+    expect(
+      evaluateRulesForStep(criterion, { ...emptyObservations, consoleErrors: ['boom'] }),
+    ).toHaveLength(1);
+    expect(evaluateRulesForStep(criterion, emptyObservations)).toEqual([]);
+  });
+
+  it('assertion_failed trips when an assertion result is failed', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'assertion_failed', severity: 'fail' }],
+    };
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      assertionResults: [{ assertionId: 'a1', status: 'failed', errorMessage: 'nope' }],
+    });
+    expect(triggered).toHaveLength(1);
+  });
+
+  it('focus_region_changed is a no-op until the focus-region feature lands', () => {
+    const criterion: StepCriterion = {
+      stepLabel: 'screenshot-1',
+      rules: [{ kind: 'focus_region_changed', severity: 'fail' }],
+    };
+    expect(
+      evaluateRulesForStep(criterion, {
+        ...emptyObservations,
+        visualDiffs: [makeDiff({ classification: 'changed', status: 'pending' })],
+      }),
+    ).toEqual([]);
+  });
+});

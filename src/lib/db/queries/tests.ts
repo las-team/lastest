@@ -23,6 +23,8 @@ import type {
   NewTestVersion,
   NewTestSpec,
   TestChangeReason,
+  StepCriterion,
+  StepRule,
 } from '../schema';
 import { eq, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -119,6 +121,23 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     .catch(() => {});
 
   return { id, ...data, createdAt: now, updatedAt: now };
+}
+
+// Step criteria — per-step pass/fail rules (see schema StepCriterion / StepRule).
+export async function getStepCriteria(testId: string): Promise<StepCriterion[]> {
+  const [row] = await db.select({ stepCriteria: tests.stepCriteria }).from(tests).where(eq(tests.id, testId));
+  return row?.stepCriteria ?? [];
+}
+
+export async function updateStepCriteria(testId: string, stepLabel: string, rules: StepRule[]) {
+  const current = await getStepCriteria(testId);
+  const others = current.filter(c => c.stepLabel !== stepLabel);
+  const next = rules.length === 0 ? others : [...others, { stepLabel, rules }];
+  await db
+    .update(tests)
+    .set({ stepCriteria: next, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
+  return next;
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {

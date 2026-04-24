@@ -178,6 +178,40 @@ export interface TestPlaywrightOverrides {
   cursorPlaybackSpeed?: number;
 }
 
+// Per-step pass/fail rules. Extensible: add new `kind`s and handle them in
+// src/lib/execution/evaluation.ts. MVP: screenshot_changed.
+export type StepRuleKind =
+  | 'screenshot_changed'
+  | 'focus_region_changed'
+  | 'console_error'
+  | 'assertion_failed';
+
+export type StepRuleSeverity = 'fail' | 'warn';
+
+export interface StepRule {
+  kind: StepRuleKind;
+  severity: StepRuleSeverity;
+  params?: Record<string, unknown>;
+}
+
+export interface StepCriterion {
+  stepLabel: string;
+  rules: StepRule[];
+}
+
+export interface TriggeredStepRule {
+  stepLabel: string;
+  rule: StepRule;
+  reason: string;
+}
+
+export interface EvaluationOutcome {
+  triggeredRules: TriggeredStepRule[];
+  evaluatedAt: string;
+  // Status the evaluator promoted the result to (only set when it actually flipped).
+  overriddenStatus?: 'failed';
+}
+
 export const functionalAreas = pgTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -212,6 +246,8 @@ export const tests = pgTable('tests', {
   diffOverrides: jsonb('diff_overrides').$type<TestDiffOverrides>(),
   playwrightOverrides: jsonb('playwright_overrides').$type<TestPlaywrightOverrides>(),
   assertions: jsonb('assertions').$type<TestAssertion[]>(),
+  // Per-step pass/fail rules. Evaluated post-execution by evaluateStepCriteria.
+  stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
@@ -314,6 +350,7 @@ export const testResults = pgTable('test_results', {
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured at screenshot time
   lastReachedStep: integer('last_reached_step'), // 0-based index of last step reached during execution
   totalSteps: integer('total_steps'), // total parsed step count for watermark ratio computation
+  evaluationOutcome: jsonb('evaluation_outcome').$type<EvaluationOutcome>(), // step-criteria rule firings
 });
 
 // Repository provider type
@@ -525,6 +562,24 @@ export const ignoreRegions = pgTable('ignore_regions', {
   reason: text('reason'),
   createdAt: timestamp('created_at'),
 });
+
+// Focus regions: per-screenshot positive mask. If any exist for a (testId, stepLabel),
+// the diff engine blanks everything *outside* their union — the inverse of ignoreRegions.
+export const focusRegions = pgTable('focus_regions', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  stepLabel: text('step_label'),
+  x: integer('x').notNull(),
+  y: integer('y').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  index('idx_focus_regions_test_step').on(table.testId, table.stepLabel),
+]));
+
+export type FocusRegion = typeof focusRegions.$inferSelect;
+export type NewFocusRegion = typeof focusRegions.$inferInsert;
 
 export type Repository = typeof repositories.$inferSelect;
 export type NewRepository = typeof repositories.$inferInsert;
@@ -999,6 +1054,7 @@ export const testVersions = pgTable('test_versions', {
   firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
   viewportWidth: integer('viewport_width'),
   viewportHeight: integer('viewport_height'),
+  stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
   createdAt: timestamp('created_at'),
 });
 

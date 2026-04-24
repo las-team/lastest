@@ -4,10 +4,12 @@ import type { CSSProperties } from 'react';
 import {
   getPublicShareContext,
   getShareDataBySlug,
+  getActiveBaselinesForTest,
   type PublicShareContext,
   type ShareVisualDiff,
   type ShareTestResult,
 } from '@/lib/db/queries/public-shares';
+import type { Baseline } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
 
@@ -82,6 +84,14 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
 
+  // Passing tests produce zero visual_diffs rows. Fall back to the test's
+  // active baselines so viewers still see a side-by-side comparison rather
+  // than an empty "recording + steps" block.
+  const baselineFallback: Baseline[] =
+    isTestShare && share.testId && diffs.length === 0
+      ? await getActiveBaselinesForTest(share.testId)
+      : [];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
@@ -110,6 +120,7 @@ export default async function PublicSharePage({ params }: PageProps) {
             shareUrl={shareUrl}
             testName={test?.name ?? displayDomain}
             pixelsChanged={totalPixelsChanged}
+            baselineFallback={baselineFallback}
           />
         ) : (
           <>
@@ -127,9 +138,10 @@ export default async function PublicSharePage({ params }: PageProps) {
         <ShareFooter slug={slug} />
       </main>
 
-      {/* Server-emitted inline script: slider wiring + video speed-up + step seek.
-          Zero hydration cost, no React client boundary, no Turbopack
-          client-chunk graph. */}
+      {/* Server-emitted inline style + script: idle/active slider toggling,
+          pointer-driven reveal, video speed-up, step seek. Zero hydration
+          cost, no React client boundary, no Turbopack client-chunk graph. */}
+      <style dangerouslySetInnerHTML={{ __html: SHARE_STYLE }} />
       <script
         dangerouslySetInnerHTML={{
           __html: SHARE_SCRIPT,
@@ -557,6 +569,7 @@ function BuildDiffsGallery({
               key={d.id}
               baseline={d.baseline}
               current={d.current}
+              diff={d.diff}
               stepLabel={d.stepLabel}
               pixelDifference={d.pixelDifference}
             />
@@ -583,6 +596,7 @@ function TestShareBody({
   shareUrl,
   testName,
   pixelsChanged,
+  baselineFallback,
 }: {
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
@@ -593,6 +607,7 @@ function TestShareBody({
   shareUrl: string;
   testName: string;
   pixelsChanged: number;
+  baselineFallback: Baseline[];
 }) {
   const videos = results
     .map((r) => (r.videoPath ? toUrl(r.videoPath) : null))
@@ -614,6 +629,10 @@ function TestShareBody({
       : null;
 
   const sliderDiffs = buildSliderDiffs(diffs, toUrl);
+  const passedSliders =
+    sliderDiffs.length === 0
+      ? buildBaselineSliders(baselineFallback, testResult, toUrl)
+      : [];
   const gallery = buildGallery(diffs, results, toUrl, stepPaths);
 
   const pullQuote =
@@ -680,6 +699,30 @@ function TestShareBody({
               key={d.id}
               baseline={d.baseline}
               current={d.current}
+              diff={d.diff}
+              stepLabel={d.stepLabel}
+              pixelDifference={d.pixelDifference}
+            />
+          ))}
+        </section>
+      )}
+
+      {sliderDiffs.length === 0 && passedSliders.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {passedSliders.length === 1
+              ? 'Tested view'
+              : `${passedSliders.length} tested views`}
+            <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
+              matches baseline
+            </span>
+          </h2>
+          {passedSliders.map((d) => (
+            <DiffSlider
+              key={d.id}
+              baseline={d.baseline}
+              current={d.current}
+              diff={d.diff}
               stepLabel={d.stepLabel}
               pixelDifference={d.pixelDifference}
             />
@@ -849,9 +892,54 @@ type SliderDiff = {
   id: string;
   baseline: string;
   current: string;
+  diff: string | null;
   stepLabel: string | null;
   pixelDifference: number;
 };
+
+// For passing tests — no visual_diffs rows exist, so synthesize sliders from
+// active baselines paired with captured screenshots. Match by stepLabel
+// (with 'final' falling back to the result's primary screenshotPath).
+function buildBaselineSliders(
+  baselines: Baseline[],
+  result: ShareTestResult | null,
+  toUrl: (p: string | null | undefined) => string | null,
+): SliderDiff[] {
+  if (!result) return [];
+  const steps = result.screenshots ?? [];
+  const out: SliderDiff[] = [];
+  const seen = new Set<string>();
+  for (const bl of baselines) {
+    const baselineUrl = toUrl(bl.imagePath);
+    if (!baselineUrl) continue;
+    const label = (bl.stepLabel ?? '').trim();
+    const isFinal = !label || label.toLowerCase() === 'final';
+    let currentPath: string | null = null;
+    if (isFinal) {
+      currentPath = result.screenshotPath;
+    } else {
+      const match = steps.find(
+        (s) => (s.label ?? '').trim() === label,
+      );
+      currentPath = match?.path ?? null;
+    }
+    if (!currentPath) continue;
+    const key = `${bl.imagePath}|${currentPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const currentUrl = toUrl(currentPath);
+    if (!currentUrl) continue;
+    out.push({
+      id: bl.id,
+      baseline: baselineUrl,
+      current: currentUrl,
+      diff: null,
+      stepLabel: bl.stepLabel ?? (isFinal ? 'Final' : null),
+      pixelDifference: 0,
+    });
+  }
+  return out;
+}
 
 function buildSliderDiffs(
   diffs: ShareVisualDiff[],
@@ -866,6 +954,7 @@ function buildSliderDiffs(
         id: d.id,
         baseline,
         current,
+        diff: toUrl(d.diffImagePath),
         stepLabel: d.stepLabel,
         pixelDifference: d.pixelDifference ?? 0,
       };
@@ -941,20 +1030,29 @@ function GallerySection({ items }: { items: GalleryItem[] }) {
 function DiffSlider({
   baseline,
   current,
+  diff,
   stepLabel,
   pixelDifference,
 }: {
   baseline: string;
   current: string;
+  diff: string | null;
   stepLabel: string | null;
   pixelDifference: number;
 }) {
   // CSS custom property starts at 50 %. The inline <script> (emitted once at
-  // page bottom) wires up every `.share-slider` by binding its <input> to
-  // that variable. Pure DOM, no hydration, no client bundle.
+  // page bottom) binds pointer move on .share-slider-stage to this variable
+  // and flips data-active between 'false' (diff overlay visible) and 'true'
+  // (baseline/current slider comparison revealed). Pure DOM, zero hydration.
   const style = { '--pct': '50%' } as CSSProperties;
+  const hasDiff = !!diff;
   return (
-    <figure className="share-slider space-y-2" style={style}>
+    <figure
+      className="share-slider space-y-2"
+      style={style}
+      data-active={hasDiff ? 'false' : 'true'}
+      data-has-diff={hasDiff ? 'true' : 'false'}
+    >
       <header className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-foreground truncate">
           {stepLabel || 'Visual diff'}
@@ -965,45 +1063,71 @@ function DiffSlider({
           </span>
         )}
       </header>
-      <div className="share-slider-stage relative rounded-md border bg-muted overflow-hidden">
+      <div
+        className="share-slider-stage relative rounded-md border bg-muted overflow-hidden touch-none select-none data-[active=true]:cursor-ew-resize"
+        tabIndex={0}
+        role="slider"
+        aria-label="Compare before and after"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={50}
+      >
         {/* Baseline fills the frame and sets height. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={baseline}
           alt="Before"
           draggable={false}
-          className="block w-full h-auto select-none"
+          className="block w-full h-auto select-none pointer-events-none"
         />
-        {/* Current overlays baseline, revealed from the left edge to --pct. */}
+        {/* Current overlays baseline, revealed from the left edge to --pct.
+            Hidden while the stage is idle (data-active=false). */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={current}
           alt="After"
           draggable={false}
-          className="absolute inset-0 w-full h-full object-cover object-top select-none"
+          className="share-slider-current absolute inset-0 w-full h-full object-cover object-top select-none pointer-events-none transition-opacity duration-150"
           style={{ clipPath: 'inset(0 calc(100% - var(--pct, 50%)) 0 0)' }}
         />
+        {/* Diff heat-map overlay — the idle view. Hidden once the slider
+            becomes active. */}
+        {hasDiff && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={diff}
+            alt="Diff"
+            draggable={false}
+            className="share-slider-diff absolute inset-0 w-full h-full object-cover object-top select-none pointer-events-none transition-opacity duration-150"
+          />
+        )}
+        {/* Divider + drag handle — only visible while active. */}
         <div
-          className="absolute top-0 bottom-0 w-px bg-primary pointer-events-none"
+          className="share-slider-divider absolute top-0 bottom-0 w-px bg-primary pointer-events-none transition-opacity duration-150"
           style={{ left: 'var(--pct, 50%)' }}
           aria-hidden
-        />
-        <span className="absolute top-2 left-2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border">
+        >
+          <div className="share-slider-handle absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border-2 border-primary bg-background shadow flex items-center justify-center text-primary text-xs font-bold">
+            ⇔
+          </div>
+        </div>
+        <span className="share-slider-label-before absolute top-2 left-2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border transition-opacity duration-150">
           Before
         </span>
-        <span className="absolute top-2 right-2 rounded bg-primary text-primary-foreground px-2 py-0.5 text-[11px] font-medium">
+        <span className="share-slider-label-after absolute top-2 right-2 rounded bg-primary text-primary-foreground px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
           After
         </span>
+        {hasDiff && (
+          <span className="share-slider-label-diff absolute top-2 right-2 rounded bg-rose-500 text-white px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
+            Changes
+          </span>
+        )}
+        {hasDiff && (
+          <span className="share-slider-hint absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border pointer-events-none transition-opacity duration-150">
+            Hover to compare
+          </span>
+        )}
       </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        defaultValue={50}
-        step={1}
-        aria-label="Compare before and after"
-        className="share-slider-input block w-full accent-primary"
-      />
     </figure>
   );
 }
@@ -1058,17 +1182,94 @@ function ShareFooter({ slug }: { slug: string }) {
   );
 }
 
+const SHARE_STYLE = `
+.share-slider .share-slider-current,
+.share-slider .share-slider-divider,
+.share-slider .share-slider-label-before,
+.share-slider .share-slider-label-after,
+.share-slider .share-slider-diff,
+.share-slider .share-slider-label-diff,
+.share-slider .share-slider-hint {
+  opacity: 1;
+}
+.share-slider[data-active="false"] .share-slider-current,
+.share-slider[data-active="false"] .share-slider-divider,
+.share-slider[data-active="false"] .share-slider-label-before,
+.share-slider[data-active="false"] .share-slider-label-after {
+  opacity: 0;
+}
+.share-slider[data-active="true"] .share-slider-diff,
+.share-slider[data-active="true"] .share-slider-label-diff,
+.share-slider[data-active="true"] .share-slider-hint {
+  opacity: 0;
+}
+.share-slider-stage:focus-visible {
+  outline: 2px solid var(--primary, #000);
+  outline-offset: 2px;
+}
+`;
+
 const SHARE_SCRIPT = `
 (function(){
-  var rows = document.querySelectorAll('.share-slider');
-  for (var i = 0; i < rows.length; i++) {
-    (function(row){
-      var input = row.querySelector('.share-slider-input');
-      if (!input) return;
-      var apply = function(){ row.style.setProperty('--pct', input.value + '%'); };
-      input.addEventListener('input', apply);
-      apply();
-    })(rows[i]);
+  var figs = document.querySelectorAll('.share-slider');
+  for (var i = 0; i < figs.length; i++) {
+    (function(fig){
+      var stage = fig.querySelector('.share-slider-stage');
+      if (!stage) return;
+      var hasDiff = fig.getAttribute('data-has-diff') === 'true';
+      // Track whether pointer is inside the stage so touchmove/leave behave.
+      function setPct(clientX) {
+        var rect = stage.getBoundingClientRect();
+        if (!rect.width) return;
+        var x = clientX - rect.left;
+        var pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+        fig.style.setProperty('--pct', pct.toFixed(2) + '%');
+        stage.setAttribute('aria-valuenow', String(Math.round(pct)));
+      }
+      function activate() { fig.setAttribute('data-active', 'true'); }
+      function deactivate() { if (hasDiff) fig.setAttribute('data-active', 'false'); }
+      stage.addEventListener('pointerenter', function(e){
+        if (e.pointerType === 'touch') return;
+        activate();
+        setPct(e.clientX);
+      });
+      stage.addEventListener('pointerleave', function(e){
+        if (e.pointerType === 'touch') return;
+        deactivate();
+      });
+      stage.addEventListener('pointermove', function(e){
+        if (fig.getAttribute('data-active') !== 'true') return;
+        setPct(e.clientX);
+      });
+      stage.addEventListener('pointerdown', function(e){
+        activate();
+        setPct(e.clientX);
+        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      stage.addEventListener('pointerup', function(e){
+        try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
+      });
+      stage.addEventListener('keydown', function(e){
+        var curStr = fig.style.getPropertyValue('--pct') || '50%';
+        var cur = parseFloat(curStr) || 50;
+        var step = e.shiftKey ? 10 : 2;
+        if (e.key === 'ArrowLeft') {
+          activate();
+          var n = Math.max(0, cur - step);
+          fig.style.setProperty('--pct', n + '%');
+          stage.setAttribute('aria-valuenow', String(Math.round(n)));
+          e.preventDefault();
+        } else if (e.key === 'ArrowRight') {
+          activate();
+          var m = Math.min(100, cur + step);
+          fig.style.setProperty('--pct', m + '%');
+          stage.setAttribute('aria-valuenow', String(Math.round(m)));
+          e.preventDefault();
+        } else if (e.key === 'Escape') {
+          deactivate();
+        }
+      });
+    })(figs[i]);
   }
   var videos = document.querySelectorAll('video.share-video');
   for (var j = 0; j < videos.length; j++) {

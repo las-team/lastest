@@ -626,7 +626,8 @@ export async function generateDiff(
   ignoreRegions?: Rectangle[],
   ignorePageShift = false,
   diffEngine: DiffEngineType = 'pixelmatch',
-  regionDetectionMode: RegionDetectionMode = 'grid'
+  regionDetectionMode: RegionDetectionMode = 'grid',
+  focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
   let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
   let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
@@ -647,7 +648,7 @@ export async function generateDiff(
 
   // Use shift-aware diffing when enabled and widths match
   if (ignorePageShift && hasSameWidth) {
-    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine, regionDetectionMode);
+    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine, regionDetectionMode, focusRegions);
   }
 
   // Pad shorter image to match taller one when heights differ
@@ -665,13 +666,13 @@ export async function generateDiff(
 
   const { width, height } = baseline;
 
-  // Blank out ignore regions in both images before comparison
-  if (ignoreRegions && ignoreRegions.length > 0) {
-    for (const region of ignoreRegions) {
-      blankRegion(baseline.data, width, height, region);
-      blankRegion(current.data, width, height, region);
-    }
-  }
+  // Apply ignore mask (blank inside) then focus mask (blank outside union).
+  // Ignore takes priority inside a focus area: ignore rects get magenta-filled, then
+  // focus-outside pass only touches pixels outside the focus union.
+  applyMask(baseline.data, width, height, ignoreRegions, 'inside');
+  applyMask(current.data, width, height, ignoreRegions, 'inside');
+  applyMask(baseline.data, width, height, focusRegions, 'outside');
+  applyMask(current.data, width, height, focusRegions, 'outside');
 
   const diff = new PNG({ width, height });
 
@@ -737,6 +738,7 @@ export async function generateTextAwareDiffFromPaths(
   options: import('./text-regions').TextAwareDiffOptions,
   ignoreRegions?: Rectangle[],
   regionDetectionMode: RegionDetectionMode = 'grid',
+  focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
   const { generateTextAwareDiff } = await import('./text-regions');
 
@@ -763,13 +765,11 @@ export async function generateTextAwareDiffFromPaths(
 
   const { width, height } = baseline;
 
-  // Blank ignore regions before diff
-  if (ignoreRegions && ignoreRegions.length > 0) {
-    for (const region of ignoreRegions) {
-      blankRegion(baseline.data, width, height, region);
-      blankRegion(current.data, width, height, region);
-    }
-  }
+  // Apply ignore then focus masks (see generateDiff for ordering rationale).
+  applyMask(baseline.data, width, height, ignoreRegions, 'inside');
+  applyMask(current.data, width, height, ignoreRegions, 'inside');
+  applyMask(baseline.data, width, height, focusRegions, 'outside');
+  applyMask(current.data, width, height, focusRegions, 'outside');
 
   // Two-pass OCR diff
   const result = await generateTextAwareDiff(
@@ -832,17 +832,16 @@ async function generateShiftAwareDiff(
   includeAntiAliasing: boolean,
   ignoreRegions?: Rectangle[],
   diffEngine: DiffEngineType = 'pixelmatch',
-  regionDetectionMode: RegionDetectionMode = 'grid'
+  regionDetectionMode: RegionDetectionMode = 'grid',
+  focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
   const width = baseline.width;
 
-  // Blank out ignore regions before alignment hashing
-  if (ignoreRegions && ignoreRegions.length > 0) {
-    for (const region of ignoreRegions) {
-      blankRegion(baseline.data, baseline.width, baseline.height, region);
-      blankRegion(current.data, current.width, current.height, region);
-    }
-  }
+  // Blank ignore regions then focus-outside before alignment hashing.
+  applyMask(baseline.data, baseline.width, baseline.height, ignoreRegions, 'inside');
+  applyMask(current.data, current.width, current.height, ignoreRegions, 'inside');
+  applyMask(baseline.data, baseline.width, baseline.height, focusRegions, 'outside');
+  applyMask(current.data, current.width, current.height, focusRegions, 'outside');
 
   // Detect background colors before alignment (needed for blank-row fills)
   const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
@@ -1013,10 +1012,10 @@ export function imagesMatch(path1: string, path2: string, threshold = 0.1): bool
 }
 
 /**
- * Fill a rectangular region in an image buffer with a solid color (magenta).
- * Used to blank out ignore regions before diff comparison.
+ * Fill a rectangular region in an image buffer with solid magenta.
+ * Used internally by applyMask.
  */
-function blankRegion(data: Buffer, imgWidth: number, imgHeight: number, region: Rectangle): void {
+function blankRect(data: Buffer, imgWidth: number, imgHeight: number, region: Rectangle): void {
   const x0 = Math.max(0, region.x);
   const y0 = Math.max(0, region.y);
   const x1 = Math.min(imgWidth, region.x + region.width);
@@ -1030,6 +1029,50 @@ function blankRegion(data: Buffer, imgWidth: number, imgHeight: number, region: 
       data[idx + 1] = 0;   // G
       data[idx + 2] = 255; // B
       data[idx + 3] = 255; // A
+    }
+  }
+}
+
+/**
+ * Blank regions in an image buffer before diff comparison.
+ * - mode='inside': blanks pixels inside any rect (ignore-region semantics).
+ * - mode='outside': blanks pixels OUTSIDE the union of rects (focus-region semantics).
+ * No-op when rects is empty.
+ */
+function applyMask(
+  data: Buffer,
+  imgWidth: number,
+  imgHeight: number,
+  rects: Rectangle[] | undefined,
+  mode: 'inside' | 'outside',
+): void {
+  if (!rects || rects.length === 0) return;
+
+  if (mode === 'inside') {
+    for (const r of rects) blankRect(data, imgWidth, imgHeight, r);
+    return;
+  }
+
+  // mode === 'outside': build union bitmap, then magenta-fill pixels outside it.
+  const inside = new Uint8Array(imgWidth * imgHeight);
+  for (const r of rects) {
+    const x0 = Math.max(0, r.x);
+    const y0 = Math.max(0, r.y);
+    const x1 = Math.min(imgWidth, r.x + r.width);
+    const y1 = Math.min(imgHeight, r.y + r.height);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        inside[y * imgWidth + x] = 1;
+      }
+    }
+  }
+  for (let i = 0; i < inside.length; i++) {
+    if (!inside[i]) {
+      const idx = i * 4;
+      data[idx] = 255;
+      data[idx + 1] = 0;
+      data[idx + 2] = 255;
+      data[idx + 3] = 255;
     }
   }
 }

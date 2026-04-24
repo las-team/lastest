@@ -41,6 +41,7 @@ import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/c
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { TestStepsTab } from '@/components/tests/success-criteria-tab';
+import { StepCriteriaTab } from '@/components/tests/step-criteria-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
@@ -941,6 +942,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               <TabsTrigger value="spec" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
             )}
             <TabsTrigger value="steps" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
+            <TabsTrigger value="criteria" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
             <TabsTrigger value="setup" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
             <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
             <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
@@ -1078,6 +1080,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   setTimeout(() => setHighlightLine(null), 2000);
                 }, 100);
               }}
+            />
+          </TabsContent>
+
+          <TabsContent value="criteria" className="mt-4">
+            <StepCriteriaTab
+              testId={test.id}
+              screenshots={latestResult?.screenshots ?? null}
+              stepCriteria={test.stepCriteria ?? null}
+              assertions={test.assertions ?? null}
             />
           </TabsContent>
 

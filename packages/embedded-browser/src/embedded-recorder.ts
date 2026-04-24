@@ -421,6 +421,30 @@ export class EmbeddedRecorder {
   }
 
   /**
+   * Create a wait event (fixed duration or wait-for-selector).
+   * The recorder does not actually pause — codegen turns this into a
+   * page.waitForTimeout / page.waitForSelector call at replay time.
+   */
+  createWait(payload: {
+    waitType: 'duration' | 'selector';
+    durationMs?: number;
+    selector?: string;
+    selectors?: Array<{ type: string; value: string }>;
+    condition?: 'visible' | 'hidden';
+    timeoutMs?: number;
+  }): void {
+    if (!this.isRecording) return;
+    this.addEvent('wait', {
+      waitType: payload.waitType,
+      durationMs: payload.durationMs,
+      selector: payload.selector,
+      selectors: payload.selectors,
+      condition: payload.condition,
+      timeoutMs: payload.timeoutMs,
+    });
+  }
+
+  /**
    * Insert a timestamp at the current cursor position in the browser.
    */
   async insertTimestamp(): Promise<void> {

@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { SliderComparison } from '@/components/diff/slider-comparison';
+import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
+import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult } from '@/lib/db/schema';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2 } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,9 +19,10 @@ interface DiffViewerClientProps {
   prevDiffId?: string;
   nextDiffId?: string;
   banAiMode?: boolean;
+  initialFocusRegions?: FocusRegionRect[];
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
@@ -177,6 +178,41 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const aiStatus = diff.aiAnalysisStatus;
   const [showRegions, setShowRegions] = useState(false);
   const [showDomOverlay, setShowDomOverlay] = useState(false);
+  const [drawFocusMode, setDrawFocusMode] = useState(false);
+  const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
+  const [focusPending, setFocusPending] = useState(false);
+
+  // Sync if server reloads with new focus regions (e.g. after router.refresh)
+  useEffect(() => { setFocusRegions(initialFocusRegions); }, [initialFocusRegions]);
+
+  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (focusPending) return;
+    setFocusPending(true);
+    try {
+      const created = await addFocusRegion(diff.id, rect);
+      setFocusRegions(prev => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawFocusMode(false);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to add focus region:', error);
+    } finally {
+      setFocusPending(false);
+    }
+  }, [diff.id, focusPending, router]);
+
+  const handleFocusDelete = useCallback(async (regionId: string) => {
+    if (focusPending) return;
+    setFocusPending(true);
+    setFocusRegions(prev => prev.filter(r => r.id !== regionId));
+    try {
+      await removeFocusRegion(regionId, diff.id);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to remove focus region:', error);
+    } finally {
+      setFocusPending(false);
+    }
+  }, [diff.id, focusPending, router]);
   const changedRegions = metadata?.changedRegions;
   const domDiff = metadata?.domDiff;
   const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
@@ -386,6 +422,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     changedRegions={changedRegions}
                     domOverlayRegions={domOverlayRegions}
                     showRegions={showRegions}
+                    focusRegions={focusRegions}
+                    drawFocusMode={drawFocusMode}
+                    onFocusRegionDrawn={handleFocusDrawn}
+                    onFocusRegionDelete={handleFocusDelete}
                     initialViewMode={viewParam || undefined}
                     onViewModeChange={handleViewModeChange}
                   />
@@ -524,6 +564,17 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               >
                 <SkipForward className="w-4 h-4" />
                 Skip
+              </Button>
+
+              <Button
+                variant={drawFocusMode ? 'default' : 'outline'}
+                onClick={() => setDrawFocusMode(prev => !prev)}
+                disabled={focusPending}
+                className={drawFocusMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-300 text-green-700 hover:bg-green-50'}
+                title="Click and drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions."
+              >
+                <Crosshair className="w-4 h-4" />
+                {drawFocusMode ? 'Drawing — click + drag' : focusRegions.length > 0 ? `Focus (${focusRegions.length})` : 'Draw Focus Region'}
               </Button>
             </div>
 

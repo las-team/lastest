@@ -16,6 +16,7 @@ export type MessageType =
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:create_assertion'
+  | 'command:create_wait'
   | 'command:flag_download'
   | 'command:insert_timestamp'
   | 'command:start_debug'
@@ -302,6 +303,24 @@ export interface CreateAssertionCommand extends BaseMessage {
   payload: CreateAssertionCommandPayload;
 }
 
+export type WaitType = 'duration' | 'selector';
+export type WaitSelectorCondition = 'visible' | 'hidden';
+
+export interface CreateWaitCommandPayload {
+  sessionId: string;
+  waitType: WaitType;
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: WaitSelectorCondition;
+  timeoutMs?: number;
+}
+
+export interface CreateWaitCommand extends BaseMessage {
+  type: 'command:create_wait';
+  payload: CreateWaitCommandPayload;
+}
+
 export interface FlagDownloadCommandPayload {
   sessionId: string;
 }
@@ -517,6 +536,7 @@ export type ServerCommand =
   | StartRecordingCommand
   | StopRecordingCommand
   | CreateAssertionCommand
+  | CreateWaitCommand
   | FlagDownloadCommand
   | InsertTimestampCommand
   | CaptureScreenshotCommand

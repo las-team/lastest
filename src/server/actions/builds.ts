@@ -986,6 +986,26 @@ async function runBuildAsync(
       }
     }
 
+    // Run per-step evaluation criteria. A rule with severity 'fail' can
+    // promote a passing test to failed (e.g. fail when a screenshot changed).
+    try {
+      const { evaluateStepCriteria } = await import('@/lib/execution/evaluation');
+      const resultsForEval = await queries.getTestResultsByRun(testRunId);
+      for (const r of resultsForEval) {
+        const prevStatus = r.status;
+        const evalResult = await evaluateStepCriteria(r.id);
+        if (
+          evalResult.overriddenStatus === 'failed' &&
+          prevStatus !== 'failed'
+        ) {
+          if (prevStatus === 'passed') passedCount--;
+          failedCount++;
+        }
+      }
+    } catch (err) {
+      console.error('[build] step-criteria evaluation failed:', err);
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -1228,10 +1248,14 @@ async function processVisualDiff(
   const defaultBranch = repo?.defaultBranch || 'main';
   const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
-  // Fetch ignore regions for this test
+  // Fetch ignore regions (test-level) and focus regions (per-step) for this screenshot
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
   const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
     ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+    : undefined;
+  const stepFocusRegions = await queries.getFocusRegions(testId, stepLabel || null);
+  const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
+    ? stepFocusRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
 
   // Helper to classify based on percentage
@@ -1296,7 +1320,8 @@ async function processVisualDiff(
         ignoreRects,
         false,
         diffEngine,
-        regionDetectionMode
+        regionDetectionMode,
+        focusRects,
       );
 
       return {
@@ -1343,7 +1368,8 @@ async function processVisualDiff(
         ignoreRects,
         ignorePageShift,
         diffEngine,
-        regionDetectionMode
+        regionDetectionMode,
+        focusRects,
       );
 
       const mainPct = mainDiffResult.percentageDifference;
@@ -1462,6 +1488,7 @@ async function processVisualDiff(
           },
           ignoreRects,
           regionDetectionMode,
+          focusRects,
         )
       : await generateDiff(
           path.join(STORAGE_ROOT, baseline.imagePath),
@@ -1472,7 +1499,8 @@ async function processVisualDiff(
           ignoreRects,
           ignorePageShift,
           diffEngine,
-          regionDetectionMode
+          regionDetectionMode,
+          focusRects,
         );
 
     const pct = diffResult.percentageDifference;

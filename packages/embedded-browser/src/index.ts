@@ -751,6 +751,32 @@ async function startup(): Promise<void> {
         break;
       }
 
+      case 'command:create_wait': {
+        if (!recorder?.isActive() || !runnerClient) break;
+        const waitPayload = command.payload as {
+          sessionId: string;
+          waitType: 'duration' | 'selector';
+          durationMs?: number;
+          selector?: string;
+          selectors?: Array<{ type: string; value: string }>;
+          condition?: 'visible' | 'hidden';
+          timeoutMs?: number;
+        };
+        recorder.createWait({
+          waitType: waitPayload.waitType,
+          durationMs: waitPayload.durationMs,
+          selector: waitPayload.selector,
+          selectors: waitPayload.selectors,
+          condition: waitPayload.condition,
+          timeoutMs: waitPayload.timeoutMs,
+        });
+        const summary = waitPayload.waitType === 'duration'
+          ? `${waitPayload.durationMs}ms`
+          : `selector ${waitPayload.selector ?? '<multi>'} ${waitPayload.condition ?? 'visible'}`;
+        console.log(`[Command] Inserted wait (${waitPayload.waitType}): ${summary}`);
+        break;
+      }
+
       case 'command:flag_download': {
         if (!recorder?.isActive()) break;
         recorder.flagDownload();

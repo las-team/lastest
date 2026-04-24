@@ -15,7 +15,7 @@ DOM delta
 ## bugs
 captures only cursor IF record path is enabled
 ## features
-stream back on headed play
+implement designs
 check tabs and enters
 Select focus areas of a screenshot that need to be checked and evaluation criteria (assertions)
 time delay in validation
@@ -75,6 +75,67 @@ Video recording
 Run online or on your pc?
 Pont erre van szükségünk
 Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
+
+Does BackstopJS support Docker for visual diff?
+
+Not probed yet
+
+No results
+0%
+
+How to choose visual regression testing for startups?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+Cheapest visual regression testing alternative to Chromatic?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+What visual testing tool integrates well with GitHub Actions?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+How to catch visual bugs in CI/CD pipeline?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+Best open-source visual regression testing tools for Playwright?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+How does Percy compare to Applitools for visual testing?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+What's the best visual regression testing tool for enterprise?
+
+Appears in 0 of 1 platforms
+
+ChatGPT
+0%
+
+Re-fetch search volume, CPC & competition from DataForSEO
+
+
+
 ### marketing ideas
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence

@@ -3,6 +3,7 @@ import {
   visualDiffs,
   baselines,
   ignoreRegions,
+  focusRegions,
   plannedScreenshots,
   testResults,
   tests,
@@ -16,6 +17,7 @@ import type {
   NewVisualDiff,
   NewBaseline,
   NewIgnoreRegion,
+  NewFocusRegion,
   NewPlannedScreenshot,
 } from '../schema';
 import { eq, desc, and, or, inArray, isNull, sql } from 'drizzle-orm';
@@ -350,6 +352,39 @@ export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
 
 export async function deleteIgnoreRegion(id: string) {
   await db.delete(ignoreRegions).where(eq(ignoreRegions.id, id));
+}
+
+// Focus Regions (per-screenshot positive mask)
+export async function getFocusRegions(testId: string, stepLabel: string | null) {
+  return db
+    .select()
+    .from(focusRegions)
+    .where(
+      and(
+        eq(focusRegions.testId, testId),
+        stepLabel === null ? isNull(focusRegions.stepLabel) : eq(focusRegions.stepLabel, stepLabel),
+      ),
+    );
+}
+
+export async function createFocusRegion(data: Omit<NewFocusRegion, 'id' | 'createdAt'>) {
+  const id = uuid();
+  const createdAt = new Date();
+  await db.insert(focusRegions).values({ ...data, id, createdAt });
+  return { id, ...data, createdAt };
+}
+
+export async function deleteFocusRegion(id: string) {
+  await db.delete(focusRegions).where(eq(focusRegions.id, id));
+}
+
+export async function getFocusRegionById(id: string) {
+  const [row] = await db.select().from(focusRegions).where(eq(focusRegions.id, id));
+  return row;
+}
+
+export async function getFocusRegionsByTest(testId: string) {
+  return db.select().from(focusRegions).where(eq(focusRegions.testId, testId));
 }
 
 // Get visual diffs for a specific test result (step-level diffs)

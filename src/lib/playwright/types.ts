@@ -32,6 +32,18 @@ export interface TestRunResult {
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
 
+export type WaitType = 'duration' | 'selector';
+export type WaitSelectorCondition = 'visible' | 'hidden';
+
+export interface WaitParams {
+  waitType: WaitType;
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: WaitSelectorCondition;
+  timeoutMs?: number;
+}
+
 export type ElementAssertionType =
   | 'toBeVisible'
   | 'toBeHidden'
