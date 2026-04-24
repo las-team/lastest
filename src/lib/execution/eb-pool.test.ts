@@ -112,6 +112,22 @@ vi.mock('@/lib/auth', () => ({
   requireTeamAdmin: vi.fn().mockResolvedValue({ team: { id: 'team-1' }, user: { id: 'user-1' } }),
 }));
 
+// Stub provisioner so tests don't react to the host's EB_PROVISIONER env var.
+// deploy.sh sources .env.local (EB_PROVISIONER=kubernetes) before `pnpm vitest`,
+// which flipped isPoolBusy into the k8s branch and broke the mock sequencing.
+vi.mock('@/lib/eb/provisioner', () => ({
+  isKubernetesMode: vi.fn(() => false),
+  launchEBJob: vi.fn(),
+  terminateEBJob: vi.fn(),
+  jobNameForRunnerName: vi.fn(),
+  listEBJobNames: vi.fn().mockResolvedValue([]),
+  poolMax: vi.fn().mockResolvedValue(10),
+  warmPoolMin: vi.fn().mockResolvedValue(0),
+  currentPoolSize: vi.fn().mockResolvedValue(0),
+  incInFlightProvisions: vi.fn(),
+  decInFlightProvisions: vi.fn(),
+}));
+
 vi.mock('next/cache', () => ({
   revalidatePath: vi.fn(),
 }));

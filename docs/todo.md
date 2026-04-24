@@ -14,7 +14,6 @@ a11y
 DOM delta
 ## bugs
 captures only cursor IF record path is enabled
-always just warn by def Network Error Mode
 ## features
 stream back on headed play
 check tabs and enters
