@@ -93,6 +93,7 @@ ${historyDesc}`;
 
     const response = await generateWithAI(config, prompt, TRIAGE_SYSTEM_PROMPT, {
       actionType: 'triage',
+      responseFormat: 'json_object',
     });
 
     // Parse JSON response

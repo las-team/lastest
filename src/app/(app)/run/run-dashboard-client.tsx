@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +39,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import type { Test, TestRun, Build } from '@/lib/db/schema';
 import { BuildSummaryCard } from '@/components/builds/build-summary-card';
 import { BuildGraphView } from '@/components/builds/build-graph-view';
@@ -121,7 +119,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
   const [showHistory, setShowHistory] = useState(false);
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const initialBaseUrlRef = useRef(initialBaseUrl);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [smartAnalysis, setSmartAnalysis] = useState<SmartRunAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSmartRunning, setIsSmartRunning] = useState(false);
@@ -169,7 +166,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
         }
 
         const versionOverrides = composeConfig.versionOverrides ?? undefined;
-        const result = await createAndRunBuild('manual', filteredTestIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', filteredTestIds, repositoryId, 'auto', versionOverrides);
         notifyJobStarted();
         if ('queued' in result && result.queued) {
           toast.info('All browsers are busy — build queued and will start automatically');
@@ -177,7 +174,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
           router.push(`/builds/${result.buildId}`);
         }
       } else {
-        const result = await runSmartBuild(repositoryId ?? null, executionTarget);
+        const result = await runSmartBuild(repositoryId ?? null, 'auto');
         if ('error' in result) {
           console.error('Smart run failed:', result.error);
         } else {
@@ -241,14 +238,14 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
           baselineUrl,
           featureBranch,
           baseUrl,
-          executionTarget,
+          'auto',
           testIds,
           versionOverrides,
         );
         notifyJobStarted();
         router.push(`/builds/${baselineBuildId}`);
       } else {
-        const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget, versionOverrides);
+        const result = await createAndRunBuild('manual', testIds, repositoryId, 'auto', versionOverrides);
         notifyJobStarted();
         if ('queued' in result && result.queued) {
           toast.info('All browsers are busy — build queued and will start automatically');
@@ -278,13 +275,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ExecutionTargetSelector
-                    value={executionTarget}
-                    onChange={setExecutionTarget}
-                    disabled={isRunning}
-                    capabilityFilter="run"
-                    size="sm"
-                  />
                   <Button
                     onClick={handleRunAll}
                     disabled={isRunning || tests.length === 0}
@@ -481,13 +471,6 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
 
                     {/* Smart Run Button */}
                     <div className="flex items-center gap-2">
-                      <ExecutionTargetSelector
-                        value={executionTarget}
-                        onChange={setExecutionTarget}
-                        disabled={isSmartRunning}
-                        capabilityFilter="run"
-                        size="sm"
-                      />
                       <Button
                         onClick={handleSmartRun}
                         disabled={isSmartRunning || smartAnalysis.affectedTests.length === 0}

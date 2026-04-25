@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,7 +70,6 @@ import { Label } from '@/components/ui/label';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
@@ -382,7 +380,6 @@ export function RecordingClient({
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
   const [skippedDefaultStepIds, setSkippedDefaultStepIds] = useState<Set<string>>(new Set());
@@ -565,7 +562,7 @@ export function RecordingClient({
           ? { steps: allSteps }
           : undefined;
 
-        const result = await startRecording(url, repositoryId, executionTarget, setupOptions, selectedStorageStateId ?? undefined);
+        const result = await startRecording(url, repositoryId, 'auto', setupOptions, selectedStorageStateId ?? undefined);
 
         if (result.error) {
           setError(result.error);
@@ -586,8 +583,8 @@ export function RecordingClient({
           // A freshly-provisioned EB may not have completed auto-register
           // by the time startRecording returns, so poll briefly until the
           // session shows up with a streamUrl rather than failing silently.
-          const resolvedTarget = result.resolvedRunnerId || executionTarget;
-          if (resolvedTarget && resolvedTarget !== 'auto') {
+          const resolvedTarget = result.resolvedRunnerId;
+          if (resolvedTarget) {
             (async () => {
               for (let attempt = 0; attempt < 10; attempt++) {
                 try {
@@ -894,22 +891,6 @@ export function RecordingClient({
                     </p>
                   </div>
                 )}
-
-                {/* Execution Target */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Execution Target</label>
-                  <ExecutionTargetSelector
-                    value={executionTarget}
-                    onChange={setExecutionTarget}
-                    disabled={isLoading}
-                    capabilityFilter="record"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {executionTarget === 'local'
-                      ? 'Record on this machine'
-                      : 'Record on a remote runner'}
-                  </p>
-                </div>
 
                 {/* Seed Toggle */}
                 {(() => {

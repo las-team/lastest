@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
 import { AreaTestCasesPanel } from '@/components/areas/area-specs-panel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,7 +23,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
@@ -204,7 +202,6 @@ export function DefinitionPageClient({
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'pending'>('all');
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
   const lastSelectedIdRef = useRef<string | null>(null);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -650,7 +647,7 @@ export function DefinitionPageClient({
     const testIds = Array.from(selectedTestIds);
     setIsBulkRunning(true);
     try {
-      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, 'auto');
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
@@ -676,7 +673,7 @@ export function DefinitionPageClient({
     }
     setIsRunningAreaBuild(true);
     try {
-      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, 'auto');
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
@@ -1284,13 +1281,6 @@ export function DefinitionPageClient({
                         <span className="text-sm text-muted-foreground">
                           {selectedTestIds.size} selected
                         </span>
-                        <ExecutionTargetSelector
-                          value={executionTarget}
-                          onChange={setExecutionTarget}
-                          disabled={isBulkRunning}
-                          capabilityFilter="run"
-                          size="sm"
-                        />
                         <Button variant="outline" size="sm" onClick={handleBulkRun} disabled={isBulkRunning}>
                           <Play className="h-3.5 w-3.5 mr-1.5" />
                           {isBulkRunning ? 'Running...' : 'Run'}

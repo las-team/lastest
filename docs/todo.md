@@ -12,10 +12,14 @@ Accept Downloads
 triage
 a11y
 DOM delta
+Create modes
 ## bugs
 captures only cursor IF record path is enabled
 area cant be drawn over slider
 ## features
+Maybe workspace list w last 3 workspaces?
+video playback design
+Clear up area desc-spec, test desc-spec duplication
 Onboarding - v1/v3
 Recording - test create v3
   Better timeline: imeline · drag to reorder · click to trim/label
@@ -45,7 +49,7 @@ Recording - test create v3
 Vars for test - extract from field values
   Load from CSV column or gsheet
   criteria add - assert value of Var by eotest
-Merge code and steps
+Merge code and steps?
 Make specs first
 implement designs
 Openrouter agent sdk parity

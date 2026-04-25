@@ -20,7 +20,6 @@ import {
 import { saveEnvironmentConfig, testServerConnection } from '@/server/actions/environment';
 import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { EmbeddedSession } from '@/lib/db/schema';
 
@@ -59,7 +58,6 @@ function isLocalUrl(url: string): boolean {
 export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
-  const [executionTarget] = usePreferredRunner();
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [expanded, setExpanded] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -164,7 +162,7 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      const result = await createAndRunBuild('manual', undefined, repositoryId ?? null, executionTarget, undefined);
+      const result = await createAndRunBuild('manual', undefined, repositoryId ?? null, 'auto', undefined);
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');

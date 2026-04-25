@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,7 +19,6 @@ import {
   Loader2,
   Pause,
   FastForward,
-  FileSearch,
   Globe,
   Terminal,
   Circle,
@@ -33,13 +31,12 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
-import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
+import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
 import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
 import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
 import { Input } from '@/components/ui/input';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface DebugClientProps {
@@ -54,8 +51,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepListRef = useRef<HTMLDivElement>(null);
 
-  // Runner selector + live view state
-  const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
+  // Live view state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [resolvedRunnerId, setResolvedRunnerId] = useState<string | null>(null);
 
@@ -87,37 +83,18 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     releasedRef.current = false;
   }, [sessionId]);
 
-  const isRemote = executionTarget !== 'local';
-
-  // Track whether initial mount has completed to avoid double-start from hydration
   const hasMountedRef = useRef(false);
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
   // second mount waits for the first to finish releasing its claimed EB before claiming again.
   const initPromiseRef = useRef<Promise<void> | null>(null);
-  // Read executionTarget via a ref inside the session-init effect. If we
-  // depended on `executionTarget` directly, the effect would re-run every
-  // time a sibling component (ExecutionTargetSelector) perturbs the target
-  // — which happens transiently during SSE reconnect cycles on
-  // /api/runners/status. Each re-run cancels the in-flight startDebugSession
-  // and fires stopDebugSession before the session is even viewable, causing
-  // the "Launching browser..." UI to spin forever.
-  const executionTargetRef = useRef(executionTarget);
-  useEffect(() => { executionTargetRef.current = executionTarget; }, [executionTarget]);
 
-  // Start session on mount. Re-starts only if the TEST itself changes (e.g.
-  // user navigates to a different test ID). `executionTarget` changes no
-  // longer re-run this effect — mid-build reassignments don't affect an
-  // already-launched debug session.
   useEffect(() => {
-    if (!isRunnerHydrated) return;
-
     let cancelled = false;
     const previous = initPromiseRef.current;
     const run = (async () => {
       if (previous) await previous.catch(() => {});
       if (cancelled) return;
 
-      // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
       if (prevSessionId && hasMountedRef.current) {
         await stopDebugSession(prevSessionId).catch(() => {});
@@ -126,8 +103,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         setState(null);
       }
       hasMountedRef.current = true;
-      const target = executionTargetRef.current;
-      const result = await startDebugSession(test.id, repositoryId, target === 'local' ? null : target);
+      const result = await startDebugSession(test.id, repositoryId, 'auto');
       if (cancelled) {
         // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
         // in dev, or fast unmount). Release it so subsequent claims can succeed.
@@ -150,7 +126,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [test.id, repositoryId, isRunnerHydrated]);
+  }, [test.id, repositoryId]);
 
   // Poll for state
   useEffect(() => {
@@ -303,13 +279,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Resolve stream URL when actual runner is known
   useEffect(() => {
     let cancelled = false;
-    const runnerId = resolvedRunnerId || (executionTarget !== 'local' && executionTarget !== 'auto' ? executionTarget : null);
-    if (!runnerId) {
+    if (!resolvedRunnerId) {
       Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
     } else {
       (async () => {
         try {
-          const streamInfo = await getStreamUrlForRunner(runnerId);
+          const streamInfo = await getStreamUrlForRunner(resolvedRunnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
             const token = streamInfo.streamAuthToken;
@@ -327,7 +302,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       })();
     }
     return () => { cancelled = true; };
-  }, [executionTarget, resolvedRunnerId]);
+  }, [resolvedRunnerId]);
 
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
@@ -357,13 +332,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>
-          <ExecutionTargetSelector
-            value={executionTarget}
-            onChange={setExecutionTarget}
-            capabilityFilter="run"
-            size="sm"
-            disabled={!!sessionId}
-          />
           <Badge
             variant="secondary"
             className={`text-white ${statusColor[state?.status || 'initializing']}`}
@@ -422,54 +390,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           >
             <Square className="h-4 w-4" />
           </Button>
-          <div className="w-px h-5 bg-border mx-1" />
-          {/* Record toggle (local only — remote debug executor doesn't support recording yet) */}
-          {!isRemote && (isRecording ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => sendCmd({ type: 'stop_recording' })}
-              title="Stop Recording"
-            >
-              <Square className="h-3 w-3 mr-1" />
-              Stop Rec{(state?.recordedEventCount ?? 0) > 0 ? ` (${state!.recordedEventCount})` : ''}
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => sendCmd({ type: 'start_recording' })}
-              disabled={!isPaused}
-              title="Record actions in browser"
-            >
-              <Circle className="h-3 w-3 mr-1 text-red-500 fill-red-500" />
-              Record
-            </Button>
-          ))}
-          {!isRemote && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (!sessionId) return;
-                const result = await flushDebugTrace(sessionId);
-                const traceUrl = result.url || state?.traceUrl;
-                if (traceUrl) {
-                  window.open(
-                    `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
-                    '_blank'
-                  );
-                } else {
-                  toast.error('No trace available');
-                }
-              }}
-              disabled={!sessionId}
-              title="Export Playwright Trace"
-            >
-              <FileSearch className="h-4 w-4 mr-1" />
-              Trace
-            </Button>
-          )}
           {streamUrl && (
             <>
               <div className="w-px h-5 bg-border mx-1" />

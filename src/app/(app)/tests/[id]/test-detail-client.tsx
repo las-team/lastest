@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -30,7 +29,6 @@ import { runTests, getJobStatus } from '@/server/actions/runs';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
 import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
@@ -244,7 +242,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Run state
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
 
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -410,7 +407,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      const result = await runTests([test.id], repositoryId, headless, executionTarget, forceVideoRecording);
+      const result = await runTests([test.id], repositoryId, headless, 'auto', forceVideoRecording);
       const { jobId } = result;
       notifyJobStarted();
       if ('queued' in result && result.queued) {
@@ -419,28 +416,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
       }
 
-      // Fetch stream URL for headed runs on embedded/system runners
-      // For specific runners, fetch immediately. For 'auto', resolve via job poll below.
-      const isAutoTarget = !executionTarget || executionTarget === 'auto' || executionTarget === 'local';
-      if (!headless && !isAutoTarget) {
-        try {
-          const streamInfo = await getStreamUrlForRunner(executionTarget);
-          if (streamInfo?.streamUrl) {
-            const token = streamInfo.streamAuthToken;
-            setStreamUrl(
-              token
-                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-                : streamInfo.streamUrl
-            );
-          }
-        } catch {
-          // Stream not available — not critical
-        }
-      }
-
-      // Poll job status for completion (ensures results are saved before refresh)
-      // Also resolves stream URL for 'auto' target headed runs
-      let streamResolved = !isAutoTarget || headless;
+      // Resolves stream URL for headed runs once the actual runner is known.
+      let streamResolved = headless;
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete, status, error, actualRunnerId } = await getJobStatus(jobId);
 
@@ -618,13 +595,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </>
                 ) : (
                   <>
-                    <ExecutionTargetSelector
-                      value={executionTarget}
-                      onChange={setExecutionTarget}
-                      disabled={isRunning}
-                      capabilityFilter="run"
-                      size="sm"
-                    />
                     <div className="flex">
                       <Button
                         onClick={() => handleRun(true)}

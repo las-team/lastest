@@ -7,6 +7,9 @@ export interface GenerateOptions {
   temperature?: number;
   images?: { base64: string; mediaType: string }[];
   signal?: AbortSignal;
+  /** Request structured JSON output. Forwarded as `response_format: { type: 'json_object' }`
+   *  to providers that support it (OpenRouter, OpenAI). Other providers ignore it. */
+  responseFormat?: 'json_object';
 }
 
 export interface StreamCallbacks {
