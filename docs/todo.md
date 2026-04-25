@@ -16,6 +16,37 @@ DOM delta
 captures only cursor IF record path is enabled
 area cant be drawn over slider
 ## features
+Onboarding - v1/v3
+Recording - test create v3
+  Better timeline: imeline · drag to reorder · click to trim/label
+            → goto
+            /login
+            🖱 click
+            [data-testid=email]
+            ⌨ type
+            viktor@…
+            🖱 click
+            [data-testid=pwd]
+            ⌨ type
+            ••••
+            🖱 click
+            Sign In
+            ⏱ wait
+            network idle
+            📸
+            step 1
+            ✓ assert
+            h1 = Dashboard
+            selectors detected
+            data-testid
+            id
+            role+name
+            css path
+Vars for test - extract from field values
+  Load from CSV column or gsheet
+  criteria add - assert value of Var by eotest
+Merge code and steps
+Make specs first
 implement designs
 Openrouter agent sdk parity
 Asset management
@@ -75,8 +106,6 @@ Pont erre van szükségünk
 Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
 
 Re-fetch search volume, CPC & competition from DataForSEO
-
-
 
 ### marketing ideas
 buy a newsletter substack twitter: duuce.com newsletter investor

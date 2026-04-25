@@ -42,7 +42,7 @@ export function Header({ title = 'Dashboard' }: HeaderProps) {
         <Button asChild variant="outline" size="sm">
           <Link href="/record">
             <Video className="h-4 w-4 mr-2" />
-            Record Test
+            Create Test
           </Link>
         </Button>
 

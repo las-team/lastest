@@ -1078,7 +1078,7 @@ export function DefinitionPageClient({
                     <Button asChild variant={isEditingArea ? 'outline' : 'default'} size="sm" className="h-8 text-sm">
                       <Link href="/record">
                         <Plus className="h-4 w-4 mr-1.5" />
-                        Record
+                        Create
                       </Link>
                     </Button>
                   </div>
@@ -1340,7 +1340,7 @@ export function DefinitionPageClient({
                         <Button asChild size="sm">
                           <Link href="/record">
                             <Plus className="h-4 w-4 mr-2" />
-                            Record First Test
+                            Create First Test
                           </Link>
                         </Button>
                       </div>

@@ -181,12 +181,12 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
 
   return (
     <div className="px-4 pb-3 space-y-2.5">
-      {/* Record + Run All */}
+      {/* Create + Run All */}
       <div className="flex gap-1.5">
         <Button asChild variant="secondary" size="sm" className="flex-1 gap-1.5">
           <Link href="/record">
             <Video className="h-3.5 w-3.5" />
-            Record
+            Create
           </Link>
         </Button>
         <Button
