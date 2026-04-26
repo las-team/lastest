@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
+import { VideoPlayer } from '@/components/video-player';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
@@ -1369,11 +1370,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               : 'Unknown'}
                           </span>
                         </div>
-                        <video
+                        <VideoPlayer
                           src={result.videoPath!}
-                          controls
                           preload="metadata"
-                          className="w-full rounded border bg-black"
+                          className="w-full aspect-video rounded border"
                         />
                       </div>
                     ))}

@@ -12,6 +12,7 @@ import {
 import type { Baseline } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
+import { ShareVideoPlayer } from './share-video-player';
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -138,9 +139,10 @@ export default async function PublicSharePage({ params }: PageProps) {
         <ShareFooter slug={slug} />
       </main>
 
-      {/* Server-emitted inline style + script: idle/active slider toggling,
-          pointer-driven reveal, video speed-up, step seek. Zero hydration
-          cost, no React client boundary, no Turbopack client-chunk graph. */}
+      {/* Server-emitted inline style + script: idle/active slider toggling and
+          pointer-driven reveal for the diff sliders. Zero hydration cost. The
+          video player is a separate React client island (see ShareVideoPlayer)
+          which owns playback rate, scrubbing, and step-seek wiring. */}
       <style dangerouslySetInnerHTML={{ __html: SHARE_STYLE }} />
       <script
         dangerouslySetInnerHTML={{
@@ -646,19 +648,7 @@ function TestShareBody({
     <>
       {videos.length > 0 && (
         <section className="space-y-3">
-          {videos.map((src, i) => (
-            <video
-              key={i}
-              src={src}
-              autoPlay
-              loop
-              muted
-              playsInline
-              controls
-              preload="metadata"
-              className="share-video w-full aspect-video rounded-md border bg-black"
-            />
-          ))}
+          <ShareVideoPlayer sources={videos} />
         </section>
       )}
 
@@ -1270,35 +1260,6 @@ const SHARE_SCRIPT = `
         }
       });
     })(figs[i]);
-  }
-  var videos = document.querySelectorAll('video.share-video');
-  for (var j = 0; j < videos.length; j++) {
-    (function(v){
-      var setRate = function(){ try { v.playbackRate = 2; } catch (e) {} };
-      setRate();
-      v.addEventListener('loadedmetadata', setRate);
-      v.addEventListener('play', setRate);
-      v.addEventListener('ratechange', function(){
-        if (v.playbackRate !== 2 && !v.dataset.userRate) {
-          v.dataset.userRate = '1';
-        }
-      });
-    })(videos[j]);
-  }
-  var seekers = document.querySelectorAll('[data-seek]');
-  for (var k = 0; k < seekers.length; k++) {
-    (function(el){
-      el.addEventListener('click', function(){
-        var sec = parseFloat(el.getAttribute('data-seek'));
-        if (isNaN(sec)) return;
-        var video = document.querySelector('video.share-video');
-        if (!video) return;
-        try {
-          video.currentTime = sec;
-          if (video.paused) video.play();
-        } catch (e) {}
-      });
-    })(seekers[k]);
   }
 })();
 `;
