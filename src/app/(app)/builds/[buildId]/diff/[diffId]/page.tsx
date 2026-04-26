@@ -154,6 +154,7 @@ export default async function DiffPage({ params }: PageProps) {
           initialFocusRegions={focusRegions.map(r => ({
             id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
           }))}
+          allDiffs={allDiffs}
         />
 
         {/* Keyboard shortcuts hint */}

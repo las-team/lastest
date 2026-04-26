@@ -13,6 +13,7 @@ triage
 a11y
 DOM delta
 Create modes
+Openrouter agent sdk parity
 ## bugs
 area cant be drawn over slider
 ## features
@@ -20,34 +21,11 @@ Maybe workspace list w last 3 workspaces?
 Clear up area desc-spec, test desc-spec duplication
 Onboarding - v1/v3
 Recording - test create v3
-  Better timeline: imeline · drag to reorder · click to trim/label
-            → goto
-            /login
-            🖱 click
-            [data-testid=email]
-            ⌨ type
-            viktor@…
-            🖱 click
-            [data-testid=pwd]
-            ⌨ type
-            ••••
-            🖱 click
-            Sign In
-            ⏱ wait
-            network idle
-            📸
-            step 1
-            ✓ assert
-            h1 = Dashboard
-            selectors detected
-            data-testid
-            id
-            role+name
-            css path
+  Better timeline: imeline · drag to reorder add icons, like steps as well
+
 Merge code and steps?
 Design
 update & implement designs
-Openrouter agent sdk parity
 Asset management
 mcp-oauth flow
 ## ideas

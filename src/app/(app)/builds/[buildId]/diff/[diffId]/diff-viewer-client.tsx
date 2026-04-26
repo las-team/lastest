@@ -1,11 +1,112 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
+
+type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
+
+function deriveStripStatus(d: VisualDiffWithTestStatus): StripStatus {
+  if (d.testResultStatus === 'failed' || d.status === 'rejected' || d.errorMessage) return 'failed';
+  if (d.status === 'todo') return 'todo';
+  if (d.status === 'approved' || d.status === 'auto_approved') return 'approved';
+  if (d.classification === 'unchanged' || (d.pixelDifference ?? 0) === 0) return 'approved';
+  if (d.status === 'pending' && (d.pixelDifference ?? 0) > 0) return 'changed';
+  return 'changed';
+}
+
+const stripStatusBar: Record<StripStatus, string> = {
+  failed: 'bg-red-500',
+  changed: 'bg-yellow-500',
+  todo: 'bg-amber-500',
+  approved: 'bg-green-500',
+};
+
+const STRIP_TILE_WIDTH = 96;
+const STRIP_TILE_HEIGHT = 64;
+const STRIP_TILE_GAP = 6;
+const STRIP_STEP = STRIP_TILE_WIDTH + STRIP_TILE_GAP;
+
+function DiffStrip({
+  allDiffs,
+  currentDiffId,
+  buildDiffUrl,
+}: {
+  allDiffs: VisualDiffWithTestStatus[];
+  currentDiffId: string;
+  buildDiffUrl: (id: string) => string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      setContainerWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const currentIndex = Math.max(0, allDiffs.findIndex((d) => d.id === currentDiffId));
+  const totalWidth = allDiffs.length * STRIP_STEP - STRIP_TILE_GAP;
+  const maxOffset = Math.max(0, totalWidth - containerWidth);
+  const desiredOffset = currentIndex * STRIP_STEP - (containerWidth - STRIP_TILE_WIDTH) / 2;
+  const offset = Math.max(0, Math.min(maxOffset, desiredOffset));
+
+  return (
+    <div ref={containerRef} className="relative w-full overflow-hidden pb-2">
+      <div
+        className="flex"
+        style={{
+          gap: `${STRIP_TILE_GAP}px`,
+          transform: `translate3d(${-offset}px, 0, 0)`,
+          transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+          willChange: 'transform',
+        }}
+      >
+        {allDiffs.map((d, i) => {
+          const status = deriveStripStatus(d);
+          const isCurrent = d.id === currentDiffId;
+          return (
+            <Link
+              key={d.id}
+              href={buildDiffUrl(d.id)}
+              title={`${d.testName ?? 'unnamed'} · ${d.stepLabel ?? `step ${i + 1}`} · ${status}`}
+              style={{ width: STRIP_TILE_WIDTH }}
+              className={`flex-none rounded overflow-hidden border border-border bg-card transition ${
+                isCurrent ? 'ring-2 ring-primary' : 'hover:opacity-80'
+              }`}
+            >
+              {d.currentImagePath ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={d.currentImagePath}
+                  alt=""
+                  style={{ height: STRIP_TILE_HEIGHT }}
+                  className="w-full object-cover"
+                />
+              ) : (
+                <div style={{ height: STRIP_TILE_HEIGHT }} className="w-full bg-muted" />
+              )}
+              <div className={`h-1 w-full ${stripStatusBar[status]}`} />
+              <div className="text-center font-mono text-[10px] py-0.5 text-muted-foreground">
+                {i + 1}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair } from 'lucide-react';
@@ -20,9 +121,10 @@ interface DiffViewerClientProps {
   nextDiffId?: string;
   banAiMode?: boolean;
   initialFocusRegions?: FocusRegionRect[];
+  allDiffs?: VisualDiffWithTestStatus[];
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [] }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], allDiffs = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
@@ -503,6 +605,15 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             <div className="p-8 text-center text-muted-foreground">
               No screenshot available
             </div>
+          )}
+
+          {/* Color-coded thumbnail queue strip */}
+          {allDiffs.length > 0 && (
+            <DiffStrip
+              allDiffs={allDiffs}
+              currentDiffId={diff.id}
+              buildDiffUrl={buildDiffUrl}
+            />
           )}
 
           {/* Action Bar */}
