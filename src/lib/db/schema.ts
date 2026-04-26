@@ -1167,6 +1167,8 @@ export const teams = pgTable('teams', {
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
+export type OnboardingPath = 'manual' | 'ai' | 'agent';
+
 // Users - Core identity
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -1178,6 +1180,10 @@ export const users = pgTable('users', {
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id, { onDelete: 'set null' }),
   emailVerified: boolean('email_verified').default(false),
+  // Onboarding wizard state (v3 fork-at-start). Null = wizard not yet completed.
+  // Existing users are backfilled to NOW() on migration so they don't see the wizard.
+  onboardingCompletedAt: timestamp('onboarding_completed_at'),
+  onboardingPath: text('onboarding_path').$type<OnboardingPath>(), // 'manual' | 'ai' | 'agent'
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });

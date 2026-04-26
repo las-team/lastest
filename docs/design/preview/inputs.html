@@ -1,0 +1,12 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>html,body{margin:0;background:var(--c-soft);padding:20px;display:flex;flex-direction:column;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px}
+label{font-family:var(--font-sans);font-size:13px;font-weight:500;color:var(--fg-1)}
+.input{height:36px;padding:0 12px;border:1px solid var(--c-line-strong);border-radius:var(--r-xs);background:#fff;font-family:var(--font-sans);font-size:14px;color:var(--fg-1);box-shadow:var(--shadow-xs);outline:none}
+.input:focus{border-color:var(--c-amber);box-shadow:0 0 0 3px rgba(224,152,54,.25)}
+.row{display:flex;gap:8px;align-items:center}
+.cb{width:18px;height:18px;border:1.5px solid var(--c-ink);border-radius:var(--r-xs);display:inline-flex;align-items:center;justify-content:center;background:var(--c-teal);color:#fff;font-size:11px}</style></head>
+<body>
+<div class="field"><label>Repository name</label><input class="input" value="lastest" /></div>
+<div class="row"><span class="cb">✓</span><span style="font-family:var(--font-sans);font-size:14px;color:var(--fg-1)">Run on every push to main</span></div>
+</body></html>
