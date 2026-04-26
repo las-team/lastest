@@ -81,6 +81,7 @@ interface TestResult {
   screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
   lastReachedStep: number | null;
   totalSteps: number | null;
+  extractedVariables: Record<string, string> | null;
 }
 
 interface DefaultStepForUI {
@@ -1071,6 +1072,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   setTimeout(() => setHighlightLine(null), 2000);
                 }, 100);
               }}
+              onNavigateToVars={() => setActiveTab('vars')}
             />
           </TabsContent>
 
@@ -1096,6 +1098,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               variables={test.variables ?? []}
               sheetSources={sheetDataSources}
               csvSources={csvDataSources}
+              extractedValues={latestResult?.extractedVariables ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);

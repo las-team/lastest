@@ -1,43 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Loader2 } from 'lucide-react';
+import { resetOnboarding } from '@/server/actions/onboarding';
 
 const STORAGE_KEY = 'lastest-setup-guide';
 
 export function ResetSetupGuide() {
-  const [isDismissed, setIsDismissed] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setMounted(true);
+  function handleRestore() {
+    startTransition(async () => {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const state = JSON.parse(raw);
-          setIsDismissed(state.dismissed === true);
-        }
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('lastest-ai-configured');
+        localStorage.removeItem('lastest-results-viewed');
       } catch {}
+      await resetOnboarding();
+      router.push('/onboarding');
+      router.refresh();
     });
-  }, []);
-
-  if (!mounted || !isDismissed) return null;
-
-  const handleRestore = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem('lastest-ai-configured');
-      localStorage.removeItem('lastest-results-viewed');
-    } catch {}
-    setIsDismissed(false);
-  };
+  }
 
   return (
-    <Button variant="outline" size="sm" onClick={handleRestore} className="gap-2">
-      <RotateCcw className="h-3.5 w-3.5" />
-      Restore Setup Guide
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleRestore}
+      className="gap-2"
+      disabled={pending}
+    >
+      {pending ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RotateCcw className="h-3.5 w-3.5" />
+      )}
+      Restart Setup Guide
     </Button>
   );
 }

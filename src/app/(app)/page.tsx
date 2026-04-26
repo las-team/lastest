@@ -10,10 +10,14 @@ import {
   getAggregatedSelectorStats,
   getBuildTrends,
   getRouteCoverageStats,
+  getGithubAccountByTeam,
+  getBaselinesByRepo,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
 import { SelectorStatsChartClient } from '@/components/dashboard/selector-stats-chart-client';
+import { SetupGuide } from '@/components/setup-guide/setup-guide';
+import { ActivityAutoFocus } from '@/components/activity-feed/activity-auto-focus-client';
 import Link from 'next/link';
 
 // Simple inline sparkline as SVG
@@ -42,20 +46,37 @@ function Sparkline({ data, color = 'currentColor', height = 24, width = 80 }: { 
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focusActivity?: string }>;
+}) {
+  const params = await searchParams;
+  const focusActivity = params.focusActivity === '1';
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   // Fetch data filtered by selected repo — no global fallbacks
-  const [tests, areas, recentBuilds, selectorStats, trends, routeCoverage] = await Promise.all([
+  const [tests, areas, recentBuilds, selectorStats, trends, routeCoverage, githubAccount, baselines] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : Promise.resolve([]),
     selectedRepo ? getAggregatedSelectorStats(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildTrends(selectedRepo.id, 30) : Promise.resolve([]),
     selectedRepo ? getRouteCoverageStats(selectedRepo.id) : Promise.resolve({ total: 0, withTests: 0, percentage: 0 }),
+    teamId ? getGithubAccountByTeam(teamId) : Promise.resolve(null),
+    selectedRepo ? getBaselinesByRepo(selectedRepo.id) : Promise.resolve([]),
   ]);
+
+  const setupStatus = {
+    githubConnected: !!githubAccount,
+    routesExist: (routeCoverage?.total ?? 0) > 0,
+    testsExist: tests.length > 0,
+    buildsExist: recentBuilds.length > 0,
+    baselinesApproved: baselines.length > 0,
+    buildCount: recentBuilds.length,
+  };
 
   // Get stats from the latest build
   const latestBuild = recentBuilds[0];
@@ -88,7 +109,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {focusActivity && <ActivityAutoFocus />}
       <div className="flex-1 p-6 space-y-6">
+        {/* Setup Guide — surfaces unfinished onboarding/setup items */}
+        <SetupGuide initialStatus={setupStatus} latestBuildId={recentBuilds[0]?.id ?? null} />
+
         {/* Health Score + Stats Cards */}
         <div className="grid grid-cols-5 gap-4">
           {/* Health Score */}

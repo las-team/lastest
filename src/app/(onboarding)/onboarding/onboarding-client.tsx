@@ -50,8 +50,6 @@ interface OnboardingClientProps {
   selectedRepoBaseUrl: string | null;
 }
 
-const TOTAL_STEPS = 5;
-
 const PATHS: Array<{
   id: OnboardingPath;
   name: string;

@@ -37,6 +37,9 @@ interface TestStepsTabProps {
   onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
   onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
   onGoToCode?: (line: number) => void;
+  /** Called after the user creates an extract-mode Var from a step, so the
+   *  parent can switch to the Vars tab and show the refreshed list. */
+  onNavigateToVars?: () => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -222,6 +225,7 @@ export function TestStepsTab({
   onToggleAssertionSoftness,
   onStepValueChange,
   onGoToCode,
+  onNavigateToVars,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN));
@@ -842,6 +846,7 @@ export function TestStepsTab({
             await onSaveVariables(next);
             // For assign mode, also rewrite the literal value in code with {{var:name}}.
             // For extract mode, the var alone is enough — extraction happens at run time.
+            const wasExtract = bindStep.mode === 'extract';
             if (bindStep.mode === 'assign' && onStepValueChange) {
               await onStepValueChange(
                 bindStep.step.lineStart + bodyLineOffset,
@@ -851,6 +856,9 @@ export function TestStepsTab({
               );
             }
             setBindStep(null);
+            // For extract mode, jump to the Vars tab so the user sees the new
+            // var listed alongside the rest.
+            if (wasExtract) onNavigateToVars?.();
           }}
         />
       )}

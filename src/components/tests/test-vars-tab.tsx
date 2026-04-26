@@ -21,6 +21,9 @@ export interface TestVarsTabProps {
   sheetSources: GoogleSheetsDataSource[];
   csvSources: CsvDataSource[];
   onSaveVariables: (next: TestVariable[]) => Promise<void>;
+  /** Values pulled by extract-mode vars during the most recent run, keyed by
+   *  variable name. Surfaced in the table as the "Last run" column. */
+  extractedValues?: Record<string, string> | null;
 }
 
 function describeSource(v: TestVariable): string {
@@ -38,6 +41,7 @@ export function TestVarsTab({
   sheetSources,
   csvSources,
   onSaveVariables,
+  extractedValues,
 }: TestVarsTabProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TestVariable | null>(null);
@@ -104,40 +108,59 @@ export function TestVarsTab({
                     <th className="text-left py-2 pr-3">Mode</th>
                     <th className="text-left py-2 pr-3">Source / Selector</th>
                     <th className="text-left py-2 pr-3">Expected</th>
+                    <th className="text-left py-2 pr-3">Last run</th>
                     <th className="text-left py-2 pr-3">Assert</th>
                     <th className="py-2 w-[88px]"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {variables.map(v => (
-                    <tr key={v.id} className="border-b last:border-0 hover:bg-muted/40">
-                      <td className="py-2 pr-3 font-mono">{v.name}</td>
-                      <td className="py-2 pr-3">
-                        <Badge variant={v.mode === 'extract' ? 'secondary' : 'outline'}>
-                          {v.mode}
-                        </Badge>
-                      </td>
-                      <td className="py-2 pr-3 font-mono text-xs">{describeSource(v)}</td>
-                      <td className="py-2 pr-3 font-mono text-xs">{v.expectedValue ?? ''}</td>
-                      <td className="py-2 pr-3">
-                        {v.assertEnabled ? (
-                          <Badge variant={v.assertSeverity === 'warn' ? 'secondary' : 'destructive'}>
-                            {v.assertSeverity ?? 'fail'}
+                  {variables.map(v => {
+                    const lastRun = extractedValues?.[v.name];
+                    return (
+                      <tr key={v.id} className="border-b last:border-0 hover:bg-muted/40">
+                        <td className="py-2 pr-3 font-mono">{v.name}</td>
+                        <td className="py-2 pr-3">
+                          <Badge variant={v.mode === 'extract' ? 'secondary' : 'outline'}>
+                            {v.mode}
                           </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
-                      </td>
-                      <td className="py-2 text-right">
-                        <Button size="icon" variant="ghost" onClick={() => openEdit(v)} aria-label="Edit">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" onClick={() => handleDelete(v)} aria-label="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-2 pr-3 font-mono text-xs">{describeSource(v)}</td>
+                        <td className="py-2 pr-3 font-mono text-xs">{v.expectedValue ?? ''}</td>
+                        <td className="py-2 pr-3 font-mono text-xs max-w-[220px] truncate" title={lastRun ?? ''}>
+                          {lastRun != null && lastRun !== '' ? (
+                            <span className={
+                              v.mode === 'extract' && v.assertEnabled && v.expectedValue != null
+                                ? lastRun === v.expectedValue
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-red-600 dark:text-red-400'
+                                : ''
+                            }>
+                              {lastRun}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {v.assertEnabled ? (
+                            <Badge variant={v.assertSeverity === 'warn' ? 'secondary' : 'destructive'}>
+                              {v.assertSeverity ?? 'fail'}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button size="icon" variant="ghost" onClick={() => openEdit(v)} aria-label="Edit">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="ghost" onClick={() => handleDelete(v)} aria-label="Delete">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import { SidebarServer } from '@/components/layout/sidebar-server';
 import { JobPollingProvider } from '@/components/queue/job-polling-context';
 import { ContextCollectorProvider } from '@/components/bug-report/context-collector';
@@ -17,6 +18,13 @@ export default async function AppLayout({
 }) {
   startActivityFeedServer();
   const session = await getCurrentSession();
+
+  // First-run gate: send users who haven't completed onboarding to /onboarding.
+  // Backfilled timestamp on existing users → no redirect for them.
+  if (session?.user && !session.user.onboardingCompletedAt) {
+    redirect('/onboarding');
+  }
+
   const showConsentBanner = session?.user
     ? !(await hasAcceptedTerms(session.user.id))
     : false;
