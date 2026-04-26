@@ -485,6 +485,7 @@ async function startup(): Promise<void> {
                 lastReachedStep: result.lastReachedStep,
                 totalSteps: result.totalSteps,
                 domSnapshot: result.domSnapshot,
+                extractedVariables: result.extractedVariables,
               },
             });
 

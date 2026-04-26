@@ -29,9 +29,9 @@ import { runTests, getJobStatus } from '@/server/actions/runs';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
+import { ScreenshotTimeline } from '@/components/tests/screenshot-timeline';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, CsvDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
@@ -40,9 +40,11 @@ import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { TestStepsTab } from '@/components/tests/success-criteria-tab';
 import { StepCriteriaTab } from '@/components/tests/step-criteria-tab';
+import { TestVarsTab } from '@/components/tests/test-vars-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
+import { VarReferenceInserter } from '@/components/test-data/var-reference-inserter';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
@@ -112,6 +114,7 @@ interface TestDetailClientProps {
   availableTests?: Test[];
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
+  csvDataSources?: CsvDataSource[];
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
   earlyAdopterMode?: boolean;
@@ -224,7 +227,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -913,10 +916,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             )}
             <TabsTrigger value="steps" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
             <TabsTrigger value="criteria" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
-            <TabsTrigger value="setup" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
+            <TabsTrigger value="vars" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Vars</TabsTrigger>
             <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
             <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
-            <TabsTrigger value="plans" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
             <TabsTrigger value="history" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
             <TabsTrigger value="recordings" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
             <TabsTrigger value="versions" onClick={loadVersions} className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
@@ -927,13 +929,23 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm">Test Code</CardTitle>
-                  {isEditing && sheetDataSources.length > 0 && (
-                    <SheetReferenceInserter
-                      dataSources={sheetDataSources}
-                      onInsert={(ref) => {
-                        setEditCode((prev) => prev + ref);
-                      }}
-                    />
+                  {isEditing && (
+                    <div className="flex items-center gap-2">
+                      {sheetDataSources.length > 0 && (
+                        <SheetReferenceInserter
+                          dataSources={sheetDataSources}
+                          onInsert={(ref) => {
+                            setEditCode((prev) => prev + ref);
+                          }}
+                        />
+                      )}
+                      <VarReferenceInserter
+                        variables={test.variables ?? []}
+                        onInsert={(ref) => {
+                          setEditCode((prev) => prev + ref);
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -1018,6 +1030,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               envBaseUrl={envBaseUrl ?? null}
               lastReachedStep={latestResult?.lastReachedStep ?? null}
               totalSteps={latestResult?.totalSteps ?? null}
+              variables={test.variables ?? null}
+              sheetSources={sheetDataSources}
+              csvSources={csvDataSources}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                router.refresh();
+              }}
               onParseNeeded={async () => {
                 try {
                   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
@@ -1059,10 +1079,31 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               screenshots={latestResult?.screenshots ?? null}
               stepCriteria={test.stepCriteria ?? null}
               assertions={test.assertions ?? null}
+              variables={test.variables ?? null}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                router.refresh();
+              }}
             />
           </TabsContent>
 
-          <TabsContent value="setup" className="mt-4">
+          <TabsContent value="vars" className="mt-4">
+            <TestVarsTab
+              testId={test.id}
+              repositoryId={repositoryId ?? null}
+              variables={test.variables ?? []}
+              sheetSources={sheetDataSources}
+              csvSources={csvDataSources}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                router.refresh();
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestSetupOverrides
               testId={test.id}
               setupOverrides={test.setupOverrides ?? null}
@@ -1073,9 +1114,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               availableTests={availableTests}
               availableScripts={availableScripts}
             />
-          </TabsContent>
 
-          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestStabilizationOverrides
               testId={test.id}
               overrides={test.stabilizationOverrides ?? null}
@@ -1124,77 +1163,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {screenshotGroups.length > 0 ? (
-                  <div className="space-y-6">
-                    {screenshotGroups.map((group) => (
-                      <div key={group.runId} className="space-y-3">
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground border-b pb-2">
-                          <Clock className="h-4 w-4" />
-                          <span>
-                            {group.startedAt
-                              ? new Date(group.startedAt).toLocaleString()
-                              : 'Unknown time'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          {group.screenshots.map((src, i) => {
-                            const filename = src.split('/').pop() || '';
-                            // Extract label from filename (after runId-testId-)
-                            const parts = filename.split('-');
-                            const label = parts.slice(10).join(' ').replace('.png', '') || 'screenshot';
-                            return (
-                              <div key={i} className="space-y-1">
-                                <a
-                                  href={src}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={src}
-                                    alt={label || 'Screenshot'}
-                                    className="w-full rounded-lg border hover:opacity-90 transition-opacity"
-                                  />
-                                </a>
-                                <p className="text-xs text-muted-foreground text-center capitalize">{label}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No screenshots captured yet
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="plans" className="mt-4">
-            {repositoryId ? (
-              <StepScreenshotMatcher
-                testId={test.id}
-                repositoryId={repositoryId}
-                screenshotGroups={screenshotGroups}
-                plannedScreenshots={plannedScreenshots}
-                onUpdate={() => router.refresh()}
-              />
-            ) : (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  Select a repository to manage planned screenshots
-                </CardContent>
-              </Card>
-            )}
+            <ScreenshotTimeline
+              testId={test.id}
+              repositoryId={repositoryId ?? null}
+              screenshotGroups={screenshotGroups}
+              plannedScreenshots={plannedScreenshots}
+              onUpdate={() => router.refresh()}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">

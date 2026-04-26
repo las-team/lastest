@@ -70,6 +70,7 @@ export interface EmbeddedTestResult {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
+  extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
 }
 
 export interface EmbeddedSetupResult {
@@ -117,6 +118,11 @@ export interface RunTestPayload {
   enableNetworkInterception?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
+  extractVariables?: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
 }
 
 /**
@@ -861,6 +867,32 @@ export class EmbeddedTestExecutor {
 
       logFn('info', 'Test code execution completed');
 
+      // Extract values from page fields for extract-mode TestVariables.
+      // Done before close so locators still resolve. Failures are best-effort
+      // (logged + recorded as empty string), never fail the whole test.
+      let extractedVariables: Record<string, string> | undefined;
+      if (command.extractVariables && command.extractVariables.length > 0) {
+        extractedVariables = {};
+        for (const v of command.extractVariables) {
+          if (!v.targetSelector) continue;
+          try {
+            const locator = page.locator(v.targetSelector).first();
+            let raw: string | null;
+            switch (v.attribute) {
+              case 'textContent': raw = await locator.textContent({ timeout: 2000 }); break;
+              case 'innerText':   raw = await locator.innerText({ timeout: 2000 }); break;
+              case 'innerHTML':   raw = await locator.innerHTML({ timeout: 2000 }); break;
+              default:            raw = await locator.inputValue({ timeout: 2000 }); break;
+            }
+            extractedVariables[v.name] = (raw ?? '').toString().trim();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logFn('warn', `Failed to extract variable "${v.name}" (${v.targetSelector}): ${msg}`);
+            extractedVariables[v.name] = '';
+          }
+        }
+      }
+
       // Check console/network error modes (mirrors runner.ts logic)
       const consoleErrorMode = command.consoleErrorMode || 'fail';
       const networkErrorMode = command.networkErrorMode || 'fail';
@@ -926,6 +958,7 @@ export class EmbeddedTestExecutor {
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
+        extractedVariables,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;

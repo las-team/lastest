@@ -104,6 +104,48 @@ export async function saveStepCriteria(
   return next;
 }
 
+export async function saveTestVariables(
+  testId: string,
+  variables: import('@/lib/db/schema').TestVariable[],
+) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+
+  // Validate
+  const seen = new Set<string>();
+  for (const v of variables) {
+    if (!v.name || !/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(v.name)) {
+      throw new Error(`Variable name "${v.name}" is invalid (letters/digits/underscore/hyphen, must start with a letter)`);
+    }
+    if (seen.has(v.name)) throw new Error(`Duplicate variable name: ${v.name}`);
+    seen.add(v.name);
+    if (v.mode !== 'extract' && v.mode !== 'assign') {
+      throw new Error(`Variable "${v.name}" has invalid mode`);
+    }
+    if (v.mode === 'extract' && !v.targetSelector) {
+      throw new Error(`Extract-mode variable "${v.name}" requires a targetSelector`);
+    }
+    if (v.mode === 'assign') {
+      if (v.sourceType === 'static' && v.staticValue === undefined) {
+        throw new Error(`Static variable "${v.name}" requires a staticValue`);
+      }
+      if ((v.sourceType === 'gsheet' || v.sourceType === 'csv') && (!v.sourceAlias || !v.sourceColumn)) {
+        throw new Error(`${v.sourceType} variable "${v.name}" requires sourceAlias and sourceColumn`);
+      }
+    }
+  }
+
+  await queries.updateTest(testId, { variables });
+  revalidatePath('/tests');
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
 export async function toggleAssertionSoftness(testId: string, assertionId: string, makeSoft: boolean) {
   const session = await requireTeamAccess();
   const test = await queries.getTest(testId);
@@ -299,7 +341,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
   if (!test) return null;
 
   const repoId = test.repositoryId || repositoryId;
-  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
     queries.getPlannedScreenshotsByTest(testId),
@@ -307,6 +349,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     repoId ? queries.getTestsByRepo(repoId) : Promise.resolve([]),
     repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
     repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
+    repoId ? queries.getCsvDataSources(repoId) : Promise.resolve([]),
     repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
     repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
     repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
@@ -323,6 +366,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     availableTests,
     availableScripts: setupScripts,
     sheetDataSources,
+    csvDataSources,
     stabilizationDefaults: playwrightSettings?.stabilization ?? null,
     diffDefaults: diffSettings,
     playwrightDefaults: playwrightSettings,

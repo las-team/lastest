@@ -5,15 +5,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Crosshair, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Crosshair, CheckCircle2, ShieldCheck, Variable } from 'lucide-react';
 import { toast } from 'sonner';
-import type { CapturedScreenshot, StepCriterion, StepRule, TestAssertion } from '@/lib/db/schema';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import type { CapturedScreenshot, StepCriterion, StepRule, TestAssertion, TestVariable } from '@/lib/db/schema';
 
 interface StepCriteriaTabProps {
   testId: string;
   screenshots: CapturedScreenshot[] | null;
   stepCriteria: StepCriterion[] | null;
   assertions: TestAssertion[] | null;
+  variables?: TestVariable[] | null;
+  onSaveVariables?: (next: TestVariable[]) => Promise<void>;
 }
 
 // Assertion criteria are test-level (not tied to a screenshot step), so they
@@ -34,9 +45,37 @@ function collectStepLabels(
   return Array.from(labels);
 }
 
-export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions }: StepCriteriaTabProps) {
+export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions, variables, onSaveVariables }: StepCriteriaTabProps) {
   const [criteria, setCriteria] = useState<StepCriterion[]>(stepCriteria ?? []);
   const [pending, startTransition] = useTransition();
+  const [varDraft, setVarDraft] = useState<TestVariable[]>(variables ?? []);
+  const [varSaving, setVarSaving] = useState(false);
+
+  // Sync local draft when external variables change
+  useEffect(() => {
+    setVarDraft(variables ?? []);
+  }, [variables]);
+
+  const extractVars = varDraft.filter(v => v.mode === 'extract');
+
+  const updateVar = (id: string, patch: Partial<TestVariable>) => {
+    setVarDraft(prev => prev.map(v => (v.id === id ? { ...v, ...patch } : v)));
+  };
+
+  const saveVarChanges = async () => {
+    if (!onSaveVariables) return;
+    setVarSaving(true);
+    try {
+      await onSaveVariables(varDraft);
+      toast.success('Variable assertions saved');
+    } catch (err) {
+      toast.error(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setVarSaving(false);
+    }
+  };
+
+  const hasUnsavedVarChanges = JSON.stringify(varDraft) !== JSON.stringify(variables ?? []);
   const [focusByStep, setFocusByStep] = useState<Record<string, number>>({});
   // Screenshot step rows only — exclude the assertion sentinel so it doesn't
   // render as a ghost screenshot.
@@ -176,6 +215,71 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions 
             </Label>
           </div>
         </div>
+
+        {/* End-of-test variable assertions — duplicate of the Vars tab inputs.
+            Both surfaces edit the same `tests.variables` record. */}
+        {onSaveVariables && (
+          <div className="border rounded-md p-3 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Variable className="h-4 w-4 text-cyan-600" />
+              <span className="text-sm font-medium">End-of-test variable assertions</span>
+              <Badge variant="outline" className="text-xs">{extractVars.length} extract var{extractVars.length === 1 ? '' : 's'}</Badge>
+              <span className="text-[11px] text-muted-foreground">These also appear in the Vars tab. Edits sync.</span>
+            </div>
+
+            {extractVars.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No extract-mode variables yet. Add one on the Vars tab to assert a page field&apos;s value at end of test.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {extractVars.map(v => (
+                  <div key={v.id} className="grid grid-cols-12 gap-2 items-center text-xs">
+                    <div className="col-span-3 font-mono truncate" title={v.name}>{v.name}</div>
+                    <div className="col-span-3 truncate text-muted-foreground" title={v.targetSelector}>
+                      {v.targetSelector}
+                    </div>
+                    <Input
+                      className="col-span-3 h-7 text-xs"
+                      placeholder="Expected value"
+                      value={v.expectedValue ?? ''}
+                      onChange={e => updateVar(v.id, { expectedValue: e.target.value })}
+                    />
+                    <div className="col-span-2">
+                      <Select
+                        value={v.assertSeverity ?? 'fail'}
+                        onValueChange={val => updateVar(v.id, { assertSeverity: val as 'fail' | 'warn' })}
+                        disabled={!v.assertEnabled}
+                      >
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fail">fail</SelectItem>
+                          <SelectItem value="warn">warn</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-1 flex justify-end">
+                      <Switch
+                        checked={!!v.assertEnabled}
+                        onCheckedChange={enabled => updateVar(v.id, { assertEnabled: enabled })}
+                      />
+                    </div>
+                  </div>
+                ))}
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={saveVarChanges}
+                    disabled={varSaving || !hasUnsavedVarChanges}
+                    className="text-xs px-3 py-1 rounded border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {varSaving ? 'Saving...' : hasUnsavedVarChanges ? 'Save changes' : 'Saved'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

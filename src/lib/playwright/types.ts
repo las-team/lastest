@@ -28,6 +28,7 @@ export interface TestRunResult {
   domSnapshot?: DomSnapshotData;
   lastReachedStep?: number;
   totalSteps?: number;
+  extractedVariables?: Record<string, string>;
 }
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';

@@ -46,9 +46,6 @@ Recording - test create v3
             id
             role+name
             css path
-Vars for test - extract from field values
-  Load from CSV column or gsheet
-  criteria add - assert value of Var by eotest
 Merge code and steps?
 Make specs first
 implement designs

@@ -1103,6 +1103,7 @@ export function DefinitionPageClient({
                     availableTests={openTestDetailData.availableTests}
                     availableScripts={openTestDetailData.availableScripts}
                     sheetDataSources={openTestDetailData.sheetDataSources}
+                    csvDataSources={openTestDetailData.csvDataSources}
                     stabilizationDefaults={openTestDetailData.stabilizationDefaults}
                     banAiMode={banAiMode}
                     earlyAdopterMode={true}

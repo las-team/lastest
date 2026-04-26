@@ -21,6 +21,7 @@ export interface StepObservations {
   visualDiffs: VisualDiff[];
   consoleErrors: string[];
   assertionResults: AssertionResult[];
+  extractedVariables?: Record<string, string>;
 }
 
 export interface EvaluationResult {
@@ -93,9 +94,49 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
         ? `Assertion ${failed.assertionId} failed: ${failed.errorMessage ?? 'no message'}`
         : null;
     }
+    case 'variable_equals': {
+      const params = (rule.params ?? {}) as { varName?: string; expectedValue?: string };
+      const varName = params.varName;
+      if (!varName) return null;
+      const actual = observations.extractedVariables?.[varName];
+      const expected = params.expectedValue ?? '';
+      if (actual === undefined) {
+        return `Variable "${varName}" not extracted (expected "${expected}")`;
+      }
+      if (actual !== expected) {
+        return `Variable "${varName}" = "${actual}" ≠ expected "${expected}"`;
+      }
+      return null;
+    }
     default:
       return null;
   }
+}
+
+// Synthesize StepCriteria entries from a test's TestVariables so that the
+// evaluation engine has a single rule path. Vars with assertEnabled are
+// turned into a 'variable_equals' rule under the special @eotest stepLabel.
+export const EOTEST_STEP_LABEL = '@eotest';
+
+export function synthesizeVariableCriteria(
+  variables: import('@/lib/db/schema').TestVariable[] | null | undefined,
+): StepCriterion | null {
+  if (!variables || variables.length === 0) return null;
+  const rules: StepRule[] = [];
+  for (const v of variables) {
+    if (v.mode !== 'extract') continue;
+    if (!v.assertEnabled) continue;
+    rules.push({
+      kind: 'variable_equals',
+      severity: v.assertSeverity ?? 'fail',
+      params: {
+        varName: v.name,
+        expectedValue: v.expectedValue ?? '',
+      },
+    });
+  }
+  if (rules.length === 0) return null;
+  return { stepLabel: EOTEST_STEP_LABEL, rules };
 }
 
 // Bucket diffs by their stepLabel. Diffs with no stepLabel get bucketed under
@@ -121,7 +162,15 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
     return { triggeredRules: [] };
   }
 
-  const criteria = await queries.getStepCriteria(testResult.testId);
+  const persistedCriteria = await queries.getStepCriteria(testResult.testId);
+
+  // Vars with assertEnabled become an @eotest StepCriterion. Combined with
+  // persisted step criteria so we evaluate everything in one pass.
+  const test = await queries.getTest(testResult.testId);
+  const eotestCriterion = synthesizeVariableCriteria(test?.variables ?? null);
+  const criteria = [...persistedCriteria];
+  if (eotestCriterion) criteria.push(eotestCriterion);
+
   if (criteria.length === 0) {
     return { triggeredRules: [] };
   }
@@ -130,6 +179,7 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   const diffsByStep = groupDiffsByStep(diffs);
   const consoleErrors = testResult.consoleErrors ?? [];
   const assertionResults = testResult.assertionResults ?? [];
+  const extractedVariables = testResult.extractedVariables ?? undefined;
 
   const observationsByStep = new Map<string, StepObservations>();
   for (const criterion of criteria) {
@@ -139,6 +189,7 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
       // the test-level lists to every criterion until that wiring exists.
       consoleErrors,
       assertionResults,
+      extractedVariables,
     });
   }
 

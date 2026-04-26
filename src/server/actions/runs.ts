@@ -211,6 +211,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         domSnapshot: result.domSnapshot,
         lastReachedStep: result.lastReachedStep,
         totalSteps: result.totalSteps,
+        extractedVariables: result.extractedVariables,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }

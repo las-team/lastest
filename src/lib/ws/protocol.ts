@@ -102,6 +102,12 @@ export interface RunTestCommandPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  // Extract-mode TestVariables — runner reads these page fields after the test body runs.
+  extractVariables?: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -240,6 +246,7 @@ export interface TestResultPayload {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
+  extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
 }
 
 export interface TestResultResponse extends BaseMessage {

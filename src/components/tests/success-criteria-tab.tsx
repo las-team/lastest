@@ -4,10 +4,19 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered, Code2 } from 'lucide-react';
-import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
+import type {
+  TestAssertion,
+  AssertionResult,
+  CapturedScreenshot,
+  TestVariable,
+  GoogleSheetsDataSource,
+  CsvDataSource,
+} from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 import { extractTestBody, parseSteps, extractEditableValue, type DebugStep } from '@/lib/playwright/debug-parser';
 import { parseAssertions } from '@/lib/playwright/assertion-parser';
+import { Variable } from 'lucide-react';
+import { VarEditDialog } from './var-edit-dialog';
 
 interface TestStepsTabProps {
   assertions: TestAssertion[] | null;
@@ -20,6 +29,10 @@ interface TestStepsTabProps {
   envBaseUrl?: string | null;
   lastReachedStep?: number | null;
   totalSteps?: number | null;
+  variables?: TestVariable[] | null;
+  sheetSources?: GoogleSheetsDataSource[];
+  csvSources?: CsvDataSource[];
+  onSaveVariables?: (next: TestVariable[]) => Promise<void>;
   onParseNeeded?: () => void;
   onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
   onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
@@ -45,6 +58,20 @@ const TYPE_COLORS: Record<string, string> = {
   other: 'text-gray-500 border-gray-200 dark:text-gray-400 dark:border-gray-700',
 };
 
+// Actionable chip styles for the per-step Bind / Extract / Var controls.
+// Pill-shaped, cyan-tinted (matches the `variable` type color), with clear hover/focus states
+// so they read as clickable affordances rather than passive badges.
+const VAR_CHIP_BASE =
+  'inline-flex items-center gap-1 rounded-full h-5 px-2 text-[10px] font-medium border shrink-0 ' +
+  'transition-colors cursor-pointer ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40';
+const VAR_CHIP_OUTLINE =
+  'bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border-cyan-200 ' +
+  'dark:bg-cyan-950/40 dark:hover:bg-cyan-900/60 dark:text-cyan-300 dark:border-cyan-800';
+const VAR_CHIP_SOLID =
+  'bg-cyan-600 hover:bg-cyan-700 text-white border-cyan-600 ' +
+  'dark:bg-cyan-500 dark:hover:bg-cyan-400 dark:text-cyan-50 dark:border-cyan-500';
+
 function StatusIcon({ status }: { status: 'passed' | 'failed' | 'skipped' | 'not_run' }) {
   switch (status) {
     case 'passed':
@@ -55,6 +82,67 @@ function StatusIcon({ status }: { status: 'passed' | 'failed' | 'skipped' | 'not
     case 'not_run':
       return <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" />;
   }
+}
+
+/** Pull a Playwright-compatible selector out of a step's code line.
+ *  Recognizes the helpers we generate (locateWithFallback, locator, getByRole,
+ *  getByText, getByTestId, getByLabel, getByPlaceholder, getByAltText, getByTitle).
+ *  Returns null when no selector can be safely extracted.
+ *
+ *  All returned strings are valid first-arg input to `page.locator(...)`,
+ *  matching the runtime extractor in packages/embedded-browser/src/test-executor.ts.
+ */
+function parseExtractableSelector(stepCode: string): string | null {
+  // locateWithFallback(page, [{"type":"...","value":"..."}, ...], ...) → first .value
+  const lwfMatch = stepCode.match(/locateWithFallback\s*\(\s*page\s*,\s*(\[[\s\S]*?\])\s*,/);
+  if (lwfMatch) {
+    try {
+      const arr = JSON.parse(lwfMatch[1]) as Array<{ type?: string; value?: string }>;
+      const first = arr.find(s => typeof s.value === 'string' && s.value.length > 0);
+      if (first?.value) return first.value;
+    } catch {
+      // fall through to other patterns
+    }
+  }
+
+  // page.locator('X') / .locator(`X`) / .locator("X")
+  const locMatch = stepCode.match(/\.locator\s*\(\s*(['"`])([^'"`]+)\1\s*[,)]/);
+  if (locMatch) return locMatch[2];
+
+  // page.getByRole('btn', { name: 'Submit' }) → role=btn[name="Submit"]
+  const roleMatch = stepCode.match(/\.getByRole\s*\(\s*(['"`])([^'"`]+)\1(?:\s*,\s*\{([^}]*)\})?/);
+  if (roleMatch) {
+    const role = roleMatch[2];
+    const opts = roleMatch[3] ?? '';
+    const nameMatch = opts.match(/name\s*:\s*(['"`])([^'"`]+)\1/);
+    return nameMatch ? `role=${role}[name="${nameMatch[2]}"]` : `role=${role}`;
+  }
+
+  // page.getByTestId('foo') → [data-testid="foo"]
+  const tidMatch = stepCode.match(/\.getByTestId\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (tidMatch) return `[data-testid="${tidMatch[2]}"]`;
+
+  // page.getByPlaceholder('X') → [placeholder="X"]
+  const phMatch = stepCode.match(/\.getByPlaceholder\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (phMatch) return `[placeholder="${phMatch[2]}"]`;
+
+  // page.getByAltText('X') → [alt="X"]
+  const altMatch = stepCode.match(/\.getByAltText\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (altMatch) return `[alt="${altMatch[2]}"]`;
+
+  // page.getByTitle('X') → [title="X"]
+  const titleMatch = stepCode.match(/\.getByTitle\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (titleMatch) return `[title="${titleMatch[2]}"]`;
+
+  // page.getByLabel('X') → [aria-label="X"] (best-effort; users can refine)
+  const labelMatch = stepCode.match(/\.getByLabel\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (labelMatch) return `[aria-label="${labelMatch[2]}"]`;
+
+  // page.getByText('X') → text=X
+  const textMatch = stepCode.match(/\.getByText\s*\(\s*(['"`])([^'"`]+)\1\s*\)/);
+  if (textMatch) return `text=${textMatch[2]}`;
+
+  return null;
 }
 
 /** Match an assertion to a step by overlapping code line ranges.
@@ -126,6 +214,10 @@ export function TestStepsTab({
   envBaseUrl,
   lastReachedStep: serverLastReachedStep,
   totalSteps: serverTotalSteps,
+  variables,
+  sheetSources = [],
+  csvSources = [],
+  onSaveVariables,
   onParseNeeded,
   onToggleAssertionSoftness,
   onStepValueChange,
@@ -138,6 +230,14 @@ export function TestStepsTab({
   const [editingValues, setEditingValues] = useState<Map<number, string>>(new Map());
   const [savingSteps, setSavingSteps] = useState<Set<number>>(new Set());
   const debounceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Bind-to-Var (assign) and Extract-to-Var dialog state — keyed by step id while open.
+  // `mode === 'assign'` is fired by the inline value-input "Bind" button and rewrites the literal in code.
+  // `mode === 'extract'` is fired by the per-step "Extract" button and only persists a Var; nothing in code changes.
+  const [bindStep, setBindStep] = useState<
+    | { mode: 'assign'; step: DebugStep; originalValue: string; selectorHint?: string }
+    | { mode: 'extract'; step: DebugStep; selectorHint: string }
+    | null
+  >(null);
 
   // Always parse assertions fresh from code — DB assertions can have stale line numbers
   const { steps, bodyLineOffset, freshAssertions } = useMemo(() => {
@@ -480,6 +580,10 @@ export function TestStepsTab({
                             ? label.slice(0, label.indexOf(`"${valueInLabel}`))
                             : label.replace(/\s*"[^"]*"?\s*$/, '');
 
+                          const isVarRef = /^\{\{var:[a-zA-Z_][a-zA-Z0-9_-]*\}\}$/.test(originalValue);
+                          // Best-effort selector hint parsed from step.code (e.g. page.locator('#email'))
+                          const selectorMatch = step.code.match(/locator\(['"`]([^'"`]+)['"`]\)/);
+                          const selectorHint = selectorMatch?.[1];
                           return (
                             <span className={cn('text-sm flex-1 min-w-0 flex items-center gap-1', isExpandable && 'font-medium')}>
                               <span className="truncate shrink-0">{labelPrefix}</span>
@@ -494,6 +598,20 @@ export function TestStepsTab({
                                   isSaving && 'opacity-50',
                                 )}
                               />
+                              {onSaveVariables && (
+                                <button
+                                  type="button"
+                                  className={cn(VAR_CHIP_BASE, isVarRef ? VAR_CHIP_SOLID : VAR_CHIP_OUTLINE)}
+                                  title={isVarRef ? 'Already bound to a variable — click to edit' : 'Bind this value to a variable'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBindStep({ mode: 'assign', step, originalValue, selectorHint });
+                                  }}
+                                >
+                                  <Variable className="h-3 w-3" />
+                                  {isVarRef ? 'Var' : 'Bind'}
+                                </button>
+                              )}
                             </span>
                           );
                         }
@@ -505,6 +623,33 @@ export function TestStepsTab({
                           )}>
                             {label}
                           </span>
+                        );
+                      })()}
+
+                      {/* Extract-to-Var chip — shows on any step where we can parse a selector
+                          (locator, getByRole/Text/TestId/Label/Placeholder/AltText/Title, locateWithFallback). */}
+                      {onSaveVariables && (() => {
+                        const sel = parseExtractableSelector(step.code);
+                        if (!sel) return null;
+                        // If any extract-mode var already targets this selector, show the solid state.
+                        const alreadyExtracted = (variables ?? []).some(
+                          v => v.mode === 'extract' && v.targetSelector === sel,
+                        );
+                        return (
+                          <button
+                            type="button"
+                            className={cn(VAR_CHIP_BASE, alreadyExtracted ? VAR_CHIP_SOLID : VAR_CHIP_OUTLINE)}
+                            title={alreadyExtracted
+                              ? `A variable already extracts from this selector — click to add another\nselector: ${sel}`
+                              : `Extract value from this element to a variable\nselector: ${sel}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBindStep({ mode: 'extract', step, selectorHint: sel });
+                            }}
+                          >
+                            <Variable className="h-3 w-3" />
+                            Extract
+                          </button>
                         );
                       })()}
 
@@ -667,6 +812,48 @@ export function TestStepsTab({
           </>
         )}
       </CardContent>
+      {bindStep && onSaveVariables && (
+        <VarEditDialog
+          open={!!bindStep}
+          onOpenChange={(o) => { if (!o) setBindStep(null); }}
+          forcedMode={bindStep.mode}
+          initial={
+            bindStep.mode === 'assign'
+              ? {
+                  name: '',
+                  mode: 'assign',
+                  sourceType: 'static',
+                  staticValue: bindStep.originalValue,
+                  description: bindStep.selectorHint ? `Bound from step at ${bindStep.selectorHint}` : undefined,
+                }
+              : {
+                  name: '',
+                  mode: 'extract',
+                  targetSelector: bindStep.selectorHint,
+                  attribute: 'value',
+                  description: `Extracted from step "${bindStep.step.label}"`,
+                }
+          }
+          takenNames={(variables ?? []).map(v => v.name)}
+          sheetSources={sheetSources}
+          csvSources={csvSources}
+          onSave={async (newVar) => {
+            const next = [...(variables ?? []).filter(v => v.id !== newVar.id), newVar];
+            await onSaveVariables(next);
+            // For assign mode, also rewrite the literal value in code with {{var:name}}.
+            // For extract mode, the var alone is enough — extraction happens at run time.
+            if (bindStep.mode === 'assign' && onStepValueChange) {
+              await onStepValueChange(
+                bindStep.step.lineStart + bodyLineOffset,
+                bindStep.step.lineEnd + bodyLineOffset,
+                bindStep.originalValue,
+                `{{var:${newVar.name}}}`,
+              );
+            }
+            setBindStep(null);
+          }}
+        />
+      )}
     </Card>
   );
 }

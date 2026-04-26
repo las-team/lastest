@@ -184,7 +184,8 @@ export type StepRuleKind =
   | 'screenshot_changed'
   | 'focus_region_changed'
   | 'console_error'
-  | 'assertion_failed';
+  | 'assertion_failed'
+  | 'variable_equals';
 
 export type StepRuleSeverity = 'fail' | 'warn';
 
@@ -248,6 +249,9 @@ export const tests = pgTable('tests', {
   assertions: jsonb('assertions').$type<TestAssertion[]>(),
   // Per-step pass/fail rules. Evaluated post-execution by evaluateStepCriteria.
   stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
+  // Named variables: bind values to page fields (extract from / assign to).
+  // {{var:name}} references in code are resolved at execution time.
+  variables: jsonb('variables').$type<TestVariable[]>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
@@ -314,6 +318,33 @@ export interface AssertionResult {
   durationMs?: number;
 }
 
+// Test variables — named values bound to page fields.
+// `assign` mode: value is sourced from gsheet/csv/static and replaces {{var:name}} in code at runtime.
+// `extract` mode: value is read from a page field after the test, optionally compared to expectedValue (eotest assertion).
+export type TestVariableMode = 'extract' | 'assign';
+export type TestVariableSourceType = 'gsheet' | 'csv' | 'static';
+export type TestVariableAttribute = 'value' | 'textContent' | 'innerText' | 'innerHTML';
+
+export interface TestVariable {
+  id: string;
+  name: string;
+  mode: TestVariableMode;
+  // Extract mode
+  targetSelector?: string;
+  attribute?: TestVariableAttribute;
+  // Assign mode source
+  sourceType?: TestVariableSourceType;
+  sourceAlias?: string;
+  sourceColumn?: string;
+  sourceRow?: number;
+  staticValue?: string;
+  // Eotest assertion
+  expectedValue?: string;
+  assertEnabled?: boolean;
+  assertSeverity?: StepRuleSeverity;
+  description?: string;
+}
+
 export interface WcagScoreSummary {
   score: number;
   totalRules: number;
@@ -351,6 +382,8 @@ export const testResults = pgTable('test_results', {
   lastReachedStep: integer('last_reached_step'), // 0-based index of last step reached during execution
   totalSteps: integer('total_steps'), // total parsed step count for watermark ratio computation
   evaluationOutcome: jsonb('evaluation_outcome').$type<EvaluationOutcome>(), // step-criteria rule firings
+  // Values pulled from page fields by extract-mode TestVariables, post-run.
+  extractedVariables: jsonb('extracted_variables').$type<Record<string, string>>(),
 });
 
 // Repository provider type
@@ -1493,6 +1526,26 @@ export const googleSheetsDataSources = pgTable('google_sheets_data_sources', {
 
 export type GoogleSheetsDataSource = typeof googleSheetsDataSources.$inferSelect;
 export type NewGoogleSheetsDataSource = typeof googleSheetsDataSources.$inferInsert;
+
+// CSV data sources - uploaded CSV files cached as repo-scoped tabular data.
+// Mirrors googleSheetsDataSources: alias-keyed, cachedHeaders + cachedData, referenced via {{csv:alias.col[row]}} or via TestVariable.sourceAlias.
+export const csvDataSources = pgTable('csv_data_sources', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  teamId: text('team_id').references(() => teams.id),
+  alias: text('alias').notNull(),                          // unique per repo
+  filename: text('filename').notNull(),
+  storagePath: text('storage_path'),                       // optional persisted file path
+  cachedHeaders: jsonb('cached_headers').$type<string[]>().notNull(),
+  cachedData: jsonb('cached_data').$type<string[][]>().notNull(),
+  rowCount: integer('row_count').notNull().default(0),
+  lastSyncedAt: timestamp('last_synced_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+export type CsvDataSource = typeof csvDataSources.$inferSelect;
+export type NewCsvDataSource = typeof csvDataSources.$inferInsert;
 
 // ============================================
 // Compose Configs (per-branch build configuration)

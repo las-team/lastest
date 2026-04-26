@@ -30,12 +30,63 @@ import {
   acknowledgeResults,
   getRunnerCommandById,
   getTestFixtures,
+  getGoogleSheetsDataSources,
+  getCsvDataSources,
 } from '@/lib/db/queries';
+import { resolveVarReferences } from '@/lib/vars/resolver';
+import { resolveSheetReferences } from '@/lib/google-sheets/resolver';
+import { resolveCsvReferences } from '@/lib/csv/resolver';
+import type { GoogleSheetsDataSource, CsvDataSource } from '@/lib/db/schema';
 /**
  * Generate SHA256 hash of test code for integrity verification.
  */
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
+}
+
+/**
+ * Resolve {{sheet:...}}, {{csv:...}}, and {{var:...}} references in test code
+ * before sending to the runner. Also returns the extract-mode TestVariable
+ * specs the runner should pull from page fields after the test body completes.
+ */
+function resolveTestCodeForRunner(
+  test: Test,
+  gsheetSources: GoogleSheetsDataSource[],
+  csvSources: CsvDataSource[],
+): {
+  resolvedCode: string;
+  extractVariables: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
+} {
+  let code = test.code;
+  // Direct {{sheet:...}} references
+  if (gsheetSources.length > 0 && code.includes('{{sheet:')) {
+    const r = resolveSheetReferences(code, gsheetSources);
+    code = r.resolvedCode;
+  }
+  // Direct {{csv:...}} references
+  if (csvSources.length > 0 && code.includes('{{csv:')) {
+    const r = resolveCsvReferences(code, csvSources);
+    code = r.resolvedCode;
+  }
+  // {{var:...}} references — resolve via TestVariables (assign-mode only)
+  if (test.variables && test.variables.length > 0 && code.includes('{{var:')) {
+    const r = resolveVarReferences(code, test.variables, gsheetSources, csvSources);
+    code = r.resolvedCode;
+  }
+
+  const extractVariables = (test.variables ?? [])
+    .filter(v => v.mode === 'extract' && !!v.targetSelector)
+    .map(v => ({
+      name: v.name,
+      targetSelector: v.targetSelector!,
+      attribute: v.attribute,
+    }));
+
+  return { resolvedCode: code, extractVariables };
 }
 
 /**
@@ -282,6 +333,11 @@ async function executeViaRunner(
     }
   }
   const pending = [...tests];
+
+  // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
+  const gsheetSources = options.repositoryId ? await getGoogleSheetsDataSources(options.repositoryId) : [];
+  const csvSources = options.repositoryId ? await getCsvDataSources(options.repositoryId) : [];
+
   // Track in-flight tests: commandId → { testId, testName, startTime }
   const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();
   let completedCount = 0;
@@ -372,11 +428,15 @@ async function executeViaRunner(
         // Non-critical
       }
 
+      // Resolve {{sheet:}}, {{csv:}}, {{var:}} tokens before sending. Hash the resolved code
+      // so the runner's integrity check matches what it actually executes.
+      const { resolvedCode, extractVariables } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
-        code: test.code,
-        codeHash: hashCode(test.code),
+        code: resolvedCode,
+        codeHash: hashCode(resolvedCode),
         targetUrl: effectiveBaseUrl,
         screenshotPath: `${runId}-${test.id}.png`,
         timeout: effectiveTimeout,
@@ -398,6 +458,7 @@ async function executeViaRunner(
         forceVideoRecording: options.forceVideoRecording || undefined,
         recordingViewport,
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
+        extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
       });
 
       // Queue command to DB
@@ -562,6 +623,9 @@ async function executeViaRunner(
         domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
         lastReachedStep: typeof payload.lastReachedStep === 'number' ? payload.lastReachedStep : undefined,
         totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
+        extractedVariables: payload.extractedVariables && typeof payload.extractedVariables === 'object'
+          ? payload.extractedVariables as Record<string, string>
+          : undefined,
       };
 
       results.push(testResult);
