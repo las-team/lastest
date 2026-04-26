@@ -170,7 +170,6 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
-    if (pg) return;
     const target = e.target as HTMLElement;
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();

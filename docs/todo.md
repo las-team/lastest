@@ -14,7 +14,6 @@ a11y
 DOM delta
 Create modes
 ## bugs
-captures only cursor IF record path is enabled
 area cant be drawn over slider
 ## features
 Maybe workspace list w last 3 workspaces?
@@ -46,6 +45,7 @@ Recording - test create v3
             role+name
             css path
 Merge code and steps?
+Design
 update & implement designs
 Openrouter agent sdk parity
 Asset management

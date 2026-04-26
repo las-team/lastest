@@ -35,6 +35,10 @@ export interface CodeGenEvent {
     durationMs?: number;
     condition?: 'visible' | 'hidden';
     timeoutMs?: number;
+    // Set by codegen pre-pass: when a click-with-selectors follows a
+    // mouse-down/mouse-up pair (cursor-tracking on), the down/up emission
+    // is suppressed so locateWithFallback owns the actual interaction.
+    _suppressDownUp?: boolean;
   };
 }
 
@@ -74,6 +78,31 @@ export function eventsToCodeLines(
     deduped.push(event);
   }
   events = deduped;
+
+  // Pre-pass: when cursor tracking is on, the browser emits mouse-down/mouse-up
+  // (coordinate-only) AND a paired action:click that carries selectors. Tag the
+  // down/up pair so the main loop emits only the visual mouse.move and lets
+  // locateWithFallback perform the actual click — robust against layout shifts.
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].type !== 'mouse-down') continue;
+    let j = i + 1;
+    while (j < events.length && events[j].type === 'cursor-move') j++;
+    if (j >= events.length || events[j].type !== 'mouse-up') continue;
+    const mouseUpIdx = j;
+    let k = mouseUpIdx + 1;
+    while (k < events.length && events[k].type === 'cursor-move') k++;
+    if (k >= events.length) continue;
+    const cand = events[k];
+    if (
+      cand.type === 'action' &&
+      cand.data.action === 'click' &&
+      cand.data.selectors &&
+      cand.data.selectors.length > 0
+    ) {
+      events[i].data._suppressDownUp = true;
+      events[mouseUpIdx].data._suppressDownUp = true;
+    }
+  }
 
   function getRelativePath(url: string): string {
     if (url.startsWith(baseOrigin)) {
@@ -140,8 +169,12 @@ export function eventsToCodeLines(
     } else if (event.type === 'action') {
       const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
 
-      // Skip LEFT click actions that follow mouse-up — pointer gestures already captured it
-      // via mouse-down/up events, so the click action is a duplicate that can interfere.
+      // Skip LEFT click actions that follow an *unsuppressed* mouse-up — pointer
+      // gestures already captured the click via mouse-down/up coordinates and the
+      // action is a true duplicate. When cursor tracking is on AND the click has
+      // selectors, the pre-pass marks the down/up as suppressed (lastEmittedEventType
+      // becomes 'mouse-up-suppressed') so this skip does NOT fire and locateWithFallback
+      // gets to run.
       // Right-click is NOT skipped: pointer gesture handlers skip button=2, so the
       // contextmenu 'rightclick' action is the sole record and must always be emitted.
       if (action === 'click' && lastEmittedEventType === 'mouse-up') {
@@ -313,9 +346,11 @@ export function eventsToCodeLines(
       const modifiers = event.data.modifiers;
       const mouseButton = event.data.button;
       const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
-      // Auto-detected downloads handled by passive listener — only wrap explicit markers
-      const isDownloadMouse = nextClickIsDownload;
-      if (nextClickIsDownload) nextClickIsDownload = false;
+      const suppressed = event.data._suppressDownUp === true;
+      // Auto-detected downloads handled by passive listener — only wrap explicit markers.
+      // When suppressed, the paired action:click owns the download wrapper.
+      const isDownloadMouse = nextClickIsDownload && !suppressed;
+      if (isDownloadMouse) nextClickIsDownload = false;
 
       if (isDownloadMouse) {
         insideDownloadMouseWrap = true;
@@ -324,32 +359,37 @@ export function eventsToCodeLines(
       }
       const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
 
-      if (modifiers && modifiers.length > 0) {
+      if (!suppressed && modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
           lines.push(`${mIndent}await page.keyboard.down('${mod}');`);
         }
       }
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
-      lastEmittedEventType = 'mouse-down';
+      if (!suppressed) {
+        lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
+      }
+      lastEmittedEventType = suppressed ? 'mouse-down-suppressed' : 'mouse-down';
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
       const mouseButton = event.data.button;
       const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
+      const suppressed = event.data._suppressDownUp === true;
       const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
-      lines.push(`${mIndent}await page.mouse.up(${buttonOpt});`);
-      if (modifiers && modifiers.length > 0) {
-        for (const mod of modifiers) {
-          lines.push(`${mIndent}await page.keyboard.up('${mod}');`);
+      if (!suppressed) {
+        lines.push(`${mIndent}await page.mouse.up(${buttonOpt});`);
+        if (modifiers && modifiers.length > 0) {
+          for (const mod of modifiers) {
+            lines.push(`${mIndent}await page.keyboard.up('${mod}');`);
+          }
         }
       }
       if (insideDownloadMouseWrap) {
         lines.push(`${indent}});`);
         insideDownloadMouseWrap = false;
       }
-      lastEmittedEventType = 'mouse-up';
+      lastEmittedEventType = suppressed ? 'mouse-up-suppressed' : 'mouse-up';
     } else if (event.type === 'keypress' && event.data.key) {
       const { key, modifiers } = event.data;
       if (modifiers && modifiers.length > 0) {
