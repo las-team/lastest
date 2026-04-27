@@ -4,30 +4,45 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 
+export type ScreenshotViewerMode = 'captured' | 'plan' | 'baseline' | 'diff';
+
 interface ScreenshotViewerProps {
   open: boolean;
   imageSrc: string;
   planSrc: string | null;
-  mode: 'captured' | 'plan';
+  baselineSrc?: string | null;
+  diffSrc?: string | null;
+  mode: ScreenshotViewerMode;
   hasNext: boolean;
   hasPrev: boolean;
   onClose: () => void;
   onNext: () => void;
   onPrev: () => void;
-  onToggleMode: () => void;
+  // Caller decides the next mode (the available alternates depend on which
+  // sources exist for this screenshot — see ScreenshotTimeline).
+  onCycleMode: () => void;
 }
+
+const MODE_LABEL: Record<ScreenshotViewerMode, string> = {
+  captured: 'Captured',
+  plan: 'Plan',
+  baseline: 'Baseline',
+  diff: 'Diff vs baseline',
+};
 
 export function ScreenshotViewer({
   open,
   imageSrc,
   planSrc,
+  baselineSrc,
+  diffSrc,
   mode,
   hasNext,
   hasPrev,
   onClose,
   onNext,
   onPrev,
-  onToggleMode,
+  onCycleMode,
 }: ScreenshotViewerProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +63,14 @@ export function ScreenshotViewer({
 
   if (!open || typeof document === 'undefined') return null;
 
-  const src = mode === 'plan' && planSrc ? planSrc : imageSrc;
+  // Resolve the active source by mode; fall back to captured if a mode's
+  // source is missing (e.g. no baseline yet for this step).
+  const src =
+    mode === 'plan' && planSrc ? planSrc :
+    mode === 'baseline' && baselineSrc ? baselineSrc :
+    mode === 'diff' && diffSrc ? diffSrc :
+    imageSrc;
+  const hasAnyAlternate = !!planSrc || !!baselineSrc || !!diffSrc;
 
   return createPortal(
     <div
@@ -66,9 +88,9 @@ export function ScreenshotViewer({
         } else if (e.key === 'ArrowLeft' && hasPrev) {
           e.preventDefault();
           onPrev();
-        } else if (e.key === ' ' && planSrc) {
+        } else if (e.key === ' ' && hasAnyAlternate) {
           e.preventDefault();
-          onToggleMode();
+          onCycleMode();
         }
       }}
       role="dialog"
@@ -77,11 +99,16 @@ export function ScreenshotViewer({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
-        alt={mode === 'plan' ? 'Planned screenshot' : 'Captured screenshot'}
+        alt={MODE_LABEL[mode]}
         className="max-w-[95vw] max-h-[95vh] object-contain select-none"
         onClick={(e) => e.stopPropagation()}
         draggable={false}
       />
+
+      {/* Mode label — shows which view the user is currently looking at. */}
+      <div className="absolute top-4 left-4 px-3 py-1.5 rounded-md bg-white/10 backdrop-blur text-white text-xs font-medium select-none">
+        {MODE_LABEL[mode]}
+      </div>
 
       <button
         type="button"
@@ -123,16 +150,16 @@ export function ScreenshotViewer({
         </button>
       )}
 
-      {planSrc && (
+      {hasAnyAlternate && (
         <button
           type="button"
           className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
           onClick={(e) => {
             e.stopPropagation();
-            onToggleMode();
+            onCycleMode();
           }}
         >
-          {mode === 'captured' ? 'Show plan (Space)' : 'Show captured (Space)'}
+          Cycle view (Space)
         </button>
       )}
     </div>,

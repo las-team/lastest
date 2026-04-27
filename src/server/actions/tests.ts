@@ -324,6 +324,10 @@ export interface ScreenshotGroup {
   runId: string;
   startedAt: Date | null;
   screenshots: string[];
+  // Baseline + diff lookup keyed by the captured screenshot path (matches
+  // `currentImagePath` on visualDiffs). Lets the gallery viewer toggle to
+  // "diff vs baseline" without an extra fetch on click.
+  diffsByPath?: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }>;
 }
 
 export async function getTestScreenshots(
@@ -350,14 +354,14 @@ export async function getTestScreenshotsGrouped(
 ): Promise<ScreenshotGroup[]> {
   // Primary: Get screenshots from database (stored in test results)
   const testResults = await queries.getTestResultsByTest(testId);
-  const groups: Map<string, { startedAt: Date | null; screenshots: string[] }> = new Map();
+  const groups: Map<string, { startedAt: Date | null; screenshots: string[]; diffsByPath: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }> }> = new Map();
 
   for (const result of testResults) {
     const runId = result.testRunId;
     if (!runId) continue;
 
     if (!groups.has(runId)) {
-      groups.set(runId, { startedAt: null, screenshots: [] });
+      groups.set(runId, { startedAt: null, screenshots: [], diffsByPath: {} });
     }
     const group = groups.get(runId)!;
 
@@ -373,6 +377,17 @@ export async function getTestScreenshotsGrouped(
     // Fallback to single screenshotPath if no array
     if (result.screenshotPath && !group.screenshots.includes(result.screenshotPath)) {
       group.screenshots.push(result.screenshotPath);
+    }
+
+    // Pair each captured screenshot with its visualDiff (if any) so the gallery
+    // viewer can show "diff vs baseline" without an extra round-trip on click.
+    const diffs = await queries.getVisualDiffsByTestResult(result.id);
+    for (const d of diffs) {
+      if (!d.currentImagePath) continue;
+      group.diffsByPath[d.currentImagePath] = {
+        baselineImagePath: d.baselineImagePath,
+        diffImagePath: d.diffImagePath,
+      };
     }
   }
 
@@ -393,6 +408,7 @@ export async function getTestScreenshotsGrouped(
     runId,
     startedAt: runMap.get(runId) || null,
     screenshots: (groups.get(runId)?.screenshots || []).sort(naturalCompare),
+    diffsByPath: groups.get(runId)?.diffsByPath ?? {},
   }));
 
   // Sort by startedAt descending (newest first)

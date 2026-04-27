@@ -92,6 +92,7 @@ export async function getTest(id: string) {
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null, viewport?: { width?: number; height?: number } | null) {
   const id = uuid();
   const now = new Date();
+  data = await withParsedAssertions(data);
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
 
   // Create initial version (version 1)
@@ -141,7 +142,7 @@ export async function updateStepCriteria(testId: string, stepLabel: string, rule
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  const patch = { ...data };
+  const patch = await withParsedAssertions({ ...data });
   if (
     patch.code !== undefined &&
     patch.code !== PLACEHOLDER_CODE &&
@@ -154,6 +155,17 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
     if (current?.isPlaceholder) patch.isPlaceholder = false;
   }
   await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
+}
+
+// Re-parse `tests.assertions` from `code` whenever a write changes the code and
+// the caller hasn't supplied its own `assertions` array. Keeps the Criteria tab's
+// per-assertion list in sync without each callsite having to remember.
+async function withParsedAssertions<T extends Partial<NewTest>>(patch: T): Promise<T> {
+  if (typeof patch.code !== 'string') return patch;
+  if (patch.code === PLACEHOLDER_CODE) return patch;
+  if (patch.assertions !== undefined) return patch;
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  return { ...patch, assertions: parseAssertions(patch.code) };
 }
 
 export async function softDeleteTest(id: string) {
@@ -801,7 +813,7 @@ export async function updateTestWithVersion(
   });
 
   // Clear placeholder flag when real code overwrites the stub
-  const patch = { ...data };
+  const patch = await withParsedAssertions({ ...data });
   if (
     patch.code !== undefined &&
     patch.code !== PLACEHOLDER_CODE &&

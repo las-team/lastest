@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import type { PlannedScreenshot } from '@/lib/db/schema';
 import { ScreenshotCard } from '@/components/tests/screenshot-card';
-import { ScreenshotViewer } from '@/components/tests/screenshot-viewer';
+import { ScreenshotViewer, type ScreenshotViewerMode } from '@/components/tests/screenshot-viewer';
 
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -23,7 +23,7 @@ interface ScreenshotTimelineProps {
 interface ViewerState {
   groupIdx: number;
   screenshotIdx: number;
-  mode: 'captured' | 'plan';
+  mode: ScreenshotViewerMode;
 }
 
 function extractStepLabel(src: string): string {
@@ -154,8 +154,32 @@ export function ScreenshotTimeline({
   const currentSrc = currentGroup ? currentGroup.screenshots[viewer!.screenshotIdx] : null;
   const currentLabel = currentSrc ? extractStepLabel(currentSrc) : null;
   const currentPlan = currentLabel ? plannedByLabel.get(currentLabel) ?? null : null;
+  const currentDiffEntry = currentSrc && currentGroup?.diffsByPath
+    ? currentGroup.diffsByPath[currentSrc] ?? null
+    : null;
+  const currentBaselineSrc = currentDiffEntry?.baselineImagePath ?? null;
+  const currentDiffSrc = currentDiffEntry?.diffImagePath ?? null;
   const hasNext = !!currentGroup && (viewer?.screenshotIdx ?? 0) < currentGroup.screenshots.length - 1;
   const hasPrev = !!currentGroup && (viewer?.screenshotIdx ?? 0) > 0;
+
+  // Order modes by usefulness: diff first (the user's primary question — "what
+  // changed since baseline"), then baseline, then plan, then captured.
+  const cycleOrder = useMemo<ScreenshotViewerMode[]>(() => {
+    const order: ScreenshotViewerMode[] = ['captured'];
+    if (currentDiffSrc) order.unshift('diff');
+    if (currentBaselineSrc) order.splice(order.length - 1, 0, 'baseline');
+    if (currentPlan?.imagePath) order.splice(order.length - 1, 0, 'plan');
+    return order;
+  }, [currentDiffSrc, currentBaselineSrc, currentPlan]);
+
+  const cycleMode = () => {
+    setViewer((v) => {
+      if (!v) return v;
+      const idx = cycleOrder.indexOf(v.mode);
+      const next = cycleOrder[(idx + 1) % cycleOrder.length] ?? 'captured';
+      return { ...v, mode: next };
+    });
+  };
 
   return (
     <Card>
@@ -200,6 +224,10 @@ export function ScreenshotTimeline({
                     const label = extractStepLabel(src);
                     const displayLabel = label.replace(/-/g, ' ');
                     const plan = plannedByLabel.get(label) ?? null;
+                    // If this screenshot has a stored diff, opening the viewer
+                    // jumps straight to the diff view (the user's first
+                    // question is almost always "what changed?").
+                    const hasDiff = !!group.diffsByPath?.[src]?.diffImagePath;
                     return (
                       <ScreenshotCard
                         key={`${group.runId}-${screenshotIdx}`}
@@ -211,7 +239,7 @@ export function ScreenshotTimeline({
                         isUploading={uploadingKey === label}
                         onDropFile={(file) => handleDropFile(label, file)}
                         onClick={() =>
-                          setViewer({ groupIdx, screenshotIdx, mode: 'captured' })
+                          setViewer({ groupIdx, screenshotIdx, mode: hasDiff ? 'diff' : 'captured' })
                         }
                         onClickPlanBadge={() =>
                           setViewer({ groupIdx, screenshotIdx, mode: 'plan' })
@@ -230,25 +258,34 @@ export function ScreenshotTimeline({
         open={!!viewer && !!currentSrc}
         imageSrc={currentSrc ?? ''}
         planSrc={currentPlan?.imagePath ?? null}
+        baselineSrc={currentBaselineSrc}
+        diffSrc={currentDiffSrc}
         mode={viewer?.mode ?? 'captured'}
         hasNext={hasNext}
         hasPrev={hasPrev}
         onClose={() => setViewer(null)}
         onNext={() =>
-          setViewer((v) =>
-            v ? { ...v, screenshotIdx: v.screenshotIdx + 1, mode: 'captured' } : v,
-          )
+          setViewer((v) => {
+            if (!v) return v;
+            // After moving to the next screenshot, stay on diff if the
+            // gallery was opened that way; fall back to captured if the
+            // next screenshot has no diff.
+            const nextIdx = v.screenshotIdx + 1;
+            const nextSrc = currentGroup?.screenshots[nextIdx];
+            const nextHasDiff = !!(nextSrc && currentGroup?.diffsByPath?.[nextSrc]?.diffImagePath);
+            return { ...v, screenshotIdx: nextIdx, mode: v.mode === 'diff' && nextHasDiff ? 'diff' : 'captured' };
+          })
         }
         onPrev={() =>
-          setViewer((v) =>
-            v ? { ...v, screenshotIdx: v.screenshotIdx - 1, mode: 'captured' } : v,
-          )
+          setViewer((v) => {
+            if (!v) return v;
+            const prevIdx = v.screenshotIdx - 1;
+            const prevSrc = currentGroup?.screenshots[prevIdx];
+            const prevHasDiff = !!(prevSrc && currentGroup?.diffsByPath?.[prevSrc]?.diffImagePath);
+            return { ...v, screenshotIdx: prevIdx, mode: v.mode === 'diff' && prevHasDiff ? 'diff' : 'captured' };
+          })
         }
-        onToggleMode={() =>
-          setViewer((v) =>
-            v ? { ...v, mode: v.mode === 'captured' ? 'plan' : 'captured' } : v,
-          )
-        }
+        onCycleMode={cycleMode}
       />
     </Card>
   );

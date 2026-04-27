@@ -26,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
-import { promoteTestResultBaselines } from '@/server/actions/diffs';
 import { runTests, getJobStatus } from '@/server/actions/runs';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
@@ -294,23 +293,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [versions, setVersions] = useState<TestVersion[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [expandedDiffVersion, setExpandedDiffVersion] = useState<number | null>(null);
-  const [promotingResult, setPromotingResult] = useState<string | null>(null);
-
-  const handlePromoteBaselines = useCallback(async (resultId: string) => {
-    setPromotingResult(resultId);
-    try {
-      const res = await promoteTestResultBaselines(resultId);
-      if (res.approvedCount > 0) {
-        toast.success(`Promoted ${res.approvedCount} screenshot${res.approvedCount === 1 ? '' : 's'} as baseline`);
-      } else {
-        toast.info('No pending screenshots to promote');
-      }
-    } catch (err) {
-      toast.error(`Failed to promote: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPromotingResult(null);
-    }
-  }, []);
   const [isRestoring, setIsRestoring] = useState<number | null>(null);
 
   // Run history expand state
@@ -1283,22 +1265,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               </div>
                             ) : runDiffs.has(result.id) && runDiffs.get(result.id)!.length > 0 ? (
                               <div className="mt-3 space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <div className="text-xs font-medium text-muted-foreground uppercase">Steps</div>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handlePromoteBaselines(result.id)}
-                                    disabled={promotingResult === result.id}
-                                  >
-                                    {promotingResult === result.id ? (
-                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                    ) : (
-                                      <CheckCircle className="h-3 w-3 mr-1" />
-                                    )}
-                                    Promote as baseline
-                                  </Button>
-                                </div>
+                                <div className="text-xs font-medium text-muted-foreground uppercase">Steps</div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                                   {runDiffs.get(result.id)!.map((diff, i) => (
                                     <div key={i} className="border rounded p-2 space-y-1">
