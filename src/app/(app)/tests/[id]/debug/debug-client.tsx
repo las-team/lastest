@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,11 +30,13 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  MousePointerClick,
 } from 'lucide-react';
 import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
 import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
+import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
 import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
 import { Input } from '@/components/ui/input';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
@@ -136,13 +138,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       const s = await getDebugState(sessionId);
       if (s) {
         setState(s);
-        // Sync server code → localCode when codeVersion changes (no pending local edits)
-        if (s.codeVersion !== codeVersionRef.current) {
+        // Sync server code → localCode when codeVersion changes AND no pending local edit.
+        // Don't advance codeVersionRef when skipping — the next poll after the debounce
+        // clears must still see the new version and apply it, otherwise the editor stays
+        // stale while state.steps/currentStepIndex move forward (the "code is behind" bug).
+        if (s.codeVersion !== codeVersionRef.current && !debounceRef.current) {
           codeVersionRef.current = s.codeVersion;
-          if (!debounceRef.current) {
-            setLocalCode(s.code);
-            lastSentCodeRef.current = s.code;
-          }
+          setLocalCode(s.code);
+          lastSentCodeRef.current = s.code;
         }
       }
     };
@@ -235,6 +238,71 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
     }, 500);
   }, [sendCmd]);
+
+  // Re-parse steps client-side from the visible code when the user has unsynced edits,
+  // so the gutter / step highlight always lines up with what's in the textarea.
+  // The server's executor.steps still drives execution (step_forward, run_to_step);
+  // displaySteps is only for rendering line ranges and the steps list.
+  // Skip stripTypeAnnotations here — it lives in @lastest/shared which transitively
+  // pulls in node-only deps; parseSteps is regex-based and tolerates TS annotations.
+  const displaySteps = useMemo(() => {
+    if (state && localCode === state.code) return state.steps;
+    const body = extractTestBody(localCode);
+    if (!body) return state?.steps ?? [];
+    try {
+      const cleanBody = removeInlineReplayCursorPath(removeInlineLocateWithFallback(body));
+      return parseSteps(cleanBody);
+    } catch {
+      return state?.steps ?? [];
+    }
+  }, [localCode, state]);
+
+  // Insert a click step at the position right after the current step.
+  // Uses locateWithFallback(...) so the parser/executor recognise it as an action step
+  // (see debug-parser.ts:82 and debug-executor.ts:locateWithFallback).
+  const handleInsertClick = useCallback((sel: { type: string; value: string }) => {
+    const code = localCode;
+    const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+    const bodyStartLine = funcMatch
+      ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+      : 0;
+
+    const steps = displaySteps;
+    const curIdx = state?.currentStepIndex ?? -1;
+    const refStepIdx = curIdx >= 0 && curIdx < steps.length
+      ? curIdx
+      : (steps.length > 0 ? steps.length - 1 : -1);
+
+    const lines = code.split('\n');
+
+    // Insertion line index (0-based). After the current step's last line, or right
+    // after the function body opening brace when there are no steps.
+    let insertAt: number;
+    if (refStepIdx >= 0 && steps[refStepIdx]) {
+      insertAt = bodyStartLine + steps[refStepIdx].lineEnd;
+    } else {
+      insertAt = bodyStartLine; // first line inside the body
+    }
+    if (insertAt < 0) insertAt = 0;
+    if (insertAt > lines.length) insertAt = lines.length;
+
+    // Reuse indentation from the previous non-empty line, or 2 spaces as a default.
+    let indent = '  ';
+    for (let i = insertAt - 1; i >= 0; i--) {
+      const m = lines[i].match(/^(\s+)\S/);
+      if (m) { indent = m[1]; break; }
+      if (lines[i].trim() !== '') break;
+    }
+
+    const selectorJson = JSON.stringify([{ type: sel.type, value: sel.value }]);
+    const newLine = `${indent}await locateWithFallback(page, ${selectorJson}, 'click');`;
+
+    const newLines = [...lines.slice(0, insertAt), newLine, ...lines.slice(insertAt)];
+    const newCode = newLines.join('\n');
+
+    handleCodeChange(newCode);
+    toast.success('Inserted click step');
+  }, [localCode, displaySteps, state?.currentStepIndex, handleCodeChange]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -456,7 +524,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 )}
                 <EditableCodeDisplay
                   code={localCode}
-                  steps={state?.steps || []}
+                  steps={displaySteps}
                   currentStepIndex={state?.currentStepIndex ?? -1}
                   stepResults={state?.stepResults || []}
                   onCodeChange={handleCodeChange}
@@ -547,7 +615,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
                 <ScrollArea className="flex-1 overflow-hidden">
                   <div ref={stepListRef} className="p-2 space-y-1">
-                    {(state?.steps || []).map((step, idx) => {
+                    {displaySteps.map((step, idx) => {
                       const result = state?.stepResults?.[idx];
                       const isCurrent = idx === (state?.currentStepIndex ?? -1);
                       const isStepPassed = result?.status === 'passed';
@@ -646,6 +714,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       setDomSnapshotLoading(true);
                       browserViewerRef.current?.requestDomSnapshot();
                     }}
+                    onInsertClick={handleInsertClick}
+                    canInsert={(isPaused || isError || isCompleted) && !isBusy}
                   />
                 </TabsContent>
               )}
@@ -934,9 +1004,11 @@ interface SelectorsPanelProps {
   search: string;
   onSearchChange: (s: string) => void;
   onRequestDomSnapshot: () => void;
+  onInsertClick: (sel: { type: string; value: string }) => void;
+  canInsert: boolean;
 }
 
-function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot }: SelectorsPanelProps) {
+function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot, onInsertClick, canInsert }: SelectorsPanelProps) {
   const [expandedIdx, setExpandedIdx] = useState<Set<number>>(new Set());
 
   const copyToClipboard = useCallback((text: string) => {
@@ -1016,6 +1088,17 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                   variant="ghost"
                   size="icon"
                   className="h-5 w-5 flex-shrink-0"
+                  disabled={!canInsert}
+                  title="Insert click step here"
+                  onClick={() => onInsertClick(sel)}
+                >
+                  <MousePointerClick className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 flex-shrink-0"
+                  title="Copy selector"
                   onClick={() => copyToClipboard(sel.value)}
                 >
                   <Copy className="h-3 w-3" />
@@ -1098,6 +1181,17 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                                 variant="ghost"
                                 size="icon"
                                 className="h-5 w-5 flex-shrink-0"
+                                disabled={!canInsert}
+                                title="Insert click step here"
+                                onClick={(e) => { e.stopPropagation(); onInsertClick(sel); }}
+                              >
+                                <MousePointerClick className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0"
+                                title="Copy selector"
                                 onClick={(e) => { e.stopPropagation(); copyToClipboard(sel.value); }}
                               >
                                 <Copy className="h-3 w-3" />

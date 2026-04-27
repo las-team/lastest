@@ -1099,6 +1099,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               sheetSources={sheetDataSources}
               csvSources={csvDataSources}
               extractedValues={latestResult?.extractedVariables ?? null}
+              code={test.code ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);

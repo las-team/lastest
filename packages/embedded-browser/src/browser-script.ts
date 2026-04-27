@@ -99,9 +99,19 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // to retarget to body/wrapper with useless selectors. pointerdown fires first.
   let pointerDownSelectors: BrowserActionSelector[] | null = null;
   let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  let pointerDownTarget: HTMLElement | null = null;
   let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   let pointerDownClickRecorded = false;
   let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Menu items in Radix DropdownMenu/ContextMenu/Select commit selection on pointerup
+  // and unmount via an exit animation, so a `click` event is never synthesized.
+  function isMenuLikeTarget(el: HTMLElement | null): boolean {
+    if (!el) return false;
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role === 'menuitem' || role === 'menuitemcheckbox' || role === 'menuitemradio' || role === 'option') return true;
+    return el.closest('[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper],[data-radix-menu-content],.dropdown-menu,.radix-menu-item') !== null;
+  }
 
   // Walk up DOM to find nearest interactive ancestor for better selectors.
   // e.g. clicking <span> inside <div role="option"> should capture the option.
@@ -139,6 +149,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     pointerDownSelectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+    pointerDownTarget = target;
     pointerDownClickRecorded = false;
 
     // Safety net: if the element is removed from DOM and no click event fires
@@ -159,7 +170,21 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   }, true);
 
   document.addEventListener('pointerup', () => {
-    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerCleanupTimer = null; }, 500);
+    const savedSelectors = pointerDownSelectors;
+    const savedBoundingBox = pointerDownBoundingBox;
+    const savedTarget = pointerDownTarget;
+    if (savedSelectors && savedSelectors.length > 0 && isMenuLikeTarget(savedTarget)) {
+      setTimeout(() => {
+        if (!pointerDownClickRecorded) {
+          pointerDownClickRecorded = true;
+          if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
+          const modifiers = getActiveModifiers();
+          // @ts-expect-error - exposed function
+          window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
+        }
+      }, 50);
+    }
+    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerDownTarget = null; pointerCleanupTimer = null; }, 500);
   }, true);
 
   // Capture mouseover selectors as second fallback (fires well before click)
