@@ -222,7 +222,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
-    const target = findBestTarget(rawTarget);
+    const target = rawTarget;
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
@@ -232,8 +232,16 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       !(selectors.length === 1 && selectors[0].type === 'css-path' &&
         (selectors[0].value === 'body' || selectors[0].value === 'html'));
 
-    // Fallback 1: use pointerdown selectors (captured before DOM removal)
-    if (!hasUsefulSelectors && pointerDownSelectors && pointerDownSelectors.length > 0) {
+    // If click target only resolves to a css-path (e.g. inner span of a menu item),
+    // prefer pointerDownSelectors which ran findBestTarget and resolved the
+    // semantic ancestor (button/menuitem/etc.).
+    const onlyCssPath = selectors.length > 0 && selectors.every(s => s.type === 'css-path');
+    const pointerDownHasSemantic = pointerDownSelectors && pointerDownSelectors.some(s => s.type !== 'css-path');
+
+    // Fallback 1: use pointerdown selectors (captured before DOM removal, or
+    // when the raw click target lacks any semantic selector while pointerdown's
+    // findBestTarget resolved an interactive ancestor with one).
+    if ((!hasUsefulSelectors || (onlyCssPath && pointerDownHasSemantic)) && pointerDownSelectors && pointerDownSelectors.length > 0) {
       selectors = pointerDownSelectors;
       if (pointerDownBoundingBox) {
         boundingBox = pointerDownBoundingBox;
