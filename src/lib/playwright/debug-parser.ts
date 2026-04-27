@@ -399,8 +399,13 @@ export function parseSteps(body: string): DebugStep[] {
     const line = lines[lineIdx];
     const trimmedLine = line.trim();
 
-    // Skip empty lines when not in a statement
+    // Skip empty lines when not in a statement.
+    // Advance currentStart so the next statement's lineStart reflects where it
+    // actually begins, not the line of the previous `;`. Otherwise blank gaps
+    // (e.g. lines left behind by line-preserving strip of inline helpers) get
+    // absorbed into the next step's range.
     if (trimmedLine === '' && current.trim() === '') {
+      currentStart = lineIdx + 1;
       continue;
     }
 
@@ -588,6 +593,26 @@ export function parseSteps(body: string): DebugStep[] {
 }
 
 /**
+ * Replace [startIdx, endIdx) in `body` with `placeholder`, but pad the
+ * placeholder with trailing newlines so the total line count of `body` is
+ * preserved. Step line numbers parsed from the cleaned body must line up
+ * with line numbers in the displayed source (which still contains the
+ * stripped helper declaration).
+ */
+function spliceWithLinePreservation(
+  body: string,
+  startIdx: number,
+  endIdx: number,
+  placeholder: string,
+): string {
+  const removed = body.slice(startIdx, endIdx);
+  const removedNewlines = (removed.match(/\n/g) || []).length;
+  const placeholderNewlines = (placeholder.match(/\n/g) || []).length;
+  const padding = '\n'.repeat(Math.max(0, removedNewlines - placeholderNewlines));
+  return body.slice(0, startIdx) + placeholder + padding + body.slice(endIdx);
+}
+
+/**
  * Remove the inline locateWithFallback function declaration from test body.
  * Same logic as runner.ts — the debug runner provides its own.
  */
@@ -607,7 +632,12 @@ export function removeInlineLocateWithFallback(body: string): string {
     endIdx++;
   }
 
-  let result = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+  let result = spliceWithLinePreservation(
+    body,
+    startIdx,
+    endIdx,
+    '/* locateWithFallback provided by runner */',
+  );
   // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
   result = result.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
   return result;
@@ -634,7 +664,12 @@ export function removeInlineReplayCursorPath(body: string): string {
     endIdx++;
   }
 
-  return body.slice(0, startIdx) + '/* replayCursorPath provided by runner */' + body.slice(endIdx);
+  return spliceWithLinePreservation(
+    body,
+    startIdx,
+    endIdx,
+    '/* replayCursorPath provided by runner */',
+  );
 }
 
 /**

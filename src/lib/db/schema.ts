@@ -307,7 +307,10 @@ export interface TestAssertion {
   label?: string;
   codeLineStart?: number;
   codeLineEnd?: number;
-  isSoft?: boolean; // true (default) = test continues on failure, false = test fails immediately
+  /** Always true — kept for back-compat with persisted rows. Whether an
+   *  assertion failure actually fails the test is decided by the per-assertion
+   *  rule on the Criteria tab (see `StepCriterion` / `assertion_failed`). */
+  isSoft?: boolean;
 }
 
 export interface AssertionResult {

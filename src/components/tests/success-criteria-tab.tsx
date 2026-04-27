@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered, Code2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Circle, ListOrdered, Code2 } from 'lucide-react';
 import type {
   TestAssertion,
   AssertionResult,
@@ -35,7 +35,6 @@ interface TestStepsTabProps {
   csvSources?: CsvDataSource[];
   onSaveVariables?: (next: TestVariable[]) => Promise<void>;
   onParseNeeded?: () => void;
-  onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
   onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
   onGoToCode?: (line: number) => void;
   /** Called after the user creates an extract-mode Var from a step, so the
@@ -162,15 +161,12 @@ export function TestStepsTab({
   csvSources = [],
   onSaveVariables,
   onParseNeeded,
-  onToggleAssertionSoftness,
   onStepValueChange,
   onGoToCode,
   onNavigateToVars,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN));
-  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
-  const [optimisticOverrides, setOptimisticOverrides] = useState<Map<string, boolean>>(new Map());
   const [editingValues, setEditingValues] = useState<Map<number, string>>(new Map());
   const [savingSteps, setSavingSteps] = useState<Set<number>>(new Set());
   const debounceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -197,22 +193,11 @@ export function TestStepsTab({
     };
   }, [code]);
 
-  // Merge: use fresh-parsed assertions for line numbers/matching, but inherit isSoft
-  // overrides from DB assertions (which the user may have toggled)
+  // Use fresh-parsed assertions when available; otherwise fall back to DB.
+  // All assertions are soft — the Criteria tab decides what fails the test.
   const assertions = useMemo(() => {
     if (freshAssertions.length === 0) return dbAssertions ?? [];
-    // Build a lookup from DB assertions by ID for isSoft overrides
-    const dbMap = new Map<string, TestAssertion>();
-    if (dbAssertions) {
-      for (const a of dbAssertions) dbMap.set(a.id, a);
-    }
-    return freshAssertions.map(a => {
-      const dbVersion = dbMap.get(a.id);
-      if (dbVersion && dbVersion.isSoft !== undefined) {
-        return { ...a, isSoft: dbVersion.isSoft };
-      }
-      return a;
-    });
+    return freshAssertions;
   }, [freshAssertions, dbAssertions]);
 
   // Sync DB if assertions are stale
@@ -283,8 +268,11 @@ export function TestStepsTab({
   const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
   const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
   const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
-  // Only hard assertion failures explain why a test stopped
-  const hasFailedHardAssertion = hasAssertions && assertions.some(a => a.isSoft === false && resultMap.get(a.id)?.status === 'failed');
+  // A failed assertion is the most likely culprit for a stopped test, regardless
+  // of whether the user wired it as a hard criterion. Treat any failure as
+  // "this explains the stop point" so we don't double-flag the next non-assertion
+  // step as the failure point.
+  const hasFailedAssertion = hasAssertions && assertions.some(a => resultMap.get(a.id)?.status === 'failed');
 
   // Count steps by type for filter badges
   const typeCounts = useMemo(() => {
@@ -476,7 +464,7 @@ export function TestStepsTab({
                 // Execution progress: was this step reached?
                 const wasReached = executionWatermark >= 0 && globalIdx <= executionWatermark;
                 // Only flag non-assertion steps as failure point when no assertion already explains the failure
-                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep && !hasFailedHardAssertion;
+                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep && !hasFailedAssertion;
 
                 return (
                   <div
@@ -597,27 +585,6 @@ export function TestStepsTab({
                         );
                       })()}
 
-                      {/* Hard/Soft badges for assertion steps */}
-                      {isExpandable && stepAssertions.length > 0 && (() => {
-                        const hardCount = stepAssertions.filter(a => a.isSoft === false).length;
-                        const softCount = stepAssertions.length - hardCount;
-                        return (
-                          <>
-                            {hardCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                                <ShieldAlert className="h-3 w-3 mr-0.5" />
-                                Hard{hardCount > 1 ? ` ×${hardCount}` : ''}
-                              </Badge>
-                            )}
-                            {softCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0 text-muted-foreground">
-                                Soft{softCount > 1 ? ` ×${softCount}` : ''}
-                              </Badge>
-                            )}
-                          </>
-                        );
-                      })()}
-
                       {/* Go to code line */}
                       {onGoToCode && (
                         <button
@@ -648,27 +615,6 @@ export function TestStepsTab({
                         {stepAssertions.map(assertion => {
                           const result = resultMap.get(assertion.id);
                           const status = result?.status ?? 'not_run';
-                          const hasOverride = optimisticOverrides.has(assertion.id);
-                          const effectiveSoft = hasOverride ? optimisticOverrides.get(assertion.id)! : assertion.isSoft !== false;
-                          const isHard = !effectiveSoft;
-                          const isToggling = togglingIds.has(assertion.id);
-
-                          const handleToggleSoftness = async (e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            if (!onToggleAssertionSoftness || isToggling) return;
-                            const newSoft = !effectiveSoft;
-                            setOptimisticOverrides(prev => new Map(prev).set(assertion.id, newSoft));
-                            setTogglingIds(prev => new Set(prev).add(assertion.id));
-                            try {
-                              await onToggleAssertionSoftness(assertion.id, newSoft);
-                              // Keep optimistic override until fresh data arrives — prevents flicker
-                            } catch {
-                              setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
-                            } finally {
-                              setTogglingIds(prev => { const next = new Set(prev); next.delete(assertion.id); return next; });
-                            }
-                          };
-
                           return (
                             <div key={assertion.id} className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -680,34 +626,6 @@ export function TestStepsTab({
                                 </Badge>
                                 {assertion.negated && (
                                   <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">.not</Badge>
-                                )}
-                                {isHard ? (
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      'text-[10px] px-1 py-0 h-4 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800',
-                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-red-100 dark:hover:bg-red-900',
-                                      isToggling && 'opacity-50',
-                                    )}
-                                    onClick={handleToggleSoftness}
-                                    title={onToggleAssertionSoftness ? 'Click to make soft (test continues on failure)' : undefined}
-                                  >
-                                    <ShieldAlert className="h-3 w-3 mr-0.5" />
-                                    Hard
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      'text-[10px] px-1 py-0 h-4 text-muted-foreground',
-                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-muted/50',
-                                      isToggling && 'opacity-50',
-                                    )}
-                                    onClick={handleToggleSoftness}
-                                    title={onToggleAssertionSoftness ? 'Click to make hard (test stops on failure)' : undefined}
-                                  >
-                                    Soft
-                                  </Badge>
                                 )}
                               </div>
 

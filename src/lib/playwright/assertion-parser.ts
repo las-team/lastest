@@ -22,28 +22,27 @@ export function parseAssertions(code: string): TestAssertion[] {
   const lines = code.split('\n');
   let orderIndex = 0;
 
+  // All assertions are soft by default. Whether a failure fails the test is
+  // controlled by per-assertion criteria rules on the Criteria tab — runtime
+  // semantics are uniform here.
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
 
     // Pattern 1: Element assertion block (from event-to-code.ts)
-    // // Element assertion: toBeVisible  OR  // Hard assertion: toBeVisible
-    const elementCommentMatch = trimmed.match(/^\/\/ (Element|Hard) assertion: (\w+)/);
+    // Tolerates legacy `// Hard assertion:` comments too — both parse the same
+    // block; isSoft is forced to true regardless.
+    const elementCommentMatch = trimmed.match(/^\/\/ (?:Element|Hard) assertion: (\w+)/);
     if (elementCommentMatch) {
-      const isHard = elementCommentMatch[1] === 'Hard';
-      const assertionType = elementCommentMatch[2];
+      const assertionType = elementCommentMatch[1];
       const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType);
       if (assertion) {
-        assertion.isSoft = !isHard;
         assertions.push(assertion);
         orderIndex++;
       }
       continue;
     }
-
-    // Check if previous line marks this assertion as hard
-    const prevTrimmed = i > 0 ? lines[i - 1].trim() : '';
-    const hasHardMarker = /^\/\/ Hard assertion/.test(prevTrimmed);
 
     // Pattern 2: Page-level assertions
     // await expect(page).toHaveURL(...)
@@ -61,7 +60,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('page', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -85,7 +84,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('element', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -113,7 +112,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('element', assertionType, negated, selectorLabel, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -138,9 +137,9 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('generic', assertionType, negated, genericMatch[1], expectedValue),
-        codeLineStart: hasHardMarker ? i : i + 1,
+        codeLineStart: i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;
@@ -165,7 +164,7 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType: 'fileDownloaded',
         negated: false,
         expectedValue: filename,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: filename && filename !== 'fileDownloaded' ? `Download: ${filename}` : 'File downloaded',
         codeLineStart: i + 1,
         codeLineEnd: endLine + 1,
@@ -185,9 +184,9 @@ export function parseAssertions(code: string): TestAssertion[] {
         assertionType: 'waitForLoadState',
         negated: false,
         expectedValue: state,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: `Page load state: ${state}`,
-        codeLineStart: hasHardMarker ? i : i + 1,
+        codeLineStart: i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;

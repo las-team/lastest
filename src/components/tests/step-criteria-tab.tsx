@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Crosshair, CheckCircle2, ShieldCheck, Variable } from 'lucide-react';
+import { Camera, Crosshair, CheckCircle2, ShieldCheck, Variable } from 'lucide-react';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -131,46 +131,167 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
     });
   };
 
+  // Per-assertion rules live under ASSERTION_STEP_LABEL with kind 'assertion_failed'
+  // and a `params.assertionId`. A legacy entry with no `assertionId` matches any
+  // assertion failure — we keep reading it so old data still works.
+  const hasAssertionRule = (assertionId: string) => {
+    const c = criteria.find(c => c.stepLabel === ASSERTION_STEP_LABEL);
+    return !!c?.rules.some(r => {
+      if (r.kind !== 'assertion_failed') return false;
+      const id = (r.params as { assertionId?: string } | undefined)?.assertionId;
+      return id === assertionId;
+    });
+  };
+
+  const setAssertionRule = (assertionId: string, on: boolean) => {
+    const current = criteria.find(c => c.stepLabel === ASSERTION_STEP_LABEL)?.rules ?? [];
+    const matches = (r: StepRule) =>
+      r.kind === 'assertion_failed'
+      && (r.params as { assertionId?: string } | undefined)?.assertionId === assertionId;
+    const next: StepRule[] = on
+      ? current.some(matches)
+        ? current
+        : [
+            ...current,
+            { kind: 'assertion_failed', severity: 'fail', params: { assertionId } },
+          ]
+      : current.filter(r => !matches(r));
+
+    setCriteria(prev => {
+      const others = prev.filter(c => c.stepLabel !== ASSERTION_STEP_LABEL);
+      return next.length === 0 ? others : [...others, { stepLabel: ASSERTION_STEP_LABEL, rules: next }];
+    });
+
+    startTransition(async () => {
+      try {
+        const { saveStepCriteria } = await import('@/server/actions/tests');
+        await saveStepCriteria(testId, ASSERTION_STEP_LABEL, next);
+      } catch (err) {
+        toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+  };
+
+  // Legacy "fail if any assertion fails" rule — an assertion_failed entry
+  // without a scoped assertionId. We expose it as a single switch so users
+  // who already enabled it can find/disable it after the per-assertion redesign.
+  const hasGlobalAssertionRule = () => {
+    const c = criteria.find(c => c.stepLabel === ASSERTION_STEP_LABEL);
+    return !!c?.rules.some(r => {
+      if (r.kind !== 'assertion_failed') return false;
+      const id = (r.params as { assertionId?: string } | undefined)?.assertionId;
+      return !id;
+    });
+  };
+
+  const setGlobalAssertionRule = (on: boolean) => {
+    const current = criteria.find(c => c.stepLabel === ASSERTION_STEP_LABEL)?.rules ?? [];
+    const isGlobal = (r: StepRule) =>
+      r.kind === 'assertion_failed'
+      && !(r.params as { assertionId?: string } | undefined)?.assertionId;
+    const next: StepRule[] = on
+      ? current.some(isGlobal)
+        ? current
+        : [...current, { kind: 'assertion_failed', severity: 'fail' }]
+      : current.filter(r => !isGlobal(r));
+
+    setCriteria(prev => {
+      const others = prev.filter(c => c.stepLabel !== ASSERTION_STEP_LABEL);
+      return next.length === 0 ? others : [...others, { stepLabel: ASSERTION_STEP_LABEL, rules: next }];
+    });
+
+    startTransition(async () => {
+      try {
+        const { saveStepCriteria } = await import('@/server/actions/tests');
+        await saveStepCriteria(testId, ASSERTION_STEP_LABEL, next);
+      } catch (err) {
+        toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Step Criteria</CardTitle>
+        <CardTitle>Criteria</CardTitle>
         <CardDescription>
           Promote a per-step diff to a hard test failure. Without these rules a
           changed screenshot only flags the build for review.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {labels.map(label => {
-          const focusCount = focusByStep[label] ?? 0;
-          return (
-            <div key={label || '(default)'} className="border rounded-md p-3 space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">
-                  {label || <span className="text-muted-foreground">(default screenshot)</span>}
-                </span>
-                {focusCount > 0 && (
-                  <Badge variant="outline" className="gap-1 border-green-300 text-green-700 bg-green-50 dark:bg-green-950/40 dark:text-green-300 dark:border-green-800">
-                    <Crosshair className="h-3 w-3" />
-                    {focusCount === 1 ? 'Focus region — diff restricted to 1 area' : `Focus regions — diff restricted to ${focusCount} areas`}
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id={`screenshot-changed-${label}`}
-                  checked={hasRule(label, 'screenshot_changed')}
-                  disabled={pending}
-                  onCheckedChange={checked => setRule(label, 'screenshot_changed', !!checked)}
-                />
-                <Label htmlFor={`screenshot-changed-${label}`} className="text-sm font-normal">
-                  Fail if screenshot changed
-                  {focusCount > 0 && <span className="text-muted-foreground"> (inside focus region)</span>}
-                </Label>
-              </div>
+        {/* Always-on baseline rule: an unrunnable test is a failed test. Surfaced
+            here as a read-only row so users see what's already enforced before
+            they start adding optional rules below. */}
+        <div className="border rounded-md p-3 bg-muted/30 flex items-center gap-2">
+          <Checkbox
+            id="all-steps-executed-baseline"
+            checked
+            aria-readonly
+            onClick={(e) => e.preventDefault()}
+            className="cursor-not-allowed"
+          />
+          <Label
+            htmlFor="all-steps-executed-baseline"
+            onClick={(e) => e.preventDefault()}
+            className="text-sm font-normal cursor-not-allowed select-none"
+          >
+            Fail the test if all steps can&apos;t be executed
+            <span className="block text-xs text-muted-foreground">
+              Always enforced — a runtime error before the last step always fails the test.
+            </span>
+          </Label>
+        </div>
+
+        <div className="border rounded-md p-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Camera className="h-4 w-4 text-emerald-600" />
+            <span className="text-sm font-medium">Screenshots</span>
+            <Badge variant="outline" className="text-xs">
+              {labels.length} step{labels.length === 1 ? '' : 's'}
+            </Badge>
+          </div>
+          {labels.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No screenshots captured by this test yet.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {labels.map(label => {
+                const focusCount = focusByStep[label] ?? 0;
+                const inputId = `screenshot-changed-${label || '__default__'}`;
+                return (
+                  <div
+                    key={label || '(default)'}
+                    className="flex items-center gap-2 py-1"
+                  >
+                    <Checkbox
+                      id={inputId}
+                      checked={hasRule(label, 'screenshot_changed')}
+                      disabled={pending}
+                      onCheckedChange={checked => setRule(label, 'screenshot_changed', !!checked)}
+                    />
+                    <Label htmlFor={inputId} className="text-sm font-normal flex items-center gap-2 flex-wrap min-w-0 flex-1">
+                      <span className="truncate">
+                        Fail if{' '}
+                        <span className="font-medium">
+                          {label || <span className="text-muted-foreground">(default screenshot)</span>}
+                        </span>{' '}
+                        changed
+                      </span>
+                      {focusCount > 0 && (
+                        <Badge variant="outline" className="gap-1 border-green-300 text-green-700 bg-green-50 dark:bg-green-950/40 dark:text-green-300 dark:border-green-800">
+                          <Crosshair className="h-3 w-3" />
+                          {focusCount === 1 ? '1 focus region' : `${focusCount} focus regions`}
+                        </Badge>
+                      )}
+                    </Label>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          )}
+        </div>
 
         <div className="border rounded-md p-3 space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -182,38 +303,51 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
           </div>
           {sortedAssertions.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No assertions parsed from this test. Hard assertions (e.g. <code>expect(...)</code>) fail the test automatically; soft assertions do not.
+              No assertions parsed from this test yet. Each <code>expect(...)</code> in the test code becomes an assertion you can promote to a hard failure here.
             </p>
           ) : (
-            <ul className="text-xs space-y-1">
-              {sortedAssertions.map(a => (
-                <li key={a.id} className="flex items-center gap-2 text-muted-foreground">
-                  <CheckCircle2 className={`h-3 w-3 shrink-0 ${a.isSoft ? 'text-amber-500' : 'text-teal-500'}`} />
-                  <span className="truncate">
-                    {a.label || `${a.category}/${a.assertionType}`}
-                  </span>
-                  <span className="ml-auto uppercase text-[10px] tracking-wide shrink-0">
-                    {a.isSoft ? 'soft' : 'hard'}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-1">
+              {sortedAssertions.map(a => {
+                const inputId = `assertion-failed-${a.id}`;
+                return (
+                  <div key={a.id} className="flex items-center gap-2 py-1">
+                    <Checkbox
+                      id={inputId}
+                      checked={hasAssertionRule(a.id)}
+                      disabled={pending}
+                      onCheckedChange={checked => setAssertionRule(a.id, !!checked)}
+                    />
+                    <Label
+                      htmlFor={inputId}
+                      className="text-sm font-normal flex items-center gap-2 flex-wrap min-w-0 flex-1"
+                    >
+                      <CheckCircle2 className="h-3 w-3 shrink-0 text-teal-500" />
+                      <span className="truncate">
+                        Fail if <span className="font-medium">{a.label || `${a.category}/${a.assertionType}`}</span> fails
+                      </span>
+                    </Label>
+                  </div>
+                );
+              })}
+            </div>
           )}
-          <div className="flex items-start gap-2 pt-1 border-t">
-            <Checkbox
-              id="assertion-failed-rule"
-              className="mt-0.5"
-              checked={hasRule(ASSERTION_STEP_LABEL, 'assertion_failed')}
-              disabled={pending}
-              onCheckedChange={checked => setRule(ASSERTION_STEP_LABEL, 'assertion_failed', !!checked)}
-            />
-            <Label htmlFor="assertion-failed-rule" className="text-sm font-normal leading-snug">
-              Fail the test if <em>any</em> assertion fails
-              <span className="block text-xs text-muted-foreground">
-                Hard assertions already fail the test. Enable this to also fail on soft-assertion failures.
-              </span>
-            </Label>
-          </div>
+          {hasGlobalAssertionRule() && (
+            <div className="flex items-start gap-2 pt-2 border-t">
+              <Checkbox
+                id="assertion-failed-any"
+                className="mt-0.5"
+                checked
+                disabled={pending}
+                onCheckedChange={checked => setGlobalAssertionRule(!!checked)}
+              />
+              <Label htmlFor="assertion-failed-any" className="text-sm font-normal leading-snug">
+                Fail the test if <em>any</em> assertion fails
+                <span className="block text-xs text-muted-foreground">
+                  Legacy rule — superseded by per-assertion toggles above. Uncheck to remove.
+                </span>
+              </Label>
+            </div>
+          )}
         </div>
 
         {/* End-of-test variable assertions — duplicate of the Vars tab inputs.

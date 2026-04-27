@@ -89,7 +89,13 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
         : null;
     }
     case 'assertion_failed': {
-      const failed = observations.assertionResults.find(a => a.status === 'failed');
+      // When `params.assertionId` is set the rule is scoped to that specific
+      // assertion (per-assertion toggle in the UI). When unset it matches
+      // any failed assertion (legacy "fail if any assertion fails" rule).
+      const targetId = (rule.params as { assertionId?: string } | undefined)?.assertionId;
+      const failed = targetId
+        ? observations.assertionResults.find(a => a.assertionId === targetId && a.status === 'failed')
+        : observations.assertionResults.find(a => a.status === 'failed');
       return failed
         ? `Assertion ${failed.assertionId} failed: ${failed.errorMessage ?? 'no message'}`
         : null;

@@ -1052,11 +1052,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   // Best effort
                 }
               }}
-              onToggleAssertionSoftness={async (assertionId, makeSoft) => {
-                const { toggleAssertionSoftness } = await import('@/server/actions/tests');
-                await toggleAssertionSoftness(test.id, assertionId, makeSoft);
-                router.refresh();
-              }}
               onStepValueChange={async (lineStart, lineEnd, oldValue, newValue) => {
                 const { updateStepValue } = await import('@/server/actions/tests');
                 await updateStepValue(test.id, lineStart, lineEnd, oldValue, newValue);

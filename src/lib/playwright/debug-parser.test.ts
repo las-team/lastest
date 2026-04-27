@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSteps, extractTestBody, extractEditableValue, type DebugStep } from './debug-parser';
+import { parseSteps, extractTestBody, extractEditableValue, removeInlineLocateWithFallback, removeInlineReplayCursorPath, type DebugStep } from './debug-parser';
 
 function actionStep(code: string): DebugStep {
   return { id: 0, type: 'action', code, label: '', lineStart: 1, lineEnd: 1 };
@@ -189,6 +189,76 @@ describe('extractEditableValue', () => {
       `await locateWithFallback(page, [{"type":"role-name","value":"role=button[name=\\"Save\\"]"}], 'click', null, null);`
     ));
     expect(v).toBeNull();
+  });
+});
+
+describe('removeInlineLocateWithFallback / removeInlineReplayCursorPath line preservation', () => {
+  it('preserves line count when stripping locateWithFallback', () => {
+    const body = [
+      'await page.goto(baseUrl);',
+      'async function locateWithFallback(page, selectors, action) {',
+      '  for (const sel of selectors) {',
+      '    try { return await page.locator(sel.value); } catch {}',
+      '  }',
+      '  throw new Error("not found");',
+      '}',
+      '',
+      'await locateWithFallback(page, [], "click");',
+    ].join('\n');
+
+    const cleaned = removeInlineLocateWithFallback(body);
+    expect(cleaned.split('\n').length).toBe(body.split('\n').length);
+
+    const steps = parseSteps(cleaned);
+    // Last step should be on the same line as in the original body (line 9, 1-based).
+    const last = steps[steps.length - 1];
+    expect(last.lineStart).toBe(9);
+  });
+
+  it('preserves line count when stripping replayCursorPath', () => {
+    const body = [
+      'await page.goto(baseUrl);',
+      'async function replayCursorPath(page, moves) {',
+      '  for (const [x, y] of moves) {',
+      '    await page.mouse.move(x, y);',
+      '  }',
+      '}',
+      '',
+      'await replayCursorPath(page, []);',
+    ].join('\n');
+
+    const cleaned = removeInlineReplayCursorPath(body);
+    expect(cleaned.split('\n').length).toBe(body.split('\n').length);
+
+    const steps = parseSteps(cleaned);
+    const last = steps[steps.length - 1];
+    expect(last.lineStart).toBe(8);
+  });
+
+  it('preserves line count across both strippers chained', () => {
+    const body = [
+      'await page.goto(baseUrl);',
+      'async function locateWithFallback(page, selectors, action) {',
+      '  for (const sel of selectors) {',
+      '    try { return await page.locator(sel.value); } catch {}',
+      '  }',
+      '  throw new Error("not found");',
+      '}',
+      'async function replayCursorPath(page, moves) {',
+      '  for (const [x, y] of moves) {',
+      '    await page.mouse.move(x, y);',
+      '  }',
+      '}',
+      '',
+      'await locateWithFallback(page, [], "click");',
+    ].join('\n');
+
+    const cleaned = removeInlineReplayCursorPath(removeInlineLocateWithFallback(body));
+    expect(cleaned.split('\n').length).toBe(body.split('\n').length);
+
+    const steps = parseSteps(cleaned);
+    const last = steps[steps.length - 1];
+    expect(last.lineStart).toBe(14);
   });
 });
 

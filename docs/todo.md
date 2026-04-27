@@ -17,18 +17,19 @@ Openrouter agent sdk parity
 ## bugs
 area cant be drawn over slider
 ## features
-Maybe workspace list w last 3 workspaces?
-Clear up area desc-spec, test desc-spec duplication
 Onboarding - v1/v3
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well
-
+Default ai, openrouter test
 Merge code and steps?
 Design
 update & implement designs
 Asset management
 mcp-oauth flow
 ## ideas
+Maybe workspace list w last 3 workspaces?
+Clear up area desc-spec, test desc-spec duplication
+
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
