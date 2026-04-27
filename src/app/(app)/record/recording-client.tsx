@@ -83,6 +83,8 @@ interface SetupStepInfo {
   name: string;
 }
 
+type RecordingStep = 'setup' | 'recording' | 'saving';
+
 interface RecordingClientProps {
   areas: FunctionalArea[];
   settings: PlaywrightSettings;
@@ -94,9 +96,8 @@ interface RecordingClientProps {
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
   availableScripts?: { id: string; name: string }[];
+  onStepChange?: (step: RecordingStep) => void;
 }
-
-type RecordingStep = 'setup' | 'recording' | 'saving';
 
 // Check if an action event can be replayed by the runner
 function isActionReplayable(event: RecordingEvent): { replayable: boolean; reason?: 'valid-selectors' | 'coords-only' | 'no-selectors' } {
@@ -376,9 +377,13 @@ export function RecordingClient({
   repositorySetupSteps = [],
   availableTests = [],
   availableScripts = [],
+  onStepChange,
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
+  useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Code2, Compass, FileText, Telescope, Video } from 'lucide-react';
@@ -13,6 +13,8 @@ import { ImportCodePanel } from './panels/import-code-panel';
 
 type TabKey = 'record' | 'explore' | 'auto' | 'spec' | 'import';
 const TAB_KEYS: TabKey[] = ['record', 'explore', 'auto', 'spec', 'import'];
+
+type RecordingStep = 'setup' | 'recording' | 'saving';
 
 interface SetupStepInfo {
   id: string;
@@ -39,6 +41,8 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rerecording = !!props.rerecordTest;
+  const [recordingStep, setRecordingStep] = useState<RecordingStep>('setup');
+  const hideTabBar = recordingStep === 'recording';
 
   const activeTab = useMemo<TabKey>(() => {
     if (rerecording) return 'record';
@@ -70,7 +74,10 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
       onValueChange={handleTabChange}
       className="flex flex-col flex-1 overflow-hidden"
     >
-      <div className="px-6 pt-4 pb-0 shrink-0 flex justify-center">
+      <div
+        className="px-6 pt-4 pb-0 shrink-0 flex justify-center data-[hidden=true]:hidden"
+        data-hidden={hideTabBar}
+      >
         <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
           <TabsTrigger value="record" className={triggerClass}>
             <Video className="h-3.5 w-3.5" />
@@ -107,6 +114,7 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
           repositorySetupSteps={props.repositorySetupSteps}
           availableTests={props.availableTests}
           availableScripts={props.availableScripts}
+          onStepChange={setRecordingStep}
         />
       </TabsContent>
 
