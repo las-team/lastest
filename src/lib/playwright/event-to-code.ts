@@ -83,14 +83,19 @@ export function eventsToCodeLines(
   // (coordinate-only) AND a paired action:click that carries selectors. Tag the
   // down/up pair so the main loop emits only the visual mouse.move and lets
   // locateWithFallback perform the actual click — robust against layout shifts.
+  // Step over cursor-move AND hover-preview: opening a popover/menu mounts new
+  // DOM under the cursor, mouseover fires, and a hover-preview lands between
+  // mouse-up and the click. Without skipping it the chain breaks, the click is
+  // not paired, and event-to-code.ts:180 silently drops it.
+  const isInterstitialEvent = (t: string) => t === 'cursor-move' || t === 'hover-preview';
   for (let i = 0; i < events.length; i++) {
     if (events[i].type !== 'mouse-down') continue;
     let j = i + 1;
-    while (j < events.length && events[j].type === 'cursor-move') j++;
+    while (j < events.length && isInterstitialEvent(events[j].type)) j++;
     if (j >= events.length || events[j].type !== 'mouse-up') continue;
     const mouseUpIdx = j;
     let k = mouseUpIdx + 1;
-    while (k < events.length && events[k].type === 'cursor-move') k++;
+    while (k < events.length && isInterstitialEvent(events[k].type)) k++;
     if (k >= events.length) continue;
     const cand = events[k];
     if (
