@@ -504,23 +504,47 @@ export class EmbeddedTestExecutor {
       // hitting the same target concurrently). Retries at 1s, 2s, 4s = ~7s
       // total; if still failing, throw a tagged error so the upper layer can
       // decide to swap to a fresh EB instead of burning the test.
+      //
+      // ALSO retry on sub-resource failures: page.goto returns success when the
+      // main HTML document loads, but JS bundles / OIDC / API calls happen
+      // afterwards. A bundle that fails with ERR_NETWORK_CHANGED leaves the
+      // app un-mounted → screenshots are pure-white shells. We track transient
+      // failures during the goto window and page.reload() up to twice if any
+      // fired, instead of letting the test run on a half-loaded page.
       const originalGoto = page.goto.bind(page);
       const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+
+      let inGotoWindow = false;
+      let transientResourceFailures = 0;
+      page.on('requestfailed', (req) => {
+        if (!inGotoWindow) return;
+        const failure = req.failure();
+        if (failure && TRANSIENT_NET_RX.test(failure.errorText)) {
+          transientResourceFailures++;
+        }
+      });
+
+      const MAX_RESOURCE_RELOAD_ATTEMPTS = 2;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
         const delays = [1000, 2000, 4000];
         let lastErr: unknown;
+        let response: Awaited<ReturnType<typeof originalGoto>> | null = null;
         for (let attempt = 0; attempt <= delays.length; attempt++) {
           try {
-            const response = await originalGoto(url, options);
+            inGotoWindow = true;
+            transientResourceFailures = 0;
+            response = await originalGoto(url, options);
+            inGotoWindow = false;
             if (attempt > 0) {
               logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
             } else {
               logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
             }
-            return response;
+            break;
           } catch (err) {
+            inGotoWindow = false;
             lastErr = err;
             const msg = err instanceof Error ? err.message : String(err);
             if (!TRANSIENT_NET_RX.test(msg)) throw err;
@@ -529,13 +553,53 @@ export class EmbeddedTestExecutor {
             await new Promise((r) => setTimeout(r, delays[attempt]));
           }
         }
-        // All retries exhausted on a transient error — this EB's network stack
-        // looks unhealthy. Tag the error so the app-side worker releases + re-claims.
-        const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-        const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (tagged as any).__ebNetworkUnhealthy = true;
-        throw tagged;
+        if (!response) {
+          // All goto retries exhausted on a transient error — this EB's network
+          // stack looks unhealthy. Tag the error so the app-side worker
+          // releases + re-claims a fresh EB.
+          const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+          const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+
+        // Sub-resource recovery: goto returned success but transient resource
+        // failures fired during the load → the app likely didn't mount.
+        // Reload up to MAX_RESOURCE_RELOAD_ATTEMPTS times.
+        for (let reloadAttempt = 1; reloadAttempt <= MAX_RESOURCE_RELOAD_ATTEMPTS && transientResourceFailures > 0; reloadAttempt++) {
+          const failures = transientResourceFailures;
+          logFn('warn', `${failures} transient sub-resource failure(s) during navigation — reloading (${reloadAttempt}/${MAX_RESOURCE_RELOAD_ATTEMPTS})`);
+          // Give CNI a moment to settle before reloading.
+          await new Promise((r) => setTimeout(r, 1000 * reloadAttempt));
+          try {
+            inGotoWindow = true;
+            transientResourceFailures = 0;
+            const reloadResp = await page.reload({ waitUntil: options?.waitUntil ?? 'load', timeout: options?.timeout });
+            inGotoWindow = false;
+            logFn('info', `Reload after sub-resource failures: ${reloadResp?.status() ?? 'no response'}; remaining failures=${transientResourceFailures}`);
+            if (reloadResp) response = reloadResp;
+          } catch (err) {
+            inGotoWindow = false;
+            const msg = err instanceof Error ? err.message : String(err);
+            logFn('warn', `Reload after sub-resource failures threw: ${msg}`);
+            if (reloadAttempt === MAX_RESOURCE_RELOAD_ATTEMPTS) {
+              const tagged = new Error(`EB network unhealthy: sub-resources still failing after ${reloadAttempt} reload(s): ${msg}`);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (tagged as any).__ebNetworkUnhealthy = true;
+              throw tagged;
+            }
+          }
+        }
+        if (transientResourceFailures > 0) {
+          // We tried — surface as unhealthy so the dispatcher retries on a
+          // fresh EB rather than letting blank-shell screenshots through.
+          const tagged = new Error(`EB network unhealthy: ${transientResourceFailures} sub-resource failure(s) persisted after ${MAX_RESOURCE_RELOAD_ATTEMPTS} reload(s)`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+        return response;
       };
 
       // Extract function body
