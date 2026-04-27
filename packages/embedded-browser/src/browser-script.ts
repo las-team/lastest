@@ -104,12 +104,6 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   let pointerDownClickRecorded = false;
   let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Browsers fire a synthetic click on a labeled <input type=radio|checkbox>
-  // immediately after the user's click on the wrapping/associated <label>.
-  // We record the label click and want to drop the duplicate.
-  let lastClickAt = 0;
-  let lastClickTarget: HTMLElement | null = null;
-
   // Menu items in Radix DropdownMenu/ContextMenu/Select commit selection on pointerup
   // and unmount via an exit animation, so a `click` event is never synthesized.
   function isMenuLikeTarget(el: HTMLElement | null): boolean {
@@ -210,22 +204,13 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   document.addEventListener('click', (e) => {
     pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
     const rawTarget = e.target as HTMLElement;
-    const now = Date.now();
 
-    // Drop synthesized click on a labeled radio/checkbox that follows the
-    // user's click on the bound <label>. Browsers fire both as separate events.
-    if (rawTarget instanceof HTMLInputElement) {
-      const inputType = (rawTarget.type || '').toLowerCase();
-      if ((inputType === 'radio' || inputType === 'checkbox') && lastClickTarget && now - lastClickAt < 100) {
-        const prevLabel = lastClickTarget.tagName === 'LABEL'
-          ? lastClickTarget
-          : lastClickTarget.closest('label');
-        if (prevLabel) {
-          const labelFor = prevLabel.getAttribute('for');
-          const isAssociated = prevLabel.contains(rawTarget) || (!!labelFor && rawTarget.id === labelFor);
-          if (isAssociated) return;
-        }
-      }
+    // Drop the synthesized click that browsers fire on a labeled <input
+    // type="radio|checkbox"> after the user clicks the bound <label>.
+    // The label-activation click has detail===0; real user clicks have detail>=1.
+    if (e.detail === 0 && rawTarget && rawTarget.tagName === 'INPUT') {
+      const inputType = ((rawTarget as HTMLInputElement).type || '').toLowerCase();
+      if (inputType === 'radio' || inputType === 'checkbox') return;
     }
 
     if (mouseDownState) {
@@ -269,8 +254,6 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     const modifiers = getActiveModifiers();
     // @ts-expect-error - exposed function
     window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
-    lastClickAt = now;
-    lastClickTarget = rawTarget;
   }, true);
 
   document.addEventListener('input', (e) => {

@@ -14,17 +14,18 @@ a11y
 DOM delta
 Create modes
 Openrouter agent sdk parity
+
 ## bugs
 area cant be drawn over slider
 ## features
+Default ai, openrouter test
 Onboarding - v1/v3
+
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well
-Default ai, openrouter test
 Merge code and steps?
 Design
-update & implement designs
-Asset management
+playback event stream
 mcp-oauth flow
 ## ideas
 Maybe workspace list w last 3 workspaces?
