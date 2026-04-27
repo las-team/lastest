@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
@@ -21,11 +21,12 @@ export default function RegisterPage() {
 }
 
 function RegisterForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const rawClaim = searchParams.get('claim');
   const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
-  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/';
+  // Skip `/` — that path forces (app)/layout.tsx (WS bootstrap + 8 providers)
+  // to compile just to redirect to /onboarding. Send new users straight there.
+  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/onboarding';
   const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
 
   const [name, setName] = useState('');
@@ -59,8 +60,11 @@ function RegisterForm() {
         console.error('recordRegistrationConsent failed', err);
       }
 
-      router.push(emailPostAuthUrl);
-      router.refresh();
+      // Hard navigation — RSC swap was racing with router.refresh and the
+      // freshly-set better-auth session cookie wasn't visible to the next
+      // server fetch in some cases. window.location.href avoids both.
+      window.location.href = emailPostAuthUrl;
+      return;
     } finally {
       setLoading(false);
     }

@@ -88,12 +88,20 @@ export function eventsToCodeLines(
   // mouse-up and the click. Without skipping it the chain breaks, the click is
   // not paired, and event-to-code.ts:180 silently drops it.
   const isInterstitialEvent = (t: string) => t === 'cursor-move' || t === 'hover-preview';
+  const PAIR_MAX_PX = 5;
   for (let i = 0; i < events.length; i++) {
     if (events[i].type !== 'mouse-down') continue;
     let j = i + 1;
     while (j < events.length && isInterstitialEvent(events[j].type)) j++;
     if (j >= events.length || events[j].type !== 'mouse-up') continue;
     const mouseUpIdx = j;
+    // Only pair tight click sequences. A drag (down at A, up at B≠A) must
+    // not be suppressed — the page.mouse.down/up calls do the actual drawing.
+    const downCoords = events[i].data.coordinates;
+    const upCoords = events[mouseUpIdx].data.coordinates;
+    if (!downCoords || !upCoords) continue;
+    if (Math.abs(downCoords.x - upCoords.x) > PAIR_MAX_PX
+      || Math.abs(downCoords.y - upCoords.y) > PAIR_MAX_PX) continue;
     let k = mouseUpIdx + 1;
     while (k < events.length && isInterstitialEvent(events[k].type)) k++;
     if (k >= events.length) continue;
@@ -125,6 +133,12 @@ export function eventsToCodeLines(
   let lastCursorY = 360;
   let nextClickIsDownload = false;
   let insideDownloadMouseWrap = false;
+  // Track the most recent unsuppressed mouse-down coords so we can decide
+  // whether the following mouse-up is a tight click pair (skip subsequent
+  // click action — pointer gesture already covers it) versus a drag end /
+  // orphan mouse-up (don't skip — the next click is unrelated).
+  let lastMouseDownCoords: { x: number; y: number } | null = null;
+  const TIGHT_PAIR_PX = 5;
 
   const flushCursorBatch = () => {
     if (cursorBatch.length > 0 && includeCursorReplay) {
@@ -372,6 +386,7 @@ export function eventsToCodeLines(
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
       if (!suppressed) {
         lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
+        lastMouseDownCoords = { x, y };
       }
       lastEmittedEventType = suppressed ? 'mouse-down-suppressed' : 'mouse-down';
     } else if (event.type === 'mouse-up' && event.data.coordinates) {
@@ -394,7 +409,22 @@ export function eventsToCodeLines(
         lines.push(`${indent}});`);
         insideDownloadMouseWrap = false;
       }
-      lastEmittedEventType = suppressed ? 'mouse-up-suppressed' : 'mouse-up';
+      // A mouse-up only counts as a "tight click pair" (skip the next click as
+      // a duplicate) if it was preceded by an unsuppressed mouse-down at
+      // (nearly) the same coords. Drag ends and orphan mouse-ups must NOT
+      // suppress an unrelated subsequent click.
+      let upState: string;
+      if (suppressed) {
+        upState = 'mouse-up-suppressed';
+      } else if (lastMouseDownCoords
+        && Math.abs(lastMouseDownCoords.x - x) <= TIGHT_PAIR_PX
+        && Math.abs(lastMouseDownCoords.y - y) <= TIGHT_PAIR_PX) {
+        upState = 'mouse-up';
+      } else {
+        upState = 'mouse-up-loose';
+      }
+      lastEmittedEventType = upState;
+      lastMouseDownCoords = null;
     } else if (event.type === 'keypress' && event.data.key) {
       const { key, modifiers } = event.data;
       if (modifiers && modifiers.length > 0) {

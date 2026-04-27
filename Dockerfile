@@ -41,12 +41,16 @@ COPY . .
 # Git info (passed via --build-arg since .git is excluded)
 ARG GIT_HASH=unknown
 ARG GIT_COMMIT_COUNT=0
+# Stable key so Server Action IDs survive rebuilds (otherwise Next.js mints a
+# random key per build and every redeploy invalidates open tabs).
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=""
 
 # Set production environment for build
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
 ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 # Dummy secret for build-time page data collection (overridden at runtime)
 ENV BETTER_AUTH_SECRET=build-time-placeholder
 
@@ -177,8 +181,10 @@ RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs 
     chown -R nextjs:nodejs /app
 
 # Environment configuration
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=""
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 # DATABASE_URL must be injected by the deployment — no default. Missing env is fatal at boot.
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0

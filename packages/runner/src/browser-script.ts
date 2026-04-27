@@ -118,6 +118,13 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       const role = current.getAttribute('role');
       if (role && INTERACTIVE.has(role)) return current;
       if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+      if (current.tagName === 'LABEL') {
+        const labelFor = current.getAttribute('for');
+        let labeledControl: HTMLElement | null = null;
+        if (labelFor) labeledControl = document.getElementById(labelFor);
+        if (!labeledControl) labeledControl = current.querySelector('input, select, textarea, button');
+        if (labeledControl) return labeledControl as HTMLElement;
+      }
       if (current.dataset.testid) return current;
       if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
       current = current.parentElement;
@@ -205,7 +212,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
-    const target = rawTarget;
+    const target = findBestTarget(rawTarget);
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };

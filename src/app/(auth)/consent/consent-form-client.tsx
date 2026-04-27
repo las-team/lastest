@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { recordRegistrationConsent } from '@/server/actions/consent';
 
-export function ConsentFormClient() {
+export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +18,7 @@ export function ConsentFormClient() {
     } catch (err) {
       console.error('recordRegistrationConsent failed', err);
     }
-    window.location.href = '/';
+    window.location.href = nextUrl;
   }
 
   return (

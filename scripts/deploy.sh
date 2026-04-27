@@ -124,6 +124,7 @@ build_app() {
     -t "$IMAGE_APP:$VERSION" \
     --build-arg GIT_HASH="$GIT_HASH" \
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:latest"
 }
@@ -155,11 +156,15 @@ build_images() {
 }
 
 build_olares() {
+  if [ -z "${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}" ]; then
+    err "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY not set in .env.local — required for stable Server Action IDs across deploys"
+  fi
   log "Building $IMAGE_APP:olares (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
   docker build \
     -t "$IMAGE_APP:olares" \
     --build-arg GIT_HASH="$GIT_HASH" \
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:olares"
 

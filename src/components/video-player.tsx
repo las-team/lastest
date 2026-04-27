@@ -309,6 +309,23 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     return () => ro.disconnect();
   }, []);
 
+  const seekFromClientX = useCallback(
+    (clientX: number): number | null => {
+      const v = videoRef.current;
+      if (!v) return null;
+      const rect = scrubberRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return null;
+      const dur = Number.isFinite(v.duration) ? v.duration : duration;
+      if (!dur || dur <= 0) return null;
+      const x = clamp(clientX - rect.left, 0, rect.width);
+      const t = (x / rect.width) * dur;
+      v.currentTime = t;
+      setCurrentTime(t);
+      return t;
+    },
+    [duration],
+  );
+
   const onScrubberPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (!duration) return;
@@ -318,6 +335,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       const t = (x / rect.width) * duration;
       setHoverPreview((prev) => ({ x, time: t, ready: prev?.ready ?? false }));
       latestPreviewTimeRef.current = t;
+      if (isScrubbing) {
+        const v = videoRef.current;
+        if (v) {
+          v.currentTime = t;
+          setCurrentTime(t);
+        }
+      }
       if (previewSeekRafRef.current == null) {
         previewSeekRafRef.current = window.requestAnimationFrame(() => {
           previewSeekRafRef.current = null;
@@ -332,7 +356,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         });
       }
     },
-    [duration],
+    [duration, isScrubbing],
   );
 
   const onScrubberPointerLeave = useCallback(() => {
@@ -344,14 +368,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     }
   }, []);
 
-  const onScrubberPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    const v = videoRef.current;
-    if (!v) return;
-    wasPlayingBeforeScrubRef.current = !v.paused;
-    if (!v.paused) v.pause();
-    setIsScrubbing(true);
-  }, []);
+  const onScrubberPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const v = videoRef.current;
+      if (!v) return;
+      wasPlayingBeforeScrubRef.current = !v.paused;
+      if (!v.paused) v.pause();
+      setIsScrubbing(true);
+      seekFromClientX(e.clientX);
+    },
+    [seekFromClientX],
+  );
 
   useEffect(() => {
     if (!isScrubbing) return;
