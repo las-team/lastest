@@ -1,13 +1,22 @@
-const GITLAB_CLIENT_ID = process.env.GITLAB_CLIENT_ID || '';
-const GITLAB_CLIENT_SECRET = process.env.GITLAB_CLIENT_SECRET || '';
+// Env vars are last-resort fallbacks for the gitlab.com SaaS flow only.
+// Self-hosted instances pass their own clientId/clientSecret/instanceUrl per-call.
+const ENV_GITLAB_CLIENT_ID = process.env.GITLAB_CLIENT_ID || '';
+const ENV_GITLAB_CLIENT_SECRET = process.env.GITLAB_CLIENT_SECRET || '';
 const GITLAB_REDIRECT_URI = process.env.GITLAB_REDIRECT_URI || 'http://localhost:3000/api/connect/gitlab/callback';
 const DEFAULT_GITLAB_INSTANCE = process.env.GITLAB_INSTANCE_URL || 'https://gitlab.com';
 
-export function getGitLabAuthUrl(state?: string, instanceUrl?: string): string {
-  const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
+export interface GitlabOAuthOptions {
+  instanceUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  redirectUri?: string;
+}
+
+export function getGitLabAuthUrl(state?: string, opts?: GitlabOAuthOptions): string {
+  const baseUrl = opts?.instanceUrl || DEFAULT_GITLAB_INSTANCE;
   const params = new URLSearchParams({
-    client_id: GITLAB_CLIENT_ID,
-    redirect_uri: GITLAB_REDIRECT_URI,
+    client_id: opts?.clientId || ENV_GITLAB_CLIENT_ID,
+    redirect_uri: opts?.redirectUri || GITLAB_REDIRECT_URI,
     response_type: 'code',
     scope: 'api read_user read_repository',
     state: state || crypto.randomUUID(),
@@ -16,14 +25,14 @@ export function getGitLabAuthUrl(state?: string, instanceUrl?: string): string {
   return `${baseUrl}/oauth/authorize?${params.toString()}`;
 }
 
-export async function exchangeCodeForToken(code: string, instanceUrl?: string): Promise<{
+export async function exchangeCodeForToken(code: string, opts?: GitlabOAuthOptions): Promise<{
   access_token: string;
   token_type: string;
   refresh_token?: string;
   expires_in?: number;
   created_at?: number;
 } | null> {
-  const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
+  const baseUrl = opts?.instanceUrl || DEFAULT_GITLAB_INSTANCE;
 
   try {
     const response = await fetch(`${baseUrl}/oauth/token`, {
@@ -32,11 +41,11 @@ export async function exchangeCodeForToken(code: string, instanceUrl?: string): 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        client_id: GITLAB_CLIENT_ID,
-        client_secret: GITLAB_CLIENT_SECRET,
+        client_id: opts?.clientId || ENV_GITLAB_CLIENT_ID,
+        client_secret: opts?.clientSecret || ENV_GITLAB_CLIENT_SECRET,
         code,
         grant_type: 'authorization_code',
-        redirect_uri: GITLAB_REDIRECT_URI,
+        redirect_uri: opts?.redirectUri || GITLAB_REDIRECT_URI,
       }),
     });
 
@@ -48,14 +57,14 @@ export async function exchangeCodeForToken(code: string, instanceUrl?: string): 
   }
 }
 
-export async function refreshAccessToken(refreshToken: string, instanceUrl?: string): Promise<{
+export async function refreshAccessToken(refreshToken: string, opts?: GitlabOAuthOptions): Promise<{
   access_token: string;
   token_type: string;
   refresh_token?: string;
   expires_in?: number;
   created_at?: number;
 } | null> {
-  const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
+  const baseUrl = opts?.instanceUrl || DEFAULT_GITLAB_INSTANCE;
 
   try {
     const response = await fetch(`${baseUrl}/oauth/token`, {
@@ -64,8 +73,8 @@ export async function refreshAccessToken(refreshToken: string, instanceUrl?: str
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        client_id: GITLAB_CLIENT_ID,
-        client_secret: GITLAB_CLIENT_SECRET,
+        client_id: opts?.clientId || ENV_GITLAB_CLIENT_ID,
+        client_secret: opts?.clientSecret || ENV_GITLAB_CLIENT_SECRET,
         refresh_token: refreshToken,
         grant_type: 'refresh_token',
       }),
@@ -79,13 +88,15 @@ export async function refreshAccessToken(refreshToken: string, instanceUrl?: str
   }
 }
 
-export async function getGitLabUser(accessToken: string, instanceUrl?: string): Promise<{
+export interface GitLabUser {
   id: number;
   username: string;
   name: string | null;
   email: string | null;
   avatar_url: string;
-} | null> {
+}
+
+export async function getGitLabUser(accessToken: string, instanceUrl?: string): Promise<GitLabUser | null> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
 
   try {
@@ -101,6 +112,14 @@ export async function getGitLabUser(accessToken: string, instanceUrl?: string): 
   } catch {
     return null;
   }
+}
+
+/**
+ * Validate a Personal Access Token by fetching the authenticated user.
+ * Used by the self-hosted PAT connect path — no OAuth dance.
+ */
+export async function validatePatToken(pat: string, instanceUrl: string): Promise<GitLabUser | null> {
+  return getGitLabUser(pat, instanceUrl);
 }
 
 export interface GitLabProject {
@@ -205,4 +224,8 @@ export async function getOpenMRsForBranch(
 
 export function getDefaultInstanceUrl(): string {
   return DEFAULT_GITLAB_INSTANCE;
+}
+
+export function getDefaultRedirectUri(): string {
+  return GITLAB_REDIRECT_URI;
 }

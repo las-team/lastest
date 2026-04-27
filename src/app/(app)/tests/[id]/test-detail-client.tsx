@@ -1083,7 +1083,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);
-                router.refresh();
+                // Refetch the parent's cached test detail. `router.refresh()`
+                // alone won't help here — this view is hydrated from a client
+                // server-action call that's not driven by server-component
+                // rendering, so the cache lives in `definition-page-client`'s
+                // `openTestDetailData` state.
+                if (onRefresh) await onRefresh(); else router.refresh();
+              }}
+              onMutated={async () => {
+                if (onRefresh) await onRefresh(); else router.refresh();
               }}
             />
           </TabsContent>
@@ -1100,7 +1108,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);
-                router.refresh();
+                if (onRefresh) await onRefresh(); else router.refresh();
               }}
             />
           </TabsContent>

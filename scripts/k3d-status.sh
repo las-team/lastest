@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick status dump for the local k3d stack.
+# Quick status dump for the local k3d EB cluster.
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-lastest}"
@@ -15,17 +15,13 @@ else
 fi
 
 echo ""
-echo "=== workloads ==="
-kubectl -n "${NAMESPACE}" get deploy,svc -o wide 2>/dev/null
-
-echo ""
 echo "=== EB jobs / pods ==="
 kubectl -n "${NAMESPACE}" get jobs,pods -l app=lastest-eb 2>/dev/null \
   || echo "(none yet)"
 
 echo ""
-echo "=== app readiness ==="
+echo "=== host app readiness ==="
 if curl -fsS -o /dev/null -w "  /api/health -> %{http_code} (%{time_total}s)\n" \
      http://localhost:3000/api/health; then :; else
-  echo "  app unreachable at http://localhost:3000"
+  echo "  host app unreachable at http://localhost:3000 — start it with 'pnpm dev'"
 fi

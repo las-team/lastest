@@ -25,6 +25,10 @@ interface StepCriteriaTabProps {
   assertions: TestAssertion[] | null;
   variables?: TestVariable[] | null;
   onSaveVariables?: (next: TestVariable[]) => Promise<void>;
+  // Called after a successful save so the parent can refetch its cached test
+  // data — without this the parent's `stepCriteria` prop stays stale and
+  // the user has to F5 to see persisted state.
+  onMutated?: () => void | Promise<void>;
 }
 
 // Assertion criteria are test-level (not tied to a screenshot step), so they
@@ -47,14 +51,25 @@ function collectStepLabels(
   for (const s of screenshots ?? []) labels.add(s.label ?? '');
   for (const c of stepCriteria ?? []) labels.add(c.stepLabel);
   if (labels.size === 0) labels.add('');
-  return Array.from(labels);
+  // Natural sort so "Step 2" comes before "Step 10" (default lexicographic
+  // sort would give Step 1, Step 10, Step 2 …). Empty label sorts first.
+  return Array.from(labels).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }),
+  );
 }
 
-export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions, variables, onSaveVariables }: StepCriteriaTabProps) {
+export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions, variables, onSaveVariables, onMutated }: StepCriteriaTabProps) {
   const [criteria, setCriteria] = useState<StepCriterion[]>(stepCriteria ?? []);
   const [pending, startTransition] = useTransition();
   const [varDraft, setVarDraft] = useState<TestVariable[]>(variables ?? []);
   const [varSaving, setVarSaving] = useState(false);
+
+  // Sync local state when the parent re-fetches and hands us new criteria.
+  // Without this, optimistic local state survives a parent refresh and the
+  // tab can drift from server truth on remount.
+  useEffect(() => {
+    setCriteria(stepCriteria ?? []);
+  }, [stepCriteria]);
 
   // Sync local draft when external variables change
   useEffect(() => {
@@ -130,6 +145,7 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
       try {
         const { saveStepCriteria } = await import('@/server/actions/tests');
         await saveStepCriteria(testId, stepLabel, next);
+        await onMutated?.();
       } catch (err) {
         toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -171,6 +187,7 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
       try {
         const { saveStepCriteria } = await import('@/server/actions/tests');
         await saveStepCriteria(testId, ASSERTION_STEP_LABEL, next);
+        await onMutated?.();
       } catch (err) {
         toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -205,6 +222,7 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
       try {
         const { saveStepCriteria } = await import('@/server/actions/tests');
         await saveStepCriteria(testId, ALL_STEPS_EXECUTED_LABEL, next);
+        await onMutated?.();
       } catch (err) {
         toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -243,6 +261,7 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
       try {
         const { saveStepCriteria } = await import('@/server/actions/tests');
         await saveStepCriteria(testId, ASSERTION_STEP_LABEL, next);
+        await onMutated?.();
       } catch (err) {
         toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
       }

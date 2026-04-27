@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tear down the local k3d cluster. Keeps .k8s-secrets.yaml by default
-# (pass --purge to remove it too).
+# Tear down the local k3d cluster.
+# `--purge` also removes any stale .k8s-secrets.yaml left over from older
+# revisions of this stack (no longer generated, but harmless to clean up).
 set -euo pipefail
 
 CLUSTER_NAME="${CLUSTER_NAME:-lastest}"
@@ -10,7 +11,7 @@ for arg in "$@"; do
     --purge) PURGE=1 ;;
     -h|--help)
       echo "Usage: $0 [--purge]"
-      echo "  --purge  also delete .k8s-secrets.yaml"
+      echo "  --purge  also delete any stale .k8s-secrets.yaml"
       exit 0
       ;;
   esac
@@ -25,5 +26,5 @@ fi
 
 if [ "$PURGE" = 1 ] && [ -f .k8s-secrets.yaml ]; then
   rm -f .k8s-secrets.yaml
-  echo "==> Removed .k8s-secrets.yaml"
+  echo "==> Removed stale .k8s-secrets.yaml"
 fi

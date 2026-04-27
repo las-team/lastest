@@ -1,8 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { getCurrentSession } from '@/lib/auth';
 import { exchangeCodeForToken, getGitLabUser, getDefaultInstanceUrl } from '@/lib/gitlab/oauth';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
+
+const GITLAB_OAUTH_STATE_COOKIE = 'gitlab_oauth_state';
+
+interface OAuthStatePayload {
+  state: string;
+  instanceUrl: string;
+  clientId?: string;
+  clientSecret?: string;
+}
+
+async function readStateCookie(): Promise<OAuthStatePayload | null> {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(GITLAB_OAUTH_STATE_COOKIE)?.value;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as OAuthStatePayload;
+    if (!parsed.state || !parsed.instanceUrl) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function clearStateCookie() {
+  const cookieStore = await cookies();
+  cookieStore.delete(GITLAB_OAUTH_STATE_COOKIE);
+}
 
 export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
@@ -13,23 +41,39 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
-  const instanceUrl = getDefaultInstanceUrl();
+  const stateParam = searchParams.get('state');
 
   if (error) {
+    await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=gitlab_auth_denied', getPublicUrl(request)));
   }
 
   if (!code) {
+    await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
   }
 
-  const tokenResponse = await exchangeCodeForToken(code, instanceUrl);
+  // Recover per-instance creds. Fall back to env defaults for the gitlab.com flow.
+  const stateRecord = await readStateCookie();
+  const instanceUrl = stateRecord?.instanceUrl || getDefaultInstanceUrl();
+  if (stateRecord && stateParam && stateRecord.state !== stateParam) {
+    await clearStateCookie();
+    return NextResponse.redirect(new URL('/settings?error=state_mismatch', getPublicUrl(request)));
+  }
+
+  const tokenResponse = await exchangeCodeForToken(code, {
+    instanceUrl,
+    clientId: stateRecord?.clientId,
+    clientSecret: stateRecord?.clientSecret,
+  });
   if (!tokenResponse) {
+    await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=token_exchange_failed', getPublicUrl(request)));
   }
 
   const gitlabUser = await getGitLabUser(tokenResponse.access_token, instanceUrl);
   if (!gitlabUser) {
+    await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=user_fetch_failed', getPublicUrl(request)));
   }
 
@@ -39,6 +83,7 @@ export async function GET(request: NextRequest) {
 
   const teamId = session.user.teamId;
   if (!teamId) {
+    await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=no_team', getPublicUrl(request)));
   }
 
@@ -51,6 +96,9 @@ export async function GET(request: NextRequest) {
       gitlabUserId: gitlabUser.id.toString(),
       gitlabUsername: gitlabUser.username,
       instanceUrl,
+      authMethod: 'oauth',
+      oauthClientId: stateRecord?.clientId ?? null,
+      oauthClientSecret: stateRecord?.clientSecret ?? null,
     });
   } else {
     await queries.createGitlabAccount({
@@ -61,8 +109,13 @@ export async function GET(request: NextRequest) {
       refreshToken: tokenResponse.refresh_token,
       tokenExpiresAt,
       instanceUrl,
+      authMethod: 'oauth',
+      oauthClientId: stateRecord?.clientId ?? null,
+      oauthClientSecret: stateRecord?.clientSecret ?? null,
     });
   }
+
+  await clearStateCookie();
 
   // Auto-sync repos so the sidebar is populated immediately
   try {

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 
 export type ScreenshotViewerMode = 'captured' | 'plan' | 'baseline' | 'diff';
 
@@ -105,10 +105,50 @@ export function ScreenshotViewer({
         draggable={false}
       />
 
-      {/* Mode label — shows which view the user is currently looking at. */}
-      <div className="absolute top-4 left-4 px-3 py-1.5 rounded-md bg-white/10 backdrop-blur text-white text-xs font-medium select-none">
-        {MODE_LABEL[mode]}
-      </div>
+      {/* Mode label — clickable badge that cycles through available views.
+          Disabled (non-button) when only the captured image is available. */}
+      {hasAnyAlternate ? (
+        <button
+          type="button"
+          className="absolute top-4 left-4 px-3 py-1.5 rounded-md bg-white/10 backdrop-blur hover:bg-white/20 text-white text-xs font-medium select-none transition-colors"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCycleMode();
+          }}
+          title="Click or press Space to cycle views"
+        >
+          {MODE_LABEL[mode]}
+        </button>
+      ) : (
+        <div className="absolute top-4 left-4 px-3 py-1.5 rounded-md bg-white/10 backdrop-blur text-white text-xs font-medium select-none">
+          {MODE_LABEL[mode]}
+        </div>
+      )}
+
+      {/* Infobox — explains the diff/baseline/plan modes available in the
+          gallery. Placed bottom-left so it doesn't fight the prev/next arrows. */}
+      {hasAnyAlternate && (
+        <div
+          className="absolute bottom-6 left-6 max-w-xs flex items-start gap-2 rounded-md bg-white/10 backdrop-blur px-3 py-2 text-white"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+          <p className="text-xs leading-snug">
+            {diffSrc && (
+              <>This step has a baseline — the viewer opened on the <span className="font-medium">diff</span> so you can see what changed. </>
+            )}
+            Click the badge top-left or press{' '}
+            <kbd className="px-1 py-0.5 rounded bg-white/20 font-mono text-[10px]">Space</kbd>{' '}
+            to cycle through{' '}
+            {[
+              diffSrc ? 'diff' : null,
+              baselineSrc ? 'baseline' : null,
+              planSrc ? 'plan' : null,
+              'captured',
+            ].filter(Boolean).join(' → ')}.
+          </p>
+        </div>
+      )}
 
       <button
         type="button"
@@ -150,18 +190,6 @@ export function ScreenshotViewer({
         </button>
       )}
 
-      {hasAnyAlternate && (
-        <button
-          type="button"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCycleMode();
-          }}
-        >
-          Cycle view (Space)
-        </button>
-      )}
     </div>,
     document.body,
   );

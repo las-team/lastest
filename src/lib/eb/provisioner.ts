@@ -11,7 +11,7 @@
  *     deleted (subject to a small idle-TTL to absorb back-to-back tests).
  *
  * Controlled via env (deployment topology / infra):
- *   EB_PROVISIONER     = 'kubernetes' | 'compose' | 'none'    (default: 'none')
+ *   EB_PROVISIONER     = 'kubernetes' | 'none'    (default: 'none')
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
  *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
@@ -38,11 +38,11 @@ import { and, eq, ne } from 'drizzle-orm';
 
 const SA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount';
 
-type Mode = 'kubernetes' | 'compose' | 'none';
+type Mode = 'kubernetes' | 'none';
 
 function provisionerMode(): Mode {
   const m = (process.env.EB_PROVISIONER || 'none').toLowerCase();
-  if (m === 'kubernetes' || m === 'compose') return m;
+  if (m === 'kubernetes') return m;
   return 'none';
 }
 

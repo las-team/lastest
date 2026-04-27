@@ -223,24 +223,7 @@ Create tests (one-time)          Run tests (forever, $0)
 
 ## Quick Start
 
-### Option 1: Docker (recommended)
-
-```bash
-git clone https://github.com/las-team/lastest.git
-cd lastest
-export BETTER_AUTH_SECRET=$(openssl rand -hex 32)
-export SYSTEM_EB_TOKEN=$(openssl rand -hex 32)
-docker compose up -d --build
-```
-
-This spins up three services:
-- **lastest** — the Next.js backend on [http://localhost:3000](http://localhost:3000)
-- **postgres** — PostgreSQL 17 database
-- **embedded-browser** — containerized Chromium with CDP live streaming (ports 9223/9224)
-
-`SYSTEM_EB_TOKEN` is shared between the backend and the embedded browser so the backend trusts the instance. `BETTER_AUTH_SECRET` is required for session signing.
-
-### Option 2: From source
+### Option 1: From source (recommended for development)
 
 ```bash
 git clone https://github.com/las-team/lastest.git
@@ -253,20 +236,31 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-### Option 3: Local k3s (exercises dynamic EB provisioning)
+### Option 2: Local k3s for dynamic Embedded Browsers
 
-Runs the exact Kubernetes-provisioned flow on a local k3d cluster — the app spawns fresh embedded-browser pods on demand via the kube API.
+Runs the dynamic EB provisioning flow against a local k3d cluster. The Next.js app stays on the host (`pnpm dev`); the cluster only hosts the short-lived EB Job pods that the host provisioner creates on demand via your kubeconfig.
 
 ```bash
-pnpm stack           # build images, create k3d cluster, deploy, ready
-                     # open http://localhost:3000
-pnpm stack:refresh   # rebuild app, rolling restart
-pnpm stack:status    # health + pod summary
-pnpm stack:logs eb   # tail all EB pods
-pnpm stack:stop      # teardown (add :purge to also drop generated secrets)
+pnpm stack           # create k3d cluster, build + import the EB image
+pnpm dev             # start the host app (separate terminal)
+pnpm stack:status    # cluster + EB jobs + host /api/health
+pnpm stack:logs      # tail all EB pods
+pnpm stack:refresh   # rebuild the EB image after editing packages/embedded-browser
+pnpm stack:stop      # delete the cluster
 ```
 
-Prereqs: `docker`, `k3d` ≥ 5.6, `kubectl`, `pnpm`, `openssl`. OAuth / email / CRM keys from `.env.local` are auto-merged into the k8s Secret. See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts).
+Required `.env.local` keys:
+
+```
+EB_PROVISIONER=kubernetes
+EB_NAMESPACE=lastest
+EB_IMAGE=lastest-embedded-browser:latest
+LASTEST_URL=http://host.k3d.internal:3000
+SYSTEM_EB_TOKEN=<openssl rand -hex 32>
+DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest
+```
+
+Prereqs: `docker`, `k3d` ≥ 5.6, `kubectl`, `pnpm`, `openssl`. See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts).
 
 ### First steps
 
@@ -400,14 +394,13 @@ pnpm db:reset     # Reset database (drops all tables + removes screenshots/basel
 pnpm db:seed      # Seed test data
 pnpm test:visual  # Run visual tests via CLI (see below)
 
-# Local k3s stack (dynamic EB provisioning on k3d)
-pnpm stack              # bootstrap: build + create cluster + deploy
-pnpm stack:stop         # teardown cluster (pnpm stack:purge also drops .k8s-secrets.yaml)
-pnpm stack:refresh      # rebuild app image + rolling restart
-pnpm stack:refresh:eb   # rebuild EB image + restart app so new Jobs use it
-pnpm stack:refresh:all  # EB then app
-pnpm stack:status       # cluster + workloads + /api/health
-pnpm stack:logs         # tail app pod (variants: :eb, :all)
+# Local k3d cluster — hosts dynamically-provisioned EB Job pods (no app, no db)
+pnpm stack              # create cluster + build/import EB image
+pnpm stack:refresh      # rebuild + import EB image (alias of stack:refresh:eb)
+pnpm stack:refresh:eb   # same
+pnpm stack:status       # cluster + EB jobs/pods + host /api/health
+pnpm stack:logs         # tail EB pod logs
+pnpm stack:stop         # delete cluster
 ```
 
 ---
@@ -494,42 +487,11 @@ This dramatically reduces test time for large suites while maintaining coverage 
 
 ---
 
-## Docker Deployment
+## Self-Hosted Deployment
 
-Deploy Lastest on your home server or any Docker host:
+The first-party deploy targets are homeservers — `pnpm deploy:zima` (ZimaBoard / CasaOS via SSH + docker compose) and `pnpm deploy:olares` (Olares via SSH + kubectl). Both build the production image from `Dockerfile` (multi-stage, Playwright base image, non-root, `GET /api/health`).
 
-```bash
-# Quick start (backend + postgres + embedded browser)
-docker compose up -d --build
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
-```
-
-Uses the official Playwright base image (`mcr.microsoft.com/playwright`) with Node.js 20, multi-stage build, and health checks via `GET /api/health`. Runs as non-root user.
-
-### Volumes
-
-| Volume | Purpose |
-|--------|---------|
-| `lastest-pgdata` | PostgreSQL data |
-| `lastest-storage` | Screenshots, baselines, diffs, traces |
-| `lastest-claude-auth` | Claude CLI auth state (optional AI features) |
-
-### Environment Variables for Docker
-
-```bash
-POSTGRES_PASSWORD=your-secure-password
-BETTER_AUTH_SECRET=your-auth-secret          # required
-SYSTEM_EB_TOKEN=your-embedded-browser-token  # required for embedded-browser service
-GITHUB_CLIENT_ID=your-github-app-id
-GITHUB_CLIENT_SECRET=your-github-app-secret
-```
-
-A development compose file (`docker-compose.dev.yml`) is also available.
+Required environment for any self-hosted run: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN`. OAuth secrets (`GITHUB_CLIENT_ID`, `GOOGLE_CLIENT_ID`, …) are optional.
 
 ---
 

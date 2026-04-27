@@ -1,7 +1,5 @@
 import type { BuildStatus } from '@/lib/db/schema';
 
-const DEFAULT_GITLAB_INSTANCE = process.env.GITLAB_INSTANCE_URL || 'https://gitlab.com';
-
 export interface MRCommentData {
   buildId: string;
   status: BuildStatus;
@@ -14,16 +12,17 @@ export interface MRCommentData {
 }
 
 /**
- * Post or update a MR note (comment) with build results
+ * Post or update a MR note (comment) with build results.
+ * `instanceUrl` is required — pass the value from `gitlab_accounts.instanceUrl`.
  */
 export async function postMRComment(
   accessToken: string,
   projectId: number,
   mrIid: number,
   data: MRCommentData,
-  instanceUrl?: string
+  instanceUrl: string,
 ): Promise<{ success: boolean; noteId?: number; error?: string }> {
-  const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
+  const baseUrl = instanceUrl.replace(/\/+$/, '');
   const statusEmoji = getStatusEmoji(data.status);
   const statusText = getStatusText(data.status);
 
@@ -39,11 +38,9 @@ export async function postMRComment(
 *Posted by Lastest Visual Regression*`;
 
   try {
-    // First, try to find an existing note from our bot
-    const existingNoteId = await findExistingNote(accessToken, projectId, mrIid, instanceUrl);
+    const existingNoteId = await findExistingNote(accessToken, projectId, mrIid, baseUrl);
 
     if (existingNoteId) {
-      // Update existing note
       const response = await fetch(
         `${baseUrl}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes/${existingNoteId}`,
         {
@@ -64,7 +61,6 @@ export async function postMRComment(
       return { success: true, noteId: existingNoteId };
     }
 
-    // Create new note
     const response = await fetch(
       `${baseUrl}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`,
       {
@@ -92,17 +88,12 @@ export async function postMRComment(
   }
 }
 
-/**
- * Find an existing note from our bot on a MR
- */
 async function findExistingNote(
   accessToken: string,
   projectId: number,
   mrIid: number,
-  instanceUrl?: string
+  baseUrl: string,
 ): Promise<number | null> {
-  const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
-
   try {
     const response = await fetch(
       `${baseUrl}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`,
@@ -129,13 +120,13 @@ async function findExistingNote(
 function getStatusEmoji(status: BuildStatus): string {
   switch (status) {
     case 'safe_to_merge':
-      return '\u2705'; // checkmark
+      return '✅';
     case 'review_required':
-      return '\u26A0\uFE0F'; // warning
+      return '⚠️';
     case 'blocked':
-      return '\u274C'; // x
+      return '❌';
     default:
-      return '\uD83D\uDCCB'; // clipboard
+      return '📋';
   }
 }
 

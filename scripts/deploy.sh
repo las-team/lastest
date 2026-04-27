@@ -2,7 +2,7 @@
 # Master deploy script for Lastest
 # Usage: deploy.sh <target> [options]
 #
-# Targets: local, eb, zima, olares, npm, all
+# Targets: zima, olares, npm, all
 # Options:
 #   --skip-checks    Skip lint/test before deploy
 #   --app-only       Only build/deploy main app image (skip EB)
@@ -178,24 +178,6 @@ build_olares() {
 }
 
 # --- Targets ---
-deploy_local() {
-  log "Deploying embedded browsers (local dev)"
-  docker compose -f docker-compose.eb.yml up -d --build
-  sleep 3
-  ok "EB containers started"
-  echo "  eb-1: http://localhost:9224/health"
-  echo "  eb-2: http://localhost:9226/health"
-}
-
-deploy_eb() {
-  log "Deploying embedded browsers (local dev)"
-  docker compose -f docker-compose.eb.yml up -d --build
-  sleep 3
-  ok "EB containers started"
-  echo "  eb-1: http://localhost:9224/health"
-  echo "  eb-2: http://localhost:9226/health"
-}
-
 deploy_zima() {
   log "Deploying to ZimaOS ($ZIMA_HOST)"
   run_checks
@@ -343,8 +325,6 @@ usage() {
   echo "Usage: deploy.sh <target> [options]"
   echo ""
   echo "Targets:"
-  echo "  local     Build + run via docker compose locally"
-  echo "  eb        Build + run embedded browsers for local dev"
   echo "  zima      Build + deploy to ZimaOS ($ZIMA_HOST)"
   echo "  olares    Build + deploy to Olares (app.lastest.cloud)"
   echo "  npm       Publish @lastest/runner to npm"
@@ -359,8 +339,6 @@ usage() {
 }
 
 case "${TARGET}" in
-  local)   timer_start; deploy_local;  timer_end ;;
-  eb)      timer_start; deploy_eb;     timer_end ;;
   zima)    timer_start; deploy_zima;   timer_end ;;
   olares)  timer_start; deploy_olares; timer_end ;;
   npm)     timer_start; deploy_npm;    timer_end ;;

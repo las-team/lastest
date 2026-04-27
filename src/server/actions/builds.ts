@@ -1869,12 +1869,13 @@ async function sendBuildNotifications(data: {
       const account = repo?.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
 
       if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
+        const instanceUrl = account.instanceUrl || 'https://gitlab.com';
         // Find open MRs for this branch
         const mrs = await getOpenMRsForBranch(
           account.accessToken,
           repo.gitlabProjectId,
           data.gitBranch,
-          account.instanceUrl || undefined
+          instanceUrl,
         );
 
         for (const mr of mrs) {
@@ -1892,7 +1893,7 @@ async function sendBuildNotifications(data: {
               failedCount: data.failedCount,
               buildUrl,
             },
-            account.instanceUrl || undefined
+            instanceUrl,
           );
         }
       }

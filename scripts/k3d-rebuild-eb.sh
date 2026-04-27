@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Rebuild the EB image and point the app at it (via EB_IMAGE env).
-# The app pod rolls so that subsequent Jobs reference the new tag.
-# Already-running EB pods keep the old image — delete jobs to force rotation.
+# Rebuild the EB image and import it into the local k3d cluster.
+# The host app reads EB_IMAGE from .env.local (typically the stable
+# `lastest-embedded-browser:latest` tag), so importing both the SHA tag and
+# `:latest` is enough — already-running EB pods keep the old image, but the
+# next Job created by the host provisioner uses the freshly imported one.
+# To force existing EB pods to rotate, delete them: `kubectl -n lastest delete jobs -l app=lastest-eb`.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,10 +28,6 @@ docker build \
 
 echo "==> k3d image import"
 k3d image import "${EB_IMAGE}" "lastest-embedded-browser:latest" -c "${CLUSTER_NAME}"
-
-echo "==> kubectl set env EB_IMAGE=${EB_IMAGE}"
-kubectl -n "${NAMESPACE}" set env deploy/lastest-app EB_IMAGE="${EB_IMAGE}"
-bash scripts/_rollout-wait.sh "${NAMESPACE}" lastest-app 600s
 
 echo ""
 echo "==> Done. To force existing EB pods to rotate onto the new image:"

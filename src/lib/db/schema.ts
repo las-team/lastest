@@ -439,7 +439,7 @@ export const githubAccounts = pgTable('github_accounts', {
   createdAt: timestamp('created_at'),
 });
 
-// GitLab OAuth accounts - per-team GitLab connection
+// GitLab OAuth / PAT accounts - per-team GitLab connection
 export const gitlabAccounts = pgTable('gitlab_accounts', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
@@ -449,6 +449,11 @@ export const gitlabAccounts = pgTable('gitlab_accounts', {
   refreshToken: text('refresh_token'),
   tokenExpiresAt: timestamp('token_expires_at'),
   instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
+  // 'oauth' (default — uses env or per-account oauth client) | 'pat' (personal access token)
+  authMethod: text('auth_method').notNull().default('oauth'),
+  // Per-account OAuth client (for self-hosted instances where the global env vars don't apply)
+  oauthClientId: text('oauth_client_id'),
+  oauthClientSecret: text('oauth_client_secret'),
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
   reposSyncedAt: timestamp('repos_synced_at'),
   createdAt: timestamp('created_at'),
@@ -1848,6 +1853,47 @@ export const githubActionConfigs = pgTable('github_action_configs', {
 
 export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
 export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
+
+// ============================================
+// GitLab Pipeline Configs
+// ============================================
+
+export type GitlabPipelineMode = 'persistent' | 'ephemeral' | 'auto';
+export type GitlabPipelineTriggerEvent = 'push' | 'merge_request' | 'schedule' | 'manual';
+// 'ci_file' = generate .gitlab-ci.yml + push it via Repo Files API (full GH-Actions parity)
+// 'webhook' = no CI file; webhook fires server-side createAndRunBuild (no edits to user repo)
+export type GitlabPipelineDeliveryMode = 'ci_file' | 'webhook';
+
+export const DEFAULT_GITLAB_PIPELINE_TRIGGER_EVENTS: GitlabPipelineTriggerEvent[] = ['push', 'merge_request'];
+export const DEFAULT_GITLAB_BRANCH_FILTER: string[] = ['main'];
+
+export const gitlabPipelineConfigs = pgTable('gitlab_pipeline_configs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  runnerId: text('runner_id').references(() => runners.id, { onDelete: 'set null' }),
+  // Repository reference
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  projectPath: text('project_path').notNull(), // "namespace/project"
+  gitlabProjectId: integer('gitlab_project_id'),
+  mode: text('mode').notNull().default('persistent'), // GitlabPipelineMode
+  deliveryMode: text('delivery_mode').notNull().default('ci_file'), // GitlabPipelineDeliveryMode
+  triggerEvents: jsonb('trigger_events').$type<GitlabPipelineTriggerEvent[]>()
+    .default(['push', 'merge_request']),
+  branchFilter: jsonb('branch_filter').$type<string[]>().default(['main']),
+  cronSchedule: text('cron_schedule'),
+  timeout: integer('timeout').default(300000),
+  failOnChanges: boolean('fail_on_changes').default(true),
+  maxParallelTests: integer('max_parallel_tests'),
+  pollInterval: integer('poll_interval'),
+  webhookSecret: text('webhook_secret'),
+  pipelineDeployed: boolean('pipeline_deployed').default(false),
+  lastDeployedAt: timestamp('last_deployed_at'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
+});
+
+export type GitlabPipelineConfig = typeof gitlabPipelineConfigs.$inferSelect;
+export type NewGitlabPipelineConfig = typeof gitlabPipelineConfigs.$inferInsert;
 
 // ============================================
 // GitHub Issues (cached for analytics)
