@@ -336,6 +336,27 @@ function generateInstanceId(): string {
  * Returns the Job name and the instanceId it was created with.
  * Does NOT wait for the pod to register — caller polls DB for the matching runner.
  */
+// Throttle pod creations. With strict 1-job-1-EB, every test triggers a
+// fresh pod launch; concurrent launches burst Calico CNI route-table updates
+// which briefly disrupt active in-flight pods' network connections.
+// Chromium surfaces this as `net::ERR_NETWORK_CHANGED` mid-test → blank
+// screenshots. Spacing launches by EB_LAUNCH_INTERVAL_MS (default 500ms)
+// gives CNI time to settle before the next pod's network namespace is wired up.
+// Set EB_LAUNCH_INTERVAL_MS=0 to disable.
+let _launchChain: Promise<void> = Promise.resolve();
+async function awaitLaunchSlot(): Promise<void> {
+  const intervalMs = parseInt(process.env.EB_LAUNCH_INTERVAL_MS || '500', 10);
+  if (intervalMs <= 0) return;
+  const prev = _launchChain;
+  let release!: () => void;
+  _launchChain = new Promise<void>((r) => { release = r; });
+  try {
+    await prev;
+  } finally {
+    setTimeout(release, intervalMs);
+  }
+}
+
 export async function launchEBJob(): Promise<{ jobName: string; instanceId: string }> {
   if (!isKubernetesMode()) {
     throw new Error('launchEBJob called but EB_PROVISIONER !== "kubernetes"');
@@ -346,6 +367,8 @@ export async function launchEBJob(): Promise<{ jobName: string; instanceId: stri
   if (poolSize >= cap) {
     throw new Error(`EB pool at capacity (${poolSize}/${cap})`);
   }
+
+  await awaitLaunchSlot();
 
   const instanceId = generateInstanceId();
   const jobName = instanceId; // instanceId is short enough to use as job name
