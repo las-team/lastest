@@ -6,20 +6,19 @@ MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
-Gitlab
+**Gitlab**
 Teardown
-Accept Downloads
+**Accept Downloads**
 triage
 a11y
 DOM delta
 Create modes
 Openrouter agent sdk parity
-
+**Onboarding - v1/v3**
 ## bugs
 area cant be drawn over slider
 ## features
 Default ai, openrouter test
-Onboarding - v1/v3
 
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well

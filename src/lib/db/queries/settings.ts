@@ -88,6 +88,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     id: '',
     repositoryId: null,
     selectorPriority: DEFAULT_SELECTOR_PRIORITY,
+    customAttributeName: null,
     browser: 'chromium' as const,
     viewportWidth: 1280,
     viewportHeight: 720,

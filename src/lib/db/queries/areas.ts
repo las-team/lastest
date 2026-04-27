@@ -52,7 +52,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     areaMap.set(area.id, {
       ...area,
       children: [],
-      tests: areaTests.map(t => ({ id: t.id, name: t.name, description: t.description, latestStatus: statusMap.get(t.id) || null, isPlaceholder: t.isPlaceholder ?? false })),
+      tests: areaTests.map(t => ({ id: t.id, name: t.name, description: t.description, latestStatus: statusMap.get(t.id)?.status ?? null, isPlaceholder: t.isPlaceholder ?? false })),
     });
   }
 

@@ -10,6 +10,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/tests/status-badge';
+import {
+  TestsTableView,
+  defaultVisibleColumns,
+  parseStoredColumns,
+  serializeColumns,
+  parseStoredSort,
+  serializeSort,
+  type TestsTableColumnKey,
+  type TestsTableSort,
+} from '@/components/tests/tests-table-view';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -53,9 +64,6 @@ import {
   FlaskConical,
   Plus,
   Wrench,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Search,
   ChevronRight,
   ChevronDown,
@@ -68,6 +76,8 @@ import {
   FolderPlus,
   Folder,
   Save,
+  LayoutList,
+  Table as TableIcon,
 } from 'lucide-react';
 import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
@@ -76,6 +86,7 @@ import type { TeardownStep } from '@/server/actions/teardown-steps';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
+  lastRunAt: Date | null;
 }
 
 interface DefinitionPageClientProps {
@@ -211,6 +222,29 @@ export function DefinitionPageClient({
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
+
+  // --- Tests list view (cards/table) state ---
+  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [sort, setSort] = useState<TestsTableSort>({ key: 'lastRun', dir: 'desc' });
+  const [visibleColumns, setVisibleColumns] = useState<Set<TestsTableColumnKey>>(() =>
+    defaultVisibleColumns(false),
+  );
+  const [columnsTouched, setColumnsTouched] = useState(false);
+
+  // Hydrate from localStorage on mount (client-only to avoid SSR mismatch)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedView = window.localStorage.getItem('lastest:tests-table:view');
+    if (storedView === 'cards' || storedView === 'table') setView(storedView);
+    const storedSort = parseStoredSort(window.localStorage.getItem('lastest:tests-table:sort'));
+    if (storedSort) setSort(storedSort);
+    const touched = window.localStorage.getItem('lastest:tests-table:columns-touched') === '1';
+    setColumnsTouched(touched);
+    if (touched) {
+      const stored = parseStoredColumns(window.localStorage.getItem('lastest:tests-table:columns'));
+      if (stored) setVisibleColumns(stored);
+    }
+  }, []);
 
   // --- Deleted tests state ---
   const [showDeleted, setShowDeleted] = useState(false);
@@ -362,6 +396,13 @@ export function DefinitionPageClient({
 
   const failedScopedTests = useMemo(() => scopedTests.filter(t => t.latestStatus === 'failed'), [scopedTests]);
 
+  // Effective columns: when the user hasn't customized, follow scope.
+  const isScoped = treeSelection?.type === 'area';
+  const effectiveVisibleColumns = useMemo(
+    () => (columnsTouched ? visibleColumns : defaultVisibleColumns(isScoped)),
+    [columnsTouched, visibleColumns, isScoped],
+  );
+
   const selectedFailedTests = useMemo(() => {
     return Array.from(selectedTestIds).filter(id => {
       const test = tests.find(t => t.id === id);
@@ -424,9 +465,9 @@ export function DefinitionPageClient({
 
   const allFilteredSelected = filteredTests.length > 0 && filteredTests.every(t => selectedTestIds.has(t.id));
 
-  const getAreaName = useCallback((areaId: string | null) => {
+  const getAreaName = useCallback((areaId: string | null): string | null => {
     if (!areaId) return null;
-    return areas.find(a => a.id === areaId)?.name;
+    return areas.find(a => a.id === areaId)?.name ?? null;
   }, [areas]);
 
   // --- Handlers ---
@@ -884,32 +925,6 @@ export function DefinitionPageClient({
   const placeholderCount = allAreaTests.filter(t => t.isPlaceholder).length;
   const realTestCount = allAreaTests.length - placeholderCount;
 
-  // StatusBadge component
-  const StatusBadge = ({ status }: { status: string | null }) => {
-    if (status === 'passed') {
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
-          <CheckCircle2 className="h-3 w-3 mr-1" />
-          Passed
-        </Badge>
-      );
-    }
-    if (status === 'failed') {
-      return (
-        <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 hover:bg-rose-500/20">
-          <XCircle className="h-3 w-3 mr-1" />
-          Failed
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="outline" className="text-muted-foreground">
-        <Clock className="h-3 w-3 mr-1" />
-        Not run
-      </Badge>
-    );
-  };
-
   // Discovery icons for the AreaTree header
   const discoveryHeaderExtra = (
     <>
@@ -1180,6 +1195,46 @@ export function DefinitionPageClient({
                               <span className="text-xs text-muted-foreground">{filteredTests.length}</span>
                             </div>
                             <div className="flex items-center gap-2">
+                              <div className="inline-flex rounded-md border border-border/60 bg-background p-0.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant={view === 'cards' ? 'secondary' : 'ghost'}
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      aria-pressed={view === 'cards'}
+                                      onClick={() => {
+                                        setView('cards');
+                                        if (typeof window !== 'undefined') {
+                                          window.localStorage.setItem('lastest:tests-table:view', 'cards');
+                                        }
+                                      }}
+                                    >
+                                      <LayoutList className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">Card view</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant={view === 'table' ? 'secondary' : 'ghost'}
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      aria-pressed={view === 'table'}
+                                      onClick={() => {
+                                        setView('table');
+                                        if (typeof window !== 'undefined') {
+                                          window.localStorage.setItem('lastest:tests-table:view', 'table');
+                                        }
+                                      }}
+                                    >
+                                      <TableIcon className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">Table view</TooltipContent>
+                                </Tooltip>
+                              </div>
                               <div className="relative w-56">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                 <Input
@@ -1339,6 +1394,32 @@ export function DefinitionPageClient({
                       <div className="text-center py-12 text-muted-foreground text-sm">
                         No tests match {searchQuery ? `"${searchQuery}"` : 'this filter'}
                       </div>
+                    ) : view === 'table' ? (
+                      <TestsTableView
+                        tests={filteredTests}
+                        scoped={isScoped}
+                        selectedTestIds={selectedTestIds}
+                        toggleSelect={toggleSelect}
+                        onOpenTest={handleOpenTest}
+                        highlightedTestId={treeSelection?.type === 'test' ? treeSelection.id : null}
+                        getAreaName={getAreaName}
+                        sort={sort}
+                        onSortChange={(s) => {
+                          setSort(s);
+                          if (typeof window !== 'undefined') {
+                            window.localStorage.setItem('lastest:tests-table:sort', serializeSort(s));
+                          }
+                        }}
+                        visibleColumns={effectiveVisibleColumns}
+                        onVisibleColumnsChange={(cols) => {
+                          setVisibleColumns(cols);
+                          setColumnsTouched(true);
+                          if (typeof window !== 'undefined') {
+                            window.localStorage.setItem('lastest:tests-table:columns', serializeColumns(cols));
+                            window.localStorage.setItem('lastest:tests-table:columns-touched', '1');
+                          }
+                        }}
+                      />
                     ) : (
                       <div className="divide-y divide-border/50">
                         {filteredTests.map((test) => (

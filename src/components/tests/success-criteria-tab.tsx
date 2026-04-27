@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, Circle, ListOrdered, Code2 } from 'lucide-react';
@@ -234,12 +234,33 @@ export function TestStepsTab({
       setSavingSteps(prev => new Set(prev).add(step.id));
       try {
         await onStepValueChange(step.lineStart + bodyLineOffset, step.lineEnd + bodyLineOffset, originalValue, newValue);
+        // Don't clear editingValues here — props update from router.refresh() races
+        // the React state flush, and clearing too early flashes the stale prop value
+        // back into the input. The prop-sync effect below clears it once the
+        // re-parsed code reflects the new value.
       } finally {
         setSavingSteps(prev => { const next = new Set(prev); next.delete(step.id); return next; });
-        setEditingValues(prev => { const next = new Map(prev); next.delete(step.id); return next; });
       }
     }, 500));
   }, [onStepValueChange, bodyLineOffset]);
+
+  // Drop editingValues entries once the underlying parsed step value has caught up
+  // with what the user typed — avoids the flicker described above.
+  useEffect(() => {
+    if (editingValues.size === 0) return;
+    let changed = false;
+    const next = new Map(editingValues);
+    for (const step of steps) {
+      const editing = next.get(step.id);
+      if (editing === undefined) continue;
+      const current = extractEditableValue(step);
+      if (current !== null && current === editing) {
+        next.delete(step.id);
+        changed = true;
+      }
+    }
+    if (changed) setEditingValues(next);
+  }, [steps, editingValues]);
 
   // Build assertion result map
   const resultMap = new Map<string, AssertionResult>();

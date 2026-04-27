@@ -158,22 +158,49 @@ export async function updateStepValue(testId: string, lineStart: number, lineEnd
   let code = test.code || '';
   const lines = code.split('\n');
 
-  // Escape the values for string replacement in code
-  const escapedOld = oldValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  const escapedNew = newValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapeForSingleQuoted = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapedOld = escapeForSingleQuoted(oldValue);
+  const escapedNew = escapeForSingleQuoted(newValue);
 
-  // Replace the value in the relevant lines
+  // Patterns that mirror extractEditableValue() in src/lib/playwright/debug-parser.ts.
+  // We replace whatever fillable value sits on the given lines, not relying on oldValue
+  // matching exactly — debounced edits can race router.refresh() and pass stale oldValue.
+  const VALUE_PATTERNS: RegExp[] = [
+    /(locateWithFallback\s*\([\s\S]*?,\s*'fill'\s*,\s*')((?:[^'\\]|\\.)*)(')/,
+    /(locateWithFallback\s*\([\s\S]*?,\s*'selectOption'\s*,\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.fill\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.keyboard\.type\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.selectOption\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+  ];
+
+  const sliceStart = Math.max(0, lineStart - 1);
+  const sliceEnd = Math.min(lineEnd, lines.length);
+  const block = lines.slice(sliceStart, sliceEnd).join('\n');
+
   let replaced = false;
-  for (let i = lineStart - 1; i < Math.min(lineEnd, lines.length); i++) {
-    if (lines[i].includes(escapedOld)) {
-      lines[i] = lines[i].replace(escapedOld, escapedNew);
+  let newBlock = block;
+  for (const re of VALUE_PATTERNS) {
+    if (re.test(newBlock)) {
+      newBlock = newBlock.replace(re, (_m, prefix: string, _value: string, suffix: string) =>
+        `${prefix}${escapedNew}${suffix}`,
+      );
       replaced = true;
       break;
     }
   }
 
+  // Fallback: literal old-value match (handles cases the patterns above miss)
+  if (!replaced && escapedOld) {
+    const idx = newBlock.indexOf(escapedOld);
+    if (idx !== -1) {
+      newBlock = newBlock.slice(0, idx) + escapedNew + newBlock.slice(idx + escapedOld.length);
+      replaced = true;
+    }
+  }
+
   if (!replaced) throw new Error('Could not find value in code');
 
+  lines.splice(sliceStart, sliceEnd - sliceStart, ...newBlock.split('\n'));
   code = lines.join('\n');
 
   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
