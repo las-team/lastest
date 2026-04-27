@@ -13,7 +13,11 @@ export function ConsentFormClient() {
 
   async function handleContinue() {
     setLoading(true);
-    await recordRegistrationConsent({ marketingEmails: marketingConsent });
+    try {
+      await recordRegistrationConsent({ marketingEmails: marketingConsent });
+    } catch (err) {
+      console.error('recordRegistrationConsent failed', err);
+    }
     window.location.href = '/';
   }
 

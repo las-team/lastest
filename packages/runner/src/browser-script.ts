@@ -96,6 +96,12 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   let pointerDownClickRecorded = false;
   let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Browsers fire a synthetic click on a labeled <input type=radio|checkbox>
+  // immediately after the user's click on the wrapping/associated <label>.
+  // We record the label click and want to drop the duplicate.
+  let lastClickAt = 0;
+  let lastClickTarget: HTMLElement | null = null;
+
   // Menu items in Radix DropdownMenu/ContextMenu/Select commit selection on pointerup
   // and unmount via an exit animation, so a `click` event is never synthesized.
   function isMenuLikeTarget(el: HTMLElement | null): boolean {
@@ -186,6 +192,25 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
 
   document.addEventListener('click', (e) => {
     pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
+    const rawTarget = e.target as HTMLElement;
+    const now = Date.now();
+
+    // Drop synthesized click on a labeled radio/checkbox that follows the
+    // user's click on the bound <label>. Browsers fire both as separate events.
+    if (rawTarget instanceof HTMLInputElement) {
+      const inputType = (rawTarget.type || '').toLowerCase();
+      if ((inputType === 'radio' || inputType === 'checkbox') && lastClickTarget && now - lastClickAt < 100) {
+        const prevLabel = lastClickTarget.tagName === 'LABEL'
+          ? lastClickTarget
+          : lastClickTarget.closest('label');
+        if (prevLabel) {
+          const labelFor = prevLabel.getAttribute('for');
+          const isAssociated = prevLabel.contains(rawTarget) || (!!labelFor && rawTarget.id === labelFor);
+          if (isAssociated) return;
+        }
+      }
+    }
+
     if (mouseDownState) {
       const dx = Math.abs(e.clientX - mouseDownState.x);
       const dy = Math.abs(e.clientY - mouseDownState.y);
@@ -195,7 +220,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
-    const target = e.target as HTMLElement;
+    const target = findBestTarget(rawTarget);
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
@@ -227,6 +252,8 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     const modifiers = getActiveModifiers();
     // @ts-expect-error - exposed function
     window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
+    lastClickAt = now;
+    lastClickTarget = rawTarget;
   }, true);
 
   document.addEventListener('input', (e) => {

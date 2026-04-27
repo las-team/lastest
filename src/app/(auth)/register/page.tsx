@@ -40,22 +40,30 @@ function RegisterForm() {
     setError('');
     setLoading(true);
 
-    const result = await authClient.signUp.email({
-      name,
-      email,
-      password,
-    });
+    try {
+      const result = await authClient.signUp.email({
+        name,
+        email,
+        password,
+      });
 
-    if (result.error) {
-      setError(result.error.message ?? 'Sign up failed');
+      if (result.error) {
+        setError(result.error.message ?? 'Sign up failed');
+        return;
+      }
+
+      try {
+        await recordRegistrationConsent({ marketingEmails: marketingConsent });
+      } catch (err) {
+        // Consent recording is secondary — user is already signed up.
+        console.error('recordRegistrationConsent failed', err);
+      }
+
+      router.push(emailPostAuthUrl);
+      router.refresh();
+    } finally {
       setLoading(false);
-      return;
     }
-
-    await recordRegistrationConsent({ marketingEmails: marketingConsent });
-
-    router.push(emailPostAuthUrl);
-    router.refresh();
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
