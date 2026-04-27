@@ -432,6 +432,13 @@ async function executeViaRunner(
       // so the runner's integrity check matches what it actually executes.
       const { resolvedCode, extractVariables } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
 
+      // Default-ON `all_steps_executed`: only off when the user explicitly
+      // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis
+      // logic in src/lib/execution/evaluation.ts.
+      const failOnRuntimeError = !(test.stepCriteria ?? []).some(c =>
+        c.rules.some(r => r.kind === 'all_steps_executed' && r.severity === 'warn'),
+      );
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -459,6 +466,7 @@ async function executeViaRunner(
         recordingViewport,
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
         extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
+        failOnRuntimeError,
       });
 
       // Queue command to DB

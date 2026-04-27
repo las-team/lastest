@@ -9,6 +9,7 @@ import { getCurrentSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { agentSessions, embeddedSessions } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { sweepStuckAgentSessions } from '@/lib/db/queries/integrations';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,10 @@ export async function GET(_request: NextRequest) {
 
   const teamId = session.team?.id;
   if (!teamId) return NextResponse.json({ error: 'No team' }, { status: 403 });
+
+  // Sweep stuck sessions before listing — keeps the activity feed honest when
+  // an agent process died without writing a terminal status.
+  await sweepStuckAgentSessions().catch(() => { /* sweep is best-effort */ });
 
   // Get active/paused sessions first, then recent completed ones
   const sessions = await db

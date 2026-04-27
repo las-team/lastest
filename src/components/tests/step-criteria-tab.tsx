@@ -31,6 +31,11 @@ interface StepCriteriaTabProps {
 // share a single sentinel stepLabel. Keep it in one place to avoid drift.
 const ASSERTION_STEP_LABEL = '__assertions__';
 
+// `all_steps_executed` is also test-level. Default ON via synthesis at
+// evaluation time — to opt out we persist an explicit severity:'warn' rule.
+// Must match `ALL_STEPS_EXECUTED_LABEL` in src/lib/execution/evaluation.ts.
+const ALL_STEPS_EXECUTED_LABEL = '@all-steps-executed';
+
 // Build the union of step labels we know about: persisted criteria stepLabels +
 // labels of screenshots captured by the latest run. Falls back to a single
 // '' (default screenshot) when neither source has any.
@@ -172,6 +177,40 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
     });
   };
 
+  // `all_steps_executed` is default-ON via synthesis on the server. The UI
+  // shows it as enabled when there's no entry, OR an entry exists with
+  // severity:'fail'. Toggling off persists severity:'warn' (sentinel for
+  // "user opted out"); toggling on removes the entry.
+  const hasAllStepsExecutedRule = () => {
+    const c = criteria.find(c => c.stepLabel === ALL_STEPS_EXECUTED_LABEL);
+    if (!c) return true; // default ON
+    const r = c.rules.find(r => r.kind === 'all_steps_executed');
+    if (!r) return true;
+    return r.severity === 'fail';
+  };
+
+  const setAllStepsExecutedRule = (on: boolean) => {
+    const others = (criteria.find(c => c.stepLabel === ALL_STEPS_EXECUTED_LABEL)?.rules ?? [])
+      .filter(r => r.kind !== 'all_steps_executed');
+    const next: StepRule[] = on
+      ? others // remove entry → fall back to synthesized default-ON
+      : [...others, { kind: 'all_steps_executed', severity: 'warn' }];
+
+    setCriteria(prev => {
+      const rest = prev.filter(c => c.stepLabel !== ALL_STEPS_EXECUTED_LABEL);
+      return next.length === 0 ? rest : [...rest, { stepLabel: ALL_STEPS_EXECUTED_LABEL, rules: next }];
+    });
+
+    startTransition(async () => {
+      try {
+        const { saveStepCriteria } = await import('@/server/actions/tests');
+        await saveStepCriteria(testId, ALL_STEPS_EXECUTED_LABEL, next);
+      } catch (err) {
+        toast.error(`Failed to save criteria: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+  };
+
   // Legacy "fail if any assertion fails" rule — an assertion_failed entry
   // without a scoped assertionId. We expose it as a single switch so users
   // who already enabled it can find/disable it after the per-assertion redesign.
@@ -220,25 +259,22 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Always-on baseline rule: an unrunnable test is a failed test. Surfaced
-            here as a read-only row so users see what's already enforced before
-            they start adding optional rules below. */}
+        {/* Default-ON baseline rule: an unrunnable test is a failed test. The
+            user can opt out, but we recommend leaving it on — without it a
+            broken test (TypeError, missing element) silently passes. */}
         <div className="border rounded-md p-3 bg-muted/30 flex items-center gap-2">
           <Checkbox
             id="all-steps-executed-baseline"
-            checked
-            aria-readonly
-            onClick={(e) => e.preventDefault()}
-            className="cursor-not-allowed"
+            checked={hasAllStepsExecutedRule()}
+            disabled={pending}
+            onCheckedChange={checked => setAllStepsExecutedRule(!!checked)}
           />
-          <Label
-            htmlFor="all-steps-executed-baseline"
-            onClick={(e) => e.preventDefault()}
-            className="text-sm font-normal cursor-not-allowed select-none"
-          >
+          <Label htmlFor="all-steps-executed-baseline" className="text-sm font-normal">
             Fail the test if all steps can&apos;t be executed
             <span className="block text-xs text-muted-foreground">
-              Always enforced — a runtime error before the last step always fails the test.
+              Recommended. A runtime error or hard timeout before the last step
+              fails the test. Turn off only if you want partial runs to count
+              as passing.
             </span>
           </Label>
         </div>

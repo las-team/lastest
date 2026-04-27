@@ -22,6 +22,10 @@ export interface StepObservations {
   consoleErrors: string[];
   assertionResults: AssertionResult[];
   extractedVariables?: Record<string, string>;
+  // Test-level signals — set on every observation bucket so test-level rules
+  // (currently `all_steps_executed`) can read them regardless of stepLabel.
+  lastReachedStep?: number;
+  totalSteps?: number;
 }
 
 export interface EvaluationResult {
@@ -114,10 +118,27 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
       }
       return null;
     }
+    case 'all_steps_executed': {
+      // Test stopped before the last instrumented step — runtime error or
+      // hard timeout. We only have signal when both fields were reported.
+      const last = observations.lastReachedStep;
+      const total = observations.totalSteps;
+      if (typeof last !== 'number' || typeof total !== 'number' || total <= 0) {
+        return null;
+      }
+      if (last + 1 < total) {
+        return `Test stopped at step ${last + 1} of ${total}`;
+      }
+      return null;
+    }
     default:
       return null;
   }
 }
+
+// Sentinel stepLabel for the synthesized `all_steps_executed` rule. Any unique
+// string works — we use one that won't collide with real screenshot labels.
+export const ALL_STEPS_EXECUTED_LABEL = '@all-steps-executed';
 
 // Synthesize StepCriteria entries from a test's TestVariables so that the
 // evaluation engine has a single rule path. Vars with assertEnabled are
@@ -177,6 +198,19 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   const criteria = [...persistedCriteria];
   if (eotestCriterion) criteria.push(eotestCriterion);
 
+  // Default-ON synthesis for `all_steps_executed`: if the user hasn't persisted
+  // their own entry (with severity:'warn' meaning "opt out"), inject a
+  // severity:'fail' rule so partial runs and runtime crashes show up as failed.
+  const hasExplicitAllSteps = criteria.some(c =>
+    c.rules.some(r => r.kind === 'all_steps_executed'),
+  );
+  if (!hasExplicitAllSteps) {
+    criteria.push({
+      stepLabel: ALL_STEPS_EXECUTED_LABEL,
+      rules: [{ kind: 'all_steps_executed', severity: 'fail' }],
+    });
+  }
+
   if (criteria.length === 0) {
     return { triggeredRules: [] };
   }
@@ -186,6 +220,8 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   const consoleErrors = testResult.consoleErrors ?? [];
   const assertionResults = testResult.assertionResults ?? [];
   const extractedVariables = testResult.extractedVariables ?? undefined;
+  const lastReachedStep = testResult.lastReachedStep ?? undefined;
+  const totalSteps = testResult.totalSteps ?? undefined;
 
   const observationsByStep = new Map<string, StepObservations>();
   for (const criterion of criteria) {
@@ -196,6 +232,8 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
       consoleErrors,
       assertionResults,
       extractedVariables,
+      lastReachedStep,
+      totalSteps,
     });
   }
 

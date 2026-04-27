@@ -63,6 +63,10 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
+  // When true, re-throw TypeError / ReferenceError / SyntaxError from the
+  // soft-wrap so broken test bodies fail the run. Driven by the test's
+  // `all_steps_executed` Criteria rule (default ON, off only when opted out).
+  failOnRuntimeError?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {

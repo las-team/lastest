@@ -929,12 +929,20 @@ export class TestRunner {
     // for soft error handling. This matches the local runner behavior so tests
     // continue past failures to reach screenshots.
     // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately.
+    // When `failOnRuntimeError` is set (driven by the test's `all_steps_executed`
+    // Criteria rule), a TypeError / ReferenceError / SyntaxError also re-throws —
+    // these indicate broken test code, not a flaky assertion, and shouldn't be
+    // swallowed as a soft warning.
     // `page.goto` is NOT soft-wrapped: if navigation fails, subsequent steps would
     // run on about:blank and produce blank screenshots recorded as passes.
+    const failOnRuntime = payload?.failOnRuntimeError === true;
+    const runtimeReThrow = failOnRuntime
+      ? 'if (__softErr && (__softErr instanceof TypeError || __softErr instanceof ReferenceError || __softErr instanceof SyntaxError)) throw __softErr;'
+      : '';
     body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
       if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
       if (stmt.includes('.goto(')) return `${indent}${stmt}`;
-      return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; ${runtimeReThrow} stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
     });
 
     // Use caller-provided softErrors array, or create local one as fallback

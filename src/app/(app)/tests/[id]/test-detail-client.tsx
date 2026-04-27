@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
+import { promoteTestResultBaselines } from '@/server/actions/diffs';
 import { runTests, getJobStatus } from '@/server/actions/runs';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
@@ -50,6 +51,7 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
+import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -291,6 +293,24 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Version history state
   const [versions, setVersions] = useState<TestVersion[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [expandedDiffVersion, setExpandedDiffVersion] = useState<number | null>(null);
+  const [promotingResult, setPromotingResult] = useState<string | null>(null);
+
+  const handlePromoteBaselines = useCallback(async (resultId: string) => {
+    setPromotingResult(resultId);
+    try {
+      const res = await promoteTestResultBaselines(resultId);
+      if (res.approvedCount > 0) {
+        toast.success(`Promoted ${res.approvedCount} screenshot${res.approvedCount === 1 ? '' : 's'} as baseline`);
+      } else {
+        toast.info('No pending screenshots to promote');
+      }
+    } catch (err) {
+      toast.error(`Failed to promote: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPromotingResult(null);
+    }
+  }, []);
   const [isRestoring, setIsRestoring] = useState<number | null>(null);
 
   // Run history expand state
@@ -1263,7 +1283,22 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               </div>
                             ) : runDiffs.has(result.id) && runDiffs.get(result.id)!.length > 0 ? (
                               <div className="mt-3 space-y-2">
-                                <div className="text-xs font-medium text-muted-foreground uppercase">Steps</div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-xs font-medium text-muted-foreground uppercase">Steps</div>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handlePromoteBaselines(result.id)}
+                                    disabled={promotingResult === result.id}
+                                  >
+                                    {promotingResult === result.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    ) : (
+                                      <CheckCircle className="h-3 w-3 mr-1" />
+                                    )}
+                                    Promote as baseline
+                                  </Button>
+                                </div>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                                   {runDiffs.get(result.id)!.map((diff, i) => (
                                     <div key={i} className="border rounded p-2 space-y-1">
@@ -1296,7 +1331,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               </div>
                             ) : (
                               <div className="mt-3 text-xs text-muted-foreground">
-                                No visual diff data for this run
+                                No screenshots captured in this run. Add a Screenshot step
+                                in the <span className="font-medium">Steps</span> tab to record one.
                               </div>
                             )}
                           </div>
@@ -1403,68 +1439,120 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </div>
                 ) : versions.length > 0 ? (
                   <div className="space-y-2">
-                    {versions.map((version) => (
-                      <div
-                        key={version.id}
-                        className="p-3 border rounded-lg"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-sm font-medium">v{version.version}</span>
-                            <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
-                              {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
-                            </span>
-                            {version.viewportWidth && version.viewportHeight && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted font-mono text-muted-foreground">
-                                {version.viewportWidth}&times;{version.viewportHeight}
+                    {versions.map((version, idx) => {
+                      // versions arrive newest-first → previous version is at idx+1.
+                      const previous = versions[idx + 1];
+                      const isExpanded = expandedDiffVersion === version.version;
+                      const diff = isExpanded && previous
+                        ? diffTextLines(previous.code ?? '', version.code ?? '')
+                        : null;
+                      const stats = diff ? diffStats(diff) : null;
+                      return (
+                        <div
+                          key={version.id}
+                          className="p-3 border rounded-lg"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-sm font-medium">v{version.version}</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
+                                {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              {version.createdAt
-                                ? new Date(version.createdAt).toLocaleString()
-                                : 'Unknown'}
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRestore(version.version)}
-                              disabled={isRestoring !== null}
-                            >
-                              {isRestoring === version.version ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <RotateCcw className="h-4 w-4" />
+                              {version.viewportWidth && version.viewportHeight && (
+                                <span className="text-xs px-2 py-0.5 rounded bg-muted font-mono text-muted-foreground">
+                                  {version.viewportWidth}&times;{version.viewportHeight}
+                                </span>
                               )}
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="mt-2 text-xs text-muted-foreground truncate">
-                          {version.name}
-                        </div>
-                        {(version.branch || version.firstBuildId) && (
-                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
-                            {version.branch && (
-                              <span className="inline-flex items-center gap-1">
-                                <GitBranch className="h-3 w-3" />
-                                {version.branch}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">
+                                {version.createdAt
+                                  ? new Date(version.createdAt).toLocaleString()
+                                  : 'Unknown'}
                               </span>
-                            )}
-                            {version.firstBuildId && (
-                              <a
-                                href={`/builds/${version.firstBuildId}`}
-                                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                              {previous && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setExpandedDiffVersion(isExpanded ? null : version.version)}
+                                  title={isExpanded ? 'Hide diff' : `Show diff vs v${previous.version}`}
+                                >
+                                  {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRestore(version.version)}
+                                disabled={isRestoring !== null}
                               >
-                                <GitCommit className="h-3 w-3" />
-                                {version.firstBuildBranch}
-                                {version.firstBuildCommit && `@${version.firstBuildCommit.slice(0, 7)}`}
-                              </a>
-                            )}
+                                {isRestoring === version.version ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div className="mt-2 text-xs text-muted-foreground truncate">
+                            {version.name}
+                          </div>
+                          {(version.branch || version.firstBuildId) && (
+                            <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                              {version.branch && (
+                                <span className="inline-flex items-center gap-1">
+                                  <GitBranch className="h-3 w-3" />
+                                  {version.branch}
+                                </span>
+                              )}
+                              {version.firstBuildId && (
+                                <a
+                                  href={`/builds/${version.firstBuildId}`}
+                                  className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  <GitCommit className="h-3 w-3" />
+                                  {version.firstBuildBranch}
+                                  {version.firstBuildCommit && `@${version.firstBuildCommit.slice(0, 7)}`}
+                                </a>
+                              )}
+                            </div>
+                          )}
+                          {isExpanded && diff && previous && (
+                            <div className="mt-3 border rounded-md overflow-hidden">
+                              <div className="px-3 py-1.5 bg-muted/40 text-xs font-mono text-muted-foreground flex items-center justify-between">
+                                <span>v{previous.version} → v{version.version}</span>
+                                {stats && (
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-emerald-600 dark:text-emerald-400">+{stats.added}</span>
+                                    <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <pre className="text-xs font-mono overflow-x-auto max-h-[500px] overflow-y-auto bg-background">
+                                {diff.map((line, lineIdx) => {
+                                  const bg =
+                                    line.op === 'add' ? 'bg-emerald-50 dark:bg-emerald-950/40' :
+                                    line.op === 'del' ? 'bg-red-50 dark:bg-red-950/40' : '';
+                                  const prefix = line.op === 'add' ? '+' : line.op === 'del' ? '-' : ' ';
+                                  return (
+                                    <div key={lineIdx} className={`flex ${bg}`}>
+                                      <span className="select-none w-10 text-right pr-1 text-muted-foreground/60 border-r">
+                                        {line.oldLineNo ?? ''}
+                                      </span>
+                                      <span className="select-none w-10 text-right pr-1 text-muted-foreground/60 border-r">
+                                        {line.newLineNo ?? ''}
+                                      </span>
+                                      <span className="select-none w-4 text-center text-muted-foreground">{prefix}</span>
+                                      <span className="flex-1 whitespace-pre pl-1 pr-2">{line.line || ' '}</span>
+                                    </div>
+                                  );
+                                })}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">

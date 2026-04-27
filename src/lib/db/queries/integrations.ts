@@ -17,7 +17,7 @@ import type {
   AgentStepId,
   AgentSessionMetadata,
 } from '../schema';
-import { eq, desc, and, or, isNotNull } from 'drizzle-orm';
+import { eq, desc, and, or, isNotNull, lt } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Spec Imports
@@ -318,6 +318,10 @@ export async function getAgentSession(id: string) {
 }
 
 export async function getActiveAgentSession(repositoryId: string) {
+  // Opportunistic sweep so a stale "active" row doesn't keep the activity
+  // feed spinning forever. Cheap when there's nothing to do.
+  await sweepStuckAgentSessions().catch(() => { /* sweep is best-effort */ });
+
   const [row] = await db
     .select()
     .from(agentSessions)
@@ -348,4 +352,44 @@ export async function updateAgentSession(
     .update(agentSessions)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(agentSessions.id, id));
+}
+
+// Stuck-detection sweep. An active session whose `updatedAt` hasn't moved in
+// `idleMs` is treated as abandoned (process crash, network drop, infinite
+// hourglass) and flipped to `failed` so the activity feed stops showing the
+// "Reconnecting..." spinner. Lazy by design — call from existing read paths
+// (no new background scheduler).
+//
+// Default 1h. Returns the count of sessions that were swept.
+export async function sweepStuckAgentSessions(idleMs: number = 60 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - idleMs);
+  const stuck = await db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.status, 'active'),
+        lt(agentSessions.updatedAt, cutoff),
+      ),
+    );
+  if (stuck.length === 0) return 0;
+
+  const now = new Date();
+  for (const s of stuck) {
+    const steps: AgentStepState[] = (s.steps ?? []).map(step =>
+      step.status === 'active' || step.status === 'waiting_user'
+        ? { ...step, status: 'failed' as const, error: 'Session timed out — no progress for over an hour.' }
+        : step,
+    );
+    await db
+      .update(agentSessions)
+      .set({
+        status: 'failed',
+        steps,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(agentSessions.id, s.id));
+  }
+  return stuck.length;
 }

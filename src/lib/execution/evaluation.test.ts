@@ -191,3 +191,44 @@ describe('evaluateRulesForStep — other rule kinds', () => {
     ).toEqual([]);
   });
 });
+
+describe('evaluateRulesForStep — all_steps_executed', () => {
+  const criterion: StepCriterion = {
+    stepLabel: '@all-steps-executed',
+    rules: [{ kind: 'all_steps_executed', severity: 'fail' }],
+  };
+
+  it('trips when the runner stopped before the last step', () => {
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      lastReachedStep: 6,
+      totalSteps: 9,
+    });
+    expect(triggered).toHaveLength(1);
+    expect(triggered[0].reason).toMatch(/step 7 of 9/);
+  });
+
+  it('does not trip when every step was reached', () => {
+    expect(
+      evaluateRulesForStep(criterion, {
+        ...emptyObservations,
+        lastReachedStep: 8,
+        totalSteps: 9,
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not trip when step counts are missing (no signal from older runners)', () => {
+    expect(evaluateRulesForStep(criterion, emptyObservations)).toEqual([]);
+  });
+
+  it('does not trip when totalSteps is zero', () => {
+    expect(
+      evaluateRulesForStep(criterion, {
+        ...emptyObservations,
+        lastReachedStep: 0,
+        totalSteps: 0,
+      }),
+    ).toEqual([]);
+  });
+});

@@ -1,6 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
+import { validateTestCode } from '@lastest/shared';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import {
   generateWithAI,
@@ -397,6 +398,14 @@ export async function startGeneratePlaceholderTestAgent(data: {
           throw new Error(result.error || 'Generator agent produced no test code');
         }
 
+        // Refuse to persist syntactically broken generator output — otherwise
+        // the runner throws a TypeError at execution time and the run appears
+        // to "pass" via the soft-wrap (see #16/#24 in the mwhis review).
+        const validation = validateTestCode(result.code);
+        if (!validation.valid) {
+          throw new Error(`Generator produced invalid TypeScript: ${validation.error}`);
+        }
+
         // Update existing test instead of creating a new one
         await queries.updateTestWithVersion(data.testId, {
           code: result.code,
@@ -529,6 +538,13 @@ export async function updateTestCode(
   changeReason: 'ai_fix' | 'ai_enhance' = 'ai_fix'
 ): Promise<{ success: boolean; error?: string }> {
   await requireTeamAccess();
+  // Refuse to persist syntactically broken AI output — otherwise the runner
+  // throws a TypeError at execution time and the user sees a misleading
+  // "Passed but broken" run.
+  const validation = validateTestCode(code);
+  if (!validation.valid) {
+    return { success: false, error: `Generated code has a syntax error and was not saved: ${validation.error}` };
+  }
   try {
     const test = await queries.getTest(testId);
     const branch = await getCurrentBranchForRepo(test?.repositoryId);

@@ -363,11 +363,29 @@ async function detectLoginRequired(
 
 async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
+
+  // Auto-inject the repo's custom test-id attribute (if configured) so every
+  // AI call generated from play-agent uses it as the primary locator without
+  // the user having to repeat the rule in every prompt.
+  let customInstructions = settings.customInstructions;
+  if (repositoryId) {
+    try {
+      const pw = await queries.getPlaywrightSettings(repositoryId);
+      const attr = pw?.customAttributeName?.trim();
+      if (attr) {
+        const rule = `When generating Playwright locators, prefer the \`${attr}\` attribute over CSS classes or text — it is the application's stable test-id and is present on every interactive element.`;
+        customInstructions = customInstructions ? `${customInstructions}\n\n${rule}` : rule;
+      }
+    } catch {
+      // Settings fetch is best-effort — fall through with whatever was there.
+    }
+  }
+
   return {
     provider: settings.provider as 'claude-cli' | 'openrouter' | 'claude-agent-sdk',
     openrouterApiKey: settings.openrouterApiKey,
     openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
-    customInstructions: settings.customInstructions,
+    customInstructions,
     agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
     agentSdkModel: settings.agentSdkModel || undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,

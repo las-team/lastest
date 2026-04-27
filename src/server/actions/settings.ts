@@ -39,6 +39,7 @@ export async function savePlaywrightSettings(data: {
   enableNetworkInterception?: boolean;
   lockViewportToRecording?: boolean;
   browsers?: string[];
+  customAttributeName?: string | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

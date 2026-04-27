@@ -180,12 +180,19 @@ export interface TestPlaywrightOverrides {
 
 // Per-step pass/fail rules. Extensible: add new `kind`s and handle them in
 // src/lib/execution/evaluation.ts. MVP: screenshot_changed.
+//
+// `all_steps_executed` is a special test-level rule (stepLabel ignored) that
+// trips when the runner reports `lastReachedStep + 1 < totalSteps`. It is
+// **default ON** for every test — synthesized at evaluation time when the
+// stored criteria don't already include it. To opt out, persist the rule
+// with `severity: 'warn'` (the UI toggle writes this when unchecked).
 export type StepRuleKind =
   | 'screenshot_changed'
   | 'focus_region_changed'
   | 'console_error'
   | 'assertion_failed'
-  | 'variable_equals';
+  | 'variable_equals'
+  | 'all_steps_executed';
 
 export type StepRuleSeverity = 'fail' | 'warn';
 
@@ -774,6 +781,11 @@ export const playwrightSettings = pgTable('playwright_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   selectorPriority: jsonb('selector_priority').$type<SelectorConfig[]>(),
+  // App-specific test-id attribute (e.g. 'data-automation-id'). When set,
+  // the recorder, fallback locator, and AI test-gen prompt will prefer this
+  // attribute over `data-testid`. Only takes effect if the user adds the
+  // 'custom-attr' entry to selectorPriority with a chosen rank.
+  customAttributeName: text('custom_attribute_name'),
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),

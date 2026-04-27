@@ -504,6 +504,15 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
     processPoolQueue().catch((err) => {
       console.error(`[Pool] Error processing queue after release:`, err);
     });
+    // Refill the warm pool if this release drops us below warmPoolMin. The
+    // periodic refill in /api/ws/runner only runs once that route module is
+    // loaded by an EB heartbeat — but if the pool drains to 0, no heartbeats
+    // fire and the loop never starts. Pulling the refill here breaks that
+    // dead state without depending on any external timer.
+    const { ensureWarmPool } = await import('@/lib/eb/provisioner');
+    ensureWarmPool().catch((err) => {
+      console.error('[Pool] ensureWarmPool after release failed:', err);
+    });
     return;
   }
 

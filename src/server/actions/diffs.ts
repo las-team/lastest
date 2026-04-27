@@ -156,6 +156,22 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
 }
 
 /**
+ * Test-level "Promote latest run as baseline" — approves every pending diff
+ * for one test result. Wraps the same logic as the build-page Approve All
+ * button but scoped to a single run. See mwhis review #21.
+ */
+export async function promoteTestResultBaselines(testResultId: string, approvedBy?: string) {
+  await requireTeamAccess();
+  const diffs = await queries.getVisualDiffsByTestResult(testResultId);
+  const pending = diffs.filter(d => d.status !== 'approved' && d.status !== 'auto_approved');
+  for (const d of pending) {
+    await approveDiffCore(d.id, approvedBy);
+  }
+  revalidatePath('/tests');
+  return { approvedCount: pending.length };
+}
+
+/**
  * Batch approve selected diffs — core logic, no auth check.
  */
 export async function batchApproveDiffsCore(diffIds: string[], approvedBy?: string) {

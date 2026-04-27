@@ -42,3 +42,23 @@ export function legacyStripTypeAnnotations(code: string): string {
   result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
   return result;
 }
+
+/**
+ * Parse-only validation for AI-generated test code. Runs the same sucrase
+ * pipeline `stripTypeAnnotations` uses, but reports the parse error instead
+ * of swallowing it. Use this before persisting AI output so a syntactically
+ * broken script doesn't reach the runner.
+ */
+export function validateTestCode(code: string): { valid: true } | { valid: false; error: string } {
+  try {
+    transform(code, {
+      transforms: ['typescript'],
+      disableESTransforms: true,
+      preserveDynamicImport: true,
+      production: true,
+    });
+    return { valid: true };
+  } catch (err) {
+    return { valid: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}

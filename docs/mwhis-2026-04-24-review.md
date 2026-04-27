@@ -262,15 +262,29 @@ most használtok és átalakítjuk. Nézd meg ha gondolod a github action templa
 
 ## 2. Development plan
 
-### What's already done (verified in code)
+### Implementation status
 
-| Item | Status | Verified at |
-|------|--------|-------------|
-| #3 — soft/hard autosave (now Criteria) | ✅ Done | `src/components/tests/step-criteria-tab.tsx:124-131,165-172,203-210` |
-| #15 — keep soft default + Criteria gate | ✅ Done | `success-criteria-tab.tsx:197`, evaluation in `src/server/actions/builds.ts:991-1009` |
-| #18 — separate soft/hard from code | ✅ Done by Criteria redesign | same as #15 |
-| #21 — promote run baselines (build-level) | ✅ Done | `src/app/(app)/builds/[buildId]/build-actions-client.tsx:5,26` |
-| Plans / screenshots merged | ✅ Done | (per user note — defer Plans UI fixes) |
+| Item | Status | Where |
+|------|--------|-------|
+| #3 — soft/hard autosave (now Criteria) | ✅ already done | `src/components/tests/step-criteria-tab.tsx:124-131,165-172,203-210` |
+| #4 — Versions diff viewer | ✅ this branch | `src/lib/diff/text-diff.ts`, `src/app/(app)/tests/[id]/test-detail-client.tsx` |
+| #11 — Agent stuck-detection (1h) | ✅ this branch | `src/lib/db/queries/integrations.ts` (`sweepStuckAgentSessions`) |
+| #13 — Custom test-id attribute | ✅ this branch (UI + AI prompt) | `playwright_settings.customAttributeName`, `playwright-settings-card.tsx`, `play-agent.ts` |
+| #15 — keep soft default + Criteria gate | ✅ already done | `success-criteria-tab.tsx:197`, evaluation in `builds.ts:991-1009` |
+| #17 — AI script validation | ✅ this branch | `validateTestCode` in `packages/shared/src/ts-strip.ts`, hooks in `ai.ts` |
+| #18 — separate soft/hard from code | ✅ already done by Criteria | same as #15 |
+| #19 — Per-test diff view + better empty-state | ✅ this branch | `test-detail-client.tsx` History tab |
+| #21 — Promote run baselines (build-level) | ✅ already done | `build-actions-client.tsx:5,26` |
+| #21 — Promote run baselines (test-level) | ✅ this branch | `promoteTestResultBaselines` in `diffs.ts`, button in History tab |
+| Plans / screenshots merged | ✅ already done | (per user note — defer Plans UI fixes) |
+| #26 — `.gitlab-ci.yml` template | ⏭️ wiki-only | per decision #5 |
+
+**P0 — `all_steps_executed` rule** (#8/#16/#24): ✅ this branch.
+- Schema: `'all_steps_executed'` added to `StepRuleKind`.
+- Evaluator: synthesized default-ON, ruleTrips on `lastReachedStep + 1 < totalSteps`. New observation fields in `StepObservations`. 4 new unit tests pass.
+- UI: read-only baseline checkbox replaced with interactive toggle.
+- Runner: re-throws `TypeError` / `ReferenceError` / `SyntaxError` from the soft-wrap when `failOnRuntimeError` is set.
+- Executor: derives `failOnRuntimeError` from each test's stepCriteria.
 
 **Comms task:** highlight the Criteria tab in the docs / onboarding —
 multiple customer questions trace back to "I didn't know Criteria

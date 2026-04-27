@@ -108,6 +108,11 @@ export interface RunTestCommandPayload {
     targetSelector: string;
     attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
   }>;
+  // When true, the runner re-throws TypeError / ReferenceError / SyntaxError
+  // from the soft-wrap so a broken test body fails the run instead of being
+  // recorded as a soft warning. Driven by the test's `all_steps_executed`
+  // Criteria rule (default ON, off only when user explicitly opted out).
+  failOnRuntimeError?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
