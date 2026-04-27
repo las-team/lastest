@@ -7,16 +7,53 @@ Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
 **Gitlab**
+  6533327a379a9f04.js:63 Sending form data to 'https://app.lastest.cloud/api/connect/gitlab' violates the following Content Security Policy directive: "form-action 'self' https://github.com". The request has been blocked.
+    screen doesnt fit popup
+  w personal acces token projects are not imported
 Teardown
 **Accept Downloads**
+    await downloads.waitForAny();
+  expect(downloads.list().length).toBeGreaterThan(0); is not converted to step
+  also make this as a criteria to enable hard fail
 triage
 a11y
 DOM delta
 Create modes
 Openrouter agent sdk parity
 **Onboarding - v1/v3**
+  On Connect your code use the same height cards with white bg, explain pros and cons (e.g. route scanning)
+  On Sandbox repo allow user to edit name
+  Without GH also ask the user to pick a template
+Criteria
+  failed
+  0ms
+  4/27/2026, 7:20:15 PM
+  Cancelled by user when failed by one of the criteria - be decent and write which one
+
+  End of test variable assertions remove save button and autosave
+**CSV upload and use**
+  table contents dont fit popup - plz fix
+  after file upload need to refresh page - refresh teh component - re-check this type of error for every test detail page tab
+  New variable
+  Variables bind values to page fields. Reference assign-mode vars in test code as {{var:name}}.  - fields are overlapping each other
+    remove desc, not needed
+    move name lower and autopopulate based on alias n column
+    add an option to use random or inc row (until last when it starts from 2)
+  refresh the step component when a var is binded - check architecturally how to fix this
+  last run value is not populated on test http://localhost:3000/tests?test=736a9abe-41e6-41b5-b4c5-5bb647e2c941
 ## bugs
 area cant be drawn over slider
+
+https://app.lastest.cloud/builds/47d79887-d7af-462b
+  -8217-1457fe4abb07 build on /olares has white        
+  screenshots still after 3 sessions trying to fix     
+  this issue. please look for the root cause, why the  
+  nodes are not ready to execute the test when         
+  received, and why are retry mechanisms failing.      
+  plan a simple way to increase logging to debug       
+  better if more info is needed.    
+
+Move gitlab out of EA functions
 ## features
 Default ai, openrouter test
 
