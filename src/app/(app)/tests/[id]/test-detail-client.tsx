@@ -1440,11 +1440,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 ) : versions.length > 0 ? (
                   <div className="space-y-2">
                     {versions.map((version, idx) => {
-                      // versions arrive newest-first → previous version is at idx+1.
-                      const previous = versions[idx + 1];
+                      // Each `testVersions` row stores the code state BEFORE its own
+                      // change (`updateTestWithVersion` saves `test.code` first, then
+                      // updates). So the diff that this version introduced is:
+                      //   before = versions[idx].code (this row's pre-change snapshot)
+                      //   after  = next-newer snapshot, OR `test.code` if this is the
+                      //            latest version (idx === 0)
+                      // versions arrive newest-first.
+                      const beforeCode = version.code ?? '';
+                      const afterCode = idx === 0
+                        ? (test.code ?? '')
+                        : (versions[idx - 1].code ?? '');
                       const isExpanded = expandedDiffVersion === version.version;
-                      const diff = isExpanded && previous
-                        ? diffTextLines(previous.code ?? '', version.code ?? '')
+                      const diff = isExpanded
+                        ? diffTextLines(beforeCode, afterCode)
                         : null;
                       const stats = diff ? diffStats(diff) : null;
                       return (
@@ -1470,12 +1479,12 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                                   ? new Date(version.createdAt).toLocaleString()
                                   : 'Unknown'}
                               </span>
-                              {previous && (
+                              {beforeCode !== afterCode && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => setExpandedDiffVersion(isExpanded ? null : version.version)}
-                                  title={isExpanded ? 'Hide diff' : `Show diff vs v${previous.version}`}
+                                  title={isExpanded ? 'Hide diff' : `Show what changed in v${version.version}`}
                                 >
                                   {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                 </Button>
@@ -1517,10 +1526,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               )}
                             </div>
                           )}
-                          {isExpanded && diff && previous && (
+                          {isExpanded && diff && (
                             <div className="mt-3 border rounded-md overflow-hidden">
                               <div className="px-3 py-1.5 bg-muted/40 text-xs font-mono text-muted-foreground flex items-center justify-between">
-                                <span>v{previous.version} → v{version.version}</span>
+                                <span>
+                                  Changes in v{version.version}
+                                  {idx === 0 && <span className="ml-1 text-muted-foreground/60">(current)</span>}
+                                </span>
                                 {stats && (
                                   <span className="flex items-center gap-2">
                                     <span className="text-emerald-600 dark:text-emerald-400">+{stats.added}</span>

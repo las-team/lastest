@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
@@ -42,8 +42,9 @@ function DiffStrip({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [transitionEnabled, setTransitionEnabled] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     setContainerWidth(el.clientWidth);
@@ -55,11 +56,16 @@ function DiffStrip({
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setTransitionEnabled(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const currentIndex = Math.max(0, allDiffs.findIndex((d) => d.id === currentDiffId));
   const totalWidth = allDiffs.length * STRIP_STEP - STRIP_TILE_GAP;
   const maxOffset = Math.max(0, totalWidth - containerWidth);
   const desiredOffset = currentIndex * STRIP_STEP - (containerWidth - STRIP_TILE_WIDTH) / 2;
-  const offset = Math.max(0, Math.min(maxOffset, desiredOffset));
+  const offset = containerWidth > 0 ? Math.max(0, Math.min(maxOffset, desiredOffset)) : 0;
 
   return (
     <div ref={containerRef} className="relative w-full overflow-hidden pb-2">
@@ -68,7 +74,7 @@ function DiffStrip({
         style={{
           gap: `${STRIP_TILE_GAP}px`,
           transform: `translate3d(${-offset}px, 0, 0)`,
-          transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+          transition: transitionEnabled ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
           willChange: 'transform',
         }}
       >
