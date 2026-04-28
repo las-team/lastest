@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { parseAssertions } from '@/lib/playwright/assertion-parser';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -23,6 +24,11 @@ interface StepCriteriaTabProps {
   screenshots: CapturedScreenshot[] | null;
   stepCriteria: StepCriterion[] | null;
   assertions: TestAssertion[] | null;
+  // The current test code. We re-parse assertions from this on every render
+  // so the toggle list stays in sync with the editor even when the persisted
+  // `tests.assertions` column is stale (null on legacy tests, or out-of-date
+  // because a save path skipped `withParsedAssertions`).
+  code?: string | null;
   variables?: TestVariable[] | null;
   onSaveVariables?: (next: TestVariable[]) => Promise<void>;
   // Called after a successful save so the parent can refetch its cached test
@@ -58,7 +64,41 @@ function collectStepLabels(
   );
 }
 
-export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions, variables, onSaveVariables, onMutated }: StepCriteriaTabProps) {
+export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions: dbAssertions, code, variables, onSaveVariables, onMutated }: StepCriteriaTabProps) {
+  // Always re-parse from the source of truth. The persisted column is only a
+  // cache for runtime (the runner reads it to map result IDs back to assertion
+  // labels); rendering should never depend on it being warm.
+  const freshAssertions = useMemo(
+    () => (code ? parseAssertions(code) : []),
+    [code],
+  );
+  // Prefer fresh; fall back to DB only when we have no code to parse.
+  const assertions = freshAssertions.length > 0 ? freshAssertions : (dbAssertions ?? []);
+
+  // Backfill the DB column when fresh and persisted disagree. The runner uses
+  // `tests.assertions` to map runtime AssertionResult.assertionId back to a
+  // human label, so a stale column means the run page can't tell you which
+  // expect() failed. Fire-and-forget — this tab works without it.
+  useEffect(() => {
+    if (!code || freshAssertions.length === 0) return;
+    const dbIds = new Set((dbAssertions ?? []).map(a => a.id));
+    const freshIds = new Set(freshAssertions.map(a => a.id));
+    const mismatch =
+      freshIds.size !== dbIds.size
+      || freshAssertions.some(a => !dbIds.has(a.id));
+    if (!mismatch) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { syncTestAssertions } = await import('@/server/actions/tests');
+        await syncTestAssertions(testId, freshAssertions);
+        if (!cancelled) await onMutated?.();
+      } catch {
+        // Best effort — the UI already shows the fresh list.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [testId, code, freshAssertions, dbAssertions, onMutated]);
   const [criteria, setCriteria] = useState<StepCriterion[]>(stepCriteria ?? []);
   const [pending, startTransition] = useTransition();
   const [varDraft, setVarDraft] = useState<TestVariable[]>(variables ?? []);

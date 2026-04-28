@@ -1080,6 +1080,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               screenshots={latestResult?.screenshots ?? null}
               stepCriteria={test.stepCriteria ?? null}
               assertions={test.assertions ?? null}
+              code={test.code ?? null}
               variables={test.variables ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');

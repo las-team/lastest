@@ -15,13 +15,9 @@ DOM delta
 Create modes
 Openrouter agent sdk parity
 **Onboarding**
-
 **Criteria**
-
 **CSV upload and use**
-
 ## bugs
-
 ## features
 Default ai, openrouter test
 gh issue- notification on discord
