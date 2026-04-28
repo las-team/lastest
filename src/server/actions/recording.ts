@@ -8,7 +8,7 @@ import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand, PromoteSelectorCommand } from '@/lib/ws/protocol';
 import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import {
   queueCommandToDB,
@@ -18,6 +18,7 @@ import {
   completeRemoteRecordingSession,
   clearRemoteRecordingSession,
   type RemoteRecordingEvent,
+  type RemoteRecordingEventUpdate,
 } from '@/app/api/ws/runner/route';
 
 export async function startRecording(
@@ -249,6 +250,28 @@ export async function insertTimestamp(repositoryId?: string | null): Promise<{ s
   return { success: false };
 }
 
+export async function promoteSelector(
+  actionId: string,
+  selectorValue: string,
+  repositoryId?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
+  if (!actionId || !selectorValue) {
+    return { success: false, error: 'actionId and selectorValue are required' };
+  }
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<PromoteSelectorCommand>('command:promote_selector', {
+      sessionId: remoteSession.sessionId,
+      actionId,
+      selectorValue,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+  return { success: false, error: 'No active recording session' };
+}
+
 export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 
@@ -287,11 +310,19 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     // If recording stopped and we have generated code, return as completed session
     const isCompleted = !remoteSession.isRecording && remoteSession.generatedCode;
 
+    // Drain late updates (verification settled, thumbnails arrived,
+    // autorepair fired) for events whose sequence the UI already polled
+    // past. The UI reconciles them by actionId.
+    const verificationUpdates = remoteSession.pendingEventUpdates ?? [];
+    if (verificationUpdates.length > 0) {
+      remoteSession.pendingEventUpdates = [];
+    }
+
     return {
       isRecording: remoteSession.isRecording,
       events,
       lastSequence,
-      verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
+      verificationUpdates,
       session: remoteSession.isRecording ? {
         id: remoteSession.sessionId,
         url: remoteSession.targetUrl,
@@ -311,7 +342,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     isRecording: false,
     events: [],
     lastSequence: 0,
-    verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
+    verificationUpdates: [] as RemoteRecordingEventUpdate[],
     session: null,
     lastCompletedSession: null,
     errorMessage: null,

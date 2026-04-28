@@ -28,6 +28,7 @@ import {
   timeoutStaleCommands,
   createRunnerCommand,
   cancelPendingCommandsByTestRun,
+  recordSelectorOutcomes,
 } from '@/lib/db/queries';
 
 // ============================================
@@ -333,6 +334,15 @@ export async function POST(request: NextRequest) {
         }
         delete payload.videoData;
 
+        // Persist per-attempt selector outcomes into selector_stats so the
+        // next run can sort fallback candidates by historical success.
+        // Best-effort — never block the test result on stats writes.
+        if (Array.isArray(result.payload.selectorOutcomes) && result.payload.testId) {
+          recordSelectorOutcomes(result.payload.testId, result.payload.selectorOutcomes).catch(
+            (err) => console.warn(`[Runner] selector_stats ingest failed:`, err),
+          );
+        }
+
         // Store result in DB and mark command completed
         const resultStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
         try {
@@ -488,11 +498,34 @@ export async function POST(request: NextRequest) {
         }
 
         // If the session exists in THIS process's memory, append directly too
-        // so same-pod consumers don't wait for the next DB poll.
+        // so same-pod consumers don't wait for the next DB poll. Re-emits
+        // (verification updates, thumbnail attachments) reuse the same
+        // sequence — replace in place so the in-memory view shows the
+        // latest copy, and queue an eventUpdate so the UI poll (which uses
+        // sinceSequence and otherwise wouldn't re-fetch older events) can
+        // reconcile in place.
         const session = findRemoteSessionBySessionId(recSessionId);
         if (session) {
           for (const event of events) {
-            session.events.push(event as RemoteRecordingEvent);
+            const incoming = event as RemoteRecordingEvent;
+            const existingIdx = session.events.findIndex(e => e.sequence === incoming.sequence);
+            if (existingIdx >= 0) {
+              session.events[existingIdx] = incoming;
+              const actionId = (incoming.data as { actionId?: string })?.actionId;
+              if (actionId) {
+                session.pendingEventUpdates ??= [];
+                session.pendingEventUpdates.push({
+                  actionId,
+                  verified: incoming.verification?.domVerified ?? false,
+                  selectorMatches: incoming.verification?.selectorMatches,
+                  chosenSelector: incoming.verification?.chosenSelector,
+                  autoRepaired: incoming.verification?.autoRepaired,
+                  thumbnailPath: (incoming.data as { thumbnailPath?: string })?.thumbnailPath,
+                });
+              }
+            } else {
+              session.events.push(incoming);
+            }
           }
         }
 
@@ -730,9 +763,25 @@ export interface RemoteRecordingEvent {
     syntaxValid: boolean;
     domVerified?: boolean;
     lastChecked?: number;
+    selectorMatches?: Array<{ type: string; value: string; count: number }>;
+    chosenSelector?: string;
+    autoRepaired?: boolean;
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: Record<string, any>;
+}
+
+/** Late update for an action event whose sequence the UI already saw —
+ *  verification finished, autorepair settled, or a thumbnail came back from
+ *  the runner. Drained on each `getRecordingStatus` poll so the timeline
+ *  can reconcile in place without re-fetching the whole event list. */
+export interface RemoteRecordingEventUpdate {
+  actionId: string;
+  verified: boolean;
+  selectorMatches?: Array<{ type: string; value: string; count: number }>;
+  chosenSelector?: string;
+  autoRepaired?: boolean;
+  thumbnailPath?: string;
 }
 
 export interface RemoteRecordingSession {
@@ -747,6 +796,7 @@ export interface RemoteRecordingSession {
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
   errorMessage?: string;
+  pendingEventUpdates?: RemoteRecordingEventUpdate[];
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {

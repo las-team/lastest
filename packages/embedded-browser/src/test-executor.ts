@@ -22,7 +22,17 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
-import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
+import {
+  instrumentAssertionTracking,
+  instrumentStepTracking,
+  stripTypeAnnotations,
+  watermarkVideo,
+  hashSelectors,
+  sortSelectorsByStats,
+  type SelectorOutcome,
+  type SelectorRef,
+  type SelectorStatRow,
+} from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -82,6 +92,10 @@ export interface EmbeddedTestResult {
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
+  /** Per-attempt selector outcomes captured by `locateWithFallback`. The
+   *  host writes these to `selector_stats` so future runs can promote
+   *  the winning candidate. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 export interface EmbeddedSetupResult {
@@ -153,6 +167,9 @@ export interface RunTestPayload {
     lineEnd: number;
     type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
   }>;
+  /** Selector_stats rows for this test, used by `locateWithFallback` to
+   *  sort fallback candidates by historical success before iterating. */
+  selectorStats?: SelectorStatRow[];
 }
 
 /**
@@ -260,6 +277,7 @@ export class EmbeddedTestExecutor {
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
     const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
+    const selectorOutcomes: SelectorOutcome[] = [];
     const consoleErrors: string[] = [];
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
@@ -964,6 +982,8 @@ export class EmbeddedTestExecutor {
       };
 
       // locateWithFallback — supports { type, value } format, ocr-text, role-name, coordinate fallback
+      const lwfStats = command.selectorStats ?? [];
+      const lwfSortCache = new Map<string, Array<{ type: string; value: string }>>();
       const locateWithFallback = async (
         pg: Page,
         selectors: Array<{ type: string; value: string } | string | { selector?: string; css?: string; text?: string }>,
@@ -983,9 +1003,19 @@ export class EmbeddedTestExecutor {
           })
           .filter((s) => s.value && s.value.trim() && !s.value.includes('undefined'));
 
-        logFn('info', `[action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+        const lwfHash = hashSelectors(validSelectors as SelectorRef[]);
+        let ordered = lwfSortCache.get(lwfHash);
+        if (!ordered) {
+          ordered = lwfStats.length > 0
+            ? sortSelectorsByStats(validSelectors, lwfStats.filter((r) => r.hash === lwfHash))
+            : validSelectors;
+          lwfSortCache.set(lwfHash, ordered);
+        }
 
-        for (const sel of validSelectors) {
+        logFn('info', `[action] ${action}${value ? ` "${value}"` : ''} (${ordered.length} selectors)`);
+
+        for (const sel of ordered) {
+          const attemptStart = Date.now();
           try {
             let locator;
             if (sel.type === 'ocr-text') {
@@ -1006,15 +1036,20 @@ export class EmbeddedTestExecutor {
             await target.waitFor({ timeout: 3000 });
 
             logFn('info', `[action] ${action} matched via ${sel.type}`);
-            if (action === 'locate') return target;
+            if (action === 'locate') {
+              selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
+              return target;
+            }
             if (action === 'click') await target.click(options || {});
             else if (action === 'fill') await target.fill(value || '');
             else if (action === 'selectOption') await target.selectOption(value || '');
             else if (action === 'check') await target.check();
             else if (action === 'uncheck') await target.uncheck();
 
+            selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
             return target;
           } catch {
+            selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: false });
             continue;
           }
         }
@@ -1210,6 +1245,7 @@ export class EmbeddedTestExecutor {
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
         extractedVariables,
+        selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -1232,6 +1268,7 @@ export class EmbeddedTestExecutor {
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
@@ -1264,6 +1301,7 @@ export class EmbeddedTestExecutor {
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
           extractedVariables,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       }
     } finally {

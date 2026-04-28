@@ -349,6 +349,7 @@ async function startup(): Promise<void> {
           stabilization?: import('./protocol.js').StabilizationPayload;
           headed?: boolean;
           forceVideoRecording?: boolean;
+          selectorStats?: import('./test-executor.js').RunTestPayload['selectorStats'];
         };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
@@ -525,6 +526,7 @@ async function startup(): Promise<void> {
                 totalSteps: result.totalSteps,
                 domSnapshot: result.domSnapshot,
                 extractedVariables: result.extractedVariables,
+                selectorOutcomes: result.selectorOutcomes,
               },
             });
 
@@ -828,6 +830,18 @@ async function startup(): Promise<void> {
         if (!recorder?.isActive()) break;
         await recorder.insertTimestamp();
         console.log(`[Command] Inserted timestamp`);
+        break;
+      }
+
+      case 'command:promote_selector': {
+        if (!recorder?.isActive()) break;
+        const promotePayload = command.payload as {
+          sessionId: string;
+          actionId: string;
+          selectorValue: string;
+        };
+        recorder.promoteSelector(promotePayload.actionId, promotePayload.selectorValue);
+        console.log(`[Command] Promoted selector for action ${promotePayload.actionId}`);
         break;
       }
 

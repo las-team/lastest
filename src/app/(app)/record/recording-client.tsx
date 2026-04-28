@@ -47,18 +47,12 @@ import {
   Loader2,
   ExternalLink,
   Clock,
-  MousePointer,
-  Navigation,
   Settings2,
   CheckCircle2,
   ChevronDown,
-  MousePointerClick,
-  Eye,
-  FormInput,
   ListFilter,
   AlertTriangle,
   Check,
-  Keyboard,
   ShieldCheck,
   Play,
   Pause,
@@ -76,6 +70,9 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
 import { RecordingTutorialOverlay } from '@/components/recording-tutorial/recording-tutorial-overlay';
+import { StepCard } from '@/components/recording/step-card';
+import { TraceScrub } from '@/components/recording/trace-scrub';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 interface SetupStepInfo {
   id: string;
@@ -314,10 +311,19 @@ interface ActionSelector {
   value: string;
 }
 
+interface SelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 interface VerificationStatus {
   syntaxValid: boolean;
   domVerified?: boolean;
   lastChecked?: number;
+  selectorMatches?: SelectorMatch[];
+  chosenSelector?: string;
+  autoRepaired?: boolean;
 }
 
 type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
@@ -336,6 +342,10 @@ interface RecordingEvent {
     url?: string;
     relativePath?: string;
     screenshotPath?: string;
+    /** data: URL for the post-action element thumbnail captured by the
+     *  recorder. Populated late via verificationUpdates — may be undefined
+     *  if the screenshot timed out or the user nav'd before it landed. */
+    thumbnailPath?: string;
     assertionType?: string;
     elementAssertion?: {
       type: string;
@@ -437,6 +447,23 @@ export function RecordingClient({
   const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
+  // Optimistic update for selector promotion from a step card. The runner
+  // round-trip will re-emit the event with the same selector chosen, so
+  // this just shortens the perceived gap until the timeline reflects it.
+  const handlePromoteOptimistic = useCallback((actionId: string, selectorValue: string) => {
+    setEvents(prev => {
+      const updated = [...prev];
+      const event = updated.find(e => e.data.actionId === actionId);
+      if (!event) return prev;
+      event.verification = {
+        ...(event.verification ?? { syntaxValid: true }),
+        chosenSelector: selectorValue,
+        autoRepaired: true,
+      };
+      return updated;
+    });
+  }, []);
+
   // Insert-Wait popover state
   const [waitPopoverOpen, setWaitPopoverOpen] = useState(false);
   const [waitMode, setWaitMode] = useState<WaitType>('duration');
@@ -482,18 +509,26 @@ export function RecordingClient({
           setIsPaused((status as Record<string, unknown>).isPaused as boolean);
         }
 
-        // Apply verification updates to existing events
+        // Apply late updates (verification settled, autorepair fired,
+        // thumbnail came back) to events the timeline has already rendered.
+        // Widened from the prior verified-only signal so the selector pill
+        // and element thumbnail can refresh without a full re-fetch.
         if (status.verificationUpdates && status.verificationUpdates.length > 0) {
           setEvents(prev => {
             const updated = [...prev];
             for (const update of status.verificationUpdates) {
               const event = updated.find(e => e.data.actionId === update.actionId);
-              if (event && event.verification) {
-                event.verification = {
-                  ...event.verification,
-                  domVerified: update.verified,
-                  lastChecked: Date.now(),
-                };
+              if (!event) continue;
+              event.verification = {
+                ...(event.verification ?? { syntaxValid: true }),
+                domVerified: update.verified,
+                lastChecked: Date.now(),
+                ...(update.selectorMatches !== undefined ? { selectorMatches: update.selectorMatches } : {}),
+                ...(update.chosenSelector !== undefined ? { chosenSelector: update.chosenSelector } : {}),
+                ...(update.autoRepaired !== undefined ? { autoRepaired: update.autoRepaired } : {}),
+              };
+              if (update.thumbnailPath !== undefined) {
+                event.data = { ...event.data, thumbnailPath: update.thumbnailPath };
               }
             }
             return updated;
@@ -533,7 +568,9 @@ export function RecordingClient({
       } catch (err) {
         console.error('Failed to poll recording status:', err);
       }
-    }, 500); // Poll every 500ms for better responsiveness
+    }, 150); // 150 ms keeps perceived row-appearance latency under the
+            // Doherty 400 ms responsiveness threshold (paired with the
+            // 150 ms recorder batch flush on the runner/EB side).
 
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
@@ -1188,78 +1225,26 @@ export function RecordingClient({
                 <span className="text-sm font-medium text-foreground">Timeline</span>
                 <span className="text-xs text-muted-foreground">{events.length} events</span>
               </div>
-              <div ref={timelineRef} className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1.5 w-72" style={{ maxHeight: 'calc(100% - 41px)' }}>
-                {events.length === 0 ? (
-                  <div className="text-center py-4 text-muted-foreground text-sm">
-                    Waiting for interactions...
-                  </div>
-                ) : (
-                  events.map((event, i) => {
-                    const replayStatus = isActionReplayable(event);
-                    const verification = event.verification;
-                    return (
-                      <div
+              <TooltipProvider delayDuration={120}>
+                <div ref={timelineRef} className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1 w-72" style={{ maxHeight: 'calc(100% - 41px)' }}>
+                  {events.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      Waiting for interactions...
+                    </div>
+                  ) : (
+                    events.map((event, i) => (
+                      <StepCard
                         key={`${event.sequence}-${i}`}
-                        className={`flex items-start gap-2 text-sm ${
-                          event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
-                        }`}
-                      >
-                        <div className="mt-0.5">
-                          {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                          {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                          {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
-                          {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
-                          {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                          {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                          {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
-                          {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
-                          {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
-                          {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
-                          {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
-                          {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
-                          {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
-                          {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
-                          {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
-                          {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-muted-foreground text-xs">
-                            {new Date(event.timestamp).toLocaleTimeString()}
-                          </span>
-                          <span className="ml-2 truncate text-foreground">
-                            {getEventDescription(event)}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
-                          {event.type === 'action' && event.status === 'committed' && (
-                            <div title={
-                              !replayStatus.replayable ? 'No selectors - may not replay' :
-                              replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
-                              verification?.domVerified ? 'Verified' :
-                              verification?.syntaxValid ? 'Verifying...' : 'Checking...'
-                            }>
-                              {!replayStatus.replayable ? (
-                                <AlertTriangle className="h-3 w-3 text-red-500" />
-                              ) : replayStatus.reason === 'coords-only' ? (
-                                <Check className="h-3 w-3 text-yellow-500" />
-                              ) : verification?.domVerified ? (
-                                <CheckCircle2 className="h-3 w-3 text-green-500" />
-                              ) : verification?.syntaxValid ? (
-                                <div className="flex items-center">
-                                  <Check className="h-3 w-3 text-green-500" />
-                                  <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
-                                </div>
-                              ) : (
-                                <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+                        event={event}
+                        description={getEventDescription(event)}
+                        replayStatus={isActionReplayable(event)}
+                        repositoryId={repositoryId}
+                        onPromoteOptimistic={handlePromoteOptimistic}
+                      />
+                    ))
+                  )}
+                </div>
+              </TooltipProvider>
             </div>
           </div>
 
@@ -1469,79 +1454,26 @@ export function RecordingClient({
                 <CardTitle className="text-sm">Interaction Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div ref={timelineRef} className="space-y-2 max-h-64 overflow-y-auto overflow-x-hidden">
-                  {events.length === 0 ? (
-                    <div className="text-center py-4 text-muted-foreground text-sm">
-                      Waiting for interactions...
-                    </div>
-                  ) : (
-                    events.map((event, i) => {
-                      const replayStatus = isActionReplayable(event);
-                      const verification = event.verification;
-                      return (
-                        <div
+                <TooltipProvider delayDuration={120}>
+                  <div ref={timelineRef} className="space-y-1 max-h-64 overflow-y-auto overflow-x-hidden">
+                    {events.length === 0 ? (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Waiting for interactions...
+                      </div>
+                    ) : (
+                      events.map((event, i) => (
+                        <StepCard
                           key={`${event.sequence}-${i}`}
-                          className={`flex items-start gap-2 text-sm ${
-                            event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
-                          }`}
-                        >
-                          <div className="mt-0.5">
-                            {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                            {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                            {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
-                            {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
-                            {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                            {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                            {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
-                            {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
-                            {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
-                            {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
-                            {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
-                            {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
-                            {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
-                            {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
-                            {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
-                            {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-muted-foreground text-xs">
-                              {new Date(event.timestamp).toLocaleTimeString()}
-                            </span>
-                            <span className="ml-2 truncate">
-                              {getEventDescription(event)}
-                            </span>
-                          </div>
-                          {/* Verification indicator - fixed width to prevent layout shift */}
-                          <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
-                            {event.type === 'action' && event.status === 'committed' && (
-                              <div title={
-                                !replayStatus.replayable ? 'No selectors - may not replay' :
-                                replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
-                                verification?.domVerified ? 'Verified' :
-                                verification?.syntaxValid ? 'Verifying...' : 'Checking...'
-                              }>
-                                {!replayStatus.replayable ? (
-                                  <AlertTriangle className="h-3 w-3 text-red-500" />
-                                ) : replayStatus.reason === 'coords-only' ? (
-                                  <Check className="h-3 w-3 text-yellow-500" />
-                                ) : verification?.domVerified ? (
-                                  <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                ) : verification?.syntaxValid ? (
-                                  <div className="flex items-center">
-                                    <Check className="h-3 w-3 text-green-500" />
-                                    <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
-                                  </div>
-                                ) : (
-                                  <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                          event={event}
+                          description={getEventDescription(event)}
+                          replayStatus={isActionReplayable(event)}
+                          repositoryId={repositoryId}
+                          onPromoteOptimistic={handlePromoteOptimistic}
+                        />
+                      ))
+                    )}
+                  </div>
+                </TooltipProvider>
               </CardContent>
             </Card>
 
@@ -1597,6 +1529,13 @@ export function RecordingClient({
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-4xl mx-auto space-y-6">
+        <TraceScrub
+          events={events}
+          describe={getEventDescription}
+          replayStatusOf={isActionReplayable}
+          repositoryId={repositoryId}
+          onPromoteOptimistic={handlePromoteOptimistic}
+        />
         <Card>
           <CardHeader>
             <CardTitle>{isRerecording ? 'Update Test' : 'Save Recording'}</CardTitle>
@@ -1615,9 +1554,9 @@ export function RecordingClient({
             </div>
 
             {autoPlayStatus !== 'idle' && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium">Headed 2x Replay</label>
+              <section className="rounded-lg border bg-card text-card-foreground overflow-hidden">
+                <header className="flex items-center justify-between px-3 py-2 border-b bg-card">
+                  <span className="text-sm font-medium">Headed 2x Replay</span>
                   <span className="text-xs text-muted-foreground flex items-center gap-1.5">
                     {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}
                     {autoPlayStatus === 'playing' && !playbackStreamUrl && (<><Loader2 className="h-3 w-3 animate-spin" /> Provisioning browser…</>)}
@@ -1625,28 +1564,37 @@ export function RecordingClient({
                     {autoPlayStatus === 'finished' && (<><Check className="h-3 w-3" /> Replay finished</>)}
                     {autoPlayStatus === 'error' && (<><AlertTriangle className="h-3 w-3" /> Replay error</>)}
                   </span>
-                </div>
-                <div className="bg-muted/50 rounded-lg border overflow-hidden flex items-center justify-center" style={{ minHeight: 360 }}>
-                  {playbackStreamUrl ? (
+                </header>
+                <div
+                  className="relative flex items-center justify-center bg-card"
+                  style={{
+                    aspectRatio: `${settings.viewportWidth ?? 1280} / ${settings.viewportHeight ?? 720}`,
+                    maxHeight: 360,
+                  }}
+                >
+                  {playbackStreamUrl && (
                     <BrowserViewer
                       streamUrl={playbackStreamUrl}
                       initialViewport={{
                         width: settings.viewportWidth ?? 1280,
                         height: settings.viewportHeight ?? 720,
                       }}
+                      className="h-full w-full"
+                      fit
                       hideControls
                     />
-                  ) : (
-                    <div className="text-xs text-muted-foreground p-8">
+                  )}
+                  {!playbackStreamUrl && (
+                    <p className="relative z-10 text-xs text-card-foreground p-8">
                       {autoPlayStatus === 'finished'
                         ? 'Replay finished — open the test to see the run.'
                         : autoPlayStatus === 'error'
                           ? 'Replay could not start.'
                           : 'Spinning up a headed browser to replay your recording…'}
-                    </div>
+                    </p>
                   )}
                 </div>
-              </div>
+              </section>
             )}
 
             <div>

@@ -38,9 +38,10 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type { CoreStabilizationSettings } from '@lastest/shared';
+import type { CoreStabilizationSettings, SelectorOutcome, SelectorStatRow } from '@lastest/shared';
 
 export type StabilizationPayload = CoreStabilizationSettings;
+export type { SelectorOutcome, SelectorStatRow };
 
 export interface RunTestCommandPayload {
   testId: string;
@@ -88,6 +89,10 @@ export interface RunTestCommandPayload {
     codeLineStart?: number;
     codeLineEnd?: number;
   }>;
+  /** Selector_stats rows for this test (see host protocol). Used by
+   *  `locateWithFallback` to sort candidates by historical success
+   *  before iterating. */
+  selectorStats?: SelectorStatRow[];
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -184,6 +189,12 @@ export interface CaptureScreenshotCommand extends BaseMessage {
   payload: { sessionId: string };
 }
 
+export interface RecordingSelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 export interface RecordingEventData {
   type: string;
   timestamp: number;
@@ -193,6 +204,9 @@ export interface RecordingEventData {
     syntaxValid: boolean;
     domVerified?: boolean;
     lastChecked?: number;
+    selectorMatches?: RecordingSelectorMatch[];
+    chosenSelector?: string;
+    autoRepaired?: boolean;
   };
   data: {
     action?: string;
@@ -202,6 +216,7 @@ export interface RecordingEventData {
     url?: string;
     relativePath?: string;
     screenshotPath?: string;
+    thumbnailPath?: string;
     assertionType?: string;
     coordinates?: { x: number; y: number };
     button?: number;
@@ -298,6 +313,10 @@ export interface TestResultPayload {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotPayload;
+  /** Per-attempt selector outcomes captured by `locateWithFallback`. The
+   *  host writes these to `selector_stats` so the next run can promote
+   *  the winning candidate. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 export interface TestResultResponse extends BaseMessage {

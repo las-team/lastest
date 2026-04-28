@@ -8,9 +8,9 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload } from './protocol.js';
+import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload, SelectorOutcome } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
+import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo, hashSelectors, sortSelectorsByStats, type SelectorRef } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -46,6 +46,9 @@ export interface TestRunResult {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotPayload;
+  /** Per-attempt selector outcomes from `locateWithFallback`. The host
+   *  ingests these into `selector_stats` for the next-run sort. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 /**
@@ -328,6 +331,7 @@ export class TestRunner {
     const logs: LogEntry[] = [];
     const softErrors: string[] = [];
     const assertionResults: NonNullable<TestRunResult['assertionResults']> = [];
+    const selectorOutcomes: SelectorOutcome[] = [];
     const logFn = (level: 'info' | 'warn' | 'error', message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       const prefix = level === 'error' ? '  [ERROR]' : level === 'warn' ? '  [WARN]' : '  [INFO]';
@@ -536,7 +540,7 @@ export class TestRunner {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults, onStepEvent)
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults, onStepEvent, selectorOutcomes)
             .then(r => { clearTimeout(timeoutTimer); return r; })
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
@@ -607,6 +611,7 @@ export class TestRunner {
         lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
+        selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -628,6 +633,7 @@ export class TestRunner {
           assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       } else {
         // Check if timeout
@@ -675,6 +681,7 @@ export class TestRunner {
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot: failureDomSnapshot,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       }
     } finally {
@@ -876,6 +883,7 @@ export class TestRunner {
     payload?: RunTestCommandPayload,
     assertionResults?: NonNullable<TestRunResult['assertionResults']>,
     onStepEvent?: (event: import('./protocol').StepEventPayload) => void,
+    selectorOutcomes?: SelectorOutcome[],
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test/setup(page, ...) { ... }
@@ -1084,6 +1092,8 @@ export class TestRunner {
     };
 
     // Create locateWithFallback helper (matches local runner signature)
+    const stats = payload?.selectorStats ?? [];
+    const sortCache = new Map<string, Array<{ type: string; value: string }>>();
     const locateWithFallback = async (
       pg: Page,
       selectors: Array<{ type: string; value: string }>,
@@ -1096,9 +1106,19 @@ export class TestRunner {
         (s) => s.value && s.value.trim() && !s.value.includes('undefined')
       );
 
-      log('info', `[action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+      const hash = hashSelectors(validSelectors as SelectorRef[]);
+      let ordered = sortCache.get(hash);
+      if (!ordered) {
+        ordered = stats.length > 0
+          ? sortSelectorsByStats(validSelectors, stats.filter((r) => r.hash === hash))
+          : validSelectors;
+        sortCache.set(hash, ordered);
+      }
 
-      for (const sel of validSelectors) {
+      log('info', `[action] ${action}${value ? ` "${value}"` : ''} (${ordered.length} selectors)`);
+
+      for (const sel of ordered) {
+        const attemptStart = Date.now();
         try {
           let locator;
           if (sel.type === 'ocr-text') {
@@ -1128,13 +1148,18 @@ export class TestRunner {
           await target.waitFor({ timeout: 3000 });
 
           log('info', `[action] ${action} matched via ${sel.type}`);
-          if (action === 'locate') return target;
+          if (action === 'locate') {
+            selectorOutcomes?.push({ hash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
+            return target;
+          }
           if (action === 'click') await target.click(options || {});
           else if (action === 'fill') await target.fill(value || '');
           else if (action === 'selectOption') await target.selectOption(value || '');
 
+          selectorOutcomes?.push({ hash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
           return target;
         } catch {
+          selectorOutcomes?.push({ hash, type: sel.type, value: sel.value, success: false });
           continue;
         }
       }

@@ -32,6 +32,7 @@ import {
   getTestFixtures,
   getGoogleSheetsDataSources,
   getCsvDataSources,
+  getSelectorStatsForTest,
 } from '@/lib/db/queries';
 import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
 import { resolveVarReferences, pickRowsForVariables, resolveAssignedValues } from '@/lib/vars/resolver';
@@ -476,6 +477,17 @@ async function executeViaRunner(
       const resolvedBody = extractTestBody(resolvedCode) ?? '';
       const parsedSteps = resolvedBody ? parseSteps(resolvedBody) : [];
 
+      // Fetch all selector_stats rows for this test so the runner / EB can
+      // sort fallback candidates by historical success without a per-action
+      // DB round-trip. Best-effort — first run of any test sees an empty
+      // list, runner falls back to the captured order.
+      let selectorStatsForRunner: Awaited<ReturnType<typeof getSelectorStatsForTest>> = [];
+      try {
+        selectorStatsForRunner = await getSelectorStatsForTest(test.id);
+      } catch (err) {
+        console.warn(`[executor] Failed to load selector_stats for test ${test.id}:`, err);
+      }
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -520,6 +532,7 @@ async function executeViaRunner(
           codeLineStart: a.codeLineStart,
           codeLineEnd: a.codeLineEnd,
         })),
+        selectorStats: selectorStatsForRunner.length > 0 ? selectorStatsForRunner : undefined,
       });
 
       // Queue command to DB

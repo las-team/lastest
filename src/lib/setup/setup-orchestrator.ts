@@ -70,7 +70,7 @@ export class SetupOrchestrator {
       };
     }
 
-    return runTestAsSetup(page, test.code, context);
+    return runTestAsSetup(page, test.code, context, testId);
   }
 
   /**

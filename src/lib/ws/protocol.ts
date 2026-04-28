@@ -19,6 +19,7 @@ export type MessageType =
   | 'command:create_wait'
   | 'command:flag_download'
   | 'command:insert_timestamp'
+  | 'command:promote_selector'
   | 'command:start_debug'
   | 'command:debug_action'
   | 'command:stop_debug'
@@ -69,9 +70,10 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type { CoreStabilizationSettings } from '@lastest/shared';
+import type { CoreStabilizationSettings, SelectorOutcome, SelectorStatRow } from '@lastest/shared';
 
 export type StabilizationPayload = CoreStabilizationSettings;
+export type { SelectorOutcome, SelectorStatRow };
 
 export interface RunTestCommandPayload {
   testId: string;
@@ -134,6 +136,13 @@ export interface RunTestCommandPayload {
     codeLineStart?: number;
     codeLineEnd?: number;
   }>;
+  /** All `selector_stats` rows for this test, used by the runner's
+   *  `locateWithFallback` to sort fallback candidates by historical
+   *  success rate before iterating. Empty / omitted on first run for
+   *  a test — runner falls back to the original captured order. The
+   *  hash field on each row is the FNV-1a of the original (pre-sort)
+   *  selectors array (`hashSelectors` in `@lastest/shared`). */
+  selectorStats?: SelectorStatRow[];
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -295,6 +304,10 @@ export interface TestResultPayload {
   totalSteps?: number;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
+  /** Per-attempt selector outcomes from `locateWithFallback`. The host
+   *  ingests these into `selector_stats` so the next run can promote the
+   *  winning candidate. Best-effort — failures swallowed on the host. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -316,6 +329,16 @@ export interface RecordingEventData {
   position?: { x: number; y: number };
 }
 
+/** Match-count signal for a single candidate selector, evaluated against the
+ *  live DOM right after an action lands. count = -1 means "not cheaply
+ *  countable" (role-name / text selectors); 0 = stale/missing; 1 = unique;
+ *  >1 = ambiguous (autorepair will prefer a unique sibling if one exists). */
+export interface RecordingSelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 export interface RecordingEventPayload {
   sessionId: string;
   events: Array<{
@@ -327,6 +350,14 @@ export interface RecordingEventPayload {
       syntaxValid: boolean;
       domVerified?: boolean;
       lastChecked?: number;
+      /** Per-selector match counts captured by the in-page verifier. */
+      selectorMatches?: RecordingSelectorMatch[];
+      /** The selector autorepair settled on (most-unique). May differ from
+       *  data.selector if the recorder picked the wrong primary first. */
+      chosenSelector?: string;
+      /** True when the original primary differed from chosenSelector — i.e.
+       *  the in-page autorepair promoted a more specific candidate. */
+      autoRepaired?: boolean;
     };
     data: Record<string, unknown>;
   }>;
@@ -388,6 +419,17 @@ export interface FlagDownloadCommand extends BaseMessage {
 export interface InsertTimestampCommand extends BaseMessage {
   type: 'command:insert_timestamp';
   payload: { sessionId: string };
+}
+
+export interface PromoteSelectorCommandPayload {
+  sessionId: string;
+  actionId: string;
+  selectorValue: string;
+}
+
+export interface PromoteSelectorCommand extends BaseMessage {
+  type: 'command:promote_selector';
+  payload: PromoteSelectorCommandPayload;
 }
 
 // ============================================
@@ -594,6 +636,7 @@ export type ServerCommand =
   | CreateWaitCommand
   | FlagDownloadCommand
   | InsertTimestampCommand
+  | PromoteSelectorCommand
   | CaptureScreenshotCommand
   | StartDebugCommand
   | DebugActionCommand
