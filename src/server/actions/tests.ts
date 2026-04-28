@@ -9,6 +9,19 @@ import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
 
+/**
+ * Fetch all selector_stats rows for a test so the UI can display per-step
+ * fallback success rates on hover. Best-effort — returns [] on auth or DB
+ * errors, since this is purely diagnostic information.
+ */
+export async function getSelectorStatsForTestAction(testId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return [];
+  if (test.repositoryId) await requireRepoAccess(test.repositoryId);
+  else await requireTeamAccess();
+  return queries.getSelectorStatsForTest(testId);
+}
+
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

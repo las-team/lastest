@@ -25,7 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest, getSelectorStatsForTestAction } from '@/server/actions/tests';
+import type { SelectorStatRow } from '@lastest/shared/selector-stats';
 import { runTests, getJobStatus, getTestRunStepState } from '@/server/actions/runs';
 import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
 import { PlaybackTimeline, type StepResultsMap } from '@/components/playback/playback-timeline';
@@ -262,6 +263,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
   const [stepResults, setStepResults] = useState<StepResultsMap>({});
 
+  // Per-step selector fallback stats from the selector_stats table. Loaded
+  // once on mount and refreshed when a run completes so newly recorded
+  // outcomes show up in the hover panel without a page reload.
+  const [selectorStats, setSelectorStats] = useState<SelectorStatRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getSelectorStatsForTestAction(test.id)
+      .then((rows) => { if (!cancelled) setSelectorStats(rows); })
+      .catch(() => { /* best-effort — diagnostic only */ });
+    return () => { cancelled = true; };
+  }, [test.id]);
+
   // Parsed steps from the current test code — feeds the upcoming-step list
   // ahead of time so the timeline shows what's coming, not just what's done.
   const plannedSteps = useMemo(() => {
@@ -487,6 +500,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           setIsRunning(false);
           setStreamUrl(null);
           router.refresh();
+          // Pull fresh selector_stats so the per-step hover reflects this
+          // run's outcomes. Best-effort.
+          getSelectorStatsForTestAction(test.id)
+            .then(setSelectorStats)
+            .catch(() => { /* diagnostic only */ });
           if (onRefresh) {
             try {
               await onRefresh();
@@ -887,19 +905,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     className="flex-1 min-h-0"
                   />
                   {plannedSteps.length > 0 && (
-                    <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 z-40 hidden md:block">
+                    <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 layer-playback-timeline hidden md:block">
                       <PlaybackTimeline
                         steps={plannedSteps}
                         currentStepIndex={currentStepIndex}
                         results={stepResults}
                         isRunning={isRunning}
+                        selectorStats={selectorStats}
                         compact
                         className="h-full pointer-events-auto"
                       />
                     </div>
                   )}
                 </div>
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
                   <div className="flex items-center gap-2 px-1">
                     <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
                     <span className="text-sm font-medium text-foreground">Running</span>
@@ -962,6 +981,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     currentStepIndex={currentStepIndex}
                     results={stepResults}
                     isRunning={isRunning}
+                    selectorStats={selectorStats}
                     className="h-[540px]"
                   />
                 )}

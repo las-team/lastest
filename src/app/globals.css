@@ -272,10 +272,43 @@
   }
 }
 
+@keyframes step-active-row-pulse {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 1px oklch(from var(--color-primary) l c h / 0.55),
+      0 0 0 0 oklch(from var(--color-primary) l c h / 0.35);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px oklch(from var(--color-primary) l c h / 0.85),
+      0 0 0 4px oklch(from var(--color-primary) l c h / 0);
+  }
+}
+
 .playback-step-active {
   animation: step-active-glow 1.6s ease-in-out infinite;
+}
+
+.playback-step-row-active {
+  animation: step-active-row-pulse 1.6s ease-in-out infinite;
 }
 
 .playback-step-enter {
   animation: step-rise 320ms ease-out both;
 }
+
+/* ---------- Z-index layer scale ---------------------------------------------
+   Centralizes stacking order for the headed-playback / recording surfaces so
+   ad-hoc `z-10/40/50` values don't drift out of sync.
+
+   canvas-overlay  10  · BrowserViewer connect/disconnect/file-chooser overlays
+                        + the hidden IME textarea inside the canvas card
+   playback-timeline 20 · Right-side step list when overlaid on the live canvas
+                        (fullscreen). Above the canvas, below floating chrome.
+   playback-controls 30 · Floating bottom-center pill (Running / exit-fullscreen
+                        / recording mini-menu). Always reachable.
+   Portals (Radix HoverCard, Dropdown, Dialog) keep their default `z-50` and
+   therefore always sit above the page chrome above. */
+.layer-canvas-overlay { z-index: 10; }
+.layer-playback-timeline { z-index: 20; }
+.layer-playback-controls { z-index: 30; }

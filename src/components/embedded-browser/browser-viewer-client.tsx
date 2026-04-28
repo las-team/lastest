@@ -690,7 +690,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
       <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
               <div className="flex flex-col items-center gap-2 text-white">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -719,7 +719,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         )}
 
         {fileChooserPending && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
             <Upload className="h-8 w-8 text-muted-foreground" />
             <p className="text-sm font-medium">File upload requested</p>
             <Button onClick={handleFileUpload} size="sm">Choose Files</Button>

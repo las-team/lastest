@@ -75,6 +75,26 @@ function classifyStatement(code: string): DebugStep['type'] {
 }
 
 /**
+ * Extract the raw selector array from a `locateWithFallback(...)` call so the
+ * UI can hash it (`hashSelectors` in `@lastest/shared`) and look up rows in
+ * `selector_stats`. Returns null if the line isn't a locate call or the
+ * literal can't be JSON-parsed (e.g. the array is built dynamically).
+ */
+export function extractSelectorArray(
+  code: string,
+): { selectors: { type: string; value: string }[]; action: string } | null {
+  const m = code.match(/locateWithFallback\s*\(\s*page\s*,\s*(\[[\s\S]+?\])\s*,\s*['"](\w+)['"]/);
+  if (!m) return null;
+  try {
+    const selectors = JSON.parse(m[1]) as { type: string; value: string }[];
+    if (!Array.isArray(selectors)) return null;
+    return { selectors, action: m[2] };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pick the most human-readable selector from a locateWithFallback JSON array.
  * Priority: role-name > id > placeholder > text > ocr-text > css-path
  */

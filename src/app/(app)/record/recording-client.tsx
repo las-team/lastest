@@ -476,7 +476,18 @@ export function RecordingClient({
   useEffect(() => {
     if (step !== 'recording') return;
 
+    // Guard against overlapping polls. setInterval fires on a fixed clock —
+    // when getRecordingStatus takes longer than the interval (DB busy,
+    // large event payloads, etc.) callbacks pile up and React batches the
+    // resulting setEvents(prev => […, …event]) calls, causing the same
+    // sequence to be appended multiple times. Symptom: 6× duplicated rows
+    // for a single click. Skip the tick when one is already in flight; the
+    // next tick will pick up any new state.
+    let pollInFlight = false;
+
     const pollInterval = setInterval(async () => {
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const status = await getRecordingStatus(repositoryId, lastSequenceRef.current);
 
@@ -535,23 +546,32 @@ export function RecordingClient({
           });
         }
 
-        // Process new events
+        // Process new events. Re-emissions (verification settled,
+        // thumbnail attached) reuse their original sequence — replace in
+        // place rather than append so timing races (overlapping polls,
+        // out-of-order responses) can't grow the timeline unboundedly.
         if (status.events.length > 0) {
           setEvents(prev => {
-            // Replace any preview events with committed versions or add new ones
             const newEvents = [...prev];
             for (const event of status.events) {
-              // Skip cursor-move events for display (too noisy)
               if (event.type === 'cursor-move') continue;
 
-              // For hover-preview, replace the last one if exists
+              // hover-preview events get fresh sequences each time but the
+              // recorder always replaces the previous preview rather than
+              // accumulating — keep that splice-by-type semantic.
               if (event.type === 'hover-preview') {
                 const lastIdx = newEvents.findLastIndex(e => e.type === 'hover-preview');
-                if (lastIdx !== -1) {
-                  newEvents.splice(lastIdx, 1);
-                }
+                if (lastIdx !== -1) newEvents.splice(lastIdx, 1);
+                newEvents.push(event);
+                continue;
               }
-              newEvents.push(event);
+
+              const existingIdx = newEvents.findIndex(e => e.sequence === event.sequence);
+              if (existingIdx >= 0) {
+                newEvents[existingIdx] = event;
+              } else {
+                newEvents.push(event);
+              }
             }
             return newEvents;
           });
@@ -567,6 +587,8 @@ export function RecordingClient({
         }
       } catch (err) {
         console.error('Failed to poll recording status:', err);
+      } finally {
+        pollInFlight = false;
       }
     }, 150); // 150 ms keeps perceived row-appearance latency under the
             // Doherty 400 ms responsiveness threshold (paired with the
@@ -1249,7 +1271,7 @@ export function RecordingClient({
           </div>
 
           {/* Floating mini-menu — fixed at bottom center */}
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
             <div className="flex items-center gap-2 px-1">
               <div className={`h-2.5 w-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
               <span className="text-sm font-medium text-foreground">{isPaused ? 'Paused' : 'Recording'}</span>

@@ -133,12 +133,19 @@ export function TraceScrub({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div ref={listRef} className="max-h-72 overflow-y-auto space-y-1 pr-1">
               {actionEvents.map((event, i) => (
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   key={`${event.sequence}-${i}`}
                   data-scrub-idx={i}
                   onClick={() => setFocusIdx(i)}
-                  className={`w-full text-left rounded-md ${i === focusIdx ? 'bg-muted/60 ring-1 ring-primary/40' : ''}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setFocusIdx(i);
+                    }
+                  }}
+                  className={`w-full text-left rounded-md cursor-pointer ${i === focusIdx ? 'bg-muted/60 ring-1 ring-primary/40' : ''}`}
                 >
                   <StepCard
                     event={event}
@@ -147,7 +154,7 @@ export function TraceScrub({
                     repositoryId={repositoryId}
                     onPromoteOptimistic={onPromoteOptimistic}
                   />
-                </button>
+                </div>
               ))}
             </div>
             <div className="flex flex-col gap-2">

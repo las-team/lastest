@@ -15,7 +15,13 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { DebugStep } from '@/lib/playwright/debug-parser';
+import { extractSelectorArray, type DebugStep } from '@/lib/playwright/debug-parser';
+import { hashSelectors, sortSelectorsByStats, type SelectorStatRow } from '@lastest/shared/selector-stats';
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card';
 
 export type StepResultsMap = Record<number, {
   status: 'passed' | 'failed';
@@ -31,6 +37,10 @@ interface PlaybackTimelineProps {
   className?: string;
   /** Render compact, narrower variant for fullscreen overlay. */
   compact?: boolean;
+  /** All `selector_stats` rows for the test backing this timeline. When
+   *  present, action steps with a parseable `locateWithFallback` array
+   *  show a hover panel with per-candidate success/fail history. */
+  selectorStats?: SelectorStatRow[];
 }
 
 const ITEM_HEIGHT = 64; // px — used to compute the wheel translate
@@ -53,6 +63,7 @@ export function PlaybackTimeline({
   isRunning,
   className,
   compact = false,
+  selectorStats,
 }: PlaybackTimelineProps) {
   const stripRef = useRef<HTMLDivElement>(null);
   const total = steps.length;
@@ -127,6 +138,7 @@ export function PlaybackTimeline({
               currentStepIndex={currentStepIndex}
               result={results[idx]}
               compact={compact}
+              selectorStats={selectorStats}
             />
           ))}
         </div>
@@ -141,9 +153,10 @@ interface StepRowProps {
   currentStepIndex: number;
   result?: StepResultsMap[number];
   compact: boolean;
+  selectorStats?: SelectorStatRow[];
 }
 
-function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProps) {
+function StepRow({ step, index, currentStepIndex, result, compact, selectorStats }: StepRowProps) {
   const isCurrent = index === currentStepIndex;
   const isCompleted = result !== undefined;
   const isUpcoming = !isCurrent && !isCompleted;
@@ -151,13 +164,39 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
 
   const Icon = STEP_TYPE_ICONS[step.type] ?? Circle;
 
-  return (
+  // Parse the locateWithFallback selectors out of the step's source so the
+  // hover panel can show per-candidate stats. null when the step isn't a
+  // locate call or the array is built dynamically (regex / JSON.parse fail).
+  const selectorInfo = useMemo(() => {
+    if (step.type !== 'action') return null;
+    const parsed = extractSelectorArray(step.code);
+    if (!parsed) return null;
+    const hash = hashSelectors(parsed.selectors);
+    const rows = (selectorStats ?? []).filter((r) => r.hash === hash);
+    const ordered = sortSelectorsByStats(parsed.selectors, rows);
+    const byKey = new Map<string, SelectorStatRow>();
+    for (const r of rows) byKey.set(`${r.type}::${r.value}`, r);
+    return { hash, action: parsed.action, ordered, byKey };
+  }, [step.type, step.code, selectorStats]);
+
+  const row = (
     <div
       data-state={isCurrent ? 'current' : isCompleted ? 'done' : 'upcoming'}
       style={{ height: ITEM_HEIGHT }}
       className={cn(
-        'flex items-center gap-3 px-4 transition-all duration-300',
+        'relative flex items-center gap-3 px-4 transition-all duration-300',
+        // Active step — strong, lively highlight so the eye lands here first.
+        // Gradient fill, accent bar on the left, soft drop-shadow lift, and
+        // an inset/outset ring pulse driven by `step-active-row-pulse`.
+        isCurrent && [
+          'rounded-md',
+          'bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5',
+          'shadow-md shadow-primary/20',
+          'before:absolute before:inset-y-1 before:left-0 before:w-1 before:rounded-r-full before:bg-primary',
+          'playback-step-row-active',
+        ],
         compact && 'gap-2 px-3',
+        selectorInfo && 'cursor-help',
       )}
     >
       {/* Status badge / icon column */}
@@ -167,7 +206,7 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
           isFailed
             ? 'border-destructive/60 bg-destructive/10 text-destructive'
             : isCurrent
-              ? 'border-primary bg-primary/10 text-primary playback-step-active'
+              ? 'border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/30 playback-step-active'
               : isCompleted
                 ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                 : 'border-border/60 bg-background/60 text-muted-foreground',
@@ -204,6 +243,11 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
           >
             {step.type}
           </span>
+          {selectorInfo && (
+            <span className="text-[10px] tabular-nums text-muted-foreground/60">
+              · {selectorInfo.ordered.length}
+            </span>
+          )}
         </div>
         <div
           className={cn(
@@ -234,6 +278,112 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
           {formatDuration(result.durationMs)}
         </div>
       )}
+
+      {/* Now badge — only on the active row. Tabular-nums + uppercase keeps
+          it in the same visual family as the other meta tags. */}
+      {isCurrent && (
+        <span
+          className={cn(
+            'shrink-0 rounded-full bg-primary px-1.5 py-0.5',
+            'text-[9px] font-semibold uppercase tracking-wider text-primary-foreground',
+            'shadow-sm',
+            compact && 'px-1 text-[8px]',
+          )}
+        >
+          Now
+        </span>
+      )}
+    </div>
+  );
+
+  if (!selectorInfo) return row;
+
+  return (
+    <HoverCard openDelay={200} closeDelay={80}>
+      <HoverCardTrigger asChild>{row}</HoverCardTrigger>
+      <HoverCardContent side="left" align="center" className="w-96 p-3">
+        <SelectorStatsPanel
+          action={selectorInfo.action}
+          hash={selectorInfo.hash}
+          ordered={selectorInfo.ordered}
+          byKey={selectorInfo.byKey}
+        />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+interface SelectorStatsPanelProps {
+  action: string;
+  hash: string;
+  ordered: { type: string; value: string }[];
+  byKey: Map<string, SelectorStatRow>;
+}
+
+function SelectorStatsPanel({ action, hash, ordered, byKey }: SelectorStatsPanelProps) {
+  const totalRows = Array.from(byKey.values()).reduce((s, r) => s + r.totalAttempts, 0);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
+          Selector fallback {action}
+        </div>
+        <code className="text-[10px] font-mono text-muted-foreground" title="Stable hash of the selectors array">
+          {hash}
+        </code>
+      </div>
+      <div className="rounded border border-border/60 overflow-hidden">
+        <table className="w-full text-[11px] tabular-nums">
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <th className="text-left px-2 py-1 font-medium">type</th>
+              <th className="text-left px-2 py-1 font-medium">selector</th>
+              <th className="text-right px-2 py-1 font-medium" title="successCount / totalAttempts">hits</th>
+              <th className="text-right px-2 py-1 font-medium">rate</th>
+              <th className="text-right px-2 py-1 font-medium" title="avg ms when matched">avg</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map((sel, i) => {
+              const r = byKey.get(`${sel.type}::${sel.value}`);
+              const rate = r && r.totalAttempts > 0 ? Math.round((r.successCount / r.totalAttempts) * 100) : null;
+              return (
+                <tr key={i} className="border-t border-border/40">
+                  <td className="px-2 py-1 text-muted-foreground/90 whitespace-nowrap">{sel.type}</td>
+                  <td className="px-2 py-1 font-mono text-foreground/80 truncate max-w-[160px]" title={sel.value}>
+                    {sel.value}
+                  </td>
+                  <td className="px-2 py-1 text-right text-muted-foreground/90">
+                    {r ? `${r.successCount}/${r.totalAttempts}` : '—'}
+                  </td>
+                  <td
+                    className={cn(
+                      'px-2 py-1 text-right',
+                      rate === null
+                        ? 'text-muted-foreground/60'
+                        : rate >= 80
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : rate <= 20
+                            ? 'text-destructive'
+                            : 'text-foreground/80',
+                    )}
+                  >
+                    {rate === null ? '—' : `${rate}%`}
+                  </td>
+                  <td className="px-2 py-1 text-right text-muted-foreground/90">
+                    {r?.avgResponseTimeMs != null ? `${r.avgResponseTimeMs}ms` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[10px] text-muted-foreground/80">
+        {totalRows === 0
+          ? 'No runs recorded yet — order shown is the captured order.'
+          : 'Sorted by success rate · winners promoted on the next run.'}
+      </div>
     </div>
   );
 }
