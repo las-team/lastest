@@ -315,7 +315,8 @@ export class TestRunner {
 
   async runTest(
     command: RunTestCommandPayload,
-    onProgress?: (step: string, progress: number) => void
+    onProgress?: (step: string, progress: number) => void,
+    onStepEvent?: (event: import('./protocol').StepEventPayload) => void
   ): Promise<TestRunResult> {
     const testAbort = new AbortController();
     // Key by testId (unique per test), NOT testRunId (shared per build)
@@ -535,7 +536,7 @@ export class TestRunner {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults)
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults, onStepEvent)
             .then(r => { clearTimeout(timeoutTimer); return r; })
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
@@ -874,6 +875,7 @@ export class TestRunner {
     stabilization?: StabilizationPayload,
     payload?: RunTestCommandPayload,
     assertionResults?: NonNullable<TestRunResult['assertionResults']>,
+    onStepEvent?: (event: import('./protocol').StepEventPayload) => void,
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test/setup(page, ...) { ... }
@@ -948,10 +950,61 @@ export class TestRunner {
     }
 
     // Instrument step tracking
-    const { instrumentedBody } = instrumentStepTracking(body);
+    const { instrumentedBody, stepCount } = instrumentStepTracking(body);
     body = instrumentedBody;
     let lastReachedStep = -1;
-    const __stepReached = async (n: number) => { lastReachedStep = Math.max(lastReachedStep, n); };
+
+    // Live step event tracking — emits step:started / step:passed / step:failed
+    // back to the host when payload.steps is provided. The instrumented body
+    // calls __stepReached(N) just before each parsed step. We use that to
+    // bracket steps: starting step N implicitly completes step N-1 as passed.
+    const stepDescriptors = payload?.steps ?? [];
+    const totalSteps = stepDescriptors.length || stepCount || 0;
+    const correlationId = payload?.testId ?? '';
+    const testRunId = payload?.testRunId ?? '';
+    let currentStepIdx = -1;
+    let currentStepStart = 0;
+    const emitStep = (event: import('./protocol').StepEventPayload) => {
+      if (!onStepEvent) return;
+      try { onStepEvent(event); } catch (e) {
+        log('warn', `onStepEvent threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+    const finishCurrentStep = (status: 'passed' | 'failed', error?: string) => {
+      if (currentStepIdx < 0) return;
+      const desc = stepDescriptors[currentStepIdx];
+      emitStep({
+        correlationId,
+        testRunId,
+        stepIndex: currentStepIdx,
+        totalSteps,
+        status,
+        label: desc?.label,
+        stepType: desc?.type,
+        durationMs: Date.now() - currentStepStart,
+        error,
+      });
+    };
+    const __stepReached = async (n: number) => {
+      lastReachedStep = Math.max(lastReachedStep, n);
+      if (n === currentStepIdx) return;
+      // Implicit completion of previous step (if any) when we advance.
+      if (currentStepIdx >= 0 && n > currentStepIdx) {
+        finishCurrentStep('passed');
+      }
+      currentStepIdx = n;
+      currentStepStart = Date.now();
+      const desc = stepDescriptors[n];
+      emitStep({
+        correlationId,
+        testRunId,
+        stepIndex: n,
+        totalSteps,
+        status: 'started',
+        label: desc?.label,
+        stepType: desc?.type,
+      });
+    };
 
     // Wrap standalone await statements (except screenshots/navigation) in try/catch
     // for soft error handling. This matches the local runner behavior so tests
@@ -1299,6 +1352,14 @@ export class TestRunner {
         fixturesMap, __stepReached, __assertion
       );
       log('info', 'Test function returned successfully');
+      // Test body finished cleanly — close out the last in-flight step.
+      finishCurrentStep('passed');
+    } catch (testErr) {
+      // Mark the in-flight step as failed so the live timeline halts on the
+      // exact step that threw, not on whatever step was last started.
+      const errMsg = testErr instanceof Error ? testErr.message : String(testErr);
+      finishCurrentStep('failed', errMsg);
+      throw testErr;
     } finally {
       // Clean up fixture temp files
       if (payload?.fixtures && payload.fixtures.length > 0) {

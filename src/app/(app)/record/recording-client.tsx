@@ -29,7 +29,7 @@ import {
   clearLastCompletedSession,
 } from '@/server/actions/recording';
 import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
-import { runTests } from '@/server/actions/runs';
+import { runTests, getJobStatus } from '@/server/actions/runs';
 import { deleteTest } from '@/server/actions/tests';
 import {
   DropdownMenu,
@@ -428,7 +428,9 @@ export function RecordingClient({
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [savedTestId, setSavedTestId] = useState<string | null>(null);
-  const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'error'>('idle');
+  const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'finished' | 'error'>('idle');
+  const [playbackStreamUrl, setPlaybackStreamUrl] = useState<string | null>(null);
+  const [playbackJobId, setPlaybackJobId] = useState<string | null>(null);
   const autoTriggeredRef = useRef(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
@@ -829,7 +831,8 @@ export function RecordingClient({
       setSavedTestId(id);
       setAutoPlayStatus('playing');
       try {
-        await runTests([id], repositoryId, /*headless*/ false, 'auto', undefined, /*cursorPlaybackSpeedOverride*/ 2);
+        const result = await runTests([id], repositoryId, /*headless*/ false, 'auto', undefined, /*cursorPlaybackSpeedOverride*/ 2);
+        if (result?.jobId) setPlaybackJobId(result.jobId);
         toast.success('Recording saved · headed 2x replay started');
       } catch (err) {
         console.error('Auto-replay after recording failed:', err);
@@ -840,6 +843,78 @@ export function RecordingClient({
     // generatedCode is the trigger payload; the rest are stable inputs into persistRecording
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, generatedCode]);
+
+  // While the playback run is in flight, find the EB session the executor
+  // claimed and wire its stream URL into the BrowserViewer below the code.
+  // Mirrors the recorder's approach (line ~597) — poll the same shared endpoint.
+  useEffect(() => {
+    if (!playbackJobId) return;
+    if (playbackStreamUrl) return;
+    let cancelled = false;
+    let runnerId: string | undefined;
+
+    (async () => {
+      // Step 1: wait for the executor to claim a runner.
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt++) {
+        try {
+          const status = await getJobStatus(playbackJobId);
+          if (status.actualRunnerId) {
+            runnerId = status.actualRunnerId;
+            break;
+          }
+          if (status.isComplete) return;
+        } catch {
+          // keep polling
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!runnerId || cancelled) return;
+
+      // Step 2: wait for the EB session to register and surface a streamUrl.
+      for (let attempt = 0; attempt < 30 && !cancelled; attempt++) {
+        try {
+          const res = await fetch('/api/embedded/stream');
+          if (res.ok) {
+            const data = await res.json();
+            const session = data?.sessions?.find((s: { runnerId: string }) => s.runnerId === runnerId);
+            if (session?.streamUrl) {
+              const token = data.streamAuthToken;
+              setPlaybackStreamUrl(
+                token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+              );
+              return;
+            }
+          }
+        } catch {
+          // keep polling
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [playbackJobId, playbackStreamUrl]);
+
+  // When the playback job finishes, flip status and tear down the stream so the
+  // BrowserViewer doesn't keep hammering a torn-down EB.
+  useEffect(() => {
+    if (!playbackJobId) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const status = await getJobStatus(playbackJobId);
+        if (cancelled) return;
+        if (status.isComplete) {
+          clearInterval(interval);
+          setPlaybackStreamUrl(null);
+          setAutoPlayStatus(status.status === 'failed' ? 'error' : 'finished');
+        }
+      } catch {
+        // keep polling
+      }
+    }, 1500);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [playbackJobId]);
 
   if (step === 'setup') {
     return (
@@ -1539,15 +1614,43 @@ export function RecordingClient({
               </div>
             </div>
 
+            {autoPlayStatus !== 'idle' && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Headed 2x Replay</label>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}
+                    {autoPlayStatus === 'playing' && !playbackStreamUrl && (<><Loader2 className="h-3 w-3 animate-spin" /> Provisioning browser…</>)}
+                    {autoPlayStatus === 'playing' && playbackStreamUrl && (<><Play className="h-3 w-3" /> Replaying at 2x</>)}
+                    {autoPlayStatus === 'finished' && (<><Check className="h-3 w-3" /> Replay finished</>)}
+                    {autoPlayStatus === 'error' && (<><AlertTriangle className="h-3 w-3" /> Replay error</>)}
+                  </span>
+                </div>
+                <div className="bg-muted/50 rounded-lg border overflow-hidden flex items-center justify-center" style={{ minHeight: 360 }}>
+                  {playbackStreamUrl ? (
+                    <BrowserViewer
+                      streamUrl={playbackStreamUrl}
+                      initialViewport={{
+                        width: settings.viewportWidth ?? 1280,
+                        height: settings.viewportHeight ?? 720,
+                      }}
+                      hideControls
+                    />
+                  ) : (
+                    <div className="text-xs text-muted-foreground p-8">
+                      {autoPlayStatus === 'finished'
+                        ? 'Replay finished — open the test to see the run.'
+                        : autoPlayStatus === 'error'
+                          ? 'Replay could not start.'
+                          : 'Spinning up a headed browser to replay your recording…'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium">Generated Code</label>
-              {autoPlayStatus !== 'idle' && (
-                <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1.5">
-                  {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}
-                  {autoPlayStatus === 'playing' && (<><Play className="h-3 w-3" /> Saved · headed 2x replay running in a separate window</>)}
-                  {autoPlayStatus === 'error' && (<><AlertTriangle className="h-3 w-3" /> Auto-replay failed — use Save Test below</>)}
-                </p>
-              )}
               <pre className="mt-2 bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono max-h-96">
                 {generatedCode || '// No code generated'}
               </pre>
@@ -1617,6 +1720,8 @@ export function RecordingClient({
                   setScreenshots([]);
                   setSavedTestId(null);
                   setAutoPlayStatus('idle');
+                  setPlaybackStreamUrl(null);
+                  setPlaybackJobId(null);
                   autoTriggeredRef.current = false;
                   lastSequenceRef.current = 0;
                 }}

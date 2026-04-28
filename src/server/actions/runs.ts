@@ -307,6 +307,17 @@ export async function getJobStatus(jobId: string) {
   };
 }
 
+/**
+ * Live per-step lifecycle state for an in-flight test run. Driven by
+ * `response:step_event` messages from the runner, stored in-memory keyed
+ * by testRunId. Returns null if the run hasn't reported any step yet (or
+ * has already been GC'd).
+ */
+export async function getTestRunStepState(testRunId: string) {
+  const { getStepState } = await import('@/lib/ws/step-state');
+  return getStepState(testRunId);
+}
+
 async function queueTestRun(
   testIds?: string[],
   repositoryId?: string | null,

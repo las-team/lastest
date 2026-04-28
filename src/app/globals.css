@@ -250,3 +250,32 @@
   border-color: var(--c-amber) !important;
   scroll-margin-top: 2rem;
 }
+
+/* Playback step timeline — wheel rise + active glow */
+@keyframes step-rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes step-active-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 oklch(from var(--color-primary) l c h / 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px oklch(from var(--color-primary) l c h / 0);
+  }
+}
+
+.playback-step-active {
+  animation: step-active-glow 1.6s ease-in-out infinite;
+}
+
+.playback-step-enter {
+  animation: step-rise 320ms ease-out both;
+}

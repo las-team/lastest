@@ -14,7 +14,8 @@ import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, delet
 import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
 import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
 import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse } from '@/lib/ws/protocol';
+import { recordStepEvent } from '@/lib/ws/step-state';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
@@ -445,6 +446,16 @@ export async function POST(request: NextRequest) {
 
       case 'response:test_progress': {
         // Progress updates are informational, just acknowledge
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:step_event': {
+        // Record live step lifecycle into the in-memory step-state store so
+        // the test detail page can poll it during headed playback.
+        const stepMsg = message as StepEventResponse;
+        try { recordStepEvent(stepMsg.payload); } catch (err) {
+          console.warn('[step_event] recordStepEvent failed:', err);
+        }
         return NextResponse.json({ ok: true });
       }
 

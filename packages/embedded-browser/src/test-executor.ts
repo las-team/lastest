@@ -143,6 +143,16 @@ export interface RunTestPayload {
     codeLineStart?: number;
     codeLineEnd?: number;
   }>;
+  /** Parsed steps from the host's `parseSteps(body)`. When present, the
+   *  runner emits per-step lifecycle events keyed by index so the host can
+   *  render a live timeline. Index N maps to the N-th step in this list. */
+  steps?: Array<{
+    id: number;
+    label: string;
+    lineStart: number;
+    lineEnd: number;
+    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  }>;
 }
 
 /**
@@ -231,6 +241,15 @@ export class EmbeddedTestExecutor {
     callbacks?: {
       onPageCreated?: (page: Page) => Promise<void> | void;
       onBeforePageClose?: () => Promise<void> | void;
+      onStepEvent?: (event: {
+        stepIndex: number;
+        totalSteps: number;
+        status: 'started' | 'passed' | 'failed';
+        label?: string;
+        stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+        durationMs?: number;
+        error?: string;
+      }) => void;
     },
   ): Promise<EmbeddedTestResult> {
     const abortCtrl = new AbortController();
@@ -347,6 +366,9 @@ export class EmbeddedTestExecutor {
     let result: EmbeddedTestResult | undefined;
     let reachedStep = -1;
     let stepCount = 0;
+    // Hoisted so the outer catch can finalize the in-flight step as failed
+    // when the test body throws. Set during step instrumentation.
+    let lastFinishStep: ((status: 'passed' | 'failed', error?: string) => void) | undefined;
     let domSnapshot: DomSnapshotResult | undefined;
     // Hoisted so the catch path can also try to extract — failed tests still
     // expose values for any extract-mode TestVariables whose selectors resolve.
@@ -745,7 +767,56 @@ export class EmbeddedTestExecutor {
       body = instrumentResult.instrumentedBody;
       stepCount = instrumentResult.stepCount;
       reachedStep = -1;
-      const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
+
+      // Live per-step lifecycle events for the host's playback timeline.
+      // Bracket steps via __stepReached(N): when N advances, the previous
+      // step is implicitly completed as passed. The catch in this method
+      // emits a final 'failed' event for the in-flight step.
+      const stepDescriptors = command.steps ?? [];
+      const totalStepsForEvents = stepDescriptors.length || stepCount || 0;
+      let currentStepIdx = -1;
+      let currentStepStart = 0;
+      const onStepEvent = callbacks?.onStepEvent;
+      const emitStep: typeof onStepEvent extends undefined ? () => void : NonNullable<typeof onStepEvent> = (event) => {
+        if (!onStepEvent) return;
+        try { onStepEvent(event); } catch (e) {
+          logFn('warn', `onStepEvent threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      };
+      const finishCurrentStep = (status: 'passed' | 'failed', error?: string) => {
+        if (currentStepIdx < 0) return;
+        const desc = stepDescriptors[currentStepIdx];
+        emitStep({
+          stepIndex: currentStepIdx,
+          totalSteps: totalStepsForEvents,
+          status,
+          label: desc?.label,
+          stepType: desc?.type,
+          durationMs: Date.now() - currentStepStart,
+          error,
+        });
+      };
+      // Expose to the outer try/catch so a thrown error can finalize the
+      // in-flight step as failed.
+      lastFinishStep = finishCurrentStep;
+
+      const __stepReached = async (n: number) => {
+        reachedStep = Math.max(reachedStep, n);
+        if (n === currentStepIdx) return;
+        if (currentStepIdx >= 0 && n > currentStepIdx) {
+          finishCurrentStep('passed');
+        }
+        currentStepIdx = n;
+        currentStepStart = Date.now();
+        const desc = stepDescriptors[n];
+        emitStep({
+          stepIndex: n,
+          totalSteps: totalStepsForEvents,
+          status: 'started',
+          label: desc?.label,
+          stepType: desc?.type,
+        });
+      };
 
       // Per-assertion bookkeeping invoked by lines wrapped by
       // `instrumentAssertionTracking`. Push one row per call (so a loop
@@ -1064,6 +1135,9 @@ export class EmbeddedTestExecutor {
 
       logFn('info', 'Test code execution completed');
 
+      // Test body finished cleanly — close out the in-flight step.
+      try { lastFinishStep?.('passed'); } catch { /* never break the run on telemetry */ }
+
       // Extract values from page fields for extract-mode TestVariables.
       // Done before close so locators still resolve. Failures are best-effort
       // (logged + recorded as empty string), never fail the whole test.
@@ -1142,6 +1216,10 @@ export class EmbeddedTestExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       const isCancelled = errorMessage.includes('cancelled') || abortCtrl.signal.aborted;
+
+      // Mark the in-flight step as failed (or cancelled-as-failed) so the
+      // live timeline halts on the exact step that threw.
+      try { lastFinishStep?.('failed', errorMessage); } catch { /* telemetry */ }
 
       if (isCancelled) {
         logFn('info', 'Test cancelled');

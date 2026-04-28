@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,7 +26,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
-import { runTests, getJobStatus } from '@/server/actions/runs';
+import { runTests, getJobStatus, getTestRunStepState } from '@/server/actions/runs';
+import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
+import { PlaybackTimeline, type StepResultsMap } from '@/components/playback/playback-timeline';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
@@ -256,6 +258,19 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
 
+  // Live step timeline state
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
+  const [stepResults, setStepResults] = useState<StepResultsMap>({});
+
+  // Parsed steps from the current test code — feeds the upcoming-step list
+  // ahead of time so the timeline shows what's coming, not just what's done.
+  const plannedSteps = useMemo(() => {
+    const code = isEditing ? editCode : test.code;
+    if (!code) return [];
+    const body = extractTestBody(code);
+    return body ? parseSteps(body) : [];
+  }, [test.code, editCode, isEditing]);
+
   const toggleViewerFullscreen = useCallback(() => {
     if (!viewerLayoutRef.current) return;
     try {
@@ -414,9 +429,12 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
 
     setIsRunning(true);
+    setCurrentStepIndex(-1);
+    setStepResults({});
     try {
       const result = await runTests([test.id], repositoryId, headless, 'auto', forceVideoRecording);
       const { jobId } = result;
+      const runId = 'runId' in result ? (result.runId ?? null) : null;
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.success('Test queued — will run when current tests finish');
@@ -444,6 +462,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             }
           } catch {
             // Stream not available — not critical
+          }
+        }
+
+        // Pull live step state for the headed timeline. Cheap call; only
+        // active while this poll is running.
+        if (runId && !headless) {
+          try {
+            const stepState = await getTestRunStepState(runId);
+            if (stepState) {
+              setCurrentStepIndex(stepState.currentStepIndex);
+              setStepResults(stepState.results as StepResultsMap);
+            }
+          } catch {
+            // Non-critical
           }
         }
 
@@ -854,6 +886,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     fit
                     className="flex-1 min-h-0"
                   />
+                  {plannedSteps.length > 0 && (
+                    <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 z-40 hidden md:block">
+                      <PlaybackTimeline
+                        steps={plannedSteps}
+                        currentStepIndex={currentStepIndex}
+                        results={stepResults}
+                        isRunning={isRunning}
+                        compact
+                        className="h-full pointer-events-auto"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
                   <div className="flex items-center gap-2 px-1">
@@ -873,41 +917,55 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 </div>
               </>
             ) : (
-              <Card className="overflow-hidden py-0">
-                <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
-                    onClick={() => setShowViewer(!showViewer)}
-                  >
-                    <Tv2 className="h-4 w-4 text-purple-500" />
-                    <span>Live Browser View</span>
-                    {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-                  </button>
-                  {showViewer && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={toggleViewerFullscreen}
-                      title="Fullscreen"
+              <div className={cn(
+                'grid gap-3',
+                plannedSteps.length > 0 ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : 'grid-cols-1',
+              )}>
+                <Card className="overflow-hidden py-0 min-w-0">
+                  <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
+                      onClick={() => setShowViewer(!showViewer)}
                     >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
+                      <Tv2 className="h-4 w-4 text-purple-500" />
+                      <span>Live Browser View</span>
+                      {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                    </button>
+                    {showViewer && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        onClick={toggleViewerFullscreen}
+                        title="Fullscreen"
+                      >
+                        <Maximize2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {showViewer && (
+                    <BrowserViewer
+                      streamUrl={streamUrl}
+                      className="h-[500px]"
+                      fit
+                      hideFullscreenToggle
+                      hideScreenshot
+                      hideViewportSelector
+                      readOnlyUrl
+                    />
                   )}
-                </div>
-                {showViewer && (
-                  <BrowserViewer
-                    streamUrl={streamUrl}
-                    className="h-[500px]"
-                    fit
-                    hideFullscreenToggle
-                    hideScreenshot
-                    hideViewportSelector
-                    readOnlyUrl
+                </Card>
+                {plannedSteps.length > 0 && showViewer && (
+                  <PlaybackTimeline
+                    steps={plannedSteps}
+                    currentStepIndex={currentStepIndex}
+                    results={stepResults}
+                    isRunning={isRunning}
+                    className="h-[540px]"
                   />
                 )}
-              </Card>
+              </div>
             )}
           </div>
         )}

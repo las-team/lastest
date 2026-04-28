@@ -383,7 +383,7 @@ async function startup(): Promise<void> {
             const shouldStreamTest = isHeaded && activeTasks === 1 && capturedScreencast && capturedStreamServer;
             const testViewport = payload.viewport ?? { width: config.viewportWidth, height: config.viewportHeight };
 
-            const callbacks = shouldStreamTest ? {
+            const callbacks: Parameters<typeof capturedExecutor.runTest>[2] = shouldStreamTest ? {
               onPageCreated: async (testPage: Page) => {
                 try {
                   // Force the test page to render at the test's configured viewport so the
@@ -419,7 +419,46 @@ async function startup(): Promise<void> {
                   console.error('[Command] Failed to restore screencast to idle page:', err);
                 }
               },
-            } : undefined;
+              onStepEvent: (event) => {
+                // Live per-step lifecycle for the host's playback timeline.
+                // Fire-and-forget — never block the test on telemetry.
+                capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:step_event',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testRunId: payload.testRunId,
+                    stepIndex: event.stepIndex,
+                    totalSteps: event.totalSteps,
+                    status: event.status,
+                    label: event.label,
+                    stepType: event.stepType,
+                    durationMs: event.durationMs,
+                    error: event.error,
+                  },
+                }).catch(() => { /* swallow — non-critical */ });
+              },
+            } : {
+              onStepEvent: (event) => {
+                capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:step_event',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testRunId: payload.testRunId,
+                    stepIndex: event.stepIndex,
+                    totalSteps: event.totalSteps,
+                    status: event.status,
+                    label: event.label,
+                    stepType: event.stepType,
+                    durationMs: event.durationMs,
+                    error: event.error,
+                  },
+                }).catch(() => { /* swallow — non-critical */ });
+              },
+            };
 
             const result = await capturedExecutor.runTest(capturedBrowser, payload, callbacks);
 

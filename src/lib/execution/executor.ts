@@ -33,6 +33,7 @@ import {
   getGoogleSheetsDataSources,
   getCsvDataSources,
 } from '@/lib/db/queries';
+import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
 import { resolveVarReferences, pickRowsForVariables, resolveAssignedValues } from '@/lib/vars/resolver';
 import { resolveSheetReferences } from '@/lib/google-sheets/resolver';
 import { resolveCsvReferences } from '@/lib/csv/resolver';
@@ -469,6 +470,12 @@ async function executeViaRunner(
         c.rules.some(r => r.kind === 'all_steps_executed' && r.severity === 'warn'),
       );
 
+      // Parse steps from the resolved code so the runner can emit per-step
+      // lifecycle events keyed to the same indices the host UI uses. Compute
+      // here (single source of truth) rather than re-deriving on the runner.
+      const resolvedBody = extractTestBody(resolvedCode) ?? '';
+      const parsedSteps = resolvedBody ? parseSteps(resolvedBody) : [];
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -497,6 +504,13 @@ async function executeViaRunner(
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
         extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
         failOnRuntimeError,
+        steps: parsedSteps.length > 0 ? parsedSteps.map(s => ({
+          id: s.id,
+          label: s.label,
+          lineStart: s.lineStart,
+          lineEnd: s.lineEnd,
+          type: s.type,
+        })) : undefined,
         // Pass the host-parsed assertions so the runner can wrap each
         // `expect(...)` line with a structured pass/fail recorder. The
         // criteria evaluator on the host keys on these ids to fail the test

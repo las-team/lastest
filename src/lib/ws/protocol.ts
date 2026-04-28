@@ -27,6 +27,7 @@ export type MessageType =
   // Agent → Server (Responses)
   | 'response:test_result'
   | 'response:test_progress'
+  | 'response:step_event'
   | 'response:setup_result'
   | 'response:recording_event'
   | 'response:recording_stopped'
@@ -113,6 +114,17 @@ export interface RunTestCommandPayload {
   // recorded as a soft warning. Driven by the test's `all_steps_executed`
   // Criteria rule (default ON, off only when user explicitly opted out).
   failOnRuntimeError?: boolean;
+  /** Parsed steps from `parseSteps(body)`. When present, the runner emits
+   *  `response:step_event` messages keyed by step index so the host can
+   *  render a live step timeline. Order-sensitive — index N corresponds to
+   *  the N-th step in this array. */
+  steps?: Array<{
+    id: number;
+    label: string;
+    lineStart: number;
+    lineEnd: number;
+    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  }>;
   /** Parsed assertions from `parseAssertions(code)`. Runner uses these to
    *  wrap each `expect(...)` line with a structured pass/fail recorder
    *  keyed by the host-computed `id`. Order-sensitive — must match the
@@ -239,6 +251,23 @@ export interface TestProgressPayload {
 export interface TestProgressResponse extends BaseMessage {
   type: 'response:test_progress';
   payload: TestProgressPayload;
+}
+
+export interface StepEventPayload {
+  correlationId: string;
+  testRunId: string;
+  stepIndex: number;
+  totalSteps: number;
+  status: 'started' | 'passed' | 'failed';
+  label?: string;
+  stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  durationMs?: number;
+  error?: string;
+}
+
+export interface StepEventResponse extends BaseMessage {
+  type: 'response:step_event';
+  payload: StepEventPayload;
 }
 
 export interface TestResultPayload {
@@ -573,6 +602,7 @@ export type ServerCommand =
 
 export type AgentResponse =
   | TestProgressResponse
+  | StepEventResponse
   | TestResultResponse
   | SetupResultResponse
   | RecordingEventResponse
