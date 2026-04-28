@@ -49,7 +49,7 @@ Lastest is a free, self-hosted visual regression testing platform that **records
 1. Point it at your app
 2. Record your user flows (point-and-click, no code)
 3. AI generates resilient test code with multi-selector fallback
-4. Run locally, on remote runners, or in an embedded browser container
+4. Run on remote runners or in an embedded browser container (EB setup required)
 5. Screenshots compared with 3 diff engines (pixelmatch, SSIM, Butteraugli)
 6. Review and approve visual changes — or let AI auto-classify them
 ```
@@ -82,17 +82,16 @@ One click kicks off an 11-step pipeline: check settings, select repo, set up env
 
 ---
 
-## Three Ways to Run
+## Two Ways to Run
 
-Once your tests exist, you have three execution modes:
+Once your tests exist, you have two execution modes. **Local Playwright execution on the host is no longer supported** — every test runs inside an Embedded Browser pod, so EB setup is required even for development.
 
 | Mode | How | When |
 |------|-----|------|
-| **Local** | Playwright runs on the same machine as Lastest | Development, debugging |
-| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers |
-| **Embedded Browser** | Browser runs in a container with live streaming back to the UI | Cloud deployments, recording/running without local Playwright |
+| **Embedded Browser** (default) | Browser runs in a container with live streaming back to the UI. Provisioned dynamically into k3d locally, or into your cluster in production. | Default for all dev and prod runs — no local Playwright install needed |
+| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers, CI/CD |
 
-All three modes support both **running** and **recording** tests. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
+Both modes support **running** and **recording**. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
 
 ---
 
@@ -191,7 +190,7 @@ Create tests (one-time)          Run tests (forever, $0)
 
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
 - **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, DB-backed command queue with result tracking, heartbeat polling, and per-test abort support.
-- **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
+- **Parallel Test Execution** — Configurable max parallel tests for the embedded-browser pool and remote runners.
 - **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
 - **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 29 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
@@ -225,12 +224,15 @@ Create tests (one-time)          Run tests (forever, $0)
 
 ### Local dev
 
+Running tests requires the Embedded Browser stack — there is **no local-Playwright fallback**. Bring up the database, the host app, and the k3d EB cluster together:
+
 ```bash
 git clone https://github.com/las-team/lastest.git
 cd lastest
 docker compose up -d         # postgres on :5432 (named volume `lastest-pgdata`)
 pnpm install
 pnpm db:push                 # apply schema
+pnpm stack                   # REQUIRED: create k3d cluster + build/import EB image
 pnpm dev                     # http://localhost:3000
 ```
 
@@ -239,9 +241,9 @@ Open [http://localhost:3000](http://localhost:3000).
 - Stop the DB: `docker compose down` (data persists in the `lastest-pgdata` volume).
 - Wipe the DB: `docker compose down -v`.
 
-### Run tests locally (adds k3d for embedded browsers)
+### Embedded Browser stack (required for any test run)
 
-The dev app keeps running on the host. EB pods are dynamically provisioned into a local k3d cluster on demand — one EB per test.
+The dev app runs on the host while EB pods are dynamically provisioned into a local k3d cluster — one EB per test. Without `pnpm stack` running, **no test can execute or record**.
 
 ```bash
 pnpm stack           # create k3d cluster, build + import the EB image
@@ -251,7 +253,7 @@ pnpm stack:refresh   # rebuild the EB image after editing packages/embedded-brow
 pnpm stack:stop      # delete the cluster
 ```
 
-Add to `.env.local`:
+Required `.env.local` keys:
 
 ```
 EB_PROVISIONER=kubernetes
@@ -276,7 +278,7 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ### Requirements
 - **Docker**: Docker 20+ with Compose v2
 - **Node.js**: 18+ and pnpm 10.x
-- **For local test execution (optional)**: `k3d` ≥ 5.6, `kubectl`, `openssl`
+- **Required for running/recording tests**: `k3d` ≥ 5.6, `kubectl`, `openssl` (the EB stack — no local-Playwright fallback)
 
 ---
 
@@ -286,9 +288,9 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ┌──────────────────┐     ┌─────────────┐     ┌─────────────┐
 │   Create Tests   │ ──▶ │   Run       │ ──▶ │   Review    │
 │                  │     │             │     │             │
-│ Record manually  │     │ Local or    │     │ Approve/    │
-│ AI-assisted      │     │ remote or   │     │ Reject      │
-│ Play Agent auto  │     │ CI/CD       │     │ changes     │
+│ Record manually  │     │ Embedded    │     │ Approve/    │
+│ AI-assisted      │     │ Browser or  │     │ Reject      │
+│ Play Agent auto  │     │ remote/CI   │     │ changes     │
 └──────────────────┘     └─────────────┘     └─────────────┘
    One-time cost           $0 per run         New baseline
    (AI optional)           (no AI needed)     saved
@@ -298,7 +300,7 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 
 1. **Create**: Build tests your way — record manually in the browser, let AI generate from a URL or spec, or let the Play Agent autonomously scan your entire app.
 
-2. **Run**: Execute tests locally, on remote runners, or in CI/CD. Screenshots are captured at key steps. No AI needed — pure Playwright execution at zero cost.
+2. **Run**: Execute tests in an Embedded Browser pod (default), on remote runners, or in CI/CD. Screenshots are captured at key steps. No AI needed — pure Playwright execution at zero cost. Local Playwright on the host is no longer supported; the EB stack is required.
 
 3. **Compare**: New screenshots are diffed against baselines using your chosen engine (pixelmatch, SSIM, or Butteraugli). Text-region-aware comparison available. Accessibility audits run automatically.
 
@@ -359,7 +361,7 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ### What makes Lastest different
 
 - **Record + AI generate + run + diff + approve** in one self-hosted tool — no competitor does all five
-- **Three execution modes**: local, remote runners (`@lastest/runner` on npm), or embedded browser container with live streaming — no local Playwright install needed
+- **Two execution modes**: embedded browser container with live streaming (default — no local Playwright install needed), or remote runners (`@lastest/runner` on npm) for distributed/CI runs
 - **Autonomous Play Agent**: one-click 11-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
 - **$0 with unlimited screenshots** — no per-screenshot pricing, no volume limits
