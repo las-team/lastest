@@ -1,0 +1,19 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>html,body{margin:0;background:var(--c-soft);padding:20px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-sans);font-weight:500;font-size:14px;padding:8px 16px;border-radius:8px;border:0;cursor:pointer;transition:all 180ms cubic-bezier(.2,.7,.2,1)}
+.primary{background:#36A88E;color:#fff}
+.primary:hover{background:#2E957D}
+.secondary{background:#3674A8;color:#fff}
+.outline{background:#fff;color:#1F2A33;border:1px solid var(--c-line);box-shadow:0px 1px 2px rgba(31,42,51,.05)}
+.ghost{background:transparent;color:#1F2A33}
+.ghost:hover{background:rgba(31,42,51,.06)}
+.destructive{background:#E03E36;color:#fff}
+.lbl{font-family:var(--font-mono);font-size:9px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em;width:100%}</style></head>
+<body>
+<span class="lbl">Buttons — non-red drives action; red reserved for destructive</span>
+<button class="btn primary">Run tests</button>
+<button class="btn secondary">Compare</button>
+<button class="btn outline">Cancel</button>
+<button class="btn ghost">Skip</button>
+<button class="btn destructive">Reject baseline</button>
+</body></html>

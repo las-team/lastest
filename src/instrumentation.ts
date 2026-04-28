@@ -5,6 +5,15 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
+  // Must run before `reconcileOrphanedPoolEBs` — deleting the Jobs here is
+  // what produces the phantom rows that reconcile prunes.
+  try {
+    const { refreshDevPoolAfterRestart } = await import('@/lib/eb/dev-port-forward');
+    await refreshDevPoolAfterRestart();
+  } catch (err) {
+    console.error('[Boot] refreshDevPoolAfterRestart failed:', err);
+  }
+
   try {
     const { reconcileOrphanedPoolEBs } = await import('@/server/actions/embedded-sessions');
     await reconcileOrphanedPoolEBs();

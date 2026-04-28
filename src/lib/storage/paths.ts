@@ -17,6 +17,7 @@ export const STORAGE_DIRS = {
   'bug-reports': path.join(STORAGE_ROOT, 'bug-reports'),
   fixtures: path.join(STORAGE_ROOT, 'fixtures'),
   'network-bodies': path.join(STORAGE_ROOT, 'network-bodies'),
+  'csv-sources': path.join(STORAGE_ROOT, 'csv-sources'),
 } as const;
 
 /** Subdirectory names allowed by the media API route. */

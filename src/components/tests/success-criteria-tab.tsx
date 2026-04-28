@@ -1,13 +1,23 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Circle, ShieldAlert, ListOrdered, Code2 } from 'lucide-react';
-import type { TestAssertion, AssertionResult, CapturedScreenshot } from '@/lib/db/schema';
+import { CheckCircle2, XCircle, Circle, ListOrdered, Code2 } from 'lucide-react';
+import type {
+  TestAssertion,
+  AssertionResult,
+  CapturedScreenshot,
+  TestVariable,
+  GoogleSheetsDataSource,
+  CsvDataSource,
+} from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
 import { extractTestBody, parseSteps, extractEditableValue, type DebugStep } from '@/lib/playwright/debug-parser';
 import { parseAssertions } from '@/lib/playwright/assertion-parser';
+import { parseExtractableSelector } from '@/lib/playwright/extractable-selector';
+import { Variable } from 'lucide-react';
+import { VarEditDialog } from './var-edit-dialog';
 
 interface TestStepsTabProps {
   assertions: TestAssertion[] | null;
@@ -20,10 +30,16 @@ interface TestStepsTabProps {
   envBaseUrl?: string | null;
   lastReachedStep?: number | null;
   totalSteps?: number | null;
+  variables?: TestVariable[] | null;
+  sheetSources?: GoogleSheetsDataSource[];
+  csvSources?: CsvDataSource[];
+  onSaveVariables?: (next: TestVariable[]) => Promise<void>;
   onParseNeeded?: () => void;
-  onToggleAssertionSoftness?: (assertionId: string, makeSoft: boolean) => Promise<void>;
   onStepValueChange?: (stepLineStart: number, stepLineEnd: number, oldValue: string, newValue: string) => Promise<void>;
   onGoToCode?: (line: number) => void;
+  /** Called after the user creates an extract-mode Var from a step, so the
+   *  parent can switch to the Vars tab and show the refreshed list. */
+  onNavigateToVars?: () => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -44,6 +60,20 @@ const TYPE_COLORS: Record<string, string> = {
   log: 'text-gray-500 border-gray-200 dark:text-gray-400 dark:border-gray-700',
   other: 'text-gray-500 border-gray-200 dark:text-gray-400 dark:border-gray-700',
 };
+
+// Actionable chip styles for the per-step Bind / Extract / Var controls.
+// Pill-shaped, cyan-tinted (matches the `variable` type color), with clear hover/focus states
+// so they read as clickable affordances rather than passive badges.
+const VAR_CHIP_BASE =
+  'inline-flex items-center gap-1 rounded-full h-5 px-2 text-[10px] font-medium border shrink-0 ' +
+  'transition-colors cursor-pointer ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/40';
+const VAR_CHIP_OUTLINE =
+  'bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border-cyan-200 ' +
+  'dark:bg-cyan-950/40 dark:hover:bg-cyan-900/60 dark:text-cyan-300 dark:border-cyan-800';
+const VAR_CHIP_SOLID =
+  'bg-cyan-600 hover:bg-cyan-700 text-white border-cyan-600 ' +
+  'dark:bg-cyan-500 dark:hover:bg-cyan-400 dark:text-cyan-50 dark:border-cyan-500';
 
 function StatusIcon({ status }: { status: 'passed' | 'failed' | 'skipped' | 'not_run' }) {
   switch (status) {
@@ -126,18 +156,28 @@ export function TestStepsTab({
   envBaseUrl,
   lastReachedStep: serverLastReachedStep,
   totalSteps: serverTotalSteps,
+  variables,
+  sheetSources = [],
+  csvSources = [],
+  onSaveVariables,
   onParseNeeded,
-  onToggleAssertionSoftness,
   onStepValueChange,
   onGoToCode,
+  onNavigateToVars,
 }: TestStepsTabProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set(DEFAULT_HIDDEN));
-  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
-  const [optimisticOverrides, setOptimisticOverrides] = useState<Map<string, boolean>>(new Map());
   const [editingValues, setEditingValues] = useState<Map<number, string>>(new Map());
   const [savingSteps, setSavingSteps] = useState<Set<number>>(new Set());
   const debounceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Bind-to-Var (assign) and Extract-to-Var dialog state — keyed by step id while open.
+  // `mode === 'assign'` is fired by the inline value-input "Bind" button and rewrites the literal in code.
+  // `mode === 'extract'` is fired by the per-step "Extract" button and only persists a Var; nothing in code changes.
+  const [bindStep, setBindStep] = useState<
+    | { mode: 'assign'; step: DebugStep; originalValue: string; selectorHint?: string }
+    | { mode: 'extract'; step: DebugStep; selectorHint: string }
+    | null
+  >(null);
 
   // Always parse assertions fresh from code — DB assertions can have stale line numbers
   const { steps, bodyLineOffset, freshAssertions } = useMemo(() => {
@@ -153,22 +193,11 @@ export function TestStepsTab({
     };
   }, [code]);
 
-  // Merge: use fresh-parsed assertions for line numbers/matching, but inherit isSoft
-  // overrides from DB assertions (which the user may have toggled)
+  // Use fresh-parsed assertions when available; otherwise fall back to DB.
+  // All assertions are soft — the Criteria tab decides what fails the test.
   const assertions = useMemo(() => {
     if (freshAssertions.length === 0) return dbAssertions ?? [];
-    // Build a lookup from DB assertions by ID for isSoft overrides
-    const dbMap = new Map<string, TestAssertion>();
-    if (dbAssertions) {
-      for (const a of dbAssertions) dbMap.set(a.id, a);
-    }
-    return freshAssertions.map(a => {
-      const dbVersion = dbMap.get(a.id);
-      if (dbVersion && dbVersion.isSoft !== undefined) {
-        return { ...a, isSoft: dbVersion.isSoft };
-      }
-      return a;
-    });
+    return freshAssertions;
   }, [freshAssertions, dbAssertions]);
 
   // Sync DB if assertions are stale
@@ -205,12 +234,33 @@ export function TestStepsTab({
       setSavingSteps(prev => new Set(prev).add(step.id));
       try {
         await onStepValueChange(step.lineStart + bodyLineOffset, step.lineEnd + bodyLineOffset, originalValue, newValue);
+        // Don't clear editingValues here — props update from router.refresh() races
+        // the React state flush, and clearing too early flashes the stale prop value
+        // back into the input. The prop-sync effect below clears it once the
+        // re-parsed code reflects the new value.
       } finally {
         setSavingSteps(prev => { const next = new Set(prev); next.delete(step.id); return next; });
-        setEditingValues(prev => { const next = new Map(prev); next.delete(step.id); return next; });
       }
     }, 500));
   }, [onStepValueChange, bodyLineOffset]);
+
+  // Drop editingValues entries once the underlying parsed step value has caught up
+  // with what the user typed — avoids the flicker described above.
+  useEffect(() => {
+    if (editingValues.size === 0) return;
+    let changed = false;
+    const next = new Map(editingValues);
+    for (const step of steps) {
+      const editing = next.get(step.id);
+      if (editing === undefined) continue;
+      const current = extractEditableValue(step);
+      if (current !== null && current === editing) {
+        next.delete(step.id);
+        changed = true;
+      }
+    }
+    if (changed) setEditingValues(next);
+  }, [steps, editingValues]);
 
   // Build assertion result map
   const resultMap = new Map<string, AssertionResult>();
@@ -239,8 +289,11 @@ export function TestStepsTab({
   const passedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'passed').length : 0;
   const failedCount = hasAssertions ? assertions.filter(a => resultMap.get(a.id)?.status === 'failed').length : 0;
   const hasResults = hasAssertions && assertionResults && assertionResults.length > 0;
-  // Only hard assertion failures explain why a test stopped
-  const hasFailedHardAssertion = hasAssertions && assertions.some(a => a.isSoft === false && resultMap.get(a.id)?.status === 'failed');
+  // A failed assertion is the most likely culprit for a stopped test, regardless
+  // of whether the user wired it as a hard criterion. Treat any failure as
+  // "this explains the stop point" so we don't double-flag the next non-assertion
+  // step as the failure point.
+  const hasFailedAssertion = hasAssertions && assertions.some(a => resultMap.get(a.id)?.status === 'failed');
 
   // Count steps by type for filter badges
   const typeCounts = useMemo(() => {
@@ -432,7 +485,7 @@ export function TestStepsTab({
                 // Execution progress: was this step reached?
                 const wasReached = executionWatermark >= 0 && globalIdx <= executionWatermark;
                 // Only flag non-assertion steps as failure point when no assertion already explains the failure
-                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep && !hasFailedHardAssertion;
+                const isFailurePoint = testStatus === 'failed' && globalIdx === executionWatermark && !isAssertionStep && !hasFailedAssertion;
 
                 return (
                   <div
@@ -480,6 +533,10 @@ export function TestStepsTab({
                             ? label.slice(0, label.indexOf(`"${valueInLabel}`))
                             : label.replace(/\s*"[^"]*"?\s*$/, '');
 
+                          const isVarRef = /^\{\{var:[a-zA-Z_][a-zA-Z0-9_-]*\}\}$/.test(originalValue);
+                          // Best-effort selector hint parsed from step.code (e.g. page.locator('#email'))
+                          const selectorMatch = step.code.match(/locator\(['"`]([^'"`]+)['"`]\)/);
+                          const selectorHint = selectorMatch?.[1];
                           return (
                             <span className={cn('text-sm flex-1 min-w-0 flex items-center gap-1', isExpandable && 'font-medium')}>
                               <span className="truncate shrink-0">{labelPrefix}</span>
@@ -494,6 +551,20 @@ export function TestStepsTab({
                                   isSaving && 'opacity-50',
                                 )}
                               />
+                              {onSaveVariables && (
+                                <button
+                                  type="button"
+                                  className={cn(VAR_CHIP_BASE, isVarRef ? VAR_CHIP_SOLID : VAR_CHIP_OUTLINE)}
+                                  title={isVarRef ? 'Already bound to a variable — click to edit' : 'Bind this value to a variable'}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBindStep({ mode: 'assign', step, originalValue, selectorHint });
+                                  }}
+                                >
+                                  <Variable className="h-3 w-3" />
+                                  {isVarRef ? 'Var' : 'Bind'}
+                                </button>
+                              )}
                             </span>
                           );
                         }
@@ -508,24 +579,30 @@ export function TestStepsTab({
                         );
                       })()}
 
-                      {/* Hard/Soft badges for assertion steps */}
-                      {isExpandable && stepAssertions.length > 0 && (() => {
-                        const hardCount = stepAssertions.filter(a => a.isSoft === false).length;
-                        const softCount = stepAssertions.length - hardCount;
+                      {/* Extract-to-Var chip — shows on any step where we can parse a selector
+                          (locator, getByRole/Text/TestId/Label/Placeholder/AltText/Title, locateWithFallback). */}
+                      {onSaveVariables && (() => {
+                        const sel = parseExtractableSelector(step.code);
+                        if (!sel) return null;
+                        // If any extract-mode var already targets this selector, show the solid state.
+                        const alreadyExtracted = (variables ?? []).some(
+                          v => v.mode === 'extract' && v.targetSelector === sel,
+                        );
                         return (
-                          <>
-                            {hardCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
-                                <ShieldAlert className="h-3 w-3 mr-0.5" />
-                                Hard{hardCount > 1 ? ` ×${hardCount}` : ''}
-                              </Badge>
-                            )}
-                            {softCount > 0 && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0 text-muted-foreground">
-                                Soft{softCount > 1 ? ` ×${softCount}` : ''}
-                              </Badge>
-                            )}
-                          </>
+                          <button
+                            type="button"
+                            className={cn(VAR_CHIP_BASE, alreadyExtracted ? VAR_CHIP_SOLID : VAR_CHIP_OUTLINE)}
+                            title={alreadyExtracted
+                              ? `A variable already extracts from this selector — click to add another\nselector: ${sel}`
+                              : `Extract value from this element to a variable\nselector: ${sel}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBindStep({ mode: 'extract', step, selectorHint: sel });
+                            }}
+                          >
+                            <Variable className="h-3 w-3" />
+                            Extract
+                          </button>
                         );
                       })()}
 
@@ -559,27 +636,6 @@ export function TestStepsTab({
                         {stepAssertions.map(assertion => {
                           const result = resultMap.get(assertion.id);
                           const status = result?.status ?? 'not_run';
-                          const hasOverride = optimisticOverrides.has(assertion.id);
-                          const effectiveSoft = hasOverride ? optimisticOverrides.get(assertion.id)! : assertion.isSoft !== false;
-                          const isHard = !effectiveSoft;
-                          const isToggling = togglingIds.has(assertion.id);
-
-                          const handleToggleSoftness = async (e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            if (!onToggleAssertionSoftness || isToggling) return;
-                            const newSoft = !effectiveSoft;
-                            setOptimisticOverrides(prev => new Map(prev).set(assertion.id, newSoft));
-                            setTogglingIds(prev => new Set(prev).add(assertion.id));
-                            try {
-                              await onToggleAssertionSoftness(assertion.id, newSoft);
-                              // Keep optimistic override until fresh data arrives — prevents flicker
-                            } catch {
-                              setOptimisticOverrides(prev => { const next = new Map(prev); next.delete(assertion.id); return next; });
-                            } finally {
-                              setTogglingIds(prev => { const next = new Set(prev); next.delete(assertion.id); return next; });
-                            }
-                          };
-
                           return (
                             <div key={assertion.id} className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -591,34 +647,6 @@ export function TestStepsTab({
                                 </Badge>
                                 {assertion.negated && (
                                   <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">.not</Badge>
-                                )}
-                                {isHard ? (
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      'text-[10px] px-1 py-0 h-4 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800',
-                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-red-100 dark:hover:bg-red-900',
-                                      isToggling && 'opacity-50',
-                                    )}
-                                    onClick={handleToggleSoftness}
-                                    title={onToggleAssertionSoftness ? 'Click to make soft (test continues on failure)' : undefined}
-                                  >
-                                    <ShieldAlert className="h-3 w-3 mr-0.5" />
-                                    Hard
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      'text-[10px] px-1 py-0 h-4 text-muted-foreground',
-                                      onToggleAssertionSoftness && 'cursor-pointer hover:bg-muted/50',
-                                      isToggling && 'opacity-50',
-                                    )}
-                                    onClick={handleToggleSoftness}
-                                    title={onToggleAssertionSoftness ? 'Click to make hard (test stops on failure)' : undefined}
-                                  >
-                                    Soft
-                                  </Badge>
                                 )}
                               </div>
 
@@ -667,6 +695,50 @@ export function TestStepsTab({
           </>
         )}
       </CardContent>
+      {bindStep && onSaveVariables && (
+        <VarEditDialog
+          open={!!bindStep}
+          onOpenChange={(o) => { if (!o) setBindStep(null); }}
+          forcedMode={bindStep.mode}
+          initial={
+            bindStep.mode === 'assign'
+              ? {
+                  name: '',
+                  mode: 'assign',
+                  sourceType: 'static',
+                  staticValue: bindStep.originalValue,
+                }
+              : {
+                  name: '',
+                  mode: 'extract',
+                  targetSelector: bindStep.selectorHint,
+                  attribute: 'value',
+                }
+          }
+          takenNames={(variables ?? []).map(v => v.name)}
+          sheetSources={sheetSources}
+          csvSources={csvSources}
+          onSave={async (newVar) => {
+            const next = [...(variables ?? []).filter(v => v.id !== newVar.id), newVar];
+            await onSaveVariables(next);
+            // For assign mode, also rewrite the literal value in code with {{var:name}}.
+            // For extract mode, the var alone is enough — extraction happens at run time.
+            const wasExtract = bindStep.mode === 'extract';
+            if (bindStep.mode === 'assign' && onStepValueChange) {
+              await onStepValueChange(
+                bindStep.step.lineStart + bodyLineOffset,
+                bindStep.step.lineEnd + bodyLineOffset,
+                bindStep.originalValue,
+                `{{var:${newVar.name}}}`,
+              );
+            }
+            setBindStep(null);
+            // For extract mode, jump to the Vars tab so the user sees the new
+            // var listed alongside the rest.
+            if (wasExtract) onNavigateToVars?.();
+          }}
+        />
+      )}
     </Card>
   );
 }

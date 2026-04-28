@@ -87,7 +87,27 @@ export async function syncTestAssertions(id: string, assertions: import('@/lib/d
   revalidatePath(`/tests/${id}`);
 }
 
-export async function toggleAssertionSoftness(testId: string, assertionId: string, makeSoft: boolean) {
+export async function saveStepCriteria(
+  testId: string,
+  stepLabel: string,
+  rules: import('@/lib/db/schema').StepRule[],
+) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+  const next = await queries.updateStepCriteria(testId, stepLabel, rules);
+  revalidatePath(`/tests/${testId}`);
+  return next;
+}
+
+export async function saveTestVariables(
+  testId: string,
+  variables: import('@/lib/db/schema').TestVariable[],
+) {
   const session = await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
@@ -96,65 +116,34 @@ export async function toggleAssertionSoftness(testId: string, assertionId: strin
     if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
   }
 
-  // Parse assertions fresh from code — DB assertions may be stale
-  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
-  let code = test.code || '';
-  const currentAssertions = parseAssertions(code);
-
-  // Find assertion in fresh parse first, then fall back to DB
-  const dbAssertions = test.assertions as import('@/lib/db/schema').TestAssertion[] | null;
-  const assertion = currentAssertions.find(a => a.id === assertionId)
-    ?? dbAssertions?.find(a => a.id === assertionId);
-  if (!assertion) throw new Error('Assertion not found');
-
-  // Update assertion metadata
-  assertion.isSoft = makeSoft;
-
-  // Update the test code to keep in sync with the metadata
-  const lines = code.split('\n');
-
-  if (assertion.codeLineStart != null) {
-    const lineIdx = assertion.codeLineStart - 1; // 0-based
-    const codeLine = lines[lineIdx]?.trim() ?? '';
-
-    // Pattern 1: Element/Hard assertion block comments
-    if (/^\/\/ (Element|Hard) assertion:/.test(codeLine)) {
-      if (makeSoft) {
-        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Hard assertion:/, '// Element assertion:');
-      } else {
-        lines[lineIdx] = lines[lineIdx].replace(/\/\/ Element assertion:/, '// Hard assertion:');
+  // Validate
+  const seen = new Set<string>();
+  for (const v of variables) {
+    if (!v.name || !/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(v.name)) {
+      throw new Error(`Variable name "${v.name}" is invalid (letters/digits/underscore/hyphen, must start with a letter)`);
+    }
+    if (seen.has(v.name)) throw new Error(`Duplicate variable name: ${v.name}`);
+    seen.add(v.name);
+    if (v.mode !== 'extract' && v.mode !== 'assign') {
+      throw new Error(`Variable "${v.name}" has invalid mode`);
+    }
+    if (v.mode === 'extract' && !v.targetSelector) {
+      throw new Error(`Extract-mode variable "${v.name}" requires a targetSelector`);
+    }
+    if (v.mode === 'assign') {
+      if (v.sourceType === 'static' && v.staticValue === undefined) {
+        throw new Error(`Static variable "${v.name}" requires a staticValue`);
       }
-    } else {
-      // Patterns 2-5: check for existing hard marker on previous line
-      const prevIdx = lineIdx - 1;
-      const prevLine = prevIdx >= 0 ? lines[prevIdx].trim() : '';
-      const hasHardMarker = /^\/\/ Hard assertion/.test(prevLine);
-
-      if (makeSoft && hasHardMarker) {
-        // Remove the hard marker line
-        lines.splice(prevIdx, 1);
-      } else if (!makeSoft && !hasHardMarker) {
-        // Insert hard marker line before the assertion
-        const indent = lines[lineIdx].match(/^(\s*)/)?.[1] ?? '';
-        lines.splice(lineIdx, 0, `${indent}// Hard assertion`);
+      if ((v.sourceType === 'gsheet' || v.sourceType === 'csv') && (!v.sourceAlias || !v.sourceColumn)) {
+        throw new Error(`${v.sourceType} variable "${v.name}" requires sourceAlias and sourceColumn`);
       }
     }
-
-    code = lines.join('\n');
   }
 
-  // Re-parse assertions from the updated code to keep line numbers consistent
-  const updatedAssertions = parseAssertions(code);
-
-  const branch = await getCurrentBranchForRepo(test.repositoryId);
-  await queries.updateTestWithVersion(
-    testId,
-    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : currentAssertions },
-    'manual_edit',
-    branch ?? undefined,
-  );
+  await queries.updateTest(testId, { variables });
   revalidatePath('/tests');
   revalidatePath(`/tests/${testId}`);
+  return { success: true };
 }
 
 export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
@@ -169,22 +158,49 @@ export async function updateStepValue(testId: string, lineStart: number, lineEnd
   let code = test.code || '';
   const lines = code.split('\n');
 
-  // Escape the values for string replacement in code
-  const escapedOld = oldValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  const escapedNew = newValue.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapeForSingleQuoted = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapedOld = escapeForSingleQuoted(oldValue);
+  const escapedNew = escapeForSingleQuoted(newValue);
 
-  // Replace the value in the relevant lines
+  // Patterns that mirror extractEditableValue() in src/lib/playwright/debug-parser.ts.
+  // We replace whatever fillable value sits on the given lines, not relying on oldValue
+  // matching exactly — debounced edits can race router.refresh() and pass stale oldValue.
+  const VALUE_PATTERNS: RegExp[] = [
+    /(locateWithFallback\s*\([\s\S]*?,\s*'fill'\s*,\s*')((?:[^'\\]|\\.)*)(')/,
+    /(locateWithFallback\s*\([\s\S]*?,\s*'selectOption'\s*,\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.fill\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.keyboard\.type\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+    /(\.selectOption\s*\(\s*')((?:[^'\\]|\\.)*)(')/,
+  ];
+
+  const sliceStart = Math.max(0, lineStart - 1);
+  const sliceEnd = Math.min(lineEnd, lines.length);
+  const block = lines.slice(sliceStart, sliceEnd).join('\n');
+
   let replaced = false;
-  for (let i = lineStart - 1; i < Math.min(lineEnd, lines.length); i++) {
-    if (lines[i].includes(escapedOld)) {
-      lines[i] = lines[i].replace(escapedOld, escapedNew);
+  let newBlock = block;
+  for (const re of VALUE_PATTERNS) {
+    if (re.test(newBlock)) {
+      newBlock = newBlock.replace(re, (_m, prefix: string, _value: string, suffix: string) =>
+        `${prefix}${escapedNew}${suffix}`,
+      );
       replaced = true;
       break;
     }
   }
 
+  // Fallback: literal old-value match (handles cases the patterns above miss)
+  if (!replaced && escapedOld) {
+    const idx = newBlock.indexOf(escapedOld);
+    if (idx !== -1) {
+      newBlock = newBlock.slice(0, idx) + escapedNew + newBlock.slice(idx + escapedOld.length);
+      replaced = true;
+    }
+  }
+
   if (!replaced) throw new Error('Could not find value in code');
 
+  lines.splice(sliceStart, sliceEnd - sliceStart, ...newBlock.split('\n'));
   code = lines.join('\n');
 
   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
@@ -282,7 +298,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
   if (!test) return null;
 
   const repoId = test.repositoryId || repositoryId;
-  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
     queries.getPlannedScreenshotsByTest(testId),
@@ -290,6 +306,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     repoId ? queries.getTestsByRepo(repoId) : Promise.resolve([]),
     repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
     repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
+    repoId ? queries.getCsvDataSources(repoId) : Promise.resolve([]),
     repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
     repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
     repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
@@ -306,6 +323,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     availableTests,
     availableScripts: setupScripts,
     sheetDataSources,
+    csvDataSources,
     stabilizationDefaults: playwrightSettings?.stabilization ?? null,
     diffDefaults: diffSettings,
     playwrightDefaults: playwrightSettings,
@@ -333,6 +351,10 @@ export interface ScreenshotGroup {
   runId: string;
   startedAt: Date | null;
   screenshots: string[];
+  // Baseline + diff lookup keyed by the captured screenshot path (matches
+  // `currentImagePath` on visualDiffs). Lets the gallery viewer toggle to
+  // "diff vs baseline" without an extra fetch on click.
+  diffsByPath?: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }>;
 }
 
 export async function getTestScreenshots(
@@ -359,14 +381,14 @@ export async function getTestScreenshotsGrouped(
 ): Promise<ScreenshotGroup[]> {
   // Primary: Get screenshots from database (stored in test results)
   const testResults = await queries.getTestResultsByTest(testId);
-  const groups: Map<string, { startedAt: Date | null; screenshots: string[] }> = new Map();
+  const groups: Map<string, { startedAt: Date | null; screenshots: string[]; diffsByPath: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }> }> = new Map();
 
   for (const result of testResults) {
     const runId = result.testRunId;
     if (!runId) continue;
 
     if (!groups.has(runId)) {
-      groups.set(runId, { startedAt: null, screenshots: [] });
+      groups.set(runId, { startedAt: null, screenshots: [], diffsByPath: {} });
     }
     const group = groups.get(runId)!;
 
@@ -382,6 +404,17 @@ export async function getTestScreenshotsGrouped(
     // Fallback to single screenshotPath if no array
     if (result.screenshotPath && !group.screenshots.includes(result.screenshotPath)) {
       group.screenshots.push(result.screenshotPath);
+    }
+
+    // Pair each captured screenshot with its visualDiff (if any) so the gallery
+    // viewer can show "diff vs baseline" without an extra round-trip on click.
+    const diffs = await queries.getVisualDiffsByTestResult(result.id);
+    for (const d of diffs) {
+      if (!d.currentImagePath) continue;
+      group.diffsByPath[d.currentImagePath] = {
+        baselineImagePath: d.baselineImagePath,
+        diffImagePath: d.diffImagePath,
+      };
     }
   }
 
@@ -402,6 +435,7 @@ export async function getTestScreenshotsGrouped(
     runId,
     startedAt: runMap.get(runId) || null,
     screenshots: (groups.get(runId)?.screenshots || []).sort(naturalCompare),
+    diffsByPath: groups.get(runId)?.diffsByPath ?? {},
   }));
 
   // Sort by startedAt descending (newest first)

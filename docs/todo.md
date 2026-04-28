@@ -6,23 +6,38 @@ MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
-Gitlab
+**Gitlab**
 Teardown
-Accept Downloads
+**Accept Downloads**
 triage
 a11y
 DOM delta
-## bugs
-## features
-change logo
-Watermark recordings
-Build free tests and share them - have them shareable
-SuperAdmin account to help manage them
+Create modes
 Openrouter agent sdk parity
-Asset management
+**Onboarding**
+
+**Criteria**
+
+**CSV upload and use**
+
+## bugs
+
+## features
+Default ai, openrouter test
+gh issue- notification on discord
+
+Recording - test create v3
+  Better timeline: imeline · drag to reorder add icons, like steps as well
+Merge code and steps?
+Design
+**Playback event stream**
+Self-test
 mcp-oauth flow
-(low) Every button is green, multiple primary actions, keep clicking on run test instead of save
 ## ideas
+Maybe workspace list w last 3 workspaces?
+Clear up area desc-spec, test desc-spec duplication
+
+check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning              │                                     
   Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
@@ -74,6 +89,9 @@ Video recording
 Run online or on your pc?
 Pont erre van szükségünk
 Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
+
+Re-fetch search volume, CPC & competition from DataForSEO
+
 ### marketing ideas
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence

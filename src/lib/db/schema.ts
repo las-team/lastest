@@ -178,6 +178,48 @@ export interface TestPlaywrightOverrides {
   cursorPlaybackSpeed?: number;
 }
 
+// Per-step pass/fail rules. Extensible: add new `kind`s and handle them in
+// src/lib/execution/evaluation.ts. MVP: screenshot_changed.
+//
+// `all_steps_executed` is a special test-level rule (stepLabel ignored) that
+// trips when the runner reports `lastReachedStep + 1 < totalSteps`. It is
+// **default ON** for every test — synthesized at evaluation time when the
+// stored criteria don't already include it. To opt out, persist the rule
+// with `severity: 'warn'` (the UI toggle writes this when unchecked).
+export type StepRuleKind =
+  | 'screenshot_changed'
+  | 'focus_region_changed'
+  | 'console_error'
+  | 'assertion_failed'
+  | 'variable_equals'
+  | 'all_steps_executed';
+
+export type StepRuleSeverity = 'fail' | 'warn';
+
+export interface StepRule {
+  kind: StepRuleKind;
+  severity: StepRuleSeverity;
+  params?: Record<string, unknown>;
+}
+
+export interface StepCriterion {
+  stepLabel: string;
+  rules: StepRule[];
+}
+
+export interface TriggeredStepRule {
+  stepLabel: string;
+  rule: StepRule;
+  reason: string;
+}
+
+export interface EvaluationOutcome {
+  triggeredRules: TriggeredStepRule[];
+  evaluatedAt: string;
+  // Status the evaluator promoted the result to (only set when it actually flipped).
+  overriddenStatus?: 'failed';
+}
+
 export const functionalAreas = pgTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -195,7 +237,7 @@ export const functionalAreas = pgTable('functional_areas', {
 export const tests = pgTable('tests', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
   description: text('description'),
@@ -212,6 +254,15 @@ export const tests = pgTable('tests', {
   diffOverrides: jsonb('diff_overrides').$type<TestDiffOverrides>(),
   playwrightOverrides: jsonb('playwright_overrides').$type<TestPlaywrightOverrides>(),
   assertions: jsonb('assertions').$type<TestAssertion[]>(),
+  // Per-step pass/fail rules. Evaluated post-execution by evaluateStepCriteria.
+  stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
+  // Named variables: bind values to page fields (extract from / assign to).
+  // {{var:name}} references in code are resolved at execution time.
+  variables: jsonb('variables').$type<TestVariable[]>(),
+  // Per-run row cursor map for assign-mode vars with sourceRowMode='increment'.
+  // Keyed by TestVariable.id → next-row-to-use. Updated post-resolve by the
+  // executor; wraps back to 2 (not 0) when it overflows the source's rowCount.
+  variableRowCursors: jsonb('variable_row_cursors').$type<Record<string, number>>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
@@ -267,7 +318,10 @@ export interface TestAssertion {
   label?: string;
   codeLineStart?: number;
   codeLineEnd?: number;
-  isSoft?: boolean; // true (default) = test continues on failure, false = test fails immediately
+  /** Always true — kept for back-compat with persisted rows. Whether an
+   *  assertion failure actually fails the test is decided by the per-assertion
+   *  rule on the Criteria tab (see `StepCriterion` / `assertion_failed`). */
+  isSoft?: boolean;
 }
 
 export interface AssertionResult {
@@ -276,6 +330,39 @@ export interface AssertionResult {
   actualValue?: string;
   errorMessage?: string;
   durationMs?: number;
+}
+
+// Test variables — named values bound to page fields.
+// `assign` mode: value is sourced from gsheet/csv/static and replaces {{var:name}} in code at runtime.
+// `extract` mode: value is read from a page field after the test, optionally compared to expectedValue (eotest assertion).
+export type TestVariableMode = 'extract' | 'assign';
+export type TestVariableSourceType = 'gsheet' | 'csv' | 'static';
+export type TestVariableAttribute = 'value' | 'textContent' | 'innerText' | 'innerHTML';
+
+export type TestVariableSourceRowMode = 'fixed' | 'increment' | 'random';
+
+export interface TestVariable {
+  id: string;
+  name: string;
+  mode: TestVariableMode;
+  // Extract mode
+  targetSelector?: string;
+  attribute?: TestVariableAttribute;
+  // Assign mode source
+  sourceType?: TestVariableSourceType;
+  sourceAlias?: string;
+  sourceColumn?: string;
+  sourceRow?: number;
+  // How the row gets picked at run time. Default 'fixed' — uses sourceRow.
+  // 'increment' walks forward across runs and wraps from rowCount-1 back to 2
+  // (rows 0/1 reserved as defaults). 'random' picks any row each run.
+  sourceRowMode?: TestVariableSourceRowMode;
+  staticValue?: string;
+  // Eotest assertion
+  expectedValue?: string;
+  assertEnabled?: boolean;
+  assertSeverity?: StepRuleSeverity;
+  description?: string;
 }
 
 export interface WcagScoreSummary {
@@ -303,6 +390,10 @@ export const testResults = pgTable('test_results', {
   networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
   downloads: jsonb('downloads').$type<DownloadRecord[]>(),
   a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
+  // EB-side test executor log lines (info/warn/error from runner-client + test-executor).
+  // Populated for embedded-browser runs; null for legacy/local. Lets us inspect
+  // [Nav]/[Shot] probe lines post-hoc when an EB pod is already GC'd.
+  logs: jsonb('logs').$type<Array<{ timestamp: number; level: string; message: string }>>(),
   assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),
   videoPath: text('video_path'),
@@ -314,6 +405,15 @@ export const testResults = pgTable('test_results', {
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured at screenshot time
   lastReachedStep: integer('last_reached_step'), // 0-based index of last step reached during execution
   totalSteps: integer('total_steps'), // total parsed step count for watermark ratio computation
+  evaluationOutcome: jsonb('evaluation_outcome').$type<EvaluationOutcome>(), // step-criteria rule firings
+  // Values pulled from page fields by extract-mode TestVariables, post-run.
+  extractedVariables: jsonb('extracted_variables').$type<Record<string, string>>(),
+  // Values resolved & injected by assign-mode TestVariables for this run.
+  // Keyed by variable name — same shape as extractedVariables. Surfaces in
+  // the Vars tab "Last run" column for assign-mode rows (especially helpful
+  // with sourceRowMode='random'/'increment' where the user otherwise can't
+  // tell which row was actually used).
+  assignedVariables: jsonb('assigned_variables').$type<Record<string, string>>(),
 });
 
 // Repository provider type
@@ -359,7 +459,7 @@ export const githubAccounts = pgTable('github_accounts', {
   createdAt: timestamp('created_at'),
 });
 
-// GitLab OAuth accounts - per-team GitLab connection
+// GitLab OAuth / PAT accounts - per-team GitLab connection
 export const gitlabAccounts = pgTable('gitlab_accounts', {
   id: text('id').primaryKey(),
   teamId: text('team_id'), // Team ownership - FK added after teams table definition
@@ -369,6 +469,11 @@ export const gitlabAccounts = pgTable('gitlab_accounts', {
   refreshToken: text('refresh_token'),
   tokenExpiresAt: timestamp('token_expires_at'),
   instanceUrl: text('instance_url').default('https://gitlab.com'), // For self-hosted GitLab
+  // 'oauth' (default — uses env or per-account oauth client) | 'pat' (personal access token)
+  authMethod: text('auth_method').notNull().default('oauth'),
+  // Per-account OAuth client (for self-hosted instances where the global env vars don't apply)
+  oauthClientId: text('oauth_client_id'),
+  oauthClientSecret: text('oauth_client_secret'),
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id),
   reposSyncedAt: timestamp('repos_synced_at'),
   createdAt: timestamp('created_at'),
@@ -525,6 +630,24 @@ export const ignoreRegions = pgTable('ignore_regions', {
   reason: text('reason'),
   createdAt: timestamp('created_at'),
 });
+
+// Focus regions: per-screenshot positive mask. If any exist for a (testId, stepLabel),
+// the diff engine blanks everything *outside* their union — the inverse of ignoreRegions.
+export const focusRegions = pgTable('focus_regions', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  stepLabel: text('step_label'),
+  x: integer('x').notNull(),
+  y: integer('y').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  index('idx_focus_regions_test_step').on(table.testId, table.stepLabel),
+]));
+
+export type FocusRegion = typeof focusRegions.$inferSelect;
+export type NewFocusRegion = typeof focusRegions.$inferInsert;
 
 export type Repository = typeof repositories.$inferSelect;
 export type NewRepository = typeof repositories.$inferInsert;
@@ -683,6 +806,11 @@ export const playwrightSettings = pgTable('playwright_settings', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id),
   selectorPriority: jsonb('selector_priority').$type<SelectorConfig[]>(),
+  // App-specific test-id attribute (e.g. 'data-automation-id'). When set,
+  // the recorder, fallback locator, and AI test-gen prompt will prefer this
+  // attribute over `data-testid`. Only takes effect if the user adds the
+  // 'custom-attr' entry to selectorPriority with a chosen rank.
+  customAttributeName: text('custom_attribute_name'),
   browser: text('browser').default('chromium'), // chromium | firefox | webkit
   viewportWidth: integer('viewport_width').default(1280),
   viewportHeight: integer('viewport_height').default(720),
@@ -703,14 +831,14 @@ export const playwrightSettings = pgTable('playwright_settings', {
   //   maxParallelEBs: per-build cap on concurrent EB claims (1 test per EB).
   //   ebPoolMax:      hard cap on concurrent system EBs across the cluster.
   //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
-  maxParallelEBs: integer('max_parallel_ebs').default(10),
-  ebPoolMax: integer('eb_pool_max').default(30),
+  maxParallelEBs: integer('max_parallel_ebs').default(30),
+  ebPoolMax: integer('eb_pool_max').default(50),
   ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
-  networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  networkErrorMode: text('network_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
   ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(false), // skip errors from different origins
-  consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  consoleErrorMode: text('console_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
@@ -752,7 +880,7 @@ export const routes = pgTable('routes', {
   filePath: text('file_path'),
   framework: text('framework'), // 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue'
   routerType: text('router_type'), // 'hash' | 'browser'
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   hasTest: boolean('has_test').default(false),
   scannedAt: timestamp('scanned_at'),
 });
@@ -999,6 +1127,7 @@ export const testVersions = pgTable('test_versions', {
   firstBuildCommit: text('first_build_commit'), // denormalized commit SHA from first build
   viewportWidth: integer('viewport_width'),
   viewportHeight: integer('viewport_height'),
+  stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
   createdAt: timestamp('created_at'),
 });
 
@@ -1078,6 +1207,8 @@ export const teams = pgTable('teams', {
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
+export type OnboardingPath = 'manual' | 'ai' | 'agent';
+
 // Users - Core identity
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -1089,6 +1220,10 @@ export const users = pgTable('users', {
   role: text('role').notNull().default('member'), // 'owner' | 'admin' | 'member' | 'viewer'
   selectedRepositoryId: text('selected_repository_id').references(() => repositories.id, { onDelete: 'set null' }),
   emailVerified: boolean('email_verified').default(false),
+  // Onboarding wizard state (v3 fork-at-start). Null = wizard not yet completed.
+  // Existing users are backfilled to NOW() on migration so they don't see the wizard.
+  onboardingCompletedAt: timestamp('onboarding_completed_at'),
+  onboardingPath: text('onboarding_path').$type<OnboardingPath>(), // 'manual' | 'ai' | 'agent'
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1438,6 +1573,26 @@ export const googleSheetsDataSources = pgTable('google_sheets_data_sources', {
 export type GoogleSheetsDataSource = typeof googleSheetsDataSources.$inferSelect;
 export type NewGoogleSheetsDataSource = typeof googleSheetsDataSources.$inferInsert;
 
+// CSV data sources - uploaded CSV files cached as repo-scoped tabular data.
+// Mirrors googleSheetsDataSources: alias-keyed, cachedHeaders + cachedData, referenced via {{csv:alias.col[row]}} or via TestVariable.sourceAlias.
+export const csvDataSources = pgTable('csv_data_sources', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  teamId: text('team_id').references(() => teams.id),
+  alias: text('alias').notNull(),                          // unique per repo
+  filename: text('filename').notNull(),
+  storagePath: text('storage_path'),                       // optional persisted file path
+  cachedHeaders: jsonb('cached_headers').$type<string[]>().notNull(),
+  cachedData: jsonb('cached_data').$type<string[][]>().notNull(),
+  rowCount: integer('row_count').notNull().default(0),
+  lastSyncedAt: timestamp('last_synced_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+export type CsvDataSource = typeof csvDataSources.$inferSelect;
+export type NewCsvDataSource = typeof csvDataSources.$inferInsert;
+
 // ============================================
 // Compose Configs (per-branch build configuration)
 // ============================================
@@ -1718,6 +1873,47 @@ export const githubActionConfigs = pgTable('github_action_configs', {
 
 export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
 export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
+
+// ============================================
+// GitLab Pipeline Configs
+// ============================================
+
+export type GitlabPipelineMode = 'persistent' | 'ephemeral' | 'auto';
+export type GitlabPipelineTriggerEvent = 'push' | 'merge_request' | 'schedule' | 'manual';
+// 'ci_file' = generate .gitlab-ci.yml + push it via Repo Files API (full GH-Actions parity)
+// 'webhook' = no CI file; webhook fires server-side createAndRunBuild (no edits to user repo)
+export type GitlabPipelineDeliveryMode = 'ci_file' | 'webhook';
+
+export const DEFAULT_GITLAB_PIPELINE_TRIGGER_EVENTS: GitlabPipelineTriggerEvent[] = ['push', 'merge_request'];
+export const DEFAULT_GITLAB_BRANCH_FILTER: string[] = ['main'];
+
+export const gitlabPipelineConfigs = pgTable('gitlab_pipeline_configs', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  teamId: text('team_id').notNull().references(() => teams.id),
+  runnerId: text('runner_id').references(() => runners.id, { onDelete: 'set null' }),
+  // Repository reference
+  repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }),
+  projectPath: text('project_path').notNull(), // "namespace/project"
+  gitlabProjectId: integer('gitlab_project_id'),
+  mode: text('mode').notNull().default('persistent'), // GitlabPipelineMode
+  deliveryMode: text('delivery_mode').notNull().default('ci_file'), // GitlabPipelineDeliveryMode
+  triggerEvents: jsonb('trigger_events').$type<GitlabPipelineTriggerEvent[]>()
+    .default(['push', 'merge_request']),
+  branchFilter: jsonb('branch_filter').$type<string[]>().default(['main']),
+  cronSchedule: text('cron_schedule'),
+  timeout: integer('timeout').default(300000),
+  failOnChanges: boolean('fail_on_changes').default(true),
+  maxParallelTests: integer('max_parallel_tests'),
+  pollInterval: integer('poll_interval'),
+  webhookSecret: text('webhook_secret'),
+  pipelineDeployed: boolean('pipeline_deployed').default(false),
+  lastDeployedAt: timestamp('last_deployed_at'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
+});
+
+export type GitlabPipelineConfig = typeof gitlabPipelineConfigs.$inferSelect;
+export type NewGitlabPipelineConfig = typeof gitlabPipelineConfigs.$inferInsert;
 
 // ============================================
 // GitHub Issues (cached for analytics)
@@ -2004,3 +2200,61 @@ export const achievements = pgTable('achievements', {
 
 export type Achievement = typeof achievements.$inferSelect;
 export type NewAchievement = typeof achievements.$inferInsert;
+
+// ============================================
+// Public Shares (Campaign Landing Pages)
+// ============================================
+// An operator on a build detail page can publish a public share, producing
+// a short URL (lastest.cloud/r/:slug) that shows the build's artifacts to
+// unauthenticated visitors. A "claim" signs the visitor up and copies the
+// test definition into their new team. The share itself remains owned by
+// the publishing team — copy-on-claim keeps the public URL stable forever.
+
+export type PublicShareStatus = 'public' | 'revoked';
+
+export const publicShares = pgTable('public_shares', {
+  id: text('id').primaryKey(),
+  // 22-char URL-safe token (~128 bits of entropy) — the public handle.
+  slug: text('slug').notNull().unique(),
+  buildId: text('build_id').notNull(),
+  testId: text('test_id'),
+  repositoryId: text('repository_id'),
+  ownerTeamId: text('owner_team_id'),
+  publishedByUserId: text('published_by_user_id'),
+  status: text('status').$type<PublicShareStatus>().notNull().default('public'),
+  targetDomain: text('target_domain'),
+  claimedByTeamId: text('claimed_by_team_id'),
+  claimedByUserId: text('claimed_by_user_id'),
+  claimedAt: timestamp('claimed_at'),
+  viewCount: integer('view_count').notNull().default(0),
+  lastViewedAt: timestamp('last_viewed_at'),
+  revokedAt: timestamp('revoked_at'),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  index('idx_public_shares_build').on(table.buildId),
+  index('idx_public_shares_owner_team').on(table.ownerTeamId),
+]));
+
+export type PublicShare = typeof publicShares.$inferSelect;
+export type NewPublicShare = typeof publicShares.$inferInsert;
+
+// Shared state for an in-flight remote debug session. Previously a per-pod
+// `globalThis` Map; moved to DB because the Olares deployment runs TWO app
+// pods (envoy-fronted `lastest-dev` for the UI + envoy-less
+// `lastest-internal-dev` that receives EB POSTs), and they can't share
+// in-process memory. The UI reads state via polling from pod A while the
+// EB writes state via `response:debug_state` POSTs that land on pod B.
+export const remoteDebugSessions = pgTable('remote_debug_sessions', {
+  sessionId: text('session_id').primaryKey(),
+  runnerId: text('runner_id').notNull(),
+  repositoryId: text('repository_id'),
+  testId: text('test_id').notNull(),
+  state: jsonb('state'),
+  startedAt: timestamp('started_at').$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_remote_debug_sessions_runner').on(table.runnerId),
+]));
+
+export type RemoteDebugSessionRow = typeof remoteDebugSessions.$inferSelect;
+export type NewRemoteDebugSessionRow = typeof remoteDebugSessions.$inferInsert;

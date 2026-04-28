@@ -24,6 +24,12 @@ const nextConfig: NextConfig = {
       allowedOrigins: ["app.lastest.cloud", "*.olares.local"],
     },
     proxyClientMaxBodySize: "50mb",
+    // Barrel imports from these packages are rewritten to deep imports so
+    // SWC never has to parse the whole package per route. Without this,
+    // any dev-server recompile that touches a file using lucide-react pulls
+    // ~1500 icon modules into SWC and OOMs the dev server — the exact
+    // napi_create_string_utf8 crash the share flow kept hitting.
+    optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
   },
   async headers() {
     return [
@@ -35,7 +41,7 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
-          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://img.clerk.com https://*.gravatar.com; connect-src 'self' ws: wss: https://github.com https://api.github.com; font-src 'self' data:; frame-src 'self' https://trace.playwright.dev; form-action 'self' https://github.com;" },
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://img.clerk.com https://*.gravatar.com https://www.google.com https://*.gstatic.com; connect-src 'self' ws: wss: https://github.com https://api.github.com https://gitlab.com; font-src 'self' data:; frame-src 'self' https://trace.playwright.dev; form-action 'self' https://github.com https://gitlab.com;" },
         ],
       },
     ];

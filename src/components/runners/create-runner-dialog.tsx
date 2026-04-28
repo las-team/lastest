@@ -67,7 +67,7 @@ export function CreateRunnerDialog() {
     if (!token) return;
     const serverUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
     const command = runnerType === 'embedded'
-      ? `LASTEST_TOKEN=${token} LASTEST_URL=${serverUrl} docker compose up embedded-browser -d --build`
+      ? `docker run -d --name lastest-eb -e LASTEST_TOKEN=${token} -e LASTEST_URL=${serverUrl} -p 9223:9223 -p 9224:9224 ewyc/lastest-eb:latest`
       : `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
     await navigator.clipboard.writeText(command);
     setCopiedCommand(true);
@@ -156,7 +156,7 @@ export function CreateRunnerDialog() {
                   </p>
                   <div className="relative">
                     <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
-{`LASTEST_TOKEN=${token} \\\nLASTEST_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\ndocker compose up embedded-browser -d`}
+{`docker run -d --name lastest-eb \\\n  -e LASTEST_TOKEN=${token} \\\n  -e LASTEST_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\n  -p 9223:9223 -p 9224:9224 \\\n  ewyc/lastest-eb:latest`}
                     </pre>
                     <Button
                       variant="ghost"

@@ -6,26 +6,16 @@
  * handler runs, and forwards /api/embedded/stream/ws + /api/activity-feed/ws
  * to their respective upstream TCP endpoints.
  *
- * Previous behaviour (the 10–40s recording-start stalls observed in prod HAR):
- *   Next.js registers its own 'upgrade' listener after our preload. When our
- *   handler ran first and began forwarding, Next.js's fallback fired next,
- *   wrote "HTTP/1.1 404 Not Found\r\n\r\n" to the client socket, and called
- *   socket.destroy(). Our `socket.end = noop` only blocked `end()` — the raw
- *   `socket.write()` and `socket.destroy()` still went through and corrupted
- *   the handshake. The browser retried until it happened to catch a race
- *   where the upstream's 101 arrived before Next.js's 404 — hence the ~40s
- *   eventual "success".
- *
- * Fix:
- *   1. prependListener so we run first (cheap insurance).
- *   2. On match, immediately `removeAllListeners('upgrade')` — re-register
- *      only our top-level handler — so Next.js's fallback can never fire for
- *      this or subsequent upgrades on this server.
- *   3. Override `socket.write` (not just end/destroy) while we own the
- *      handshake, so anything that slipped through cannot corrupt the stream.
- *   4. Read the upstream's 101 response manually, forward it, THEN enable
- *      piping. Guarantees the handshake bytes are in order.
- *   5. Handshake watchdog (15s) + explicit teardown covers edge cases.
+ * Next's fallback upgrade handler fires synchronously after ours and can
+ * schedule socket.destroy/end via microtasks. Two guards keep those from
+ * corrupting our tunnel:
+ *   - `claimed` — blocks socket.write until the upstream 101 arrives, so
+ *     Next can't inject a 404 body into the handshake.
+ *   - `sessionOver` — blocks socket.end/destroy for the socket's lifetime;
+ *     only OUR teardown flips it, so latent Next cleanup calls are ignored
+ *     and the pipe stays up until TCP naturally closes.
+ * Upstream's 101 + any trailing WS frame are read manually and forwarded
+ * before piping begins, guaranteeing handshake bytes are in order.
  */
 
 const http = require('http');
@@ -68,25 +58,21 @@ function parseTarget(url) {
 }
 
 function forwardUpgrade(server, req, socket, head, cfg) {
-  // We're the first listener (prependListener). Other listeners — notably
-  // Next.js's own upgrade fallback — still fire after us. We neutralise their
-  // ability to touch this specific socket via the write/end/destroy
-  // overrides below, without removing them from the emitter (other upgrade
-  // paths still need Next.js to handle them).
   const realWrite = socket.write.bind(socket);
   const realEnd = socket.end.bind(socket);
   const realDestroy = socket.destroy.bind(socket);
-  let claimed = true;
+  let claimed = true;           // blocks socket.write pre-upgrade
+  let sessionOver = false;      // only our teardown flips this — gates end/destroy
   socket.write = (...a) => {
     if (claimed) { dlog(cfg.label, 'blocked external socket.write', a[0] && a[0].length); return true; }
     return realWrite(...a);
   };
-  socket.end = () => {
-    if (claimed) { dlog(cfg.label, 'blocked external socket.end'); return socket; }
-    return realEnd();
+  socket.end = (...a) => {
+    if (!sessionOver) { dlog(cfg.label, 'blocked external socket.end'); return socket; }
+    return realEnd(...a);
   };
   socket.destroy = (...a) => {
-    if (claimed) { dlog(cfg.label, 'blocked external socket.destroy'); return socket; }
+    if (!sessionOver) { dlog(cfg.label, 'blocked external socket.destroy'); return socket; }
     return realDestroy(...a);
   };
 
@@ -110,6 +96,7 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
     if (!clientClosed) {
       clientClosed = true;
+      sessionOver = true;
       try { hadError ? realDestroy() : realEnd(); } catch { /* ignore */ }
     }
   };
@@ -183,11 +170,7 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     }
 
     upgraded = true;
-    claimed = false;
-    // Restore socket methods for piping.
-    socket.write = realWrite;
-    socket.end = realEnd;
-    socket.destroy = realDestroy;
+    claimed = false;  // pipe(upstream→socket) needs socket.write to pass through
 
     try { realWrite(hbytes); if (trailing.length) realWrite(trailing); } catch { /* ignore */ }
 

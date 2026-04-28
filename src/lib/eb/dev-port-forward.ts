@@ -123,48 +123,46 @@ async function getOrStart(instanceId: string): Promise<Forward> {
     return existing;
   }
   installExitHooks();
-  const fw = await startForward(instanceId);
-  try {
-    await fw.ready;
-  } catch (err) {
-    try { fw.child.kill('SIGTERM'); } catch { /* ignore */ }
-    forwards.delete(instanceId);
-    throw err;
+  // The EB container calls auto-register as soon as its HTTP server is up,
+  // but `kubectl port-forward` hits the Kubernetes API which can briefly see
+  // `pod.status=Pending` during that window and exits with "pod is not
+  // running". Retry a few times with short backoff so the normal startup
+  // race resolves itself instead of returning 500 to the EB.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const fw = await startForward(instanceId);
+      await fw.ready;
+      return fw;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
   }
-  return fw;
+  throw lastErr;
 }
 
 /**
  * Rewrite `ws://<podIP>:9223` to `ws://127.0.0.1:<forwardedPort>` so the host
- * dev server can reach the EB. Returns the original URL unchanged in prod or
- * when the flag is off.
+ * dev server can reach the EB. Throws on failure — a raw pod IP in the DB is
+ * unroutable from the host and silently breaks recording.
  */
 export async function rewriteDevStreamUrl(instanceId: string, streamUrl: string | undefined): Promise<string | undefined> {
   if (!ENABLED || !streamUrl) return streamUrl;
-  try {
-    const fw = await getOrStart(instanceId);
-    const u = new URL(streamUrl);
-    u.hostname = '127.0.0.1';
-    u.port = String(fw.streamPort);
-    return u.toString();
-  } catch (err) {
-    console.warn(`[EB dev-pf] stream rewrite failed for ${instanceId}:`, (err as Error).message);
-    return streamUrl;
-  }
+  const fw = await getOrStart(instanceId);
+  const u = new URL(streamUrl);
+  u.hostname = '127.0.0.1';
+  u.port = String(fw.streamPort);
+  return u.toString();
 }
 
 export async function rewriteDevCdpUrl(instanceId: string, cdpUrl: string | undefined): Promise<string | undefined> {
   if (!ENABLED || !cdpUrl) return cdpUrl;
-  try {
-    const fw = await getOrStart(instanceId);
-    const u = new URL(cdpUrl);
-    u.hostname = '127.0.0.1';
-    u.port = String(fw.cdpPort);
-    return u.toString();
-  } catch (err) {
-    console.warn(`[EB dev-pf] cdp rewrite failed for ${instanceId}:`, (err as Error).message);
-    return cdpUrl;
-  }
+  const fw = await getOrStart(instanceId);
+  const u = new URL(cdpUrl);
+  u.hostname = '127.0.0.1';
+  u.port = String(fw.cdpPort);
+  return u.toString();
 }
 
 /** Kill the port-forward for an instance (on session delete / pod teardown). */
@@ -177,13 +175,24 @@ export function stopDevPortForward(instanceId: string): void {
 }
 
 /**
- * On dev-server boot, orphan port-forward children from a previous run may
- * still hold the free ports we want. `pkill` them defensively. Safe no-op if
- * none are running. Only runs when the flag is enabled.
+ * On `pnpm dev` restart, every system EB in the DB is stale — its
+ * `ws://127.0.0.1:<port>` URL points to a port-forward that died with the
+ * previous Node process, and pods only auto-register once at container start.
+ * Delete the Jobs so `reconcileOrphanedPoolEBs` can prune the phantom rows
+ * and `ensureWarmPool` can provision fresh ones against this dev server.
  */
-export function reapOrphanDevPortForwards(): void {
+export async function refreshDevPoolAfterRestart(): Promise<void> {
   if (!ENABLED) return;
   try {
-    execFileSync('pkill', ['-f', `kubectl.*-n ${NAMESPACE} port-forward pod/`], { stdio: 'ignore' });
-  } catch { /* no matches → exit 1, fine */ }
+    execFileSync('kubectl', [
+      '-n', NAMESPACE,
+      'delete', 'job',
+      '-l', 'app=lastest-eb',
+      '--wait=false',
+      '--ignore-not-found=true',
+    ], { stdio: 'pipe' });
+    console.log('[EB dev-pf] Deleted existing EB Jobs (warm-pool will provision fresh ones)');
+  } catch (err) {
+    console.warn('[EB dev-pf] Failed to delete stale EB Jobs:', (err as Error).message);
+  }
 }

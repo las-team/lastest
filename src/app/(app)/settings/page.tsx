@@ -3,7 +3,6 @@ import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { Github, Check, X, Users, Bot, Mail, Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -41,6 +40,8 @@ import { GamificationToggle } from '@/components/settings/gamification-toggle';
 import { GamificationAdminCard } from '@/components/settings/gamification-admin-card';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
+import { ConnectGitlabButton } from '@/components/settings/connect-gitlab-button';
+import { GitlabPipelinesCard } from '@/components/settings/gitlab-pipelines-card-client';
 import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
 import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
@@ -62,8 +63,9 @@ export default async function SettingsPage({
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
     teamId ? queries.getSelectedRepository(userId, teamId) : null,
   ]);
-  const [githubActionConfigs, teamRepos, runners, sysRunners] = await Promise.all([
+  const [githubActionConfigs, gitlabPipelineConfigs, teamRepos, runners, sysRunners] = await Promise.all([
     teamId ? queries.getGithubActionConfigs(teamId) : [],
+    teamId ? queries.getGitlabPipelineConfigs(teamId) : [],
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
     getRunners(),
     getSystemRunners(),
@@ -119,7 +121,7 @@ export default async function SettingsPage({
               GitHub account connected successfully!
             </div>
           )}
-          {earlyAdopterMode && params.success === 'gitlab_connected' && (
+          {params.success === 'gitlab_connected' && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
@@ -194,8 +196,14 @@ export default async function SettingsPage({
             githubUsername={githubAccount?.githubUsername ?? null}
           />
 
-          {/* GitLab Integration (early adopter only) */}
-          {earlyAdopterMode && (
+          <GitlabPipelinesCard
+            configs={gitlabPipelineConfigs}
+            runners={runners}
+            repos={teamRepos}
+            hasGitlabAccount={!!gitlabAccount}
+          />
+
+          {/* GitLab Integration */}
           <Card id="gitlab">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -237,23 +245,13 @@ export default async function SettingsPage({
               ) : (
                 <>
                   <p className="text-muted-foreground">
-                    Connect your GitLab account to link builds with merge requests.
+                    Connect your GitLab account to link builds with merge requests. Self-hosted instances supported via PAT or per-account OAuth.
                   </p>
-                  <Button asChild variant="outline">
-                    <a
-                      href="/api/connect/gitlab"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <GitLabIcon className="w-5 h-5" />
-                      Connect GitLab
-                    </a>
-                  </Button>
+                  <ConnectGitlabButton />
                 </>
               )}
             </CardContent>
           </Card>
-          )}
 
           {/* Repository Info */}
           <Card id="repository">

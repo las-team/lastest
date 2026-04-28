@@ -152,6 +152,7 @@ export async function agentDiscoverAreas(
       repositoryId,
       actionType: 'agent_discover',
       onLogCreated: options?.onLogCreated,
+      responseFormat: 'json_object',
     });
 
     const areas = parseAreasFromResponse(response);
@@ -277,6 +278,7 @@ Classify each area as "skip" or "explore" and output JSON.`;
       repositoryId,
       actionType: 'agent_discover',
       onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
+      responseFormat: 'json_object',
     });
 
     // Parse scout output
@@ -364,6 +366,7 @@ export async function runDeepDiveExploration(
     repositoryId,
     actionType: 'agent_discover',
     onLogCreated: options?.onLogCreated,
+    responseFormat: 'json_object',
   });
 
   return parseAreasFromResponse(response);

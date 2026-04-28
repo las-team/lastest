@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
-import { getUserProjects, getProjectBranches } from '@/lib/gitlab/oauth';
+import { getUserProjectsDetailed, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
 
 const REPO_SYNC_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -38,11 +38,16 @@ export async function syncGithubReposForTeam(teamId: string, accessToken: string
 }
 
 /** Core GitLab repo sync — no session required */
-export async function syncGitlabReposForTeam(teamId: string, accessToken: string, instanceUrl?: string): Promise<number> {
-  const glProjects = await getUserProjects(accessToken, instanceUrl);
-  if (!glProjects.length) return 0;
+export async function syncGitlabReposForTeam(
+  teamId: string,
+  accessToken: string,
+  instanceUrl?: string
+): Promise<{ count: number; error?: string }> {
+  const { projects, error } = await getUserProjectsDetailed(accessToken, instanceUrl);
+  if (error) return { count: 0, error: error.message };
+  if (!projects.length) return { count: 0 };
 
-  for (const project of glProjects) {
+  for (const project of projects) {
     const existing = await queries.getRepositoryByGitlabProjectId(project.id);
     const [namespace, ...nameParts] = project.path_with_namespace.split('/');
     const projectName = nameParts.join('/');
@@ -66,7 +71,7 @@ export async function syncGitlabReposForTeam(teamId: string, accessToken: string
       });
     }
   }
-  return glProjects.length;
+  return { count: projects.length };
 }
 
 /** Sync repos from GitHub/GitLab if last sync was > 10 min ago */
@@ -118,7 +123,7 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
   const account = await queries.getGitlabAccountByTeam(session.team.id);
   if (!account) return { success: false, count: 0 };
 
-  const count = await syncGitlabReposForTeam(session.team.id, account.accessToken, account.instanceUrl || undefined);
+  const { count } = await syncGitlabReposForTeam(session.team.id, account.accessToken, account.instanceUrl || undefined);
   if (count > 0) {
     await queries.updateGitlabAccount(account.id, { reposSyncedAt: new Date() });
     revalidatePath('/');
@@ -153,7 +158,7 @@ export async function selectRepo(repositoryId: string | null) {
   revalidatePath('/run');
 }
 
-export async function createLocalRepo(name: string) {
+export async function createLocalRepo(name: string, baseUrl?: string) {
   const session = await requireTeamAccess();
   const repo = await queries.createRepository({
     teamId: session.team.id,
@@ -161,6 +166,7 @@ export async function createLocalRepo(name: string) {
     owner: 'local',
     name,
     fullName: name,
+    ...(baseUrl ? { branchBaseUrls: { default: baseUrl } } : {}),
   });
   // Auto-select the new repo on user
   await queries.updateUser(session.user.id, { selectedRepositoryId: repo.id });

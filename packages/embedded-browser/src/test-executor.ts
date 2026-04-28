@@ -22,7 +22,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
-import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
+import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -65,11 +65,23 @@ export interface EmbeddedTestResult {
   consoleErrors?: string[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
+  /** One entry per `expect(...)` call wrapped by `instrumentAssertionTracking`.
+   *  `assertionId` matches a parsed `TestAssertion.id` from the host. The
+   *  Criteria evaluator (`src/lib/execution/evaluation.ts`) keys on these to
+   *  promote a soft assertion failure to a hard test failure. */
+  assertionResults?: Array<{
+    assertionId: string;
+    status: 'passed' | 'failed' | 'skipped';
+    actualValue?: string;
+    errorMessage?: string;
+    durationMs?: number;
+  }>;
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
+  extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
 }
 
 export interface EmbeddedSetupResult {
@@ -95,6 +107,7 @@ export interface RunSetupPayload {
   viewport?: { width: number; height: number };
   stabilization?: StabilizationPayload;
   browser?: string;
+  headed?: boolean;
 }
 
 export interface RunTestPayload {
@@ -116,6 +129,20 @@ export interface RunTestPayload {
   enableNetworkInterception?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
+  extractVariables?: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
+  /** Parsed assertions from the host's `parseAssertions(code)`. The runner
+   *  uses `(codeLineStart, codeLineEnd)` as a registry to map each runtime
+   *  `expect(...)` call to the right parsed `id`, so the host stays the
+   *  single source of truth for id computation. */
+  assertions?: Array<{
+    id: string;
+    codeLineStart?: number;
+    codeLineEnd?: number;
+  }>;
 }
 
 /**
@@ -213,6 +240,7 @@ export class EmbeddedTestExecutor {
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
+    const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
     const consoleErrors: string[] = [];
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
@@ -320,6 +348,34 @@ export class EmbeddedTestExecutor {
     let reachedStep = -1;
     let stepCount = 0;
     let domSnapshot: DomSnapshotResult | undefined;
+    // Hoisted so the catch path can also try to extract — failed tests still
+    // expose values for any extract-mode TestVariables whose selectors resolve.
+    let extractedVariables: Record<string, string> | undefined;
+    const runExtractions = async () => {
+      if (!command.extractVariables || command.extractVariables.length === 0) return;
+      if (!page || page.isClosed()) return;
+      const out: Record<string, string> = extractedVariables ?? {};
+      for (const v of command.extractVariables) {
+        if (!v.targetSelector) continue;
+        if (out[v.name] !== undefined) continue; // already extracted (success path)
+        try {
+          const locator = page.locator(v.targetSelector).first();
+          let raw: string | null;
+          switch (v.attribute) {
+            case 'textContent': raw = await locator.textContent({ timeout: 2000 }); break;
+            case 'innerText':   raw = await locator.innerText({ timeout: 2000 }); break;
+            case 'innerHTML':   raw = await locator.innerHTML({ timeout: 2000 }); break;
+            default:            raw = await locator.inputValue({ timeout: 2000 }); break;
+          }
+          out[v.name] = (raw ?? '').toString().trim();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logFn('warn', `Failed to extract variable "${v.name}" (${v.targetSelector}): ${msg}`);
+          out[v.name] = '';
+        }
+      }
+      extractedVariables = out;
+    };
     const captureFinalDomSnapshot = async () => {
       if (!page || page.isClosed()) return;
       try {
@@ -469,6 +525,14 @@ export class EmbeddedTestExecutor {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
+          // [Shot] probe: byte size + viewport-content signal to detect blank-render screenshots.
+          // bytes << healthy or bodyChildren=0/hasCanvas=false on a canvas app → captured a non-rendered page.
+          const probeUrl = page.url();
+          const probe = await page.evaluate(() => ({
+            bodyChildren: document.body?.childElementCount ?? 0,
+            hasCanvas: !!document.querySelector('canvas'),
+          })).catch(() => ({ bodyChildren: -1, hasCanvas: false }));
+          logFn('info', `[Shot] ${label}: bytes=${buffer.length} url=${probeUrl} bodyChildren=${probe.bodyChildren} hasCanvas=${probe.hasCanvas}`);
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
           /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -497,23 +561,77 @@ export class EmbeddedTestExecutor {
       // hitting the same target concurrently). Retries at 1s, 2s, 4s = ~7s
       // total; if still failing, throw a tagged error so the upper layer can
       // decide to swap to a fresh EB instead of burning the test.
+      //
+      // ALSO recovers from sub-resource failures: page.goto returns 200 when
+      // the main HTML doc loads, but the JS bundles that mount the app fire
+      // afterwards. A bundle that hits ERR_NETWORK_CHANGED leaves the page as
+      // a blank shell (bodyChildren > 0, hasCanvas=false) — the test then runs
+      // cursor moves on un-mounted UI and the screenshot is ~10× smaller.
+      // Smoking-gun example (Test 2: Move Binding Arrow):
+      //   Request failed: .../mermaid-to-excalidraw-D-aVQaad.js ERR_NETWORK_CHANGED
+      //   Navigation complete: 200
+      //   [Nav] post-goto: bodyChildren=5 hasCanvas=false
+      //   [Shot] Step 1: bytes=4253 (vs. healthy 44169)
+      //
+      // Strategy: track CRITICAL sub-resource failures (script + document
+      // resourceTypes only — ignore image/font/stylesheet/media so blocked
+      // analytics don't trigger spurious reloads) for the goto window AND a
+      // 3s grace period after goto resolves (catches lazy chunks). If any
+      // fired, page.reload() up to twice. After reloads settle, require
+      // networkidle within 5s; otherwise tag __ebNetworkUnhealthy so the
+      // dispatcher swaps to a fresh EB instead of producing a blank screenshot.
       const originalGoto = page.goto.bind(page);
       const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+      const CRITICAL_RESOURCE_TYPES = new Set(['script', 'document', 'xhr', 'fetch']);
+      const POST_GOTO_TRACK_MS = 3000;
+      const MAX_SUBRESOURCE_RELOADS = 2;
+
+      let trackingActive = false;
+      let criticalSubresourceFailures: string[] = [];
+      page.on('requestfailed', (req) => {
+        if (!trackingActive) return;
+        if (!CRITICAL_RESOURCE_TYPES.has(req.resourceType())) return;
+        const failure = req.failure();
+        if (failure && TRANSIENT_NET_RX.test(failure.errorText)) {
+          criticalSubresourceFailures.push(`${req.resourceType()} ${req.url()} (${failure.errorText})`);
+        }
+      });
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
         const delays = [1000, 2000, 4000];
         let lastErr: unknown;
+        let response: Awaited<ReturnType<typeof originalGoto>> | null = null;
         for (let attempt = 0; attempt <= delays.length; attempt++) {
           try {
-            const response = await originalGoto(url, options);
+            criticalSubresourceFailures = [];
+            trackingActive = true;
+            response = await originalGoto(url, options);
+            // Keep tracking for POST_GOTO_TRACK_MS after goto resolves — the
+            // mermaid chunk that broke Test 2 fired ~750ms post-goto.
+            await new Promise((r) => setTimeout(r, POST_GOTO_TRACK_MS));
+            trackingActive = false;
             if (attempt > 0) {
               logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
             } else {
               logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
             }
-            return response;
+            try {
+              const docState = await page.evaluate(() => ({
+                url: location.href,
+                readyState: document.readyState,
+                bodyChildren: document.body?.childElementCount ?? 0,
+                bodyText: (document.body?.innerText || '').slice(0, 80),
+                hasCanvas: !!document.querySelector('canvas'),
+              }));
+              logFn('info', `[Nav] post-goto: url=${docState.url} ready=${docState.readyState} bodyChildren=${docState.bodyChildren} hasCanvas=${docState.hasCanvas} text="${docState.bodyText}"`);
+            } catch (e) {
+              logFn('warn', `[Nav] post-goto probe failed: ${e}`);
+            }
+            break;
           } catch (err) {
+            trackingActive = false;
             lastErr = err;
             const msg = err instanceof Error ? err.message : String(err);
             if (!TRANSIENT_NET_RX.test(msg)) throw err;
@@ -522,13 +640,52 @@ export class EmbeddedTestExecutor {
             await new Promise((r) => setTimeout(r, delays[attempt]));
           }
         }
-        // All retries exhausted on a transient error — this EB's network stack
-        // looks unhealthy. Tag the error so the app-side worker releases + re-claims.
-        const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-        const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (tagged as any).__ebNetworkUnhealthy = true;
-        throw tagged;
+        if (!response) {
+          // All goto retries exhausted on a transient error — EB network unhealthy.
+          const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+          const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+
+        // Sub-resource recovery: goto succeeded but a critical script/doc/xhr
+        // hit ERR_NETWORK_CHANGED during or just after navigation → app likely
+        // didn't mount. Reload up to MAX_SUBRESOURCE_RELOADS with backoff.
+        for (let reloadAttempt = 1; reloadAttempt <= MAX_SUBRESOURCE_RELOADS && criticalSubresourceFailures.length > 0; reloadAttempt++) {
+          const sample = criticalSubresourceFailures.slice(0, 2).join('; ');
+          logFn('warn', `[Reload] ${criticalSubresourceFailures.length} critical sub-resource failure(s) during navigation — reloading (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}). Sample: ${sample}`);
+          // Give CNI a moment to settle.
+          await new Promise((r) => setTimeout(r, 1000 * reloadAttempt));
+          try {
+            criticalSubresourceFailures = [];
+            trackingActive = true;
+            const reloadResp = await page.reload({ waitUntil: options?.waitUntil ?? 'load', timeout: options?.timeout });
+            await new Promise((r) => setTimeout(r, POST_GOTO_TRACK_MS));
+            trackingActive = false;
+            logFn('info', `[Reload] Completed (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}): status=${reloadResp?.status() ?? 'none'} remainingFailures=${criticalSubresourceFailures.length}`);
+            if (reloadResp) response = reloadResp;
+          } catch (err) {
+            trackingActive = false;
+            const msg = err instanceof Error ? err.message : String(err);
+            logFn('warn', `[Reload] threw on attempt ${reloadAttempt}: ${msg}`);
+            if (reloadAttempt === MAX_SUBRESOURCE_RELOADS) {
+              const tagged = new Error(`EB network unhealthy: sub-resource reloads failed (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}): ${msg}`);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (tagged as any).__ebNetworkUnhealthy = true;
+              throw tagged;
+            }
+          }
+        }
+        if (criticalSubresourceFailures.length > 0) {
+          // Reloads exhausted, sub-resources still flaky — surface as unhealthy
+          // so dispatcher's MAX_EB_ATTEMPTS=2 retry kicks in on a fresh EB.
+          const tagged = new Error(`EB network unhealthy: ${criticalSubresourceFailures.length} critical sub-resource failure(s) persisted after ${MAX_SUBRESOURCE_RELOADS} reload(s)`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+        return response;
       };
 
       // Extract function body
@@ -568,6 +725,21 @@ export class EmbeddedTestExecutor {
       // Patch selectAll (mirrors runner.ts)
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+      // Instrument assertions BEFORE step instrumentation and soft-wrapping.
+      // Each `expect(...)` / `await page.waitForLoadState(...)` line gets
+      // wrapped with `await __assertion(id, async () => { <stmt> })` so the
+      // runner can record structured AssertionResult[] keyed to the host's
+      // parsed assertion ids. Lines wrapped here are skipped by the
+      // soft-error regex below (they no longer match the bare `expect(`
+      // pattern), so each assertion fails through `__assertion` only.
+      if (command.assertions && command.assertions.length > 0) {
+        const ar = instrumentAssertionTracking(body, command.assertions);
+        body = ar.instrumentedBody;
+        if (ar.wrappedCount !== command.assertions.length) {
+          logFn('warn', `Assertion instrumentation wrapped ${ar.wrappedCount}/${command.assertions.length} assertions — runtime/parser drift`);
+        }
+      }
+
       // Instrument step tracking before soft error wrapping
       const instrumentResult = instrumentStepTracking(body);
       body = instrumentResult.instrumentedBody;
@@ -575,16 +747,48 @@ export class EmbeddedTestExecutor {
       reachedStep = -1;
       const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
 
+      // Per-assertion bookkeeping invoked by lines wrapped by
+      // `instrumentAssertionTracking`. Push one row per call (so a loop
+      // around an `expect()` records each iteration); the criteria evaluator
+      // uses `.find(... status === 'failed')` so any single failure trips
+      // the rule — matches the soft-fail semantics we keep at runtime.
+      const __assertion = async (id: string, fn: () => Promise<void>) => {
+        const start = Date.now();
+        try {
+          await fn();
+          assertionResults.push({ assertionId: id, status: 'passed', durationMs: Date.now() - start });
+        } catch (e: unknown) {
+          // A real `__hardAssertion` (set on the error) still escapes — host
+          // tests rely on that to fail-fast on TypeError / ReferenceError.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (e && (e as any).__hardAssertion) throw e;
+          const msg = e instanceof Error ? e.message : String(e);
+          assertionResults.push({
+            assertionId: id, status: 'failed', errorMessage: msg, durationMs: Date.now() - start,
+          });
+          // Mirror into softErrors so the legacy steps tab still surfaces the
+          // human-readable message — the structured row is what the criteria
+          // evaluator actually keys on.
+          softErrors.push(msg);
+          logFn('warn', `[ASSERTION FAIL] ${msg}`);
+        }
+      };
+
       // Soft error wrapping — skip screenshot lines AND navigation lines
       // (mirrors runner.ts). `page.goto` failures must fail the test hard:
       // if a worker can't reach the target URL, subsequent steps would run
       // on about:blank and produce blank-white screenshots recorded as passes.
+      // `__assertion(...)` lines are also skipped — they manage their own
+      // pass/fail bookkeeping and re-throwing them as soft warnings would
+      // double-report into softErrors.
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
         if (stmt.includes('.goto(')) return `${indent}${stmt}`;
+        if (stmt.includes('__assertion(')) return `${indent}${stmt}`;
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
       // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test
+      // (only hits expects that the assertion instrumenter didn't claim — e.g. multi-line statements)
       body = body.replace(/^(\s*)(expect\(.+;)\s*$/gm, (_match, indent, stmt) => {
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
@@ -823,10 +1027,10 @@ export class EmbeddedTestExecutor {
           (async () => {
             const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
             const testFn = new AsyncFunction(
-              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached',
+              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached', '__assertion',
               body
             );
-            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached);
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached, __assertion);
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -859,6 +1063,11 @@ export class EmbeddedTestExecutor {
       }
 
       logFn('info', 'Test code execution completed');
+
+      // Extract values from page fields for extract-mode TestVariables.
+      // Done before close so locators still resolve. Failures are best-effort
+      // (logged + recorded as empty string), never fail the whole test.
+      await runExtractions();
 
       // Check console/network error modes (mirrors runner.ts logic)
       const consoleErrorMode = command.consoleErrorMode || 'fail';
@@ -922,9 +1131,11 @@ export class EmbeddedTestExecutor {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
+        extractedVariables,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -939,6 +1150,7 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
@@ -955,6 +1167,9 @@ export class EmbeddedTestExecutor {
             errorScreenshot = buffer.toString('base64');
           } catch { /* ignore */ }
           await captureFinalDomSnapshot();
+          // Extract whatever's still readable on the page so the Vars-tab
+          // "Last run" column reflects state at the failure point.
+          await runExtractions();
         }
 
         result = {
@@ -966,9 +1181,11 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
+          extractedVariables,
         };
       }
     } finally {
@@ -993,6 +1210,7 @@ export class EmbeddedTestExecutor {
           const tempDest = path.join(videoDir, videoFilename);
           await video.saveAs(tempDest);
           await video.delete();
+          await watermarkVideo(tempDest);
           const videoBuffer = fs.readFileSync(tempDest);
           result.videoData = videoBuffer.toString('base64');
           result.videoFilename = videoFilename;
@@ -1008,7 +1226,13 @@ export class EmbeddedTestExecutor {
     return result!
   }
 
-  async runSetup(browser: Browser, command: RunSetupPayload): Promise<EmbeddedSetupResult> {
+  async runSetup(
+    browser: Browser,
+    command: RunSetupPayload,
+    callbacks?: {
+      onPageCreated?: (page: Page) => Promise<void> | void;
+    },
+  ): Promise<EmbeddedSetupResult> {
     const startTime = Date.now();
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const setupTimeout = Math.max(command.timeout || 120000, 30000);
@@ -1035,6 +1259,17 @@ export class EmbeddedTestExecutor {
     let retainContext = false;
 
     try {
+      // Give the caller a chance to attach live-stream infra (CDP screencast) to
+      // the setup page before navigation begins. Used by debug mode so the user
+      // can watch setup run.
+      if (callbacks?.onPageCreated) {
+        try {
+          await callbacks.onPageCreated(page);
+        } catch (cbErr) {
+          logFn('warn', `onPageCreated callback failed: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}`);
+        }
+      }
+
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
 

@@ -211,12 +211,38 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         domSnapshot: result.domSnapshot,
         lastReachedStep: result.lastReachedStep,
         totalSteps: result.totalSteps,
+        extractedVariables: result.extractedVariables,
+        assignedVariables: result.assignedVariables,
+        logs: result.logs,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }
 
+    // Run per-step evaluation criteria — same pass that executeBuildJob
+    // performs. Without this, assertEnabled extract-mode vars (synthesized
+    // into variable_equals rules) and other persisted criteria never flip a
+    // passing single-test run to failed.
+    let criteriaFailureCount = 0;
+    try {
+      const { evaluateStepCriteria } = await import('@/lib/execution/evaluation');
+      const resultsForEval = await queries.getTestResultsByRun(runId);
+      for (const r of resultsForEval) {
+        const prevStatus = r.status;
+        const evalResult = await evaluateStepCriteria(r.id);
+        if (
+          evalResult.overriddenStatus === 'failed' &&
+          prevStatus !== 'failed'
+        ) {
+          criteriaFailureCount++;
+        }
+      }
+    } catch (err) {
+      console.error('[test-run] step-criteria evaluation failed:', err);
+    }
+
     // Update run status
-    const hasFailures = results.some(r => r.status === 'failed' || r.status === 'setup_failed');
+    const hasFailures = criteriaFailureCount > 0
+      || results.some(r => r.status === 'failed' || r.status === 'setup_failed');
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
       status: hasFailures ? 'failed' : 'passed',

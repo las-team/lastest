@@ -28,9 +28,24 @@ export interface TestRunResult {
   domSnapshot?: DomSnapshotData;
   lastReachedStep?: number;
   totalSteps?: number;
+  extractedVariables?: Record<string, string>;
+  assignedVariables?: Record<string, string>;
+  logs?: Array<{ timestamp: number; level: string; message: string }>;
 }
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
+
+export type WaitType = 'duration' | 'selector';
+export type WaitSelectorCondition = 'visible' | 'hidden';
+
+export interface WaitParams {
+  waitType: WaitType;
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: WaitSelectorCondition;
+  timeoutMs?: number;
+}
 
 export type ElementAssertionType =
   | 'toBeVisible'

@@ -30,14 +30,80 @@ import {
   acknowledgeResults,
   getRunnerCommandById,
   getTestFixtures,
+  getGoogleSheetsDataSources,
+  getCsvDataSources,
 } from '@/lib/db/queries';
-import { isScreenshotBlankWhite } from '@/lib/diff/blank-detector';
-
+import { resolveVarReferences, pickRowsForVariables, resolveAssignedValues } from '@/lib/vars/resolver';
+import { resolveSheetReferences } from '@/lib/google-sheets/resolver';
+import { resolveCsvReferences } from '@/lib/csv/resolver';
+import type { GoogleSheetsDataSource, CsvDataSource } from '@/lib/db/schema';
 /**
  * Generate SHA256 hash of test code for integrity verification.
  */
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
+}
+
+/**
+ * Resolve {{sheet:...}}, {{csv:...}}, and {{var:...}} references in test code
+ * before sending to the runner. Also returns the extract-mode TestVariable
+ * specs the runner should pull from page fields after the test body completes.
+ */
+function resolveTestCodeForRunner(
+  test: Test,
+  gsheetSources: GoogleSheetsDataSource[],
+  csvSources: CsvDataSource[],
+): {
+  resolvedCode: string;
+  extractVariables: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
+  /** Resolved value for every assign-mode var, keyed by var name. Persisted
+   *  on the test_results row so the Vars-tab "Last run" column has data for
+   *  assign-mode rows (especially with random/increment row strategies). */
+  assignedVariables: Record<string, string>;
+  /** Updated cursor map for increment-mode vars — caller writes back to
+   *  tests.variableRowCursors. Empty when nothing changed. */
+  nextRowCursors: Record<string, number>;
+} {
+  let code = test.code;
+  // Direct {{sheet:...}} references
+  if (gsheetSources.length > 0 && code.includes('{{sheet:')) {
+    const r = resolveSheetReferences(code, gsheetSources);
+    code = r.resolvedCode;
+  }
+  // Direct {{csv:...}} references
+  if (csvSources.length > 0 && code.includes('{{csv:')) {
+    const r = resolveCsvReferences(code, csvSources);
+    code = r.resolvedCode;
+  }
+  // Pre-pick rows for increment/random vars once per run so all {{var:x}}
+  // occurrences agree on a single row (per-run, not per-occurrence).
+  const { rowPicks, nextCursors } = pickRowsForVariables(
+    test.variables,
+    gsheetSources,
+    csvSources,
+    test.variableRowCursors ?? null,
+  );
+  // {{var:...}} references — resolve via TestVariables (assign-mode only)
+  if (test.variables && test.variables.length > 0 && code.includes('{{var:')) {
+    const r = resolveVarReferences(code, test.variables, gsheetSources, csvSources, rowPicks);
+    code = r.resolvedCode;
+  }
+
+  const assignedVariables = resolveAssignedValues(test.variables, gsheetSources, csvSources, rowPicks);
+
+  const extractVariables = (test.variables ?? [])
+    .filter(v => v.mode === 'extract' && !!v.targetSelector)
+    .map(v => ({
+      name: v.name,
+      targetSelector: v.targetSelector!,
+      attribute: v.attribute,
+    }));
+
+  return { resolvedCode: code, extractVariables, assignedVariables, nextRowCursors: nextCursors };
 }
 
 /**
@@ -153,6 +219,7 @@ export async function executeSetupViaRunner(
   timeout?: number,
   playwrightSettings?: PlaywrightSettings | null,
   browser?: 'chromium' | 'firefox' | 'webkit',
+  headed?: boolean,
 ): Promise<{ storageState?: string; storageStateJson?: string; variables?: Record<string, unknown> }> {
   const setupTimeout = timeout || 120000;
 
@@ -165,6 +232,7 @@ export async function executeSetupViaRunner(
     viewport,
     stabilization: buildStabilizationPayload(playwrightSettings),
     browser,
+    headed: headed || undefined,
   });
 
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
@@ -282,8 +350,13 @@ async function executeViaRunner(
     }
   }
   const pending = [...tests];
+
+  // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
+  const gsheetSources = options.repositoryId ? await getGoogleSheetsDataSources(options.repositoryId) : [];
+  const csvSources = options.repositoryId ? await getCsvDataSources(options.repositoryId) : [];
+
   // Track in-flight tests: commandId → { testId, testName, startTime }
-  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
   let completedCount = 0;
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
@@ -372,11 +445,34 @@ async function executeViaRunner(
         // Non-critical
       }
 
+      // Resolve {{sheet:}}, {{csv:}}, {{var:}} tokens before sending. Hash the resolved code
+      // so the runner's integrity check matches what it actually executes.
+      const { resolvedCode, extractVariables, assignedVariables, nextRowCursors } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
+
+      // Persist the updated row cursors so increment-mode vars walk forward
+      // across runs. Best-effort — never fail the run on a cursor write fail.
+      if (Object.keys(nextRowCursors).length > 0) {
+        try {
+          await db.update(testsTable)
+            .set({ variableRowCursors: nextRowCursors })
+            .where(eq(testsTable.id, test.id));
+        } catch (err) {
+          console.warn(`[executor] Failed to persist variableRowCursors for test ${test.id}:`, err);
+        }
+      }
+
+      // Default-ON `all_steps_executed`: only off when the user explicitly
+      // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis
+      // logic in src/lib/execution/evaluation.ts.
+      const failOnRuntimeError = !(test.stepCriteria ?? []).some(c =>
+        c.rules.some(r => r.kind === 'all_steps_executed' && r.severity === 'warn'),
+      );
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
-        code: test.code,
-        codeHash: hashCode(test.code),
+        code: resolvedCode,
+        codeHash: hashCode(resolvedCode),
         targetUrl: effectiveBaseUrl,
         screenshotPath: `${runId}-${test.id}.png`,
         timeout: effectiveTimeout,
@@ -386,8 +482,8 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
-        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
+        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
         browser: effectiveBrowser,
@@ -398,11 +494,27 @@ async function executeViaRunner(
         forceVideoRecording: options.forceVideoRecording || undefined,
         recordingViewport,
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
+        extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
+        failOnRuntimeError,
+        // Pass the host-parsed assertions so the runner can wrap each
+        // `expect(...)` line with a structured pass/fail recorder. The
+        // criteria evaluator on the host keys on these ids to fail the test
+        // when a user-pinned assertion failed.
+        assertions: (test.assertions ?? []).map(a => ({
+          id: a.id,
+          codeLineStart: a.codeLineStart,
+          codeLineEnd: a.codeLineEnd,
+        })),
       });
 
       // Queue command to DB
       await queueCommandToDB(runnerId, command);
-      inFlight.set(command.id, { testId: test.id, testName: test.name, startTime: Date.now() });
+      inFlight.set(command.id, {
+        testId: test.id,
+        testName: test.name,
+        startTime: Date.now(),
+        assignedVariables: Object.keys(assignedVariables).length > 0 ? assignedVariables : undefined,
+      });
     }
   };
 
@@ -557,26 +669,25 @@ async function executeViaRunner(
         networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
         downloads: Array.isArray(payload.downloads) && payload.downloads.length > 0 ? payload.downloads as DownloadRecord[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
+        assertionResults: Array.isArray(payload.assertionResults) && payload.assertionResults.length > 0
+          ? payload.assertionResults as import('@/lib/db/schema').AssertionResult[]
+          : undefined,
         videoPath,
         networkBodiesPath,
         domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
         lastReachedStep: typeof payload.lastReachedStep === 'number' ? payload.lastReachedStep : undefined,
         totalSteps: typeof payload.totalSteps === 'number' ? payload.totalSteps : undefined,
+        extractedVariables: payload.extractedVariables && typeof payload.extractedVariables === 'object'
+          ? payload.extractedVariables as Record<string, string>
+          : undefined,
+        // Host-resolved values for assign-mode vars on this run. Stored
+        // alongside extractedVariables so the Vars-tab "Last run" column has
+        // data for both modes (especially with random/increment row picks).
+        assignedVariables: info.assignedVariables,
+        logs: Array.isArray(payload.logs) && payload.logs.length > 0
+          ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
+          : undefined,
       };
-
-      // Guardrail: a passed test whose screenshot is all-white is almost
-      // certainly a race between navigation and capture under load (seen when
-      // the EB pool saturates without setup). Surface it loudly instead of
-      // letting it pollute baselines as a silent pass.
-      if (testResult.status === 'passed' && allScreenshots[0]?.path) {
-        try {
-          if (await isScreenshotBlankWhite(allScreenshots[0].path)) {
-            testResult.status = 'failed';
-            testResult.errorMessage =
-              'Screenshot is blank/white — navigation likely raced capture under pool pressure. Does this test need setup?';
-          }
-        } catch { /* best-effort */ }
-      }
 
       results.push(testResult);
       await onResult?.(testResult);
@@ -623,8 +734,18 @@ async function executeViaRunner(
 }
 
 /**
- * Worker-pool fan-out for the on-demand EB model: N concurrent workers, each
- * claiming its own EB and running exactly ONE test per claim, then releasing.
+ * Dispatch tests to the system EB pool with strict 1-job-1-EB isolation.
+ *
+ * Setup (if any) runs ONCE on a dedicated EB; its serialized storageState is
+ * broadcast to every subsequent test-EB. This keeps seed scripts and account
+ * signups single-execution, and guarantees no browser context / CDP session
+ * crosses test boundaries.
+ *
+ * Each test then claims a fresh EB, applies the broadcast storageState cold,
+ * runs the test, and releases the EB. Concurrency is bounded by
+ * `maxParallelEBs`; provisioning scales to meet demand (see
+ * `src/lib/eb/provisioner.ts`). Per-test retry is limited to one extra EB
+ * attempt for genuinely dead EB infra.
  *
  * Returns the collected results, or `null` if no EB could be claimed at all
  * (so the caller can fall through to the queue path).
@@ -638,13 +759,9 @@ async function executeViaPoolWorkers(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[] | null> {
+  if (tests.length === 0) return [];
   const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
 
-  // When the pool is finite (e.g. docker-compose with 2 EBs locally) and we have
-  // more workers than EBs, a worker's claim can legitimately return null. Wait
-  // for another worker to release rather than marking the test skipped. In k8s
-  // mode claimOrProvisionPoolEB already provisions on demand, so this mainly
-  // helps localhost/compose mode and the k8s "at capacity" edge case.
   const claimMaxWaitMs = parseInt(process.env.EB_CLAIM_MAX_WAIT_MS || '120000', 10);
   const claimWithRetry = async () => {
     const deadline = Date.now() + claimMaxWaitMs;
@@ -658,14 +775,6 @@ async function executeViaPoolWorkers(
     return null;
   };
 
-  // Setup propagation model: each worker runs its own setup on its claimed EB once,
-  // then passes `storageState: "persistent:<setupId>"` to every subsequent run_test
-  // on that EB. The EB's TestExecutor.setupContexts Map reuses the live
-  // BrowserContext — preserving cookies, localStorage, sessionStorage, IndexedDB,
-  // and in-memory auth tokens (which `page.context().storageState()` drops).
-  //
-  // Fallback: if caller already provided a pre-computed setupContext.storageState
-  // (no setupInfo to re-run), we pass that blob through as the cold-start state.
   const baseUrl = (options.environmentConfig?.baseUrl || 'http://localhost:3000').replace(/\/+$/, '');
   const viewport = options.playwrightSettings
     ? {
@@ -674,14 +783,19 @@ async function executeViaPoolWorkers(
       }
     : undefined;
 
-  const results: TestRunResult[] = [];
-  const resultMap = new Map<string, TestRunResult>();
-  let nextIdx = 0;
-  let completedCount = 0;
-  let everClaimed = false;
-  const workerCount = Math.min(maxParallelEBs, tests.length);
+  // One extra attempt if the first EB turns out to be dead-on-arrival (setup
+  // throws with an infra-failure signature, or the test result surfaces a
+  // "Target has been closed" style error). Anything beyond that is almost
+  // certainly the test itself, not infra — surface the failure.
+  const MAX_EB_ATTEMPTS = 2;
+  const EB_DEAD_ERR_RX = /Target .*has been closed|offline|crash|runner went|ECONNREFUSED|EB network unhealthy|page\.screenshot.*Target page.*closed/i;
 
-  const updateProgress = (activeCount: number, currentName?: string) => {
+  const resultMap = new Map<string, TestRunResult>();
+  let completedCount = 0;
+  let activeCount = 0;
+  let everClaimed = false;
+
+  const updateProgress = (currentName?: string) => {
     onProgress?.({
       completed: completedCount,
       total: tests.length,
@@ -691,265 +805,212 @@ async function executeViaPoolWorkers(
     });
   };
 
-  let activeWorkers = 0;
-
-  type WorkerEB = { runnerId: string; sessionId: string | null };
-  // Bounded setup retry: burst-starting many workers against one target URL
-  // triggers network/DNS flakes (e.g. ERR_NETWORK_CHANGED) on a minority of
-  // EBs. Retrying on a fresh EB almost always succeeds, so we back off and
-  // retry rather than burning one test per failed setup. Cap retries so a
-  // persistently-unreachable target doesn't loop forever.
-  const MAX_SETUP_RETRIES = 5;
-  // A test that lands on a dead EB (see EB_DEAD_RESULT_RX) gets one retry on a
-  // fresh EB before we record the failure — prevents a pool infra flake
-  // (e.g. the double-claim race previously surfaced by concurrent re-register +
-  // claimPoolEB) from masquerading as a real test failure. Shared across workers
-  // so a test that ping-pongs between bad EBs still respects the budget.
-  const MAX_DEAD_STATE_RETRIES = 1;
-  const deadStateAttempts = new Map<string, number>();
-  // Per-worker diagnostic counters — logs how many tests each worker processed
-  // so pool parallelism issues (e.g. one worker doing all the work while peers
-  // idle) show up clearly at build end.
-  const workerTestCounts = new Map<number, number>();
-  console.log(`[PoolDispatch] Starting build run=${runId} with ${workerCount} workers across ${tests.length} tests`);
-  const runWorker = async (workerId: number): Promise<void> => {
-    // Each worker holds onto a single EB for as long as possible. Setup runs once
-    // per EB. If the EB dies mid-sequence, we claim a fresh one and re-setup.
-    let claimed: WorkerEB | null = null;
-    let setupDone = false;
-    let setupFailureStreak = 0;
-    let retryTest: Test | null = null;
-    const workerSetupId = options.setupInfo ? `${runId}-w${workerId}` : null;
-
-    const ensureEBWithSetup = async (): Promise<WorkerEB | null> => {
-      // Claim a fresh EB if we don't hold one yet.
-      if (!claimed) {
-        const c = await claimWithRetry();
-        if (!c) return null;
-        claimed = c;
-        setupDone = false;
-        everClaimed = true;
-        await recordActualRunner(c.runnerId);
-        console.log(`[Worker ${workerId}] Claimed EB ${c.runnerId.slice(0, 8)}`);
+  // ── One-shot broadcast setup ────────────────────────────────────────────
+  // Run setup once on a dedicated EB. Capture its storageState as JSON so
+  // every test-EB can cold-start from the same authenticated/seeded state.
+  // Side-effecting setup (seed inserts, signups, API keys) runs exactly once.
+  // The EB carrying the live setup context dies right after — we intentionally
+  // don't reference it downstream, since cross-EB live-context reuse is the
+  // very bug this dispatcher exists to prevent.
+  let effectiveOptions = options;
+  if (options.setupInfo) {
+    let setupErr: string | undefined;
+    for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
+      const eb = await claimWithRetry();
+      if (!eb) {
+        setupErr = `Could not claim an EB for broadcast setup within ${claimMaxWaitMs}ms`;
+        break;
       }
-
-      // If we hold an EB but setup hasn't completed, RE-RUN setup. We don't
-      // want to short-circuit on `claimed` while setupDone=false — otherwise
-      // the worker proceeds to run tests with no persistent context (silent
-      // data bug: tests hang on auth redirects and time out at 300s).
-      if (options.setupInfo && workerSetupId && !setupDone) {
-        try {
-          await executeSetupViaRunner(
-            options.setupInfo.code,
-            workerSetupId,
-            claimed.runnerId,
-            baseUrl,
-            viewport,
-            options.playwrightSettings?.navigationTimeout ?? undefined,
-            options.playwrightSettings,
-          );
-          setupDone = true;
-          console.log(`[Worker ${workerId}] Setup completed on EB ${claimed.runnerId.slice(0, 8)} (persistent:${workerSetupId})`);
-        } catch (err) {
-          // Setup flake. By default, retry on the SAME EB — a fresh EB won't
-          // help if the target URL is briefly contended. But if the error
-          // signals the EB itself is unhealthy (offline/crash/command timeout,
-          // OR the EB's network stack exhausted its goto retry ladder and
-          // surfaced the `EB network unhealthy` tag), drop the EB so the next
-          // iteration claims a fresh one. Signal failure via `return null` so
-          // setupFailureStreak increments and we back off before retrying.
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[Worker ${workerId}] Setup failed on EB ${claimed.runnerId.slice(0, 8)}:`, err);
-          if (/offline|crash|runner went|ECONNREFUSED|timed out|EB network unhealthy/i.test(msg)) {
-            try { await releasePoolEB(claimed.runnerId); } catch { /* ignore */ }
-            claimed = null;
-          }
-          return null;
+      everClaimed = true;
+      await recordActualRunner(eb.runnerId);
+      console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for broadcast setup (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
+      try {
+        const setupResult = await executeSetupViaRunner(
+          options.setupInfo.code,
+          `${runId}-setup`,
+          eb.runnerId,
+          baseUrl,
+          viewport,
+          options.playwrightSettings?.navigationTimeout ?? undefined,
+          options.playwrightSettings,
+        );
+        // Prefer `storageStateJson` (portable JSON blob) over `storageState`
+        // (may be a `persistent:<setupId>` marker pinned to the setup EB
+        // that's about to be released). Each test-EB parses the JSON cold.
+        const broadcastState = setupResult.storageStateJson ?? options.setupContext?.storageState;
+        if (!setupResult.storageStateJson) {
+          console.warn(`[Dispatch] Setup returned no storageStateJson — tests will cold-start without injected state. Expected for no-auth apps; surprising otherwise.`);
         }
-      }
-      return claimed;
-    };
-
-    try {
-      while (true) {
-        // Don't reserve a test index until setup actually succeeds — otherwise
-        // one setup flake per worker silently burns one test as "skipped".
-        if (!retryTest && nextIdx >= tests.length) return;
-
-        const eb = await ensureEBWithSetup();
-        if (!eb) {
-          setupFailureStreak++;
-          if (setupFailureStreak >= MAX_SETUP_RETRIES) {
-            // Target looks persistently unreachable from this worker. Mark
-            // the next pending test as setup_failed so the failure surfaces
-            // in the build report, then exit — peer workers may still succeed.
-            // If we were holding a retry, surface it as the failure instead of
-            // skipping a fresh test.
-            const t = retryTest ?? (nextIdx < tests.length ? tests[nextIdx++]! : null);
-            if (t) {
-              resultMap.set(t.id, {
-                testId: t.id,
-                status: 'setup_failed' as const,
-                durationMs: 0,
-                screenshots: [],
-                errorMessage: `Setup failed ${MAX_SETUP_RETRIES} times in a row — worker giving up`,
-              });
-              completedCount++;
-              updateProgress(activeWorkers, t.name);
-            }
-            retryTest = null;
-            return;
-          }
-          // Exponential back-off (0.5s, 1s, 2s, 4s, ...) — gives DNS/CNI
-          // bursts time to quiesce and lets peer workers free an EB.
-          const delayMs = 500 * 2 ** (setupFailureStreak - 1);
-          await new Promise((r) => setTimeout(r, delayMs));
+        effectiveOptions = {
+          ...options,
+          setupInfo: undefined,
+          setupContext: {
+            storageState: broadcastState,
+            variables: { ...options.setupContext?.variables, ...setupResult.variables },
+          },
+        };
+        console.log(`[Dispatch] Broadcast setup complete (storageState: ${broadcastState ? 'captured' : 'none'})`);
+        setupErr = undefined;
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setupErr = msg;
+        // Only retry on infra-looking failures — a real setup bug (script
+        // error, bad selector, wrong URL) shouldn't consume EBs.
+        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+          console.warn(`[Dispatch] Broadcast setup hit dead-EB on attempt ${attempt}, retrying: ${msg}`);
           continue;
         }
-        setupFailureStreak = 0;
-
-        // Pick the test: a dead-state retry takes priority over claiming a new
-        // index — otherwise a retry from this worker could race with a peer
-        // worker picking up the same test.
-        let test: Test;
-        let isRetry = false;
-        if (retryTest) {
-          test = retryTest;
-          retryTest = null;
-          isRetry = true;
-        } else {
-          const myIdx = nextIdx++;
-          if (myIdx >= tests.length) return;
-          test = tests[myIdx]!;
-        }
-
-        // Prefer the live persistent context over serialized storageState.
-        const effectiveSetup = workerSetupId && setupDone
-          ? { storageState: `persistent:${workerSetupId}`, variables: options.setupContext?.variables }
-          : options.setupContext;
-
-        activeWorkers++;
-        workerTestCounts.set(workerId, (workerTestCounts.get(workerId) ?? 0) + 1);
-        console.log(`[Worker ${workerId}] Starting test "${test.name}" (count=${workerTestCounts.get(workerId)}, active=${activeWorkers}/${workerCount}, nextIdx=${nextIdx}/${tests.length}) on EB ${eb.runnerId.slice(0, 8)}`);
-        updateProgress(activeWorkers, test.name);
-        let ebDied = false;
-        let deferredRetry = false;
-        // Pattern an EB-health failure looks like when it comes back as a
-        // test RESULT (not a thrown exception): the EB reports the test
-        // failed with a Playwright "Target ... has been closed" error, which
-        // means its persistent BrowserContext got disposed and every
-        // subsequent test on this EB will fail the same way. Detect it and
-        // swap EBs for the next iteration. Checked against the result's
-        // errorMessage below, since `executeViaRunner` doesn't throw for
-        // reported-failed tests.
-        const EB_DEAD_RESULT_RX = /Target .*has been closed|offline|crash|runner went|EB network unhealthy/i;
-        const tryDeadStateRetry = (errMsg: string): boolean => {
-          const attempts = (deadStateAttempts.get(test.id) ?? 0) + 1;
-          deadStateAttempts.set(test.id, attempts);
-          if (attempts <= MAX_DEAD_STATE_RETRIES) {
-            console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error (attempt ${attempts}/${MAX_DEAD_STATE_RETRIES + 1}) — retrying "${test.name}" on fresh EB: ${errMsg}`);
-            retryTest = test;
-            deferredRetry = true;
-            return true;
-          }
-          console.warn(`[Worker ${workerId}] EB ${eb.runnerId.slice(0, 8)} returned dead-state error on final attempt — recording failure: ${errMsg}`);
-          return false;
-        };
-        try {
-          const [oneResult] = await executeViaRunner(
-            [test],
-            runId,
-            eb.runnerId,
-            { ...options, setupContext: effectiveSetup, setupInfo: undefined, maxParallelTests: 1 },
-            undefined, // progress emitted at the worker-pool level
-            onResult,
-          );
-          if (oneResult) {
-            const deadResult = oneResult.status === 'failed'
-              && !!oneResult.errorMessage
-              && EB_DEAD_RESULT_RX.test(oneResult.errorMessage);
-            if (deadResult && tryDeadStateRetry(oneResult.errorMessage!)) {
-              ebDied = true;
-            } else {
-              resultMap.set(test.id, oneResult);
-              if (deadResult) ebDied = true;
-            }
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const looksDead = /offline|crash|timed out|runner went|EB network unhealthy|page\.screenshot.*Target page.*closed|Target .*has been closed/i.test(msg);
-          if (looksDead && tryDeadStateRetry(msg)) {
-            ebDied = true;
-          } else {
-            console.error(`[Worker ${workerId}] Error running test ${test.id}:`, err);
-            resultMap.set(test.id, {
-              testId: test.id,
-              status: 'failed' as const,
-              durationMs: 0,
-              screenshots: [],
-              errorMessage: msg,
-            });
-            // Heuristic: if the EB looks dead (went offline, crash-loop, command
-            // timed out, or tagged as network-unhealthy by the in-pod goto retry
-            // ladder), drop it so the next iteration claims a fresh one and
-            // re-runs setup.
-            if (looksDead) ebDied = true;
-          }
-        } finally {
-          activeWorkers--;
-          // Deferred retries aren't "completed" yet — bumping here would make
-          // the progress bar overshoot and then stick when the retry records.
-          if (!deferredRetry) completedCount++;
-          console.log(`[Worker ${workerId}] Finished test "${test.name}" (completed=${completedCount}/${tests.length}, active=${activeWorkers}, ebDied=${ebDied})`);
-          updateProgress(activeWorkers);
-        }
-        // Reference isRetry to keep it available for future logging without
-        // tripping the unused-var lint.
-        void isRetry;
-
-        if (ebDied) {
-          const dying = claimed as WorkerEB | null;
-          if (dying) {
-            try { await releasePoolEB(dying.runnerId); } catch { /* ignore */ }
-          }
-          claimed = null;
-          setupDone = false;
-        }
+        break;
+      } finally {
+        try { await releasePoolEB(eb.runnerId); } catch { /* ignore */ }
       }
-    } finally {
-      const held = claimed as WorkerEB | null;
-      if (held) {
-        try { await releasePoolEB(held.runnerId); } catch { /* ignore */ }
-      }
-      console.log(`[Worker ${workerId}] Exiting — ran ${workerTestCounts.get(workerId) ?? 0} test(s)`);
     }
+    if (setupErr) {
+      console.error(`[Dispatch] Broadcast setup failed: ${setupErr}`);
+      // Every test fails with the same setup error — there's no per-test
+      // retry that can rescue a broken seed script or unreachable target.
+      const failed = tests.map(t => ({
+        testId: t.id,
+        status: 'setup_failed' as const,
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: `Broadcast setup failed: ${setupErr}`,
+      }));
+      return everClaimed ? failed : null;
+    }
+  }
+
+  const runOneTest = async (test: Test): Promise<TestRunResult> => {
+    let lastError: string | undefined;
+    for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
+      const eb = await claimWithRetry();
+      if (!eb) {
+        return {
+          testId: test.id,
+          status: 'setup_failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: `Could not claim an EB within ${claimMaxWaitMs}ms`,
+        };
+      }
+      everClaimed = true;
+      await recordActualRunner(eb.runnerId);
+      console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for "${test.name}" (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
+
+      try {
+        const [result] = await executeViaRunner(
+          [test],
+          runId,
+          eb.runnerId,
+          { ...effectiveOptions, maxParallelTests: 1 },
+          undefined,
+          onResult,
+        );
+
+        // [Dispatch] result-shape log: blank-render runs return status=passed with no error
+        // and may return 0 screenshots or odd label counts. Pair this with the EB-side
+        // [Shot] line (which reports byte size + body content) when triaging.
+        const screenshotCount = result?.screenshots?.length ?? 0;
+        const labels = (result?.screenshots ?? []).map(s => s.label).join(',') || 'none';
+        console.log(
+          `[Dispatch] Test "${test.name}" attempt ${attempt} returned: status=${result?.status} screenshots=${screenshotCount} labels=[${labels}] error=${result?.errorMessage?.slice(0, 100) ?? 'none'}`,
+        );
+
+        if (!result) {
+          lastError = 'Runner returned no result';
+          continue;
+        }
+
+        const deadResult = result.status === 'failed'
+          && !!result.errorMessage
+          && EB_DEAD_ERR_RX.test(result.errorMessage);
+        if (deadResult && attempt < MAX_EB_ATTEMPTS) {
+          lastError = result.errorMessage;
+          console.warn(`[Dispatch] Dead-EB result on attempt ${attempt} for "${test.name}", retrying: ${lastError}`);
+          continue;
+        }
+        return result;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastError = msg;
+        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+          console.warn(`[Dispatch] Dead-EB exception on attempt ${attempt} for "${test.name}", retrying: ${msg}`);
+          continue;
+        }
+        return {
+          testId: test.id,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: msg,
+        };
+      } finally {
+        try { await releasePoolEB(eb.runnerId); } catch { /* ignore */ }
+      }
+    }
+    return {
+      testId: test.id,
+      status: 'setup_failed',
+      durationMs: 0,
+      screenshots: [],
+      errorMessage: lastError || `Exhausted ${MAX_EB_ATTEMPTS} EB attempts`,
+    };
   };
 
-  // Kick off workers in parallel
-  const workers = Array.from({ length: workerCount }, (_, i) => runWorker(i + 1));
-  await Promise.all(workers);
-  const summary = Array.from({ length: workerCount }, (_, i) => `W${i + 1}=${workerTestCounts.get(i + 1) ?? 0}`).join(' ');
-  console.log(`[PoolDispatch] Build run=${runId} done. Per-worker test counts: ${summary}`);
+  console.log(`[Dispatch] Starting build run=${runId} — ${tests.length} tests, concurrency=${maxParallelEBs}`);
 
-  // Preserve input order
+  // Semaphore: bound concurrent per-test dispatches. Each slot holds exactly
+  // one EB for exactly one test — 1-job-1-EB.
+  let inFlight = 0;
+  const waiters: Array<() => void> = [];
+  const acquire = () => new Promise<void>((resolve) => {
+    if (inFlight < maxParallelEBs) {
+      inFlight++;
+      resolve();
+    } else {
+      waiters.push(() => { inFlight++; resolve(); });
+    }
+  });
+  const release = () => {
+    inFlight--;
+    const next = waiters.shift();
+    if (next) next();
+  };
+
+  await Promise.all(tests.map(async (test) => {
+    await acquire();
+    activeCount++;
+    updateProgress(test.name);
+    try {
+      const r = await runOneTest(test);
+      resultMap.set(test.id, r);
+    } finally {
+      activeCount--;
+      completedCount++;
+      updateProgress();
+      release();
+    }
+  }));
+
+  console.log(`[Dispatch] Build run=${runId} done — ${completedCount}/${tests.length} tests dispatched`);
+
+  const results: TestRunResult[] = [];
   for (const t of tests) {
     const r = resultMap.get(t.id);
     if (r) {
       results.push(r);
     } else {
-      // Defensive: every worker gave up on setup before reaching this test.
-      // Surface it as setup_failed rather than silently dropping it.
       results.push({
         testId: t.id,
         status: 'setup_failed' as const,
         durationMs: 0,
         screenshots: [],
-        errorMessage: 'Setup failed — all workers exhausted retries before reaching this test',
+        errorMessage: 'Dispatch ended without recording a result',
       });
     }
   }
 
-  // If nothing ever got claimed, let the caller fall through to the queue path.
   return everClaimed ? results : null;
 }
 
@@ -1109,41 +1170,21 @@ async function executeFallbackChain(
     }
   }
 
-  // 2. Try system EB pool.
-  //    Worker-pool fan-out: one EB per WORKER (not per test). Each worker runs its
-  //    own setup on its claimed EB and then reuses that EB's live BrowserContext
-  //    via `persistent:<setupId>` for every subsequent test. Preserves full setup
-  //    state (cookies + localStorage + sessionStorage + IndexedDB + in-memory
-  //    tokens) that `storageState()` serialization would drop.
+  // 2. Try system EB pool. Every test gets a fresh EB (1-job-1-EB); the
+  //    dispatcher is the single entry point whether there are 1 test or 100,
+  //    serial or parallel. Returns null only if no EB could ever be claimed,
+  //    letting us fall through to the queue path.
   const maxParallelEBs = Math.max(1, options.playwrightSettings?.maxParallelEBs ?? 10);
-  const canUseWorkerPool =
-    tests.length > 1 &&
-    maxParallelEBs > 1;
-  if (canUseWorkerPool) {
-    const poolResults = await executeViaPoolWorkers(
-      tests,
-      runId,
-      options,
-      maxParallelEBs,
-      recordActualRunner,
-      onProgress,
-      onResult,
-    );
-    if (poolResults) return poolResults;
-  }
-
-  const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
-  const poolEB = await claimOrProvisionPoolEB();
-  if (poolEB) {
-    console.log(`Fallback chain: claimed pool EB ${poolEB.runnerId.slice(0, 8)}`);
-    await recordActualRunner(poolEB.runnerId);
-    try {
-      return await executeViaRunner(tests, runId, poolEB.runnerId, options, onProgress, onResult);
-    } finally {
-      await releasePoolEB(poolEB.runnerId);
-      console.log(`Fallback chain: released pool EB ${poolEB.runnerId.slice(0, 8)}`);
-    }
-  }
+  const poolResults = await executeViaPoolWorkers(
+    tests,
+    runId,
+    options,
+    maxParallelEBs,
+    recordActualRunner,
+    onProgress,
+    onResult,
+  );
+  if (poolResults) return poolResults;
 
   // 3. Queue — return empty results with "skipped" status
   // The background job stays pending with targetRunnerId=null.

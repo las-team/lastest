@@ -31,6 +31,151 @@ function RegionOverlay({ dims, regions }: { dims: { width: number; height: numbe
   );
 }
 
+export interface FocusRegionRect {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function FocusRegionOverlay({
+  dims,
+  regions,
+  onDelete,
+}: {
+  dims: { width: number; height: number } | null;
+  regions: FocusRegionRect[];
+  onDelete?: (id: string) => void;
+}) {
+  if (!dims || regions.length === 0) return null;
+  return (
+    <>
+      <svg
+        className="absolute inset-0 w-full h-full pointer-events-none"
+        viewBox={`0 0 ${dims.width} ${dims.height}`}
+        preserveAspectRatio="none"
+      >
+        {regions.map((r) => (
+          <rect
+            key={r.id}
+            x={r.x}
+            y={r.y}
+            width={r.width}
+            height={r.height}
+            fill="rgba(34,197,94,0.08)"
+            stroke="rgba(34,197,94,0.9)"
+            strokeWidth="2"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      {onDelete && regions.map((r) => {
+        const leftPct = ((r.x + r.width) / dims.width) * 100;
+        const topPct = (r.y / dims.height) * 100;
+        return (
+          <button
+            key={`del-${r.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(r.id);
+            }}
+            title="Remove focus region"
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-green-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-green-700"
+            style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+          >
+            ×
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+interface DrawLayerProps {
+  dims: { width: number; height: number } | null;
+  onDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+}
+
+function DrawLayer({ dims, onDrawn }: DrawLayerProps) {
+  const layerRef = useRef<HTMLDivElement>(null);
+  const [start, setStart] = useState<{ x: number; y: number } | null>(null);
+  const [current, setCurrent] = useState<{ x: number; y: number } | null>(null);
+
+  const toNatural = useCallback((clientX: number, clientY: number) => {
+    if (!layerRef.current || !dims) return null;
+    const rect = layerRef.current.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * dims.width;
+    const py = ((clientY - rect.top) / rect.height) * dims.height;
+    return { x: Math.max(0, Math.min(dims.width, px)), y: Math.max(0, Math.min(dims.height, py)) };
+  }, [dims]);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const p = toNatural(e.clientX, e.clientY);
+    if (!p) return;
+    setStart(p);
+    setCurrent(p);
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!start) return;
+    const p = toNatural(e.clientX, e.clientY);
+    if (p) setCurrent(p);
+  };
+  const onMouseUp = () => {
+    if (!start || !current || !dims) {
+      setStart(null);
+      setCurrent(null);
+      return;
+    }
+    const x = Math.round(Math.min(start.x, current.x));
+    const y = Math.round(Math.min(start.y, current.y));
+    const width = Math.round(Math.abs(current.x - start.x));
+    const height = Math.round(Math.abs(current.y - start.y));
+    setStart(null);
+    setCurrent(null);
+    if (width >= 4 && height >= 4) onDrawn({ x, y, width, height });
+  };
+
+  const preview = start && current && dims ? {
+    x: Math.min(start.x, current.x),
+    y: Math.min(start.y, current.y),
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  } : null;
+
+  return (
+    <div
+      ref={layerRef}
+      className="absolute inset-0 cursor-crosshair select-none"
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+    >
+      {preview && dims && (
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          viewBox={`0 0 ${dims.width} ${dims.height}`}
+          preserveAspectRatio="none"
+        >
+          <rect
+            x={preview.x}
+            y={preview.y}
+            width={preview.width}
+            height={preview.height}
+            fill="rgba(34,197,94,0.15)"
+            stroke="rgba(34,197,94,0.9)"
+            strokeWidth="2"
+            strokeDasharray="4"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function DomRegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }> }) {
   if (!dims || regions.length === 0) return null;
   return (
@@ -76,6 +221,10 @@ interface SliderComparisonProps {
   changedRegions?: ChangedRegion[];
   domOverlayRegions?: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }>;
   showRegions?: boolean;
+  focusRegions?: FocusRegionRect[];
+  drawFocusMode?: boolean;
+  onFocusRegionDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onFocusRegionDelete?: (id: string) => void;
   leftLabel?: string;
   rightLabel?: string;
   className?: string;
@@ -96,6 +245,10 @@ export function SliderComparison({
   changedRegions,
   domOverlayRegions,
   showRegions: showRegionsProp = false,
+  focusRegions,
+  drawFocusMode = false,
+  onFocusRegionDrawn,
+  onFocusRegionDelete,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
   className = '',
@@ -316,6 +469,7 @@ export function SliderComparison({
               <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
               <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
+              <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
             </div>
           </div>
         </div>
@@ -417,6 +571,7 @@ export function SliderComparison({
           />
           <RegionOverlay dims={imageDims} regions={visibleRegions} />
           <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
+          <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
         </div>
       </div>
     );
@@ -451,10 +606,10 @@ export function SliderComparison({
           <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
         </div>
 
-        {/* Current (right side, clipped) */}
+        {/* Current (right side, clipped — fully revealed while drawing focus regions) */}
         <div
           className="absolute inset-0 overflow-hidden"
-          style={{ clipPath: `inset(0 0 0 ${sliderPosition}%)` }}
+          style={{ clipPath: `inset(0 0 0 ${drawFocusMode ? 0 : sliderPosition}%)` }}
         >
           <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
@@ -462,21 +617,27 @@ export function SliderComparison({
         {/* Region overlays */}
         <RegionOverlay dims={imageDims} regions={visibleRegions} />
         <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
+        <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} onDelete={onFocusRegionDelete} />
+        {drawFocusMode && onFocusRegionDrawn && (
+          <DrawLayer dims={imageDims} onDrawn={onFocusRegionDrawn} />
+        )}
 
-        {/* Slider handle */}
-        <div
-          className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
-          style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleMouseDown}
-        >
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center">
-            <div className="flex gap-0.5">
-              <div className="w-0.5 h-4 bg-gray-400" />
-              <div className="w-0.5 h-4 bg-gray-400" />
+        {/* Slider handle — hidden while drawing so it doesn't intercept the mouse mid-drag */}
+        {!drawFocusMode && (
+          <div
+            className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
+            style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleMouseDown}
+          >
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center">
+              <div className="flex gap-0.5">
+                <div className="w-0.5 h-4 bg-gray-400" />
+                <div className="w-0.5 h-4 bg-gray-400" />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Labels */}
         <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">

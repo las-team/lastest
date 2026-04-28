@@ -25,8 +25,6 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "deploy:local": "bash scripts/deploy.sh local",
-    "deploy:eb": "bash scripts/deploy.sh eb",
     "deploy:zima": "bash scripts/deploy.sh zima",
     "deploy:olares": "bash scripts/deploy.sh olares",
     "deploy:npm": "bash scripts/deploy.sh npm",
@@ -36,13 +34,10 @@
     "stack:stop": "bash scripts/k3d-down.sh",
     "stack:down": "bash scripts/k3d-down.sh",
     "stack:purge": "bash scripts/k3d-down.sh --purge",
-    "stack:refresh": "bash scripts/k3d-rebuild-app.sh",
-    "stack:refresh:app": "bash scripts/k3d-rebuild-app.sh",
+    "stack:refresh": "bash scripts/k3d-rebuild-eb.sh",
     "stack:refresh:eb": "bash scripts/k3d-rebuild-eb.sh",
-    "stack:refresh:all": "bash scripts/k3d-rebuild-eb.sh && bash scripts/k3d-rebuild-app.sh",
     "stack:logs": "bash scripts/k3d-logs.sh",
     "stack:logs:eb": "bash scripts/k3d-logs.sh eb",
-    "stack:logs:all": "bash scripts/k3d-logs.sh all",
     "stack:status": "bash scripts/k3d-status.sh"
   },
   "dependencies": {

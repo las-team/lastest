@@ -337,6 +337,88 @@ describe('generateDiff', () => {
     });
   });
 
+  describe('focus regions', () => {
+    it('reports zero change when pixels differ only outside the focus region', async () => {
+      // Change lives OUTSIDE the focus rect — focus mask should magenta-fill it in both images.
+      const png1 = createMockPNGWithRect(800, 600,
+        { x: 50, y: 50, w: 100, h: 100 },
+        [0, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const png2 = createMockPNGWithRect(800, 600,
+        { x: 50, y: 50, w: 100, h: 100 },
+        [255, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const baseline = path.join(tempDir, 'baseline.png');
+      const current = path.join(tempDir, 'current.png');
+      fs.writeFileSync(baseline, PNG.sync.write(png1));
+      fs.writeFileSync(current, PNG.sync.write(png2));
+
+      // Focus on a region that doesn't contain the diff
+      const focusRegions = [{ x: 400, y: 300, width: 200, height: 100 }];
+      const result = await generateDiff(
+        baseline, current, tempDir,
+        0.1, false, undefined, false, 'pixelmatch', 'grid',
+        focusRegions,
+      );
+      expect(result.pixelDifference).toBe(0);
+    });
+
+    it('reports non-zero change when pixels differ inside the focus region', async () => {
+      const png1 = createMockPNGWithRect(800, 600,
+        { x: 450, y: 320, w: 80, h: 60 },
+        [0, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const png2 = createMockPNGWithRect(800, 600,
+        { x: 450, y: 320, w: 80, h: 60 },
+        [255, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const baseline = path.join(tempDir, 'baseline.png');
+      const current = path.join(tempDir, 'current.png');
+      fs.writeFileSync(baseline, PNG.sync.write(png1));
+      fs.writeFileSync(current, PNG.sync.write(png2));
+
+      const focusRegions = [{ x: 400, y: 300, width: 200, height: 100 }];
+      const result = await generateDiff(
+        baseline, current, tempDir,
+        0.1, false, undefined, false, 'pixelmatch', 'grid',
+        focusRegions,
+      );
+      expect(result.pixelDifference).toBeGreaterThan(0);
+    });
+
+    it('ignore regions take priority inside a focus area', async () => {
+      // Differing colored rect sits inside both the focus area AND an ignore rect.
+      // Ignore applies first (magenta-fills both images → diff = 0), so focus can't resurrect it.
+      const png1 = createMockPNGWithRect(800, 600,
+        { x: 450, y: 320, w: 80, h: 60 },
+        [0, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const png2 = createMockPNGWithRect(800, 600,
+        { x: 450, y: 320, w: 80, h: 60 },
+        [255, 0, 0, 255],
+        [255, 255, 255, 255],
+      );
+      const baseline = path.join(tempDir, 'baseline.png');
+      const current = path.join(tempDir, 'current.png');
+      fs.writeFileSync(baseline, PNG.sync.write(png1));
+      fs.writeFileSync(current, PNG.sync.write(png2));
+
+      const ignoreRegions = [{ x: 440, y: 310, width: 100, height: 80 }];
+      const focusRegions = [{ x: 400, y: 300, width: 200, height: 100 }];
+      const result = await generateDiff(
+        baseline, current, tempDir,
+        0.1, false, ignoreRegions, false, 'pixelmatch', 'grid',
+        focusRegions,
+      );
+      expect(result.pixelDifference).toBe(0);
+    });
+  });
+
   describe('content-aware percentage', () => {
     it('calculates diff percentage based on content area, not total image', async () => {
       // Create images with large empty areas

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,25 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Github } from 'lucide-react';
 import { recordRegistrationConsent } from '@/server/actions/consent';
+import { isValidShareSlug } from '@/lib/share/slug';
 
 export default function RegisterPage() {
-  const router = useRouter();
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
+  const searchParams = useSearchParams();
+  const rawClaim = searchParams.get('claim');
+  const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
+  // Skip `/` — that path forces (app)/layout.tsx (WS bootstrap + 8 providers)
+  // to compile just to redirect to /onboarding. Send new users straight there.
+  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/onboarding';
+  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,35 +41,50 @@ export default function RegisterPage() {
     setError('');
     setLoading(true);
 
-    const result = await authClient.signUp.email({
-      name,
-      email,
-      password,
-    });
+    try {
+      const result = await authClient.signUp.email({
+        name,
+        email,
+        password,
+      });
 
-    if (result.error) {
-      setError(result.error.message ?? 'Sign up failed');
-      setLoading(false);
+      if (result.error) {
+        setError(result.error.message ?? 'Sign up failed');
+        return;
+      }
+
+      try {
+        await recordRegistrationConsent({ marketingEmails: marketingConsent });
+      } catch (err) {
+        // Consent recording is secondary — user is already signed up.
+        console.error('recordRegistrationConsent failed', err);
+      }
+
+      // Hard navigation — RSC swap was racing with router.refresh and the
+      // freshly-set better-auth session cookie wasn't visible to the next
+      // server fetch in some cases. window.location.href avoids both.
+      window.location.href = emailPostAuthUrl;
       return;
+    } finally {
+      setLoading(false);
     }
-
-    await recordRegistrationConsent({ marketingEmails: marketingConsent });
-
-    router.push('/');
-    router.refresh();
   }
 
   async function handleOAuth(provider: 'github' | 'google') {
-    await authClient.signIn.social({ provider, callbackURL: '/consent' });
+    await authClient.signIn.social({ provider, callbackURL: oauthPostAuthUrl });
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Create an account</h1>
+          <h1 className="text-2xl font-bold">
+            {claim ? 'Claim this test' : 'Create an account'}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Get started with visual regression testing
+            {claim
+              ? "Sign up and we'll copy the test into your own workspace — free."
+              : 'Get started with visual regression testing'}
           </p>
         </div>
 
@@ -172,7 +203,10 @@ export default function RegisterPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link href="/login" className="text-primary underline-offset-4 hover:underline">
+          <Link
+            href={claim ? `/login?claim=${claim}` : '/login'}
+            className="text-primary underline-offset-4 hover:underline"
+          >
             Sign in
           </Link>
         </p>

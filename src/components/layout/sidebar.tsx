@@ -87,8 +87,8 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
           className="flex items-center gap-2 font-bold text-lg"
           style={{ height: 36 }}
         >
-          <Image src="/icon-light.svg" alt="" width={28} height={28} className="rounded-full dark:hidden" />
-          <Image src="/icon-dark.svg" alt="" width={28} height={28} className="rounded-full hidden dark:block" />
+          <Image src="/icon-light.svg" alt="" width={28} height={28} className="dark:hidden" />
+          <Image src="/icon-dark.svg" alt="" width={28} height={28} className="hidden dark:block" />
           LASTEST
         </Link>
         {team && (

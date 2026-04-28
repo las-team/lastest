@@ -132,6 +132,10 @@ interface TestSetupOverridesProps {
   defaultSetupSteps: DefaultStep[];
   availableTests: Test[];
   availableScripts: SetupScript[];
+  /** When provided, called instead of `router.refresh()` after every mutation
+   *  so callers that hydrate via a client server-action (e.g. the test-detail
+   *  panel) can refetch their cached props. Falls back to `router.refresh()`. */
+  onRefresh?: () => Promise<void> | void;
 }
 
 export function TestSetupOverrides({
@@ -140,8 +144,13 @@ export function TestSetupOverrides({
   defaultSetupSteps,
   availableTests,
   availableScripts,
+  onRefresh,
 }: TestSetupOverridesProps) {
   const router = useRouter();
+  const refresh = async () => {
+    if (onRefresh) await onRefresh();
+    else router.refresh();
+  };
   const [mounted, setMounted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [localOverrides, setLocalOverrides] = useState<TestSetupOverridesType | null>(setupOverrides);
@@ -207,7 +216,7 @@ export function TestSetupOverrides({
       } else {
         await skipDefaultStepForTest(testId, stepId);
       }
-      router.refresh();
+      await refresh();
     } catch {
       setLocalOverrides(localOverrides);
       toast.error('Failed to update setup override');
@@ -234,7 +243,7 @@ export function TestSetupOverrides({
     setIsSaving(true);
     try {
       await addExtraSetupStep(testId, stepType, itemId);
-      router.refresh();
+      await refresh();
       toast.success('Extra step added');
     } catch {
       setLocalOverrides(localOverrides);
@@ -261,7 +270,7 @@ export function TestSetupOverrides({
     setIsSaving(true);
     try {
       await removeExtraSetupStep(testId, index);
-      router.refresh();
+      await refresh();
     } catch {
       setLocalOverrides(localOverrides);
       toast.error('Failed to remove extra step');
@@ -295,7 +304,7 @@ export function TestSetupOverrides({
     setIsSaving(true);
     try {
       await reorderExtraSetupSteps(testId, reordered);
-      router.refresh();
+      await refresh();
     } catch {
       setLocalOverrides(localOverrides);
       toast.error('Failed to reorder steps');
@@ -309,7 +318,7 @@ export function TestSetupOverrides({
     setIsSaving(true);
     try {
       await saveTestSetupOverrides(testId, null);
-      router.refresh();
+      await refresh();
       toast.success('Reset to defaults');
     } catch {
       setLocalOverrides(localOverrides);
@@ -502,6 +511,7 @@ export function TestSetupOverrides({
           </div>
         </CardContent>
       </Card>
+
     </div>
   );
 }

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lastest — Dashboard</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--c-soft);color:var(--fg-1);font-family:var(--font-sans);-webkit-font-smoothing:antialiased}
+  .app{display:flex;height:100vh;overflow:hidden}
+
+  /* ============================== SIDEBAR ============================== */
+  aside.side{
+    width:256px;flex-shrink:0;background:#F1F1EE;
+    border-right:1px solid var(--c-line);
+    display:flex;flex-direction:column;
+  }
+  .brand{padding:14px 16px;border-bottom:1px solid var(--c-line);display:flex;flex-direction:column;gap:8px}
+  .brand .lock{display:flex;align-items:center;gap:10px;height:36px;text-decoration:none;border:0}
+  .brand .lock img{width:28px;height:28px}
+  .brand .lock .word{font-family:var(--font-display);font-weight:900;font-size:18px;letter-spacing:-0.04em;color:var(--fg-1)}
+  .brand .lock .word .t{color:var(--c-red)}
+  .brand .team{display:flex;align-items:center;gap:6px;color:var(--fg-3);font-size:11.5px}
+
+  .repo{padding:12px 16px;border-bottom:1px solid var(--c-line)}
+  .repo .picker{
+    height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;
+    border:1px solid var(--c-line-strong);background:#fff;border-radius:var(--r-md);
+    font-size:13px;color:var(--fg-1);box-shadow:var(--shadow-xs);cursor:pointer;
+  }
+  .repo .picker .name{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  nav.nav{flex:1;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+  .nav .lbl{font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);text-transform:uppercase;letter-spacing:0.08em;font-weight:500;padding:0 12px 4px}
+  .nav ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:2px}
+  .nav a{
+    display:flex;align-items:center;gap:10px;padding:7px 12px;border-radius:var(--r-md);
+    font-size:13.5px;color:var(--fg-1);text-decoration:none;font-weight:500;border:0;
+    transition:background 120ms var(--ease-out);
+  }
+  .nav a:hover{background:rgba(31,42,51,0.05)}
+  .nav a.active{background:var(--c-teal);color:#fff}
+  .nav a.active svg{color:#fff}
+  .nav a svg{width:16px;height:16px;color:var(--fg-2);stroke-width:2}
+
+  .side-foot{border-top:1px solid var(--c-line);padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+  .side-foot .user{display:flex;align-items:center;gap:10px;padding:6px;border-radius:var(--r-md);cursor:pointer}
+  .user .avatar{width:30px;height:30px;border-radius:50%;background:var(--c-blue);color:#fff;font-weight:600;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .user .meta{flex:1;min-width:0}
+  .user .meta .n{font-size:13px;font-weight:500}
+  .user .meta .e{font-size:11px;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .side-foot .tag{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--fg-3)}
+  .pulse{width:6px;height:6px;border-radius:50%;background:var(--c-teal);box-shadow:0 0 0 0 rgba(54,168,142,.5);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(54,168,142,.5)}70%{box-shadow:0 0 0 6px rgba(54,168,142,0)}100%{box-shadow:0 0 0 0 rgba(54,168,142,0)}}
+
+  /* ============================== MAIN ============================== */
+  main.main{flex:1;display:flex;flex-direction:column;min-width:0}
+  header.head{
+    height:64px;flex-shrink:0;background:var(--c-soft);
+    border-bottom:1px solid var(--c-line);
+    display:flex;align-items:center;justify-content:space-between;padding:0 28px;
+  }
+  .head h1{margin:0;font-size:18px;font-weight:600;letter-spacing:-0.01em}
+  .head .actions{display:flex;align-items:center;gap:8px}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;
+    border-radius:var(--r-md);font-family:var(--font-sans);font-size:13.5px;font-weight:500;
+    border:1px solid transparent;cursor:pointer;text-decoration:none;color:inherit;
+    transition:background 120ms var(--ease-out);
+  }
+  .btn svg{width:14px;height:14px;stroke-width:2.2}
+  .btn-primary{background:var(--c-teal);color:#fff}
+  .btn-primary:hover{background:#2E957D}
+  .btn-outline{background:#fff;color:var(--fg-1);border-color:var(--c-line-strong);box-shadow:var(--shadow-xs)}
+  .btn-outline:hover{background:var(--c-soft-2)}
+  .btn-ghost{background:transparent;color:var(--fg-1)}
+  .btn-ghost:hover{background:rgba(31,42,51,0.06)}
+  .btn-icon{width:34px;padding:0;justify-content:center}
+  .btn-sm{height:28px;padding:0 10px;font-size:12px}
+
+  /* ============================== CONTENT ============================== */
+  .content{flex:1;overflow-y:auto;padding:24px 28px 40px}
+  .content::-webkit-scrollbar{width:8px}
+  .content::-webkit-scrollbar-thumb{background:rgba(31,42,51,0.18);border-radius:8px}
+  .content::-webkit-scrollbar-track{background:transparent}
+  .container{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+
+  .card{background:#fff;border:1px solid var(--c-line);border-radius:var(--r-md);box-shadow:var(--shadow-sm);padding:20px 22px}
+
+  /* Hero card */
+  .hero{display:flex;align-items:flex-start;gap:24px;justify-content:space-between}
+  .hero .meta-row{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--fg-3);flex-wrap:wrap}
+  .hero .commit{font-family:var(--font-mono);color:var(--fg-2);background:var(--c-soft-2);padding:2px 6px;border-radius:var(--r-xs);font-size:11.5px}
+  .hero .title{font-size:20px;font-weight:600;margin:14px 0 6px}
+  .hero .desc{font-size:13.5px;color:var(--fg-2);margin:0;line-height:1.5;max-width:520px}
+  .status-pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:var(--r-md);font-size:13px;font-weight:600;border:1px solid;flex-shrink:0}
+  .status-pill svg{width:14px;height:14px}
+  .status-review{background:rgba(224,152,54,0.10);border-color:rgba(224,152,54,0.30);color:#8C5C16}
+  .status-pill .count{font-weight:400;opacity:.7;font-size:12px}
+
+  /* Pass-rate */
+  .progress-block{display:flex;flex-direction:column;gap:8px}
+  .progress-block .row{display:flex;justify-content:space-between;align-items:baseline}
+  .progress-block .lab{font-size:13px;font-weight:500;color:var(--fg-2)}
+  .progress-block .val{font-size:18px;font-weight:600;color:#3D8B3D;font-variant-numeric:tabular-nums}
+  .bar{width:100%;height:10px;background:var(--c-soft-2);border-radius:var(--r-pill);overflow:hidden;display:flex}
+  .bar .pass{background:var(--c-teal);height:100%}
+  .bar .fail{background:var(--c-red);height:100%}
+  .progress-block .foot{display:flex;justify-content:space-between;font-size:11.5px;color:var(--fg-3);font-family:var(--font-mono)}
+
+  /* Metrics */
+  .metrics-row{display:flex;gap:18px;align-items:stretch}
+  .group-tests{flex:0 0 auto;min-width:230px}
+  .vsep{width:1px;background:var(--c-line)}
+  .group-cases{flex:1}
+  .group-label{font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);text-transform:uppercase;letter-spacing:0.08em;font-weight:500;margin-bottom:8px}
+  .metrics{display:grid;gap:12px}
+  .group-tests .metrics{grid-template-columns:repeat(2,1fr)}
+  .group-cases .metrics{grid-template-columns:repeat(4,1fr)}
+  .metric{
+    background:#fff;border:1px solid var(--c-line);border-radius:var(--r-md);
+    padding:18px 16px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;
+    transition:transform 120ms var(--ease-out),box-shadow 120ms var(--ease-out);
+  }
+  .metric:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
+  .metric .num{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;letter-spacing:-0.02em}
+  .metric .lbl{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-3)}
+  .metric .lbl svg{width:13px;height:13px;stroke-width:2}
+  .metric.pass .num{color:#2E7A56}
+  .metric.fail .num{color:#A82A24}
+  .metric.warn .num{color:#8C5C16}
+  .metric.zero .num{color:var(--fg-4)}
+  .metric.muted .num{color:var(--fg-3);font-size:24px}
+
+  /* Toolbar */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:var(--c-soft-2);border-radius:var(--r-md);padding:3px;border:1px solid var(--c-line)}
+  .seg button{border:0;background:transparent;font:inherit;cursor:pointer;padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--fg-3);display:inline-flex;align-items:center;gap:6px}
+  .seg button.on{background:#fff;color:var(--fg-1);box-shadow:var(--shadow-xs)}
+  .seg button svg{width:13px;height:13px}
+  .toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r-md);border:1px solid var(--c-line);background:var(--c-soft-2);font-size:12.5px;color:var(--fg-3);font-weight:500;cursor:pointer}
+  .toggle.on{background:#fff;border-color:var(--c-line-strong);color:var(--fg-1)}
+  .toggle svg{width:13px;height:13px}
+
+  /* Areas / tests */
+  .area{background:#fff;border:1px solid var(--c-line);border-radius:var(--r-md);overflow:hidden}
+  .area-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--c-line);background:#FAFAF8}
+  .area-head .chev{width:14px;height:14px;color:var(--fg-3)}
+  .area-head .name{font-size:14px;font-weight:600}
+  .area-head .count{font-family:var(--font-mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.04em}
+  .area-head .spread{flex:1}
+  .area-head .badges{display:flex;gap:6px}
+  .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:var(--r-pill);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums}
+  .badge.pass{background:rgba(54,168,142,0.14);color:#1F6B59}
+  .badge.warn{background:rgba(224,152,54,0.18);color:#8C5C16}
+  .badge.info{background:rgba(54,116,168,0.14);color:#235479}
+
+  .test-row{display:grid;grid-template-columns:24px 1fr 80px 110px 130px;align-items:center;gap:14px;padding:11px 18px;border-top:1px solid var(--c-line);font-size:13px}
+  .test-row:first-child{border-top:0}
+  .test-row .ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%}
+  .test-row .ico.pass{background:rgba(54,168,142,0.14);color:#2E7A56}
+  .test-row .ico.warn{background:rgba(224,152,54,0.18);color:#8C5C16}
+  .test-row .ico svg{width:11px;height:11px;stroke-width:3}
+  .test-row .name{font-weight:500}
+  .test-row .name .path{display:block;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);font-weight:400;margin-top:1px}
+  .test-row .runtime{font-family:var(--font-mono);font-size:12px;color:var(--fg-3);text-align:right}
+  .test-row .change{font-family:var(--font-mono);font-size:12px;text-align:right;color:var(--fg-3)}
+  .test-row .change.warn{color:#8C5C16;font-weight:500}
+  .test-row .actions{display:flex;justify-content:flex-end;gap:4px}
+
+  /* Two-col */
+  .two-col{display:grid;grid-template-columns:1.4fr 1fr;gap:20px}
+  .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .section-head h2{margin:0;font-size:16px;font-weight:600}
+  .section-head a{font-size:12px;color:var(--c-blue);text-decoration:none;border:0}
+
+  /* History */
+  .history .item{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px dashed var(--c-line)}
+  .history .item:first-child{border-top:0}
+  .history .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .history .dot.pass{background:var(--c-teal)}
+  .history .dot.fail{background:var(--c-red)}
+  .history .dot.warn{background:var(--c-amber)}
+  .history .commit{font-family:var(--font-mono);font-size:12px;color:var(--fg-2);background:var(--c-soft-2);padding:2px 6px;border-radius:var(--r-xs)}
+  .history .msg{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .history .when{font-size:11.5px;color:var(--fg-3);font-family:var(--font-mono)}
+
+  /* Activity */
+  .activity{display:flex;flex-direction:column;gap:12px}
+  .activity .row{display:flex;gap:12px;align-items:flex-start}
+  .activity .av{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600}
+  .activity .b{flex:1;min-width:0}
+  .activity .t{font-size:13px;line-height:1.4}
+  .activity .t b{font-weight:600}
+  .activity .pill{display:inline-block;font-family:var(--font-mono);font-size:11px;background:var(--c-soft-2);padding:1px 5px;border-radius:3px;color:var(--fg-2)}
+  .activity .when{font-size:11px;color:var(--fg-3);margin-top:2px;font-family:var(--font-mono)}
+
+  .foot-meta{font-size:11px;color:var(--fg-4);text-align:center;font-family:var(--font-mono);letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="side">
+    <div class="brand">
+      <a class="lock" href="#">
+        <img src="../../assets/delta-mark.svg" alt="">
+        <span class="word">LAS<span class="t">T</span>EST</span>
+      </a>
+      <div class="team"><i data-lucide="building-2" style="width:11px;height:11px"></i><span>Acme Engineering</span></div>
+    </div>
+
+    <div class="repo">
+      <div class="picker">
+        <i data-lucide="layers" style="width:14px;height:14px"></i>
+        <span class="name">acme/storefront</span>
+        <i data-lucide="chevrons-up-down" style="width:13px;height:13px;color:var(--fg-3)"></i>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <ul>
+        <li><a href="#" class="active"><i data-lucide="layout-dashboard"></i>Dashboard</a></li>
+      </ul>
+      <div>
+        <div class="lbl">Tests</div>
+        <ul>
+          <li><a href="#"><i data-lucide="file-code"></i>Tests</a></li>
+          <li><a href="#"><i data-lucide="layers"></i>Compose</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="lbl">Execution</div>
+        <ul>
+          <li><a href="#"><i data-lucide="play"></i>Runs</a></li>
+          <li><a href="#"><i data-lucide="git-compare"></i>Compare</a></li>
+          <li><a href="#"><i data-lucide="trending-down"></i>Impact</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="side-foot">
+      <a href="#" style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-radius:var(--r-md);font-size:13.5px;font-weight:500;text-decoration:none;color:var(--fg-1);border:0">
+        <i data-lucide="settings" style="width:16px;height:16px;color:var(--fg-2)"></i>Settings
+      </a>
+      <div class="user">
+        <div class="avatar">JS</div>
+        <div class="meta"><div class="n">Jordan Singh</div><div class="e">jordan@acme.io</div></div>
+      </div>
+      <div class="tag"><span>Visual regression testing</span><span class="pulse"></span></div>
+    </div>
+  </aside>
+
+  <!-- ========== MAIN ========== -->
+  <main class="main">
+    <header class="head">
+      <h1>Dashboard</h1>
+      <div class="actions">
+        <button class="btn btn-outline"><i data-lucide="video"></i>Record test</button>
+        <button class="btn btn-primary"><i data-lucide="play"></i>Run all</button>
+        <button class="btn btn-ghost btn-icon" aria-label="Settings"><i data-lucide="settings"></i></button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="container">
+
+        <!-- Build hero -->
+        <div class="card">
+          <div class="hero">
+            <div>
+              <div class="meta-row">
+                <span class="commit">a1f2c8d</span>
+                <span>·</span>
+                <span><i data-lucide="git-branch" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"></i> main</span>
+                <span>·</span>
+                <span>2 minutes ago</span>
+                <span>·</span>
+                <span>Build #248</span>
+              </div>
+              <h3 class="title">fix(checkout): align price stepper on iOS Safari</h3>
+              <p class="desc">24 tests · 3 functional areas · 11-step pipeline completed in 1m 42s. 2 visual changes detected on the checkout flow — review before merge.</p>
+            </div>
+            <div class="status-pill status-review">
+              <i data-lucide="alert-triangle"></i>REVIEW REQUIRED <span class="count">(2)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pass rate + metrics -->
+        <div class="card" style="display:flex;flex-direction:column;gap:20px">
+          <div class="progress-block">
+            <div class="row"><span class="lab">Pass rate</span><span class="val">91.7%</span></div>
+            <div class="bar">
+              <div class="pass" style="width:91.7%"></div>
+              <div class="fail" style="width:8.3%"></div>
+            </div>
+            <div class="foot"><span>22 passed</span><span>2 failed</span></div>
+          </div>
+
+          <div class="metrics-row">
+            <div class="group-tests">
+              <div class="group-label">Tests</div>
+              <div class="metrics">
+                <div class="metric pass"><div class="num">22</div><div class="lbl"><i data-lucide="check-circle"></i>Passed</div></div>
+                <div class="metric fail"><div class="num">2</div><div class="lbl"><i data-lucide="x-circle"></i>Failed</div></div>
+              </div>
+            </div>
+            <div class="vsep"></div>
+            <div class="group-cases">
+              <div class="group-label">Cases</div>
+              <div class="metrics">
+                <div class="metric zero"><div class="num">0</div><div class="lbl"><i data-lucide="bug"></i>Errors</div></div>
+                <div class="metric warn"><div class="num">2</div><div class="lbl"><i data-lucide="alert-triangle"></i>Changed</div></div>
+                <div class="metric warn"><div class="num">1</div><div class="lbl"><i data-lucide="refresh-cw"></i>Flaky</div></div>
+                <div class="metric muted"><div class="num">1m&nbsp;42s</div><div class="lbl"><i data-lucide="clock"></i>Time</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <div class="seg">
+            <button class="on"><i data-lucide="git-branch"></i>Branch</button>
+            <button><i data-lucide="shield"></i>Main</button>
+          </div>
+          <button class="toggle on"><i data-lucide="list-tree"></i>Group by test</button>
+          <button class="toggle"><i data-lucide="layers"></i>Group by area</button>
+          <div style="flex:1"></div>
+          <button class="btn btn-outline btn-sm"><i data-lucide="filter"></i>All cases</button>
+        </div>
+
+        <!-- Area: Checkout -->
+        <div class="area">
+          <div class="area-head">
+            <i data-lucide="chevron-down" class="chev"></i>
+            <span class="name">Checkout flow</span>
+            <span class="count">8 tests</span>
+            <div class="spread"></div>
+            <div class="badges">
+              <span class="badge pass">6 passed</span>
+              <span class="badge warn">2 changed</span>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico warn"><i data-lucide="alert-triangle"></i></span>
+            <div class="name">Price stepper alignment on iOS Safari<span class="path">tests/checkout/price-stepper.spec.ts</span></div>
+            <div class="runtime">3.2s</div>
+            <div class="change warn">+2.1% diff</div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm"><i data-lucide="git-compare"></i>Compare</button>
+              <button class="btn btn-ghost btn-sm">Approve</button>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico warn"><i data-lucide="alert-triangle"></i></span>
+            <div class="name">Coupon banner — promo expanded state<span class="path">tests/checkout/coupon-banner.spec.ts</span></div>
+            <div class="runtime">2.8s</div>
+            <div class="change warn">+0.4% diff</div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm"><i data-lucide="git-compare"></i>Compare</button>
+              <button class="btn btn-ghost btn-sm">Approve</button>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico pass"><i data-lucide="check"></i></span>
+            <div class="name">Cart empty state<span class="path">tests/checkout/cart-empty.spec.ts</span></div>
+            <div class="runtime">1.4s</div>
+            <div class="change">—</div>
+            <div class="actions"><button class="btn btn-ghost btn-sm">View</button></div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico pass"><i data-lucide="check"></i></span>
+            <div class="name">Address autocomplete dropdown<span class="path">tests/checkout/address.spec.ts</span></div>
+            <div class="runtime">2.1s</div>
+            <div class="change">—</div>
+            <div class="actions"><button class="btn btn-ghost btn-sm">View</button></div>
+          </div>
+        </div>
+
+        <!-- Area: Product detail -->
+        <div class="area">
+          <div class="area-head">
+            <i data-lucide="chevron-down" class="chev"></i>
+            <span class="name">Product detail</span>
+            <span class="count">9 tests</span>
+            <div class="spread"></div>
+            <div class="badges">
+              <span class="badge pass">8 passed</span>
+              <span class="badge info">1 flaky</span>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico pass"><i data-lucide="check"></i></span>
+            <div class="name">Image gallery — swipe interactions<span class="path">tests/pdp/gallery-swipe.spec.ts</span></div>
+            <div class="runtime">4.5s</div>
+            <div class="change">—</div>
+            <div class="actions"><button class="btn btn-ghost btn-sm">View</button></div>
+          </div>
+
+          <div class="test-row">
+            <span class="ico warn"><i data-lucide="refresh-cw"></i></span>
+            <div class="name">Variant selector — out-of-stock states<span class="path">tests/pdp/variant-stock.spec.ts</span></div>
+            <div class="runtime">1.9s</div>
+            <div class="change warn">flaky · 3 retries</div>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm">Heal</button>
+              <button class="btn btn-ghost btn-sm">View</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Two col: history + activity -->
+        <div class="two-col">
+          <div class="card">
+            <div class="section-head">
+              <h2>Recent builds</h2>
+              <a href="#">View all →</a>
+            </div>
+            <div class="history">
+              <div class="item"><span class="dot warn"></span><span class="commit">a1f2c8d</span><span class="msg">fix(checkout): align price stepper on iOS Safari</span><span class="when">2m</span></div>
+              <div class="item"><span class="dot pass"></span><span class="commit">8e3b91c</span><span class="msg">chore: bump playwright to 1.49</span><span class="when">23m</span></div>
+              <div class="item"><span class="dot pass"></span><span class="commit">2c44d10</span><span class="msg">feat(pdp): add wishlist toggle on gallery</span><span class="when">1h</span></div>
+              <div class="item"><span class="dot fail"></span><span class="commit">9bb7e02</span><span class="msg">refactor(api): rename order events</span><span class="when">2h</span></div>
+              <div class="item"><span class="dot pass"></span><span class="commit">37e9a4f</span><span class="msg">fix(nav): keyboard focus loop on dropdowns</span><span class="when">3h</span></div>
+              <div class="item"><span class="dot pass"></span><span class="commit">d18f5a2</span><span class="msg">test: cover empty cart promo banner</span><span class="when">5h</span></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="section-head">
+              <h2>Activity</h2>
+              <a href="#">Feed →</a>
+            </div>
+            <div class="activity">
+              <div class="row">
+                <div class="av" style="background:var(--c-blue)">JS</div>
+                <div class="b"><div class="t"><b>Jordan</b> approved baseline for <span class="pill">checkout/coupon-banner</span></div><div class="when">2 min ago</div></div>
+              </div>
+              <div class="row">
+                <div class="av" style="background:var(--c-teal)">MR</div>
+                <div class="b"><div class="t"><b>Maya</b> recorded a new test <span class="pill">pdp/gallery-zoom</span></div><div class="when">14 min ago</div></div>
+              </div>
+              <div class="row">
+                <div class="av" style="background:var(--c-amber)">CI</div>
+                <div class="b"><div class="t"><b>CI</b> flagged regression on <span class="pill">checkout/price-stepper</span> · iOS Safari</div><div class="when">28 min ago</div></div>
+              </div>
+              <div class="row">
+                <div class="av" style="background:var(--c-red)">DK</div>
+                <div class="b"><div class="t"><b>Devon</b> rejected baseline for <span class="pill">nav/dropdown-focus</span></div><div class="when">1 hr ago</div></div>
+              </div>
+              <div class="row">
+                <div class="av" style="background:#8a8a8a">Bot</div>
+                <div class="b"><div class="t"><b>Heal-bot</b> auto-fixed selector drift on 3 tests · <span class="pill">storefront</span></div><div class="when">4 hr ago</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="foot-meta">★ LASTEST · BUILD #248 · NODE 22 · PLAYWRIGHT 1.49 · 11-STEP PIPELINE · $0 FOREVER</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>if (window.lucide) lucide.createIcons();</script>
+</body>
+</html>

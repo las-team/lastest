@@ -1,6 +1,6 @@
 'use server';
 
-import type { AssertionType } from '@/lib/playwright/types';
+import type { AssertionType, WaitParams } from '@/lib/playwright/types';
 import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript } from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
@@ -8,7 +8,7 @@ import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
 import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import {
   queueCommandToDB,
@@ -192,6 +192,47 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
   return { success: false };
 }
 
+export async function createWait(params: WaitParams, repositoryId?: string | null): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
+
+  if (params.waitType === 'duration') {
+    if (typeof params.durationMs !== 'number' || params.durationMs < 0 || !Number.isFinite(params.durationMs)) {
+      return { success: false, error: 'durationMs must be a non-negative finite number' };
+    }
+  } else if (params.waitType === 'selector') {
+    const hasSelector = (params.selector && params.selector.trim().length > 0)
+      || (params.selectors && params.selectors.some(s => s.value && s.value.trim()));
+    if (!hasSelector) {
+      return { success: false, error: 'selector or selectors must be provided' };
+    }
+    if (params.condition && params.condition !== 'visible' && params.condition !== 'hidden') {
+      return { success: false, error: "condition must be 'visible' or 'hidden'" };
+    }
+    if (params.timeoutMs !== undefined && (!Number.isFinite(params.timeoutMs) || params.timeoutMs < 0)) {
+      return { success: false, error: 'timeoutMs must be a non-negative finite number' };
+    }
+  } else {
+    return { success: false, error: "waitType must be 'duration' or 'selector'" };
+  }
+
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<CreateWaitCommand>('command:create_wait', {
+      sessionId: remoteSession.sessionId,
+      waitType: params.waitType,
+      durationMs: params.durationMs,
+      selector: params.selector,
+      selectors: params.selectors,
+      condition: params.condition,
+      timeoutMs: params.timeoutMs,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+
+  return { success: false, error: 'No active recording session' };
+}
+
 export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 
@@ -261,6 +302,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
         id: remoteSession.sessionId,
         generatedCode: remoteSession.generatedCode!,
       } : null,
+      errorMessage: remoteSession.errorMessage ?? null,
     };
   }
 
@@ -272,6 +314,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
     session: null,
     lastCompletedSession: null,
+    errorMessage: null,
   };
 }
 

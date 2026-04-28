@@ -2,7 +2,7 @@
 # Master deploy script for Lastest
 # Usage: deploy.sh <target> [options]
 #
-# Targets: local, eb, zima, olares, npm, all
+# Targets: zima, olares, npm, all
 # Options:
 #   --skip-checks    Skip lint/test before deploy
 #   --app-only       Only build/deploy main app image (skip EB)
@@ -23,6 +23,10 @@ OLARES_HOST="ewyctorlab.olares.local"
 OLARES_USER="root"
 OLARES_NS="lastest-dev-ewyctorlab"
 OLARES_DEPLOY="lastest-dev"
+# Companion envoy-less Deployment that EB Jobs call via LASTEST_URL.
+# MUST be rolled alongside OLARES_DEPLOY — otherwise EB POSTs land in
+# a stale pod running an older build.
+OLARES_INTERNAL_DEPLOY="lastest-internal-dev"
 
 IMAGE_APP="ewyc/lastest"
 IMAGE_EB="ewyc/lastest-eb"
@@ -120,6 +124,7 @@ build_app() {
     -t "$IMAGE_APP:$VERSION" \
     --build-arg GIT_HASH="$GIT_HASH" \
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:latest"
 }
@@ -151,11 +156,15 @@ build_images() {
 }
 
 build_olares() {
+  if [ -z "${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}" ]; then
+    err "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY not set in .env.local — required for stable Server Action IDs across deploys"
+  fi
   log "Building $IMAGE_APP:olares (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
   docker build \
     -t "$IMAGE_APP:olares" \
     --build-arg GIT_HASH="$GIT_HASH" \
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
+    --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:olares"
 
@@ -169,24 +178,6 @@ build_olares() {
 }
 
 # --- Targets ---
-deploy_local() {
-  log "Deploying embedded browsers (local dev)"
-  docker compose -f docker-compose.eb.yml up -d --build
-  sleep 3
-  ok "EB containers started"
-  echo "  eb-1: http://localhost:9224/health"
-  echo "  eb-2: http://localhost:9226/health"
-}
-
-deploy_eb() {
-  log "Deploying embedded browsers (local dev)"
-  docker compose -f docker-compose.eb.yml up -d --build
-  sleep 3
-  ok "EB containers started"
-  echo "  eb-1: http://localhost:9224/health"
-  echo "  eb-2: http://localhost:9226/health"
-}
-
 deploy_zima() {
   log "Deploying to ZimaOS ($ZIMA_HOST)"
   run_checks
@@ -249,13 +240,17 @@ deploy_olares() {
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ok "Images imported on Olares"
 
-  log "Restarting deployment..."
+  log "Restarting deployments ($OLARES_DEPLOY + $OLARES_INTERNAL_DEPLOY)..."
+  # Both Deployments must be rolled: the envoy-fronted one serves the UI,
+  # the envoy-less `-internal` one is what EB Jobs POST into via LASTEST_URL.
+  # Skipping the internal one leaves EB traffic on a stale build.
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+    "kubectl rollout restart deployment/$OLARES_DEPLOY deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS"
 
   log "Waiting for rollout..."
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s && \
+     kubectl rollout status deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS --timeout=180s"
 
   log "Verifying deployment..."
   bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
@@ -318,9 +313,10 @@ deploy_olares_transfer() {
   docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout restart deployment/$OLARES_DEPLOY -n $OLARES_NS"
+    "kubectl rollout restart deployment/$OLARES_DEPLOY deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS"
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s"
+    "kubectl rollout status deployment/$OLARES_DEPLOY -n $OLARES_NS --timeout=180s && \
+     kubectl rollout status deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS --timeout=180s"
   bash "$SCRIPT_DIR/health-check.sh" "https://app.lastest.cloud" 180
 }
 
@@ -329,8 +325,6 @@ usage() {
   echo "Usage: deploy.sh <target> [options]"
   echo ""
   echo "Targets:"
-  echo "  local     Build + run via docker compose locally"
-  echo "  eb        Build + run embedded browsers for local dev"
   echo "  zima      Build + deploy to ZimaOS ($ZIMA_HOST)"
   echo "  olares    Build + deploy to Olares (app.lastest.cloud)"
   echo "  npm       Publish @lastest/runner to npm"
@@ -345,8 +339,6 @@ usage() {
 }
 
 case "${TARGET}" in
-  local)   timer_start; deploy_local;  timer_end ;;
-  eb)      timer_start; deploy_eb;     timer_end ;;
   zima)    timer_start; deploy_zima;   timer_end ;;
   olares)  timer_start; deploy_olares; timer_end ;;
   npm)     timer_start; deploy_npm;    timer_end ;;

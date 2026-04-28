@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +18,7 @@ import {
   stopRecording,
   captureScreenshot,
   createAssertion,
+  createWait,
   flagDownload,
   insertTimestamp,
   togglePauseRecording,
@@ -35,7 +35,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { AssertionType } from '@/lib/playwright/types';
+import type { AssertionType, WaitParams, WaitType, WaitSelectorCondition } from '@/lib/playwright/types';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Timer, CalendarClock } from 'lucide-react';
 import {
   Video,
   Square,
@@ -68,7 +70,6 @@ import { Label } from '@/components/ui/label';
 import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
 import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
@@ -82,6 +83,8 @@ interface SetupStepInfo {
   name: string;
 }
 
+type RecordingStep = 'setup' | 'recording' | 'saving';
+
 interface RecordingClientProps {
   areas: FunctionalArea[];
   settings: PlaywrightSettings;
@@ -93,9 +96,8 @@ interface RecordingClientProps {
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
   availableScripts?: { id: string; name: string }[];
+  onStepChange?: (step: RecordingStep) => void;
 }
-
-type RecordingStep = 'setup' | 'recording' | 'saving';
 
 // Check if an action event can be replayed by the runner
 function isActionReplayable(event: RecordingEvent): { replayable: boolean; reason?: 'valid-selectors' | 'coords-only' | 'no-selectors' } {
@@ -190,9 +192,119 @@ function getEventDescription(event: RecordingEvent): string {
       return `Hold "${event.data.key || 'key'}"`;
     case 'keyup':
       return `Release "${event.data.key || 'key'}"`;
+    case 'wait': {
+      if (event.data.waitType === 'duration') {
+        return `Wait ${event.data.durationMs ?? 0}ms`;
+      }
+      const sel = event.data.selector || event.data.selectors?.[0]?.value || 'element';
+      const cond = event.data.condition || 'visible';
+      return `Wait for ${sel.slice(0, 30)} (${cond})`;
+    }
     default:
       return event.type;
   }
+}
+
+interface WaitPopoverBodyProps {
+  mode: WaitType;
+  setMode: (m: WaitType) => void;
+  durationMs: string;
+  setDurationMs: (v: string) => void;
+  selector: string;
+  setSelector: (v: string) => void;
+  condition: WaitSelectorCondition;
+  setCondition: (c: WaitSelectorCondition) => void;
+  timeoutMs: string;
+  setTimeoutMs: (v: string) => void;
+  onInsert: () => void;
+}
+
+function WaitPopoverBody({
+  mode, setMode,
+  durationMs, setDurationMs,
+  selector, setSelector,
+  condition, setCondition,
+  timeoutMs, setTimeoutMs,
+  onInsert,
+}: WaitPopoverBodyProps) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <div className="text-sm font-medium">Insert Wait</div>
+        <div className="text-xs text-muted-foreground">
+          Pause the test at this point — useful for slow async UIs.
+        </div>
+      </div>
+      <div className="flex gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setMode('duration')}
+          className={`px-2 py-1 rounded border ${mode === 'duration' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 border-border'}`}
+        >
+          Duration
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('selector')}
+          className={`px-2 py-1 rounded border ${mode === 'selector' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 border-border'}`}
+        >
+          Wait for selector
+        </button>
+      </div>
+      {mode === 'duration' ? (
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Duration (ms)</label>
+          <Input
+            type="number"
+            min={0}
+            value={durationMs}
+            onChange={e => setDurationMs(e.target.value)}
+            placeholder="3000"
+          />
+          <div className="text-xs text-muted-foreground">
+            e.g. <code>180000</code> = 3 minutes
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium">Selector</label>
+            <Input
+              value={selector}
+              onChange={e => setSelector(e.target.value)}
+              placeholder="#status, .build-done, [data-state='ready']"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Condition</label>
+              <select
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                value={condition}
+                onChange={e => setCondition(e.target.value as WaitSelectorCondition)}
+              >
+                <option value="visible">visible</option>
+                <option value="hidden">hidden</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Timeout (ms)</label>
+              <Input
+                type="number"
+                min={0}
+                value={timeoutMs}
+                onChange={e => setTimeoutMs(e.target.value)}
+                placeholder="30000"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button size="sm" onClick={onInsert}>Insert</Button>
+      </div>
+    </div>
+  );
 }
 
 interface ActionSelector {
@@ -239,6 +351,10 @@ interface RecordingEvent {
     deltaY?: number;
     downloadWrap?: boolean;
     autoDetected?: boolean;
+    waitType?: WaitType;
+    durationMs?: number;
+    condition?: WaitSelectorCondition;
+    timeoutMs?: number;
     elementInfo?: {
       tagName: string;
       id?: string;
@@ -261,11 +377,14 @@ export function RecordingClient({
   repositorySetupSteps = [],
   availableTests = [],
   availableScripts = [],
+  onStepChange,
 }: RecordingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState<RecordingStep>('setup');
+  useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
   const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
   const [skippedDefaultStepIds, setSkippedDefaultStepIds] = useState<Set<string>>(new Set());
@@ -311,6 +430,14 @@ export function RecordingClient({
   const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);
 
+  // Insert-Wait popover state
+  const [waitPopoverOpen, setWaitPopoverOpen] = useState(false);
+  const [waitMode, setWaitMode] = useState<WaitType>('duration');
+  const [waitDurationMs, setWaitDurationMs] = useState<string>('3000');
+  const [waitSelector, setWaitSelector] = useState<string>('');
+  const [waitCondition, setWaitCondition] = useState<WaitSelectorCondition>('visible');
+  const [waitTimeoutMs, setWaitTimeoutMs] = useState<string>('30000');
+
   // Poll for recording status and events when in recording step
   useEffect(() => {
     if (step !== 'recording') return;
@@ -328,6 +455,12 @@ export function RecordingClient({
             setDomSnapshot((status.lastCompletedSession as Record<string, unknown>).domSnapshot as typeof domSnapshot ?? null);
             await clearLastCompletedSession(repositoryId);
             setStep('saving');
+          } else if (status.errorMessage) {
+            // Recording start failed (e.g. setup step threw on the EB) — surface
+            // the error and unblock the UI instead of spinning forever.
+            setStep('setup');
+            setError(`Recording failed: ${status.errorMessage}`);
+            await clearLastCompletedSession(repositoryId);
           } else {
             // Recording was stopped but no session - go back to setup
             setStep('setup');
@@ -434,7 +567,7 @@ export function RecordingClient({
           ? { steps: allSteps }
           : undefined;
 
-        const result = await startRecording(url, repositoryId, executionTarget, setupOptions, selectedStorageStateId ?? undefined);
+        const result = await startRecording(url, repositoryId, 'auto', setupOptions, selectedStorageStateId ?? undefined);
 
         if (result.error) {
           setError(result.error);
@@ -447,23 +580,37 @@ export function RecordingClient({
           setEvents([]);
           lastSequenceRef.current = 0;
 
-          // Fetch embedded stream URL if recording via an embedded runner
-          const resolvedTarget = result.resolvedRunnerId || executionTarget;
-          if (resolvedTarget && resolvedTarget !== 'auto') {
-            fetch(`/api/embedded/stream`)
-              .then(res => res.ok ? res.json() : null)
-              .then(data => {
-                if (data?.sessions) {
-                  const session = data.sessions.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
-                  if (session?.streamUrl) {
-                    const token = data.streamAuthToken;
-                    setEmbeddedStreamUrl(
-                      token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
-                    );
+          // Stale URL from a prior attempt would keep the BrowserViewer
+          // reconnecting to the old target until the poll below resolves.
+          setEmbeddedStreamUrl(null);
+
+          // Fetch embedded stream URL if recording via an embedded runner.
+          // A freshly-provisioned EB may not have completed auto-register
+          // by the time startRecording returns, so poll briefly until the
+          // session shows up with a streamUrl rather than failing silently.
+          const resolvedTarget = result.resolvedRunnerId;
+          if (resolvedTarget) {
+            (async () => {
+              for (let attempt = 0; attempt < 10; attempt++) {
+                try {
+                  const res = await fetch(`/api/embedded/stream`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    const session = data?.sessions?.find((s: { runnerId: string }) => s.runnerId === resolvedTarget);
+                    if (session?.streamUrl) {
+                      const token = data.streamAuthToken;
+                      setEmbeddedStreamUrl(
+                        token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+                      );
+                      return;
+                    }
                   }
+                } catch {
+                  // ignore transient fetch errors and retry
                 }
-              })
-              .catch(() => {});
+                await new Promise(r => setTimeout(r, 500));
+              }
+            })();
           }
         }
       }
@@ -510,6 +657,42 @@ export function RecordingClient({
       await insertTimestamp(repositoryId);
     } catch (error) {
       console.error('Failed to insert timestamp:', error);
+    }
+  };
+
+  const handleInsertWait = async () => {
+    const params: WaitParams = waitMode === 'duration'
+      ? { waitType: 'duration', durationMs: Number(waitDurationMs) }
+      : {
+          waitType: 'selector',
+          selector: waitSelector.trim(),
+          condition: waitCondition,
+          timeoutMs: Number(waitTimeoutMs),
+        };
+
+    if (params.waitType === 'duration' && (!Number.isFinite(params.durationMs) || (params.durationMs ?? -1) < 0)) {
+      toast.error('Duration must be a non-negative number of milliseconds');
+      return;
+    }
+    if (params.waitType === 'selector' && !params.selector) {
+      toast.error('Selector is required');
+      return;
+    }
+    if (params.waitType === 'selector' && (!Number.isFinite(params.timeoutMs) || (params.timeoutMs ?? -1) < 0)) {
+      toast.error('Timeout must be a non-negative number of milliseconds');
+      return;
+    }
+
+    try {
+      const result = await createWait(params, repositoryId);
+      if (!result.success) {
+        toast.error(result.error || 'Failed to insert wait');
+        return;
+      }
+      setWaitPopoverOpen(false);
+    } catch (error) {
+      console.error('Failed to insert wait:', error);
+      toast.error('Failed to insert wait');
     }
   };
 
@@ -714,22 +897,6 @@ export function RecordingClient({
                   </div>
                 )}
 
-                {/* Execution Target */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Execution Target</label>
-                  <ExecutionTargetSelector
-                    value={executionTarget}
-                    onChange={setExecutionTarget}
-                    disabled={isLoading}
-                    capabilityFilter="record"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {executionTarget === 'local'
-                      ? 'Record on this machine'
-                      : 'Record on a remote runner'}
-                  </p>
-                </div>
-
                 {/* Seed Toggle */}
                 {(() => {
                   const hasDefaults = repositorySetupSteps.length > 0;
@@ -925,6 +1092,8 @@ export function RecordingClient({
                           {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
                           {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
                           {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
+                          {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
+                          {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <span className="text-muted-foreground text-xs">
@@ -1006,8 +1175,30 @@ export function RecordingClient({
               <Download className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleInsertTimestamp} title="Insert Timestamp">
-              <Clock className="h-4 w-4" />
+              <CalendarClock className="h-4 w-4" />
             </Button>
+            <Popover open={waitPopoverOpen} onOpenChange={setWaitPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Insert Wait">
+                  <Timer className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="center" className="w-80">
+                <WaitPopoverBody
+                  mode={waitMode}
+                  setMode={setWaitMode}
+                  durationMs={waitDurationMs}
+                  setDurationMs={setWaitDurationMs}
+                  selector={waitSelector}
+                  setSelector={setWaitSelector}
+                  condition={waitCondition}
+                  setCondition={setWaitCondition}
+                  timeoutMs={waitTimeoutMs}
+                  setTimeoutMs={setWaitTimeoutMs}
+                  onInsert={handleInsertWait}
+                />
+              </PopoverContent>
+            </Popover>
             <div className="w-px h-5 bg-border" />
             <Button
               variant="ghost"
@@ -1102,9 +1293,32 @@ export function RecordingClient({
                   Wait for Download
                 </Button>
                 <Button onClick={handleInsertTimestamp} variant="outline">
-                  <Clock className="h-4 w-4 mr-2" />
+                  <CalendarClock className="h-4 w-4 mr-2" />
                   Insert Timestamp
                 </Button>
+                <Popover open={waitPopoverOpen} onOpenChange={setWaitPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline">
+                      <Timer className="h-4 w-4 mr-2" />
+                      Insert Wait
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-80">
+                    <WaitPopoverBody
+                      mode={waitMode}
+                      setMode={setWaitMode}
+                      durationMs={waitDurationMs}
+                      setDurationMs={setWaitDurationMs}
+                      selector={waitSelector}
+                      setSelector={setWaitSelector}
+                      condition={waitCondition}
+                      setCondition={setWaitCondition}
+                      timeoutMs={waitTimeoutMs}
+                      setTimeoutMs={setWaitTimeoutMs}
+                      onInsert={handleInsertWait}
+                    />
+                  </PopoverContent>
+                </Popover>
                 <Button
                   onClick={handleStopRecording}
                   variant="destructive"
@@ -1159,6 +1373,8 @@ export function RecordingClient({
                             {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
                             {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
                             {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
+                            {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
+                            {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <span className="text-muted-foreground text-xs">

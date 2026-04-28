@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentStepTracking, stripTypeAnnotations } from '@lastest/shared';
+import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -31,6 +31,16 @@ export interface TestRunResult {
   logs: LogEntry[];
   screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }>;
   softErrors?: string[];
+  /** Per-`expect()` outcome rows produced by the runner's `__assertion`
+   *  helper. The criteria evaluator uses `assertionId` to match these to
+   *  the user's `assertion_failed` rules. */
+  assertionResults?: Array<{
+    assertionId: string;
+    status: 'passed' | 'failed' | 'skipped';
+    actualValue?: string;
+    errorMessage?: string;
+    durationMs?: number;
+  }>;
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
@@ -316,6 +326,7 @@ export class TestRunner {
 
     const logs: LogEntry[] = [];
     const softErrors: string[] = [];
+    const assertionResults: NonNullable<TestRunResult['assertionResults']> = [];
     const logFn = (level: 'info' | 'warn' | 'error', message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       const prefix = level === 'error' ? '  [ERROR]' : level === 'warn' ? '  [WARN]' : '  [INFO]';
@@ -524,7 +535,7 @@ export class TestRunner {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command)
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults)
             .then(r => { clearTimeout(timeoutTimer); return r; })
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
@@ -591,6 +602,7 @@ export class TestRunner {
         logs,
         screenshots,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
         lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
@@ -612,6 +624,7 @@ export class TestRunner {
           },
           logs,
           screenshots,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
         };
@@ -657,6 +670,7 @@ export class TestRunner {
           logs,
           screenshots,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot: failureDomSnapshot,
@@ -680,6 +694,7 @@ export class TestRunner {
         try {
           const videoPath = await video.path();
           if (videoPath && fs.existsSync(videoPath)) {
+            await watermarkVideo(videoPath);
             const videoBuffer = fs.readFileSync(videoPath);
             result.videoData = videoBuffer.toString('base64');
             result.videoFilename = `${command.testRunId}-${command.testId}.webm`;
@@ -857,7 +872,8 @@ export class TestRunner {
     softErrors?: string[],
     cursorPlaybackSpeed?: number,
     stabilization?: StabilizationPayload,
-    payload?: RunTestCommandPayload
+    payload?: RunTestCommandPayload,
+    assertionResults?: NonNullable<TestRunResult['assertionResults']>,
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test/setup(page, ...) { ... }
@@ -918,6 +934,19 @@ export class TestRunner {
     // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
     body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+    // Instrument assertions BEFORE step tracking + soft-wrap. Each
+    // `expect(...)` line gets wrapped with `await __assertion(id, async () => { ... })`
+    // so the runner can record structured AssertionResult[] keyed to the
+    // host's parsed assertion ids. Order-paired with `payload.assertions`.
+    const assertionPayload = payload?.assertions ?? [];
+    if (assertionPayload.length > 0) {
+      const ar = instrumentAssertionTracking(body, assertionPayload);
+      body = ar.instrumentedBody;
+      if (ar.wrappedCount !== assertionPayload.length) {
+        log('warn', `Assertion instrumentation wrapped ${ar.wrappedCount}/${assertionPayload.length} assertions — runtime/parser drift`);
+      }
+    }
+
     // Instrument step tracking
     const { instrumentedBody } = instrumentStepTracking(body);
     body = instrumentedBody;
@@ -928,16 +957,49 @@ export class TestRunner {
     // for soft error handling. This matches the local runner behavior so tests
     // continue past failures to reach screenshots.
     // Hard assertion errors (.__hardAssertion) are re-thrown to fail the test immediately.
+    // When `failOnRuntimeError` is set (driven by the test's `all_steps_executed`
+    // Criteria rule), a TypeError / ReferenceError / SyntaxError also re-throws —
+    // these indicate broken test code, not a flaky assertion, and shouldn't be
+    // swallowed as a soft warning.
     // `page.goto` is NOT soft-wrapped: if navigation fails, subsequent steps would
     // run on about:blank and produce blank screenshots recorded as passes.
+    const failOnRuntime = payload?.failOnRuntimeError === true;
+    const runtimeReThrow = failOnRuntime
+      ? 'if (__softErr && (__softErr instanceof TypeError || __softErr instanceof ReferenceError || __softErr instanceof SyntaxError)) throw __softErr;'
+      : '';
     body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match: string, indent: string, stmt: string) => {
       if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
       if (stmt.includes('.goto(')) return `${indent}${stmt}`;
-      return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
+      // `__assertion(...)` already records pass/fail and re-pushes to
+      // softErrors itself — wrapping it again would double-report.
+      if (stmt.includes('__assertion(')) return `${indent}${stmt}`;
+      return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; ${runtimeReThrow} stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
     });
 
     // Use caller-provided softErrors array, or create local one as fallback
     const errors = softErrors ?? [];
+    const aResults = assertionResults ?? [];
+
+    // Per-assertion bookkeeping invoked by lines wrapped by
+    // `instrumentAssertionTracking`. Mirror in `softErrors` so the legacy
+    // steps tab still surfaces the message; the structured row is what the
+    // criteria evaluator keys on.
+    const __assertion = async (id: string, fn: () => Promise<void>) => {
+      const start = Date.now();
+      try {
+        await fn();
+        aResults.push({ assertionId: id, status: 'passed', durationMs: Date.now() - start });
+      } catch (e: unknown) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (e && (e as any).__hardAssertion) throw e;
+        const msg = e instanceof Error ? e.message : String(e);
+        aResults.push({
+          assertionId: id, status: 'failed', errorMessage: msg, durationMs: Date.now() - start,
+        });
+        errors.push(msg);
+        log('warn', `[ASSERTION FAIL] ${msg}`);
+      }
+    };
 
     // Create stepLogger (matches local runner signature)
     const stepLogger = {
@@ -1224,6 +1286,7 @@ export class TestRunner {
       'replayCursorPath',
       'fixtures',
       '__stepReached',
+      '__assertion',
       body
     );
 
@@ -1233,7 +1296,7 @@ export class TestRunner {
         page, targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect,
         null, locateWithFallback,
         fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn,
-        fixturesMap, __stepReached
+        fixturesMap, __stepReached, __assertion
       );
       log('info', 'Test function returned successfully');
     } finally {

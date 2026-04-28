@@ -1,14 +1,121 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { SliderComparison } from '@/components/diff/slider-comparison';
+import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, undoApproval, addDiffTodo } from '@/server/actions/diffs';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult } from '@/lib/db/schema';
+import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
+
+type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
+
+function deriveStripStatus(d: VisualDiffWithTestStatus): StripStatus {
+  if (d.testResultStatus === 'failed' || d.status === 'rejected' || d.errorMessage) return 'failed';
+  if (d.status === 'todo') return 'todo';
+  if (d.status === 'approved' || d.status === 'auto_approved') return 'approved';
+  if (d.classification === 'unchanged' || (d.pixelDifference ?? 0) === 0) return 'approved';
+  if (d.status === 'pending' && (d.pixelDifference ?? 0) > 0) return 'changed';
+  return 'changed';
+}
+
+const stripStatusBar: Record<StripStatus, string> = {
+  failed: 'bg-red-500',
+  changed: 'bg-yellow-500',
+  todo: 'bg-amber-500',
+  approved: 'bg-green-500',
+};
+
+const STRIP_TILE_WIDTH = 96;
+const STRIP_TILE_HEIGHT = 64;
+const STRIP_TILE_GAP = 6;
+const STRIP_STEP = STRIP_TILE_WIDTH + STRIP_TILE_GAP;
+
+function DiffStrip({
+  allDiffs,
+  currentDiffId,
+  buildDiffUrl,
+}: {
+  allDiffs: VisualDiffWithTestStatus[];
+  currentDiffId: string;
+  buildDiffUrl: (id: string) => string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [transitionEnabled, setTransitionEnabled] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      setContainerWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setTransitionEnabled(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const currentIndex = Math.max(0, allDiffs.findIndex((d) => d.id === currentDiffId));
+  const totalWidth = allDiffs.length * STRIP_STEP - STRIP_TILE_GAP;
+  const maxOffset = Math.max(0, totalWidth - containerWidth);
+  const desiredOffset = currentIndex * STRIP_STEP - (containerWidth - STRIP_TILE_WIDTH) / 2;
+  const offset = containerWidth > 0 ? Math.max(0, Math.min(maxOffset, desiredOffset)) : 0;
+
+  return (
+    <div ref={containerRef} className="relative w-full overflow-hidden pb-2">
+      <div
+        className="flex"
+        style={{
+          gap: `${STRIP_TILE_GAP}px`,
+          transform: `translate3d(${-offset}px, 0, 0)`,
+          transition: transitionEnabled ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
+          willChange: 'transform',
+        }}
+      >
+        {allDiffs.map((d, i) => {
+          const status = deriveStripStatus(d);
+          const isCurrent = d.id === currentDiffId;
+          return (
+            <Link
+              key={d.id}
+              href={buildDiffUrl(d.id)}
+              title={`${d.testName ?? 'unnamed'} · ${d.stepLabel ?? `step ${i + 1}`} · ${status}`}
+              style={{ width: STRIP_TILE_WIDTH }}
+              className={`flex-none rounded overflow-hidden border border-border bg-card transition ${
+                isCurrent ? 'ring-2 ring-primary' : 'hover:opacity-80'
+              }`}
+            >
+              {d.currentImagePath ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={d.currentImagePath}
+                  alt=""
+                  style={{ height: STRIP_TILE_HEIGHT }}
+                  className="w-full object-cover"
+                />
+              ) : (
+                <div style={{ height: STRIP_TILE_HEIGHT }} className="w-full bg-muted" />
+              )}
+              <div className={`h-1 w-full ${stripStatusBar[status]}`} />
+              <div className="text-center font-mono text-[10px] py-0.5 text-muted-foreground">
+                {i + 1}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2 } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,9 +126,11 @@ interface DiffViewerClientProps {
   prevDiffId?: string;
   nextDiffId?: string;
   banAiMode?: boolean;
+  initialFocusRegions?: FocusRegionRect[];
+  allDiffs?: VisualDiffWithTestStatus[];
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], allDiffs = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
@@ -177,6 +286,41 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const aiStatus = diff.aiAnalysisStatus;
   const [showRegions, setShowRegions] = useState(false);
   const [showDomOverlay, setShowDomOverlay] = useState(false);
+  const [drawFocusMode, setDrawFocusMode] = useState(false);
+  const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
+  const [focusPending, setFocusPending] = useState(false);
+
+  // Sync if server reloads with new focus regions (e.g. after router.refresh)
+  useEffect(() => { setFocusRegions(initialFocusRegions); }, [initialFocusRegions]);
+
+  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (focusPending) return;
+    setFocusPending(true);
+    try {
+      const created = await addFocusRegion(diff.id, rect);
+      setFocusRegions(prev => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawFocusMode(false);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to add focus region:', error);
+    } finally {
+      setFocusPending(false);
+    }
+  }, [diff.id, focusPending, router]);
+
+  const handleFocusDelete = useCallback(async (regionId: string) => {
+    if (focusPending) return;
+    setFocusPending(true);
+    setFocusRegions(prev => prev.filter(r => r.id !== regionId));
+    try {
+      await removeFocusRegion(regionId, diff.id);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to remove focus region:', error);
+    } finally {
+      setFocusPending(false);
+    }
+  }, [diff.id, focusPending, router]);
   const changedRegions = metadata?.changedRegions;
   const domDiff = metadata?.domDiff;
   const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
@@ -386,6 +530,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     changedRegions={changedRegions}
                     domOverlayRegions={domOverlayRegions}
                     showRegions={showRegions}
+                    focusRegions={focusRegions}
+                    drawFocusMode={drawFocusMode}
+                    onFocusRegionDrawn={handleFocusDrawn}
+                    onFocusRegionDelete={handleFocusDelete}
                     initialViewMode={viewParam || undefined}
                     onViewModeChange={handleViewModeChange}
                   />
@@ -465,6 +613,15 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             </div>
           )}
 
+          {/* Color-coded thumbnail queue strip */}
+          {allDiffs.length > 0 && (
+            <DiffStrip
+              allDiffs={allDiffs}
+              currentDiffId={diff.id}
+              buildDiffUrl={buildDiffUrl}
+            />
+          )}
+
           {/* Action Bar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -524,6 +681,17 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               >
                 <SkipForward className="w-4 h-4" />
                 Skip
+              </Button>
+
+              <Button
+                variant={drawFocusMode ? 'default' : 'outline'}
+                onClick={() => setDrawFocusMode(prev => !prev)}
+                disabled={focusPending}
+                className={drawFocusMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-300 text-green-700 hover:bg-green-50'}
+                title="Click and drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions."
+              >
+                <Crosshair className="w-4 h-4" />
+                {drawFocusMode ? 'Drawing — click + drag' : focusRegions.length > 0 ? `Focus (${focusRegions.length})` : 'Draw Focus Region'}
               </Button>
             </div>
 

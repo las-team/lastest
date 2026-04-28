@@ -155,7 +155,58 @@ describe('Assertion Parser', () => {
     });
   });
 
-  describe('Pattern 5: Page wait assertions', () => {
+  describe('Pattern 5: Download assertions', () => {
+    it('parses recorder-emitted block with filename comment', () => {
+      const code = `
+// Download assertion: report.csv
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(1);
+      expect(assertions[0].category).toBe('download');
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[0].expectedValue).toBe('report.csv');
+      expect(assertions[0].label).toBe('Download: report.csv');
+    });
+
+    it('parses bare pattern without comment', () => {
+      const code = `
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(1);
+      expect(assertions[0].category).toBe('download');
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[0].label).toBe('File downloaded');
+      // Spans waitForAny → expect line so step matching can locate it
+      expect(assertions[0].codeLineEnd).toBeGreaterThan(assertions[0].codeLineStart!);
+    });
+
+    it('does not double-count expect when bare pattern is parsed', () => {
+      // Without skip-past logic the inner `expect(downloads.list().length).toBeGreaterThan(0)`
+      // would also be scanned by Pattern 4 on the next iteration. It happens to
+      // not match Pattern 4's regex because of nested parens, but the test
+      // pins the expected count regardless.
+      const code = `
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);
+await expect(page).toHaveURL('/done');`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(2);
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[1].assertionType).toBe('toHaveURL');
+    });
+
+    it('ignores lone waitForAny without a following expect', () => {
+      const code = `
+await downloads.waitForAny();
+await page.click('button');`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(0);
+    });
+  });
+
+  describe('Pattern 6: Page wait assertions', () => {
     it('parses waitForLoadState with state', () => {
       const code = `await page.waitForLoadState('networkidle');`;
       const assertions = parseAssertions(code);
@@ -201,6 +252,50 @@ expect(x).toBe(1);`;
       const a1 = parseAssertions(code);
       const a2 = parseAssertions(code);
       expect(a1[0].id).toBe(a2[0].id);
+    });
+
+    it('keeps IDs stable when unrelated lines are added above', () => {
+      // Adding comments / blank lines / unrelated code above an assertion
+      // should NOT change its id — that's the whole point of swapping
+      // orderIndex out of the hash.
+      const before = `await expect(page).toHaveURL('/home');
+expect(count).toBe(3);`;
+      const after = `// new comment line
+const x = 1;
+await expect(page).toHaveURL('/home');
+expect(count).toBe(3);`;
+      const a = parseAssertions(before);
+      const b = parseAssertions(after);
+      expect(a[0].id).toBe(b[0].id);
+      expect(a[1].id).toBe(b[1].id);
+    });
+
+    it('keeps IDs stable when dissimilar assertions are reordered', () => {
+      const original = `await expect(page).toHaveURL('/home');
+await expect(button).toBeVisible();`;
+      const reordered = `await expect(button).toBeVisible();
+await expect(page).toHaveURL('/home');`;
+      const a = parseAssertions(original);
+      const b = parseAssertions(reordered);
+      // Same (type, selector, expected) → same id regardless of source order
+      const urlA = a.find(x => x.assertionType === 'toHaveURL')!;
+      const urlB = b.find(x => x.assertionType === 'toHaveURL')!;
+      expect(urlA.id).toBe(urlB.id);
+      const visA = a.find(x => x.assertionType === 'toBeVisible')!;
+      const visB = b.find(x => x.assertionType === 'toBeVisible')!;
+      expect(visA.id).toBe(visB.id);
+    });
+
+    it('gives duplicate assertions distinct IDs via occurrence index', () => {
+      const code = `await expect(page).toHaveURL('/foo');
+await expect(page).toHaveURL('/foo');`;
+      const a = parseAssertions(code);
+      expect(a).toHaveLength(2);
+      expect(a[0].id).not.toBe(a[1].id);
+      // Both should re-parse to the same pair of ids in the same order
+      const b = parseAssertions(code);
+      expect(b[0].id).toBe(a[0].id);
+      expect(b[1].id).toBe(a[1].id);
     });
 
     it('returns empty array for code with no assertions', () => {

@@ -1,0 +1,223 @@
+/* ============================================================
+   Lastest — Design System: Colors & Type
+   Source: Delta Mark export kit (uploads/lasTest export kit-print.html)
+   Note: This is the RENEWED system. Per direction:
+   - Bold display font (Archivo Black) reserved for the LOGO/wordmark only
+   - Body uses a thinner sans (Inter) — kept from the existing codebase
+   - Bright neutrals are the standard surface; non-red colors drive ACTION
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---------- BRAND PALETTE (5 stops) ---------- */
+  --c-red:        #E03E36;   /* Primary anchor — mark accent, regression alert */
+  --c-amber:      #E09836;   /* Warm support — highlights, focus rings */
+  --c-teal:       #36A88E;   /* Cool support — pass / success / primary CTA */
+  --c-blue:       #3674A8;   /* Info / links / secondary CTA */
+  --c-ink:        #1F2A33;   /* Type, borders, dark backgrounds */
+
+  /* ---------- SURFACES (neutrals) ---------- */
+  --c-white:      #FFFFFF;            /* high-contrast surfaces */
+  --c-soft:       #F6F6F4;            /* primary brighter bg (was lab(96.52 0 0)) */
+  --c-paper:      #F6F4EF;            /* warm paper for marketing/print */
+  --c-soft-2:     #EFEFEC;            /* slightly darker neutral */
+  --c-line:       rgba(31,42,51,0.08);
+  --c-line-strong:rgba(31,42,51,0.16);
+
+  /* ---------- INK SCALE (text) ---------- */
+  --fg-1: #1F2A33;             /* primary type */
+  --fg-2: rgba(31,42,51,0.72); /* secondary type */
+  --fg-3: rgba(31,42,51,0.55); /* tertiary / labels */
+  --fg-4: rgba(31,42,51,0.38); /* disabled / hint */
+
+  /* On-dark inverses */
+  --fg-on-dark-1: #FFFFFF;
+  --fg-on-dark-2: rgba(255,255,255,0.72);
+  --fg-on-dark-3: rgba(255,255,255,0.45);
+
+  /* ---------- SEMANTIC TOKENS ---------- */
+  /* Bright bg is standard. Non-red drives action. Red is reserved for the brand mark + regression/destructive. */
+  --bg:               var(--c-soft);
+  --bg-elevated:      var(--c-white);
+  --bg-inverted:      var(--c-ink);
+
+  --action:           var(--c-teal);   /* Primary CTA (non-red) */
+  --action-hover:     #2E957D;
+  --action-fg:        #FFFFFF;
+
+  --action-secondary: var(--c-blue);   /* Secondary CTA / links */
+  --action-secondary-hover: #2E6594;
+
+  --accent:           var(--c-amber);  /* Highlights, focus, selection */
+  --brand:            var(--c-red);    /* Logo + brand-only flourish */
+
+  --success:          var(--c-teal);
+  --warning:          var(--c-amber);
+  --info:             var(--c-blue);
+  --danger:           var(--c-red);    /* RED is reserved for actual regressions / destructive */
+
+  --border:           var(--c-line);
+  --border-strong:    var(--c-line-strong);
+  --ring:             color-mix(in oklab, var(--c-amber) 60%, transparent);
+
+  /* ---------- TYPOGRAPHY ---------- */
+  --font-display: "Archivo", system-ui, sans-serif;       /* LOGO / wordmark only — weight 900 */
+  --font-sans:    "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; /* Body, UI, headings */
+  --font-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type scale (rem) */
+  --t-xs:   0.75rem;   /* 12 */
+  --t-sm:   0.875rem;  /* 14 */
+  --t-base: 1rem;      /* 16 */
+  --t-md:   1.125rem;  /* 18 */
+  --t-lg:   1.375rem;  /* 22 */
+  --t-xl:   1.75rem;   /* 28 */
+  --t-2xl:  2.25rem;   /* 36 */
+  --t-3xl:  3rem;      /* 48 */
+  --t-4xl:  4.5rem;    /* 72 — only for hero wordmark */
+
+  /* ---------- SPACING ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---------- RADII ---------- */
+  /* Lastest leans squared / industrial. Keep radii small. */
+  --r-xs: 4px;       /* default for cards, inputs, buttons */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;   /* badges only */
+
+  /* ---------- SHADOWS (subtle, like the print kit) ---------- */
+  --shadow-xs: 0px 1px 2px rgba(31,42,51,0.05);
+  --shadow-sm: 0px 2px 4px rgba(31,42,51,0.06);
+  --shadow-md: 0px 4px 12px rgba(31,42,51,0.08);
+  --shadow-lg: 0px 12px 28px rgba(31,42,51,0.12);
+
+  /* ---------- MOTION ---------- */
+  --ease-out: cubic-bezier(.2, .7, .2, 1);
+  --ease-snap: cubic-bezier(.4, 0, .2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+}
+
+/* ---------- DARK MODE ---------- */
+.dark, [data-theme="dark"] {
+  --bg:           var(--c-ink);
+  --bg-elevated:  #2A3640;
+  --bg-inverted:  var(--c-soft);
+
+  --fg-1: #FFFFFF;
+  --fg-2: rgba(255,255,255,0.78);
+  --fg-3: rgba(255,255,255,0.55);
+  --fg-4: rgba(255,255,255,0.35);
+
+  --border:        rgba(255,255,255,0.10);
+  --border-strong: rgba(255,255,255,0.20);
+}
+
+/* ============================================================
+   SEMANTIC ELEMENT STYLES (h1, h2, p, code, etc.)
+   ============================================================ */
+
+html { font-family: var(--font-sans); color: var(--fg-1); background: var(--bg); }
+
+/* Wordmark — ONLY place Archivo Black is used.
+   Per brand: "T" is highlighted in red. */
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  text-transform: uppercase;
+  color: var(--fg-1);
+}
+.wordmark .t { color: var(--c-red); }
+
+/* Headings — thinner sans (per direction) */
+h1, .h1 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-2xl);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--fg-1);
+}
+h2, .h2 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-xl);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--fg-1);
+}
+h3, .h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--t-lg);
+  line-height: 1.25;
+  color: var(--fg-1);
+}
+h4, .h4 {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: var(--t-md);
+  line-height: 1.3;
+  color: var(--fg-1);
+}
+
+p, .body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--t-base);
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+.body-sm {
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+/* Labels — small mono, uppercase, used like the print kit */
+.label, .eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  font-weight: 500;
+}
+
+code, .code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--c-soft-2);
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  color: var(--fg-1);
+}
+
+a {
+  color: var(--action-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+a:hover { border-bottom-color: var(--action-secondary); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--space-5) 0;
+}
+
+::selection { background: color-mix(in oklab, var(--c-amber) 35%, transparent); color: var(--fg-1); }

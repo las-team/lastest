@@ -56,7 +56,10 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
 
     const pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/builds/${buildId}/status`);
+        // Force a fresh response — browser HTTP cache + service-worker
+        // intermediaries were returning the first 0/N snapshot for the whole
+        // build, freezing the progress UI.
+        const res = await fetch(`/api/builds/${buildId}/status`, { cache: 'no-store' });
         if (!res.ok) return;
 
         const data = await res.json();

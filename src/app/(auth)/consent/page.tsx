@@ -15,9 +15,13 @@ export default async function ConsentPage() {
     redirect('/');
   }
 
+  // Brand-new users (no onboarding done) bypass `/` so (app)/layout.tsx —
+  // WS bootstrap + 8 providers — doesn't cold-compile only to redirect.
+  const nextUrl = session.user.onboardingCompletedAt ? '/' : '/onboarding';
+
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <ConsentFormClient />
+      <ConsentFormClient nextUrl={nextUrl} />
     </div>
   );
 }

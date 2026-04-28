@@ -38,8 +38,72 @@ async function preCreate() {
   }
 }
 
+// Null out orphan FK references that would block drizzle-kit push --force
+// when it re-applies FK constraints (e.g. routes / tests pointing at a
+// functional_area_id that was hard-deleted before onDelete:'set null' existed).
+async function nullOrphans() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require('postgres')(process.env.DATABASE_URL);
+    const targets = [
+      { table: 'routes', col: 'functional_area_id', refTable: 'functional_areas', refCol: 'id' },
+      { table: 'tests',  col: 'functional_area_id', refTable: 'functional_areas', refCol: 'id' },
+    ];
+    for (const t of targets) {
+      try {
+        const r = await sql.unsafe(`
+          UPDATE "${t.table}"
+          SET "${t.col}" = NULL
+          WHERE "${t.col}" IS NOT NULL
+            AND "${t.col}" NOT IN (SELECT "${t.refCol}" FROM "${t.refTable}")
+        `);
+        const c = (r && r.count) || 0;
+        if (c > 0) {
+          console.warn(`[migrate] nulled ${c} orphan(s) in ${t.table}.${t.col}`);
+        }
+      } catch (e) {
+        console.warn(`[migrate] orphan-null skipped for ${t.table}.${t.col}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.log('[migrate] orphan cleanup skipped:', e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
+// Bump pool capacity on the existing global playwright_settings row to the
+// new defaults. Schema defaults only apply to fresh rows, so without this
+// the old prod values (maxParallelEBs=10, ebPoolMax=30) stick forever. Uses
+// GREATEST() so user-customized higher values are never reduced.
+async function bumpPoolDefaults() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require('postgres')(process.env.DATABASE_URL);
+    const r = await sql.unsafe(`
+      UPDATE "playwright_settings"
+      SET "max_parallel_ebs" = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
+          "eb_pool_max"      = GREATEST(COALESCE("eb_pool_max", 0), 50)
+      WHERE "repository_id" IS NULL
+        AND (COALESCE("max_parallel_ebs", 0) < 30 OR COALESCE("eb_pool_max", 0) < 50)
+    `);
+    const c = (r && r.count) || 0;
+    if (c > 0) {
+      console.log(`[migrate] bumped pool defaults on global playwright_settings (rows=${c})`);
+    }
+  } catch (e) {
+    console.warn('[migrate] pool default bump skipped:', e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
+  await nullOrphans();
+  await bumpPoolDefaults();
 
   console.log('[migrate] Running drizzle-kit push...');
   try {

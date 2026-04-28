@@ -14,7 +14,7 @@ import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, delet
 import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
 import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
 import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse } from '@/lib/ws/protocol';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
@@ -504,12 +504,30 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:error': {
+        // Runner-side failure (e.g. EB setup step threw during command:start_recording).
+        // If the correlationId matches an active recording session, mark it failed
+        // so getRecordingStatus() surfaces the error to the client instead of
+        // leaving it spinning on isRecording=true.
+        const errMsg = message as ErrorResponse;
+        const { correlationId, message: errorMessage } = errMsg.payload;
+        if (correlationId) {
+          const session = findRemoteSessionBySessionId(correlationId);
+          if (session) {
+            session.isRecording = false;
+            session.errorMessage = errorMessage;
+            console.log(`[Recording] Session ${correlationId} failed: ${errorMessage}`);
+          }
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       case 'response:debug_state': {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const debugPayload = (message as any).payload as DebugStateResponsePayload;
-        const debugSession = findRemoteDebugBySessionId(debugPayload.sessionId);
-        if (debugSession) {
-          debugSession.state = debugPayload;
+        const updated = await updateRemoteDebugSessionState(debugPayload.sessionId, debugPayload);
+        if (!updated) {
+          console.warn('[wsRunner][POST] debug_state: no session for', debugPayload.sessionId);
         }
         return NextResponse.json({ ok: true });
       }
@@ -717,6 +735,7 @@ export interface RemoteRecordingSession {
   startedAt: Date;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
+  errorMessage?: string;
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {
@@ -837,10 +856,17 @@ export async function clearRemoteRecordingSession(repositoryId?: string | null):
 }
 
 // ============================================
-// Remote Debug Session Management (in-memory — real-time, acceptable)
+// Remote Debug Session Management
 // ============================================
+// State lives in Postgres (`remote_debug_sessions`) because on Olares the
+// UI-facing pod (`lastest-dev`) creates the session and the envoy-less pod
+// (`lastest-internal-dev`) receives the EB's `response:debug_state` POSTs.
+// Pre-DB this was a globalThis Map, which silently broke on that split.
 
 import type { DebugStateResponsePayload } from '@/lib/ws/protocol';
+import { db } from '@/lib/db';
+import { remoteDebugSessions } from '@/lib/db/schema';
+import { eq as drizzleEq } from 'drizzle-orm';
 
 export interface RemoteDebugSession {
   sessionId: string;
@@ -851,42 +877,56 @@ export interface RemoteDebugSession {
   startedAt: Date;
 }
 
-const globalDebugState = globalThis as typeof globalThis & {
-  __remoteDebugSessions?: Map<string, RemoteDebugSession>;
-};
-if (!globalDebugState.__remoteDebugSessions) {
-  globalDebugState.__remoteDebugSessions = new Map<string, RemoteDebugSession>();
-}
-const remoteDebugSessionsMap = globalDebugState.__remoteDebugSessions;
-
-function findRemoteDebugBySessionId(sessionId: string): RemoteDebugSession | undefined {
-  for (const session of remoteDebugSessionsMap.values()) {
-    if (session.sessionId === sessionId) return session;
-  }
-  return undefined;
-}
-
-export function createRemoteDebugSession(
+export async function createRemoteDebugSession(
   sessionId: string,
   runnerId: string,
   repositoryId: string | null,
   testId: string
-): void {
-  remoteDebugSessionsMap.set(sessionId, {
+): Promise<void> {
+  await db.insert(remoteDebugSessions).values({
     sessionId,
     runnerId,
     repositoryId,
     testId,
     state: null,
     startedAt: new Date(),
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: remoteDebugSessions.sessionId,
+    set: { runnerId, repositoryId, testId, state: null, updatedAt: new Date() },
   });
   console.log(`[Debug] Created remote session ${sessionId} for runner ${runnerId}`);
 }
 
-export function getRemoteDebugSession(sessionId: string): RemoteDebugSession | null {
-  return remoteDebugSessionsMap.get(sessionId) ?? findRemoteDebugBySessionId(sessionId) ?? null;
+export async function getRemoteDebugSession(sessionId: string): Promise<RemoteDebugSession | null> {
+  const [row] = await db
+    .select()
+    .from(remoteDebugSessions)
+    .where(drizzleEq(remoteDebugSessions.sessionId, sessionId))
+    .limit(1);
+  if (!row) return null;
+  return {
+    sessionId: row.sessionId,
+    runnerId: row.runnerId,
+    repositoryId: row.repositoryId,
+    testId: row.testId,
+    state: row.state as DebugStateResponsePayload | null,
+    startedAt: row.startedAt,
+  };
 }
 
-export function clearRemoteDebugSession(sessionId: string): void {
-  remoteDebugSessionsMap.delete(sessionId);
+async function updateRemoteDebugSessionState(
+  sessionId: string,
+  state: DebugStateResponsePayload
+): Promise<boolean> {
+  const result = await db
+    .update(remoteDebugSessions)
+    .set({ state, updatedAt: new Date() })
+    .where(drizzleEq(remoteDebugSessions.sessionId, sessionId))
+    .returning({ sessionId: remoteDebugSessions.sessionId });
+  return result.length > 0;
+}
+
+export async function clearRemoteDebugSession(sessionId: string): Promise<void> {
+  await db.delete(remoteDebugSessions).where(drizzleEq(remoteDebugSessions.sessionId, sessionId));
 }

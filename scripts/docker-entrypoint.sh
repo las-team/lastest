@@ -30,7 +30,7 @@ if mkdir -p /app/storage/.claude 2>/dev/null; then
 fi
 
 echo "Starting Lastest..."
-echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"1
+echo "Database: $(echo "${DATABASE_URL:-postgresql://lastest:lastest@localhost:5432/lastest}" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 
 # Run database migrations
 if [ -f "/app/migrate.js" ]; then

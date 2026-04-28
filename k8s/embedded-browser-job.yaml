@@ -12,7 +12,10 @@
 #   - /dev/shm is mounted as a 512Mi memory emptyDir — Chromium crashes under
 #     load on the default 64Mi /dev/shm.
 #
-# Replace INSTANCE_ID placeholders before applying manually.
+# Replace INSTANCE_ID + SYSTEM_EB_TOKEN placeholders before applying manually.
+# LASTEST_URL points at the host's pnpm dev via the k3d CoreDNS pin installed
+# by scripts/k3d-up.sh — change it to a Service DNS name in production
+# (Olares) where the app runs in-cluster.
 ---
 apiVersion: batch/v1
 kind: Job
@@ -44,12 +47,9 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: LASTEST_URL
-              value: "http://lastest-app.lastest.svc.cluster.local:3000"
+              value: "http://host.k3d.internal:3000"
             - name: SYSTEM_EB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: lastest-system-eb
-                  key: token
+              value: "REPLACE_ME"
             - name: INSTANCE_ID
               value: "INSTANCE_ID"
             - name: STREAM_PORT

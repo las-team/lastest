@@ -16,6 +16,7 @@ export type MessageType =
   | 'command:start_recording'
   | 'command:stop_recording'
   | 'command:create_assertion'
+  | 'command:create_wait'
   | 'command:flag_download'
   | 'command:insert_timestamp'
   | 'command:start_debug'
@@ -101,6 +102,26 @@ export interface RunTestCommandPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  // Extract-mode TestVariables — runner reads these page fields after the test body runs.
+  extractVariables?: Array<{
+    name: string;
+    targetSelector: string;
+    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
+  // When true, the runner re-throws TypeError / ReferenceError / SyntaxError
+  // from the soft-wrap so a broken test body fails the run instead of being
+  // recorded as a soft warning. Driven by the test's `all_steps_executed`
+  // Criteria rule (default ON, off only when user explicitly opted out).
+  failOnRuntimeError?: boolean;
+  /** Parsed assertions from `parseAssertions(code)`. Runner uses these to
+   *  wrap each `expect(...)` line with a structured pass/fail recorder
+   *  keyed by the host-computed `id`. Order-sensitive — must match the
+   *  source order produced by the parser. */
+  assertions?: Array<{
+    id: string;
+    codeLineStart?: number;
+    codeLineEnd?: number;
+  }>;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -120,6 +141,11 @@ export interface RunSetupCommandPayload {
   };
   stabilization?: StabilizationPayload;
   browser?: 'chromium' | 'firefox' | 'webkit';
+  // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
+  // the setup page so the user can watch setup execute live (login flow,
+  // OAuth redirects). Default false preserves the CPU-saving behavior of
+  // headless batch runs.
+  headed?: boolean;
 }
 
 export interface RunSetupCommand extends BaseMessage {
@@ -229,11 +255,17 @@ export interface TestResultPayload {
   };
   logs: LogEntry[];
   softErrors?: string[];
+  /** Per-`expect()` outcome rows produced by the runner's assertion tracker.
+   *  `assertionId` matches one of the `assertions[].id` sent in the run
+   *  command. The criteria evaluator keys on these to fail the test when a
+   *  user-pinned assertion failed. */
+  assertionResults?: import('@/lib/db/schema').AssertionResult[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
+  extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -295,6 +327,24 @@ export interface CreateAssertionCommandPayload {
 export interface CreateAssertionCommand extends BaseMessage {
   type: 'command:create_assertion';
   payload: CreateAssertionCommandPayload;
+}
+
+export type WaitType = 'duration' | 'selector';
+export type WaitSelectorCondition = 'visible' | 'hidden';
+
+export interface CreateWaitCommandPayload {
+  sessionId: string;
+  waitType: WaitType;
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: WaitSelectorCondition;
+  timeoutMs?: number;
+}
+
+export interface CreateWaitCommand extends BaseMessage {
+  type: 'command:create_wait';
+  payload: CreateWaitCommandPayload;
 }
 
 export interface FlagDownloadCommandPayload {
@@ -512,6 +562,7 @@ export type ServerCommand =
   | StartRecordingCommand
   | StopRecordingCommand
   | CreateAssertionCommand
+  | CreateWaitCommand
   | FlagDownloadCommand
   | InsertTimestampCommand
   | CaptureScreenshotCommand

@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
+import { VideoPlayer } from '@/components/video-player';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
@@ -30,10 +30,9 @@ import { runTests, getJobStatus } from '@/server/actions/runs';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
-import { StepScreenshotMatcher } from '@/components/planned/step-screenshot-matcher';
+import { ScreenshotTimeline } from '@/components/tests/screenshot-timeline';
 import { TestSetupOverrides } from '@/components/setup/test-setup-overrides';
-import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
+import type { Test, TestVersion, PlannedScreenshot, SetupScript, GoogleSheetsDataSource, CsvDataSource, A11yViolation, StabilizationSettings, DiffSensitivitySettings, TestSpec } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
@@ -41,12 +40,17 @@ import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/c
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { TestStepsTab } from '@/components/tests/success-criteria-tab';
+import { StepCriteriaTab } from '@/components/tests/step-criteria-tab';
+import { TestVarsTab } from '@/components/tests/test-vars-tab';
 import type { ScreenshotGroup } from '@/server/actions/tests';
 import { SheetDataPreview } from '@/components/test-data/sheet-data-preview';
 import { SheetReferenceInserter } from '@/components/test-data/sheet-reference-inserter';
+import { VarReferenceInserter } from '@/components/test-data/var-reference-inserter';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
+import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
+import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -78,6 +82,8 @@ interface TestResult {
   screenshots: import('@/lib/db/schema').CapturedScreenshot[] | null;
   lastReachedStep: number | null;
   totalSteps: number | null;
+  extractedVariables: Record<string, string> | null;
+  assignedVariables: Record<string, string> | null;
 }
 
 interface DefaultStepForUI {
@@ -112,6 +118,7 @@ interface TestDetailClientProps {
   availableTests?: Test[];
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
+  csvDataSources?: CsvDataSource[];
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
   earlyAdopterMode?: boolean;
@@ -224,7 +231,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -242,7 +249,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Run state
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
 
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -287,6 +293,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   // Version history state
   const [versions, setVersions] = useState<TestVersion[]>([]);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [expandedDiffVersion, setExpandedDiffVersion] = useState<number | null>(null);
   const [isRestoring, setIsRestoring] = useState<number | null>(null);
 
   // Run history expand state
@@ -408,7 +415,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
     setIsRunning(true);
     try {
-      const result = await runTests([test.id], repositoryId, headless, executionTarget, forceVideoRecording);
+      const result = await runTests([test.id], repositoryId, headless, 'auto', forceVideoRecording);
       const { jobId } = result;
       notifyJobStarted();
       if ('queued' in result && result.queued) {
@@ -417,28 +424,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         toast.success(forceVideoRecording ? 'Test started with recording' : headless ? 'Test started' : 'Test started (headed mode)');
       }
 
-      // Fetch stream URL for headed runs on embedded/system runners
-      // For specific runners, fetch immediately. For 'auto', resolve via job poll below.
-      const isAutoTarget = !executionTarget || executionTarget === 'auto' || executionTarget === 'local';
-      if (!headless && !isAutoTarget) {
-        try {
-          const streamInfo = await getStreamUrlForRunner(executionTarget);
-          if (streamInfo?.streamUrl) {
-            const token = streamInfo.streamAuthToken;
-            setStreamUrl(
-              token
-                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-                : streamInfo.streamUrl
-            );
-          }
-        } catch {
-          // Stream not available — not critical
-        }
-      }
-
-      // Poll job status for completion (ensures results are saved before refresh)
-      // Also resolves stream URL for 'auto' target headed runs
-      let streamResolved = !isAutoTarget || headless;
+      // Resolves stream URL for headed runs once the actual runner is known.
+      let streamResolved = headless;
       pollIntervalRef.current = setInterval(async () => {
         const { isComplete, status, error, actualRunnerId } = await getJobStatus(jobId);
 
@@ -552,7 +539,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   };
 
   return (
-    <div className="flex-1 p-6 overflow-auto">
+    <div className="flex-1 p-6">
       <div className={cn("max-w-4xl mx-auto space-y-6", contentClassName)}>
         {/* Deleted Banner */}
         {test.deletedAt && (
@@ -616,13 +603,6 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </>
                 ) : (
                   <>
-                    <ExecutionTargetSelector
-                      value={executionTarget}
-                      onChange={setExecutionTarget}
-                      disabled={isRunning}
-                      capabilityFilter="run"
-                      size="sm"
-                    />
                     <div className="flex">
                       <Button
                         onClick={() => handleRun(true)}
@@ -713,6 +693,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                    <PublishShareDialog testId={test.id} initialShares={[]} iconOnly />
                   </>
                 )}
               </div>
@@ -866,10 +847,12 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           <div ref={viewerLayoutRef} className={isViewerFullscreen ? 'flex-1 flex flex-col h-full overflow-hidden bg-muted/50' : ''}>
             {isViewerFullscreen ? (
               <>
-                <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+                <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
                   <BrowserViewer
                     streamUrl={streamUrl}
                     hideControls
+                    fit
+                    className="flex-1 min-h-0"
                   />
                 </div>
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
@@ -916,7 +899,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 {showViewer && (
                   <BrowserViewer
                     streamUrl={streamUrl}
-                    className="max-h-[500px]"
+                    className="h-[500px]"
+                    fit
                     hideFullscreenToggle
                     hideScreenshot
                     hideViewportSelector
@@ -931,18 +915,18 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         {/* Tabs for Code, Screenshots, History */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
-            <TabsTrigger value="code" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
+            <TabsTrigger value="code" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
             {earlyAdopterMode && (
-              <TabsTrigger value="spec" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
+              <TabsTrigger value="spec" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Spec</TabsTrigger>
             )}
-            <TabsTrigger value="steps" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
-            <TabsTrigger value="setup" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Seed</TabsTrigger>
-            <TabsTrigger value="playback" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
-            <TabsTrigger value="screenshots" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
-            <TabsTrigger value="plans" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Plans</TabsTrigger>
-            <TabsTrigger value="history" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
-            <TabsTrigger value="recordings" className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
-            <TabsTrigger value="versions" onClick={loadVersions} className="flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
+            <TabsTrigger value="steps" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Steps</TabsTrigger>
+            <TabsTrigger value="criteria" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Criteria</TabsTrigger>
+            <TabsTrigger value="vars" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Vars</TabsTrigger>
+            <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
+            <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="history" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
+            <TabsTrigger value="recordings" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
+            <TabsTrigger value="versions" onClick={loadVersions} className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="code" className="mt-4 space-y-4">
@@ -950,13 +934,23 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm">Test Code</CardTitle>
-                  {isEditing && sheetDataSources.length > 0 && (
-                    <SheetReferenceInserter
-                      dataSources={sheetDataSources}
-                      onInsert={(ref) => {
-                        setEditCode((prev) => prev + ref);
-                      }}
-                    />
+                  {isEditing && (
+                    <div className="flex items-center gap-2">
+                      {sheetDataSources.length > 0 && (
+                        <SheetReferenceInserter
+                          dataSources={sheetDataSources}
+                          onInsert={(ref) => {
+                            setEditCode((prev) => prev + ref);
+                          }}
+                        />
+                      )}
+                      <VarReferenceInserter
+                        variables={test.variables ?? []}
+                        onInsert={(ref) => {
+                          setEditCode((prev) => prev + ref);
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -1041,6 +1035,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               envBaseUrl={envBaseUrl ?? null}
               lastReachedStep={latestResult?.lastReachedStep ?? null}
               totalSteps={latestResult?.totalSteps ?? null}
+              variables={test.variables ?? null}
+              sheetSources={sheetDataSources}
+              csvSources={csvDataSources}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                if (onRefresh) await onRefresh(); else router.refresh();
+              }}
               onParseNeeded={async () => {
                 try {
                   const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
@@ -1053,15 +1055,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   // Best effort
                 }
               }}
-              onToggleAssertionSoftness={async (assertionId, makeSoft) => {
-                const { toggleAssertionSoftness } = await import('@/server/actions/tests');
-                await toggleAssertionSoftness(test.id, assertionId, makeSoft);
-                router.refresh();
-              }}
               onStepValueChange={async (lineStart, lineEnd, oldValue, newValue) => {
                 const { updateStepValue } = await import('@/server/actions/tests');
                 await updateStepValue(test.id, lineStart, lineEnd, oldValue, newValue);
-                router.refresh();
+                if (onRefresh) await onRefresh(); else router.refresh();
               }}
               onGoToCode={(line) => {
                 setHighlightLine(line);
@@ -1073,10 +1070,53 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   setTimeout(() => setHighlightLine(null), 2000);
                 }, 100);
               }}
+              onNavigateToVars={() => setActiveTab('vars')}
             />
           </TabsContent>
 
-          <TabsContent value="setup" className="mt-4">
+          <TabsContent value="criteria" className="mt-4">
+            <StepCriteriaTab
+              testId={test.id}
+              screenshots={latestResult?.screenshots ?? null}
+              stepCriteria={test.stepCriteria ?? null}
+              assertions={test.assertions ?? null}
+              variables={test.variables ?? null}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                // Refetch the parent's cached test detail. `router.refresh()`
+                // alone won't help here — this view is hydrated from a client
+                // server-action call that's not driven by server-component
+                // rendering, so the cache lives in `definition-page-client`'s
+                // `openTestDetailData` state.
+                if (onRefresh) await onRefresh(); else router.refresh();
+              }}
+              onMutated={async () => {
+                if (onRefresh) await onRefresh(); else router.refresh();
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="vars" className="mt-4">
+            <TestVarsTab
+              testId={test.id}
+              repositoryId={repositoryId ?? null}
+              variables={test.variables ?? []}
+              sheetSources={sheetDataSources}
+              csvSources={csvDataSources}
+              extractedValues={latestResult?.extractedVariables ?? null}
+              assignedValues={latestResult?.assignedVariables ?? null}
+              code={test.code ?? null}
+              onRefresh={onRefresh}
+              onSaveVariables={async (next) => {
+                const { saveTestVariables } = await import('@/server/actions/tests');
+                await saveTestVariables(test.id, next);
+                if (onRefresh) await onRefresh(); else router.refresh();
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestSetupOverrides
               testId={test.id}
               setupOverrides={test.setupOverrides ?? null}
@@ -1086,10 +1126,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               }))}
               availableTests={availableTests}
               availableScripts={availableScripts}
+              onRefresh={onRefresh}
             />
-          </TabsContent>
 
-          <TabsContent value="playback" className="mt-4 space-y-6">
             <TestStabilizationOverrides
               testId={test.id}
               overrides={test.stabilizationOverrides ?? null}
@@ -1126,8 +1165,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   navigationTimeout: playwrightDefaults?.navigationTimeout ?? 30000,
                   actionTimeout: playwrightDefaults?.actionTimeout ?? 30000,
                   screenshotDelay: playwrightDefaults?.screenshotDelay ?? 0,
-                  networkErrorMode: (playwrightDefaults?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-                  consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+                  networkErrorMode: (playwrightDefaults?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+                  consoleErrorMode: (playwrightDefaults?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
                   acceptAnyCertificate: playwrightDefaults?.acceptAnyCertificate ?? false,
                   maxParallelTests: playwrightDefaults?.maxParallelTests ?? 2,
                   cursorPlaybackSpeed: playwrightDefaults?.cursorPlaybackSpeed ?? 1,
@@ -1138,77 +1177,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {screenshotGroups.length > 0 ? (
-                  <div className="space-y-6">
-                    {screenshotGroups.map((group) => (
-                      <div key={group.runId} className="space-y-3">
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground border-b pb-2">
-                          <Clock className="h-4 w-4" />
-                          <span>
-                            {group.startedAt
-                              ? new Date(group.startedAt).toLocaleString()
-                              : 'Unknown time'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          {group.screenshots.map((src, i) => {
-                            const filename = src.split('/').pop() || '';
-                            // Extract label from filename (after runId-testId-)
-                            const parts = filename.split('-');
-                            const label = parts.slice(10).join(' ').replace('.png', '') || 'screenshot';
-                            return (
-                              <div key={i} className="space-y-1">
-                                <a
-                                  href={src}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={src}
-                                    alt={label || 'Screenshot'}
-                                    className="w-full rounded-lg border hover:opacity-90 transition-opacity"
-                                  />
-                                </a>
-                                <p className="text-xs text-muted-foreground text-center capitalize">{label}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    No screenshots captured yet
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="plans" className="mt-4">
-            {repositoryId ? (
-              <StepScreenshotMatcher
-                testId={test.id}
-                repositoryId={repositoryId}
-                screenshotGroups={screenshotGroups}
-                plannedScreenshots={plannedScreenshots}
-                onUpdate={() => router.refresh()}
-              />
-            ) : (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  Select a repository to manage planned screenshots
-                </CardContent>
-              </Card>
-            )}
+            <ScreenshotTimeline
+              testId={test.id}
+              repositoryId={repositoryId ?? null}
+              screenshotGroups={screenshotGroups}
+              plannedScreenshots={plannedScreenshots}
+              onUpdate={() => router.refresh()}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
@@ -1335,7 +1310,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               </div>
                             ) : (
                               <div className="mt-3 text-xs text-muted-foreground">
-                                No visual diff data for this run
+                                No screenshots captured in this run. Add a Screenshot step
+                                in the <span className="font-medium">Steps</span> tab to record one.
                               </div>
                             )}
                           </div>
@@ -1408,11 +1384,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               : 'Unknown'}
                           </span>
                         </div>
-                        <video
+                        <VideoPlayer
                           src={result.videoPath!}
-                          controls
                           preload="metadata"
-                          className="w-full rounded border bg-black"
+                          className="w-full aspect-video rounded border"
                         />
                       </div>
                     ))}
@@ -1443,68 +1418,132 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </div>
                 ) : versions.length > 0 ? (
                   <div className="space-y-2">
-                    {versions.map((version) => (
-                      <div
-                        key={version.id}
-                        className="p-3 border rounded-lg"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-sm font-medium">v{version.version}</span>
-                            <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
-                              {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
-                            </span>
-                            {version.viewportWidth && version.viewportHeight && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted font-mono text-muted-foreground">
-                                {version.viewportWidth}&times;{version.viewportHeight}
+                    {versions.map((version, idx) => {
+                      // Each `testVersions` row stores the code state BEFORE its own
+                      // change (`updateTestWithVersion` saves `test.code` first, then
+                      // updates). So the diff that this version introduced is:
+                      //   before = versions[idx].code (this row's pre-change snapshot)
+                      //   after  = next-newer snapshot, OR `test.code` if this is the
+                      //            latest version (idx === 0)
+                      // versions arrive newest-first.
+                      const beforeCode = version.code ?? '';
+                      const afterCode = idx === 0
+                        ? (test.code ?? '')
+                        : (versions[idx - 1].code ?? '');
+                      const isExpanded = expandedDiffVersion === version.version;
+                      const diff = isExpanded
+                        ? diffTextLines(beforeCode, afterCode)
+                        : null;
+                      const stats = diff ? diffStats(diff) : null;
+                      return (
+                        <div
+                          key={version.id}
+                          className="p-3 border rounded-lg"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-sm font-medium">v{version.version}</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted capitalize">
+                                {version.changeReason?.replace(/_/g, ' ') || 'manual edit'}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              {version.createdAt
-                                ? new Date(version.createdAt).toLocaleString()
-                                : 'Unknown'}
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRestore(version.version)}
-                              disabled={isRestoring !== null}
-                            >
-                              {isRestoring === version.version ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <RotateCcw className="h-4 w-4" />
+                              {version.viewportWidth && version.viewportHeight && (
+                                <span className="text-xs px-2 py-0.5 rounded bg-muted font-mono text-muted-foreground">
+                                  {version.viewportWidth}&times;{version.viewportHeight}
+                                </span>
                               )}
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="mt-2 text-xs text-muted-foreground truncate">
-                          {version.name}
-                        </div>
-                        {(version.branch || version.firstBuildId) && (
-                          <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
-                            {version.branch && (
-                              <span className="inline-flex items-center gap-1">
-                                <GitBranch className="h-3 w-3" />
-                                {version.branch}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">
+                                {version.createdAt
+                                  ? new Date(version.createdAt).toLocaleString()
+                                  : 'Unknown'}
                               </span>
-                            )}
-                            {version.firstBuildId && (
-                              <a
-                                href={`/builds/${version.firstBuildId}`}
-                                className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                              {beforeCode !== afterCode && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setExpandedDiffVersion(isExpanded ? null : version.version)}
+                                  title={isExpanded ? 'Hide diff' : `Show what changed in v${version.version}`}
+                                >
+                                  {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRestore(version.version)}
+                                disabled={isRestoring !== null}
                               >
-                                <GitCommit className="h-3 w-3" />
-                                {version.firstBuildBranch}
-                                {version.firstBuildCommit && `@${version.firstBuildCommit.slice(0, 7)}`}
-                              </a>
-                            )}
+                                {isRestoring === version.version ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div className="mt-2 text-xs text-muted-foreground truncate">
+                            {version.name}
+                          </div>
+                          {(version.branch || version.firstBuildId) && (
+                            <div className="mt-1.5 flex items-center gap-3 text-xs text-muted-foreground">
+                              {version.branch && (
+                                <span className="inline-flex items-center gap-1">
+                                  <GitBranch className="h-3 w-3" />
+                                  {version.branch}
+                                </span>
+                              )}
+                              {version.firstBuildId && (
+                                <a
+                                  href={`/builds/${version.firstBuildId}`}
+                                  className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                                >
+                                  <GitCommit className="h-3 w-3" />
+                                  {version.firstBuildBranch}
+                                  {version.firstBuildCommit && `@${version.firstBuildCommit.slice(0, 7)}`}
+                                </a>
+                              )}
+                            </div>
+                          )}
+                          {isExpanded && diff && (
+                            <div className="mt-3 border rounded-md overflow-hidden">
+                              <div className="px-3 py-1.5 bg-muted/40 text-xs font-mono text-muted-foreground flex items-center justify-between">
+                                <span>
+                                  Changes in v{version.version}
+                                  {idx === 0 && <span className="ml-1 text-muted-foreground/60">(current)</span>}
+                                </span>
+                                {stats && (
+                                  <span className="flex items-center gap-2">
+                                    <span className="text-emerald-600 dark:text-emerald-400">+{stats.added}</span>
+                                    <span className="text-red-600 dark:text-red-400">-{stats.removed}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <pre className="text-xs font-mono overflow-x-auto max-h-[500px] overflow-y-auto bg-background">
+                                {diff.map((line, lineIdx) => {
+                                  const bg =
+                                    line.op === 'add' ? 'bg-emerald-50 dark:bg-emerald-950/40' :
+                                    line.op === 'del' ? 'bg-red-50 dark:bg-red-950/40' : '';
+                                  const prefix = line.op === 'add' ? '+' : line.op === 'del' ? '-' : ' ';
+                                  return (
+                                    <div key={lineIdx} className={`flex ${bg}`}>
+                                      <span className="select-none w-10 text-right pr-1 text-muted-foreground/60 border-r">
+                                        {line.oldLineNo ?? ''}
+                                      </span>
+                                      <span className="select-none w-10 text-right pr-1 text-muted-foreground/60 border-r">
+                                        {line.newLineNo ?? ''}
+                                      </span>
+                                      <span className="select-none w-4 text-center text-muted-foreground">{prefix}</span>
+                                      <span className="flex-1 whitespace-pre pl-1 pr-2">{line.line || ' '}</span>
+                                    </div>
+                                  );
+                                })}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">

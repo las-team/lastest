@@ -11,7 +11,7 @@
  *     deleted (subject to a small idle-TTL to absorb back-to-back tests).
  *
  * Controlled via env (deployment topology / infra):
- *   EB_PROVISIONER     = 'kubernetes' | 'compose' | 'none'    (default: 'none')
+ *   EB_PROVISIONER     = 'kubernetes' | 'none'    (default: 'none')
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
  *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
@@ -38,11 +38,11 @@ import { and, eq, ne } from 'drizzle-orm';
 
 const SA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount';
 
-type Mode = 'kubernetes' | 'compose' | 'none';
+type Mode = 'kubernetes' | 'none';
 
 function provisionerMode(): Mode {
   const m = (process.env.EB_PROVISIONER || 'none').toLowerCase();
-  if (m === 'kubernetes' || m === 'compose') return m;
+  if (m === 'kubernetes') return m;
   return 'none';
 }
 
@@ -244,7 +244,11 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   const creds = (() => { try { return loadClusterCreds(); } catch { return null; } })();
   const image = process.env.EB_IMAGE || 'lastest-embedded-browser:latest';
   const lastestUrl = process.env.LASTEST_URL || 'http://lastest-app.lastest.svc.cluster.local:3000';
-  const systemToken = process.env.SYSTEM_EB_TOKEN || '';
+  // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
+  // (auto-register validates by splitting on `,`). Each EB sends the env var
+  // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
+  // every register attempt. Take the first entry — the one the app prefers.
+  const systemToken = (process.env.SYSTEM_EB_TOKEN || '').split(',')[0].trim();
   const cpuRequest = process.env.EB_CPU_REQUEST || '1000m';
   const cpuLimit = process.env.EB_CPU_LIMIT || '2000m';
   const memRequest = process.env.EB_MEM_REQUEST || '2Gi';
@@ -332,6 +336,27 @@ function generateInstanceId(): string {
  * Returns the Job name and the instanceId it was created with.
  * Does NOT wait for the pod to register — caller polls DB for the matching runner.
  */
+// Throttle pod creations. With strict 1-job-1-EB, every test triggers a
+// fresh pod launch; concurrent launches burst Calico CNI route-table updates
+// which briefly disrupt active in-flight pods' network connections.
+// Chromium surfaces this as `net::ERR_NETWORK_CHANGED` mid-test → blank
+// screenshots. Spacing launches by EB_LAUNCH_INTERVAL_MS (default 500ms)
+// gives CNI time to settle before the next pod's network namespace is wired up.
+// Set EB_LAUNCH_INTERVAL_MS=0 to disable.
+let _launchChain: Promise<void> = Promise.resolve();
+async function awaitLaunchSlot(): Promise<void> {
+  const intervalMs = parseInt(process.env.EB_LAUNCH_INTERVAL_MS || '500', 10);
+  if (intervalMs <= 0) return;
+  const prev = _launchChain;
+  let release!: () => void;
+  _launchChain = new Promise<void>((r) => { release = r; });
+  try {
+    await prev;
+  } finally {
+    setTimeout(release, intervalMs);
+  }
+}
+
 export async function launchEBJob(): Promise<{ jobName: string; instanceId: string }> {
   if (!isKubernetesMode()) {
     throw new Error('launchEBJob called but EB_PROVISIONER !== "kubernetes"');
@@ -342,6 +367,8 @@ export async function launchEBJob(): Promise<{ jobName: string; instanceId: stri
   if (poolSize >= cap) {
     throw new Error(`EB pool at capacity (${poolSize}/${cap})`);
   }
+
+  await awaitLaunchSlot();
 
   const instanceId = generateInstanceId();
   const jobName = instanceId; // instanceId is short enough to use as job name

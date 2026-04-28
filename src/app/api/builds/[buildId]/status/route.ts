@@ -60,5 +60,12 @@ export async function GET(
     isMainBranch: build.isMainBranch,
     diffs: build.diffs,
     errorMessage: build.errorMessage,
+  }, {
+    headers: {
+      // Defeat browser HTTP cache: this endpoint is polled every 2s during
+      // a running build; without this, browsers may serve the first response
+      // from cache for the whole build duration, freezing the progress UI.
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    },
   });
 }

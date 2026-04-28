@@ -79,8 +79,8 @@ export async function resolveTestSettings(
     navigationTimeout: repoPlaywright?.navigationTimeout ?? 30000,
     actionTimeout: repoPlaywright?.actionTimeout ?? 30000,
     screenshotDelay: repoPlaywright?.screenshotDelay ?? 0,
-    networkErrorMode: (repoPlaywright?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-    consoleErrorMode: (repoPlaywright?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+    networkErrorMode: (repoPlaywright?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+    consoleErrorMode: (repoPlaywright?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
     acceptAnyCertificate: repoPlaywright?.acceptAnyCertificate ?? false,
     maxParallelTests: repoPlaywright?.maxParallelTests ?? 2,
   };

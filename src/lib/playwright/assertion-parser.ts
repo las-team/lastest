@@ -7,11 +7,25 @@ import type { TestAssertion } from '@/lib/db/schema';
 import { createHash } from 'crypto';
 
 /**
- * Generate a stable ID for an assertion based on its properties.
+ * Generate a stable ID for an assertion based on its content + occurrence.
+ *
+ * Hashed on (type, selector, expected, occurrence) — NOT positional source
+ * order. `occurrence` is the Nth instance of this exact triple in the file
+ * (0 for the first, 1 for an exact duplicate, etc.). This keeps IDs stable
+ * across edits that don't change the assertion's identity (adding a comment
+ * above, reordering dissimilar assertions) and lets the runner reproduce the
+ * same id at runtime by counting matchers per-(type, target, expected).
  */
-function assertionId(orderIndex: number, type: string, selector?: string, expected?: string): string {
-  const input = `${orderIndex}:${type}:${selector ?? ''}:${expected ?? ''}`;
+function assertionId(occurrence: number, type: string, selector?: string, expected?: string): string {
+  const input = `${type}:${selector ?? ''}:${expected ?? ''}:${occurrence}`;
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
+}
+
+function nextOccurrence(map: Map<string, number>, type: string, selector?: string, expected?: string): number {
+  const key = `${type}:${selector ?? ''}:${expected ?? ''}`;
+  const n = map.get(key) ?? 0;
+  map.set(key, n + 1);
+  return n;
 }
 
 /**
@@ -21,29 +35,31 @@ export function parseAssertions(code: string): TestAssertion[] {
   const assertions: TestAssertion[] = [];
   const lines = code.split('\n');
   let orderIndex = 0;
+  // Per-(type, selector, expected) occurrence counter. Drives `assertionId`
+  // so that an exact-duplicate assertion later in the file gets a distinct id.
+  const occurrenceMap = new Map<string, number>();
+
+  // All assertions are soft by default. Whether a failure fails the test is
+  // controlled by per-assertion criteria rules on the Criteria tab — runtime
+  // semantics are uniform here.
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
 
     // Pattern 1: Element assertion block (from event-to-code.ts)
-    // // Element assertion: toBeVisible  OR  // Hard assertion: toBeVisible
-    const elementCommentMatch = trimmed.match(/^\/\/ (Element|Hard) assertion: (\w+)/);
+    // Tolerates legacy `// Hard assertion:` comments too — both parse the same
+    // block; isSoft is forced to true regardless.
+    const elementCommentMatch = trimmed.match(/^\/\/ (?:Element|Hard) assertion: (\w+)/);
     if (elementCommentMatch) {
-      const isHard = elementCommentMatch[1] === 'Hard';
-      const assertionType = elementCommentMatch[2];
-      const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType);
+      const assertionType = elementCommentMatch[1];
+      const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType, occurrenceMap);
       if (assertion) {
-        assertion.isSoft = !isHard;
         assertions.push(assertion);
         orderIndex++;
       }
       continue;
     }
-
-    // Check if previous line marks this assertion as hard
-    const prevTrimmed = i > 0 ? lines[i - 1].trim() : '';
-    const hasHardMarker = /^\/\/ Hard assertion/.test(prevTrimmed);
 
     // Pattern 2: Page-level assertions
     // await expect(page).toHaveURL(...)
@@ -55,13 +71,13 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, 'page', expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, 'page', expectedValue), assertionType, 'page', expectedValue),
         orderIndex,
         category: 'page',
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('page', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -79,13 +95,13 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, inlineElMatch[1], expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, inlineElMatch[1], expectedValue), assertionType, inlineElMatch[1], expectedValue),
         orderIndex,
         category: 'element',
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('element', assertionType, negated, undefined, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -107,13 +123,13 @@ export function parseAssertions(code: string): TestAssertion[] {
       const selectorLabel = extractLocatorLabel(target);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, target, expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, target, expectedValue), assertionType, target, expectedValue),
         orderIndex,
         category: 'element',
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('element', assertionType, negated, selectorLabel, expectedValue),
         codeLineStart: i + 1,
         codeLineEnd: i + 1,
@@ -132,15 +148,15 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, genericMatch[1], expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, genericMatch[1], expectedValue), assertionType, genericMatch[1], expectedValue),
         orderIndex,
         category: 'generic',
         assertionType,
         negated,
         expectedValue,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: describeAssertion('generic', assertionType, negated, genericMatch[1], expectedValue),
-        codeLineStart: hasHardMarker ? i : i + 1,
+        codeLineStart: i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;
@@ -148,30 +164,62 @@ export function parseAssertions(code: string): TestAssertion[] {
     }
 
     // Pattern 5: Download assertions
-    // // Download assertion: wait for download to complete then verify
+    // Two entry points:
+    //   (a) `// Download assertion: <filename>` comment emitted by the recorder
+    //       (event-to-code.ts:downloadExists). Captures the filename for the label.
+    //   (b) Bare `await downloads.waitForAny();` followed within ~2 lines by
+    //       `expect(downloads.list()…` — covers hand-written / AI-generated /
+    //       imported tests where the comment is missing. Pattern 4 can't catch
+    //       the expect on its own because `downloads.list().length` has nested
+    //       parens that defeat its `[^)]+` capture.
     const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:\s*(.+)?$/);
-    if (downloadCommentMatch) {
-      const filename = downloadCommentMatch[1]?.trim();
-      // Find the expect line (may be 1-3 lines after the comment, past waitForAny)
-      let endLine = i + 1;
-      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-        if (lines[j].trim().startsWith('expect(')) { endLine = j; break; }
+    const isBareDownloadWait = !downloadCommentMatch
+      && /^await\s+downloads\.waitForAny\s*\(/.test(trimmed);
+    if (downloadCommentMatch || isBareDownloadWait) {
+      const filename = downloadCommentMatch?.[1]?.trim();
+      // Find the expect line that closes the download block. From a comment:
+      // expect is 1-3 lines below. From a bare waitForAny: 0-2 lines below.
+      // Require the expect to reference `downloads.list(` so we don't grab an
+      // unrelated assertion from the next step.
+      let endLine = i;
+      let foundExpect = false;
+      const scanStart = downloadCommentMatch ? i + 1 : i + 1;
+      const scanEnd = Math.min(scanStart + 3, lines.length);
+      for (let j = scanStart; j < scanEnd; j++) {
+        const lt = lines[j].trim();
+        if (/^expect\s*\(\s*downloads\.list\s*\(/.test(lt)) {
+          endLine = j;
+          foundExpect = true;
+          break;
+        }
+        // Allow `await downloads.waitForAny()` to sit between the comment and
+        // the expect — that's exactly what the recorder emits.
+        if (/^await\s+downloads\.waitForAny\s*\(/.test(lt)) continue;
+        // Anything else means this isn't a download block — bail.
+        if (lt && !lt.startsWith('//')) break;
       }
 
-      assertions.push({
-        id: assertionId(orderIndex, 'fileDownloaded', 'download', filename),
-        orderIndex,
-        category: 'download',
-        assertionType: 'fileDownloaded',
-        negated: false,
-        expectedValue: filename,
-        isSoft: !hasHardMarker,
-        label: filename && filename !== 'fileDownloaded' ? `Download: ${filename}` : 'File downloaded',
-        codeLineStart: i + 1,
-        codeLineEnd: endLine + 1,
-      });
-      orderIndex++;
-      continue;
+      // Bare pattern only counts when the expect line is actually present —
+      // otherwise we'd false-positive on a lone waitForAny() call.
+      if (downloadCommentMatch || foundExpect) {
+        assertions.push({
+          id: assertionId(nextOccurrence(occurrenceMap, 'fileDownloaded', 'download', filename), 'fileDownloaded', 'download', filename),
+          orderIndex,
+          category: 'download',
+          assertionType: 'fileDownloaded',
+          negated: false,
+          expectedValue: filename,
+          isSoft: true,
+          label: filename && filename !== 'fileDownloaded' ? `Download: ${filename}` : 'File downloaded',
+          codeLineStart: i + 1,
+          codeLineEnd: (foundExpect ? endLine : i) + 1,
+        });
+        orderIndex++;
+        // Skip past the consumed lines so the bare-expect line isn't re-scanned
+        // by Pattern 4 on the next iteration.
+        if (foundExpect) i = endLine;
+        continue;
+      }
     }
 
     // Pattern 6: Page wait assertions
@@ -179,15 +227,15 @@ export function parseAssertions(code: string): TestAssertion[] {
       const stateMatch = trimmed.match(/waitForLoadState\(['"](\w+)['"]\)/);
       const state = stateMatch?.[1] ?? 'load';
       assertions.push({
-        id: assertionId(orderIndex, 'waitForLoadState', 'page', state),
+        id: assertionId(nextOccurrence(occurrenceMap, 'waitForLoadState', 'page', state), 'waitForLoadState', 'page', state),
         orderIndex,
         category: 'page',
         assertionType: 'waitForLoadState',
         negated: false,
         expectedValue: state,
-        isSoft: !hasHardMarker,
+        isSoft: true,
         label: `Page load state: ${state}`,
-        codeLineStart: hasHardMarker ? i : i + 1,
+        codeLineStart: i + 1,
         codeLineEnd: i + 1,
       });
       orderIndex++;
@@ -203,6 +251,7 @@ function parseElementAssertionBlock(
   commentLine: number,
   orderIndex: number,
   assertionType: string,
+  occurrenceMap: Map<string, number>,
 ): TestAssertion | null {
   // Look for the locateWithFallback call and expect call in the following lines
   let targetSelector: string | undefined;
@@ -256,7 +305,7 @@ function parseElementAssertionBlock(
   }
 
   return {
-    id: assertionId(orderIndex, assertionType, targetSelector, expectedValue),
+    id: assertionId(nextOccurrence(occurrenceMap, assertionType, targetSelector, expectedValue), assertionType, targetSelector, expectedValue),
     orderIndex,
     category: 'element',
     assertionType,

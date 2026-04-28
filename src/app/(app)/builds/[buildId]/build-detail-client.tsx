@@ -339,6 +339,7 @@ export function BuildDetailClient({
             onGroupByAreaChange={setGroupByArea}
             groupByTest={groupByTest}
             onGroupByTestChange={setGroupByTest}
+            diffs={diffs}
           />
         </CardContent>
       </Card>

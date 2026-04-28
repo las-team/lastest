@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -27,7 +26,6 @@ interface TestSpecEditorProps {
 }
 
 export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, functionalAreaId }: TestSpecEditorProps) {
-  const [title, setTitle] = useState(initialSpec?.title || testName);
   const [spec, setSpec] = useState(initialSpec?.spec || '');
   const [status, setStatus] = useState<string>(initialSpec?.status || 'draft');
   const [specId, setSpecId] = useState<string | null>(initialSpec?.id || null);
@@ -35,17 +33,17 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
   const [regenerating, setRegenerating] = useState(false);
   const [showRegenDialog, setShowRegenDialog] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef({ title: initialSpec?.title || testName, spec: initialSpec?.spec || '' });
+  const lastSavedRef = useRef({ spec: initialSpec?.spec || '' });
 
-  const doSave = useCallback(async (newTitle: string, newSpec: string) => {
+  const doSave = useCallback(async (newSpec: string) => {
     if (!newSpec.trim()) return;
-    if (newTitle === lastSavedRef.current.title && newSpec === lastSavedRef.current.spec) return;
+    if (newSpec === lastSavedRef.current.spec) return;
 
     setSaving(true);
     try {
-      const id = await saveTestSpec(testId, newTitle, newSpec, repositoryId, functionalAreaId);
+      const id = await saveTestSpec(testId, testName, newSpec, repositoryId, functionalAreaId);
       setSpecId(id);
-      lastSavedRef.current = { title: newTitle, spec: newSpec };
+      lastSavedRef.current = { spec: newSpec };
 
       // Check drift
       const drift = await detectSpecDrift(testId);
@@ -57,11 +55,11 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
     } finally {
       setSaving(false);
     }
-  }, [testId, repositoryId, functionalAreaId]);
+  }, [testId, testName, repositoryId, functionalAreaId]);
 
-  const scheduleAutoSave = useCallback((newTitle: string, newSpec: string) => {
+  const scheduleAutoSave = useCallback((newSpec: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSave(newTitle, newSpec), 1500);
+    debounceRef.current = setTimeout(() => doSave(newSpec), 1500);
   }, [doSave]);
 
   // Cleanup debounce on unmount
@@ -71,14 +69,9 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
     };
   }, []);
 
-  const handleTitleChange = (val: string) => {
-    setTitle(val);
-    scheduleAutoSave(val, spec);
-  };
-
   const handleSpecChange = (val: string) => {
     setSpec(val);
-    scheduleAutoSave(title, val);
+    scheduleAutoSave(val);
   };
 
   const handleRegenerate = async () => {
@@ -113,16 +106,6 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Title</label>
-            <Input
-              value={title}
-              onChange={(e) => handleTitleChange(e.target.value)}
-              placeholder="Spec title"
-              className="text-sm"
-            />
-          </div>
-
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Specification</label>
             <Textarea

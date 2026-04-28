@@ -20,7 +20,6 @@ import {
 import { saveEnvironmentConfig, testServerConnection } from '@/server/actions/environment';
 import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { createAndRunBuild } from '@/server/actions/builds';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import type { EmbeddedSession } from '@/lib/db/schema';
 
@@ -59,7 +58,6 @@ function isLocalUrl(url: string): boolean {
 export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
-  const [executionTarget] = usePreferredRunner();
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [expanded, setExpanded] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -164,7 +162,7 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
   const handleRunAll = async () => {
     setIsRunning(true);
     try {
-      const result = await createAndRunBuild('manual', undefined, repositoryId ?? null, executionTarget, undefined);
+      const result = await createAndRunBuild('manual', undefined, repositoryId ?? null, 'auto', undefined);
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
@@ -181,12 +179,12 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
 
   return (
     <div className="px-4 pb-3 space-y-2.5">
-      {/* Record + Run All */}
+      {/* Create + Run All */}
       <div className="flex gap-1.5">
         <Button asChild variant="secondary" size="sm" className="flex-1 gap-1.5">
           <Link href="/record">
             <Video className="h-3.5 w-3.5" />
-            Record
+            Create
           </Link>
         </Button>
         <Button

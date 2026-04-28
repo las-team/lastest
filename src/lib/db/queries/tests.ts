@@ -23,6 +23,8 @@ import type {
   NewTestVersion,
   NewTestSpec,
   TestChangeReason,
+  StepCriterion,
+  StepRule,
 } from '../schema';
 import { eq, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -90,6 +92,7 @@ export async function getTest(id: string) {
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null, viewport?: { width?: number; height?: number } | null) {
   const id = uuid();
   const now = new Date();
+  data = await withParsedAssertions(data);
   await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
 
   // Create initial version (version 1)
@@ -121,8 +124,25 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
+// Step criteria — per-step pass/fail rules (see schema StepCriterion / StepRule).
+export async function getStepCriteria(testId: string): Promise<StepCriterion[]> {
+  const [row] = await db.select({ stepCriteria: tests.stepCriteria }).from(tests).where(eq(tests.id, testId));
+  return row?.stepCriteria ?? [];
+}
+
+export async function updateStepCriteria(testId: string, stepLabel: string, rules: StepRule[]) {
+  const current = await getStepCriteria(testId);
+  const others = current.filter(c => c.stepLabel !== stepLabel);
+  const next = rules.length === 0 ? others : [...others, { stepLabel, rules }];
+  await db
+    .update(tests)
+    .set({ stepCriteria: next, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
+  return next;
+}
+
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  const patch = { ...data };
+  const patch = await withParsedAssertions({ ...data });
   if (
     patch.code !== undefined &&
     patch.code !== PLACEHOLDER_CODE &&
@@ -135,6 +155,17 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
     if (current?.isPlaceholder) patch.isPlaceholder = false;
   }
   await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
+}
+
+// Re-parse `tests.assertions` from `code` whenever a write changes the code and
+// the caller hasn't supplied its own `assertions` array. Keeps the Criteria tab's
+// per-assertion list in sync without each callsite having to remember.
+async function withParsedAssertions<T extends Partial<NewTest>>(patch: T): Promise<T> {
+  if (typeof patch.code !== 'string') return patch;
+  if (patch.code === PLACEHOLDER_CODE) return patch;
+  if (patch.assertions !== undefined) return patch;
+  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  return { ...patch, assertions: parseAssertions(patch.code) };
 }
 
 export async function softDeleteTest(id: string) {
@@ -446,6 +477,8 @@ export async function getTestResultsByTest(testId: string) {
       domSnapshot: testResults.domSnapshot,
       lastReachedStep: testResults.lastReachedStep,
       totalSteps: testResults.totalSteps,
+      extractedVariables: testResults.extractedVariables,
+      assignedVariables: testResults.assignedVariables,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
@@ -496,21 +529,24 @@ export async function setTestQuarantined(testId: string, quarantined: boolean) {
 }
 
 // Latest status per test, one query. PG DISTINCT ON picks the most recent
-// test_run per test_id. Returns a Map<testId, status>.
-export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<Map<string, string>> {
+// test_run per test_id. Returns a Map<testId, { status, startedAt }>.
+export type LatestRunInfo = { status: string; startedAt: Date | null };
+
+export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<Map<string, LatestRunInfo>> {
   if (testIds.length === 0) return new Map();
   const rows = await db
     .selectDistinctOn([testResults.testId], {
       testId: testResults.testId,
       status: testResults.status,
+      startedAt: testRuns.startedAt,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
     .where(inArray(testResults.testId, testIds))
     .orderBy(testResults.testId, desc(testRuns.startedAt));
-  const map = new Map<string, string>();
+  const map = new Map<string, LatestRunInfo>();
   for (const r of rows) {
-    if (r.testId && r.status) map.set(r.testId, r.status);
+    if (r.testId && r.status) map.set(r.testId, { status: r.status, startedAt: r.startedAt ?? null });
   }
   return map;
 }
@@ -522,11 +558,15 @@ export async function getTestsWithStatus() {
   const areaMap = new Map(areas.map(a => [a.id, a]));
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return allTests.map((test) => ({
-    ...test,
-    area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
-    latestStatus: statusMap.get(test.id) ?? null,
-  }));
+  return allTests.map((test) => {
+    const info = statusMap.get(test.id);
+    return {
+      ...test,
+      area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+      latestStatus: info?.status ?? null,
+      lastRunAt: info?.startedAt ?? null,
+    };
+  });
 }
 
 // Get tests with status filtered by repo
@@ -536,11 +576,15 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
   const areaMap = new Map(areas.map(a => [a.id, a]));
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return allTests.map((test) => ({
-    ...test,
-    area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
-    latestStatus: statusMap.get(test.id) ?? null,
-  }));
+  return allTests.map((test) => {
+    const info = statusMap.get(test.id);
+    return {
+      ...test,
+      area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
+      latestStatus: info?.status ?? null,
+      lastRunAt: info?.startedAt ?? null,
+    };
+  });
 }
 
 // Repo-filtered queries
@@ -560,11 +604,15 @@ export async function getUncategorizedTestsWithStatus() {
   const allTests = await getUncategorizedTests();
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
-  return allTests.map((test) => ({
-    ...test,
-    area: null,
-    latestStatus: statusMap.get(test.id) ?? null,
-  }));
+  return allTests.map((test) => {
+    const info = statusMap.get(test.id);
+    return {
+      ...test,
+      area: null,
+      latestStatus: info?.status ?? null,
+      lastRunAt: info?.startedAt ?? null,
+    };
+  });
 }
 
 export async function getDeletedUncategorizedTests() {
@@ -781,7 +829,7 @@ export async function updateTestWithVersion(
   });
 
   // Clear placeholder flag when real code overwrites the stub
-  const patch = { ...data };
+  const patch = await withParsedAssertions({ ...data });
   if (
     patch.code !== undefined &&
     patch.code !== PLACEHOLDER_CODE &&

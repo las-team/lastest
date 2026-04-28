@@ -99,9 +99,19 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // to retarget to body/wrapper with useless selectors. pointerdown fires first.
   let pointerDownSelectors: BrowserActionSelector[] | null = null;
   let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  let pointerDownTarget: HTMLElement | null = null;
   let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   let pointerDownClickRecorded = false;
   let pointerDownDeferTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Menu items in Radix DropdownMenu/ContextMenu/Select commit selection on pointerup
+  // and unmount via an exit animation, so a `click` event is never synthesized.
+  function isMenuLikeTarget(el: HTMLElement | null): boolean {
+    if (!el) return false;
+    const role = (el.getAttribute('role') || '').toLowerCase();
+    if (role === 'menuitem' || role === 'menuitemcheckbox' || role === 'menuitemradio' || role === 'option') return true;
+    return el.closest('[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper],[data-radix-menu-content],.dropdown-menu,.radix-menu-item') !== null;
+  }
 
   // Walk up DOM to find nearest interactive ancestor for better selectors.
   // e.g. clicking <span> inside <div role="option"> should capture the option.
@@ -117,6 +127,21 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       const role = current.getAttribute('role');
       if (role && INTERACTIVE.has(role)) return current;
       if (INTERACTIVE_TAGS.has(current.tagName)) return current;
+      // <label> wrapping a form control: attribute the click to the bound
+      // control (its data-testid/role/aria-label make for far better
+      // selectors than the visual descendant the user actually clicked,
+      // e.g. an <svg><path> inside a toolbar radio item).
+      if (current.tagName === 'LABEL') {
+        const labelFor = current.getAttribute('for');
+        let labeledControl: HTMLElement | null = null;
+        if (labelFor) {
+          labeledControl = document.getElementById(labelFor);
+        }
+        if (!labeledControl) {
+          labeledControl = current.querySelector('input, select, textarea, button');
+        }
+        if (labeledControl) return labeledControl as HTMLElement;
+      }
       if (current.dataset.testid) return current;
       if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
       // Traverse shadow DOM boundaries
@@ -139,6 +164,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     pointerDownSelectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
+    pointerDownTarget = target;
     pointerDownClickRecorded = false;
 
     // Safety net: if the element is removed from DOM and no click event fires
@@ -159,7 +185,21 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   }, true);
 
   document.addEventListener('pointerup', () => {
-    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerCleanupTimer = null; }, 500);
+    const savedSelectors = pointerDownSelectors;
+    const savedBoundingBox = pointerDownBoundingBox;
+    const savedTarget = pointerDownTarget;
+    if (savedSelectors && savedSelectors.length > 0 && isMenuLikeTarget(savedTarget)) {
+      setTimeout(() => {
+        if (!pointerDownClickRecorded) {
+          pointerDownClickRecorded = true;
+          if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
+          const modifiers = getActiveModifiers();
+          // @ts-expect-error - exposed function
+          window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
+        }
+      }, 50);
+    }
+    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerDownTarget = null; pointerCleanupTimer = null; }, 500);
   }, true);
 
   // Capture mouseover selectors as second fallback (fires well before click)
@@ -178,6 +218,16 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
 
   document.addEventListener('click', (e) => {
     pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
+    const rawTarget = e.target as HTMLElement;
+
+    // Drop the synthesized click that browsers fire on a labeled <input
+    // type="radio|checkbox"> after the user clicks the bound <label>.
+    // The label-activation click has detail===0; real user clicks have detail>=1.
+    if (e.detail === 0 && rawTarget && rawTarget.tagName === 'INPUT') {
+      const inputType = ((rawTarget as HTMLInputElement).type || '').toLowerCase();
+      if (inputType === 'radio' || inputType === 'checkbox') return;
+    }
+
     if (mouseDownState) {
       const dx = Math.abs(e.clientX - mouseDownState.x);
       const dy = Math.abs(e.clientY - mouseDownState.y);
@@ -187,8 +237,7 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
         return;
       }
     }
-    if (pg) return;
-    const target = e.target as HTMLElement;
+    const target = findBestTarget(rawTarget);
     let selectors = generateAllSelectors(target);
     const rect = target.getBoundingClientRect();
     let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
@@ -198,8 +247,16 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       !(selectors.length === 1 && selectors[0].type === 'css-path' &&
         (selectors[0].value === 'body' || selectors[0].value === 'html'));
 
-    // Fallback 1: use pointerdown selectors (captured before DOM removal)
-    if (!hasUsefulSelectors && pointerDownSelectors && pointerDownSelectors.length > 0) {
+    // If click target only resolves to a css-path (e.g. inner span of a menu item),
+    // prefer pointerDownSelectors which ran findBestTarget and resolved the
+    // semantic ancestor (button/menuitem/etc.).
+    const onlyCssPath = selectors.length > 0 && selectors.every(s => s.type === 'css-path');
+    const pointerDownHasSemantic = pointerDownSelectors && pointerDownSelectors.some(s => s.type !== 'css-path');
+
+    // Fallback 1: use pointerdown selectors (captured before DOM removal, or
+    // when the raw click target lacks any semantic selector while pointerdown's
+    // findBestTarget resolved an interactive ancestor with one).
+    if ((!hasUsefulSelectors || (onlyCssPath && pointerDownHasSemantic)) && pointerDownSelectors && pointerDownSelectors.length > 0) {
       selectors = pointerDownSelectors;
       if (pointerDownBoundingBox) {
         boundingBox = pointerDownBoundingBox;

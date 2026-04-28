@@ -16,7 +16,7 @@
  *      function-body extraction, function removal, timeout/cancel).
  */
 import { describe, it, expect } from 'vitest';
-import { stripTypeAnnotations, legacyStripTypeAnnotations } from '@lastest/shared';
+import { instrumentAssertionTracking, stripTypeAnnotations, legacyStripTypeAnnotations } from '@lastest/shared';
 
 // ─── Function body extraction regex (shared by both runners) ───
 const FUNC_BODY_REGEX = /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
@@ -345,6 +345,45 @@ describe('Runner Parity — Code Transformations', () => {
       const input = 'await page.keyboard.press("Enter");';
       const result = patchSelectAll(input);
       expect(result).toBe(input);
+    });
+  });
+
+  describe('assertion instrumentation (shared helper used by both runners)', () => {
+    it('wraps await expect(page).toHaveURL with __assertion(id, async () => { ... })', () => {
+      const body = `await expect(page).toHaveURL('/home');`;
+      const { instrumentedBody, wrappedCount } = instrumentAssertionTracking(body, [{ id: 'aaa111' }]);
+      expect(wrappedCount).toBe(1);
+      expect(instrumentedBody).toContain('await __assertion("aaa111"');
+      expect(instrumentedBody).toContain(`await expect(page).toHaveURL('/home');`);
+    });
+
+    it('pairs multiple assertions in source order', () => {
+      const body = [
+        `await page.waitForLoadState('networkidle');`,
+        `await expect(page).toHaveURL(/foo/);`,
+        `await expect(button).toBeVisible();`,
+      ].join('\n');
+      const { instrumentedBody, wrappedCount } = instrumentAssertionTracking(body, [
+        { id: 'id-load' }, { id: 'id-url' }, { id: 'id-vis' },
+      ]);
+      expect(wrappedCount).toBe(3);
+      const lines = instrumentedBody.split('\n');
+      expect(lines[0]).toContain('"id-load"');
+      expect(lines[1]).toContain('"id-url"');
+      expect(lines[2]).toContain('"id-vis"');
+    });
+
+    it('is a no-op when no assertions are provided', () => {
+      const body = `await expect(page).toHaveURL('/home');`;
+      const { instrumentedBody, wrappedCount } = instrumentAssertionTracking(body, []);
+      expect(wrappedCount).toBe(0);
+      expect(instrumentedBody).toBe(body);
+    });
+
+    it('preserves indentation', () => {
+      const body = `    await expect(page).toHaveURL('/');`;
+      const { instrumentedBody } = instrumentAssertionTracking(body, [{ id: 'i1' }]);
+      expect(instrumentedBody).toMatch(/^ {4}await __assertion\(/);
     });
   });
 

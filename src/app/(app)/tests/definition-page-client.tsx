@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { AreaTree, type TreeSelection } from '@/components/areas/area-tree';
 import { AreaTestCasesPanel } from '@/components/areas/area-specs-panel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +10,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/tests/status-badge';
+import {
+  TestsTableView,
+  TestsTableColumnsButton,
+  defaultVisibleColumns,
+  parseStoredColumns,
+  serializeColumns,
+  parseStoredSort,
+  serializeSort,
+  type TestsTableColumnKey,
+  type TestsTableSort,
+} from '@/components/tests/tests-table-view';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -24,7 +35,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
@@ -55,9 +65,6 @@ import {
   FlaskConical,
   Plus,
   Wrench,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Search,
   ChevronRight,
   ChevronDown,
@@ -70,6 +77,8 @@ import {
   FolderPlus,
   Folder,
   Save,
+  LayoutList,
+  Table as TableIcon,
 } from 'lucide-react';
 import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
@@ -78,6 +87,7 @@ import type { TeardownStep } from '@/server/actions/teardown-steps';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
+  lastRunAt: Date | null;
 }
 
 interface DefinitionPageClientProps {
@@ -204,7 +214,6 @@ export function DefinitionPageClient({
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'pending'>('all');
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
   const lastSelectedIdRef = useRef<string | null>(null);
-  const [executionTarget, setExecutionTarget] = usePreferredRunner();
   const [isBulkRunning, setIsBulkRunning] = useState(false);
   const [isRunningAreaBuild, setIsRunningAreaBuild] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -214,6 +223,29 @@ export function DefinitionPageClient({
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [isAddTestsOpen, setIsAddTestsOpen] = useState(false);
   const [isAICreateOpen, setIsAICreateOpen] = useState(false);
+
+  // --- Tests list view (cards/table) state ---
+  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [sort, setSort] = useState<TestsTableSort>({ key: 'lastRun', dir: 'desc' });
+  const [visibleColumns, setVisibleColumns] = useState<Set<TestsTableColumnKey>>(() =>
+    defaultVisibleColumns(false),
+  );
+  const [columnsTouched, setColumnsTouched] = useState(false);
+
+  // Hydrate from localStorage on mount (client-only to avoid SSR mismatch)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedView = window.localStorage.getItem('lastest:tests-table:view');
+    if (storedView === 'cards' || storedView === 'table') setView(storedView);
+    const storedSort = parseStoredSort(window.localStorage.getItem('lastest:tests-table:sort'));
+    if (storedSort) setSort(storedSort);
+    const touched = window.localStorage.getItem('lastest:tests-table:columns-touched') === '1';
+    setColumnsTouched(touched);
+    if (touched) {
+      const stored = parseStoredColumns(window.localStorage.getItem('lastest:tests-table:columns'));
+      if (stored) setVisibleColumns(stored);
+    }
+  }, []);
 
   // --- Deleted tests state ---
   const [showDeleted, setShowDeleted] = useState(false);
@@ -365,6 +397,22 @@ export function DefinitionPageClient({
 
   const failedScopedTests = useMemo(() => scopedTests.filter(t => t.latestStatus === 'failed'), [scopedTests]);
 
+  // Effective columns: when the user hasn't customized, follow scope.
+  const isScoped = treeSelection?.type === 'area';
+  const effectiveVisibleColumns = useMemo(
+    () => (columnsTouched ? visibleColumns : defaultVisibleColumns(isScoped)),
+    [columnsTouched, visibleColumns, isScoped],
+  );
+
+  const handleVisibleColumnsChange = useCallback((cols: Set<TestsTableColumnKey>) => {
+    setVisibleColumns(cols);
+    setColumnsTouched(true);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('lastest:tests-table:columns', serializeColumns(cols));
+      window.localStorage.setItem('lastest:tests-table:columns-touched', '1');
+    }
+  }, []);
+
   const selectedFailedTests = useMemo(() => {
     return Array.from(selectedTestIds).filter(id => {
       const test = tests.find(t => t.id === id);
@@ -427,9 +475,9 @@ export function DefinitionPageClient({
 
   const allFilteredSelected = filteredTests.length > 0 && filteredTests.every(t => selectedTestIds.has(t.id));
 
-  const getAreaName = useCallback((areaId: string | null) => {
+  const getAreaName = useCallback((areaId: string | null): string | null => {
     if (!areaId) return null;
-    return areas.find(a => a.id === areaId)?.name;
+    return areas.find(a => a.id === areaId)?.name ?? null;
   }, [areas]);
 
   // --- Handlers ---
@@ -650,7 +698,7 @@ export function DefinitionPageClient({
     const testIds = Array.from(selectedTestIds);
     setIsBulkRunning(true);
     try {
-      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, 'auto');
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
@@ -676,7 +724,7 @@ export function DefinitionPageClient({
     }
     setIsRunningAreaBuild(true);
     try {
-      const result = await createAndRunBuild('manual', testIds, repositoryId, executionTarget);
+      const result = await createAndRunBuild('manual', testIds, repositoryId, 'auto');
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
@@ -887,32 +935,6 @@ export function DefinitionPageClient({
   const placeholderCount = allAreaTests.filter(t => t.isPlaceholder).length;
   const realTestCount = allAreaTests.length - placeholderCount;
 
-  // StatusBadge component
-  const StatusBadge = ({ status }: { status: string | null }) => {
-    if (status === 'passed') {
-      return (
-        <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
-          <CheckCircle2 className="h-3 w-3 mr-1" />
-          Passed
-        </Badge>
-      );
-    }
-    if (status === 'failed') {
-      return (
-        <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 hover:bg-rose-500/20">
-          <XCircle className="h-3 w-3 mr-1" />
-          Failed
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="outline" className="text-muted-foreground">
-        <Clock className="h-3 w-3 mr-1" />
-        Not run
-      </Badge>
-    );
-  };
-
   // Discovery icons for the AreaTree header
   const discoveryHeaderExtra = (
     <>
@@ -1075,10 +1097,10 @@ export function DefinitionPageClient({
                         Generate
                       </Button>
                     )}
-                    <Button asChild size="sm" className="h-8 text-sm">
+                    <Button asChild variant={isEditingArea ? 'outline' : 'default'} size="sm" className="h-8 text-sm">
                       <Link href="/record">
                         <Plus className="h-4 w-4 mr-1.5" />
-                        Record
+                        Create
                       </Link>
                     </Button>
                   </div>
@@ -1106,6 +1128,7 @@ export function DefinitionPageClient({
                     availableTests={openTestDetailData.availableTests}
                     availableScripts={openTestDetailData.availableScripts}
                     sheetDataSources={openTestDetailData.sheetDataSources}
+                    csvDataSources={openTestDetailData.csvDataSources}
                     stabilizationDefaults={openTestDetailData.stabilizationDefaults}
                     banAiMode={banAiMode}
                     earlyAdopterMode={true}
@@ -1182,6 +1205,52 @@ export function DefinitionPageClient({
                               <span className="text-xs text-muted-foreground">{filteredTests.length}</span>
                             </div>
                             <div className="flex items-center gap-2">
+                              <div className="inline-flex rounded-md border border-border/60 bg-background p-0.5">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant={view === 'cards' ? 'secondary' : 'ghost'}
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      aria-pressed={view === 'cards'}
+                                      onClick={() => {
+                                        setView('cards');
+                                        if (typeof window !== 'undefined') {
+                                          window.localStorage.setItem('lastest:tests-table:view', 'cards');
+                                        }
+                                      }}
+                                    >
+                                      <LayoutList className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">Card view</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant={view === 'table' ? 'secondary' : 'ghost'}
+                                      size="sm"
+                                      className="h-6 w-6 p-0"
+                                      aria-pressed={view === 'table'}
+                                      onClick={() => {
+                                        setView('table');
+                                        if (typeof window !== 'undefined') {
+                                          window.localStorage.setItem('lastest:tests-table:view', 'table');
+                                        }
+                                      }}
+                                    >
+                                      <TableIcon className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">Table view</TooltipContent>
+                                </Tooltip>
+                              </div>
+                              {view === 'table' && (
+                                <TestsTableColumnsButton
+                                  visibleColumns={effectiveVisibleColumns}
+                                  onVisibleColumnsChange={handleVisibleColumnsChange}
+                                />
+                              )}
                               <div className="relative w-56">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                 <Input
@@ -1284,13 +1353,6 @@ export function DefinitionPageClient({
                         <span className="text-sm text-muted-foreground">
                           {selectedTestIds.size} selected
                         </span>
-                        <ExecutionTargetSelector
-                          value={executionTarget}
-                          onChange={setExecutionTarget}
-                          disabled={isBulkRunning}
-                          capabilityFilter="run"
-                          size="sm"
-                        />
                         <Button variant="outline" size="sm" onClick={handleBulkRun} disabled={isBulkRunning}>
                           <Play className="h-3.5 w-3.5 mr-1.5" />
                           {isBulkRunning ? 'Running...' : 'Run'}
@@ -1340,7 +1402,7 @@ export function DefinitionPageClient({
                         <Button asChild size="sm">
                           <Link href="/record">
                             <Plus className="h-4 w-4 mr-2" />
-                            Record First Test
+                            Create First Test
                           </Link>
                         </Button>
                       </div>
@@ -1348,6 +1410,24 @@ export function DefinitionPageClient({
                       <div className="text-center py-12 text-muted-foreground text-sm">
                         No tests match {searchQuery ? `"${searchQuery}"` : 'this filter'}
                       </div>
+                    ) : view === 'table' ? (
+                      <TestsTableView
+                        tests={filteredTests}
+                        scoped={isScoped}
+                        selectedTestIds={selectedTestIds}
+                        toggleSelect={toggleSelect}
+                        onOpenTest={handleOpenTest}
+                        highlightedTestId={treeSelection?.type === 'test' ? treeSelection.id : null}
+                        getAreaName={getAreaName}
+                        sort={sort}
+                        onSortChange={(s) => {
+                          setSort(s);
+                          if (typeof window !== 'undefined') {
+                            window.localStorage.setItem('lastest:tests-table:sort', serializeSort(s));
+                          }
+                        }}
+                        visibleColumns={effectiveVisibleColumns}
+                      />
                     ) : (
                       <div className="divide-y divide-border/50">
                         {filteredTests.map((test) => (

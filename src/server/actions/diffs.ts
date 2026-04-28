@@ -156,6 +156,22 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
 }
 
 /**
+ * Test-level "Promote latest run as baseline" — approves every pending diff
+ * for one test result. Wraps the same logic as the build-page Approve All
+ * button but scoped to a single run. See mwhis review #21.
+ */
+export async function promoteTestResultBaselines(testResultId: string, approvedBy?: string) {
+  await requireTeamAccess();
+  const diffs = await queries.getVisualDiffsByTestResult(testResultId);
+  const pending = diffs.filter(d => d.status !== 'approved' && d.status !== 'auto_approved');
+  for (const d of pending) {
+    await approveDiffCore(d.id, approvedBy);
+  }
+  revalidatePath('/tests');
+  return { approvedCount: pending.length };
+}
+
+/**
  * Batch approve selected diffs — core logic, no auth check.
  */
 export async function batchApproveDiffsCore(diffIds: string[], approvedBy?: string) {
@@ -351,6 +367,63 @@ export async function removeIgnoreRegion(regionId: string) {
 export async function getIgnoreRegions(testId: string) {
   await requireTeamAccess();
   return queries.getIgnoreRegions(testId);
+}
+
+/**
+ * Add a focus region to a specific (testId, stepLabel) screenshot.
+ * Focus regions define a positive mask — only pixels inside any focus rect participate
+ * in the diff. Without focus regions, the whole image is checked (default behavior).
+ * Triggers a recalculation of the diff so the UI reflects the new mask immediately.
+ */
+export async function addFocusRegion(
+  diffId: string,
+  region: { x: number; y: number; width: number; height: number },
+) {
+  await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
+  const created = await queries.createFocusRegion({
+    testId: diff.testId,
+    stepLabel: diff.stepLabel ?? null,
+    ...region,
+  });
+
+  await recalculateDiff(diffId, diff.stepLabel ?? null);
+  return created;
+}
+
+/**
+ * Remove a focus region by id. Triggers recalculation for the owning diff
+ * if one is provided so the UI updates in-place.
+ */
+export async function removeFocusRegion(regionId: string, diffId?: string) {
+  await requireTeamAccess();
+  await queries.deleteFocusRegion(regionId);
+  if (diffId) {
+    const diff = await queries.getVisualDiff(diffId);
+    if (diff) await recalculateDiff(diffId, diff.stepLabel ?? null);
+  }
+  return { success: true };
+}
+
+/**
+ * Get focus regions for the (testId, stepLabel) owning this diff.
+ */
+export async function getFocusRegionsForDiff(diffId: string) {
+  await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+  return queries.getFocusRegions(diff.testId, diff.stepLabel ?? null);
+}
+
+/**
+ * List all focus regions for a test, across every stepLabel.
+ * Used by the test-detail criteria tab to show which screenshots are restricted.
+ */
+export async function listFocusRegionsByTest(testId: string) {
+  await requireTeamAccess();
+  return queries.getFocusRegionsByTest(testId);
 }
 
 /**
@@ -569,6 +642,21 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
     return { success: true, changed: false };
   }
 
+  await recalculateDiff(diffId, newStepLabel);
+  return { success: true, changed: true };
+}
+
+/**
+ * Re-run diff for a given (diffId, stepLabel) using current ignore + focus regions.
+ * Used by step-label rename, focus-region add/remove, and any other mutation that
+ * invalidates the current diff result without changing the underlying screenshot.
+ * Caller is responsible for auth; this function re-fetches baselines, settings, and
+ * masks, then persists the new diff result and build status.
+ */
+async function recalculateDiff(diffId: string, stepLabel: string | null): Promise<void> {
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
   // Resolve branch/repo context (same pattern as approveDiff)
   const testResult = diff.testResultId
     ? await queries.getTestResultById(diff.testResultId)
@@ -590,16 +678,20 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
   const diffEngine = (settings.diffEngine as DiffEngineType) ?? 'pixelmatch';
   const regionDetectionMode = (settings.regionDetectionMode as RegionDetectionMode) ?? 'grid';
 
-  // Fetch ignore regions
+  // Fetch ignore regions (test-level) and focus regions (per-step)
   const testIgnoreRegions = await queries.getIgnoreRegions(diff.testId);
   const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
     ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
+  const stepFocusRegions = await queries.getFocusRegions(diff.testId, stepLabel);
+  const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
+    ? stepFocusRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+    : undefined;
 
   // Look up baseline: branch-specific first, then fallback to default branch
   const baseline =
-    await queries.getBranchBaseline(diff.testId, newStepLabel, branch) ??
-    await queries.getActiveBaseline(diff.testId, newStepLabel, branch, defaultBranch);
+    await queries.getBranchBaseline(diff.testId, stepLabel, branch) ??
+    await queries.getActiveBaseline(diff.testId, stepLabel, branch, defaultBranch);
 
   const baselineExists = baseline && fs.existsSync(path.join(STORAGE_ROOT, baseline.imagePath));
   const currentExists = diff.currentImagePath && fs.existsSync(path.join(STORAGE_ROOT, diff.currentImagePath));
@@ -616,6 +708,7 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
       ignorePageShift,
       diffEngine,
       regionDetectionMode,
+      focusRects,
     );
 
     const pct = diffResult.percentageDifference;
@@ -641,7 +734,7 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
     }
 
     await queries.updateVisualDiff(diffId, {
-      stepLabel: newStepLabel,
+      stepLabel,
       baselineImagePath: baseline.imagePath,
       diffImagePath: toRelativePath(diffResult.diffImagePath),
       pixelDifference: diffResult.pixelDifference,
@@ -653,7 +746,7 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
   } else {
     // No baseline found — mark as new screenshot
     await queries.updateVisualDiff(diffId, {
-      stepLabel: newStepLabel,
+      stepLabel,
       baselineImagePath: null,
       diffImagePath: null,
       pixelDifference: 0,
@@ -675,6 +768,4 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
     revalidatePath(`/builds/${diff.buildId}`);
     revalidatePath(`/builds/${diff.buildId}/diff/${diffId}`);
   }
-
-  return { success: true, changed: true };
 }

@@ -63,6 +63,19 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
+  // When true, re-throw TypeError / ReferenceError / SyntaxError from the
+  // soft-wrap so broken test bodies fail the run. Driven by the test's
+  // `all_steps_executed` Criteria rule (default ON, off only when opted out).
+  failOnRuntimeError?: boolean;
+  /** Parsed assertions from the host. Used by the runner's
+   *  `instrumentAssertionTracking` to wrap each `expect(...)` line with a
+   *  pass/fail recorder keyed by the host-computed `id`. Order-sensitive —
+   *  must match the order produced by `parseAssertions`. */
+  assertions?: Array<{
+    id: string;
+    codeLineStart?: number;
+    codeLineEnd?: number;
+  }>;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -79,6 +92,9 @@ export interface RunSetupCommandPayload {
   viewport?: { width: number; height: number };
   browser?: 'chromium' | 'firefox' | 'webkit';
   stabilization?: StabilizationPayload;
+  // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
+  // the setup page so the user can watch setup execute live.
+  headed?: boolean;
 }
 
 export interface RunSetupCommand extends BaseMessage {
@@ -254,6 +270,17 @@ export interface TestResultPayload {
   };
   logs: LogEntry[];
   softErrors?: string[];
+  /** Per-`expect()` outcome rows produced by the runner's `__assertion`
+   *  helper. `assertionId` matches the corresponding parsed assertion sent
+   *  in the run command; the criteria evaluator keys on these to fail the
+   *  test when a user-pinned assertion failed. */
+  assertionResults?: Array<{
+    assertionId: string;
+    status: 'passed' | 'failed' | 'skipped';
+    actualValue?: string;
+    errorMessage?: string;
+    durationMs?: number;
+  }>;
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;

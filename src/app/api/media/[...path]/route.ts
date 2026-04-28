@@ -5,7 +5,7 @@ import { Readable } from 'stream';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { resolveStoragePath } from '@/lib/storage/paths';
-import * as queries from '@/lib/db/queries';
+import { getRepository } from '@/lib/db/queries/repositories';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -24,16 +24,12 @@ function getContentType(filePath: string): string {
 }
 
 async function verifyAuth(request: NextRequest) {
-  // Try session first
   const session = await getCurrentSession();
   if (session) return session;
-
-  // Try Bearer token (runner / VS Code extension)
   const authHeader = request.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     return verifyBearerToken(authHeader.slice(7));
   }
-
   return null;
 }
 
@@ -44,7 +40,7 @@ export async function GET(
   const segments = (await params).path;
 
   // Skip auth for traces — they're fetched cross-origin by trace.playwright.dev
-  // and are auto-cleaned after 1 hour
+  // and are auto-cleaned after 1 hour.
   const isTrace = segments[0] === 'traces';
   if (!isTrace) {
     const session = await verifyAuth(request);
@@ -55,7 +51,7 @@ export async function GET(
     // Verify team ownership for repo-scoped directories (screenshots use repoId subdirs)
     if (segments[0] === 'screenshots' && segments[1]) {
       const repoId = segments[1];
-      const repo = await queries.getRepository(repoId);
+      const repo = await getRepository(repoId);
       if (!repo || repo.teamId !== session.team?.id) {
         return new Response('Forbidden', { status: 403 });
       }
@@ -63,21 +59,16 @@ export async function GET(
   }
 
   const urlPath = '/' + segments.join('/');
-
-  // Resolve to filesystem
   const filePath = resolveStoragePath(urlPath);
   if (!filePath) {
     return new Response('Bad Request', { status: 400 });
   }
-
   if (!existsSync(filePath)) {
     return new Response('Not Found', { status: 404 });
   }
 
   const fileStat = await stat(filePath);
   const contentType = getContentType(filePath);
-
-  // Stream file
   const nodeStream = createReadStream(filePath);
   const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
@@ -86,8 +77,6 @@ export async function GET(
     'Content-Length': fileStat.size.toString(),
     'Cache-Control': 'public, max-age=31536000, immutable',
   };
-
-  // CORS for trace.playwright.dev
   if (segments[0] === 'traces') {
     headers['Access-Control-Allow-Origin'] = 'https://trace.playwright.dev';
     headers['Access-Control-Allow-Methods'] = 'GET';
@@ -104,7 +93,6 @@ export async function OPTIONS(
   if (segments[0] !== 'traces') {
     return new Response(null, { status: 204 });
   }
-
   return new Response(null, {
     status: 204,
     headers: {

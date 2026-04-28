@@ -132,10 +132,10 @@ export class EmbeddedRecorder {
       }
     });
 
-    // Navigate to target URL
-    await this.page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // Run setup steps if provided
+    // Run setup steps FIRST (before navigating to target). Setup typically
+    // authenticates by navigating to /login and submitting, leaving the page
+    // on a post-login URL. We then navigate to payload.targetUrl so recording
+    // begins at the URL the user asked for, regardless of what setup did.
     if (payload.setupSteps?.length) {
       for (const step of payload.setupSteps) {
         try {
@@ -147,6 +147,9 @@ export class EmbeddedRecorder {
         }
       }
     }
+
+    // Navigate to target URL (after setup has established session state)
+    await this.page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Set up recording event capture (exposeFunction + inject script)
     await this.setupRecording(payload);
@@ -415,6 +418,30 @@ export class EmbeddedRecorder {
   createAssertion(assertionType: string): void {
     if (!this.isRecording) return;
     this.addEvent('assertion', { assertionType });
+  }
+
+  /**
+   * Create a wait event (fixed duration or wait-for-selector).
+   * The recorder does not actually pause — codegen turns this into a
+   * page.waitForTimeout / page.waitForSelector call at replay time.
+   */
+  createWait(payload: {
+    waitType: 'duration' | 'selector';
+    durationMs?: number;
+    selector?: string;
+    selectors?: Array<{ type: string; value: string }>;
+    condition?: 'visible' | 'hidden';
+    timeoutMs?: number;
+  }): void {
+    if (!this.isRecording) return;
+    this.addEvent('wait', {
+      waitType: payload.waitType,
+      durationMs: payload.durationMs,
+      selector: payload.selector,
+      selectors: payload.selectors,
+      condition: payload.condition,
+      timeoutMs: payload.timeoutMs,
+    });
   }
 
   /**

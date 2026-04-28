@@ -78,9 +78,9 @@ export function PlaywrightSettingsCard({
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [enableA11y, setEnableA11y] = useState(settings.enableA11y ?? false);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
-  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
+  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'warn');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
-  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
+  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'warn');
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
@@ -93,6 +93,7 @@ export function PlaywrightSettingsCard({
   const [browsers, setBrowsers] = useState<string[]>(
     (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium']
   );
+  const [customAttributeName, setCustomAttributeName] = useState<string>(settings.customAttributeName ?? '');
   const [stabilizationOpen, setStabilizationOpen] = useState(false);
   const [selectorStats, setSelectorStats] = useState<SelectorTypeStats[]>([]);
   const [savedStorageStates, setSavedStorageStates] = useState<Array<{ id: string; name: string; cookieCount: number | null; originCount: number | null; createdAt: Date | null }>>([]);
@@ -127,6 +128,7 @@ export function PlaywrightSettingsCard({
     maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
     browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
+    customAttributeName: settings.customAttributeName ?? '',
   });
 
   // Sync local state when settings prop changes (e.g. after template apply)
@@ -158,6 +160,7 @@ export function PlaywrightSettingsCard({
     setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
     setBrowsers((settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium']);
+    setCustomAttributeName(settings.customAttributeName ?? '');
 
     originalValues.current = {
       selectorPriority: settings.selectorPriority || DEFAULT_SELECTOR_PRIORITY,
@@ -186,6 +189,7 @@ export function PlaywrightSettingsCard({
       maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
       browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
+      customAttributeName: settings.customAttributeName ?? '',
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey]);
@@ -241,6 +245,7 @@ export function PlaywrightSettingsCard({
         maxParallelTests,
         stabilization,
         browsers,
+        customAttributeName: customAttributeName.trim() || null,
       });
       if (compact) {
         setShowSaved(true);
@@ -249,7 +254,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -280,7 +285,8 @@ export function PlaywrightSettingsCard({
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization) ||
-      JSON.stringify(browsers) !== JSON.stringify(orig.browsers);
+      JSON.stringify(browsers) !== JSON.stringify(orig.browsers) ||
+      customAttributeName !== orig.customAttributeName;
 
     if (!hasChanges) return;
 
@@ -297,7 +303,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -328,6 +334,7 @@ export function PlaywrightSettingsCard({
       setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
       setBrowsers(['chromium']);
+      setCustomAttributeName('');
       if (!compact) {
         toast.success('Playwright settings reset to defaults');
       }
@@ -348,6 +355,27 @@ export function PlaywrightSettingsCard({
           compact={compact}
           recommendations={recommendations}
         />
+        {/* Custom test-id attribute (e.g. data-automation-id). When set, the
+            recorder, fallback locator, and AI test-gen prompt prefer this
+            attribute. Position it in the priority list above by adding a
+            'custom-attr' entry. */}
+        <div className="pt-2 space-y-1">
+          <Label htmlFor="customAttributeName" className="text-xs text-muted-foreground">
+            Custom test-id attribute
+          </Label>
+          <Input
+            id="customAttributeName"
+            type="text"
+            placeholder="e.g. data-automation-id"
+            value={customAttributeName}
+            onChange={(e) => setCustomAttributeName(e.target.value)}
+            className="h-8 font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            App-specific stable test-id (optional). When set, the AI test-gen
+            prompt will prefer this attribute over CSS classes.
+          </p>
+        </div>
       </div>
 
       {/* Default Recording Engine - only in full mode */}

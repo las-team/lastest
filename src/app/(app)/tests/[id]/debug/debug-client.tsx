@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { usePreferredRunner } from '@/hooks/use-preferred-runner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,7 +19,6 @@ import {
   Loader2,
   Pause,
   FastForward,
-  FileSearch,
   Globe,
   Terminal,
   Circle,
@@ -32,14 +30,15 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  MousePointerClick,
 } from 'lucide-react';
-import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession, flushDebugTrace } from '@/server/actions/debug';
+import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession } from '@/server/actions/debug';
 import { toast } from 'sonner';
 import type { Test } from '@/lib/db/schema';
 import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
+import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
 import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
 import { Input } from '@/components/ui/input';
-import { ExecutionTargetSelector } from '@/components/execution/execution-target-selector';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 
 interface DebugClientProps {
@@ -54,8 +53,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepListRef = useRef<HTMLDivElement>(null);
 
-  // Runner selector + live view state
-  const [executionTarget, setExecutionTarget, isRunnerHydrated] = usePreferredRunner();
+  // Live view state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [resolvedRunnerId, setResolvedRunnerId] = useState<string | null>(null);
 
@@ -87,37 +85,18 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     releasedRef.current = false;
   }, [sessionId]);
 
-  const isRemote = executionTarget !== 'local';
-
-  // Track whether initial mount has completed to avoid double-start from hydration
   const hasMountedRef = useRef(false);
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
   // second mount waits for the first to finish releasing its claimed EB before claiming again.
   const initPromiseRef = useRef<Promise<void> | null>(null);
-  // Read executionTarget via a ref inside the session-init effect. If we
-  // depended on `executionTarget` directly, the effect would re-run every
-  // time a sibling component (ExecutionTargetSelector) perturbs the target
-  // — which happens transiently during SSE reconnect cycles on
-  // /api/runners/status. Each re-run cancels the in-flight startDebugSession
-  // and fires stopDebugSession before the session is even viewable, causing
-  // the "Launching browser..." UI to spin forever.
-  const executionTargetRef = useRef(executionTarget);
-  useEffect(() => { executionTargetRef.current = executionTarget; }, [executionTarget]);
 
-  // Start session on mount. Re-starts only if the TEST itself changes (e.g.
-  // user navigates to a different test ID). `executionTarget` changes no
-  // longer re-run this effect — mid-build reassignments don't affect an
-  // already-launched debug session.
   useEffect(() => {
-    if (!isRunnerHydrated) return;
-
     let cancelled = false;
     const previous = initPromiseRef.current;
     const run = (async () => {
       if (previous) await previous.catch(() => {});
       if (cancelled) return;
 
-      // Stop any existing session (only on target change after initial mount)
       const prevSessionId = sessionIdRef.current;
       if (prevSessionId && hasMountedRef.current) {
         await stopDebugSession(prevSessionId).catch(() => {});
@@ -126,8 +105,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         setState(null);
       }
       hasMountedRef.current = true;
-      const target = executionTargetRef.current;
-      const result = await startDebugSession(test.id, repositoryId, target === 'local' ? null : target);
+      const result = await startDebugSession(test.id, repositoryId, 'auto');
       if (cancelled) {
         // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
         // in dev, or fast unmount). Release it so subsequent claims can succeed.
@@ -150,7 +128,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [test.id, repositoryId, isRunnerHydrated]);
+  }, [test.id, repositoryId]);
 
   // Poll for state
   useEffect(() => {
@@ -160,13 +138,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       const s = await getDebugState(sessionId);
       if (s) {
         setState(s);
-        // Sync server code → localCode when codeVersion changes (no pending local edits)
-        if (s.codeVersion !== codeVersionRef.current) {
+        // Sync server code → localCode when codeVersion changes AND no pending local edit.
+        // Don't advance codeVersionRef when skipping — the next poll after the debounce
+        // clears must still see the new version and apply it, otherwise the editor stays
+        // stale while state.steps/currentStepIndex move forward (the "code is behind" bug).
+        if (s.codeVersion !== codeVersionRef.current && !debounceRef.current) {
           codeVersionRef.current = s.codeVersion;
-          if (!debounceRef.current) {
-            setLocalCode(s.code);
-            lastSentCodeRef.current = s.code;
-          }
+          setLocalCode(s.code);
+          lastSentCodeRef.current = s.code;
         }
       }
     };
@@ -260,6 +239,71 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }, 500);
   }, [sendCmd]);
 
+  // Re-parse steps client-side from the visible code when the user has unsynced edits,
+  // so the gutter / step highlight always lines up with what's in the textarea.
+  // The server's executor.steps still drives execution (step_forward, run_to_step);
+  // displaySteps is only for rendering line ranges and the steps list.
+  // Skip stripTypeAnnotations here — it lives in @lastest/shared which transitively
+  // pulls in node-only deps; parseSteps is regex-based and tolerates TS annotations.
+  const displaySteps = useMemo(() => {
+    if (state && localCode === state.code) return state.steps;
+    const body = extractTestBody(localCode);
+    if (!body) return state?.steps ?? [];
+    try {
+      const cleanBody = removeInlineReplayCursorPath(removeInlineLocateWithFallback(body));
+      return parseSteps(cleanBody);
+    } catch {
+      return state?.steps ?? [];
+    }
+  }, [localCode, state]);
+
+  // Insert a click step at the position right after the current step.
+  // Uses locateWithFallback(...) so the parser/executor recognise it as an action step
+  // (see debug-parser.ts:82 and debug-executor.ts:locateWithFallback).
+  const handleInsertClick = useCallback((sel: { type: string; value: string }) => {
+    const code = localCode;
+    const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+    const bodyStartLine = funcMatch
+      ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+      : 0;
+
+    const steps = displaySteps;
+    const curIdx = state?.currentStepIndex ?? -1;
+    const refStepIdx = curIdx >= 0 && curIdx < steps.length
+      ? curIdx
+      : (steps.length > 0 ? steps.length - 1 : -1);
+
+    const lines = code.split('\n');
+
+    // Insertion line index (0-based). After the current step's last line, or right
+    // after the function body opening brace when there are no steps.
+    let insertAt: number;
+    if (refStepIdx >= 0 && steps[refStepIdx]) {
+      insertAt = bodyStartLine + steps[refStepIdx].lineEnd;
+    } else {
+      insertAt = bodyStartLine; // first line inside the body
+    }
+    if (insertAt < 0) insertAt = 0;
+    if (insertAt > lines.length) insertAt = lines.length;
+
+    // Reuse indentation from the previous non-empty line, or 2 spaces as a default.
+    let indent = '  ';
+    for (let i = insertAt - 1; i >= 0; i--) {
+      const m = lines[i].match(/^(\s+)\S/);
+      if (m) { indent = m[1]; break; }
+      if (lines[i].trim() !== '') break;
+    }
+
+    const selectorJson = JSON.stringify([{ type: sel.type, value: sel.value }]);
+    const newLine = `${indent}await locateWithFallback(page, ${selectorJson}, 'click');`;
+
+    const newLines = [...lines.slice(0, insertAt), newLine, ...lines.slice(insertAt)];
+    const newCode = newLines.join('\n');
+
+    handleCodeChange(newCode);
+    toast.success('Inserted click step');
+  }, [localCode, displaySteps, state?.currentStepIndex, handleCodeChange]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -303,13 +347,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Resolve stream URL when actual runner is known
   useEffect(() => {
     let cancelled = false;
-    const runnerId = resolvedRunnerId || (executionTarget !== 'local' && executionTarget !== 'auto' ? executionTarget : null);
-    if (!runnerId) {
+    if (!resolvedRunnerId) {
       Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
     } else {
       (async () => {
         try {
-          const streamInfo = await getStreamUrlForRunner(runnerId);
+          const streamInfo = await getStreamUrlForRunner(resolvedRunnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
             const token = streamInfo.streamAuthToken;
@@ -327,7 +370,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       })();
     }
     return () => { cancelled = true; };
-  }, [executionTarget, resolvedRunnerId]);
+  }, [resolvedRunnerId]);
 
   const isPaused = state?.status === 'paused';
   const isError = state?.status === 'error';
@@ -357,13 +400,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>
-          <ExecutionTargetSelector
-            value={executionTarget}
-            onChange={setExecutionTarget}
-            capabilityFilter="run"
-            size="sm"
-            disabled={!!sessionId}
-          />
           <Badge
             variant="secondary"
             className={`text-white ${statusColor[state?.status || 'initializing']}`}
@@ -422,54 +458,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           >
             <Square className="h-4 w-4" />
           </Button>
-          <div className="w-px h-5 bg-border mx-1" />
-          {/* Record toggle (local only — remote debug executor doesn't support recording yet) */}
-          {!isRemote && (isRecording ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => sendCmd({ type: 'stop_recording' })}
-              title="Stop Recording"
-            >
-              <Square className="h-3 w-3 mr-1" />
-              Stop Rec{(state?.recordedEventCount ?? 0) > 0 ? ` (${state!.recordedEventCount})` : ''}
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => sendCmd({ type: 'start_recording' })}
-              disabled={!isPaused}
-              title="Record actions in browser"
-            >
-              <Circle className="h-3 w-3 mr-1 text-red-500 fill-red-500" />
-              Record
-            </Button>
-          ))}
-          {!isRemote && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (!sessionId) return;
-                const result = await flushDebugTrace(sessionId);
-                const traceUrl = result.url || state?.traceUrl;
-                if (traceUrl) {
-                  window.open(
-                    `https://trace.playwright.dev/?trace=${window.location.origin}${traceUrl}`,
-                    '_blank'
-                  );
-                } else {
-                  toast.error('No trace available');
-                }
-              }}
-              disabled={!sessionId}
-              title="Export Playwright Trace"
-            >
-              <FileSearch className="h-4 w-4 mr-1" />
-              Trace
-            </Button>
-          )}
           {streamUrl && (
             <>
               <div className="w-px h-5 bg-border mx-1" />
@@ -536,7 +524,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 )}
                 <EditableCodeDisplay
                   code={localCode}
-                  steps={state?.steps || []}
+                  steps={displaySteps}
                   currentStepIndex={state?.currentStepIndex ?? -1}
                   stepResults={state?.stepResults || []}
                   onCodeChange={handleCodeChange}
@@ -627,7 +615,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
                 <ScrollArea className="flex-1 overflow-hidden">
                   <div ref={stepListRef} className="p-2 space-y-1">
-                    {(state?.steps || []).map((step, idx) => {
+                    {displaySteps.map((step, idx) => {
                       const result = state?.stepResults?.[idx];
                       const isCurrent = idx === (state?.currentStepIndex ?? -1);
                       const isStepPassed = result?.status === 'passed';
@@ -726,6 +714,8 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       setDomSnapshotLoading(true);
                       browserViewerRef.current?.requestDomSnapshot();
                     }}
+                    onInsertClick={handleInsertClick}
+                    canInsert={(isPaused || isError || isCompleted) && !isBusy}
                   />
                 </TabsContent>
               )}
@@ -1014,9 +1004,11 @@ interface SelectorsPanelProps {
   search: string;
   onSearchChange: (s: string) => void;
   onRequestDomSnapshot: () => void;
+  onInsertClick: (sel: { type: string; value: string }) => void;
+  canInsert: boolean;
 }
 
-function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot }: SelectorsPanelProps) {
+function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot, onInsertClick, canInsert }: SelectorsPanelProps) {
   const [expandedIdx, setExpandedIdx] = useState<Set<number>>(new Set());
 
   const copyToClipboard = useCallback((text: string) => {
@@ -1096,6 +1088,17 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                   variant="ghost"
                   size="icon"
                   className="h-5 w-5 flex-shrink-0"
+                  disabled={!canInsert}
+                  title="Insert click step here"
+                  onClick={() => onInsertClick(sel)}
+                >
+                  <MousePointerClick className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 flex-shrink-0"
+                  title="Copy selector"
                   onClick={() => copyToClipboard(sel.value)}
                 >
                   <Copy className="h-3 w-3" />
@@ -1178,6 +1181,17 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                                 variant="ghost"
                                 size="icon"
                                 className="h-5 w-5 flex-shrink-0"
+                                disabled={!canInsert}
+                                title="Insert click step here"
+                                onClick={(e) => { e.stopPropagation(); onInsertClick(sel); }}
+                              >
+                                <MousePointerClick className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0"
+                                title="Copy selector"
                                 onClick={(e) => { e.stopPropagation(); copyToClipboard(sel.value); }}
                               >
                                 <Copy className="h-3 w-3" />

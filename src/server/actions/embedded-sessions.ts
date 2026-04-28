@@ -461,12 +461,64 @@ export async function claimPoolEB(): Promise<{
  */
 export async function releasePoolEB(runnerId: string): Promise<void> {
   const [runner] = await db
-    .select({ status: runners.status, teamId: runners.teamId })
+    .select({ status: runners.status, teamId: runners.teamId, isSystem: runners.isSystem, type: runners.type, name: runners.name })
     .from(runners)
     .where(eq(runners.id, runnerId));
+  if (!runner) return;
 
-  // Only release if still busy (heartbeat may have already set it online)
-  if (runner?.status === 'busy') {
+  // 1-job-1-EB enforcement (k8s + system embedded EBs): flip directly
+  // `busy → offline` so claimPoolEB (which only picks `online`) can never
+  // race in. Then tear down the Job. The previous design routed through an
+  // `online` intermediate plus a fire-and-forget `maybeTerminateReleasedEB`,
+  // which left a window where a peer's claimPoolEB could grab the just-
+  // released EB before terminate fired — recycling one EB across multiple
+  // tests, producing blank-white screenshots from CDP/screencast races.
+  // claimOrProvisionPoolEB launches fresh EBs on demand, and warm-pool
+  // refill is handled by ensureWarmPool, so we don't need to recycle here.
+  const isPoolEB = isKubernetesMode() && runner.isSystem === true && runner.type === 'embedded';
+  if (isPoolEB) {
+    const previousStatus = runner.status;
+    await db
+      .update(runners)
+      .set({ status: 'offline', lastSeen: new Date() })
+      .where(eq(runners.id, runnerId));
+    await db
+      .update(embeddedSessions)
+      .set({ status: 'stopped', userId: null, busySince: null, lastActivityAt: new Date() })
+      .where(eq(embeddedSessions.runnerId, runnerId));
+
+    if (previousStatus === 'busy' || previousStatus === 'online') {
+      emitRunnerStatusChange({
+        runnerId,
+        teamId: runner.teamId,
+        status: 'offline',
+        previousStatus,
+        timestamp: Date.now(),
+      });
+    }
+
+    console.log(`[Pool] Released EB ${runnerId.slice(0, 8)} → terminating (1-job-1-EB)`);
+    teardownPoolEB(runnerId, runner.name).catch((err) => {
+      console.error(`[Pool] Tear-down failed for ${runnerId.slice(0, 8)}:`, err);
+    });
+    processPoolQueue().catch((err) => {
+      console.error(`[Pool] Error processing queue after release:`, err);
+    });
+    // Refill the warm pool if this release drops us below warmPoolMin. The
+    // periodic refill in /api/ws/runner only runs once that route module is
+    // loaded by an EB heartbeat — but if the pool drains to 0, no heartbeats
+    // fire and the loop never starts. Pulling the refill here breaks that
+    // dead state without depending on any external timer.
+    const { ensureWarmPool } = await import('@/lib/eb/provisioner');
+    ensureWarmPool().catch((err) => {
+      console.error('[Pool] ensureWarmPool after release failed:', err);
+    });
+    return;
+  }
+
+  // Non-k8s (compose / dev): pool is fixed-size and we can't dynamically
+  // provision replacements — recycle the runner so the next test reuses it.
+  if (runner.status === 'busy') {
     await db
       .update(runners)
       .set({ status: 'online', lastSeen: new Date() })
@@ -480,8 +532,6 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
       timestamp: Date.now(),
     });
   }
-
-  // Reset session
   await db
     .update(embeddedSessions)
     .set({
@@ -492,81 +542,27 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
     })
     .where(eq(embeddedSessions.runnerId, runnerId));
 
-  console.log(`[Pool] Released EB ${runnerId.slice(0, 8)}`);
+  console.log(`[Pool] Released EB ${runnerId.slice(0, 8)} (recycled)`);
 
-  // In Kubernetes mode, tear down the Job unless we're below warm-pool minimum.
-  // Pod deletion is async; the runner's heartbeat-timeout reaper will mark the row offline.
-  if (isKubernetesMode()) {
-    maybeTerminateReleasedEB(runnerId).catch((err) => {
-      console.error(`[Pool] Error terminating released EB ${runnerId.slice(0, 8)}:`, err);
-    });
-  }
-
-  // Process any queued jobs waiting for an EB
   processPoolQueue().catch((err) => {
     console.error(`[Pool] Error processing queue after release:`, err);
   });
 }
 
 /**
- * Delete the k8s Job backing this runner if the pool is above its warm-pool minimum.
- * Ephemeral-per-test model: the default is to terminate immediately after release so
- * each test gets a fresh browser. Set EB_WARM_POOL_MIN > 0 to keep idle capacity.
+ * Tear down the k8s Job backing a released system EB.
  *
- * Graceful teardown: we enqueue a `command:shutdown` first, then poll for the EB
- * to self-report disconnect (status='offline' via final heartbeat) or for all its
- * in-flight commands to reach a terminal state. The EB's drain() flushes pending
- * test_result/screenshot/network_bodies POSTs before exiting. Only after the
- * grace window do we DELETE the k8s Job as a fallback.
+ * Caller is responsible for already having flipped the runner to `offline`
+ * (so no claimPoolEB can race in). This function only handles the
+ * shutdown→drain→delete sequence: enqueue `command:shutdown` so the EB's
+ * `runnerClient.drain()` flushes pending test_result/screenshot/network_bodies
+ * uploads, wait up to EB_SHUTDOWN_GRACE_MS for in-flight commands to settle,
+ * then DELETE the Job as a fallback if the EB hasn't exited cleanly.
  */
-// Serializes the "check pool size + reserve slot" decision across concurrent
-// release calls. Without this, two parallel releases both read size=3 under a
-// warmPoolMin=2 budget and both terminate, dropping the pool below the floor.
-let reserveGate: Promise<void> = Promise.resolve();
+async function teardownPoolEB(runnerId: string, runnerName: string): Promise<void> {
+  const jobName = jobNameForRunnerName(runnerName);
+  if (!jobName) return; // not a provisioner-created runner
 
-async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
-  const [runner] = await db
-    .select({ name: runners.name, isSystem: runners.isSystem, type: runners.type })
-    .from(runners)
-    .where(eq(runners.id, runnerId));
-  if (!runner?.isSystem || runner.type !== 'embedded') return;
-
-  const jobName = jobNameForRunnerName(runner.name);
-  if (!jobName) return; // Not a provisioner-created runner (e.g. docker-compose EB)
-
-  // Step 1 — under the reserve gate: check pool size, and if we're above warm
-  // min, atomically flip this runner to 'offline' so (a) it can't be re-claimed
-  // and (b) subsequent concurrent releases see the new lower count.
-  let resolveGate!: () => void;
-  const nextGate = new Promise<void>((r) => { resolveGate = r; });
-  const prevGate = reserveGate;
-  reserveGate = nextGate;
-  let reserved = false;
-  try {
-    await prevGate;
-    const size = await currentPoolSize();
-    if (size <= warmPoolMin()) {
-      return; // Keep this one alive to absorb back-to-back claims
-    }
-    // Flip to offline now — only if still 'online' (idle). If the EB was
-    // already reclaimed for another test by processPoolQueue → claimPoolEB
-    // (status='busy'), leave it alone — sending shutdown here would kill a
-    // live test and surface as ERR_NETWORK_CHANGED in the browser.
-    const res = await db
-      .update(runners)
-      .set({ status: 'offline', lastSeen: new Date() })
-      .where(and(eq(runners.id, runnerId), eq(runners.status, 'online')))
-      .returning({ id: runners.id });
-    if (res.length === 0) return; // already offline, or reclaimed as busy
-    reserved = true;
-  } finally {
-    resolveGate();
-  }
-  if (!reserved) return;
-
-  // Step 2: ask the EB to shut itself down gracefully. It was flipped to
-  // offline in step 1, so no new work will be queued. Existing in-flight
-  // commands still drain through `runnerClient.drain()` on the EB side.
   const { createRunnerCommand } = await import('@/lib/db/queries');
   const { notifyCommandQueued } = await import('@/lib/ws/runner-events');
   try {
@@ -584,8 +580,6 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
     console.warn(`[Pool] Failed to enqueue shutdown for ${runnerId.slice(0, 8)}:`, err);
   }
 
-  // Step 3: wait up to EB_SHUTDOWN_GRACE_MS for the EB's in-flight commands to
-  // complete (drain signal). If everything's already settled, proceed.
   const graceMs = parseInt(process.env.EB_SHUTDOWN_GRACE_MS || '30000', 10);
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
@@ -600,19 +594,8 @@ async function maybeTerminateReleasedEB(runnerId: string): Promise<void> {
         ne(runnerCommands.status, 'timeout'),
         ne(runnerCommands.status, 'cancelled'),
       ));
-    if (pendingOrClaimed.length === 0) {
-      // All work resolved; ok to proceed with Job deletion even if heartbeat
-      // hasn't landed yet (drain() may still be running but results are in).
-      break;
-    }
+    if (pendingOrClaimed.length === 0) break;
   }
-
-  // Step 4: update the embedded_sessions row + tear down the Job. Runner row
-  // was already flipped in step 1 under the gate.
-  await db
-    .update(embeddedSessions)
-    .set({ status: 'stopped', busySince: null })
-    .where(eq(embeddedSessions.runnerId, runnerId));
 
   await terminateEBJob(jobName);
   stopDevPortForward(jobName);
@@ -717,9 +700,19 @@ export async function claimOrProvisionPoolEB(
   const waitTimeoutMs = opts.waitTimeoutMs ?? 90_000;
   const deadline = Date.now() + waitTimeoutMs;
   const expectedRunnerName = `System EB-${jobInfo.instanceId}`;
+  const provisionStart = Date.now();
+  let lastLoggedSecond = -1;
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000));
+
+    // Log provisioning latency every ~10s so slow Olares cold starts are visible
+    // without needing to add per-poll noise. Catches startup-window race symptoms.
+    const elapsedSec = Math.round((Date.now() - provisionStart) / 1000);
+    if (elapsedSec > 0 && elapsedSec % 10 === 0 && elapsedSec !== lastLoggedSecond) {
+      lastLoggedSecond = elapsedSec;
+      console.log(`[Pool] Waiting for ${expectedRunnerName} to register: ${elapsedSec}s elapsed (timeout ${waitTimeoutMs / 1000}s)`);
+    }
 
     // Transactional claim with row-level lock (SKIP LOCKED) — same pattern as
     // claimPoolEB. Guarantees that two concurrent callers can't end up on the
@@ -881,10 +874,10 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
       .set({ status: 'ready', busySince: null, userId: null, lastActivityAt: new Date() })
       .where(eq(embeddedSessions.status, 'busy'));
 
-    // Step 2: for each orphan, go through releasePoolEB so warm-pool trimming
-    // (maybeTerminateReleasedEB) kicks in and tears the Job down if we're above
-    // EB_WARM_POOL_MIN. Releases run serially to avoid racing the warm-pool
-    // reserve gate.
+    // Step 2: for each orphan, go through releasePoolEB so the Job is torn
+    // down (1-job-1-EB: every release terminates the EB; ensureWarmPool
+    // refills as needed). Releases run serially so we don't burst the k8s
+    // API on app boot when many orphans are present.
     for (const row of orphaned) {
       await db
         .update(runners)

@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-pnpm dev                        # Dev server on localhost:3000
+pnpm dev                        # Dev server on localhost:3000 (host Next.js)
 pnpm build                      # Production build
 pnpm lint                       # ESLint
 pnpm test                       # Unit tests (vitest)
@@ -18,25 +18,40 @@ pnpm test -- src/lib/diff       # Tests in specific directory
 pnpm db:push                    # Push schema changes to DB
 pnpm db:studio                  # Drizzle Studio
 
-# Embedded Browser (local dev)
-docker compose -f docker-compose.eb.yml up -d --build  # Rebuild + start
+# Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
+docker compose up -d
 
-# Local k3s stack (dynamic EB provisioning via k3d)
-pnpm stack                      # bootstrap: build images + create k3d cluster + deploy
-pnpm stack:stop                 # teardown (pnpm stack:purge also drops .k8s-secrets.yaml)
-pnpm stack:refresh              # rebuild app image + rolling restart
-pnpm stack:refresh:eb           # rebuild EB image + restart app so new Jobs use it
-pnpm stack:refresh:all          # EB then app
-pnpm stack:status               # cluster + workloads + /api/health
-pnpm stack:logs [app|eb|all]    # tail pod logs (default: app)
+# k3d cluster — hosts dynamically-provisioned EB Job pods only (no app, no db)
+pnpm stack                      # create k3d cluster + build/import EB image
+pnpm stack:refresh              # rebuild EB image + import (alias of stack:refresh:eb)
+pnpm stack:refresh:eb           # same
+pnpm stack:status               # cluster + EB jobs/pods + host /api/health
+pnpm stack:logs                 # tail EB pod logs (default; only EB lives in cluster)
+pnpm stack:logs:eb              # explicit
+pnpm stack:stop                 # delete cluster (pnpm stack:purge also drops .k8s-secrets.yaml)
+
+# Deploy targets (homeservers — unchanged)
+pnpm deploy:olares              # k8s deploy to Olares
+pnpm deploy:zima                # docker-compose deploy to ZimaBoard/CasaOS
+pnpm deploy:npm                 # publish @lastest/runner
+pnpm deploy:all                 # zima + olares + npm
 ```
 
-## k3s Local Dev (dynamic EB provisioning)
+## Local Dev (host app + k3d EB provisioning)
 
-- Manifests in `k8s/` (`app-deployment.yaml`, `postgres.yaml`, `embedded-browser-rbac.yaml`, …). Scripts in `scripts/k3d-*.sh`.
-- The EB provisioner (`src/lib/eb/provisioner.ts`) only runs **inside** a k8s pod — it reads the mounted SA token. `pnpm dev` on the host cannot exercise `EB_PROVISIONER=kubernetes`.
-- Service DNS is hard-coded: `lastest-app.lastest.svc.cluster.local:3000`. Override via `LASTEST_URL` only.
-- `scripts/_generate-secrets.sh` auto-merges OAuth / Resend / Twenty keys from `.env.local` into the k8s Secret. DB URL + `BETTER_AUTH_SECRET` + `SYSTEM_EB_TOKEN` stay k8s-owned.
+The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docker), and **EB pods provisioned dynamically into a local k3d cluster**.
+
+- Manifests in `k8s/` (`namespace.yaml`, `embedded-browser-rbac.yaml`, `embedded-browser-job.yaml` reference). Scripts in `scripts/k3d-*.sh`.
+- The EB provisioner (`src/lib/eb/provisioner.ts:127-168`) detects host mode: when `KUBERNETES_SERVICE_HOST` is unset, it shells out to `kubectl config view --raw --minify -o json` and uses the current kubeconfig context (`k3d-lastest`) to talk to the cluster. No in-pod ServiceAccount required.
+- EB pods reach the host app via `host.k3d.internal:3000` — `k3d-up.sh` installs a CoreDNS override that pins the name to the Docker bridge gateway, so the resolution works on Linux without Docker Desktop.
+- The provisioner inlines `SYSTEM_EB_TOKEN` / `LASTEST_URL` / `EB_IMAGE` into each Job spec from the host process env, so no in-cluster Secret is needed for EB lifecycle.
+- Required `.env.local` keys for the host dev flow:
+  - `EB_PROVISIONER=kubernetes`
+  - `EB_NAMESPACE=lastest`
+  - `EB_IMAGE=lastest-embedded-browser:latest`
+  - `LASTEST_URL=http://host.k3d.internal:3000`
+  - `SYSTEM_EB_TOKEN=<random hex>` (single token, or comma-list with the EB-facing token first)
+  - `DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest`
 - All built images + cluster containers carry `com.docker.compose.project=lastest` so Docker Desktop groups them as one stack.
 
 ## Architecture

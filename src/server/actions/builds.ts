@@ -603,7 +603,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }> }) => {
     processedCount++;
 
     // Save test result immediately
@@ -630,6 +630,9 @@ async function runBuildAsync(
       domSnapshot: result.domSnapshot,
       lastReachedStep: result.lastReachedStep,
       totalSteps: result.totalSteps,
+      extractedVariables: result.extractedVariables,
+      assignedVariables: result.assignedVariables,
+      logs: result.logs,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -947,6 +950,9 @@ async function runBuildAsync(
                 domSnapshot: result.domSnapshot,
                 lastReachedStep: result.lastReachedStep,
                 totalSteps: result.totalSteps,
+                extractedVariables: result.extractedVariables,
+                assignedVariables: result.assignedVariables,
+                logs: result.logs,
                 retryOf: originalResult?.id ?? null,
                 isFlaky: false,
               });
@@ -984,6 +990,26 @@ async function runBuildAsync(
           });
         }
       }
+    }
+
+    // Run per-step evaluation criteria. A rule with severity 'fail' can
+    // promote a passing test to failed (e.g. fail when a screenshot changed).
+    try {
+      const { evaluateStepCriteria } = await import('@/lib/execution/evaluation');
+      const resultsForEval = await queries.getTestResultsByRun(testRunId);
+      for (const r of resultsForEval) {
+        const prevStatus = r.status;
+        const evalResult = await evaluateStepCriteria(r.id);
+        if (
+          evalResult.overriddenStatus === 'failed' &&
+          prevStatus !== 'failed'
+        ) {
+          if (prevStatus === 'passed') passedCount--;
+          failedCount++;
+        }
+      }
+    } catch (err) {
+      console.error('[build] step-criteria evaluation failed:', err);
     }
 
     // Update test run status
@@ -1228,10 +1254,14 @@ async function processVisualDiff(
   const defaultBranch = repo?.defaultBranch || 'main';
   const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
-  // Fetch ignore regions for this test
+  // Fetch ignore regions (test-level) and focus regions (per-step) for this screenshot
   const testIgnoreRegions = await queries.getIgnoreRegions(testId);
   const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
     ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+    : undefined;
+  const stepFocusRegions = await queries.getFocusRegions(testId, stepLabel || null);
+  const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
+    ? stepFocusRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
 
   // Helper to classify based on percentage
@@ -1296,7 +1326,8 @@ async function processVisualDiff(
         ignoreRects,
         false,
         diffEngine,
-        regionDetectionMode
+        regionDetectionMode,
+        focusRects,
       );
 
       return {
@@ -1343,7 +1374,8 @@ async function processVisualDiff(
         ignoreRects,
         ignorePageShift,
         diffEngine,
-        regionDetectionMode
+        regionDetectionMode,
+        focusRects,
       );
 
       const mainPct = mainDiffResult.percentageDifference;
@@ -1462,6 +1494,7 @@ async function processVisualDiff(
           },
           ignoreRects,
           regionDetectionMode,
+          focusRects,
         )
       : await generateDiff(
           path.join(STORAGE_ROOT, baseline.imagePath),
@@ -1472,7 +1505,8 @@ async function processVisualDiff(
           ignoreRects,
           ignorePageShift,
           diffEngine,
-          regionDetectionMode
+          regionDetectionMode,
+          focusRects,
         );
 
     const pct = diffResult.percentageDifference;
@@ -1839,12 +1873,13 @@ async function sendBuildNotifications(data: {
       const account = repo?.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
 
       if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
+        const instanceUrl = account.instanceUrl || 'https://gitlab.com';
         // Find open MRs for this branch
         const mrs = await getOpenMRsForBranch(
           account.accessToken,
           repo.gitlabProjectId,
           data.gitBranch,
-          account.instanceUrl || undefined
+          instanceUrl,
         );
 
         for (const mr of mrs) {
@@ -1862,7 +1897,7 @@ async function sendBuildNotifications(data: {
               failedCount: data.failedCount,
               buildUrl,
             },
-            account.instanceUrl || undefined
+            instanceUrl,
           );
         }
       }

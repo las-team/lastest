@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>lasTest — Delta Mark export kit (print)</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+  * { box-sizing: border-box; }
+
+  @page { size: A4 landscape; margin: 1cm; }
+  @media print {
+    html, body { background: #fff !important; }
+    .page {
+      break-after: page;
+      page-break-after: always;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page:last-child { break-after: auto; page-break-after: auto; }
+    .no-print { display: none !important; }
+  }
+
+  .page {
+    width: 27cm;
+    min-height: 19cm;
+    margin: 0 auto 1cm;
+    padding: 1.2cm 1.4cm;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    display: flex; flex-direction: column;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #1F2A33;
+    position: relative;
+  }
+  .page-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding-bottom: 12px; border-bottom: 1px solid rgba(0,0,0,0.08);
+    margin-bottom: 24px;
+  }
+  .page-title {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: -0.5px;
+  }
+  .page-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: rgba(0,0,0,0.5);
+    text-transform: uppercase;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; flex: 1; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; flex: 1; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .tile {
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(0,0,0,0.08);
+    position: relative; overflow: hidden;
+  }
+  .tile .label {
+    position: absolute; top: 10px; left: 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase;
+    color: rgba(0,0,0,0.45);
+    z-index: 2;
+  }
+  .tile.dark { background: #1F2A33; }
+  .tile.dark .label { color: rgba(255,255,255,0.45); }
+  .tile.paper { background: #f6f4ef; }
+  .tile.bg { background: lab(96.52 -0.0000298023 0.0000119209); }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Archivo:wght@700;800;900&family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- PAGE 1 — COVER -->
+<div class="page" style="display:flex; flex-direction:column; justify-content:space-between;">
+  <div>
+    <div style="font-family:'Press Start 2P', monospace; font-size:10px; color:#E03E36; letter-spacing:2px; margin-bottom:18px;">★ EXPORT KIT · DELTA MARK</div>
+    <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:72px; line-height:0.95; letter-spacing:-2.5px; margin-bottom:24px;">LAS<span style="color:#E03E36">T</span>EST</div>
+    <div style="font-family:system-ui, sans-serif; font-size:16px; line-height:1.5; color:rgba(31,42,51,0.7); max-width:18cm;">
+      Delta Mark — final logo for lasTest, a visual regression testing tool. This kit contains the mark in all primary forms, the brand color system, scale references, wordmark lockups, and context mockups, ready for handoff.
+    </div>
+  </div>
+
+  <div style="display:flex; align-items:center; justify-content:center; flex:1; padding: 40px 0;">
+    <svg viewBox="0 0 200 200" width="360" height="360" style="display:block">
+      <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+      <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+      <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+      <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+      <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+    </svg>
+  </div>
+
+  <div style="display:flex; gap:18px; font-family:'JetBrains Mono', monospace; font-size:10px; color:rgba(31,42,51,0.65); flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#E03E36;"></div>RED · #E03E36</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#E09836;"></div>AMBER · #E09836</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#36A88E;"></div>TEAL · #36A88E</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#3674A8;"></div>BLUE · #3674A8</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#1F2A33;"></div>INK · #1F2A33</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#F6F4EF; border:1px solid rgba(0,0,0,0.1);"></div>PAPER · #F6F4EF</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:lab(96.52 -0.0000298023 0.0000119209); border:1px solid rgba(0,0,0,0.1);"></div>SOFT · LAB(96.52 0 0)</div>
+    <div style="display:flex; align-items:center; gap:8px;"><div style="width:14px; height:14px; background:#FFFFFF; border:1px solid rgba(0,0,0,0.15);"></div>WHITE · #FFFFFF</div>
+  </div>
+</div>
+
+<!-- PAGE 2 — THE MARK -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">01 · The Mark</div>
+    <div class="page-num">PAGE 2 / 8</div>
+  </div>
+  <div class="grid-2" style="grid-template-rows: 1fr 1fr; min-height: 16cm;">
+    <div class="tile paper">
+      <div class="label">PRIMARY · LIGHT</div>
+      <svg viewBox="0 0 200 200" width="260" height="260">
+        <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+        <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+        <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+        <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+        <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+      </svg>
+    </div>
+    <div class="tile dark">
+      <div class="label">PRIMARY · DARK</div>
+      <svg viewBox="0 0 200 200" width="260" height="260">
+        <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
+        <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+        <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
+        <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
+        <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>
+      </svg>
+    </div>
+    <div class="tile paper">
+      <div class="label">BARE · NO EARS</div>
+      <svg viewBox="0 0 200 200" width="260" height="260">
+        <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+        <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+        <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+      </svg>
+    </div>
+    <div class="tile paper">
+      <div class="label">MONOCHROME · INK ONLY</div>
+      <svg viewBox="0 0 200 200" width="260" height="260">
+        <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+        <rect x="56" y="56" width="110" height="110" fill="#1F2A33"/>
+        <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+        <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+        <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 3 — PALETTE OVERVIEW -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">02 · Palette — split-complementary</div>
+    <div class="page-num">PAGE 3 / 8</div>
+  </div>
+
+  <div style="background:lab(96.52 -0.0000298023 0.0000119209); padding: 28px; margin-bottom: 16px; display:flex; justify-content:space-between; align-items:flex-start;">
+    <div style="max-width: 16cm;">
+      <div style="font-family:'Press Start 2P', monospace; font-size:9px; color:#E03E36; letter-spacing:1.5px; margin-bottom:10px;">★ COLOR SYSTEM</div>
+      <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:28px; letter-spacing:-1px; line-height:1; color:#1F2A33; margin-bottom:8px;">5 stops, anchored on red.</div>
+      <div style="font-family:system-ui, sans-serif; font-size:12px; color:rgba(31,42,51,0.65); line-height:1.5;">
+        Red anchor; warm support via amber (analogous); cool support via teal + steel blue (split-complement); deep ink for type. Three neutral surfaces — soft lab(96.52 0 0), warm paper #F6F4EF, pure white for high-contrast displays.
+      </div>
+    </div>
+    <svg viewBox="0 0 200 200" width="100" height="100">
+      <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+      <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+      <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+      <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+      <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+    </svg>
+  </div>
+
+  <div class="grid-5" style="margin-bottom: 20px;">
+    <!-- Each swatch -->
+    <div style="background:#E03E36; height: 160px; padding: 14px; display:flex; flex-direction:column; justify-content:space-between; color:#fff;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.8;">01 · ~5°</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.3px;">Primary</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px;">#E03E36</div>
+      </div>
+    </div>
+    <div style="background:#E09836; height: 160px; padding: 14px; display:flex; flex-direction:column; justify-content:space-between; color:#1F2A33;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.7;">02 · ~33°</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.3px;">Amber</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px;">#E09836</div>
+      </div>
+    </div>
+    <div style="background:#36A88E; height: 160px; padding: 14px; display:flex; flex-direction:column; justify-content:space-between; color:#1F2A33;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.7;">03 · ~165°</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.3px;">Teal</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px;">#36A88E</div>
+      </div>
+    </div>
+    <div style="background:#3674A8; height: 160px; padding: 14px; display:flex; flex-direction:column; justify-content:space-between; color:#fff;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.8;">04 · ~205°</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.3px;">Steel Blue</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px;">#3674A8</div>
+      </div>
+    </div>
+    <div style="background:#1F2A33; height: 160px; padding: 14px; display:flex; flex-direction:column; justify-content:space-between; color:#fff;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.8;">05 · cool dark</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.3px;">Ink</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px;">#1F2A33</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Surfaces row -->
+  <div style="font-family:'JetBrains Mono', monospace; font-size:10px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase; margin-bottom: 8px;">Surfaces — neutral system</div>
+  <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+    <div style="background:#FFFFFF; height: 90px; padding: 12px; display:flex; flex-direction:column; justify-content:space-between; color:#1F2A33; border:1px solid rgba(0,0,0,0.1);">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.55;">S1 · HIGH-CONTRAST</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:15px; letter-spacing:-0.3px;">White</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; margin-top:3px; opacity:0.7;">#FFFFFF</div>
+      </div>
+    </div>
+    <div style="background:lab(96.52 -0.0000298023 0.0000119209); height: 90px; padding: 12px; display:flex; flex-direction:column; justify-content:space-between; color:#1F2A33; border:1px solid rgba(0,0,0,0.06);">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.55;">S2 · PRIMARY SOFT</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:15px; letter-spacing:-0.3px;">Soft</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; margin-top:3px; opacity:0.7;">lab(96.52 0 0)</div>
+      </div>
+    </div>
+    <div style="background:#F6F4EF; height: 90px; padding: 12px; display:flex; flex-direction:column; justify-content:space-between; color:#1F2A33; border:1px solid rgba(0,0,0,0.06);">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.55;">S3 · WARM PAPER</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:15px; letter-spacing:-0.3px;">Paper</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; margin-top:3px; opacity:0.7;">#F6F4EF</div>
+      </div>
+    </div>
+    <div style="background:#1F2A33; height: 90px; padding: 12px; display:flex; flex-direction:column; justify-content:space-between; color:#fff;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; opacity:0.7;">S4 · DARK / TYPE</div>
+      <div>
+        <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:15px; letter-spacing:-0.3px;">Ink</div>
+        <div style="font-family:'JetBrains Mono', monospace; font-size:9.5px; margin-top:3px; opacity:0.85;">#1F2A33</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wheel + ratio side-by-side -->
+  <div style="display:grid; grid-template-columns: 1fr 1.4fr; gap: 16px; flex:1;">
+    <!-- Wheel -->
+    <div style="background:lab(96.52 -0.0000298023 0.0000119209); padding: 16px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+      <svg viewBox="0 0 320 320" width="240" height="240" id="wheel-svg"></svg>
+      <div style="font-family:'JetBrains Mono', monospace; font-size:9px; color:#1F2A33; opacity:0.65; letter-spacing:0.5px; text-align:center; margin-top:8px; line-height:1.4;">
+        Dashed = split-complement reach. Solid = analogous warm dyad.
+      </div>
+    </div>
+    <!-- Usage ratio -->
+    <div style="display:flex; flex-direction:column; gap:14px;">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:10px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase;">Recommended usage ratio</div>
+      <div style="display:flex; height: 50px; width: 100%;">
+        <div style="flex: 60; background:lab(96.52 -0.0000298023 0.0000119209); display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:10px; color:#1F2A33; border:1px solid rgba(0,0,0,0.05);">60% · NEUTRALS</div>
+        <div style="flex: 18; background:#1F2A33; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:10px; color:#fff;">18% · INK</div>
+        <div style="flex: 12; background:#E03E36; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:10px; color:#fff;">12% · RED</div>
+        <div style="flex: 5; background:#E09836; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono', monospace; font-size:9px; color:#1F2A33;">5%</div>
+        <div style="flex: 3; background:#36A88E;"></div>
+        <div style="flex: 2; background:#3674A8;"></div>
+      </div>
+      <div style="font-family:system-ui, sans-serif; font-size:11px; color:rgba(31,42,51,0.7); line-height:1.55;">
+        Neutral surfaces (background, paper, ink type) carry 60%+. Red anchors brand moments — mark, primary CTA, regression alert. Amber, teal, blue are accent-only: UI states and data viz.
+      </div>
+
+      <div style="margin-top: 8px; font-family:'JetBrains Mono', monospace; font-size:10px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase;">Pairings · LASTEST on backgrounds</div>
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap: 8px;">
+        <div style="background:#FFFFFF; border:1px solid rgba(0,0,0,0.08); padding:14px; height:70px; display:flex; align-items:center; justify-content:center;">
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.6px; color:#1F2A33;">LAS<span style="color:#E03E36">T</span>EST</span>
+        </div>
+        <div style="background:lab(96.52 -0.0000298023 0.0000119209); padding:14px; height:70px; display:flex; align-items:center; justify-content:center;">
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.6px; color:#1F2A33;">LAS<span style="color:#E03E36">T</span>EST</span>
+        </div>
+        <div style="background:#F6F4EF; padding:14px; height:70px; display:flex; align-items:center; justify-content:center;">
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.6px; color:#1F2A33;">LAS<span style="color:#E03E36">T</span>EST</span>
+        </div>
+        <div style="background:#1F2A33; padding:14px; height:70px; display:flex; align-items:center; justify-content:center;">
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:18px; letter-spacing:-0.6px; color:#fff;">LAS<span style="color:#E03E36">T</span>EST</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 4 — PALETTE SPEC CARDS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">02 · Palette — spec</div>
+    <div class="page-num">PAGE 4 / 8</div>
+  </div>
+
+  <div id="palette-cards" style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 12px; flex:1;"></div>
+</div>
+
+<!-- PAGE 5 — SCALE -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">03 · Scale</div>
+    <div class="page-num">PAGE 5 / 8</div>
+  </div>
+  <div style="background:#f6f4ef; padding: 60px 40px; display:flex; align-items:flex-end; justify-content:center; gap:32px; margin-bottom:20px;">
+    <div id="scale-light"></div>
+  </div>
+  <div style="background:#1F2A33; padding: 60px 40px; display:flex; align-items:flex-end; justify-content:center; gap:32px;">
+    <div id="scale-dark"></div>
+  </div>
+</div>
+
+<!-- PAGE 6 — WORDMARK LOCKUPS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">04 · Wordmark — Archivo Black</div>
+    <div class="page-num">PAGE 6 / 8</div>
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap: 24px; padding: 12px 0;">
+    <div class="tile paper" style="padding:36px; min-height: 4cm;">
+      <div class="label">HORIZONTAL · HERO</div>
+      <div style="display:flex; align-items:center; gap:28px;">
+        <svg viewBox="0 0 200 200" width="120" height="120">
+          <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+          <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+          <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+          <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+          <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+        </svg>
+        <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:88px; letter-spacing:-3px; line-height:1;">
+          LAS<span style="color:#E03E36">T</span>EST
+        </span>
+      </div>
+    </div>
+
+    <div class="grid-2" style="min-height: 6cm;">
+      <div class="tile paper" style="padding:24px;">
+        <div class="label">STACKED</div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+          <svg viewBox="0 0 200 200" width="90" height="90">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+          </svg>
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:40px; letter-spacing:-1.5px;">
+            LAS<span style="color:#E03E36">T</span>EST
+          </span>
+        </div>
+      </div>
+      <div class="tile dark" style="padding:24px;">
+        <div class="label">STACKED · DARK</div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+          <svg viewBox="0 0 200 200" width="90" height="90">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>
+          </svg>
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:40px; letter-spacing:-1.5px; color:#fff;">
+            LAS<span style="color:#E03E36">T</span>EST
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tile paper" style="padding:24px 36px; min-height: 2.5cm;">
+      <div class="label">SMALL LOCKUPS</div>
+      <div style="display:flex; align-items:center; gap:48px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <svg viewBox="0 0 200 200" width="44" height="44">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+          </svg>
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:26px; letter-spacing:-1px;">
+            LAS<span style="color:#E03E36">T</span>EST
+          </span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <svg viewBox="0 0 200 200" width="24" height="24">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+          </svg>
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:14px; letter-spacing:-0.3px;">
+            LAS<span style="color:#E03E36">T</span>EST
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 7 — CONTEXTS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">05 · In context</div>
+    <div class="page-num">PAGE 7 / 8</div>
+  </div>
+
+  <div class="grid-2" style="grid-template-rows: 1fr 1fr; min-height: 16cm;">
+    <div class="tile paper">
+      <div class="label">APP ICON · 512</div>
+      <div style="width:180px; height:180px; background:#f6f4ef; border-radius:40px; box-shadow: 0 8px 22px rgba(0,0,0,0.15); display:flex; align-items:center; justify-content:center;">
+        <svg viewBox="0 0 200 200" width="130" height="130">
+          <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+          <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+          <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+          <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+          <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="tile paper">
+      <div class="label">GITHUB AVATAR</div>
+      <div style="width:180px; height:180px; background:#1F2A33; border-radius:90px; display:flex; align-items:center; justify-content:center;">
+        <svg viewBox="0 0 200 200" width="115" height="115">
+          <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
+          <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+          <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
+          <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
+          <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="tile dark">
+      <div class="label">README HEADER</div>
+      <div style="display:flex; align-items:center; gap:22px; padding: 30px;">
+        <svg viewBox="0 0 200 200" width="90" height="90">
+          <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
+          <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+          <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
+          <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
+          <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>
+        </svg>
+        <div>
+          <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:38px; letter-spacing:-1.5px; color:#fff;">
+            LAS<span style="color:#E03E36">T</span>EST
+          </div>
+          <div style="font-family:'JetBrains Mono', monospace; font-size:11px; color:rgba(255,255,255,0.5); margin-top:8px; letter-spacing:0.5px;">VISUAL REGRESSION · V1.0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tile dark">
+      <div class="label">CLI PROMPT</div>
+      <div style="font-family:'JetBrains Mono', monospace; font-size:12px; color:rgba(255,255,255,0.9); line-height:1.7; padding: 20px 28px; width:100%;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+          <svg viewBox="0 0 200 200" width="20" height="20">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>
+          </svg>
+          <span style="font-family:Archivo, sans-serif; font-weight:900; font-size:16px; color:#fff;">LAS<span style="color:#E03E36">T</span>EST</span>
+          <span style="color:rgba(255,255,255,0.4); font-size:10px;">v1.0.0</span>
+        </div>
+        <div style="color:rgba(255,255,255,0.45);">$ lastest run --compare main</div>
+        <div style="color:rgba(255,255,255,0.8);">→ 24 screenshots captured</div>
+        <div style="color:#E03E36;">→ 2 regressions detected ✦</div>
+        <div style="color:rgba(255,255,255,0.6);">&nbsp;&nbsp;↳ home.png &nbsp;&nbsp;<span style="color:#E03E36;">+0.4%</span></div>
+        <div style="color:rgba(255,255,255,0.6);">&nbsp;&nbsp;↳ pricing.png <span style="color:#E03E36;">+1.2%</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 8 — CLEAR SPACE + DELIVERABLES -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">06 · Clear space + deliverables</div>
+    <div class="page-num">PAGE 8 / 8</div>
+  </div>
+
+  <div style="display:flex; gap: 24px; margin-bottom: 30px;">
+    <div style="flex:1; background:#f6f4ef; padding: 40px; display:flex; align-items:center; justify-content:center; position:relative;">
+      <div style="position:absolute; top:12px; left:12px; font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.5px; text-transform:uppercase; color:rgba(0,0,0,0.45);">CLEAR SPACE · X = EAR HEIGHT</div>
+      <div style="position:relative; padding: 28px; border: 1px dashed rgba(0,0,0,0.3);">
+        <svg viewBox="0 0 200 200" width="180" height="180">
+          <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+          <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+          <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+          <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+          <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+        </svg>
+      </div>
+    </div>
+
+    <div style="flex:1; background:#fff; padding: 24px; border: 1px solid rgba(0,0,0,0.08);">
+      <div style="font-family:'JetBrains Mono', monospace; font-size:10px; letter-spacing:0.5px; text-transform:uppercase; color:rgba(0,0,0,0.5); margin-bottom:14px;">DO NOT</div>
+      <ul style="font-family:system-ui, sans-serif; font-size:13px; line-height:1.7; color:rgba(31,42,51,0.75); padding-left:18px; margin:0;">
+        <li>Change the proportions of the overlap square</li>
+        <li>Remove the accent square — both rectangles are core</li>
+        <li>Apply gradients, shadows, or effects to the mark</li>
+        <li>Rotate or skew</li>
+        <li>Use accents other than the approved palette</li>
+        <li>Combine with fonts other than Archivo Black</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="font-family:'JetBrains Mono', monospace; font-size:10px; letter-spacing:0.5px; text-transform:uppercase; color:rgba(0,0,0,0.5); margin-bottom:12px;">Deliverables</div>
+  <ul style="font-family:system-ui, sans-serif; font-size:13px; line-height:1.7; color:rgba(31,42,51,0.75); padding-left:18px; margin:0;">
+    <li><strong>Mark</strong> — SVG (primary, dark, bare, monochrome), PNG @ 16/32/48/64/128/256/512/1024</li>
+    <li><strong>Favicon bundle</strong> — .ico (16+32+48), apple-touch-icon 180, maskable 512</li>
+    <li><strong>Wordmark lockups</strong> — horizontal + stacked, light + dark, Archivo Black</li>
+    <li><strong>Color tokens</strong> — CSS / Figma / Style Dictionary, with semantic aliases</li>
+    <li><strong>Social</strong> — README banner 1280×640, OG image 1200×630, Twitter avatar 400×400</li>
+  </ul>
+</div>
+
+<script>
+  // Render scale steps
+  (function renderScales() {
+    function svgAt(size, light) {
+      const stroke = light ? '#1F2A33' : '#ffffff';
+      const fillInk = light ? '#1F2A33' : '#ffffff';
+      return `
+        <div style="display:flex; flex-direction:column; align-items:center; gap:8px;">
+          <svg viewBox="0 0 200 200" width="${size}" height="${size}">
+            <rect x="34" y="34" width="110" height="110" fill="none" stroke="${stroke}" stroke-width="6"/>
+            <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+            <rect x="56" y="56" width="88" height="88" fill="${fillInk}"/>
+            <path d="M 70 34 L 80 18 L 90 34 Z" fill="${fillInk}"/>
+            <path d="M 110 34 L 120 18 L 130 34 Z" fill="${fillInk}"/>
+          </svg>
+          <div style="font-family:'JetBrains Mono', monospace; font-size:9px; color:${light ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)'}">${size}px</div>
+        </div>`;
+    }
+    const sizes = [128, 96, 64, 48, 32, 24, 16];
+    document.getElementById('scale-light').innerHTML =
+      '<div style="display:flex; align-items:flex-end; gap:32px;">' + sizes.map(s => svgAt(s, true)).join('') + '</div>';
+    document.getElementById('scale-dark').innerHTML =
+      '<div style="display:flex; align-items:flex-end; gap:32px;">' + sizes.map(s => svgAt(s, false)).join('') + '</div>';
+  })();
+
+  // Render color wheel
+  (function renderWheel() {
+    const svg = document.getElementById('wheel-svg');
+    if (!svg) return;
+    const ns = 'http://www.w3.org/2000/svg';
+    const r1 = 130, r2 = 155;
+    const rad = (deg) => (deg * Math.PI) / 180;
+    let html = '';
+    for (let i = 0; i < 60; i++) {
+      const a = (i * 6) - 90;
+      const a2 = a + 6;
+      const x1 = 160 + Math.cos(rad(a)) * r1;
+      const y1 = 160 + Math.sin(rad(a)) * r1;
+      const x2 = 160 + Math.cos(rad(a2)) * r1;
+      const y2 = 160 + Math.sin(rad(a2)) * r1;
+      const x3 = 160 + Math.cos(rad(a2)) * r2;
+      const y3 = 160 + Math.sin(rad(a2)) * r2;
+      const x4 = 160 + Math.cos(rad(a)) * r2;
+      const y4 = 160 + Math.sin(rad(a)) * r2;
+      const hue = (i * 6) % 360;
+      html += `<path d="M ${x1} ${y1} L ${x2} ${y2} L ${x3} ${y3} L ${x4} ${y4} Z" fill="hsl(${hue}, 70%, 55%)" opacity="0.4"/>`;
+    }
+    // pin connector lines (red→amber solid; red→teal/blue dashed)
+    function pin(deg, r=142) {
+      const a = (deg - 90) * Math.PI / 180;
+      return [160 + Math.cos(a) * r, 160 + Math.sin(a) * r];
+    }
+    const [rx, ry] = pin(5);
+    const [ax, ay] = pin(33);
+    const [tx, ty] = pin(165);
+    const [bx, by] = pin(205);
+    html += `<line x1="${rx}" y1="${ry}" x2="${ax}" y2="${ay}" stroke="#1F2A33" stroke-width="1.5" opacity="0.7"/>`;
+    html += `<line x1="${rx}" y1="${ry}" x2="${tx}" y2="${ty}" stroke="#1F2A33" stroke-width="1.2" stroke-dasharray="3 3" opacity="0.55"/>`;
+    html += `<line x1="${rx}" y1="${ry}" x2="${bx}" y2="${by}" stroke="#1F2A33" stroke-width="1.2" stroke-dasharray="3 3" opacity="0.55"/>`;
+    // pins
+    const pins = [
+      { hex:'#E03E36', deg: 5 },
+      { hex:'#E09836', deg: 33 },
+      { hex:'#36A88E', deg: 165 },
+      { hex:'#3674A8', deg: 205 },
+    ];
+    pins.forEach(p => {
+      const [x, y] = pin(p.deg);
+      html += `<circle cx="${x}" cy="${y}" r="13" fill="${p.hex}" stroke="#1F2A33" stroke-width="2"/>`;
+    });
+    // center
+    html += `<circle cx="160" cy="160" r="100" fill="lab(96.52 -0.0000298023 0.0000119209)"/>`;
+    html += `<circle cx="160" cy="160" r="14" fill="#1F2A33"/>`;
+    html += `<text x="160" y="232" text-anchor="middle" style="font-family:'Archivo', sans-serif; font-weight:900; font-size:13px; fill:#1F2A33; letter-spacing:-0.3px;">SPLIT-COMPLEMENTARY</text>`;
+    svg.innerHTML = html;
+  })();
+
+  // Render palette spec cards
+  (function renderPaletteCards() {
+    const cards = [
+      { id:'01', name:'Primary',    role:'Mark accent · CTA · alerts',        hex:'#E03E36', wheel:'~5°',  rgb:'224 · 62 · 54',   notes:'Anchor. Carries brand recognition; reserve for marks, primary buttons, and errors.', onLight:false },
+      { id:'02', name:'Amber',      role:'Warm support · highlights',         hex:'#E09836', wheel:'~33°', rgb:'224 · 152 · 54',  notes:'Analogous warm dyad with red. Use for tags, secondary accents, focus states.', onLight:true },
+      { id:'03', name:'Teal',       role:'Cool support · success',            hex:'#36A88E', wheel:'~165°',rgb:'54 · 168 · 142',  notes:'Split-complement. Echoes the cool background; great for "passed" / positive diff.', onLight:true },
+      { id:'04', name:'Steel Blue', role:'Info · links · charts',             hex:'#3674A8', wheel:'~205°',rgb:'54 · 116 · 168',  notes:'Second split-complement. Pairs with teal for cool-data palette.', onLight:false },
+      { id:'05', name:'Ink',        role:'Type · borders · dark backgrounds', hex:'#1F2A33', wheel:'cool dark', rgb:'31 · 42 · 51', notes:'Deep neutral with the bg\'s cool tint. Use over paper for body type.', onLight:false },
+    ];
+    const root = document.getElementById('palette-cards');
+    if (!root) return;
+    root.innerHTML = cards.map(c => `
+      <div style="background:#fff; border:1px solid rgba(0,0,0,0.08); display:flex; flex-direction:column;">
+        <div style="background:${c.hex}; height:140px; padding:14px; display:flex; flex-direction:column; justify-content:space-between; color:${c.onLight ? '#1F2A33' : '#fff'};">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:1px; opacity:0.85;">${c.id}</div>
+            <div style="font-family:'JetBrains Mono', monospace; font-size:9px; letter-spacing:0.4px; opacity:0.85;">${c.wheel}</div>
+          </div>
+          <div>
+            <div style="font-family:Archivo, sans-serif; font-weight:900; font-size:22px; letter-spacing:-0.6px; line-height:1;">${c.name}</div>
+            <div style="font-family:'JetBrains Mono', monospace; font-size:10px; margin-top:4px; opacity:0.9; letter-spacing:0.4px;">${c.hex}</div>
+          </div>
+        </div>
+        <div style="padding:14px; display:flex; flex-direction:column; gap:9px; flex:1;">
+          <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(0,0,0,0.1); padding-bottom:5px;">
+            <span style="font-family:'JetBrains Mono', monospace; font-size:8.5px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase;">Role</span>
+            <span style="font-family:system-ui, sans-serif; font-size:10px; color:#1F2A33; font-weight:500; text-align:right;">${c.role}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(0,0,0,0.1); padding-bottom:5px;">
+            <span style="font-family:'JetBrains Mono', monospace; font-size:8.5px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase;">Hex</span>
+            <span style="font-family:'JetBrains Mono', monospace; font-size:10px; color:#1F2A33;">${c.hex.toUpperCase()}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(0,0,0,0.1); padding-bottom:5px;">
+            <span style="font-family:'JetBrains Mono', monospace; font-size:8.5px; color:rgba(0,0,0,0.5); letter-spacing:0.5px; text-transform:uppercase;">RGB</span>
+            <span style="font-family:'JetBrains Mono', monospace; font-size:10px; color:#1F2A33;">${c.rgb}</span>
+          </div>
+          <div style="font-family:system-ui, sans-serif; font-size:11px; line-height:1.5; color:rgba(0,0,0,0.65); margin-top:4px;">${c.notes}</div>
+        </div>
+      </div>
+    `).join('');
+  })();
+
+  // Auto-print after fonts + render
+  (async function autoPrint() {
+    try { if (document.fonts && document.fonts.ready) { await document.fonts.ready; } } catch(e) {}
+    setTimeout(() => window.print(), 500);
+  })();
+</script>
+
+</body>
+</html>

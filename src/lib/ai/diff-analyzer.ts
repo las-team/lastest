@@ -133,6 +133,7 @@ export async function analyzeDiff(
       maxTokens: 1024,
       temperature: 0.2,
       images: [baselineImage, currentImage, diffImage],
+      responseFormat: 'json_object',
     });
   }
 

@@ -2,7 +2,33 @@
 
 import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers, Bug, ListTree } from 'lucide-react';
 import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
+import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
+
+type TileStatus = 'passed' | 'failed' | 'changed' | 'pending';
+
+function deriveTestTileStatus(diffs: VisualDiffWithTestStatus[]): TileStatus {
+  const hasFailed = diffs.some(
+    (d) => d.testResultStatus === 'failed' || d.status === 'rejected' || !!d.errorMessage,
+  );
+  if (hasFailed) return 'failed';
+  const hasChanged = diffs.some(
+    (d) =>
+      d.classification === 'changed' ||
+      (d.status === 'pending' && (d.pixelDifference ?? 0) > 0),
+  );
+  if (hasChanged) return 'changed';
+  const allResolved = diffs.every(
+    (d) =>
+      d.status === 'approved' ||
+      d.status === 'auto_approved' ||
+      d.classification === 'unchanged' ||
+      (d.pixelDifference ?? 0) === 0,
+  );
+  if (allResolved && diffs.some((d) => d.testResultStatus === 'passed')) return 'passed';
+  if (allResolved) return 'passed';
+  return 'pending';
+}
 
 interface MetricsRowProps {
   totalTests: number;
@@ -25,6 +51,7 @@ interface MetricsRowProps {
   onGroupByAreaChange?: (v: boolean) => void;
   groupByTest?: boolean;
   onGroupByTestChange?: (v: boolean) => void;
+  diffs?: VisualDiffWithTestStatus[];
 }
 
 export function MetricsRow({
@@ -48,6 +75,7 @@ export function MetricsRow({
   onGroupByAreaChange,
   groupByTest = true,
   onGroupByTestChange,
+  diffs,
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -57,7 +85,6 @@ export function MetricsRow({
   };
 
   const passRate = totalTests > 0 ? Math.round((passedCount / totalTests) * 100) : 0;
-  const progress = totalTests > 0 ? Math.round((completedTests / totalTests) * 100) : 0;
 
   const hasAIMetrics = aiSafeCount + aiReviewCount + aiFlagCount > 0;
 
@@ -202,48 +229,144 @@ export function MetricsRow({
 
   return (
     <div className="space-y-4">
-      {/* Pass Rate Bar */}
+      {/* Per-test tile bar (replaces the legacy progress / pass-rate bar) */}
       <div className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-foreground">
-            {isRunning ? 'Progress' : 'Pass Rate'}
-          </span>
-          <span className={cn(
-            'text-lg font-bold',
-            isRunning ? 'text-primary' :
-            passRate === 100 ? 'text-green-600' :
-            passRate >= 80 ? 'text-yellow-600' : 'text-red-600'
-          )}>
-            {isRunning ? `${completedTests}/${totalTests}` : `${passRate}%`}
-          </span>
-        </div>
-        <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
-          {isRunning ? (
-            <div
-              className="h-full bg-primary transition-all duration-300 relative overflow-hidden"
-              style={{ width: `${progress}%` }}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
-            </div>
-          ) : (
-            <div className="h-full flex">
-              <div
-                className="bg-green-500 transition-all"
-                style={{ width: `${passRate}%` }}
-              />
-              <div
-                className="bg-red-500 transition-all"
-                style={{ width: `${100 - passRate}%` }}
-              />
-            </div>
-          )}
-        </div>
-        {!isRunning && totalTests > 0 && (
-          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
-            <span>{passedCount} passed</span>
-            <span>{failedCount} failed</span>
-          </div>
-        )}
+        {(() => {
+          const byTest = new Map<string, VisualDiffWithTestStatus[]>();
+          for (const d of diffs ?? []) {
+            const arr = byTest.get(d.testId) ?? [];
+            arr.push(d);
+            byTest.set(d.testId, arr);
+          }
+          const testIdsInOrder = Array.from(byTest.keys());
+          const testTiles: { testId: string; name: string; status: TileStatus }[] = testIdsInOrder.map((tid) => {
+            const group = byTest.get(tid)!;
+            return {
+              testId: tid,
+              name: group[0]?.testName ?? 'unnamed test',
+              status: deriveTestTileStatus(group),
+            };
+          });
+          const pendingTiles = Math.max(0, totalTests - testTiles.length);
+
+          const tileBg: Record<TileStatus, string> = {
+            passed: 'bg-green-500',
+            failed: 'bg-red-500',
+            changed: 'bg-yellow-500',
+            pending: 'bg-muted',
+          };
+
+          const runningTests = isRunning
+            ? testTiles
+                .filter((t) => {
+                  const group = byTest.get(t.testId) ?? [];
+                  const hasFinalResult = group.some(
+                    (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
+                  );
+                  return !hasFinalResult;
+                })
+                .map((t) => {
+                  const group = byTest.get(t.testId) ?? [];
+                  const recent = group
+                    .filter((d) => d.createdAt)
+                    .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())[0];
+                  return {
+                    testId: t.testId,
+                    name: t.name,
+                    stepLabel: recent?.stepLabel ?? null,
+                  };
+                })
+            : [];
+
+          const VISIBLE_LIMIT = 5;
+          const visibleRunning = runningTests.slice(0, VISIBLE_LIMIT);
+          const overflow = Math.max(0, runningTests.length - VISIBLE_LIMIT);
+
+          const headerLabel = isRunning ? 'Progress' : 'Result';
+          const headerValue = isRunning ? `${completedTests}/${totalTests}` : `${passRate}%`;
+          const headerValueClass = isRunning
+            ? 'text-primary'
+            : passRate === 100
+              ? 'text-green-600'
+              : passRate >= 80
+                ? 'text-yellow-600'
+                : 'text-red-600';
+
+          return (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-foreground">{headerLabel}</span>
+                <span className={cn('text-lg font-bold tabular-nums', headerValueClass)}>
+                  {headerValue}
+                </span>
+              </div>
+
+              <div className="flex w-full h-3 rounded overflow-hidden border border-border">
+                {testTiles.map((t, i) => (
+                  <div
+                    key={`tile-${t.testId}-${i}`}
+                    title={`${t.name} · ${t.status}`}
+                    className={cn(
+                      'flex-1 min-w-[2px] border-r border-background last:border-r-0',
+                      tileBg[t.status],
+                    )}
+                  />
+                ))}
+                {Array.from({ length: pendingTiles }).map((_, i) => (
+                  <div
+                    key={`pending-${i}`}
+                    title="pending"
+                    className="flex-1 min-w-[2px] border-r border-background last:border-r-0 border-y border-dashed border-muted-foreground/40 bg-muted"
+                  />
+                ))}
+              </div>
+
+              {!isRunning && totalTests > 0 && (
+                <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+                  <span>{passedCount} passed</span>
+                  <span>{failedCount} failed</span>
+                </div>
+              )}
+
+              {isRunning && (
+                <div className="mt-2 rounded bg-muted/50 px-2 py-1.5">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    <span className="font-medium text-foreground">
+                      now running
+                      {runningTests.length > 1 && (
+                        <span className="ml-1 text-muted-foreground tabular-nums">({runningTests.length})</span>
+                      )}
+                    </span>
+                  </div>
+                  {visibleRunning.length === 0 ? (
+                    <div className="font-mono text-xs text-muted-foreground mt-1 ml-3.5">running…</div>
+                  ) : (
+                    <ul className="mt-1 space-y-0.5">
+                      {visibleRunning.map((r) => (
+                        <li
+                          key={r.testId}
+                          className="ml-3.5 font-mono text-xs text-muted-foreground truncate"
+                        >
+                          <span className="text-foreground">{r.name}</span>
+                          {r.stepLabel && (
+                            <span className="text-muted-foreground/70"> · {r.stepLabel}</span>
+                          )}
+                          <span className="text-muted-foreground/70"> · capturing…</span>
+                        </li>
+                      ))}
+                      {overflow > 0 && (
+                        <li className="ml-3.5 font-mono text-xs text-muted-foreground/70">
+                          + {overflow} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Metrics Grid */}

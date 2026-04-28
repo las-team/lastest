@@ -485,6 +485,7 @@ async function startup(): Promise<void> {
                 lastReachedStep: result.lastReachedStep,
                 totalSteps: result.totalSteps,
                 domSnapshot: result.domSnapshot,
+                extractedVariables: result.extractedVariables,
               },
             });
 
@@ -616,6 +617,18 @@ async function startup(): Promise<void> {
           console.error(`[Command] Failed to start recording:`, err);
           isRecording = false;
           if (recordingWatchdog) { clearInterval(recordingWatchdog); recordingWatchdog = null; }
+          // Surface the failure to the server so the client polling recording
+          // status can unblock and show the error instead of spinning forever.
+          runnerClient.sendMessage({
+            id: crypto.randomUUID(),
+            type: 'response:error',
+            timestamp: Date.now(),
+            payload: {
+              correlationId: payload.sessionId,
+              code: 'INTERNAL_ERROR',
+              message: err instanceof Error ? err.message : String(err),
+            },
+          });
           // Force cleanup recorder if it partially started
           await recorder.forceCleanup();
           // Restore screencast/input on idle page
@@ -736,6 +749,32 @@ async function startup(): Promise<void> {
         const assertPayload = command.payload as { sessionId: string; assertionType: string };
         recorder.createAssertion(assertPayload.assertionType);
         console.log(`[Command] Created assertion: ${assertPayload.assertionType}`);
+        break;
+      }
+
+      case 'command:create_wait': {
+        if (!recorder?.isActive() || !runnerClient) break;
+        const waitPayload = command.payload as {
+          sessionId: string;
+          waitType: 'duration' | 'selector';
+          durationMs?: number;
+          selector?: string;
+          selectors?: Array<{ type: string; value: string }>;
+          condition?: 'visible' | 'hidden';
+          timeoutMs?: number;
+        };
+        recorder.createWait({
+          waitType: waitPayload.waitType,
+          durationMs: waitPayload.durationMs,
+          selector: waitPayload.selector,
+          selectors: waitPayload.selectors,
+          condition: waitPayload.condition,
+          timeoutMs: waitPayload.timeoutMs,
+        });
+        const summary = waitPayload.waitType === 'duration'
+          ? `${waitPayload.durationMs}ms`
+          : `selector ${waitPayload.selector ?? '<multi>'} ${waitPayload.condition ?? 'visible'}`;
+        console.log(`[Command] Inserted wait (${waitPayload.waitType}): ${summary}`);
         break;
       }
 
@@ -945,6 +984,7 @@ async function startup(): Promise<void> {
           viewport?: { width: number; height: number };
           stabilization?: import('./protocol.js').StabilizationPayload;
           browser?: string;
+          headed?: boolean;
         };
 
         // Fire-and-forget async (same activeTasks bookkeeping as run_test)
@@ -952,18 +992,53 @@ async function startup(): Promise<void> {
         const capturedExecutor = testExecutor;
         const capturedBrowser = browser;
         const capturedCommand = command;
+        const setupHeaded = !!payload.headed;
 
         activeTasks++;
         if (activeTasks === 1) {
           capturedClient.setStatus('busy', `setup:${payload.setupId}`);
           streamServer?.broadcastStatus('busy', payload.targetUrl);
-          // Pause screencast to free Chromium CPU for setup execution
-          await screencast?.stop();
+          if (!setupHeaded) {
+            // Pause screencast to free Chromium CPU for setup execution.
+            // In headed (debug) mode we keep it alive and re-route it to the
+            // setup page in the onPageCreated callback below.
+            await screencast?.stop();
+          }
         }
 
         (async () => {
           try {
-            const result = await capturedExecutor.runSetup(capturedBrowser, payload);
+            const capturedScreencast = screencast;
+            const capturedStreamServer = streamServer;
+            const shouldStreamSetup = setupHeaded && activeTasks === 1 && capturedScreencast && capturedStreamServer;
+            const setupViewport = payload.viewport ?? { width: config.viewportWidth, height: config.viewportHeight };
+
+            const setupCallbacks = shouldStreamSetup ? {
+              onPageCreated: async (setupPage: Page) => {
+                try {
+                  // Force the setup page to render at the configured viewport so the
+                  // streamed framebuffer matches what the user expects to see.
+                  const cdp = await setupPage.context().newCDPSession(setupPage);
+                  await cdp.send('Emulation.setDeviceMetricsOverride', {
+                    width: setupViewport.width,
+                    height: setupViewport.height,
+                    deviceScaleFactor: 1,
+                    mobile: false,
+                  });
+                  await cdp.detach();
+
+                  await capturedScreencast.stop();
+                  await capturedScreencast.updateViewport(setupViewport.width, setupViewport.height);
+                  await capturedScreencast.start(setupPage, (frame) => {
+                    capturedStreamServer.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+                  });
+                } catch (err) {
+                  console.error('[Command] Failed to attach screencast to setup page:', err);
+                }
+              },
+            } : undefined;
+
+            const result = await capturedExecutor.runSetup(capturedBrowser, payload, setupCallbacks);
 
             await capturedClient.sendMessage({
               id: crypto.randomUUID(),

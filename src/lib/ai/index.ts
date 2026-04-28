@@ -92,6 +92,9 @@ export interface GenerateWithAIOptions {
   signal?: AbortSignal;
   /** Called with the prompt log ID after the log entry is created (before AI call) */
   onLogCreated?: (logId: string) => void;
+  /** Request structured JSON output. Forwarded to providers that support
+   *  `response_format: { type: 'json_object' }` (OpenRouter, OpenAI). Ignored elsewhere. */
+  responseFormat?: 'json_object';
 }
 
 export async function generateWithAI(
@@ -179,12 +182,14 @@ export async function generateWithAI(
         signal: options?.signal,
         cdpEndpoint: options?.mcpConfig?.cdpEndpoint,
         customServers: options?.mcpConfig?.servers,
+        responseFormat: options?.responseFormat,
       });
     } else {
       response = await provider.generate({
         prompt,
         systemPrompt: finalSystemPrompt || undefined,
         signal: options?.signal,
+        responseFormat: options?.responseFormat,
       });
     }
 
@@ -225,6 +230,7 @@ async function generateWithMCPBridge(
     signal?: AbortSignal;
     cdpEndpoint?: string;
     customServers?: Record<string, MCPServerConfig>;
+    responseFormat?: 'json_object';
   },
 ): Promise<string> {
   if (!provider.generateWithTools) {
@@ -269,6 +275,7 @@ async function generateWithMCPBridge(
       prompt: options.prompt,
       systemPrompt: options.systemPrompt,
       signal: options.signal,
+      responseFormat: options.responseFormat,
       tools: allTools,
       onToolCall: async (call) => {
         const bridge = toolToBridge.get(call.name);

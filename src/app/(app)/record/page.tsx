@@ -1,4 +1,4 @@
-import { RecordingClient } from './recording-client';
+import { TestCreationTabs } from './test-creation-tabs';
 import { getFunctionalAreasByRepo, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import type { RecordingEngine } from '@/lib/db/schema';
@@ -57,7 +57,7 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <RecordingClient
+      <TestCreationTabs
         areas={areas}
         settings={settings}
         repositoryId={selectedRepo?.id}
