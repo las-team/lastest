@@ -700,9 +700,19 @@ export async function claimOrProvisionPoolEB(
   const waitTimeoutMs = opts.waitTimeoutMs ?? 90_000;
   const deadline = Date.now() + waitTimeoutMs;
   const expectedRunnerName = `System EB-${jobInfo.instanceId}`;
+  const provisionStart = Date.now();
+  let lastLoggedSecond = -1;
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000));
+
+    // Log provisioning latency every ~10s so slow Olares cold starts are visible
+    // without needing to add per-poll noise. Catches startup-window race symptoms.
+    const elapsedSec = Math.round((Date.now() - provisionStart) / 1000);
+    if (elapsedSec > 0 && elapsedSec % 10 === 0 && elapsedSec !== lastLoggedSecond) {
+      lastLoggedSecond = elapsedSec;
+      console.log(`[Pool] Waiting for ${expectedRunnerName} to register: ${elapsedSec}s elapsed (timeout ${waitTimeoutMs / 1000}s)`);
+    }
 
     // Transactional claim with row-level lock (SKIP LOCKED) — same pattern as
     // claimPoolEB. Guarantees that two concurrent callers can't end up on the

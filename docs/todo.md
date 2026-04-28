@@ -14,17 +14,10 @@ a11y
 DOM delta
 Create modes
 Openrouter agent sdk parity
-**Onboarding - v1/v3**
-  On Connect your code use the same height cards with white bg, explain pros and cons (e.g. route scanning)
-  On Sandbox repo allow user to edit name
-  Without GH also ask the user to pick a template
-Criteria
-  failed
-  0ms
-  4/27/2026, 7:20:15 PM
-  Cancelled by user when failed by one of the criteria - be decent and write which one
+**Onboarding**
 
-  End of test variable assertions remove save button and autosave
+**Criteria**
+ 
 **CSV upload and use**
   table contents dont fit popup - plz fix
   after file upload need to refresh page - refresh teh component - re-check this type of error for every test detail page tab

@@ -155,7 +155,58 @@ describe('Assertion Parser', () => {
     });
   });
 
-  describe('Pattern 5: Page wait assertions', () => {
+  describe('Pattern 5: Download assertions', () => {
+    it('parses recorder-emitted block with filename comment', () => {
+      const code = `
+// Download assertion: report.csv
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(1);
+      expect(assertions[0].category).toBe('download');
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[0].expectedValue).toBe('report.csv');
+      expect(assertions[0].label).toBe('Download: report.csv');
+    });
+
+    it('parses bare pattern without comment', () => {
+      const code = `
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(1);
+      expect(assertions[0].category).toBe('download');
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[0].label).toBe('File downloaded');
+      // Spans waitForAny → expect line so step matching can locate it
+      expect(assertions[0].codeLineEnd).toBeGreaterThan(assertions[0].codeLineStart!);
+    });
+
+    it('does not double-count expect when bare pattern is parsed', () => {
+      // Without skip-past logic the inner `expect(downloads.list().length).toBeGreaterThan(0)`
+      // would also be scanned by Pattern 4 on the next iteration. It happens to
+      // not match Pattern 4's regex because of nested parens, but the test
+      // pins the expected count regardless.
+      const code = `
+await downloads.waitForAny();
+expect(downloads.list().length).toBeGreaterThan(0);
+await expect(page).toHaveURL('/done');`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(2);
+      expect(assertions[0].assertionType).toBe('fileDownloaded');
+      expect(assertions[1].assertionType).toBe('toHaveURL');
+    });
+
+    it('ignores lone waitForAny without a following expect', () => {
+      const code = `
+await downloads.waitForAny();
+await page.click('button');`;
+      const assertions = parseAssertions(code);
+      expect(assertions).toHaveLength(0);
+    });
+  });
+
+  describe('Pattern 6: Page wait assertions', () => {
     it('parses waitForLoadState with state', () => {
       const code = `await page.waitForLoadState('networkidle');`;
       const assertions = parseAssertions(code);

@@ -178,6 +178,35 @@ describe('evaluateRulesForStep — other rule kinds', () => {
     expect(triggered).toHaveLength(1);
   });
 
+  it('scoped assertion_failed only trips for the targeted assertionId', () => {
+    // Regression for the post-migration id format: rules pin to a specific
+    // assertion (`params.assertionId`) and only that assertion's failure
+    // should trip the rule. New ids are content+occurrence-hashed (12 hex
+    // chars), but the evaluator just does string equality — covered here
+    // so any future id-format change still passes through cleanly.
+    const criterion: StepCriterion = {
+      stepLabel: '__assertions__',
+      rules: [
+        { kind: 'assertion_failed', severity: 'fail', params: { assertionId: 'pinned-id-abc' } },
+      ],
+    };
+    // Failure of an UNRELATED assertion should NOT trip the scoped rule
+    expect(evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      assertionResults: [{ assertionId: 'someone-else', status: 'failed', errorMessage: 'x' }],
+    })).toEqual([]);
+    // Failure of the PINNED assertion DOES trip
+    const triggered = evaluateRulesForStep(criterion, {
+      ...emptyObservations,
+      assertionResults: [
+        { assertionId: 'someone-else', status: 'passed' },
+        { assertionId: 'pinned-id-abc', status: 'failed', errorMessage: 'pinned fail' },
+      ],
+    });
+    expect(triggered).toHaveLength(1);
+    expect(triggered[0].reason).toContain('pinned-id-abc');
+  });
+
   it('focus_region_changed is a no-op until the focus-region feature lands', () => {
     const criterion: StepCriterion = {
       stepLabel: 'screenshot-1',

@@ -497,6 +497,14 @@ export class EmbeddedTestExecutor {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
+          // [Shot] probe: byte size + viewport-content signal to detect blank-render screenshots.
+          // bytes << healthy or bodyChildren=0/hasCanvas=false on a canvas app → captured a non-rendered page.
+          const probeUrl = page.url();
+          const probe = await page.evaluate(() => ({
+            bodyChildren: document.body?.childElementCount ?? 0,
+            hasCanvas: !!document.querySelector('canvas'),
+          })).catch(() => ({ bodyChildren: -1, hasCanvas: false }));
+          logFn('info', `[Shot] ${label}: bytes=${buffer.length} url=${probeUrl} bodyChildren=${probe.bodyChildren} hasCanvas=${probe.hasCanvas}`);
           logFn('info', `Captured screenshot: ${filename}`);
           // Disable RAF gating + unfreeze performance.now after screenshot
           /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -539,6 +547,21 @@ export class EmbeddedTestExecutor {
               logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
             } else {
               logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
+            }
+            // [Nav] probe: confirm goto returned a rendered page (not a blank/error shell).
+            // bodyChildren=0 or hasCanvas=false on a canvas app indicates the React/SPA root
+            // never hydrated even though HTTP returned 200 — root cause candidate for white screenshots.
+            try {
+              const docState = await page.evaluate(() => ({
+                url: location.href,
+                readyState: document.readyState,
+                bodyChildren: document.body?.childElementCount ?? 0,
+                bodyText: (document.body?.innerText || '').slice(0, 80),
+                hasCanvas: !!document.querySelector('canvas'),
+              }));
+              logFn('info', `[Nav] post-goto: url=${docState.url} ready=${docState.readyState} bodyChildren=${docState.bodyChildren} hasCanvas=${docState.hasCanvas} text="${docState.bodyText}"`);
+            } catch (e) {
+              logFn('warn', `[Nav] post-goto probe failed: ${e}`);
             }
             return response;
           } catch (err) {

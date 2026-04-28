@@ -223,33 +223,35 @@ Create tests (one-time)          Run tests (forever, $0)
 
 ## Quick Start
 
-### Option 1: From source (recommended for development)
+### Local dev
 
 ```bash
 git clone https://github.com/las-team/lastest.git
 cd lastest
-docker run -d --name lastest-dev-db -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest -p 5432:5432 postgres:17-alpine
+docker compose up -d         # postgres on :5432 (named volume `lastest-pgdata`)
 pnpm install
-pnpm db:push
-pnpm dev
+pnpm db:push                 # apply schema
+pnpm dev                     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000).
 
-### Option 2: Local k3s for dynamic Embedded Browsers
+- Stop the DB: `docker compose down` (data persists in the `lastest-pgdata` volume).
+- Wipe the DB: `docker compose down -v`.
 
-Runs the dynamic EB provisioning flow against a local k3d cluster. The Next.js app stays on the host (`pnpm dev`); the cluster only hosts the short-lived EB Job pods that the host provisioner creates on demand via your kubeconfig.
+### Run tests locally (adds k3d for embedded browsers)
+
+The dev app keeps running on the host. EB pods are dynamically provisioned into a local k3d cluster on demand — one EB per test.
 
 ```bash
 pnpm stack           # create k3d cluster, build + import the EB image
-pnpm dev             # start the host app (separate terminal)
 pnpm stack:status    # cluster + EB jobs + host /api/health
-pnpm stack:logs      # tail all EB pods
+pnpm stack:logs      # tail EB pod logs
 pnpm stack:refresh   # rebuild the EB image after editing packages/embedded-browser
 pnpm stack:stop      # delete the cluster
 ```
 
-Required `.env.local` keys:
+Add to `.env.local`:
 
 ```
 EB_PROVISIONER=kubernetes
@@ -260,7 +262,7 @@ SYSTEM_EB_TOKEN=<openssl rand -hex 32>
 DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest
 ```
 
-Prereqs: `docker`, `k3d` ≥ 5.6, `kubectl`, `pnpm`, `openssl`. See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts).
+See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bootstrap scripts.
 
 ### First steps
 
@@ -272,8 +274,9 @@ Prereqs: `docker`, `k3d` ≥ 5.6, `kubectl`, `pnpm`, `openssl`. See [`k8s/`](./k
 6. **Review** visual changes and approve or reject
 
 ### Requirements
-- **Docker**: Docker 20+ and Docker Compose
-- **From source**: Node.js 18+, pnpm, PostgreSQL 15+
+- **Docker**: Docker 20+ with Compose v2
+- **Node.js**: 18+ and pnpm 10.x
+- **For local test execution (optional)**: `k3d` ≥ 5.6, `kubectl`, `openssl`
 
 ---
 

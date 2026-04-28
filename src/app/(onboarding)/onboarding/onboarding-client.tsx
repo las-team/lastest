@@ -18,6 +18,8 @@ import {
   Rocket,
   Sparkles,
   ArrowRight,
+  X,
+  Gitlab,
 } from 'lucide-react';
 import { authClient } from '@/lib/auth/auth-client';
 import { toast } from 'sonner';
@@ -200,9 +202,9 @@ export function OnboardingClient({
                 router.refresh();
               })
             }
-            onCreateSandbox={() =>
+            onCreateSandbox={(name, baseUrl) =>
               startTransition(async () => {
-                await createLocalRepo('My First Project');
+                await createLocalRepo(name, baseUrl);
                 router.refresh();
               })
             }
@@ -398,6 +400,40 @@ function Step1Fork({
 
 // ─── Step 2: Connect repo ────────────────────────────────────────────────────
 
+type SandboxTemplate = {
+  id: string;
+  name: string;
+  url: string | null;
+  description: string;
+};
+
+const SANDBOX_TEMPLATES: SandboxTemplate[] = [
+  {
+    id: 'todomvc',
+    name: 'TodoMVC',
+    url: 'https://demo.playwright.dev/todomvc/',
+    description: "Playwright's classic todo demo — perfect for first tests.",
+  },
+  {
+    id: 'the-internet',
+    name: 'The Internet',
+    url: 'https://the-internet.herokuapp.com/',
+    description: 'A QA testing playground with logins, drag-drop, frames, and more.',
+  },
+  {
+    id: 'playwright-docs',
+    name: 'Playwright Docs',
+    url: 'https://playwright.dev',
+    description: 'A real public docs site with rich navigation and content.',
+  },
+  {
+    id: 'blank',
+    name: 'Blank',
+    url: null,
+    description: "Start empty — you'll set the URL in the next step.",
+  },
+];
+
 function Step2Repo({
   githubAccount,
   gitlabAccount,
@@ -418,7 +454,7 @@ function Step2Repo({
   selectedRepoId: string | null;
   pending: boolean;
   onSelectRepo: (id: string) => void;
-  onCreateSandbox: () => void;
+  onCreateSandbox: (name: string, baseUrl?: string) => void;
   onSyncGithub: () => void;
   onSyncGitlab: () => void;
   onNext: () => void;
@@ -426,57 +462,20 @@ function Step2Repo({
   onSkip: () => void;
 }) {
   const recentRepos = repos.slice(0, 5);
-  const hasConnection = !!githubAccount || !!gitlabAccount;
   const hasSelected = !!selectedRepoId;
+
+  const [showSandbox, setShowSandbox] = useState(false);
+  const [sandboxName, setSandboxName] = useState('My First Project');
+  const [sandboxTemplateId, setSandboxTemplateId] = useState<string>('todomvc');
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Connect your code</h1>
         <p className="text-sm text-muted-foreground">
-          Link a repo so Lastest can scope tests, comment on PRs, and watch branches.
+          Pick how you want Lastest to find your app. You can change this later.
         </p>
       </div>
-
-      {githubAccount && (
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-3">
-              <Github className="h-5 w-5" />
-              <div>
-                <div className="text-sm font-medium">
-                  Connected as @{githubAccount.username}
-                </div>
-                <div className="text-xs text-muted-foreground">GitHub</div>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={onSyncGithub} disabled={pending}>
-              {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
-              Sync repos
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {gitlabAccount && (
-        <Card>
-          <CardContent className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-3">
-              <Github className="h-5 w-5" />
-              <div>
-                <div className="text-sm font-medium">
-                  Connected as @{gitlabAccount.username}
-                </div>
-                <div className="text-xs text-muted-foreground">GitLab</div>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={onSyncGitlab} disabled={pending}>
-              {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
-              Sync projects
-            </Button>
-          </CardContent>
-        </Card>
-      )}
 
       {recentRepos.length > 0 && (
         <Card>
@@ -497,7 +496,13 @@ function Step2Repo({
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <Github className="h-3.5 w-3.5 text-muted-foreground" />
+                    {r.provider === 'gitlab' ? (
+                      <Gitlab className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : r.provider === 'local' ? (
+                      <Rocket className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <Github className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
                     <span className="font-mono text-xs">{r.fullName}</span>
                     <Badge variant="outline" className="text-[10px]">
                       {r.provider}
@@ -511,37 +516,145 @@ function Step2Repo({
         </Card>
       )}
 
-      {!hasConnection && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <Button
-            variant="outline"
-            className="h-auto justify-start gap-2 py-3"
-            onClick={() =>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <ConnectionCard
+          icon={Github}
+          title="GitHub"
+          subtitle={githubAccount ? `@${githubAccount.username}` : 'Connect a repo'}
+          connected={!!githubAccount}
+          pros={['Route scanning', 'PR checks & comments', 'Branch tracking']}
+          cons={['Needs OAuth permission']}
+          actionLabel={githubAccount ? 'Sync repos' : 'Connect GitHub'}
+          onAction={() => {
+            if (githubAccount) {
+              onSyncGithub();
+            } else {
               authClient.signIn.social({
                 provider: 'github',
                 callbackURL: '/onboarding?step=2',
-              })
+              });
             }
-          >
-            <Github className="h-4 w-4" />
-            <span>Connect GitHub</span>
-          </Button>
-          <Button asChild variant="outline" className="h-auto justify-start gap-2 py-3">
-            <a href="/api/connect/gitlab">
-              <Github className="h-4 w-4" />
-              <span>Connect GitLab</span>
-            </a>
-          </Button>
-          <Button
-            variant="outline"
-            className="h-auto justify-start gap-2 py-3"
-            onClick={onCreateSandbox}
-            disabled={pending}
-          >
-            <Rocket className="h-4 w-4" />
-            <span>Use a sandbox</span>
-          </Button>
-        </div>
+          }}
+          pending={pending}
+        />
+        <ConnectionCard
+          icon={Gitlab}
+          title="GitLab"
+          subtitle={gitlabAccount ? `@${gitlabAccount.username}` : 'Connect a project'}
+          connected={!!gitlabAccount}
+          pros={['Route scanning', 'MR checks & comments', 'Branch tracking']}
+          cons={['Needs OAuth permission']}
+          actionLabel={gitlabAccount ? 'Sync projects' : 'Connect GitLab'}
+          onAction={() => {
+            if (gitlabAccount) {
+              onSyncGitlab();
+            } else {
+              window.location.href = '/api/connect/gitlab';
+            }
+          }}
+          pending={pending}
+        />
+        <ConnectionCard
+          icon={Rocket}
+          title="Sandbox"
+          subtitle="No repo, just a demo URL"
+          connected={false}
+          pros={['Instant — no install', 'Pick from templates', 'Great for trying it out']}
+          cons={['No PR comments or route scanning']}
+          actionLabel={showSandbox ? 'Editing below…' : 'Use a sandbox'}
+          onAction={() => setShowSandbox(true)}
+          pending={pending}
+          highlighted={showSandbox}
+        />
+      </div>
+
+      {showSandbox && (
+        <Card className="border-primary/40">
+          <CardContent className="space-y-4 py-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Rocket className="h-4 w-4 text-primary" />
+                  <h3 className="text-sm font-semibold">Create a sandbox</h3>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Name your project and pick a starter site to test against.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSandbox(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Cancel sandbox setup"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="sandbox-name" className="text-xs">
+                Project name
+              </Label>
+              <Input
+                id="sandbox-name"
+                value={sandboxName}
+                onChange={(e) => setSandboxName(e.target.value)}
+                placeholder="My First Project"
+                maxLength={64}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">Template</Label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {SANDBOX_TEMPLATES.map((t) => {
+                  const active = sandboxTemplateId === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setSandboxTemplateId(t.id)}
+                      className={`rounded-md border p-3 text-left transition-colors ${
+                        active
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border bg-card hover:border-muted-foreground/40'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-medium">{t.name}</div>
+                        {active && <Check className="h-3.5 w-3.5 text-primary" />}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                        {t.description}
+                      </div>
+                      {t.url && (
+                        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground/80">
+                          {t.url}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() => {
+                  const tpl = SANDBOX_TEMPLATES.find((t) => t.id === sandboxTemplateId);
+                  const name = sandboxName.trim() || 'My First Project';
+                  onCreateSandbox(name, tpl?.url ?? undefined);
+                  setShowSandbox(false);
+                }}
+                disabled={pending || !sandboxName.trim()}
+                size="sm"
+              >
+                {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
+                Create sandbox
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="flex items-center justify-between">
@@ -559,6 +672,81 @@ function Step2Repo({
         </div>
       </div>
     </div>
+  );
+}
+
+function ConnectionCard({
+  icon: Icon,
+  title,
+  subtitle,
+  connected,
+  pros,
+  cons,
+  actionLabel,
+  onAction,
+  pending,
+  highlighted,
+}: {
+  icon: typeof Github;
+  title: string;
+  subtitle: string;
+  connected: boolean;
+  pros: string[];
+  cons: string[];
+  actionLabel: string;
+  onAction: () => void;
+  pending: boolean;
+  highlighted?: boolean;
+}) {
+  return (
+    <Card
+      className={`flex h-full flex-col gap-0 bg-white py-0 dark:bg-card ${
+        highlighted ? 'border-primary/40 ring-1 ring-primary/30' : ''
+      }`}
+    >
+      <CardContent className="flex flex-1 flex-col gap-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Icon className="h-5 w-5 text-foreground" />
+            <h3 className="text-sm font-semibold">{title}</h3>
+          </div>
+          {connected && (
+            <Badge variant="default" className="text-[10px]">
+              Connected
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+
+        <ul className="space-y-1 text-xs">
+          {pros.map((p) => (
+            <li key={p} className="flex items-start gap-1.5 text-foreground/80">
+              <Check className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+              <span>{p}</span>
+            </li>
+          ))}
+          {cons.map((c) => (
+            <li key={c} className="flex items-start gap-1.5 text-muted-foreground">
+              <X className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <span>{c}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-auto pt-2">
+          <Button
+            variant={connected ? 'outline' : 'default'}
+            size="sm"
+            className="w-full"
+            onClick={onAction}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
+            {actionLabel}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

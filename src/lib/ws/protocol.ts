@@ -113,6 +113,15 @@ export interface RunTestCommandPayload {
   // recorded as a soft warning. Driven by the test's `all_steps_executed`
   // Criteria rule (default ON, off only when user explicitly opted out).
   failOnRuntimeError?: boolean;
+  /** Parsed assertions from `parseAssertions(code)`. Runner uses these to
+   *  wrap each `expect(...)` line with a structured pass/fail recorder
+   *  keyed by the host-computed `id`. Order-sensitive — must match the
+   *  source order produced by the parser. */
+  assertions?: Array<{
+    id: string;
+    codeLineStart?: number;
+    codeLineEnd?: number;
+  }>;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -246,6 +255,11 @@ export interface TestResultPayload {
   };
   logs: LogEntry[];
   softErrors?: string[];
+  /** Per-`expect()` outcome rows produced by the runner's assertion tracker.
+   *  `assertionId` matches one of the `assertions[].id` sent in the run
+   *  command. The criteria evaluator keys on these to fail the test when a
+   *  user-pinned assertion failed. */
+  assertionResults?: import('@/lib/db/schema').AssertionResult[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import {
   Dialog,
@@ -59,6 +59,15 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [origin, setOrigin] = useState('');
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  const redirectUri = origin ? `${origin}/api/connect/gitlab/callback` : '/api/connect/gitlab/callback';
+  const trimmedInstance = instanceUrl.trim().replace(/\/+$/, '');
+  const oauthAppsUrl = trimmedInstance ? `${trimmedInstance}/-/profile/applications` : '<instance>/-/profile/applications';
 
   const submitPat = async () => {
     setSubmitting(true);
@@ -68,11 +77,15 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instanceUrl: instanceUrl.trim(), pat: pat.trim() }),
       });
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      toast.success('GitLab connected');
+      if (body.warning) {
+        toast.warning(body.warning);
+      } else {
+        toast.success(`GitLab connected — imported ${body.importedCount ?? 0} project${body.importedCount === 1 ? '' : 's'}`);
+      }
       onOpenChange(false);
       window.location.href = '/settings?success=gitlab_connected';
     } catch (err) {
@@ -82,25 +95,34 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     }
   };
 
-  const submitOAuth = () => {
-    // Use a hidden form to POST so clientSecret never lands in the URL.
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '/api/connect/gitlab';
-    for (const [k, v] of Object.entries({ instanceUrl: instanceUrl.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim() })) {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = k;
-      input.value = v;
-      form.appendChild(input);
+  const submitOAuth = async () => {
+    // Fetch + top-level navigate avoids the form-action CSP, since self-hosted
+    // GitLab origins are arbitrary and can't be enumerated in the policy.
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/connect/gitlab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instanceUrl: instanceUrl.trim(),
+          clientId: clientId.trim(),
+          clientSecret: clientSecret.trim(),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.authorizeUrl) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      window.location.href = body.authorizeUrl;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start OAuth');
+      setSubmitting(false);
     }
-    document.body.appendChild(form);
-    form.submit();
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Connect Self-Hosted GitLab</DialogTitle>
           <DialogDescription>
@@ -134,7 +156,7 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 placeholder="glpat-..."
               />
               <p className="text-xs text-muted-foreground">
-                Stored encrypted at rest; used in place of OAuth for self-hosted instances.
+                The <code>api</code> scope is required to list and import projects. Stored encrypted at rest.
               </p>
             </TabsContent>
             <TabsContent value="oauth" className="space-y-2 pt-2">
@@ -153,10 +175,12 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 onChange={(e) => setClientSecret(e.target.value)}
                 placeholder="Application secret"
               />
-              <p className="text-xs text-muted-foreground">
-                Register the OAuth app at <code>{instanceUrl}/-/profile/applications</code> with redirect URI{' '}
-                <code>{typeof window !== 'undefined' ? `${window.location.origin}/api/connect/gitlab/callback` : '/api/connect/gitlab/callback'}</code>.
-              </p>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>Register the OAuth app at:</p>
+                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">{oauthAppsUrl}</code>
+                <p>with redirect URI:</p>
+                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">{redirectUri}</code>
+              </div>
             </TabsContent>
           </Tabs>
         </div>
@@ -171,7 +195,8 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               Connect via PAT
             </Button>
           ) : (
-            <Button onClick={submitOAuth} disabled={!instanceUrl.startsWith('http') || !clientId || !clientSecret}>
+            <Button onClick={submitOAuth} disabled={submitting || !instanceUrl.startsWith('http') || !clientId || !clientSecret}>
+              {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Continue to GitLab
             </Button>
           )}

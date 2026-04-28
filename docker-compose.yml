@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: lastest-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lastest
+      POSTGRES_PASSWORD: lastest
+      POSTGRES_DB: lastest
+    ports:
+      - "5432:5432"
+    volumes:
+      - lastest-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lastest -d lastest"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      com.docker.compose.project: lastest
+
+volumes:
+  lastest-pgdata:
+    name: lastest-pgdata

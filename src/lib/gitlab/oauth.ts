@@ -132,7 +132,17 @@ export interface GitLabProject {
   web_url: string;
 }
 
-export async function getUserProjects(accessToken: string, instanceUrl?: string): Promise<GitLabProject[]> {
+export interface GetUserProjectsResult {
+  projects: GitLabProject[];
+  error?: { status: number; message: string };
+}
+
+/**
+ * Fetch projects with full error context. Use this when the caller wants to
+ * distinguish "user has no projects" from "API rejected the token" (e.g. PAT
+ * lacks the `api`/`read_api` scope and gets 403).
+ */
+export async function getUserProjectsDetailed(accessToken: string, instanceUrl?: string): Promise<GetUserProjectsResult> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
 
   try {
@@ -145,12 +155,22 @@ export async function getUserProjects(accessToken: string, instanceUrl?: string)
       }
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error('[gitlab] getUserProjects failed', response.status, body.slice(0, 300));
+      return { projects: [], error: { status: response.status, message: body.slice(0, 300) || `HTTP ${response.status}` } };
+    }
 
-    return response.json();
-  } catch {
-    return [];
+    return { projects: await response.json() };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    console.error('[gitlab] getUserProjects threw', message);
+    return { projects: [], error: { status: 0, message } };
   }
+}
+
+export async function getUserProjects(accessToken: string, instanceUrl?: string): Promise<GitLabProject[]> {
+  return (await getUserProjectsDetailed(accessToken, instanceUrl)).projects;
 }
 
 export interface GitLabBranch {

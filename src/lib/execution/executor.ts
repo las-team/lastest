@@ -467,6 +467,15 @@ async function executeViaRunner(
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
         extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
         failOnRuntimeError,
+        // Pass the host-parsed assertions so the runner can wrap each
+        // `expect(...)` line with a structured pass/fail recorder. The
+        // criteria evaluator on the host keys on these ids to fail the test
+        // when a user-pinned assertion failed.
+        assertions: (test.assertions ?? []).map(a => ({
+          id: a.id,
+          codeLineStart: a.codeLineStart,
+          codeLineEnd: a.codeLineEnd,
+        })),
       });
 
       // Queue command to DB
@@ -626,6 +635,9 @@ async function executeViaRunner(
         networkRequests: Array.isArray(payload.networkRequests) && payload.networkRequests.length > 0 ? payload.networkRequests as NetworkRequest[] : undefined,
         downloads: Array.isArray(payload.downloads) && payload.downloads.length > 0 ? payload.downloads as DownloadRecord[] : undefined,
         softErrors: Array.isArray(payload.softErrors) && payload.softErrors.length > 0 ? payload.softErrors as string[] : undefined,
+        assertionResults: Array.isArray(payload.assertionResults) && payload.assertionResults.length > 0
+          ? payload.assertionResults as import('@/lib/db/schema').AssertionResult[]
+          : undefined,
         videoPath,
         networkBodiesPath,
         domSnapshot: payload.domSnapshot as import('@/lib/db/schema').DomSnapshotData | undefined,
@@ -853,6 +865,15 @@ async function executeViaPoolWorkers(
           { ...effectiveOptions, maxParallelTests: 1 },
           undefined,
           onResult,
+        );
+
+        // [Dispatch] result-shape log: blank-render runs return status=passed with no error
+        // and may return 0 screenshots or odd label counts. Pair this with the EB-side
+        // [Shot] line (which reports byte size + body content) when triaging.
+        const screenshotCount = result?.screenshots?.length ?? 0;
+        const labels = (result?.screenshots ?? []).map(s => s.label).join(',') || 'none';
+        console.log(
+          `[Dispatch] Test "${test.name}" attempt ${attempt} returned: status=${result?.status} screenshots=${screenshotCount} labels=[${labels}] error=${result?.errorMessage?.slice(0, 100) ?? 'none'}`,
         );
 
         if (!result) {

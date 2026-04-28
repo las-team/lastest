@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { getCurrentSession } from '@/lib/auth';
 import { validatePatToken } from '@/lib/gitlab/oauth';
 import * as queries from '@/lib/db/queries';
@@ -68,17 +69,31 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Auto-sync repos so the sidebar populates immediately
+  // Auto-sync repos so the sidebar populates immediately. Surface scope/API
+  // errors so the user can fix the PAT without guessing.
+  let importedCount = 0;
+  let warning: string | undefined;
   try {
     const { syncGitlabReposForTeam } = await import('@/server/actions/repos');
-    await syncGitlabReposForTeam(teamId, pat, instanceUrl);
+    const result = await syncGitlabReposForTeam(teamId, pat, instanceUrl);
+    importedCount = result.count;
+    if (result.error) {
+      warning = `PAT validated but listing projects failed: ${result.error}. Make sure the token has the \`api\` (or \`read_api\`) scope.`;
+    } else if (result.count === 0) {
+      warning = 'PAT validated but 0 projects were returned. Confirm the token has the `api` scope and that you are a member of the projects you want to import.';
+    }
     const account = await queries.getGitlabAccountByTeam(teamId);
     if (account) {
       await queries.updateGitlabAccount(account.id, { reposSyncedAt: new Date() });
     }
-  } catch {
-    // Non-fatal
+    if (importedCount > 0) {
+      revalidatePath('/');
+      revalidatePath('/settings');
+    }
+  } catch (err) {
+    console.error('[gitlab pat] sync failed', err);
+    warning = err instanceof Error ? `Sync failed: ${err.message}` : 'Sync failed.';
   }
 
-  return NextResponse.json({ success: true, username: user.username, instanceUrl });
+  return NextResponse.json({ success: true, username: user.username, instanceUrl, importedCount, warning });
 }

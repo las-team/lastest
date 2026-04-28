@@ -18,11 +18,8 @@ pnpm test -- src/lib/diff       # Tests in specific directory
 pnpm db:push                    # Push schema changes to DB
 pnpm db:studio                  # Drizzle Studio
 
-# Host postgres (one-time, persists in named volume)
-docker run -d --name lastest-dev-db -p 5432:5432 \
-  -e POSTGRES_USER=lastest -e POSTGRES_PASSWORD=lastest -e POSTGRES_DB=lastest \
-  -v lastest-pgdata:/var/lib/postgresql/data \
-  postgres:17-alpine
+# Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
+docker compose up -d
 
 # k3d cluster — hosts dynamically-provisioned EB Job pods only (no app, no db)
 pnpm stack                      # create k3d cluster + build/import EB image
