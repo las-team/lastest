@@ -1582,6 +1582,7 @@ export function RecordingClient({
                       className="h-full w-full"
                       fit
                       hideControls
+                      hideToolbar
                     />
                   )}
                   {!playbackStreamUrl && (

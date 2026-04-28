@@ -73,21 +73,14 @@ export function PlaybackTimeline({
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-xl border border-border/60 shadow-lg',
-        'bg-card/70 backdrop-blur-xl backdrop-saturate-150',
+        'relative overflow-hidden rounded-xl border border-border shadow-sm',
+        'bg-card',
         'flex flex-col',
         className,
       )}
-      style={{
-        // Soften top + bottom so steps fade in/out of the wheel
-        maskImage:
-          'linear-gradient(to bottom, transparent 0, black 18%, black 82%, transparent 100%)',
-        WebkitMaskImage:
-          'linear-gradient(to bottom, transparent 0, black 18%, black 82%, transparent 100%)',
-      }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2 border-b border-border/40 bg-background/40 backdrop-blur-sm">
+      <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2 border-b border-border bg-card">
         <div className="flex items-center gap-2">
           {isRunning ? (
             <>
@@ -115,7 +108,7 @@ export function PlaybackTimeline({
 
       {/* Wheel viewport */}
       <div
-        className="relative flex-1"
+        className="relative flex-1 overflow-hidden"
         style={{ minHeight: ITEM_HEIGHT * 5 }}
       >
         <div
@@ -157,18 +150,6 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
   const isFailed = result?.status === 'failed';
 
   const Icon = STEP_TYPE_ICONS[step.type] ?? Circle;
-  const distance = Math.abs(index - currentStepIndex);
-
-  // Distance-based opacity creates the wheel falloff in addition to the mask.
-  const opacityClass = isCurrent
-    ? 'opacity-100'
-    : distance === 1
-      ? 'opacity-90'
-      : distance === 2
-        ? 'opacity-60'
-        : distance === 3
-          ? 'opacity-35'
-          : 'opacity-20';
 
   return (
     <div
@@ -176,7 +157,6 @@ function StepRow({ step, index, currentStepIndex, result, compact }: StepRowProp
       style={{ height: ITEM_HEIGHT }}
       className={cn(
         'flex items-center gap-3 px-4 transition-all duration-300',
-        opacityClass,
         compact && 'gap-2 px-3',
       )}
     >

@@ -34,6 +34,7 @@ interface BrowserViewerProps {
   className?: string;
   expiresAt?: Date | string | null;
   hideControls?: boolean;
+  hideToolbar?: boolean; // Suppress the URL/controls bar entirely (no translucent header strip)
   hideFullscreenToggle?: boolean;
   hideScreenshot?: boolean;
   hideViewportSelector?: boolean;
@@ -50,7 +51,7 @@ export interface BrowserViewerHandle {
   sendInspectMode: (enabled: boolean) => void;
 }
 
-export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot }, ref) {
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideToolbar, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -670,22 +671,24 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
   return (
     <div ref={containerRef} className={`flex flex-col ${className ?? ''}`}>
-      <BrowserToolbar
-        currentUrl={currentUrl}
-        viewport={viewport}
-        isFullscreen={isFullscreen}
-        onNavigate={handleNavigate}
-        onViewportChange={handleViewportChange}
-        onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
-        hideControls={hideControls}
-        hideFullscreenToggle={hideFullscreenToggle}
-        hideScreenshot={hideScreenshot}
-        hideViewportSelector={hideViewportSelector}
-        readOnly={readOnlyUrl}
-      />
+      {!hideToolbar && (
+        <BrowserToolbar
+          currentUrl={currentUrl}
+          viewport={viewport}
+          isFullscreen={isFullscreen}
+          onNavigate={handleNavigate}
+          onViewportChange={handleViewportChange}
+          onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
+          hideControls={hideControls}
+          hideFullscreenToggle={hideFullscreenToggle}
+          hideScreenshot={hideScreenshot}
+          hideViewportSelector={hideViewportSelector}
+          readOnly={readOnlyUrl}
+        />
+      )}
 
       {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
-      <div className={`relative rounded-b-lg border bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
+      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
