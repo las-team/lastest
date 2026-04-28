@@ -121,7 +121,7 @@ export default async function SettingsPage({
               GitHub account connected successfully!
             </div>
           )}
-          {earlyAdopterMode && params.success === 'gitlab_connected' && (
+          {params.success === 'gitlab_connected' && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
@@ -203,8 +203,7 @@ export default async function SettingsPage({
             hasGitlabAccount={!!gitlabAccount}
           />
 
-          {/* GitLab Integration (early adopter only) */}
-          {earlyAdopterMode && (
+          {/* GitLab Integration */}
           <Card id="gitlab">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -253,7 +252,6 @@ export default async function SettingsPage({
               )}
             </CardContent>
           </Card>
-          )}
 
           {/* Repository Info */}
           <Card id="repository">

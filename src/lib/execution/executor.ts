@@ -33,7 +33,7 @@ import {
   getGoogleSheetsDataSources,
   getCsvDataSources,
 } from '@/lib/db/queries';
-import { resolveVarReferences } from '@/lib/vars/resolver';
+import { resolveVarReferences, pickRowsForVariables, resolveAssignedValues } from '@/lib/vars/resolver';
 import { resolveSheetReferences } from '@/lib/google-sheets/resolver';
 import { resolveCsvReferences } from '@/lib/csv/resolver';
 import type { GoogleSheetsDataSource, CsvDataSource } from '@/lib/db/schema';
@@ -60,6 +60,13 @@ function resolveTestCodeForRunner(
     targetSelector: string;
     attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
   }>;
+  /** Resolved value for every assign-mode var, keyed by var name. Persisted
+   *  on the test_results row so the Vars-tab "Last run" column has data for
+   *  assign-mode rows (especially with random/increment row strategies). */
+  assignedVariables: Record<string, string>;
+  /** Updated cursor map for increment-mode vars — caller writes back to
+   *  tests.variableRowCursors. Empty when nothing changed. */
+  nextRowCursors: Record<string, number>;
 } {
   let code = test.code;
   // Direct {{sheet:...}} references
@@ -72,11 +79,21 @@ function resolveTestCodeForRunner(
     const r = resolveCsvReferences(code, csvSources);
     code = r.resolvedCode;
   }
+  // Pre-pick rows for increment/random vars once per run so all {{var:x}}
+  // occurrences agree on a single row (per-run, not per-occurrence).
+  const { rowPicks, nextCursors } = pickRowsForVariables(
+    test.variables,
+    gsheetSources,
+    csvSources,
+    test.variableRowCursors ?? null,
+  );
   // {{var:...}} references — resolve via TestVariables (assign-mode only)
   if (test.variables && test.variables.length > 0 && code.includes('{{var:')) {
-    const r = resolveVarReferences(code, test.variables, gsheetSources, csvSources);
+    const r = resolveVarReferences(code, test.variables, gsheetSources, csvSources, rowPicks);
     code = r.resolvedCode;
   }
+
+  const assignedVariables = resolveAssignedValues(test.variables, gsheetSources, csvSources, rowPicks);
 
   const extractVariables = (test.variables ?? [])
     .filter(v => v.mode === 'extract' && !!v.targetSelector)
@@ -86,7 +103,7 @@ function resolveTestCodeForRunner(
       attribute: v.attribute,
     }));
 
-  return { resolvedCode: code, extractVariables };
+  return { resolvedCode: code, extractVariables, assignedVariables, nextRowCursors: nextCursors };
 }
 
 /**
@@ -339,7 +356,7 @@ async function executeViaRunner(
   const csvSources = options.repositoryId ? await getCsvDataSources(options.repositoryId) : [];
 
   // Track in-flight tests: commandId → { testId, testName, startTime }
-  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number }>();
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
   let completedCount = 0;
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
@@ -430,7 +447,19 @@ async function executeViaRunner(
 
       // Resolve {{sheet:}}, {{csv:}}, {{var:}} tokens before sending. Hash the resolved code
       // so the runner's integrity check matches what it actually executes.
-      const { resolvedCode, extractVariables } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
+      const { resolvedCode, extractVariables, assignedVariables, nextRowCursors } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
+
+      // Persist the updated row cursors so increment-mode vars walk forward
+      // across runs. Best-effort — never fail the run on a cursor write fail.
+      if (Object.keys(nextRowCursors).length > 0) {
+        try {
+          await db.update(testsTable)
+            .set({ variableRowCursors: nextRowCursors })
+            .where(eq(testsTable.id, test.id));
+        } catch (err) {
+          console.warn(`[executor] Failed to persist variableRowCursors for test ${test.id}:`, err);
+        }
+      }
 
       // Default-ON `all_steps_executed`: only off when the user explicitly
       // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis
@@ -480,7 +509,12 @@ async function executeViaRunner(
 
       // Queue command to DB
       await queueCommandToDB(runnerId, command);
-      inFlight.set(command.id, { testId: test.id, testName: test.name, startTime: Date.now() });
+      inFlight.set(command.id, {
+        testId: test.id,
+        testName: test.name,
+        startTime: Date.now(),
+        assignedVariables: Object.keys(assignedVariables).length > 0 ? assignedVariables : undefined,
+      });
     }
   };
 
@@ -646,6 +680,10 @@ async function executeViaRunner(
         extractedVariables: payload.extractedVariables && typeof payload.extractedVariables === 'object'
           ? payload.extractedVariables as Record<string, string>
           : undefined,
+        // Host-resolved values for assign-mode vars on this run. Stored
+        // alongside extractedVariables so the Vars-tab "Last run" column has
+        // data for both modes (especially with random/increment row picks).
+        assignedVariables: info.assignedVariables,
       };
 
       results.push(testResult);

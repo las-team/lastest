@@ -6,7 +6,8 @@
  *   - `tests.assertions[].id`
  *   - `tests.step_criteria.rules[].params.assertionId` (under stepLabel
  *     `__assertions__`) — old → new mapping; entries with no mapping
- *     (assertion deleted from code) are dropped
+ *     (assertion deleted from code) are dropped, but only if other rules
+ *     under that stepLabel survive
  *   - `test_versions.step_criteria` — same, using each version's own code
  *
  * `test_results.assertion_results` is left alone — that column was
@@ -14,6 +15,11 @@
  * so there's nothing to rewrite. New runs will populate correctly.
  *
  * Idempotent: re-running computes the same new ids and the rewrites no-op.
+ *
+ * The OLD parser is inlined here (in `oldParseAssertions`) so we can
+ * reconstruct old assertion ids on each test's source — TestAssertion rows
+ * don't store all the fields the old hash used (e.g. `'page'` literal for
+ * waitForLoadState), so we can't recompute purely from the persisted row.
  *
  * Run with: pnpm tsx scripts/migrate-assertion-ids.ts
  */
@@ -23,13 +29,11 @@ import { tests, testVersions } from '../src/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { parseAssertions } from '../src/lib/playwright/assertion-parser';
-import type { StepCriterion, StepRule, TestAssertion } from '../src/lib/db/schema';
+import type { StepCriterion, StepRule } from '../src/lib/db/schema';
 
 /**
- * Old assertion id formula — matches the pre-migration version of
- * `assertionId` in src/lib/playwright/assertion-parser.ts:12-15.
- * Inlined here so we can compute old ids for mapping without reverting
- * the live parser.
+ * Old assertion id formula (orderIndex-keyed). Inlined so we can compute
+ * old ids without reverting the live parser.
  */
 function oldAssertionId(orderIndex: number, type: string, selector?: string, expected?: string): string {
   const input = `${orderIndex}:${type}:${selector ?? ''}:${expected ?? ''}`;
@@ -37,16 +41,154 @@ function oldAssertionId(orderIndex: number, type: string, selector?: string, exp
 }
 
 /**
- * Re-derive the OLD id for each parsed assertion. We use the same
- * `(type, targetSelector, expectedValue)` tuple the new parser captured,
- * keyed by the assertion's current `orderIndex` (which the new parser
- * still preserves on each TestAssertion). Returns a Map<oldId, newId>.
+ * Inline copy of the OLD parser's id-emitting logic.
+ *
+ * Walks `code` and produces just the array of OLD ids in source order —
+ * paired by orderIndex with the new parser's TestAssertion[]. That gives
+ * us a (oldId, newId) tuple per assertion without trying to reconstruct
+ * fields that weren't persisted on TestAssertion.
+ *
+ * Mirrors src/lib/playwright/assertion-parser.ts pre-migration. Kept in
+ * sync with the patterns the old parser matched (1-6).
  */
-function buildIdMap(parsed: TestAssertion[]): Map<string, string> {
+function oldParseAssertionIds(code: string): string[] {
+  const ids: string[] = [];
+  const lines = code.split('\n');
+  let orderIndex = 0;
+
+  const extractStringArg = (argStr: string): string | undefined => {
+    const str = argStr.trim();
+    if (!str) return undefined;
+    const m = str.match(/^['"](.*)['"]$/);
+    if (m) return m[1];
+    const bu = str.match(/buildUrl\(baseUrl,\s*['"]([^'"]+)['"]\)/);
+    if (bu) return bu[1];
+    const re = str.match(/^\/(.+)\/([gimsuy]*)$/);
+    if (re) return `/${re[1]}/${re[2]}`;
+    const num = str.match(/^(\d+(?:\.\d+)?)$/);
+    if (num) return num[1];
+    return str;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Pattern 1: Element assertion block
+    const elementCommentMatch = trimmed.match(/^\/\/ (?:Element|Hard) assertion: (\w+)/);
+    if (elementCommentMatch) {
+      const assertionType = elementCommentMatch[1];
+      let targetSelector: string | undefined;
+      let expectedValue: string | undefined;
+      for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
+        const l = lines[j].trim();
+        const sm = l.match(/locateWithFallback\(page,\s*(\[.*?\])/);
+        if (sm) {
+          try {
+            const arr = JSON.parse(sm[1]) as Array<{ type: string; value: string }>;
+            if (arr && arr.length > 0) targetSelector = `${arr[0].type}: ${arr[0].value}`;
+          } catch { /* ignore */ }
+        }
+        const em = l.match(/await\s+expect\(el\)\.(not\.)?(\w+)\((.*)?\)/);
+        if (em) {
+          const args = em[3] ?? '';
+          if (assertionType === 'toHaveAttribute') {
+            const am = args.match(/['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]/);
+            if (am) expectedValue = am[2];
+          } else {
+            expectedValue = extractStringArg(args);
+          }
+          break;
+        }
+        if (l === '}') break;
+      }
+      ids.push(oldAssertionId(orderIndex, assertionType, targetSelector, expectedValue));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 2: await expect(page).matcher()
+    const pageAssertionMatch = trimmed.match(/await\s+expect\(page\)\.(not\.)?(\w+)\((.*)?\)/);
+    if (pageAssertionMatch) {
+      const type = pageAssertionMatch[2];
+      const expected = extractStringArg(pageAssertionMatch[3] ?? '');
+      ids.push(oldAssertionId(orderIndex, type, 'page', expected));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 3a: await expect(varName).matcher()
+    const inlineElMatch = trimmed.match(/await\s+expect\((\w+)\)\.(not\.)?(\w+)\((.*)?\)/);
+    if (inlineElMatch && inlineElMatch[1] !== 'page') {
+      const type = inlineElMatch[3];
+      const expected = extractStringArg(inlineElMatch[4] ?? '');
+      ids.push(oldAssertionId(orderIndex, type, inlineElMatch[1], expected));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 3b: await expect(page.locator/getByRole/etc).matcher()
+    const locatorElMatch = trimmed.match(/await\s+expect\((page\.\w+\([^)]*\)(?:\.\w+\([^)]*\))*)\)\.(not\.)?(\w+)\((.*)?\)/);
+    if (locatorElMatch) {
+      const target = locatorElMatch[1];
+      const type = locatorElMatch[3];
+      const expected = extractStringArg(locatorElMatch[4] ?? '');
+      ids.push(oldAssertionId(orderIndex, type, target, expected));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 4: bare expect(varName).matcher()
+    const genericMatch = trimmed.match(/expect\(([^)]+)\)\.(not\.)?(\w+)\((.*)?\)/);
+    if (genericMatch && !trimmed.includes('await') && !genericMatch[1].match(/^(page|el|element)$/)) {
+      const type = genericMatch[3];
+      const expected = extractStringArg(genericMatch[4] ?? '');
+      ids.push(oldAssertionId(orderIndex, type, genericMatch[1], expected));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 5: download assertion (recorder-emitted comment)
+    const downloadCommentMatch = trimmed.match(/^\/\/ Download assertion:\s*(.+)?$/);
+    if (downloadCommentMatch) {
+      const filename = downloadCommentMatch[1]?.trim();
+      ids.push(oldAssertionId(orderIndex, 'fileDownloaded', 'download', filename));
+      orderIndex++;
+      continue;
+    }
+
+    // Pattern 6: await page.waitForLoadState(state)
+    if (trimmed.match(/await\s+page\.waitForLoadState\(/)) {
+      const sm = trimmed.match(/waitForLoadState\(['"](\w+)['"]\)/);
+      const state = sm?.[1] ?? 'load';
+      ids.push(oldAssertionId(orderIndex, 'waitForLoadState', 'page', state));
+      orderIndex++;
+      continue;
+    }
+  }
+
+  return ids;
+}
+
+/**
+ * Build a Map<oldId, newId> by running both parsers on the same code and
+ * pairing by orderIndex. Both walks produce assertions in source order with
+ * the same orderIndex sequence, so position N in `oldIds` corresponds to
+ * position N in `newAssertions`.
+ *
+ * Note: the new parser added a "bare download" pattern (waitForAny without
+ * the `// Download assertion:` comment) that the old parser missed. If the
+ * counts don't match we abort the rewrite for that row and log — better to
+ * skip than mis-pair ids.
+ */
+function buildIdMap(code: string, newAssertionIds: string[]): Map<string, string> | null {
+  const oldIds = oldParseAssertionIds(code);
+  if (oldIds.length !== newAssertionIds.length) {
+    return null;
+  }
   const map = new Map<string, string>();
-  for (const a of parsed) {
-    const oldId = oldAssertionId(a.orderIndex, a.assertionType, a.targetSelector, a.expectedValue);
-    map.set(oldId, a.id);
+  for (let i = 0; i < oldIds.length; i++) {
+    map.set(oldIds[i], newAssertionIds[i]);
   }
   return map;
 }
@@ -54,8 +196,10 @@ function buildIdMap(parsed: TestAssertion[]): Map<string, string> {
 /**
  * Rewrite stepCriteria so any `assertion_failed` rule under stepLabel
  * `__assertions__` swaps its old `params.assertionId` for the new id.
- * Rules whose old id has no mapping (assertion deleted from current code)
- * are dropped.
+ * Rules whose old id has no mapping are kept as-is (defensive — a stale
+ * rule is better than silently dropping the user's pinned state). Other
+ * stepLabels (e.g. `Step 3` with `screenshot_changed`) are passed through
+ * unchanged.
  */
 function rewriteStepCriteria(criteria: StepCriterion[] | null, idMap: Map<string, string>): StepCriterion[] | null {
   if (!criteria || criteria.length === 0) return criteria;
@@ -69,10 +213,15 @@ function rewriteStepCriteria(criteria: StepCriterion[] | null, idMap: Map<string
     for (const r of c.rules) {
       if (r.kind !== 'assertion_failed') { newRules.push(r); continue; }
       const oldId = (r.params as { assertionId?: string } | undefined)?.assertionId;
-      if (!oldId) { newRules.push(r); continue; }  // legacy global rule, no scoping
+      if (!oldId) { newRules.push(r); continue; }
       const newId = idMap.get(oldId);
-      if (!newId) continue;  // assertion no longer exists, drop the rule
-      if (newId === oldId) { newRules.push(r); continue; }  // already migrated
+      if (!newId) {
+        // Keep the rule with the original id — user can re-toggle manually
+        // if it's stale. Dropping silently is more destructive.
+        newRules.push(r);
+        continue;
+      }
+      if (newId === oldId) { newRules.push(r); continue; }
       newRules.push({ ...r, params: { ...(r.params ?? {}), assertionId: newId } });
     }
     if (newRules.length > 0) out.push({ ...c, rules: newRules });
@@ -85,33 +234,39 @@ async function migrate() {
 
   let testsUpdated = 0;
   let testsSkipped = 0;
+  let testsParserMismatch = 0;
   let criteriaRewrites = 0;
-  let droppedRules = 0;
   let versionsUpdated = 0;
 
-  const allTests = await db.select().from(tests).all();
+  const allTests = await db.select().from(tests);
   console.log(`Found ${allTests.length} tests to scan`);
 
   for (const t of allTests) {
     if (!t.code || t.code.trim() === '') { testsSkipped++; continue; }
 
     const newAssertions = parseAssertions(t.code);
-    const idMap = buildIdMap(newAssertions);
+    const newIds = newAssertions.map(a => a.id);
+    const idMap = buildIdMap(t.code, newIds);
 
-    // Rewrite step_criteria using old→new mapping
+    if (!idMap) {
+      // Old vs new parser disagree on assertion count for this code — can't
+      // safely map ids. Update assertions but leave step_criteria alone.
+      testsParserMismatch++;
+      const assertionsChanged = JSON.stringify(t.assertions ?? []) !== JSON.stringify(newAssertions);
+      if (assertionsChanged) {
+        await db.update(tests).set({ assertions: newAssertions }).where(eq(tests.id, t.id));
+        testsUpdated++;
+      }
+      continue;
+    }
+
     const oldCriteria = t.stepCriteria;
     const newCriteria = rewriteStepCriteria(oldCriteria, idMap);
 
     const stepCriteriaChanged = JSON.stringify(oldCriteria) !== JSON.stringify(newCriteria);
     const assertionsChanged = JSON.stringify(t.assertions ?? []) !== JSON.stringify(newAssertions);
 
-    if (stepCriteriaChanged) {
-      // Count dropped rules for visibility
-      const oldRuleCount = (oldCriteria ?? []).flatMap(c => c.rules.filter(r => r.kind === 'assertion_failed')).length;
-      const newRuleCount = (newCriteria ?? []).flatMap(c => c.rules.filter(r => r.kind === 'assertion_failed')).length;
-      if (newRuleCount < oldRuleCount) droppedRules += oldRuleCount - newRuleCount;
-      criteriaRewrites++;
-    }
+    if (stepCriteriaChanged) criteriaRewrites++;
 
     if (assertionsChanged || stepCriteriaChanged) {
       await db.update(tests)
@@ -124,19 +279,17 @@ async function migrate() {
     }
   }
 
-  console.log(`✓ Tests updated: ${testsUpdated} (${testsSkipped} skipped — no code)`);
-  console.log(`✓ Step criteria rewrites: ${criteriaRewrites} (${droppedRules} rules dropped — assertion no longer in code)`);
+  console.log(`✓ Tests updated: ${testsUpdated} (${testsSkipped} skipped — no code, ${testsParserMismatch} parser-count mismatch — assertions only)`);
+  console.log(`✓ Step criteria rewrites: ${criteriaRewrites}`);
 
-  // testVersions hold historical snapshots. Each version has its own `code`
-  // and `stepCriteria`. Re-parse with the snapshot's own code so a restored
-  // version's pinned criteria still resolve to working assertions.
-  const allVersions = await db.select().from(testVersions).all();
+  const allVersions = await db.select().from(testVersions);
   console.log(`\nFound ${allVersions.length} test versions to scan`);
 
   for (const v of allVersions) {
     if (!v.code || !v.stepCriteria || v.stepCriteria.length === 0) continue;
     const versionAssertions = parseAssertions(v.code);
-    const idMap = buildIdMap(versionAssertions);
+    const idMap = buildIdMap(v.code, versionAssertions.map(a => a.id));
+    if (!idMap) continue;
     const newCriteria = rewriteStepCriteria(v.stepCriteria, idMap);
     if (JSON.stringify(v.stepCriteria) === JSON.stringify(newCriteria)) continue;
     await db.update(testVersions)

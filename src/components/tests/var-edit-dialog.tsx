@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -23,6 +22,7 @@ import {
 } from '@/components/ui/select';
 import type {
   TestVariable,
+  TestVariableSourceRowMode,
   GoogleSheetsDataSource,
   CsvDataSource,
 } from '@/lib/db/schema';
@@ -43,6 +43,16 @@ function genId() {
   return `var_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Sanitize an alias+column pair into a valid TestVariable.name. Must satisfy
+// /^[a-zA-Z_][a-zA-Z0-9_-]*$/ — matches the regex enforced below.
+function suggestName(alias: string, column: string): string {
+  const raw = `${alias}_${column}`.toLowerCase();
+  let cleaned = raw.replace(/[^a-z0-9_-]+/g, '_').replace(/_+/g, '_');
+  cleaned = cleaned.replace(/^_+|_+$/g, '');
+  if (!/^[a-zA-Z_]/.test(cleaned)) cleaned = `v_${cleaned}`;
+  return cleaned;
+}
+
 export function VarEditDialog({
   open,
   onOpenChange,
@@ -61,12 +71,15 @@ export function VarEditDialog({
   const [sourceAlias, setSourceAlias] = useState(initial?.sourceAlias ?? '');
   const [sourceColumn, setSourceColumn] = useState(initial?.sourceColumn ?? '');
   const [sourceRow, setSourceRow] = useState(String(initial?.sourceRow ?? 0));
+  const [sourceRowMode, setSourceRowMode] = useState<TestVariableSourceRowMode>(initial?.sourceRowMode ?? 'fixed');
   const [staticValue, setStaticValue] = useState(initial?.staticValue ?? '');
   const [expectedValue, setExpectedValue] = useState(initial?.expectedValue ?? '');
   const [assertEnabled, setAssertEnabled] = useState(initial?.assertEnabled ?? false);
   const [assertSeverity, setAssertSeverity] = useState<'fail' | 'warn'>(initial?.assertSeverity ?? 'fail');
-  const [description, setDescription] = useState(initial?.description ?? '');
   const [submitting, setSubmitting] = useState(false);
+  // Stop auto-suggesting a name once the user types one. Reset on dialog
+  // re-open so a new variable starts auto-filling again from alias+column.
+  const nameTouchedRef = useRef<boolean>(!!initial?.name);
 
   // Reset form when re-opened with a different `initial`
   useEffect(() => {
@@ -79,11 +92,12 @@ export function VarEditDialog({
     setSourceAlias(initial?.sourceAlias ?? '');
     setSourceColumn(initial?.sourceColumn ?? '');
     setSourceRow(String(initial?.sourceRow ?? 0));
+    setSourceRowMode(initial?.sourceRowMode ?? 'fixed');
     setStaticValue(initial?.staticValue ?? '');
     setExpectedValue(initial?.expectedValue ?? '');
     setAssertEnabled(initial?.assertEnabled ?? false);
     setAssertSeverity(initial?.assertSeverity ?? 'fail');
-    setDescription(initial?.description ?? '');
+    nameTouchedRef.current = !!initial?.name;
   }, [open, initial, forcedMode]);
 
   const aliasOptions = useMemo(() => {
@@ -97,6 +111,16 @@ export function VarEditDialog({
     if (sourceType === 'csv') return csvSources.find(s => s.alias === sourceAlias)?.cachedHeaders ?? [];
     return [];
   }, [sourceType, sourceAlias, sheetSources, csvSources]);
+
+  // Auto-suggest a name from alias+column for CSV/Sheet assign vars, until
+  // the user starts typing one themselves.
+  useEffect(() => {
+    if (mode !== 'assign') return;
+    if (sourceType !== 'csv' && sourceType !== 'gsheet') return;
+    if (nameTouchedRef.current) return;
+    if (!sourceAlias || !sourceColumn) return;
+    setName(suggestName(sourceAlias, sourceColumn));
+  }, [mode, sourceType, sourceAlias, sourceColumn]);
 
   const nameError = (() => {
     if (!name) return 'Name required';
@@ -136,10 +160,17 @@ export function VarEditDialog({
             sourceType,
             ...(sourceType === 'static' ? { staticValue } : {}),
             ...((sourceType === 'gsheet' || sourceType === 'csv')
-              ? { sourceAlias, sourceColumn, sourceRow: parseInt(sourceRow, 10) || 0, staticValue: staticValue || undefined }
+              ? {
+                  sourceAlias,
+                  sourceColumn,
+                  sourceRowMode,
+                  // Only persist sourceRow when 'fixed' — for increment/random
+                  // the value is picked at run time and stored on the test.
+                  ...(sourceRowMode === 'fixed' ? { sourceRow: parseInt(sourceRow, 10) || 0 } : {}),
+                  staticValue: staticValue || undefined,
+                }
               : {}),
           }),
-      description: description || undefined,
     };
     setSubmitting(true);
     try {
@@ -149,6 +180,24 @@ export function VarEditDialog({
       setSubmitting(false);
     }
   };
+
+  const renderNameField = () => (
+    <div className="space-y-1.5">
+      <Label htmlFor="var-name">Name</Label>
+      <Input
+        id="var-name"
+        value={name}
+        onChange={e => {
+          nameTouchedRef.current = true;
+          setName(e.target.value);
+        }}
+        placeholder={mode === 'assign' && (sourceType === 'csv' || sourceType === 'gsheet')
+          ? 'Auto-fills from alias + column'
+          : 'email'}
+      />
+      {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -161,17 +210,6 @@ export function VarEditDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="var-name">Name</Label>
-            <Input
-              id="var-name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="email"
-            />
-            {nameError && <p className="text-xs text-destructive">{nameError}</p>}
-          </div>
-
           {!forcedMode && (
             <div className="space-y-1.5">
               <Label>Mode</Label>
@@ -211,37 +249,71 @@ export function VarEditDialog({
               )}
 
               {(sourceType === 'gsheet' || sourceType === 'csv') && (
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="space-y-1.5">
-                    <Label>Alias</Label>
-                    <Select value={sourceAlias} onValueChange={setSourceAlias}>
-                      <SelectTrigger><SelectValue placeholder="Pick" /></SelectTrigger>
-                      <SelectContent>
-                        {aliasOptions.map(o => <SelectItem key={o.alias} value={o.alias}>{o.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <Label>Alias</Label>
+                      <Select value={sourceAlias} onValueChange={setSourceAlias}>
+                        <SelectTrigger><SelectValue placeholder="Pick" /></SelectTrigger>
+                        <SelectContent>
+                          {aliasOptions.map(o => <SelectItem key={o.alias} value={o.alias}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Column</Label>
+                      <Select value={sourceColumn} onValueChange={setSourceColumn} disabled={!sourceAlias}>
+                        <SelectTrigger><SelectValue placeholder="Pick" /></SelectTrigger>
+                        <SelectContent>
+                          {columnOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Column</Label>
-                    <Select value={sourceColumn} onValueChange={setSourceColumn} disabled={!sourceAlias}>
-                      <SelectTrigger><SelectValue placeholder="Pick" /></SelectTrigger>
-                      <SelectContent>
-                        {columnOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <Label>Row strategy</Label>
+                      <Select
+                        value={sourceRowMode}
+                        onValueChange={v => setSourceRowMode(v as TestVariableSourceRowMode)}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed row</SelectItem>
+                          <SelectItem value="increment">Increment per run</SelectItem>
+                          <SelectItem value="random">Random per run</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {sourceRowMode === 'fixed' ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="var-row">Row</Label>
+                        <Input
+                          id="var-row"
+                          type="number"
+                          min={0}
+                          value={sourceRow}
+                          onChange={e => setSourceRow(e.target.value)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <Label className="text-muted-foreground">Row</Label>
+                        <p className="text-xs text-muted-foreground pt-2">
+                          {sourceRowMode === 'random'
+                            ? 'Picked at random each run.'
+                            : 'Walks forward across runs; wraps to row 2 after the last row.'}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="var-row">Row</Label>
-                    <Input
-                      id="var-row"
-                      type="number"
-                      min={0}
-                      value={sourceRow}
-                      onChange={e => setSourceRow(e.target.value)}
-                    />
-                  </div>
-                </div>
+
+                  {renderNameField()}
+                </>
               )}
+
+              {sourceType === 'static' && renderNameField()}
             </>
           )}
 
@@ -268,6 +340,8 @@ export function VarEditDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              {renderNameField()}
 
               <div className="rounded-md border p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -305,16 +379,6 @@ export function VarEditDialog({
               </div>
             </>
           )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="var-desc">Description (optional)</Label>
-            <Textarea
-              id="var-desc"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={2}
-            />
-          </div>
 
           {formError && !nameError && (
             <p className="text-xs text-destructive">{formError}</p>

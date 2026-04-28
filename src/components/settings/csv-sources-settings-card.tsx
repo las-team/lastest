@@ -14,9 +14,14 @@ import type { CsvDataSource } from '@/lib/db/schema';
 interface CsvSourcesSettingsCardProps {
   dataSources: CsvDataSource[];
   repositoryId?: string | null;
+  /** When provided, called instead of `router.refresh()` after upload / sync /
+   *  delete. The test-detail panel hydrates from a client server-action, so a
+   *  hard `router.refresh()` won't update its cached `csvDataSources` — the
+   *  caller must refetch through this hook. Falls back to `router.refresh()`. */
+  onRefresh?: () => Promise<void> | void;
 }
 
-export function CsvSourcesSettingsCard({ dataSources, repositoryId }: CsvSourcesSettingsCardProps) {
+export function CsvSourcesSettingsCard({ dataSources, repositoryId, onRefresh }: CsvSourcesSettingsCardProps) {
   const router = useRouter();
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -52,6 +57,11 @@ export function CsvSourcesSettingsCard({ dataSources, repositoryId }: CsvSources
     setDragActive(false);
   };
 
+  const refresh = async () => {
+    if (onRefresh) await onRefresh();
+    else router.refresh();
+  };
+
   const handleSync = async (id: string) => {
     setSyncingId(id);
     try {
@@ -59,7 +69,7 @@ export function CsvSourcesSettingsCard({ dataSources, repositoryId }: CsvSources
       const res = await syncCsvSource(id);
       if (res.success) {
         toast.success('CSV reloaded from disk');
-        router.refresh();
+        await refresh();
       } else {
         toast.error(res.error || 'Sync failed');
       }
@@ -75,7 +85,7 @@ export function CsvSourcesSettingsCard({ dataSources, repositoryId }: CsvSources
       const { deleteCsvSource } = await import('@/server/actions/csv-sources');
       await deleteCsvSource(id);
       toast.success('CSV source deleted');
-      router.refresh();
+      await refresh();
     } finally {
       setDeletingId(null);
     }
@@ -193,7 +203,7 @@ export function CsvSourcesSettingsCard({ dataSources, repositoryId }: CsvSources
             }}
             repositoryId={repositoryId}
             initialFile={pendingFile}
-            onUploaded={() => router.refresh()}
+            onUploaded={() => { void refresh(); }}
           />
         </>
       )}

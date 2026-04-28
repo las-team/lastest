@@ -83,6 +83,7 @@ interface TestResult {
   lastReachedStep: number | null;
   totalSteps: number | null;
   extractedVariables: Record<string, string> | null;
+  assignedVariables: Record<string, string> | null;
 }
 
 interface DefaultStepForUI {
@@ -1040,7 +1041,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);
-                router.refresh();
+                if (onRefresh) await onRefresh(); else router.refresh();
               }}
               onParseNeeded={async () => {
                 try {
@@ -1057,7 +1058,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               onStepValueChange={async (lineStart, lineEnd, oldValue, newValue) => {
                 const { updateStepValue } = await import('@/server/actions/tests');
                 await updateStepValue(test.id, lineStart, lineEnd, oldValue, newValue);
-                router.refresh();
+                if (onRefresh) await onRefresh(); else router.refresh();
               }}
               onGoToCode={(line) => {
                 setHighlightLine(line);
@@ -1104,7 +1105,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               sheetSources={sheetDataSources}
               csvSources={csvDataSources}
               extractedValues={latestResult?.extractedVariables ?? null}
+              assignedValues={latestResult?.assignedVariables ?? null}
               code={test.code ?? null}
+              onRefresh={onRefresh}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);
@@ -1123,6 +1126,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               }))}
               availableTests={availableTests}
               availableScripts={availableScripts}
+              onRefresh={onRefresh}
             />
 
             <TestStabilizationOverrides

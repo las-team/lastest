@@ -348,6 +348,34 @@ export class EmbeddedTestExecutor {
     let reachedStep = -1;
     let stepCount = 0;
     let domSnapshot: DomSnapshotResult | undefined;
+    // Hoisted so the catch path can also try to extract — failed tests still
+    // expose values for any extract-mode TestVariables whose selectors resolve.
+    let extractedVariables: Record<string, string> | undefined;
+    const runExtractions = async () => {
+      if (!command.extractVariables || command.extractVariables.length === 0) return;
+      if (!page || page.isClosed()) return;
+      const out: Record<string, string> = extractedVariables ?? {};
+      for (const v of command.extractVariables) {
+        if (!v.targetSelector) continue;
+        if (out[v.name] !== undefined) continue; // already extracted (success path)
+        try {
+          const locator = page.locator(v.targetSelector).first();
+          let raw: string | null;
+          switch (v.attribute) {
+            case 'textContent': raw = await locator.textContent({ timeout: 2000 }); break;
+            case 'innerText':   raw = await locator.innerText({ timeout: 2000 }); break;
+            case 'innerHTML':   raw = await locator.innerHTML({ timeout: 2000 }); break;
+            default:            raw = await locator.inputValue({ timeout: 2000 }); break;
+          }
+          out[v.name] = (raw ?? '').toString().trim();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logFn('warn', `Failed to extract variable "${v.name}" (${v.targetSelector}): ${msg}`);
+          out[v.name] = '';
+        }
+      }
+      extractedVariables = out;
+    };
     const captureFinalDomSnapshot = async () => {
       if (!page || page.isClosed()) return;
       try {
@@ -961,28 +989,7 @@ export class EmbeddedTestExecutor {
       // Extract values from page fields for extract-mode TestVariables.
       // Done before close so locators still resolve. Failures are best-effort
       // (logged + recorded as empty string), never fail the whole test.
-      let extractedVariables: Record<string, string> | undefined;
-      if (command.extractVariables && command.extractVariables.length > 0) {
-        extractedVariables = {};
-        for (const v of command.extractVariables) {
-          if (!v.targetSelector) continue;
-          try {
-            const locator = page.locator(v.targetSelector).first();
-            let raw: string | null;
-            switch (v.attribute) {
-              case 'textContent': raw = await locator.textContent({ timeout: 2000 }); break;
-              case 'innerText':   raw = await locator.innerText({ timeout: 2000 }); break;
-              case 'innerHTML':   raw = await locator.innerHTML({ timeout: 2000 }); break;
-              default:            raw = await locator.inputValue({ timeout: 2000 }); break;
-            }
-            extractedVariables[v.name] = (raw ?? '').toString().trim();
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            logFn('warn', `Failed to extract variable "${v.name}" (${v.targetSelector}): ${msg}`);
-            extractedVariables[v.name] = '';
-          }
-        }
-      }
+      await runExtractions();
 
       // Check console/network error modes (mirrors runner.ts logic)
       const consoleErrorMode = command.consoleErrorMode || 'fail';
@@ -1082,6 +1089,9 @@ export class EmbeddedTestExecutor {
             errorScreenshot = buffer.toString('base64');
           } catch { /* ignore */ }
           await captureFinalDomSnapshot();
+          // Extract whatever's still readable on the page so the Vars-tab
+          // "Last run" column reflects state at the failure point.
+          await runExtractions();
         }
 
         result = {
@@ -1097,6 +1107,7 @@ export class EmbeddedTestExecutor {
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
+          extractedVariables,
         };
       }
     } finally {

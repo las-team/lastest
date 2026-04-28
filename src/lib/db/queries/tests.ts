@@ -478,6 +478,7 @@ export async function getTestResultsByTest(testId: string) {
       lastReachedStep: testResults.lastReachedStep,
       totalSteps: testResults.totalSteps,
       extractedVariables: testResults.extractedVariables,
+      assignedVariables: testResults.assignedVariables,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))

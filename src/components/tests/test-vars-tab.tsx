@@ -27,10 +27,18 @@ export interface TestVarsTabProps {
   /** Values pulled by extract-mode vars during the most recent run, keyed by
    *  variable name. Surfaced in the table as the "Last run" column. */
   extractedValues?: Record<string, string> | null;
+  /** Values resolved & injected for assign-mode vars on the most recent run.
+   *  Keyed by variable name. Used so the "Last run" column also makes sense
+   *  for CSV/Sheet/static assign vars. */
+  assignedValues?: Record<string, string> | null;
   /** Current test code — used to detect extract-mode vars whose targetSelector
    *  no longer appears in any step (orphaned vars). When omitted, no orphan
    *  detection runs. */
   code?: string | null;
+  /** Refetch hook used after CSV upload / sync / delete to refresh the parent
+   *  panel's cached `csvSources`. When omitted, the inner card falls back to
+   *  `router.refresh()`. */
+  onRefresh?: () => Promise<void> | void;
 }
 
 function describeSource(v: TestVariable): string {
@@ -49,7 +57,9 @@ export function TestVarsTab({
   csvSources,
   onSaveVariables,
   extractedValues,
+  assignedValues,
   code,
+  onRefresh,
 }: TestVarsTabProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TestVariable | null>(null);
@@ -151,7 +161,14 @@ export function TestVarsTab({
                 </thead>
                 <tbody>
                   {variables.map(v => {
-                    const lastRun = extractedValues?.[v.name];
+                    // Extract-mode vars surface what the page held at end of run.
+                    // Assign-mode vars surface the value we injected (resolved
+                    // CSV / Sheet / static), so the column is meaningful for
+                    // both modes — especially with random/increment row strategies
+                    // where the user can't tell at a glance which row was used.
+                    const lastRun = v.mode === 'extract'
+                      ? extractedValues?.[v.name]
+                      : assignedValues?.[v.name];
                     const orphan = isOrphan(v);
                     return (
                       <tr
@@ -249,6 +266,7 @@ export function TestVarsTab({
       <CsvSourcesSettingsCard
         dataSources={csvSources}
         repositoryId={repositoryId}
+        onRefresh={onRefresh}
       />
 
       <VarEditDialog

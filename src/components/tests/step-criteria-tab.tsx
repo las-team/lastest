@@ -62,7 +62,12 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
   const [criteria, setCriteria] = useState<StepCriterion[]>(stepCriteria ?? []);
   const [pending, startTransition] = useTransition();
   const [varDraft, setVarDraft] = useState<TestVariable[]>(variables ?? []);
-  const [varSaving, setVarSaving] = useState(false);
+  const [varStatus, setVarStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Track the snapshot we last persisted so external `variables` updates from
+  // the parent don't clobber an in-flight local edit.
+  const lastSavedRef = useRef<string>(JSON.stringify(variables ?? []));
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync local state when the parent re-fetches and hands us new criteria.
   // Without this, optimistic local state survives a parent refresh and the
@@ -71,31 +76,50 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
     setCriteria(stepCriteria ?? []);
   }, [stepCriteria]);
 
-  // Sync local draft when external variables change
+  // Adopt parent variables only when the incoming snapshot differs from what
+  // we last saved — otherwise a refetch racing with our own debounced save
+  // would yank user edits back.
   useEffect(() => {
-    setVarDraft(variables ?? []);
+    const incoming = JSON.stringify(variables ?? []);
+    if (incoming !== lastSavedRef.current) {
+      setVarDraft(variables ?? []);
+      lastSavedRef.current = incoming;
+    }
   }, [variables]);
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+  }, []);
 
   const extractVars = varDraft.filter(v => v.mode === 'extract');
 
-  const updateVar = (id: string, patch: Partial<TestVariable>) => {
-    setVarDraft(prev => prev.map(v => (v.id === id ? { ...v, ...patch } : v)));
-  };
-
-  const saveVarChanges = async () => {
+  // 500ms debounce — matches the settings auto-save convention in CLAUDE.md.
+  const scheduleVarSave = (next: TestVariable[]) => {
     if (!onSaveVariables) return;
-    setVarSaving(true);
-    try {
-      await onSaveVariables(varDraft);
-      toast.success('Variable assertions saved');
-    } catch (err) {
-      toast.error(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setVarSaving(false);
-    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setVarStatus('saving');
+      try {
+        await onSaveVariables(next);
+        lastSavedRef.current = JSON.stringify(next);
+        setVarStatus('saved');
+        if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+        savedFlashTimerRef.current = setTimeout(() => setVarStatus('idle'), 1500);
+      } catch (err) {
+        setVarStatus('error');
+        toast.error(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, 500);
   };
 
-  const hasUnsavedVarChanges = JSON.stringify(varDraft) !== JSON.stringify(variables ?? []);
+  const updateVar = (id: string, patch: Partial<TestVariable>) => {
+    setVarDraft(prev => {
+      const next = prev.map(v => (v.id === id ? { ...v, ...patch } : v));
+      scheduleVarSave(next);
+      return next;
+    });
+  };
   const [focusByStep, setFocusByStep] = useState<Record<string, number>>({});
   // Screenshot step rows only — exclude the assertion sentinel so it doesn't
   // render as a ghost screenshot.
@@ -414,6 +438,16 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
               <span className="text-sm font-medium">End-of-test variable assertions</span>
               <Badge variant="outline" className="text-xs">{extractVars.length} extract var{extractVars.length === 1 ? '' : 's'}</Badge>
               <span className="text-[11px] text-muted-foreground">These also appear in the Vars tab. Edits sync.</span>
+              {varStatus !== 'idle' && (
+                <span
+                  className={`text-[11px] ml-auto ${
+                    varStatus === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                  }`}
+                  aria-live="polite"
+                >
+                  {varStatus === 'saving' ? 'Saving…' : varStatus === 'saved' ? 'Saved' : 'Save failed'}
+                </span>
+              )}
             </div>
 
             {extractVars.length === 0 ? (
@@ -455,16 +489,6 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions,
                     </div>
                   </div>
                 ))}
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={saveVarChanges}
-                    disabled={varSaving || !hasUnsavedVarChanges}
-                    className="text-xs px-3 py-1 rounded border bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {varSaving ? 'Saving...' : hasUnsavedVarChanges ? 'Save changes' : 'Saved'}
-                  </button>
-                </div>
               </div>
             )}
           </div>

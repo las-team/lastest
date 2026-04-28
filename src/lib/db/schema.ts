@@ -259,6 +259,10 @@ export const tests = pgTable('tests', {
   // Named variables: bind values to page fields (extract from / assign to).
   // {{var:name}} references in code are resolved at execution time.
   variables: jsonb('variables').$type<TestVariable[]>(),
+  // Per-run row cursor map for assign-mode vars with sourceRowMode='increment'.
+  // Keyed by TestVariable.id → next-row-to-use. Updated post-resolve by the
+  // executor; wraps back to 2 (not 0) when it overflows the source's rowCount.
+  variableRowCursors: jsonb('variable_row_cursors').$type<Record<string, number>>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
@@ -335,6 +339,8 @@ export type TestVariableMode = 'extract' | 'assign';
 export type TestVariableSourceType = 'gsheet' | 'csv' | 'static';
 export type TestVariableAttribute = 'value' | 'textContent' | 'innerText' | 'innerHTML';
 
+export type TestVariableSourceRowMode = 'fixed' | 'increment' | 'random';
+
 export interface TestVariable {
   id: string;
   name: string;
@@ -347,6 +353,10 @@ export interface TestVariable {
   sourceAlias?: string;
   sourceColumn?: string;
   sourceRow?: number;
+  // How the row gets picked at run time. Default 'fixed' — uses sourceRow.
+  // 'increment' walks forward across runs and wraps from rowCount-1 back to 2
+  // (rows 0/1 reserved as defaults). 'random' picks any row each run.
+  sourceRowMode?: TestVariableSourceRowMode;
   staticValue?: string;
   // Eotest assertion
   expectedValue?: string;
@@ -394,6 +404,12 @@ export const testResults = pgTable('test_results', {
   evaluationOutcome: jsonb('evaluation_outcome').$type<EvaluationOutcome>(), // step-criteria rule firings
   // Values pulled from page fields by extract-mode TestVariables, post-run.
   extractedVariables: jsonb('extracted_variables').$type<Record<string, string>>(),
+  // Values resolved & injected by assign-mode TestVariables for this run.
+  // Keyed by variable name — same shape as extractedVariables. Surfaces in
+  // the Vars tab "Last run" column for assign-mode rows (especially helpful
+  // with sourceRowMode='random'/'increment' where the user otherwise can't
+  // tell which row was actually used).
+  assignedVariables: jsonb('assigned_variables').$type<Record<string, string>>(),
 });
 
 // Repository provider type

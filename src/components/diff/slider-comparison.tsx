@@ -606,10 +606,10 @@ export function SliderComparison({
           <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
         </div>
 
-        {/* Current (right side, clipped) */}
+        {/* Current (right side, clipped — fully revealed while drawing focus regions) */}
         <div
           className="absolute inset-0 overflow-hidden"
-          style={{ clipPath: `inset(0 0 0 ${sliderPosition}%)` }}
+          style={{ clipPath: `inset(0 0 0 ${drawFocusMode ? 0 : sliderPosition}%)` }}
         >
           <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
@@ -622,20 +622,22 @@ export function SliderComparison({
           <DrawLayer dims={imageDims} onDrawn={onFocusRegionDrawn} />
         )}
 
-        {/* Slider handle */}
-        <div
-          className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
-          style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleMouseDown}
-        >
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center">
-            <div className="flex gap-0.5">
-              <div className="w-0.5 h-4 bg-gray-400" />
-              <div className="w-0.5 h-4 bg-gray-400" />
+        {/* Slider handle — hidden while drawing so it doesn't intercept the mouse mid-drag */}
+        {!drawFocusMode && (
+          <div
+            className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
+            style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
+            onMouseDown={handleMouseDown}
+            onTouchStart={handleMouseDown}
+          >
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center">
+              <div className="flex gap-0.5">
+                <div className="w-0.5 h-4 bg-gray-400" />
+                <div className="w-0.5 h-4 bg-gray-400" />
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Labels */}
         <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">

@@ -111,7 +111,7 @@ export function CsvDataBrowser({ open, onOpenChange, repositoryId, initialFile, 
         onOpenChange(o);
       }}
     >
-      <DialogContent className="sm:max-w-[640px]">
+      <DialogContent className="sm:max-w-3xl lg:max-w-5xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Import CSV</DialogTitle>
           <DialogDescription>
@@ -119,7 +119,7 @@ export function CsvDataBrowser({ open, onOpenChange, repositoryId, initialFile, 
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-4 py-2 flex-1 min-h-0 overflow-auto">
           {file && (
             <div className="flex items-center gap-2 text-sm border rounded-md px-3 py-2 bg-muted/40">
               <FileSpreadsheet className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -153,12 +153,12 @@ export function CsvDataBrowser({ open, onOpenChange, repositoryId, initialFile, 
 
               <div className="space-y-1.5">
                 <Label>Preview ({preview.total} row{preview.total === 1 ? '' : 's'} total, showing first {preview.rows.length})</Label>
-                <div className="border rounded-md overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted">
+                <div className="border rounded-md overflow-auto max-h-[55vh]">
+                  <table className="text-xs">
+                    <thead className="bg-muted sticky top-0 z-10">
                       <tr>
                         {preview.headers.map(h => (
-                          <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>
+                          <th key={h} className="text-left px-2 py-1 font-medium whitespace-nowrap border-b">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -166,7 +166,7 @@ export function CsvDataBrowser({ open, onOpenChange, repositoryId, initialFile, 
                       {preview.rows.map((row, i) => (
                         <tr key={i} className="border-t">
                           {row.map((cell, j) => (
-                            <td key={j} className="px-2 py-1 truncate max-w-[200px]" title={cell}>{cell}</td>
+                            <td key={j} className="px-2 py-1 whitespace-nowrap" title={cell}>{cell}</td>
                           ))}
                         </tr>
                       ))}

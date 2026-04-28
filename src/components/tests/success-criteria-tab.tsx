@@ -707,14 +707,12 @@ export function TestStepsTab({
                   mode: 'assign',
                   sourceType: 'static',
                   staticValue: bindStep.originalValue,
-                  description: bindStep.selectorHint ? `Bound from step at ${bindStep.selectorHint}` : undefined,
                 }
               : {
                   name: '',
                   mode: 'extract',
                   targetSelector: bindStep.selectorHint,
                   attribute: 'value',
-                  description: `Extracted from step "${bindStep.step.label}"`,
                 }
           }
           takenNames={(variables ?? []).map(v => v.name)}

@@ -251,7 +251,62 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   if (evaluation.overriddenStatus === 'failed' && testResult.status !== 'failed') {
     patch.status = 'failed';
   }
+
+  // When a fail-severity rule tripped, surface which criterion fired and how
+  // far the test got in `errorMessage` so the result UI shows something
+  // actionable instead of a bare "Cancelled by user" / empty string.
+  if (evaluation.overriddenStatus === 'failed') {
+    const criteriaError = formatCriteriaError(
+      evaluation.triggeredRules,
+      lastReachedStep,
+      totalSteps,
+    );
+    if (criteriaError) {
+      const prev = testResult.errorMessage?.trim();
+      const isPlaceholder = !prev || prev === 'Cancelled by user';
+      patch.errorMessage = isPlaceholder
+        ? criteriaError
+        : `${prev} — Criteria: ${criteriaError}`;
+    }
+  }
+
   await queries.updateTestResult(testResultId, patch);
 
   return evaluation;
+}
+
+// Build a human-readable summary of the fail-severity rules that fired,
+// suffixed with step progress when the runner reported it. Returns null when
+// no fail-severity rules fired (warn-severity rules don't justify overwriting
+// the existing error message).
+function formatCriteriaError(
+  triggered: TriggeredStepRule[],
+  lastReachedStep: number | undefined,
+  totalSteps: number | undefined,
+): string | null {
+  const failing = triggered.filter(t => t.rule.severity === 'fail');
+  if (failing.length === 0) return null;
+
+  const parts = failing.map(t => {
+    const label = t.stepLabel;
+    const isSentinel =
+      label === ALL_STEPS_EXECUTED_LABEL ||
+      label === EOTEST_STEP_LABEL ||
+      label === '';
+    return isSentinel ? t.reason : `step "${label}": ${t.reason}`;
+  });
+  let msg = `Failed criteria: ${parts.join(' | ')}`;
+
+  // Skip the progress suffix when an all_steps_executed rule already encoded
+  // step counts in its reason.
+  const hasProgressInReason = failing.some(t => t.rule.kind === 'all_steps_executed');
+  if (
+    !hasProgressInReason &&
+    typeof lastReachedStep === 'number' &&
+    typeof totalSteps === 'number' &&
+    totalSteps > 0
+  ) {
+    msg += ` (reached step ${lastReachedStep + 1}/${totalSteps})`;
+  }
+  return msg;
 }

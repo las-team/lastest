@@ -17,34 +17,14 @@ Openrouter agent sdk parity
 **Onboarding**
 
 **Criteria**
- 
+
 **CSV upload and use**
-  table contents dont fit popup - plz fix
-  after file upload need to refresh page - refresh teh component - re-check this type of error for every test detail page tab
-  New variable
-  Variables bind values to page fields. Reference assign-mode vars in test code as {{var:name}}.  - fields are overlapping each other
-    remove desc, not needed
-    move name lower and autopopulate based on alias n column
-    add an option to use random or inc row (until last when it starts from 2)
-  refresh the step component when a var is binded - check architecturally how to fix this
-  last run value is not populated on test http://localhost:3000/tests?test=736a9abe-41e6-41b5-b4c5-5bb647e2c941
+
 ## bugs
-area cant be drawn over slider
 
-https://app.lastest.cloud/builds/47d79887-d7af-462b
-  -8217-1457fe4abb07 build on /olares has white        
-  screenshots still after 3 sessions trying to fix     
-  this issue. please look for the root cause, why the  
-  nodes are not ready to execute the test when         
-  received, and why are retry mechanisms failing.      
-  plan a simple way to increase logging to debug       
-  better if more info is needed.    
-
-Move gitlab out of EA functions
 ## features
 Default ai, openrouter test
 gh issue- notification on discord
-sort readme and self-run instructions
 
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well
