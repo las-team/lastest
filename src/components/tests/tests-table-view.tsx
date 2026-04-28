@@ -48,7 +48,7 @@ export interface TestsTableSort {
   dir: 'asc' | 'desc';
 }
 
-const ALL_TOGGLEABLE_COLUMNS: TestsTableColumnKey[] = [
+export const TESTS_TABLE_TOGGLEABLE_COLUMNS: TestsTableColumnKey[] = [
   'status',
   'lastRun',
   'lastModified',
@@ -57,7 +57,7 @@ const ALL_TOGGLEABLE_COLUMNS: TestsTableColumnKey[] = [
   'targetUrl',
 ];
 
-const COLUMN_LABELS: Record<TestsTableColumnKey, string> = {
+export const TESTS_TABLE_COLUMN_LABELS: Record<TestsTableColumnKey, string> = {
   status: 'Status',
   lastRun: 'Last run',
   lastModified: 'Last modified',
@@ -80,7 +80,7 @@ export function parseStoredColumns(raw: string | null): Set<TestsTableColumnKey>
     const parsed = JSON.parse(raw) as { v?: number; cols?: unknown };
     if (parsed.v !== STORED_VERSION || !Array.isArray(parsed.cols)) return null;
     const valid = parsed.cols.filter((c): c is TestsTableColumnKey =>
-      typeof c === 'string' && (ALL_TOGGLEABLE_COLUMNS as string[]).includes(c),
+      typeof c === 'string' && (TESTS_TABLE_TOGGLEABLE_COLUMNS as string[]).includes(c),
     );
     return new Set(valid);
   } catch {
@@ -162,8 +162,9 @@ export function compareTests(
     const ys = String(y).toLowerCase();
     return xs < ys ? -1 : xs > ys ? 1 : 0;
   });
-  if (result === null) return 0;
-  return dir === 'asc' ? result : -result;
+  // Nulls always sort last regardless of direction; only the value comparison flips.
+  if (result.kind === 'null') return result.value;
+  return dir === 'asc' ? result.value : -result.value;
 }
 
 export interface TestsTableViewProps {
@@ -177,10 +178,50 @@ export interface TestsTableViewProps {
   sort: TestsTableSort;
   onSortChange: (s: TestsTableSort) => void;
   visibleColumns: Set<TestsTableColumnKey>;
-  onVisibleColumnsChange: (cols: Set<TestsTableColumnKey>) => void;
 }
 
 const DEFAULT_DESC_KEYS: ReadonlySet<TestsTableSortKey> = new Set(['lastRun', 'lastModified']);
+
+export interface TestsTableColumnsButtonProps {
+  visibleColumns: Set<TestsTableColumnKey>;
+  onVisibleColumnsChange: (cols: Set<TestsTableColumnKey>) => void;
+}
+
+export function TestsTableColumnsButton({
+  visibleColumns,
+  onVisibleColumnsChange,
+}: TestsTableColumnsButtonProps) {
+  const toggleColumn = (col: TestsTableColumnKey) => {
+    const next = new Set(visibleColumns);
+    if (next.has(col)) next.delete(col);
+    else next.add(col);
+    onVisibleColumnsChange(next);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 text-xs">
+          <Settings2 className="h-3.5 w-3.5 mr-1.5" />
+          Columns
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {TESTS_TABLE_TOGGLEABLE_COLUMNS.map((col) => (
+          <DropdownMenuCheckboxItem
+            key={col}
+            checked={visibleColumns.has(col)}
+            onCheckedChange={() => toggleColumn(col)}
+            onSelect={(e) => e.preventDefault()}
+          >
+            {TESTS_TABLE_COLUMN_LABELS[col]}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function TestsTableView({
   tests,
@@ -193,7 +234,6 @@ export function TestsTableView({
   sort,
   onSortChange,
   visibleColumns,
-  onVisibleColumnsChange,
 }: TestsTableViewProps) {
   const sortedTests = useMemo(() => {
     const copy = tests.slice();
@@ -209,22 +249,7 @@ export function TestsTableView({
     }
   };
 
-  const toggleColumn = (col: TestsTableColumnKey) => {
-    const next = new Set(visibleColumns);
-    if (next.has(col)) next.delete(col);
-    else next.add(col);
-    onVisibleColumnsChange(next);
-  };
-
-  const SortHeader = ({
-    label,
-    sortKey,
-    align = 'left',
-  }: {
-    label: string;
-    sortKey: TestsTableSortKey;
-    align?: 'left' | 'right';
-  }) => {
+  const renderSortHeader = (label: string, sortKey: TestsTableSortKey) => {
     const active = sort.key === sortKey;
     return (
       <button
@@ -232,7 +257,6 @@ export function TestsTableView({
         onClick={() => handleHeaderClick(sortKey)}
         className={cn(
           'inline-flex items-center gap-1 hover:text-foreground transition-colors',
-          align === 'right' && 'flex-row-reverse',
           active ? 'text-foreground' : 'text-muted-foreground',
         )}
       >
@@ -251,60 +275,32 @@ export function TestsTableView({
   };
 
   return (
-    <div className="flex flex-col">
-      {/* Toolbar — Columns picker */}
-      <div className="flex items-center justify-end px-4 py-2 border-b border-border/50 bg-muted/20">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-7 text-xs">
-              <Settings2 className="h-3.5 w-3.5 mr-1.5" />
-              Columns
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {ALL_TOGGLEABLE_COLUMNS.map((col) => (
-              <DropdownMenuCheckboxItem
-                key={col}
-                checked={visibleColumns.has(col)}
-                onCheckedChange={() => toggleColumn(col)}
-                onSelect={(e) => e.preventDefault()}
-              >
-                {COLUMN_LABELS[col]}
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-x-auto">
+    <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/30 border-b border-border/50 text-xs">
             <tr>
               <th className="px-4 py-2 w-8" />
               <th className="px-3 py-2 text-left font-medium">
-                <SortHeader label="Name" sortKey="name" />
+                {renderSortHeader('Name', 'name')}
               </th>
               {visibleColumns.has('status') && (
                 <th className="px-3 py-2 text-left font-medium w-28">
-                  <SortHeader label="Status" sortKey="status" />
+                  {renderSortHeader('Status', 'status')}
                 </th>
               )}
               {visibleColumns.has('lastRun') && (
                 <th className="px-3 py-2 text-left font-medium w-32">
-                  <SortHeader label="Last run" sortKey="lastRun" />
+                  {renderSortHeader('Last run', 'lastRun')}
                 </th>
               )}
               {visibleColumns.has('lastModified') && (
                 <th className="px-3 py-2 text-left font-medium w-32">
-                  <SortHeader label="Last modified" sortKey="lastModified" />
+                  {renderSortHeader('Last modified', 'lastModified')}
                 </th>
               )}
               {visibleColumns.has('area') && (
                 <th className="px-3 py-2 text-left font-medium w-40">
-                  <SortHeader label="Area" sortKey="area" />
+                  {renderSortHeader('Area', 'area')}
                 </th>
               )}
               {visibleColumns.has('description') && (
@@ -314,7 +310,7 @@ export function TestsTableView({
               )}
               {visibleColumns.has('targetUrl') && (
                 <th className="px-3 py-2 text-left font-medium w-48">
-                  <SortHeader label="Target URL" sortKey="targetUrl" />
+                  {renderSortHeader('Target URL', 'targetUrl')}
                 </th>
               )}
               <th className="px-4 py-2 w-8" />
@@ -405,7 +401,6 @@ export function TestsTableView({
             })}
           </tbody>
         </table>
-      </div>
     </div>
   );
 }

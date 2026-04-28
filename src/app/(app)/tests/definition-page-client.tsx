@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/tests/status-badge';
 import {
   TestsTableView,
+  TestsTableColumnsButton,
   defaultVisibleColumns,
   parseStoredColumns,
   serializeColumns,
@@ -402,6 +403,15 @@ export function DefinitionPageClient({
     () => (columnsTouched ? visibleColumns : defaultVisibleColumns(isScoped)),
     [columnsTouched, visibleColumns, isScoped],
   );
+
+  const handleVisibleColumnsChange = useCallback((cols: Set<TestsTableColumnKey>) => {
+    setVisibleColumns(cols);
+    setColumnsTouched(true);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('lastest:tests-table:columns', serializeColumns(cols));
+      window.localStorage.setItem('lastest:tests-table:columns-touched', '1');
+    }
+  }, []);
 
   const selectedFailedTests = useMemo(() => {
     return Array.from(selectedTestIds).filter(id => {
@@ -1235,6 +1245,12 @@ export function DefinitionPageClient({
                                   <TooltipContent side="bottom">Table view</TooltipContent>
                                 </Tooltip>
                               </div>
+                              {view === 'table' && (
+                                <TestsTableColumnsButton
+                                  visibleColumns={effectiveVisibleColumns}
+                                  onVisibleColumnsChange={handleVisibleColumnsChange}
+                                />
+                              )}
                               <div className="relative w-56">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                 <Input
@@ -1411,14 +1427,6 @@ export function DefinitionPageClient({
                           }
                         }}
                         visibleColumns={effectiveVisibleColumns}
-                        onVisibleColumnsChange={(cols) => {
-                          setVisibleColumns(cols);
-                          setColumnsTouched(true);
-                          if (typeof window !== 'undefined') {
-                            window.localStorage.setItem('lastest:tests-table:columns', serializeColumns(cols));
-                            window.localStorage.setItem('lastest:tests-table:columns-touched', '1');
-                          }
-                        }}
                       />
                     ) : (
                       <div className="divide-y divide-border/50">

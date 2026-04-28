@@ -7,14 +7,8 @@ Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
 **Gitlab**
-  6533327a379a9f04.js:63 Sending form data to 'https://app.lastest.cloud/api/connect/gitlab' violates the following Content Security Policy directive: "form-action 'self' https://github.com". The request has been blocked.
-    screen doesnt fit popup
-  w personal acces token projects are not imported
 Teardown
 **Accept Downloads**
-    await downloads.waitForAny();
-  expect(downloads.list().length).toBeGreaterThan(0); is not converted to step
-  also make this as a criteria to enable hard fail
 triage
 a11y
 DOM delta
@@ -56,6 +50,8 @@ https://app.lastest.cloud/builds/47d79887-d7af-462b
 Move gitlab out of EA functions
 ## features
 Default ai, openrouter test
+gh issue- notification on discord
+sort readme and self-run instructions
 
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well

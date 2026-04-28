@@ -203,6 +203,50 @@ expect(x).toBe(1);`;
       expect(a1[0].id).toBe(a2[0].id);
     });
 
+    it('keeps IDs stable when unrelated lines are added above', () => {
+      // Adding comments / blank lines / unrelated code above an assertion
+      // should NOT change its id — that's the whole point of swapping
+      // orderIndex out of the hash.
+      const before = `await expect(page).toHaveURL('/home');
+expect(count).toBe(3);`;
+      const after = `// new comment line
+const x = 1;
+await expect(page).toHaveURL('/home');
+expect(count).toBe(3);`;
+      const a = parseAssertions(before);
+      const b = parseAssertions(after);
+      expect(a[0].id).toBe(b[0].id);
+      expect(a[1].id).toBe(b[1].id);
+    });
+
+    it('keeps IDs stable when dissimilar assertions are reordered', () => {
+      const original = `await expect(page).toHaveURL('/home');
+await expect(button).toBeVisible();`;
+      const reordered = `await expect(button).toBeVisible();
+await expect(page).toHaveURL('/home');`;
+      const a = parseAssertions(original);
+      const b = parseAssertions(reordered);
+      // Same (type, selector, expected) → same id regardless of source order
+      const urlA = a.find(x => x.assertionType === 'toHaveURL')!;
+      const urlB = b.find(x => x.assertionType === 'toHaveURL')!;
+      expect(urlA.id).toBe(urlB.id);
+      const visA = a.find(x => x.assertionType === 'toBeVisible')!;
+      const visB = b.find(x => x.assertionType === 'toBeVisible')!;
+      expect(visA.id).toBe(visB.id);
+    });
+
+    it('gives duplicate assertions distinct IDs via occurrence index', () => {
+      const code = `await expect(page).toHaveURL('/foo');
+await expect(page).toHaveURL('/foo');`;
+      const a = parseAssertions(code);
+      expect(a).toHaveLength(2);
+      expect(a[0].id).not.toBe(a[1].id);
+      // Both should re-parse to the same pair of ids in the same order
+      const b = parseAssertions(code);
+      expect(b[0].id).toBe(a[0].id);
+      expect(b[1].id).toBe(a[1].id);
+    });
+
     it('returns empty array for code with no assertions', () => {
       const code = `
 const x = 1;

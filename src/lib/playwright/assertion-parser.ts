@@ -7,11 +7,25 @@ import type { TestAssertion } from '@/lib/db/schema';
 import { createHash } from 'crypto';
 
 /**
- * Generate a stable ID for an assertion based on its properties.
+ * Generate a stable ID for an assertion based on its content + occurrence.
+ *
+ * Hashed on (type, selector, expected, occurrence) — NOT positional source
+ * order. `occurrence` is the Nth instance of this exact triple in the file
+ * (0 for the first, 1 for an exact duplicate, etc.). This keeps IDs stable
+ * across edits that don't change the assertion's identity (adding a comment
+ * above, reordering dissimilar assertions) and lets the runner reproduce the
+ * same id at runtime by counting matchers per-(type, target, expected).
  */
-function assertionId(orderIndex: number, type: string, selector?: string, expected?: string): string {
-  const input = `${orderIndex}:${type}:${selector ?? ''}:${expected ?? ''}`;
+function assertionId(occurrence: number, type: string, selector?: string, expected?: string): string {
+  const input = `${type}:${selector ?? ''}:${expected ?? ''}:${occurrence}`;
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
+}
+
+function nextOccurrence(map: Map<string, number>, type: string, selector?: string, expected?: string): number {
+  const key = `${type}:${selector ?? ''}:${expected ?? ''}`;
+  const n = map.get(key) ?? 0;
+  map.set(key, n + 1);
+  return n;
 }
 
 /**
@@ -21,6 +35,9 @@ export function parseAssertions(code: string): TestAssertion[] {
   const assertions: TestAssertion[] = [];
   const lines = code.split('\n');
   let orderIndex = 0;
+  // Per-(type, selector, expected) occurrence counter. Drives `assertionId`
+  // so that an exact-duplicate assertion later in the file gets a distinct id.
+  const occurrenceMap = new Map<string, number>();
 
   // All assertions are soft by default. Whether a failure fails the test is
   // controlled by per-assertion criteria rules on the Criteria tab — runtime
@@ -36,7 +53,7 @@ export function parseAssertions(code: string): TestAssertion[] {
     const elementCommentMatch = trimmed.match(/^\/\/ (?:Element|Hard) assertion: (\w+)/);
     if (elementCommentMatch) {
       const assertionType = elementCommentMatch[1];
-      const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType);
+      const assertion = parseElementAssertionBlock(lines, i, orderIndex, assertionType, occurrenceMap);
       if (assertion) {
         assertions.push(assertion);
         orderIndex++;
@@ -54,7 +71,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, 'page', expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, 'page', expectedValue), assertionType, 'page', expectedValue),
         orderIndex,
         category: 'page',
         assertionType,
@@ -78,7 +95,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, inlineElMatch[1], expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, inlineElMatch[1], expectedValue), assertionType, inlineElMatch[1], expectedValue),
         orderIndex,
         category: 'element',
         assertionType,
@@ -106,7 +123,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       const selectorLabel = extractLocatorLabel(target);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, target, expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, target, expectedValue), assertionType, target, expectedValue),
         orderIndex,
         category: 'element',
         assertionType,
@@ -131,7 +148,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       const expectedValue = extractStringArg(argStr);
 
       assertions.push({
-        id: assertionId(orderIndex, assertionType, genericMatch[1], expectedValue),
+        id: assertionId(nextOccurrence(occurrenceMap, assertionType, genericMatch[1], expectedValue), assertionType, genericMatch[1], expectedValue),
         orderIndex,
         category: 'generic',
         assertionType,
@@ -158,7 +175,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       }
 
       assertions.push({
-        id: assertionId(orderIndex, 'fileDownloaded', 'download', filename),
+        id: assertionId(nextOccurrence(occurrenceMap, 'fileDownloaded', 'download', filename), 'fileDownloaded', 'download', filename),
         orderIndex,
         category: 'download',
         assertionType: 'fileDownloaded',
@@ -178,7 +195,7 @@ export function parseAssertions(code: string): TestAssertion[] {
       const stateMatch = trimmed.match(/waitForLoadState\(['"](\w+)['"]\)/);
       const state = stateMatch?.[1] ?? 'load';
       assertions.push({
-        id: assertionId(orderIndex, 'waitForLoadState', 'page', state),
+        id: assertionId(nextOccurrence(occurrenceMap, 'waitForLoadState', 'page', state), 'waitForLoadState', 'page', state),
         orderIndex,
         category: 'page',
         assertionType: 'waitForLoadState',
@@ -202,6 +219,7 @@ function parseElementAssertionBlock(
   commentLine: number,
   orderIndex: number,
   assertionType: string,
+  occurrenceMap: Map<string, number>,
 ): TestAssertion | null {
   // Look for the locateWithFallback call and expect call in the following lines
   let targetSelector: string | undefined;
@@ -255,7 +273,7 @@ function parseElementAssertionBlock(
   }
 
   return {
-    id: assertionId(orderIndex, assertionType, targetSelector, expectedValue),
+    id: assertionId(nextOccurrence(occurrenceMap, assertionType, targetSelector, expectedValue), assertionType, targetSelector, expectedValue),
     orderIndex,
     category: 'element',
     assertionType,

@@ -22,7 +22,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
-import { instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
+import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -65,6 +65,17 @@ export interface EmbeddedTestResult {
   consoleErrors?: string[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
+  /** One entry per `expect(...)` call wrapped by `instrumentAssertionTracking`.
+   *  `assertionId` matches a parsed `TestAssertion.id` from the host. The
+   *  Criteria evaluator (`src/lib/execution/evaluation.ts`) keys on these to
+   *  promote a soft assertion failure to a hard test failure. */
+  assertionResults?: Array<{
+    assertionId: string;
+    status: 'passed' | 'failed' | 'skipped';
+    actualValue?: string;
+    errorMessage?: string;
+    durationMs?: number;
+  }>;
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
@@ -122,6 +133,15 @@ export interface RunTestPayload {
     name: string;
     targetSelector: string;
     attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+  }>;
+  /** Parsed assertions from the host's `parseAssertions(code)`. The runner
+   *  uses `(codeLineStart, codeLineEnd)` as a registry to map each runtime
+   *  `expect(...)` call to the right parsed `id`, so the host stays the
+   *  single source of truth for id computation. */
+  assertions?: Array<{
+    id: string;
+    codeLineStart?: number;
+    codeLineEnd?: number;
   }>;
 }
 
@@ -220,6 +240,7 @@ export class EmbeddedTestExecutor {
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
+    const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
     const consoleErrors: string[] = [];
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
@@ -575,6 +596,21 @@ export class EmbeddedTestExecutor {
       // Patch selectAll (mirrors runner.ts)
       body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
 
+      // Instrument assertions BEFORE step instrumentation and soft-wrapping.
+      // Each `expect(...)` / `await page.waitForLoadState(...)` line gets
+      // wrapped with `await __assertion(id, async () => { <stmt> })` so the
+      // runner can record structured AssertionResult[] keyed to the host's
+      // parsed assertion ids. Lines wrapped here are skipped by the
+      // soft-error regex below (they no longer match the bare `expect(`
+      // pattern), so each assertion fails through `__assertion` only.
+      if (command.assertions && command.assertions.length > 0) {
+        const ar = instrumentAssertionTracking(body, command.assertions);
+        body = ar.instrumentedBody;
+        if (ar.wrappedCount !== command.assertions.length) {
+          logFn('warn', `Assertion instrumentation wrapped ${ar.wrappedCount}/${command.assertions.length} assertions — runtime/parser drift`);
+        }
+      }
+
       // Instrument step tracking before soft error wrapping
       const instrumentResult = instrumentStepTracking(body);
       body = instrumentResult.instrumentedBody;
@@ -582,16 +618,48 @@ export class EmbeddedTestExecutor {
       reachedStep = -1;
       const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
 
+      // Per-assertion bookkeeping invoked by lines wrapped by
+      // `instrumentAssertionTracking`. Push one row per call (so a loop
+      // around an `expect()` records each iteration); the criteria evaluator
+      // uses `.find(... status === 'failed')` so any single failure trips
+      // the rule — matches the soft-fail semantics we keep at runtime.
+      const __assertion = async (id: string, fn: () => Promise<void>) => {
+        const start = Date.now();
+        try {
+          await fn();
+          assertionResults.push({ assertionId: id, status: 'passed', durationMs: Date.now() - start });
+        } catch (e: unknown) {
+          // A real `__hardAssertion` (set on the error) still escapes — host
+          // tests rely on that to fail-fast on TypeError / ReferenceError.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (e && (e as any).__hardAssertion) throw e;
+          const msg = e instanceof Error ? e.message : String(e);
+          assertionResults.push({
+            assertionId: id, status: 'failed', errorMessage: msg, durationMs: Date.now() - start,
+          });
+          // Mirror into softErrors so the legacy steps tab still surfaces the
+          // human-readable message — the structured row is what the criteria
+          // evaluator actually keys on.
+          softErrors.push(msg);
+          logFn('warn', `[ASSERTION FAIL] ${msg}`);
+        }
+      };
+
       // Soft error wrapping — skip screenshot lines AND navigation lines
       // (mirrors runner.ts). `page.goto` failures must fail the test hard:
       // if a worker can't reach the target URL, subsequent steps would run
       // on about:blank and produce blank-white screenshots recorded as passes.
+      // `__assertion(...)` lines are also skipped — they manage their own
+      // pass/fail bookkeeping and re-throwing them as soft warnings would
+      // double-report into softErrors.
       body = body.replace(/^(\s*)(await\s+.+;)\s*$/gm, (_match, indent, stmt) => {
         if (stmt.includes('.screenshot(')) return `${indent}${stmt}`;
         if (stmt.includes('.goto(')) return `${indent}${stmt}`;
+        if (stmt.includes('__assertion(')) return `${indent}${stmt}`;
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
       // Also soft-wrap synchronous expect() calls so assertion failures don't kill the test
+      // (only hits expects that the assertion instrumenter didn't claim — e.g. multi-line statements)
       body = body.replace(/^(\s*)(expect\(.+;)\s*$/gm, (_match, indent, stmt) => {
         return `${indent}try { ${stmt} } catch(__softErr) { if (__softErr && __softErr.__hardAssertion) throw __softErr; stepLogger.warn(typeof __softErr === 'object' && __softErr !== null && 'message' in __softErr ? __softErr.message : String(__softErr)); }`;
       });
@@ -830,10 +898,10 @@ export class EmbeddedTestExecutor {
           (async () => {
             const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
             const testFn = new AsyncFunction(
-              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached',
+              'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached', '__assertion',
               body
             );
-            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached);
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached, __assertion);
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -955,6 +1023,7 @@ export class EmbeddedTestExecutor {
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
+        assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
@@ -973,6 +1042,7 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
@@ -1000,6 +1070,7 @@ export class EmbeddedTestExecutor {
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
+          assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
