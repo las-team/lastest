@@ -1,6 +1,31 @@
-import { describe, it, expect } from 'vitest';
-import { evaluateRules, evaluateRulesForStep, type StepObservations } from './evaluation';
-import type { StepCriterion, VisualDiff } from '@/lib/db/schema';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock the queries barrel before importing the evaluator — `evaluateStepCriteria`
+// reads test results, persisted criteria, the test (for variable synthesis), and
+// visual diffs from the DB, then writes an evaluation outcome back. Tests below
+// stub each query with the precise shape evaluation.ts expects.
+vi.mock('@/lib/db/queries', () => ({
+  getTestResultById: vi.fn(),
+  getStepCriteria: vi.fn(),
+  getTest: vi.fn(),
+  getVisualDiffsByTestResult: vi.fn(),
+  updateTestResult: vi.fn(),
+}));
+
+import * as queries from '@/lib/db/queries';
+import {
+  evaluateRules,
+  evaluateRulesForStep,
+  evaluateStepCriteria,
+  type StepObservations,
+} from './evaluation';
+import type {
+  StepCriterion,
+  TestResult,
+  Test,
+  TestVariable,
+  VisualDiff,
+} from '@/lib/db/schema';
 
 function makeDiff(overrides: Partial<VisualDiff> = {}): VisualDiff {
   return {
@@ -259,5 +284,217 @@ describe('evaluateRulesForStep — all_steps_executed', () => {
         totalSteps: 0,
       }),
     ).toEqual([]);
+  });
+});
+
+// DB-backed entry point. Single-test runs (`runTestsAsync` in
+// src/server/actions/runs.ts) and build runs (`executeBuildJob` in
+// src/server/actions/builds.ts) both invoke this for every persisted result.
+// Until 2026-04-28 only the build path called it, so single-test runs silently
+// ignored every persisted criterion + every assertEnabled extract var. These
+// tests pin the contract for both call sites.
+describe('evaluateStepCriteria — DB-backed flow', () => {
+  function makeResult(overrides: Partial<TestResult> = {}): TestResult {
+    return {
+      id: 'tr1',
+      testRunId: 'run1',
+      testId: 'test1',
+      status: 'passed',
+      errorMessage: null,
+      consoleErrors: null,
+      assertionResults: null,
+      extractedVariables: null,
+      lastReachedStep: null,
+      totalSteps: null,
+      // Drizzle inferred type has many columns we don't care about — cast
+      // through unknown so the partial mock is acceptable.
+      ...overrides,
+    } as unknown as TestResult;
+  }
+
+  function makeTest(variables: TestVariable[] | null): Test {
+    return {
+      id: 'test1',
+      variables,
+    } as unknown as Test;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: no persisted criteria, no variables, no diffs. Each test
+    // overrides only what it needs.
+    vi.mocked(queries.getStepCriteria).mockResolvedValue([]);
+    vi.mocked(queries.getTest).mockResolvedValue(makeTest(null));
+    vi.mocked(queries.getVisualDiffsByTestResult).mockResolvedValue([]);
+    vi.mocked(queries.updateTestResult).mockResolvedValue(undefined as never);
+  });
+
+  it('flips passed → failed when an assertEnabled extract var mismatches', async () => {
+    // Mirrors the user-reported flow: extract var bound to a page field, with
+    // assertEnabled + expectedValue, but the page returned a different value.
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({
+        status: 'passed',
+        extractedVariables: { data: 'on' }, // page held "on"
+      }),
+    );
+    vi.mocked(queries.getTest).mockResolvedValue(
+      makeTest([
+        {
+          id: 'v1',
+          name: 'data',
+          mode: 'extract',
+          targetSelector: '[data-testid="toolbar-diamond"]',
+          attribute: 'value',
+          assertEnabled: true,
+          assertSeverity: 'fail',
+          expectedValue: 'off',
+        },
+      ]),
+    );
+
+    const result = await evaluateStepCriteria('tr1');
+
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules).toHaveLength(1);
+    expect(result.triggeredRules[0].rule.kind).toBe('variable_equals');
+
+    expect(queries.updateTestResult).toHaveBeenCalledWith(
+      'tr1',
+      expect.objectContaining({
+        status: 'failed',
+        errorMessage: expect.stringContaining('"data"'),
+        evaluationOutcome: expect.objectContaining({
+          overriddenStatus: 'failed',
+        }),
+      }),
+    );
+  });
+
+  it('does NOT flip status when an assertEnabled extract var matches expected', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({
+        status: 'passed',
+        extractedVariables: { data: 'off' },
+      }),
+    );
+    vi.mocked(queries.getTest).mockResolvedValue(
+      makeTest([
+        {
+          id: 'v1',
+          name: 'data',
+          mode: 'extract',
+          assertEnabled: true,
+          assertSeverity: 'fail',
+          expectedValue: 'off',
+        },
+      ]),
+    );
+
+    const result = await evaluateStepCriteria('tr1');
+
+    expect(result.overriddenStatus).toBeUndefined();
+    expect(result.triggeredRules).toEqual([]);
+    // Outcome is still persisted (with no fail), but status patch is absent.
+    const patch = vi.mocked(queries.updateTestResult).mock.calls[0]?.[1];
+    expect(patch?.status).toBeUndefined();
+  });
+
+  it('flips passed → failed via persisted screenshot_changed criterion', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({ status: 'passed' }),
+    );
+    vi.mocked(queries.getStepCriteria).mockResolvedValue([
+      {
+        stepLabel: 'screenshot-1',
+        rules: [{ kind: 'screenshot_changed', severity: 'fail' }],
+      },
+    ]);
+    vi.mocked(queries.getVisualDiffsByTestResult).mockResolvedValue([
+      makeDiff({ stepLabel: 'screenshot-1', classification: 'changed', status: 'pending' }),
+    ]);
+
+    const result = await evaluateStepCriteria('tr1');
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules[0].rule.kind).toBe('screenshot_changed');
+    expect(queries.updateTestResult).toHaveBeenCalledWith(
+      'tr1',
+      expect.objectContaining({ status: 'failed' }),
+    );
+  });
+
+  it('flips passed → failed via persisted console_error criterion', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({ status: 'passed', consoleErrors: ['boom'] }),
+    );
+    vi.mocked(queries.getStepCriteria).mockResolvedValue([
+      {
+        stepLabel: '__console__',
+        rules: [{ kind: 'console_error', severity: 'fail' }],
+      },
+    ]);
+
+    const result = await evaluateStepCriteria('tr1');
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules[0].rule.kind).toBe('console_error');
+  });
+
+  it('flips passed → failed via persisted assertion_failed criterion', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({
+        status: 'passed',
+        assertionResults: [{ assertionId: 'a1', status: 'failed', errorMessage: 'mismatch' }],
+      }),
+    );
+    vi.mocked(queries.getStepCriteria).mockResolvedValue([
+      {
+        stepLabel: '__assertions__',
+        rules: [{ kind: 'assertion_failed', severity: 'fail' }],
+      },
+    ]);
+
+    const result = await evaluateStepCriteria('tr1');
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules[0].rule.kind).toBe('assertion_failed');
+  });
+
+  it('synthesizes a default-on all_steps_executed rule that trips on partial runs', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({
+        status: 'passed',
+        lastReachedStep: 5,
+        totalSteps: 9,
+      }),
+    );
+    // No persisted criteria — the default-ON synthesis path must still fire.
+    const result = await evaluateStepCriteria('tr1');
+    expect(result.overriddenStatus).toBe('failed');
+    expect(result.triggeredRules.map(t => t.rule.kind)).toContain('all_steps_executed');
+  });
+
+  it('does not flip status when only a warn-severity rule fires', async () => {
+    vi.mocked(queries.getTestResultById).mockResolvedValue(
+      makeResult({
+        status: 'passed',
+        extractedVariables: { data: 'unexpected' },
+      }),
+    );
+    vi.mocked(queries.getTest).mockResolvedValue(
+      makeTest([
+        {
+          id: 'v1',
+          name: 'data',
+          mode: 'extract',
+          assertEnabled: true,
+          assertSeverity: 'warn',
+          expectedValue: 'off',
+        },
+      ]),
+    );
+
+    const result = await evaluateStepCriteria('tr1');
+    expect(result.overriddenStatus).toBeUndefined();
+    expect(result.triggeredRules).toHaveLength(1);
+    expect(result.triggeredRules[0].rule.severity).toBe('warn');
   });
 });

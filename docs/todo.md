@@ -30,7 +30,8 @@ Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well
 Merge code and steps?
 Design
-playback event stream
+**Playback event stream**
+Self-test
 mcp-oauth flow
 ## ideas
 Maybe workspace list w last 3 workspaces?
