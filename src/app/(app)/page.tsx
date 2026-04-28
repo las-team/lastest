@@ -104,8 +104,8 @@ export default async function DashboardPage({
   const flakyTrend = trends.map(t => t.flakyRate);
 
   // Health score color
-  const healthColor = healthScore >= 80 ? 'text-green-600' : healthScore >= 50 ? 'text-yellow-600' : 'text-red-600';
-  const healthBg = healthScore >= 80 ? 'bg-green-500/10' : healthScore >= 50 ? 'bg-yellow-500/10' : 'bg-red-500/10';
+  const healthColor = healthScore >= 80 ? 'text-success' : healthScore >= 50 ? 'text-warning' : 'text-destructive';
+  const healthBg = healthScore >= 80 ? 'bg-success/10' : healthScore >= 50 ? 'bg-warning/10' : 'bg-destructive/10';
 
   return (
     <div className="flex flex-col h-full">
@@ -186,9 +186,9 @@ export default async function DashboardPage({
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center justify-between">
                 Passing
-                <Sparkline data={passRateTrend} color="var(--color-green-500, #22c55e)" />
+                <Sparkline data={passRateTrend} color="var(--c-teal)" />
               </CardDescription>
-              <CardTitle className="text-3xl flex items-center gap-2 text-green-600">
+              <CardTitle className="text-3xl flex items-center gap-2 text-success">
                 <CheckCircle className="h-5 w-5" />
                 {passingCount}
               </CardTitle>
@@ -211,9 +211,9 @@ export default async function DashboardPage({
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center justify-between">
                 Flaky
-                <Sparkline data={flakyTrend} color="var(--color-yellow-500, #eab308)" />
+                <Sparkline data={flakyTrend} color="var(--c-amber)" />
               </CardDescription>
-              <CardTitle className="text-3xl flex items-center gap-2 text-yellow-600">
+              <CardTitle className="text-3xl flex items-center gap-2 text-warning">
                 <Zap className="h-5 w-5" />
                 {flakyCount}
               </CardTitle>
@@ -296,13 +296,13 @@ export default async function DashboardPage({
                     >
                       <div className="flex items-center gap-3">
                         {isRunning ? (
-                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                          <Loader2 className="h-4 w-4 text-info animate-spin" />
                         ) : build.overallStatus === 'safe_to_merge' ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <CheckCircle className="h-4 w-4 text-success" />
                         ) : build.overallStatus === 'blocked' ? (
                           <XCircle className="h-4 w-4 text-destructive" />
                         ) : (
-                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                          <AlertTriangle className="h-4 w-4 text-warning" />
                         )}
                         <div>
                           <span className="font-medium">Build #{build.id.slice(0, 8)}</span>
@@ -310,7 +310,7 @@ export default async function DashboardPage({
                             {buildTotal} tests
                           </span>
                           {buildFlaky > 0 && (
-                            <span className="text-xs text-yellow-600 ml-2">
+                            <span className="text-xs text-warning ml-2">
                               {buildFlaky} flaky
                             </span>
                           )}
@@ -321,7 +321,7 @@ export default async function DashboardPage({
                         <div className="flex items-center gap-2">
                           <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className={`h-full transition-all ${buildPassRate === 100 ? 'bg-green-500' : buildPassRate > 80 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              className={`h-full transition-all ${buildPassRate === 100 ? 'bg-success' : buildPassRate > 80 ? 'bg-warning' : 'bg-destructive'}`}
                               style={{ width: `${buildPassRate}%` }}
                             />
                           </div>

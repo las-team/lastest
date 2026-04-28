@@ -16,15 +16,15 @@ export function A11yViolationsPanel({ violations }: A11yViolationsPanelProps) {
   const getImpactColor = (impact: A11yViolation['impact']) => {
     switch (impact) {
       case 'critical':
-        return 'bg-red-500 text-white';
+        return 'bg-destructive text-white';
       case 'serious':
-        return 'bg-orange-500 text-white';
+        return 'bg-destructive/80 text-white';
       case 'moderate':
-        return 'bg-yellow-500 text-black';
+        return 'bg-warning text-foreground';
       case 'minor':
-        return 'bg-blue-500 text-white';
+        return 'bg-info text-white';
       default:
-        return 'bg-gray-500 text-white';
+        return 'bg-muted-foreground text-white';
     }
   };
 
@@ -39,7 +39,7 @@ export function A11yViolationsPanel({ violations }: A11yViolationsPanelProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-500" />
+        <AlertTriangle className="w-4 h-4 text-warning" />
         <span className="font-medium">Accessibility Issues</span>
         <Badge variant="secondary" className="ml-auto">
           {violations.length} {violations.length === 1 ? 'issue' : 'issues'}

@@ -5,95 +5,147 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.98 0 0);
-  --foreground: oklch(0.28 0.02 230);
-  --card: oklch(1.00 0 0);
-  --card-foreground: oklch(0.28 0.02 230);
-  --popover: oklch(1.00 0 0);
-  --popover-foreground: oklch(0.28 0.02 230);
-  --primary: oklch(0.55 0.17 195);
-  --primary-foreground: oklch(1.00 0 0);
-  --secondary: oklch(0.93 0.01 230);
-  --secondary-foreground: oklch(0.37 0.02 230);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.55 0.01 230);
-  --accent: oklch(0.93 0.03 195);
-  --accent-foreground: oklch(0.37 0.02 230);
-  --destructive: oklch(0.64 0.21 25.39);
-  --border: oklch(0.87 0.01 230);
-  --input: oklch(0.87 0.01 230);
-  --ring: oklch(0.55 0.17 195);
-  --chart-1: oklch(0.55 0.17 195);
-  --chart-2: oklch(0.48 0.18 195);
-  --chart-3: oklch(0.42 0.16 195);
-  --chart-4: oklch(0.36 0.14 195);
-  --chart-5: oklch(0.30 0.11 195);
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: oklch(0.28 0.02 230);
-  --sidebar-primary: oklch(0.55 0.17 195);
-  --sidebar-primary-foreground: oklch(1.00 0 0);
-  --sidebar-accent: oklch(0.93 0.03 195);
-  --sidebar-accent-foreground: oklch(0.37 0.02 230);
-  --sidebar-border: oklch(0.87 0.01 230);
-  --sidebar-ring: oklch(0.55 0.17 195);
+  /* Shadcn semantic tokens — re-anchored to the renewed Lastest palette
+     (docs/design/colors_and_type.css). Red `#E03E36` is reserved for the
+     brand mark + regression states; teal `#36A88E` drives primary action;
+     soft `#F6F6F4` is the standard app surface. */
+  --background: #F6F6F4;
+  --foreground: #1F2A33;
+  --card: #FFFFFF;
+  --card-foreground: #1F2A33;
+  --popover: #FFFFFF;
+  --popover-foreground: #1F2A33;
+  --primary: #36A88E;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EFEFEC;
+  --secondary-foreground: #1F2A33;
+  --muted: #F1F1EE;
+  --muted-foreground: rgba(31, 42, 51, 0.55);
+  --accent: rgba(54, 168, 142, 0.12);
+  --accent-foreground: #1F2A33;
+  --destructive: #E03E36;
+  --border: rgba(31, 42, 51, 0.08);
+  --input: rgba(31, 42, 51, 0.08);
+  --ring: rgba(224, 152, 54, 0.6);
+
+  /* Chart palette — anchored on the brand 5-stop wheel */
+  --chart-1: #36A88E;
+  --chart-2: #3674A8;
+  --chart-3: #E09836;
+  --chart-4: #E03E36;
+  --chart-5: #1F2A33;
+
+  --sidebar: #F1F1EE;
+  --sidebar-foreground: #1F2A33;
+  --sidebar-primary: #36A88E;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: rgba(31, 42, 51, 0.05);
+  --sidebar-accent-foreground: #1F2A33;
+  --sidebar-border: rgba(31, 42, 51, 0.08);
+  --sidebar-ring: rgba(224, 152, 54, 0.6);
 
   --font-sans: Inter, sans-serif;
   --font-serif: Merriweather, serif;
   --font-mono: JetBrains Mono, monospace;
 
-  --radius: 0.5rem;
+  /* Industrial radius — 4px default, tighter than shadcn's 8px stock */
+  --radius: 0.25rem;
 
-  --shadow-2xs: 0px 4px 8px -1px oklch(0.00 0 0 / 0.05);
-  --shadow-xs: 0px 4px 8px -1px oklch(0.00 0 0 / 0.05);
-  --shadow-sm: 0px 4px 8px -1px oklch(0.00 0 0 / 0.10), 0px 1px 2px -2px oklch(0.00 0 0 / 0.10);
-  --shadow: 0px 4px 8px -1px oklch(0.00 0 0 / 0.10), 0px 1px 2px -2px oklch(0.00 0 0 / 0.10);
-  --shadow-md: 0px 4px 8px -1px oklch(0.00 0 0 / 0.10), 0px 2px 4px -2px oklch(0.00 0 0 / 0.10);
-  --shadow-lg: 0px 4px 8px -1px oklch(0.00 0 0 / 0.10), 0px 4px 6px -2px oklch(0.00 0 0 / 0.10);
-  --shadow-xl: 0px 4px 8px -1px oklch(0.00 0 0 / 0.10), 0px 8px 10px -2px oklch(0.00 0 0 / 0.10);
-  --shadow-2xl: 0px 4px 8px -1px oklch(0.00 0 0 / 0.25);
+  /* Ink-tinted shadows (rgba on #1F2A33) — replaces pure-black oklch */
+  --shadow-2xs: 0px 1px 1px rgba(31, 42, 51, 0.04);
+  --shadow-xs: 0px 1px 2px rgba(31, 42, 51, 0.05);
+  --shadow-sm: 0px 2px 4px rgba(31, 42, 51, 0.06);
+  --shadow: 0px 2px 4px rgba(31, 42, 51, 0.06);
+  --shadow-md: 0px 4px 12px rgba(31, 42, 51, 0.08);
+  --shadow-lg: 0px 12px 28px rgba(31, 42, 51, 0.12);
+  --shadow-xl: 0px 18px 40px rgba(31, 42, 51, 0.14);
+  --shadow-2xl: 0px 24px 56px rgba(31, 42, 51, 0.18);
+
+  /* ---------- DESIGN-SYSTEM TOKENS (docs/design/colors_and_type.css) ----------
+     Available for direct CSS usage in bespoke components. Shadcn primitives
+     consume the semantic tokens above; new code can reach for these directly. */
+  --c-red: #E03E36;
+  --c-amber: #E09836;
+  --c-teal: #36A88E;
+  --c-blue: #3674A8;
+  --c-ink: #1F2A33;
+
+  --c-white: #FFFFFF;
+  --c-soft: #F6F6F4;
+  --c-paper: #F6F4EF;
+  --c-soft-2: #EFEFEC;
+  --c-line: rgba(31, 42, 51, 0.08);
+  --c-line-strong: rgba(31, 42, 51, 0.16);
+
+  --action: var(--c-teal);
+  --action-hover: #2E957D;
+  --action-secondary: var(--c-blue);
+  --action-secondary-hover: #2E6594;
+  --brand: var(--c-red);
+  --success: var(--c-teal);
+  --warning: var(--c-amber);
+  --info: var(--c-blue);
+  --danger: var(--c-red);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
 }
 
 .dark {
-  --background: oklch(0.21 0.02 230);
-  --foreground: oklch(0.93 0.01 230);
-  --card: oklch(0.28 0.02 230);
-  --card-foreground: oklch(0.93 0.01 230);
-  --popover: oklch(0.28 0.02 230);
-  --popover-foreground: oklch(0.93 0.01 230);
-  --primary: oklch(0.68 0.14 195);
-  --primary-foreground: oklch(0.21 0.02 230);
-  --secondary: oklch(0.34 0.02 230);
-  --secondary-foreground: oklch(0.87 0.01 230);
-  --muted: oklch(0.28 0.02 230);
-  --muted-foreground: oklch(0.71 0.01 230);
-  --accent: oklch(0.37 0.03 195);
-  --accent-foreground: oklch(0.87 0.01 230);
-  --destructive: oklch(0.64 0.21 25.39);
-  --border: oklch(0.45 0.02 230);
-  --input: oklch(0.45 0.02 230);
-  --ring: oklch(0.68 0.14 195);
-  --chart-1: oklch(0.68 0.14 195);
-  --chart-2: oklch(0.55 0.17 195);
-  --chart-3: oklch(0.48 0.18 195);
-  --chart-4: oklch(0.42 0.16 195);
-  --chart-5: oklch(0.36 0.14 195);
-  --sidebar: oklch(0.28 0.02 230);
-  --sidebar-foreground: oklch(0.93 0.01 230);
-  --sidebar-primary: oklch(0.68 0.14 195);
-  --sidebar-primary-foreground: oklch(0.21 0.02 230);
-  --sidebar-accent: oklch(0.37 0.03 195);
-  --sidebar-accent-foreground: oklch(0.87 0.01 230);
-  --sidebar-border: oklch(0.45 0.02 230);
-  --sidebar-ring: oklch(0.68 0.14 195);
+  --background: #1F2A33;
+  --foreground: #FFFFFF;
+  --card: #2A3640;
+  --card-foreground: #FFFFFF;
+  --popover: #2A3640;
+  --popover-foreground: #FFFFFF;
+  --primary: #36A88E;
+  --primary-foreground: #FFFFFF;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: #FFFFFF;
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: rgba(255, 255, 255, 0.55);
+  --accent: rgba(54, 168, 142, 0.18);
+  --accent-foreground: #FFFFFF;
+  --destructive: #E03E36;
+  --border: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.10);
+  --ring: rgba(224, 152, 54, 0.5);
 
-  --shadow-2xs: 0 1px 3px 0px oklch(0.00 0 0 / 0.05);
-  --shadow-xs: 0 1px 3px 0px oklch(0.00 0 0 / 0.05);
-  --shadow-sm: 0 1px 3px 0px oklch(0.00 0 0 / 0.10), 0 1px 2px -1px oklch(0.00 0 0 / 0.10);
-  --shadow: 0 1px 3px 0px oklch(0.00 0 0 / 0.10), 0 1px 2px -1px oklch(0.00 0 0 / 0.10);
-  --shadow-md: 0 1px 3px 0px oklch(0.00 0 0 / 0.10), 0 2px 4px -1px oklch(0.00 0 0 / 0.10);
-  --shadow-lg: 0 1px 3px 0px oklch(0.00 0 0 / 0.10), 0 4px 6px -1px oklch(0.00 0 0 / 0.10);
-  --shadow-xl: 0 1px 3px 0px oklch(0.00 0 0 / 0.10), 0 8px 10px -1px oklch(0.00 0 0 / 0.10);
-  --shadow-2xl: 0 1px 3px 0px oklch(0.00 0 0 / 0.25);
+  --chart-1: #36A88E;
+  --chart-2: #3674A8;
+  --chart-3: #E09836;
+  --chart-4: #E03E36;
+  --chart-5: #FFFFFF;
+
+  --sidebar: #1F2A33;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #36A88E;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: rgba(255, 255, 255, 0.06);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255, 255, 255, 0.10);
+  --sidebar-ring: rgba(224, 152, 54, 0.5);
+
+  --shadow-2xs: 0px 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, 0.20);
+  --shadow-sm: 0px 2px 4px rgba(0, 0, 0, 0.22);
+  --shadow: 0px 2px 4px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0px 4px 12px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0px 12px 28px rgba(0, 0, 0, 0.36);
+  --shadow-xl: 0px 18px 40px rgba(0, 0, 0, 0.44);
+  --shadow-2xl: 0px 24px 56px rgba(0, 0, 0, 0.55);
 }
 
 @theme inline {
@@ -129,14 +181,26 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* Brand semantic colors — usable as Tailwind utilities (`text-success`,
+     `bg-warning`, `border-info`, etc.). Use these instead of `text-green-500`
+     / `bg-yellow-500` so palette migrations stay in one place. */
+  --color-brand: var(--c-red);
+  --color-success: var(--c-teal);
+  --color-warning: var(--c-amber);
+  --color-info: var(--c-blue);
+  --color-danger: var(--c-red);
+  --color-ink: var(--c-ink);
+
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Explicit radius scale — `--radius` dropped to 4px so the calc() formula
+     would collapse `--radius-sm` to 0px. Pin each tier instead. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -174,15 +238,15 @@
 /* Settings highlight pulse from onboarding navigation */
 @keyframes settings-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 oklch(0.75 0.15 85);
+    box-shadow: 0 0 0 0 var(--c-amber);
   }
   50% {
-    box-shadow: 0 0 0 4px oklch(0.75 0.15 85 / 0.4);
+    box-shadow: 0 0 0 4px rgba(224, 152, 54, 0.4);
   }
 }
 
 .settings-highlight {
   animation: settings-pulse 1s ease-in-out 3;
-  border-color: oklch(0.75 0.15 85) !important;
+  border-color: var(--c-amber) !important;
   scroll-margin-top: 2rem;
 }

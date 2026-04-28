@@ -148,6 +148,7 @@ export interface ExecutionOptions {
   forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
   jobId?: string; // Background job ID for cancellation checks
   setupInfo?: { code: string; setupId: string }; // Setup code to run on remote runner before tests
+  cursorPlaybackSpeedOverride?: number; // One-shot per-call override (e.g. recording preview replay at 2x); takes precedence over per-test/global settings
 }
 
 export interface ExecutionProgress {
@@ -480,7 +481,7 @@ async function executeViaRunner(
         viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
-        cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
+        cursorPlaybackSpeed: options.cursorPlaybackSpeedOverride ?? pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
         consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
         networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',

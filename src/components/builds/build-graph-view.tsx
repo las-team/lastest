@@ -25,16 +25,24 @@ const NODE_R = 8;
 const PAD_X = 40;
 const PAD_Y = 40;
 
+// Branch ribbons — distinct hues for visual differentiation across many branches.
+// Anchored on the brand 5-stop where possible, then extended with neutral
+// complements (purple, pink) to keep adjacent branches readable.
 const BRANCH_COLORS = [
-  '#3b82f6', '#8b5cf6', '#ec4899', '#f97316',
-  '#14b8a6', '#6366f1', '#84cc16',
+  '#3674A8', // brand blue
+  '#36A88E', // brand teal
+  '#E09836', // brand amber
+  '#1F2A33', // brand ink
+  '#8B5CF6', // violet (extended)
+  '#EC4899', // pink (extended)
+  '#84CC16', // lime (extended)
 ];
 
 const STATUS_COLORS: Record<BuildStatus, string> = {
-  safe_to_merge: '#22c55e',
-  review_required: '#eab308',
-  blocked: '#ef4444',
-  has_todos: '#f59e0b',
+  safe_to_merge: '#36A88E',  // brand teal (--c-teal)
+  review_required: '#E09836', // brand amber (--c-amber)
+  blocked: '#E03E36',         // brand red (--c-red)
+  has_todos: '#E09836',       // brand amber (--c-amber)
 };
 
 const STATUS_LABELS: Record<BuildStatus, string> = {
@@ -442,8 +450,8 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
             )}
             <div className="flex items-center gap-2">
               <span>{tooltip.build.totalTests ?? 0} tests</span>
-              <span className="text-yellow-600">{tooltip.build.changesDetected ?? 0} changed</span>
-              <span className="text-red-600">{tooltip.build.failedCount ?? 0} failed</span>
+              <span className="text-warning">{tooltip.build.changesDetected ?? 0} changed</span>
+              <span className="text-destructive">{tooltip.build.failedCount ?? 0} failed</span>
             </div>
             <div className="flex items-center gap-2">
               <span>{formatDuration(tooltip.build.elapsedMs)}</span>

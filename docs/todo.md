@@ -20,14 +20,9 @@ Openrouter agent sdk parity
 ## bugs
 ## features
 Default ai, openrouter test
-gh issue- notification on discord
-
 Recording - test create v3
   Better timeline: imeline · drag to reorder add icons, like steps as well
-Merge code and steps?
-Design
-**Playback event stream**
-Self-test
+**Self-test**
 mcp-oauth flow
 ## ideas
 Maybe workspace list w last 3 workspaces?

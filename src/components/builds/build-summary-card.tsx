@@ -44,34 +44,34 @@ const statusConfig: Record<BuildStatus, {
   safe_to_merge: {
     icon: CheckCircle,
     label: 'Safe to Merge',
-    bgColor: 'bg-green-50',
-    borderColor: 'border-green-200',
-    textColor: 'text-green-700',
-    iconColor: 'text-green-500',
+    bgColor: 'bg-success/10',
+    borderColor: 'border-success/30',
+    textColor: 'text-success',
+    iconColor: 'text-success',
   },
   review_required: {
     icon: AlertTriangle,
     label: 'Review Required',
-    bgColor: 'bg-yellow-50',
-    borderColor: 'border-yellow-200',
-    textColor: 'text-yellow-700',
-    iconColor: 'text-yellow-500',
+    bgColor: 'bg-warning/10',
+    borderColor: 'border-warning/30',
+    textColor: 'text-warning',
+    iconColor: 'text-warning',
   },
   blocked: {
     icon: XCircle,
     label: 'Blocked',
-    bgColor: 'bg-red-50',
-    borderColor: 'border-red-200',
-    textColor: 'text-red-700',
-    iconColor: 'text-red-500',
+    bgColor: 'bg-destructive/10',
+    borderColor: 'border-destructive/30',
+    textColor: 'text-destructive',
+    iconColor: 'text-destructive',
   },
   has_todos: {
     icon: ListTodo,
     label: 'Has Todos',
-    bgColor: 'bg-amber-50',
-    borderColor: 'border-amber-200',
-    textColor: 'text-amber-700',
-    iconColor: 'text-amber-500',
+    bgColor: 'bg-warning/10',
+    borderColor: 'border-warning/30',
+    textColor: 'text-warning',
+    iconColor: 'text-warning',
   },
 };
 
@@ -122,19 +122,19 @@ export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, 
               </Badge>
             )}
             {isBaseline && !isMainBaseline && !isBranchBaseline && (
-              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-green-300 text-green-700 bg-green-50">
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-success/30 text-success bg-success/10">
                 <Shield className="h-3 w-3" />
                 Baseline
               </Badge>
             )}
             {isMainBaseline && (
-              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-purple-300 text-purple-700 bg-purple-50">
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-foreground/20 text-foreground bg-foreground/5">
                 <Shield className="h-3 w-3" />
                 Main Baseline
               </Badge>
             )}
             {isBranchBaseline && (
-              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-blue-300 text-blue-700 bg-blue-50">
+              <Badge variant="outline" className="text-xs font-normal gap-1 shrink-0 border-info/30 text-info bg-info/10">
                 <Shield className="h-3 w-3" />
                 Branch Baseline
               </Badge>
@@ -151,11 +151,11 @@ export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, 
           <span className="text-muted-foreground">tests</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="font-medium text-yellow-600">{build.changesDetected ?? 0}</span>
+          <span className="font-medium text-warning">{build.changesDetected ?? 0}</span>
           <span className="text-muted-foreground">changed</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="font-medium text-red-600">{build.failedCount ?? 0}</span>
+          <span className="font-medium text-destructive">{build.failedCount ?? 0}</span>
           <span className="text-muted-foreground">failed</span>
         </div>
         <div className="flex items-center gap-1 text-muted-foreground ml-auto">

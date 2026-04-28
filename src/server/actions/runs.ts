@@ -62,7 +62,7 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
   return run;
 }
 
-export async function runTestsCore(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
+export async function runTestsCore(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
   // Storage limit enforcement (off by default)
   if (process.env.ENFORCE_STORAGE_LIMITS === 'true' && repositoryId) {
     const repo = await queries.getRepository(repositoryId);
@@ -82,10 +82,10 @@ export async function runTestsCore(testIds?: string[], repositoryId?: string | n
     const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
     if (await isPoolBusy()) {
       // Queue with null targetRunnerId so processPoolQueue can find it
-      return queueTestRun(testIds, repositoryId, headless, undefined, forceVideoRecording);
+      return queueTestRun(testIds, repositoryId, headless, undefined, forceVideoRecording, cursorPlaybackSpeedOverride);
     }
   } else if (await isRunnerBusy(targetRunner)) {
-    return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording);
+    return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
   }
 
   // Get tests to run (filter out soft-deleted tests)
@@ -121,18 +121,18 @@ export async function runTestsCore(testIds?: string[], repositoryId?: string | n
   const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording);
+  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean) {
+export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  return runTestsCore(testIds, repositoryId, headless, runnerId, forceVideoRecording);
+  return runTestsCore(testIds, repositoryId, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean) {
+async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
   // Use provided jobId or create new one (for backwards compatibility)
   const targetRunner = runnerId || 'auto';
   const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
@@ -189,6 +189,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
       },
       forceVideoRecording,
       jobId: activeJobId,
+      cursorPlaybackSpeedOverride,
     });
 
     // Save results
@@ -312,6 +313,7 @@ async function queueTestRun(
   headless?: boolean,
   runnerId?: string,
   forceVideoRecording?: boolean,
+  cursorPlaybackSpeedOverride?: number,
 ) {
   // Get tests to determine label (filter out soft-deleted tests)
   let tests: Test[];
@@ -337,7 +339,7 @@ async function queueTestRun(
     `Queued Test Run (${tests.length} tests)`,
     tests.length,
     repositoryId,
-    { testIds: testIds || null, headless, runnerId, forceVideoRecording },
+    { testIds: testIds || null, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride },
     targetRunner,
   );
 
@@ -363,6 +365,7 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
     headless?: boolean;
     runnerId?: string;
     forceVideoRecording?: boolean;
+    cursorPlaybackSpeedOverride?: number;
   } | null;
 
   // Delete the queue placeholder — runTests creates its own running job.
@@ -381,6 +384,7 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
       metadata?.headless,
       metadata?.runnerId,
       metadata?.forceVideoRecording,
+      metadata?.cursorPlaybackSpeedOverride,
     );
   } catch (error) {
     console.error('[queue] Failed to start queued test run:', error);

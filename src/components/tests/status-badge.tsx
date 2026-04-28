@@ -4,7 +4,7 @@ import { CheckCircle2, XCircle, Clock } from 'lucide-react';
 export function StatusBadge({ status }: { status: string | null }) {
   if (status === 'passed') {
     return (
-      <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
+      <Badge className="bg-success/10 text-success border-success/20 hover:bg-success/20">
         <CheckCircle2 className="h-3 w-3 mr-1" />
         Passed
       </Badge>
@@ -12,7 +12,7 @@ export function StatusBadge({ status }: { status: string | null }) {
   }
   if (status === 'failed') {
     return (
-      <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 hover:bg-rose-500/20">
+      <Badge className="bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/20">
         <XCircle className="h-3 w-3 mr-1" />
         Failed
       </Badge>

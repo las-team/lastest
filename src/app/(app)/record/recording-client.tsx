@@ -29,6 +29,8 @@ import {
   clearLastCompletedSession,
 } from '@/server/actions/recording';
 import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
+import { runTests } from '@/server/actions/runs';
+import { deleteTest } from '@/server/actions/tests';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -425,6 +427,9 @@ export function RecordingClient({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
+  const [savedTestId, setSavedTestId] = useState<string | null>(null);
+  const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'error'>('idle');
+  const autoTriggeredRef = useRef(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -752,42 +757,89 @@ export function RecordingClient({
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
+  const persistRecording = async (): Promise<string | null> => {
+    if (isRerecording && rerecordTest) {
+      await updateRerecordedTest({
+        testId: rerecordTest.id,
+        code: generatedCode,
+        targetUrl: url,
+        viewportWidth: settings.viewportWidth ?? 1280,
+        viewportHeight: settings.viewportHeight ?? 720,
+      });
+      return rerecordTest.id;
+    }
+    const test = await saveRecordedTest({
+      name: testName,
+      functionalAreaId: areaId || null,
+      targetUrl: url,
+      code: generatedCode,
+      repositoryId,
+      requiredCapabilities,
+      viewportWidth: settings.viewportWidth ?? 1280,
+      viewportHeight: settings.viewportHeight ?? 720,
+      extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
+      skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
+      domSnapshot,
+    });
+    return test.id;
+  };
+
   const handleSaveTest = async () => {
     setIsLoading(true);
     try {
-      if (isRerecording && rerecordTest) {
-        // Update existing test with new code
-        await updateRerecordedTest({
-          testId: rerecordTest.id,
-          code: generatedCode,
-          targetUrl: url,
-          viewportWidth: settings.viewportWidth ?? 1280,
-          viewportHeight: settings.viewportHeight ?? 720,
-        });
-        router.push(`/tests?test=${encodeURIComponent(rerecordTest.id)}`);
-      } else {
-        // Create new test
-        const test = await saveRecordedTest({
-          name: testName,
-          functionalAreaId: areaId || null,
-          targetUrl: url,
-          code: generatedCode,
-          repositoryId,
-          requiredCapabilities,
-          viewportWidth: settings.viewportWidth ?? 1280,
-          viewportHeight: settings.viewportHeight ?? 720,
-          extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
-          skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
-          domSnapshot,
-        });
-        router.push(`/tests?test=${encodeURIComponent(test.id)}`);
+      const id = await persistRecording();
+      if (id) {
+        setSavedTestId(id);
+        router.push(`/tests?test=${encodeURIComponent(id)}`);
       }
     } catch (error) {
       console.error('Failed to save test:', error);
+      toast.error('Failed to save test');
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Auto-save the recording and immediately fire a headed 2x replay so the
+  // user can watch the test play back while reviewing the generated code.
+  // Triggered whether the user clicked Stop or the EB session ended on its own.
+  useEffect(() => {
+    if (step !== 'saving') return;
+    if (autoTriggeredRef.current) return;
+    if (!generatedCode) return;
+    autoTriggeredRef.current = true;
+
+    (async () => {
+      setAutoPlayStatus('saving');
+      let id: string | null = null;
+      try {
+        id = await persistRecording();
+      } catch (err) {
+        console.error('Auto-save after recording failed:', err);
+        toast.error('Could not save the recorded test — try Save Test below.');
+        setAutoPlayStatus('error');
+        autoTriggeredRef.current = false;
+        return;
+      }
+      if (!id) {
+        setAutoPlayStatus('error');
+        autoTriggeredRef.current = false;
+        return;
+      }
+      setSavedTestId(id);
+      setAutoPlayStatus('playing');
+      try {
+        await runTests([id], repositoryId, /*headless*/ false, 'auto', undefined, /*cursorPlaybackSpeedOverride*/ 2);
+        toast.success('Recording saved · headed 2x replay started');
+      } catch (err) {
+        console.error('Auto-replay after recording failed:', err);
+        toast.error('Saved, but the headed replay could not start');
+        setAutoPlayStatus('error');
+      }
+    })();
+    // generatedCode is the trigger payload; the rest are stable inputs into persistRecording
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, generatedCode]);
 
   if (step === 'setup') {
     return (
@@ -1489,6 +1541,13 @@ export function RecordingClient({
 
             <div>
               <label className="text-sm font-medium">Generated Code</label>
+              {autoPlayStatus !== 'idle' && (
+                <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1.5">
+                  {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}
+                  {autoPlayStatus === 'playing' && (<><Play className="h-3 w-3" /> Saved · headed 2x replay running in a separate window</>)}
+                  {autoPlayStatus === 'error' && (<><AlertTriangle className="h-3 w-3" /> Auto-replay failed — use Save Test below</>)}
+                </p>
+              )}
               <pre className="mt-2 bg-muted p-4 rounded-lg overflow-x-auto text-sm font-mono max-h-96">
                 {generatedCode || '// No code generated'}
               </pre>
@@ -1533,24 +1592,52 @@ export function RecordingClient({
             <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
-                onClick={() => {
+                disabled={isLoading || autoPlayStatus === 'saving'}
+                onClick={async () => {
+                  // For a fresh recording that auto-saved, Discard means delete
+                  // the persisted test so the user actually walks away clean.
+                  // For re-records, the prior version is preserved by
+                  // updateTestWithVersion — Discard just navigates back.
+                  if (savedTestId && !isRerecording) {
+                    setIsLoading(true);
+                    try {
+                      await deleteTest(savedTestId);
+                    } catch (err) {
+                      console.error('Failed to discard auto-saved test:', err);
+                      toast.error('Could not delete the auto-saved test');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }
                   setStep('setup');
                   setGeneratedCode('');
                   setRequiredCapabilities(null);
                   setCapturedStorageState(null);
                   setEvents([]);
                   setScreenshots([]);
+                  setSavedTestId(null);
+                  setAutoPlayStatus('idle');
+                  autoTriggeredRef.current = false;
                   lastSequenceRef.current = 0;
                 }}
               >
                 Discard
               </Button>
-              <Button onClick={handleSaveTest} disabled={isLoading}>
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : null}
-                {isRerecording ? 'Update Test' : 'Save Test'}
-              </Button>
+              {savedTestId ? (
+                <Button
+                  onClick={() => router.push(`/tests?test=${encodeURIComponent(savedTestId)}`)}
+                  disabled={isLoading}
+                >
+                  Open Test
+                </Button>
+              ) : (
+                <Button onClick={handleSaveTest} disabled={isLoading || autoPlayStatus === 'saving'}>
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : null}
+                  {isRerecording ? 'Update Test' : 'Save Test'}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

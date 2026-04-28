@@ -8,9 +8,9 @@ interface RecentHistoryProps {
 }
 
 const statusColors: Record<string, string> = {
-  safe_to_merge: 'bg-green-500',
-  review_required: 'bg-yellow-500',
-  blocked: 'bg-red-500',
+  safe_to_merge: 'bg-success',
+  review_required: 'bg-warning',
+  blocked: 'bg-destructive',
 };
 
 export function RecentHistory({ builds }: RecentHistoryProps) {
