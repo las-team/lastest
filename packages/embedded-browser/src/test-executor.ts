@@ -561,24 +561,62 @@ export class EmbeddedTestExecutor {
       // hitting the same target concurrently). Retries at 1s, 2s, 4s = ~7s
       // total; if still failing, throw a tagged error so the upper layer can
       // decide to swap to a fresh EB instead of burning the test.
+      //
+      // ALSO recovers from sub-resource failures: page.goto returns 200 when
+      // the main HTML doc loads, but the JS bundles that mount the app fire
+      // afterwards. A bundle that hits ERR_NETWORK_CHANGED leaves the page as
+      // a blank shell (bodyChildren > 0, hasCanvas=false) — the test then runs
+      // cursor moves on un-mounted UI and the screenshot is ~10× smaller.
+      // Smoking-gun example (Test 2: Move Binding Arrow):
+      //   Request failed: .../mermaid-to-excalidraw-D-aVQaad.js ERR_NETWORK_CHANGED
+      //   Navigation complete: 200
+      //   [Nav] post-goto: bodyChildren=5 hasCanvas=false
+      //   [Shot] Step 1: bytes=4253 (vs. healthy 44169)
+      //
+      // Strategy: track CRITICAL sub-resource failures (script + document
+      // resourceTypes only — ignore image/font/stylesheet/media so blocked
+      // analytics don't trigger spurious reloads) for the goto window AND a
+      // 3s grace period after goto resolves (catches lazy chunks). If any
+      // fired, page.reload() up to twice. After reloads settle, require
+      // networkidle within 5s; otherwise tag __ebNetworkUnhealthy so the
+      // dispatcher swaps to a fresh EB instead of producing a blank screenshot.
       const originalGoto = page.goto.bind(page);
       const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+      const CRITICAL_RESOURCE_TYPES = new Set(['script', 'document', 'xhr', 'fetch']);
+      const POST_GOTO_TRACK_MS = 3000;
+      const MAX_SUBRESOURCE_RELOADS = 2;
+
+      let trackingActive = false;
+      let criticalSubresourceFailures: string[] = [];
+      page.on('requestfailed', (req) => {
+        if (!trackingActive) return;
+        if (!CRITICAL_RESOURCE_TYPES.has(req.resourceType())) return;
+        const failure = req.failure();
+        if (failure && TRANSIENT_NET_RX.test(failure.errorText)) {
+          criticalSubresourceFailures.push(`${req.resourceType()} ${req.url()} (${failure.errorText})`);
+        }
+      });
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn('info', `Navigating to ${url}...`);
         const delays = [1000, 2000, 4000];
         let lastErr: unknown;
+        let response: Awaited<ReturnType<typeof originalGoto>> | null = null;
         for (let attempt = 0; attempt <= delays.length; attempt++) {
           try {
-            const response = await originalGoto(url, options);
+            criticalSubresourceFailures = [];
+            trackingActive = true;
+            response = await originalGoto(url, options);
+            // Keep tracking for POST_GOTO_TRACK_MS after goto resolves — the
+            // mermaid chunk that broke Test 2 fired ~750ms post-goto.
+            await new Promise((r) => setTimeout(r, POST_GOTO_TRACK_MS));
+            trackingActive = false;
             if (attempt > 0) {
               logFn('info', `Navigation complete (retry ${attempt}): ${response?.status() ?? 'no response'}`);
             } else {
               logFn('info', `Navigation complete: ${response?.status() ?? 'no response'}`);
             }
-            // [Nav] probe: confirm goto returned a rendered page (not a blank/error shell).
-            // bodyChildren=0 or hasCanvas=false on a canvas app indicates the React/SPA root
-            // never hydrated even though HTTP returned 200 — root cause candidate for white screenshots.
             try {
               const docState = await page.evaluate(() => ({
                 url: location.href,
@@ -591,8 +629,9 @@ export class EmbeddedTestExecutor {
             } catch (e) {
               logFn('warn', `[Nav] post-goto probe failed: ${e}`);
             }
-            return response;
+            break;
           } catch (err) {
+            trackingActive = false;
             lastErr = err;
             const msg = err instanceof Error ? err.message : String(err);
             if (!TRANSIENT_NET_RX.test(msg)) throw err;
@@ -601,13 +640,52 @@ export class EmbeddedTestExecutor {
             await new Promise((r) => setTimeout(r, delays[attempt]));
           }
         }
-        // All retries exhausted on a transient error — this EB's network stack
-        // looks unhealthy. Tag the error so the app-side worker releases + re-claims.
-        const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-        const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (tagged as any).__ebNetworkUnhealthy = true;
-        throw tagged;
+        if (!response) {
+          // All goto retries exhausted on a transient error — EB network unhealthy.
+          const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+          const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+
+        // Sub-resource recovery: goto succeeded but a critical script/doc/xhr
+        // hit ERR_NETWORK_CHANGED during or just after navigation → app likely
+        // didn't mount. Reload up to MAX_SUBRESOURCE_RELOADS with backoff.
+        for (let reloadAttempt = 1; reloadAttempt <= MAX_SUBRESOURCE_RELOADS && criticalSubresourceFailures.length > 0; reloadAttempt++) {
+          const sample = criticalSubresourceFailures.slice(0, 2).join('; ');
+          logFn('warn', `[Reload] ${criticalSubresourceFailures.length} critical sub-resource failure(s) during navigation — reloading (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}). Sample: ${sample}`);
+          // Give CNI a moment to settle.
+          await new Promise((r) => setTimeout(r, 1000 * reloadAttempt));
+          try {
+            criticalSubresourceFailures = [];
+            trackingActive = true;
+            const reloadResp = await page.reload({ waitUntil: options?.waitUntil ?? 'load', timeout: options?.timeout });
+            await new Promise((r) => setTimeout(r, POST_GOTO_TRACK_MS));
+            trackingActive = false;
+            logFn('info', `[Reload] Completed (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}): status=${reloadResp?.status() ?? 'none'} remainingFailures=${criticalSubresourceFailures.length}`);
+            if (reloadResp) response = reloadResp;
+          } catch (err) {
+            trackingActive = false;
+            const msg = err instanceof Error ? err.message : String(err);
+            logFn('warn', `[Reload] threw on attempt ${reloadAttempt}: ${msg}`);
+            if (reloadAttempt === MAX_SUBRESOURCE_RELOADS) {
+              const tagged = new Error(`EB network unhealthy: sub-resource reloads failed (${reloadAttempt}/${MAX_SUBRESOURCE_RELOADS}): ${msg}`);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (tagged as any).__ebNetworkUnhealthy = true;
+              throw tagged;
+            }
+          }
+        }
+        if (criticalSubresourceFailures.length > 0) {
+          // Reloads exhausted, sub-resources still flaky — surface as unhealthy
+          // so dispatcher's MAX_EB_ATTEMPTS=2 retry kicks in on a fresh EB.
+          const tagged = new Error(`EB network unhealthy: ${criticalSubresourceFailures.length} critical sub-resource failure(s) persisted after ${MAX_SUBRESOURCE_RELOADS} reload(s)`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (tagged as any).__ebNetworkUnhealthy = true;
+          throw tagged;
+        }
+        return response;
       };
 
       // Extract function body
