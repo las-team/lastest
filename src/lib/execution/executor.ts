@@ -684,6 +684,9 @@ async function executeViaRunner(
         // alongside extractedVariables so the Vars-tab "Last run" column has
         // data for both modes (especially with random/increment row picks).
         assignedVariables: info.assignedVariables,
+        logs: Array.isArray(payload.logs) && payload.logs.length > 0
+          ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
+          : undefined,
       };
 
       results.push(testResult);

@@ -213,6 +213,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
         totalSteps: result.totalSteps,
         extractedVariables: result.extractedVariables,
         assignedVariables: result.assignedVariables,
+        logs: result.logs,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }

@@ -237,7 +237,7 @@ export const functionalAreas = pgTable('functional_areas', {
 export const tests = pgTable('tests', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
   description: text('description'),
@@ -390,6 +390,10 @@ export const testResults = pgTable('test_results', {
   networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
   downloads: jsonb('downloads').$type<DownloadRecord[]>(),
   a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
+  // EB-side test executor log lines (info/warn/error from runner-client + test-executor).
+  // Populated for embedded-browser runs; null for legacy/local. Lets us inspect
+  // [Nav]/[Shot] probe lines post-hoc when an EB pod is already GC'd.
+  logs: jsonb('logs').$type<Array<{ timestamp: number; level: string; message: string }>>(),
   assertionResults: jsonb('assertion_results').$type<AssertionResult[]>(),
   a11yPassesCount: integer('a11y_passes_count'),
   videoPath: text('video_path'),
@@ -827,8 +831,8 @@ export const playwrightSettings = pgTable('playwright_settings', {
   //   maxParallelEBs: per-build cap on concurrent EB claims (1 test per EB).
   //   ebPoolMax:      hard cap on concurrent system EBs across the cluster.
   //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
-  maxParallelEBs: integer('max_parallel_ebs').default(10),
-  ebPoolMax: integer('eb_pool_max').default(30),
+  maxParallelEBs: integer('max_parallel_ebs').default(30),
+  ebPoolMax: integer('eb_pool_max').default(50),
   ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
@@ -876,7 +880,7 @@ export const routes = pgTable('routes', {
   filePath: text('file_path'),
   framework: text('framework'), // 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue'
   routerType: text('router_type'), // 'hash' | 'browser'
-  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   hasTest: boolean('has_test').default(false),
   scannedAt: timestamp('scanned_at'),
 });

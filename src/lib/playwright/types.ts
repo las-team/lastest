@@ -30,6 +30,7 @@ export interface TestRunResult {
   totalSteps?: number;
   extractedVariables?: Record<string, string>;
   assignedVariables?: Record<string, string>;
+  logs?: Array<{ timestamp: number; level: string; message: string }>;
 }
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
