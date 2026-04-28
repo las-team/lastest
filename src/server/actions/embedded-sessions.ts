@@ -808,16 +808,28 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
   const minKeep = warmPoolMin();
 
   const cutoff = new Date(Date.now() - idleTtlMs);
+  // Join sessions to get lastActivityAt (bumped on claim/release/register —
+  // NOT on heartbeat). Using runners.lastSeen instead would never trigger:
+  // a healthy idle EB heartbeats every few seconds, so lastSeen stays fresh
+  // and the reaper never finds anything to clean up. Symptom seen in prod:
+  // a build that bursts the pool to 50 leaves the surplus online-idle EBs
+  // sitting forever (they only get claimed if another build runs).
   const candidates = await db
-    .select({ id: runners.id, name: runners.name, status: runners.status, lastSeen: runners.lastSeen })
+    .select({
+      id: runners.id,
+      name: runners.name,
+      status: runners.status,
+      lastActivityAt: embeddedSessions.lastActivityAt,
+    })
     .from(runners)
+    .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
     .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
 
   let terminated = 0;
   let onlineReaped = 0;
   for (const row of candidates) {
     const isOffline = row.status === 'offline';
-    const isIdle = row.status === 'online' && (!row.lastSeen || row.lastSeen < cutoff);
+    const isIdle = row.status === 'online' && (!row.lastActivityAt || row.lastActivityAt < cutoff);
     if (!isOffline && !isIdle) continue;
 
     // Protect warm pool: only reap an idle-online row if doing so would still

@@ -84,10 +84,13 @@ async function bumpPoolDefaults() {
     sql = require('postgres')(process.env.DATABASE_URL);
     const r = await sql.unsafe(`
       UPDATE "playwright_settings"
-      SET "max_parallel_ebs" = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
-          "eb_pool_max"      = GREATEST(COALESCE("eb_pool_max", 0), 50)
+      SET "max_parallel_ebs"      = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
+          "eb_pool_max"            = GREATEST(COALESCE("eb_pool_max", 0), 50),
+          "eb_idle_ttl_seconds"    = GREATEST(COALESCE("eb_idle_ttl_seconds", 0), 120)
       WHERE "repository_id" IS NULL
-        AND (COALESCE("max_parallel_ebs", 0) < 30 OR COALESCE("eb_pool_max", 0) < 50)
+        AND (COALESCE("max_parallel_ebs", 0) < 30
+          OR COALESCE("eb_pool_max", 0) < 50
+          OR COALESCE("eb_idle_ttl_seconds", 0) < 120)
     `);
     const c = (r && r.count) || 0;
     if (c > 0) {

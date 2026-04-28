@@ -833,7 +833,7 @@ export const playwrightSettings = pgTable('playwright_settings', {
   //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
   maxParallelEBs: integer('max_parallel_ebs').default(30),
   ebPoolMax: integer('eb_pool_max').default(50),
-  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
+  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(120),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
