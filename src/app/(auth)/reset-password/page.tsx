@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authClient } from '@/lib/auth/auth-client';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -50,77 +52,83 @@ function ResetPasswordForm() {
 
   if (!token) {
     return (
-      <div className="w-full max-w-sm space-y-6 px-4 text-center">
-        <h1 className="text-2xl font-bold">Invalid reset link</h1>
-        <p className="text-sm text-muted-foreground">
-          This password reset link is invalid or has expired.
-        </p>
-        <Link href="/forgot-password" className="text-sm text-primary underline-offset-4 hover:underline">
-          Request a new reset link
-        </Link>
-      </div>
+      <>
+        <AuthBrandHeader
+          title="Invalid reset link"
+          description="This password reset link is invalid or has expired."
+        />
+        <Card className="gap-5 py-6 shadow-sm">
+          <CardContent className="text-center">
+            <Link href="/forgot-password" className="text-sm text-primary underline-offset-4 hover:underline">
+              Request a new reset link
+            </Link>
+          </CardContent>
+        </Card>
+      </>
     );
   }
 
   return (
-    <div className="w-full max-w-sm space-y-6 px-4">
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold">Set new password</h1>
-        <p className="text-sm text-muted-foreground">
-          Enter your new password below
-        </p>
-      </div>
+    <>
+      <AuthBrandHeader
+        title="Set new password"
+        description="Enter your new password below"
+      />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="password">New password</Label>
-          <Input
-            id="password"
-            type="password"
-            placeholder="Min 8 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
-          <Input
-            id="confirmPassword"
-            type="password"
-            placeholder="Confirm your password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-            minLength={8}
-          />
-        </div>
+      <Card className="gap-5 py-6 shadow-sm">
+        <CardContent className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="password">New password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Min 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+                minLength={8}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Confirm password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+                minLength={8}
+              />
+            </div>
 
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
 
-        <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? 'Resetting...' : 'Reset password'}
-        </Button>
-      </form>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? 'Resetting...' : 'Reset password'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       <p className="text-center text-sm text-muted-foreground">
-        <Link href="/login" className="text-primary underline-offset-4 hover:underline">
+        <Link href="/login" className="text-primary font-medium underline-offset-4 hover:underline">
           Back to sign in
         </Link>
       </p>
-    </div>
+    </>
   );
 }
 
 export default function ResetPasswordPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Suspense>
-        <ResetPasswordForm />
-      </Suspense>
-    </div>
+    <Suspense>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }
