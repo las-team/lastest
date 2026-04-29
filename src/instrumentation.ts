@@ -36,4 +36,15 @@ export async function register() {
   } catch (err) {
     console.error('[Boot] ensureWarmPool failed:', err);
   }
+
+  // Start the periodic reaper loop here — not lazily from `/api/ws/runner` —
+  // because EBs hit the envoy-less companion pod via LASTEST_URL, leaving the
+  // user-facing pod's lazy init dormant. With both pods running the loop, idle
+  // EBs get reaped regardless of which pod sees runner traffic.
+  try {
+    const { startCleanupLoop } = await import('@/lib/eb/cleanup-loop');
+    startCleanupLoop();
+  } catch (err) {
+    console.error('[Boot] startCleanupLoop failed:', err);
+  }
 }
