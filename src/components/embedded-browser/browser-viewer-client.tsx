@@ -714,7 +714,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       )}
 
       {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
-      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
+      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} ${hideToolbar && hideStatusBar ? '' : 'bg-black'} ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (

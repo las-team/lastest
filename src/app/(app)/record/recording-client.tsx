@@ -1578,8 +1578,8 @@ export function RecordingClient({
             </div>
 
             {autoPlayStatus !== 'idle' && (
-              <section className="rounded-lg border bg-card text-card-foreground overflow-hidden">
-                <header className="flex items-center justify-between px-3 py-2 border-b bg-card">
+              <section className="rounded-lg bg-card text-card-foreground overflow-hidden">
+                <header className="flex items-center justify-between px-3 py-2 bg-card">
                   <span className="text-sm font-medium">Headed 2x Replay</span>
                   <span className="text-xs text-muted-foreground flex items-center gap-1.5">
                     {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}

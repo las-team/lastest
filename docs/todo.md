@@ -19,6 +19,9 @@ Openrouter agent sdk parity
 **CSV upload and use**
 ## bugs
 Enhance with AI is broken
+
+now running during build only shows:
+running…
 ## features
 Auto signup if no user?
 Add logo to signin, improve it, switch to eu comapatible explicit opt-in
