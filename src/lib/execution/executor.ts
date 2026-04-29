@@ -854,7 +854,11 @@ async function executeViaPoolWorkers(
         break;
       }
       everClaimed = true;
-      await recordActualRunner(eb.runnerId);
+      // Don't record the setup EB as the job's actualRunnerId. The recording
+      // UI polls actualRunnerId to find which EB to attach its BrowserViewer
+      // to; if it locks on the setup EB, that EB gets released as soon as
+      // setup finishes and the viewer ends up with a dead/cleared streamUrl.
+      // The test EB (recorded in runOneTest) is the only user-visible runner.
       console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for broadcast setup (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
       try {
         const setupResult = await executeSetupViaRunner(
