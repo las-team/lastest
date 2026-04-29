@@ -441,6 +441,7 @@ export function RecordingClient({
   const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'finished' | 'error'>('idle');
   const [playbackStreamUrl, setPlaybackStreamUrl] = useState<string | null>(null);
   const [playbackJobId, setPlaybackJobId] = useState<string | null>(null);
+  const [playbackFrameSize, setPlaybackFrameSize] = useState<{ width: number; height: number } | null>(null);
   const autoTriggeredRef = useRef(false);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
@@ -966,6 +967,7 @@ export function RecordingClient({
         if (status.isComplete) {
           clearInterval(interval);
           setPlaybackStreamUrl(null);
+          setPlaybackFrameSize(null);
           setAutoPlayStatus(status.status === 'failed' ? 'error' : 'finished');
         }
       } catch {
@@ -1588,10 +1590,10 @@ export function RecordingClient({
                   </span>
                 </header>
                 <div
-                  className="relative flex items-center justify-center bg-card"
+                  className="relative flex items-center justify-center bg-card mx-auto w-full"
                   style={{
-                    aspectRatio: `${settings.viewportWidth ?? 1280} / ${settings.viewportHeight ?? 720}`,
-                    maxHeight: 360,
+                    aspectRatio: `${playbackFrameSize?.width ?? settings.viewportWidth ?? 1280} / ${playbackFrameSize?.height ?? settings.viewportHeight ?? 720}`,
+                    maxWidth: `${360 * ((playbackFrameSize?.width ?? settings.viewportWidth ?? 1280) / (playbackFrameSize?.height ?? settings.viewportHeight ?? 720))}px`,
                   }}
                 >
                   {playbackStreamUrl && (
@@ -1605,6 +1607,8 @@ export function RecordingClient({
                       fit
                       hideControls
                       hideToolbar
+                      hideStatusBar
+                      onViewportChange={setPlaybackFrameSize}
                     />
                   )}
                   {!playbackStreamUrl && (
@@ -1693,6 +1697,7 @@ export function RecordingClient({
                   setAutoPlayStatus('idle');
                   setPlaybackStreamUrl(null);
                   setPlaybackJobId(null);
+                  setPlaybackFrameSize(null);
                   autoTriggeredRef.current = false;
                   lastSequenceRef.current = 0;
                 }}
