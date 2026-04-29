@@ -83,11 +83,27 @@ function forwardUpgrade(server, req, socket, head, cfg) {
   let upgraded = false;
   let upstream = null;
 
-  // teardown(reason, { hadError }) — on clean close (hadError=false) we send a
-  // graceful FIN via end() so any data still buffered on the pipe drains. On
-  // error we RST via destroy().
+  // Synthesize an HTTP error response when we abort before the upgrade
+  // succeeds. Without this, browsers see a bare "WebSocket connection failed"
+  // with no status — making dead-EB-pod-IPs (the most common cause) impossible
+  // to diagnose from DevTools.
+  const writeSyntheticError = (status, statusText, bodyText) => {
+    const body = Buffer.from(bodyText + '\n');
+    const headers =
+      `HTTP/1.1 ${status} ${statusText}\r\n` +
+      `Content-Type: text/plain; charset=utf-8\r\n` +
+      `Content-Length: ${body.length}\r\n` +
+      `Connection: close\r\n\r\n`;
+    try { realWrite(headers); realWrite(body); } catch { /* ignore */ }
+  };
+
+  // teardown(reason, { hadError, clientStatus }) — on clean close (hadError=false)
+  // we send a graceful FIN via end() so any data still buffered on the pipe
+  // drains. On error we RST via destroy(). If clientStatus is set and we never
+  // upgraded, write that synthetic HTTP response so the client gets a real code.
   const teardown = (reason, opts) => {
     const hadError = opts && opts.hadError;
+    const clientStatus = opts && opts.clientStatus;
     dlog(cfg.label, 'teardown:', reason, 'hadError=', !!hadError);
     claimed = false;
     if (upstream && !upstreamClosed) {
@@ -97,7 +113,12 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     if (!clientClosed) {
       clientClosed = true;
       sessionOver = true;
-      try { hadError ? realDestroy() : realEnd(); } catch { /* ignore */ }
+      if (!upgraded && clientStatus) {
+        writeSyntheticError(clientStatus.code, clientStatus.text, clientStatus.body);
+        try { realEnd(); } catch { /* ignore */ }
+      } else {
+        try { hadError ? realDestroy() : realEnd(); } catch { /* ignore */ }
+      }
     }
   };
 
@@ -112,12 +133,21 @@ function forwardUpgrade(server, req, socket, head, cfg) {
   upstream.once('timeout', () => {
     if (!upgraded) {
       dlog(cfg.label, 'connect timeout');
-      teardown('connect-timeout', { hadError: true });
+      teardown('connect-timeout', {
+        hadError: true,
+        clientStatus: { code: 504, text: 'Gateway Timeout', body: `ws-proxy: upstream connect timeout (${cfg.host}:${cfg.port}) — likely a torn-down EB pod` },
+      });
     }
   });
   upstream.once('connect', () => { try { upstream.setTimeout(0); } catch { /* ignore */ } });
   try { upstream.setNoDelay(true); upstream.setKeepAlive(true, 30_000); } catch { /* ignore */ }
-  upstream.on('error', (e) => { dlog(cfg.label, 'upstream error:', e.message); teardown('upstream-error', { hadError: true }); });
+  upstream.on('error', (e) => {
+    dlog(cfg.label, 'upstream error:', e.message);
+    teardown('upstream-error', {
+      hadError: true,
+      clientStatus: { code: 502, text: 'Bad Gateway', body: `ws-proxy: upstream error (${cfg.host}:${cfg.port}): ${e.message}` },
+    });
+  });
   upstream.on('end', () => { teardown('upstream-end', { hadError: false }); });
   upstream.on('close', (hadErr) => { upstreamClosed = true; teardown('upstream-close', { hadError: hadErr }); });
 
@@ -153,7 +183,10 @@ function forwardUpgrade(server, req, socket, head, cfg) {
     headerBuf = Buffer.concat([headerBuf, chunk]);
     const sep = headerBuf.indexOf('\r\n\r\n');
     if (sep === -1) {
-      if (headerBuf.length > 32_768) teardown('oversized-upstream-header');
+      if (headerBuf.length > 32_768) teardown('oversized-upstream-header', {
+        hadError: true,
+        clientStatus: { code: 502, text: 'Bad Gateway', body: 'ws-proxy: upstream header exceeded 32KiB' },
+      });
       return;
     }
     const hbytes = headerBuf.subarray(0, sep + 4);
@@ -182,7 +215,13 @@ function forwardUpgrade(server, req, socket, head, cfg) {
   upstream.on('data', onData);
 
   const handshakeTimer = setTimeout(() => {
-    if (!upgraded) { dlog(cfg.label, 'handshake timeout'); teardown('handshake-timeout'); }
+    if (!upgraded) {
+      dlog(cfg.label, 'handshake timeout');
+      teardown('handshake-timeout', {
+        hadError: true,
+        clientStatus: { code: 504, text: 'Gateway Timeout', body: `ws-proxy: upstream handshake timeout (${cfg.host}:${cfg.port})` },
+      });
+    }
   }, 15_000);
   upstream.once('close', () => clearTimeout(handshakeTimer));
   socket.once('close', () => clearTimeout(handshakeTimer));

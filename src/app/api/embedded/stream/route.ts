@@ -33,17 +33,22 @@ export async function GET() {
     const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
 
     return NextResponse.json({
-      sessions: allSessions.map((s) => ({
-        id: s.id,
-        runnerId: s.runnerId,
-        status: s.status,
-        streamUrl: toProxyStreamUrl(s.streamUrl),
-        viewport: s.viewport,
-        currentUrl: s.currentUrl,
-        userId: s.userId,
-        createdAt: s.createdAt,
-        lastActivityAt: s.lastActivityAt,
-      })),
+      sessions: allSessions.map((s) => {
+        // Drop the streamUrl for sessions whose EB is gone — keeps the recording
+        // poll loop from latching onto a dead pod IP after the Job was torn down.
+        const isLive = s.status !== 'stopped' && s.status !== 'stopping';
+        return {
+          id: s.id,
+          runnerId: s.runnerId,
+          status: s.status,
+          streamUrl: isLive ? toProxyStreamUrl(s.streamUrl) : null,
+          viewport: s.viewport,
+          currentUrl: s.currentUrl,
+          userId: s.userId,
+          createdAt: s.createdAt,
+          lastActivityAt: s.lastActivityAt,
+        };
+      }),
       streamAuthToken,
     });
   } catch {

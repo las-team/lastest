@@ -482,9 +482,21 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
       .update(runners)
       .set({ status: 'offline', lastSeen: new Date() })
       .where(eq(runners.id, runnerId));
+    // Null out connection URLs so a stale `embedded_sessions` row can't hand a
+    // dead pod IP to a browser that re-fetches by sessionId after the Job is
+    // torn down. Without this the WS proxy gets a "WebSocket connection failed"
+    // with no diagnostics until the row is reaped.
     await db
       .update(embeddedSessions)
-      .set({ status: 'stopped', userId: null, busySince: null, lastActivityAt: new Date() })
+      .set({
+        status: 'stopped',
+        userId: null,
+        busySince: null,
+        streamUrl: null,
+        cdpUrl: null,
+        containerUrl: null,
+        lastActivityAt: new Date(),
+      })
       .where(eq(embeddedSessions.runnerId, runnerId));
 
     if (previousStatus === 'busy' || previousStatus === 'online') {
