@@ -143,6 +143,12 @@ export interface RunTestCommandPayload {
    *  hash field on each row is the FNV-1a of the original (pre-sort)
    *  selectors array (`hashSelectors` in `@lastest/shared`). */
   selectorStats?: SelectorStatRow[];
+  /** Default per-candidate `waitFor` budget for `locateWithFallback`
+   *  (ms). Resolved on the host as
+   *  `pwOverrides.selectorTimeoutMs ?? playwrightSettings.selectorTimeoutMs ?? 3000`.
+   *  Each runner additionally short-circuits known-slow selectors via
+   *  `selectorTimeoutFor` from `@lastest/shared`. */
+  selectorTimeoutMs?: number;
 }
 
 export interface RunTestCommand extends BaseMessage {

@@ -29,6 +29,7 @@ import {
   watermarkVideo,
   hashSelectors,
   sortSelectorsByStats,
+  selectorTimeoutFor,
   type SelectorOutcome,
   type SelectorRef,
   type SelectorStatRow,
@@ -170,6 +171,9 @@ export interface RunTestPayload {
   /** Selector_stats rows for this test, used by `locateWithFallback` to
    *  sort fallback candidates by historical success before iterating. */
   selectorStats?: SelectorStatRow[];
+  /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
+   *  Resolved on the host. Defaults to 3000ms when omitted. */
+  selectorTimeoutMs?: number;
 }
 
 /**
@@ -983,6 +987,7 @@ export class EmbeddedTestExecutor {
 
       // locateWithFallback — supports { type, value } format, ocr-text, role-name, coordinate fallback
       const lwfStats = command.selectorStats ?? [];
+      const lwfDefaultTimeoutMs = command.selectorTimeoutMs ?? 3000;
       const lwfSortCache = new Map<string, Array<{ type: string; value: string }>>();
       const locateWithFallback = async (
         pg: Page,
@@ -1033,7 +1038,9 @@ export class EmbeddedTestExecutor {
             }
 
             const target = locator.first();
-            await target.waitFor({ timeout: 3000 });
+            const lwfStat = lwfStats.find((r) => r.hash === lwfHash && r.type === sel.type && r.value === sel.value);
+            const lwfCandidateTimeout = selectorTimeoutFor(lwfStat, lwfDefaultTimeoutMs);
+            await target.waitFor({ timeout: lwfCandidateTimeout });
 
             logFn('info', `[action] ${action} matched via ${sel.type}`);
             if (action === 'locate') {

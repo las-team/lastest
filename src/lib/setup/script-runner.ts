@@ -1,6 +1,6 @@
 import type { Page, Locator } from 'playwright';
-import { stripTypeAnnotations, hashSelectors, type SelectorRef } from '@lastest/shared';
-import { getSortedSelectors, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries/misc';
+import { stripTypeAnnotations, hashSelectors, sortSelectorsByStats, selectorTimeoutFor, type SelectorRef, type SelectorStatRow } from '@lastest/shared';
+import { getSelectorStatsForTest, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries/misc';
 import type { SetupScript, SetupContext, SetupResult } from './types';
 
 /**
@@ -159,11 +159,26 @@ function createAppState(page: Page) {
  * and per-attempt outcomes are recorded fire-and-forget against
  * `selector_stats`. Pure setup scripts call without a testId and skip the
  * optimization — selector_stats is keyed on the tests table FK.
+ *
+ * `defaultTimeoutMs` is the per-candidate `waitFor` budget. When stats are
+ * available, `selectorTimeoutFor` further shortens it for known-slow
+ * candidates so we don't burn the full budget on selectors that are
+ * historically dead weight.
  */
-function createLocateWithFallback(_page: Page, testId?: string) {
+function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs = 3000) {
   // Per-call sort cache: hash → sorted selectors. Reused across actions so a
   // test that locates the same array repeatedly only pays the DB read once.
   const sortCache = new Map<string, { type: string; value: string }[]>();
+  // Lazy single-shot fetch of every selector_stats row for the test. Used
+  // both to sort candidates and to compute adaptive per-candidate timeouts.
+  let allStatsPromise: Promise<SelectorStatRow[]> | null = null;
+  const getAllStats = (): Promise<SelectorStatRow[]> => {
+    if (!testId) return Promise.resolve([]);
+    if (!allStatsPromise) {
+      allStatsPromise = getSelectorStatsForTest(testId).catch(() => [] as SelectorStatRow[]);
+    }
+    return allStatsPromise;
+  };
 
   return async (
     pg: Page,
@@ -176,19 +191,13 @@ function createLocateWithFallback(_page: Page, testId?: string) {
 
     const hash = hashSelectors(validSelectors as SelectorRef[]);
 
-    let ordered = validSelectors;
-    if (testId) {
-      const cached = sortCache.get(hash);
-      if (cached) {
-        ordered = cached;
-      } else {
-        try {
-          ordered = await getSortedSelectors(testId, validSelectors);
-        } catch {
-          ordered = validSelectors;
-        }
-        sortCache.set(hash, ordered);
-      }
+    const allStats = await getAllStats();
+    let ordered = sortCache.get(hash);
+    if (!ordered) {
+      ordered = allStats.length > 0
+        ? sortSelectorsByStats(validSelectors, allStats.filter(r => r.hash === hash))
+        : validSelectors;
+      sortCache.set(hash, ordered);
     }
 
     for (const sel of ordered) {
@@ -206,7 +215,9 @@ function createLocateWithFallback(_page: Page, testId?: string) {
           locator = pg.locator(sel.value);
         }
         const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
+        const stat = allStats.find(r => r.hash === hash && r.type === sel.type && r.value === sel.value);
+        const candidateTimeout = selectorTimeoutFor(stat, defaultTimeoutMs);
+        await target.waitFor({ timeout: candidateTimeout });
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
@@ -351,7 +362,7 @@ async function executeSetupCode(
     // Create helper functions that tests expect
     const expectFn = createExpect(5000);
     const appStateFn = createAppState(page);
-    const locateWithFallbackFn = createLocateWithFallback(page, testId);
+    const locateWithFallbackFn = createLocateWithFallback(page, testId, context.selectorTimeoutMs ?? 3000);
 
     // Create a stepLogger that logs to console for debugging
     const stepLogger = {

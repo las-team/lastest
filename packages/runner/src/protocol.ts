@@ -93,6 +93,9 @@ export interface RunTestCommandPayload {
    *  `locateWithFallback` to sort candidates by historical success
    *  before iterating. */
   selectorStats?: SelectorStatRow[];
+  /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
+   *  Resolved on the host. Defaults to 3000ms when omitted. */
+  selectorTimeoutMs?: number;
 }
 
 export interface RunTestCommand extends BaseMessage {

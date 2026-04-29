@@ -105,3 +105,21 @@ export function sortSelectorsByStats<T extends SelectorRef>(
   });
   return indexed.map((x) => x.sel);
 }
+
+/**
+ * Adaptive per-candidate `waitFor` timeout for `locateWithFallback`.
+ *
+ * Cold start (no stats, or fewer than 3 attempts) returns the configured
+ * default. Once a selector has 3+ attempts on record, we cap its budget at
+ * `max(avg * 2, 500)` (clamped above by the default), so historically slow
+ * or always-failing candidates are skipped sooner instead of burning the
+ * full default each run. The 500ms floor avoids racing UI paint when a
+ * selector's avg is artificially tiny.
+ */
+export function selectorTimeoutFor(
+  stat: SelectorStatRow | undefined,
+  defaultMs: number,
+): number {
+  if (!stat || stat.totalAttempts < 3 || !stat.avgResponseTimeMs) return defaultMs;
+  return Math.min(defaultMs, Math.max(stat.avgResponseTimeMs * 2, 500));
+}

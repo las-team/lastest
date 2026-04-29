@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload, SelectorOutcome } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo, hashSelectors, sortSelectorsByStats, type SelectorRef } from '@lastest/shared';
+import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo, hashSelectors, sortSelectorsByStats, selectorTimeoutFor, type SelectorRef } from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -1093,6 +1093,7 @@ export class TestRunner {
 
     // Create locateWithFallback helper (matches local runner signature)
     const stats = payload?.selectorStats ?? [];
+    const defaultSelectorTimeoutMs = payload?.selectorTimeoutMs ?? 3000;
     const sortCache = new Map<string, Array<{ type: string; value: string }>>();
     const locateWithFallback = async (
       pg: Page,
@@ -1145,7 +1146,9 @@ export class TestRunner {
           }
 
           const target = locator.first();
-          await target.waitFor({ timeout: 3000 });
+          const stat = stats.find((s) => s.hash === hash && s.type === sel.type && s.value === sel.value);
+          const candidateTimeout = selectorTimeoutFor(stat, defaultSelectorTimeoutMs);
+          await target.waitFor({ timeout: candidateTimeout });
 
           log('info', `[action] ${action} matched via ${sel.type}`);
           if (action === 'locate') {

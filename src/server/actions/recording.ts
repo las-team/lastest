@@ -128,10 +128,12 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Generate code from the stored events (merged in-memory + DB-forwarded)
     const allEvents = await getRemoteRecordingEvents(repositoryId);
+    const recordingSettings = await getPlaywrightSettings(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
       allEvents,
       remoteSession.selectorPriority,
-      remoteSession.targetUrl
+      remoteSession.targetUrl,
+      recordingSettings.selectorTimeoutMs ?? 3000,
     );
     completeRemoteRecordingSession(repositoryId, generatedCode);
 
@@ -500,16 +502,28 @@ export async function getOrCreateFunctionalArea(name: string) {
 function generateCodeFromRemoteEvents(
   events: RemoteRecordingEvent[],
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
-  targetUrl: string
+  targetUrl: string,
+  selectorTimeoutMs = 3000,
 ): string {
   const baseOrigin = new URL(targetUrl).origin;
   const coordsEnabled = selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
   const hasCursorEvents = events.some(e => e.type === 'cursor-move');
+  // Baked into the recorded test so plain `npx playwright test` runs respect
+  // the user's selector-timeout setting at record time. When the runner /
+  // EB executes the test, both strip this inline `locateWithFallback` and
+  // substitute their own helper which reads the live setting from the run
+  // command — so changes after recording still apply via the runtime path.
+  const recordedTimeoutMs = Number.isFinite(selectorTimeoutMs) && selectorTimeoutMs > 0
+    ? Math.floor(selectorTimeoutMs)
+    : 3000;
 
   const lines: string[] = [
     `import { Page } from 'playwright';`,
     '',
     `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
+    `  // Per-candidate waitFor budget for locateWithFallback, baked at record time`,
+    `  const __SELECTOR_TIMEOUT_MS = ${recordedTimeoutMs};`,
+    ``,
     `  // Helper to build URLs safely (handles trailing/leading slashes)`,
     `  function buildUrl(base, path) {`,
     `    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;`,
@@ -548,7 +562,7 @@ function generateCodeFromRemoteEvents(
     `          locator = page.locator(sel.value);`,
     `        }`,
     `        const target = locator.first();`,
-    `        await target.waitFor({ timeout: 3000 });`,
+    `        await target.waitFor({ timeout: __SELECTOR_TIMEOUT_MS });`,
     `        await target.scrollIntoViewIfNeeded().catch(() => {});`,
     `        if (action === 'locate') return target;`,
     `        if (action === 'click') await target.click(options || {});`,

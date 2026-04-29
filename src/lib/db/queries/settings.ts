@@ -96,6 +96,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     headlessMode: 'true' as const,
     navigationTimeout: 30000,
     actionTimeout: 5000,
+    selectorTimeoutMs: 3000,
     pointerGestures: false,
     cursorFPS: 30,
     cursorPlaybackSpeed: 1,

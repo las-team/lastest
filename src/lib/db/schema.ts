@@ -176,6 +176,9 @@ export interface TestPlaywrightOverrides {
   maxParallelTests?: number;
   baseUrl?: string;
   cursorPlaybackSpeed?: number;
+  // Per-candidate waitFor budget inside locateWithFallback. Falls back to
+  // playwrightSettings.selectorTimeoutMs, then a 3000ms default.
+  selectorTimeoutMs?: number;
 }
 
 // Per-step pass/fail rules. Extensible: add new `kind`s and handle them in
@@ -818,6 +821,10 @@ export const playwrightSettings = pgTable('playwright_settings', {
   headlessMode: text('headless_mode').default('true'), // 'true' | 'false' | 'shell'
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
+  // Per-candidate waitFor budget for locateWithFallback. The 4 runner sites
+  // also adaptively shorten this when selector_stats indicate a known-slow
+  // selector (see `selectorTimeoutFor` in @lastest/shared/selector-stats).
+  selectorTimeoutMs: integer('selector_timeout_ms').default(3000),
   pointerGestures: boolean('pointer_gestures').default(false),
   cursorFPS: integer('cursor_fps').default(30),
   cursorPlaybackSpeed: integer('cursor_playback_speed').default(1), // 1 = realtime, 0 = instant (skip delays)

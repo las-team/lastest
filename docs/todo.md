@@ -18,11 +18,15 @@ Openrouter agent sdk parity
 **Criteria**
 **CSV upload and use**
 ## bugs
+Enhance with AI is broken
 ## features
-Default ai, openrouter test
-Recording - test create v3
-  Better timeline: imeline · drag to reorder add icons, like steps as well
+Add logo to signin, improve it, switch to eu comapatible explicit opt-in
 **Self-test**
+Chat agent for website
+Auto-feedback to resolve loop
+Default ai, openrouter test
+unsubscribe
+delete account
 mcp-oauth flow
 ## ideas
 Maybe workspace list w last 3 workspaces?

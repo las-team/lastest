@@ -19,6 +19,7 @@ export async function savePlaywrightSettings(data: {
   headlessMode?: string;
   navigationTimeout?: number;
   actionTimeout?: number;
+  selectorTimeoutMs?: number;
   pointerGestures?: boolean;
   cursorFPS?: number;
   cursorPlaybackSpeed?: number;

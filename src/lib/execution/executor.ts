@@ -533,6 +533,10 @@ async function executeViaRunner(
           codeLineEnd: a.codeLineEnd,
         })),
         selectorStats: selectorStatsForRunner.length > 0 ? selectorStatsForRunner : undefined,
+        selectorTimeoutMs:
+          pwOverrides?.selectorTimeoutMs
+          ?? options.playwrightSettings?.selectorTimeoutMs
+          ?? 3000,
       });
 
       // Queue command to DB
