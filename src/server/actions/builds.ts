@@ -22,7 +22,7 @@ import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { createJob, createPendingJob, updateJobProgress, updateJobActivity, completeJob, failJob, isRunnerBusy } from './jobs';
 import { emitJobEvent } from '@/lib/ws/job-events';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
@@ -755,12 +755,11 @@ async function runBuildAsync(
     });
   };
 
-  // Progress callback for parallel execution tracking
+  // Progress callback for parallel execution tracking. Only updates the
+  // activeCount/activeTests metadata — completedSteps is owned by onResult so
+  // the two callbacks can't race-overwrite each other on the same row.
   const onProgress = async (progress: { completed: number; total: number; activeCount?: number; activeTests?: string[] }) => {
-    await updateJobProgress(jobId, progress.completed, progress.total, {
-      activeCount: progress.activeCount,
-      activeTests: progress.activeTests,
-    });
+    await updateJobActivity(jobId, progress.activeCount, progress.activeTests);
   };
 
   try {

@@ -110,16 +110,16 @@ export default async function DashboardPage({
   return (
     <div className="flex flex-col h-full">
       {focusActivity && <ActivityAutoFocus />}
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 md:p-6 space-y-4 md:space-y-6">
         {/* Setup Guide — surfaces unfinished onboarding/setup items */}
         <SetupGuide initialStatus={setupStatus} latestBuildId={recentBuilds[0]?.id ?? null} />
 
         {/* Health Score + Stats Cards */}
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
           {/* Health Score */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className={`${healthBg} cursor-default`}>
+              <Card className={`${healthBg} cursor-default col-span-2 md:col-span-1`}>
                 <CardHeader className="pb-2">
                   <CardDescription className="flex items-center gap-1">
                     <Shield className="h-3.5 w-3.5" />
@@ -222,7 +222,7 @@ export default async function DashboardPage({
         </div>
 
         {/* Coverage + Last Build Row */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center gap-1">
@@ -292,9 +292,9 @@ export default async function DashboardPage({
                     <Link
                       key={build.id}
                       href={`/builds/${build.id}`}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         {isRunning ? (
                           <Loader2 className="h-4 w-4 text-info animate-spin" />
                         ) : build.overallStatus === 'safe_to_merge' ? (
@@ -316,9 +316,9 @@ export default async function DashboardPage({
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 shrink-0">
                         {/* Pass rate mini bar */}
-                        <div className="flex items-center gap-2">
+                        <div className="hidden sm:flex items-center gap-2">
                           <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                             <div
                               className={`h-full transition-all ${buildPassRate === 100 ? 'bg-success' : buildPassRate > 80 ? 'bg-warning' : 'bg-destructive'}`}
@@ -357,7 +357,7 @@ export default async function DashboardPage({
           </CardHeader>
           <CardContent>
             {areas.length > 0 ? (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {areas.map((area) => {
                   const areaTests = tests.filter(t => t.functionalAreaId === area.id);
                   return (

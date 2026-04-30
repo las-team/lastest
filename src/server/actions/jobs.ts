@@ -125,6 +125,28 @@ export async function updateJobProgress(
   emitJobUpdate(jobId).catch(() => {});
 }
 
+// Updates only the parallel-execution metadata (activeCount/activeTests) without
+// touching completedSteps/progress. Use from the executor's onProgress where the
+// authoritative completedSteps comes from onResult — writing both racing against
+// each other left the queue UI stuck at the lower value.
+export async function updateJobActivity(
+  jobId: string,
+  activeCount?: number,
+  activeTests?: string[],
+) {
+  const existingJob = await queries.getBackgroundJob(jobId);
+  const mergedMetadata = {
+    ...((existingJob?.metadata as Record<string, unknown>) ?? {}),
+    activeCount: activeCount ?? 0,
+    activeTests: activeTests ?? [],
+  };
+  await queries.updateBackgroundJob(jobId, {
+    lastActivityAt: new Date(),
+    metadata: mergedMetadata,
+  });
+  emitJobUpdate(jobId).catch(() => {});
+}
+
 export async function completeJob(jobId: string) {
   await queries.updateBackgroundJob(jobId, {
     status: 'completed',

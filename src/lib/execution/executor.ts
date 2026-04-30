@@ -913,22 +913,30 @@ async function executeViaPoolWorkers(
         screenshots: [],
         errorMessage: `Broadcast setup failed: ${setupErr}`,
       }));
+      for (const r of failed) {
+        try { await onResult?.(r); } catch (err) { console.error('[Dispatch] onResult threw for broadcast-setup-failed test:', err); }
+      }
       return everClaimed ? failed : null;
     }
   }
+
+  const fireResult = async (r: TestRunResult): Promise<TestRunResult> => {
+    try { await onResult?.(r); } catch (err) { console.error('[Dispatch] onResult threw:', err); }
+    return r;
+  };
 
   const runOneTest = async (test: Test): Promise<TestRunResult> => {
     let lastError: string | undefined;
     for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
       const eb = await claimWithRetry();
       if (!eb) {
-        return {
+        return fireResult({
           testId: test.id,
           status: 'setup_failed',
           durationMs: 0,
           screenshots: [],
           errorMessage: `Could not claim an EB within ${claimMaxWaitMs}ms`,
-        };
+        });
       }
       everClaimed = true;
       await recordActualRunner(eb.runnerId);
@@ -974,24 +982,24 @@ async function executeViaPoolWorkers(
           console.warn(`[Dispatch] Dead-EB exception on attempt ${attempt} for "${test.name}", retrying: ${msg}`);
           continue;
         }
-        return {
+        return fireResult({
           testId: test.id,
           status: 'failed',
           durationMs: 0,
           screenshots: [],
           errorMessage: msg,
-        };
+        });
       } finally {
         try { await releasePoolEB(eb.runnerId); } catch { /* ignore */ }
       }
     }
-    return {
+    return fireResult({
       testId: test.id,
       status: 'setup_failed',
       durationMs: 0,
       screenshots: [],
       errorMessage: lastError || `Exhausted ${MAX_EB_ATTEMPTS} EB attempts`,
-    };
+    });
   };
 
   console.log(`[Dispatch] Starting build run=${runId} — ${tests.length} tests, concurrency=${maxParallelEBs}`);
@@ -1037,13 +1045,15 @@ async function executeViaPoolWorkers(
     if (r) {
       results.push(r);
     } else {
-      results.push({
+      const missing: TestRunResult = {
         testId: t.id,
-        status: 'setup_failed' as const,
+        status: 'setup_failed',
         durationMs: 0,
         screenshots: [],
         errorMessage: 'Dispatch ended without recording a result',
-      });
+      };
+      try { await onResult?.(missing); } catch (err) { console.error('[Dispatch] onResult threw for missing-result test:', err); }
+      results.push(missing);
     }
   }
 

@@ -30,6 +30,7 @@ import {
 } from '@/server/actions/recording';
 import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
 import { runTests, getJobStatus } from '@/server/actions/runs';
+import { useIsMobile } from '@/lib/hooks/use-is-mobile';
 import { deleteTest } from '@/server/actions/tests';
 import {
   DropdownMenu,
@@ -445,7 +446,12 @@ export function RecordingClient({
   const [playbackJobId, setPlaybackJobId] = useState<string | null>(null);
   const [playbackFrameSize, setPlaybackFrameSize] = useState<{ width: number; height: number } | null>(null);
   const autoTriggeredRef = useRef(false);
+  const isMobile = useIsMobile();
   const [timelineOpen, setTimelineOpen] = useState(true);
+  // On mobile, close the timeline by default once we know we're on a small screen.
+  useEffect(() => {
+    if (isMobile) setTimelineOpen(false);
+  }, [isMobile]);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);

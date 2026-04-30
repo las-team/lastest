@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { useIsMobile } from '@/lib/hooks/use-is-mobile';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
 import { RouteSelectorDialog } from '@/components/routes/route-selector-dialog';
 import { AICreateTestDialog } from '@/components/ai/ai-create-test-dialog';
@@ -169,6 +170,7 @@ export function DefinitionPageClient({
   const router = useRouter();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
+  const isMobile = useIsMobile();
   const tabParam = searchParams.get('tab');
   const initialTab = tabParam === 'plan' || tabParam === 'setup' ? tabParam : 'tests';
 
@@ -986,37 +988,41 @@ export function DefinitionPageClient({
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
-      {/* ─── Left Sidebar ─── */}
-      <ResizablePanel defaultSize="22%" minSize="15%" maxSize="35%" className="bg-muted/30 h-full overflow-hidden flex flex-col">
-        <div className="flex-1 overflow-hidden">
-          <AreaTree
-            tree={tree}
-            uncategorizedTests={uncategorizedTests}
-            selection={treeSelection}
-            selectedAreaIds={selectedAreaIds}
-            onSelect={handleTreeSelect}
-            onMultiSelect={setSelectedAreaIds}
-            onNewArea={handleNewArea}
-            onEditArea={(id) => setTreeSelection({ type: 'area', id })}
-            onDeleteArea={setDeleteAreaId}
-            onDeleteMultipleAreas={setDeleteAreaIds}
-            onMoveTest={handleMoveTest}
-            onMoveArea={handleMoveArea}
-            onDeleteTest={setDeleteTestId}
-            headerExtra={discoveryHeaderExtra}
-            addButtonClassName="text-primary hover:text-primary"
-          />
-        </div>
-      </ResizablePanel>
+      {/* ─── Left Sidebar (hidden on mobile) ─── */}
+      {!isMobile && (
+        <>
+          <ResizablePanel defaultSize="22%" minSize="15%" maxSize="35%" className="bg-muted/30 h-full overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-hidden">
+              <AreaTree
+                tree={tree}
+                uncategorizedTests={uncategorizedTests}
+                selection={treeSelection}
+                selectedAreaIds={selectedAreaIds}
+                onSelect={handleTreeSelect}
+                onMultiSelect={setSelectedAreaIds}
+                onNewArea={handleNewArea}
+                onEditArea={(id) => setTreeSelection({ type: 'area', id })}
+                onDeleteArea={setDeleteAreaId}
+                onDeleteMultipleAreas={setDeleteAreaIds}
+                onMoveTest={handleMoveTest}
+                onMoveArea={handleMoveArea}
+                onDeleteTest={setDeleteTestId}
+                headerExtra={discoveryHeaderExtra}
+                addButtonClassName="text-primary hover:text-primary"
+              />
+            </div>
+          </ResizablePanel>
 
-      <ResizableHandle withHandle />
+          <ResizableHandle withHandle />
+        </>
+      )}
 
       {/* ─── Main Content ─── */}
-      <ResizablePanel defaultSize="78%" className="overflow-hidden flex flex-col">
+      <ResizablePanel defaultSize={isMobile ? '100%' : '78%'} className="overflow-hidden flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
-          <div className="px-6 pt-4 pb-0 shrink-0">
+          <div className="px-3 md:px-6 pt-3 md:pt-4 pb-0 shrink-0">
             <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
-              <TabsTrigger value="plan" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="plan" className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Plan
                 {flatAreas.length > 0 && (
                   <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-accent-foreground/20 data-[state=active]:text-accent-foreground">
@@ -1024,10 +1030,10 @@ export function DefinitionPageClient({
                   </Badge>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="setup" className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Setup
               </TabsTrigger>
-              <TabsTrigger value="tests" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+              <TabsTrigger value="tests" className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Tests
               </TabsTrigger>
             </TabsList>
@@ -1035,10 +1041,10 @@ export function DefinitionPageClient({
 
           {/* ─── Tests Tab ─── */}
           <TabsContent value="tests" className="overflow-auto flex-1 flex flex-col">
-            <div className="px-6 pt-4 pb-2 shrink-0">
+            <div className="px-3 md:px-6 pt-3 md:pt-4 pb-2 shrink-0">
               <div className="max-w-5xl">
                 {/* Breadcrumb + Action Toolbar */}
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center justify-between gap-2 md:gap-4 flex-wrap">
                   <div className="flex items-center gap-1.5 text-sm min-w-0">
                     <button
                       onClick={() => { setTreeSelection(null); setSelectedAreaIds(new Set()); handleCloseTest(); }}
@@ -1074,7 +1080,7 @@ export function DefinitionPageClient({
                   </div>
 
                   {!openTestId && (
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
                     {/* Area-specific actions */}
                     {treeSelection?.type === 'area' && (
                       <>
