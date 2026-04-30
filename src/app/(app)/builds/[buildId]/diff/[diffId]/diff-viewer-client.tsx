@@ -7,7 +7,8 @@ import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider
 import { SwipeDeck } from '@/components/diff/swipe-deck-client';
 import { useIsMobile } from '@/lib/hooks/use-is-mobile';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
+import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion, submitDiffAsIssue } from '@/server/actions/diffs';
+import { toast } from 'sonner';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
@@ -119,7 +120,7 @@ function DiffStrip({
 }
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair, CircleAlert, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -236,6 +237,35 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
       router.push(buildDiffUrl(nextDiffId));
     }
   }, [nextDiffId, buildDiffUrl, router]);
+
+  const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [issueUrl, setIssueUrl] = useState<string | null>(diff.issueUrl ?? null);
+
+  const handleSubmitAsIssue = useCallback(async () => {
+    if (issueSubmitting) return;
+    if (issueUrl) {
+      window.open(issueUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setIssueSubmitting(true);
+    try {
+      const res = await submitDiffAsIssue(diff.id);
+      if (!res.success || !res.issueUrl) {
+        toast.error(res.error || 'Failed to create issue');
+        return;
+      }
+      setIssueUrl(res.issueUrl);
+      const url = res.issueUrl;
+      toast.success(res.alreadyExists ? 'Issue already exists' : 'Issue created', {
+        action: { label: 'Open', onClick: () => window.open(url, '_blank', 'noopener,noreferrer') },
+      });
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create issue');
+    } finally {
+      setIssueSubmitting(false);
+    }
+  }, [diff.id, issueSubmitting, issueUrl, router]);
 
   const handlePrev = useCallback(() => {
     if (prevDiffId) {
@@ -708,6 +738,23 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               >
                 <SkipForward className="w-4 h-4" />
                 Skip
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={handleSubmitAsIssue}
+                disabled={issueSubmitting}
+                className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                title={issueUrl ? 'Open the GitHub issue created from this diff' : 'Create an issue in your configured tracker'}
+              >
+                {issueSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : issueUrl ? (
+                  <ExternalLink className="w-4 h-4" />
+                ) : (
+                  <CircleAlert className="w-4 h-4" />
+                )}
+                {issueUrl ? 'View Issue' : 'Submit as Issue'}
               </Button>
 
               <Button

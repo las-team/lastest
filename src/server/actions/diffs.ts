@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import { awardScore } from '@/server/actions/gamification';
+import { buildVisualDiffIssue, createVisualDiffIssue } from '@/lib/integrations/github-issues';
 
 /**
  * Approve a single visual diff — core logic, no auth check.
@@ -509,6 +510,108 @@ export async function discardAIRecommendations(buildId: string) {
   revalidatePath(`/builds/${buildId}`);
 
   return { success: true };
+}
+
+/**
+ * Submit the current diff as an issue in the team's configured issue tracker.
+ * Idempotent: if an issue was already created for this diff, returns the
+ * existing URL instead of opening a duplicate.
+ */
+export async function submitDiffAsIssue(
+  diffId: string,
+): Promise<{ success: boolean; issueUrl?: string; alreadyExists?: boolean; error?: string }> {
+  const session = await requireTeamAccess();
+
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) return { success: false, error: 'Diff not found' };
+
+  // Idempotency: don't double-submit
+  if (diff.issueUrl) {
+    return { success: true, issueUrl: diff.issueUrl, alreadyExists: true };
+  }
+
+  // Resolve repo + branch + commit via build → testRun
+  const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
+  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repositoryId = testRun?.repositoryId || null;
+  const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
+  if (!repo) return { success: false, error: 'Repository not found for this diff' };
+
+  // Tenant check — same pattern as requireRepoAccess but inline so we can
+  // surface a friendlier error instead of throwing.
+  if (repo.teamId !== session.team.id) {
+    return { success: false, error: 'Forbidden: repository does not belong to your team' };
+  }
+
+  // Resolve provider preference. Per-repo first, then global.
+  const notif = await queries.getNotificationSettings(repo.id);
+  const provider = notif.issueTrackerProvider || 'github';
+
+  if (provider !== 'github') {
+    return { success: false, error: `Issue tracker "${provider}" is not yet supported. Switch to GitHub in Settings.` };
+  }
+
+  if (repo.provider !== 'github' || !repo.owner || !repo.name) {
+    return { success: false, error: 'This repository is not linked to GitHub. Connect a GitHub repository in Settings.' };
+  }
+
+  const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
+  if (!ghAccount?.accessToken) {
+    return { success: false, error: 'GitHub is not connected for this team. Connect it in Settings.' };
+  }
+
+  // Enrich with test + test result context for the issue body
+  const test = await queries.getTest(diff.testId);
+  const functionalArea = test?.functionalAreaId
+    ? await queries.getFunctionalArea(test.functionalAreaId)
+    : null;
+  let errorMessage: string | null = null;
+  let consoleErrors: string[] | null = null;
+  let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
+  if (diff.testResultId) {
+    const tr = await queries.getTestResultById(diff.testResultId);
+    errorMessage = tr?.errorMessage ?? null;
+    consoleErrors = tr?.consoleErrors ?? null;
+    a11yViolations = tr?.a11yViolations ?? null;
+  }
+
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.BETTER_AUTH_BASE_URL ||
+    'http://localhost:3000';
+
+  const payload = buildVisualDiffIssue({
+    diff: { ...diff, errorMessage, consoleErrors, a11yViolations },
+    test: test ? { name: test.name } : null,
+    functionalAreaName: functionalArea?.name ?? null,
+    build: { id: diff.buildId },
+    branch: testRun?.gitBranch ?? null,
+    commit: testRun?.gitCommit ?? null,
+    repoFullName: repo.fullName,
+    reporterEmail: session.user.email,
+    baseUrl,
+  });
+
+  const result = await createVisualDiffIssue(
+    ghAccount.accessToken,
+    repo.owner,
+    repo.name,
+    payload,
+  );
+
+  if (!result.success || !result.issueUrl) {
+    return { success: false, error: result.error || 'Failed to create GitHub issue' };
+  }
+
+  await queries.setDiffIssue(diffId, result.issueUrl, 'github');
+
+  revalidatePath('/builds');
+  if (diff.buildId) {
+    revalidatePath(`/builds/${diff.buildId}`);
+    revalidatePath(`/builds/${diff.buildId}/diff/${diffId}`);
+  }
+
+  return { success: true, issueUrl: result.issueUrl };
 }
 
 /**

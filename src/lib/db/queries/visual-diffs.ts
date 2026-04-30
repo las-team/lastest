@@ -107,6 +107,10 @@ export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVis
   await db.update(visualDiffs).set(data).where(inArray(visualDiffs.id, ids));
 }
 
+export async function setDiffIssue(id: string, issueUrl: string, issueProvider: string) {
+  await db.update(visualDiffs).set({ issueUrl, issueProvider }).where(eq(visualDiffs.id, id));
+}
+
 export async function getAIDiffSummaryForBuild(buildId: string) {
   const diffs = await db
     .select({

@@ -41,7 +41,6 @@ Test coverage assessment and recreation based on existing test set  ~/.claude/pl
 Content comparison - compare text in 2 setups
 Component specific testing
 Figma plugin
-Generate test data with AI
 Sitemap -flow
 Formal verification of code?
 Approve reject changes or create ticket -> gh issue, jira, linear

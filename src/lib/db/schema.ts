@@ -584,6 +584,9 @@ export const visualDiffs = pgTable('visual_diffs', {
   aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
   aiAnalysisStatus: text('ai_analysis_status'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | null
   browser: text('browser').default('chromium'), // browser used for this diff
+  // External issue tracker submission (e.g. GitHub issue created from this diff)
+  issueUrl: text('issue_url'),
+  issueProvider: text('issue_provider'), // 'github' | 'gitlab' | …
 });
 
 // Baselines for carry-forward logic
@@ -1155,12 +1158,15 @@ export const notificationSettings = pgTable('notification_settings', {
   customWebhookUrl: text('custom_webhook_url'),
   customWebhookMethod: text('custom_webhook_method').default('POST'),
   customWebhookHeaders: text('custom_webhook_headers'), // JSON: {"Authorization": "Bearer xxx"}
+  // Where "Submit as Issue" on a visual diff posts the issue. Only 'github' is wired today.
+  issueTrackerProvider: text('issue_tracker_provider').default('github').notNull(),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
 
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type NewNotificationSettings = typeof notificationSettings.$inferInsert;
+export type IssueTrackerProvider = 'github' | 'gitlab';
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
@@ -1169,6 +1175,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   gitlabMrCommentsEnabled: false,
   customWebhookEnabled: false,
   customWebhookMethod: 'POST' as const,
+  issueTrackerProvider: 'github' as IssueTrackerProvider,
 };
 
 // Selector statistics for optimizing fallback strategy
