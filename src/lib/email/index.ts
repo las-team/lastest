@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { buildUnsubscribeUrl, buildUnsubscribePostUrl } from './unsubscribe';
 
 // Only instantiate Resend if API key is available
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -10,9 +11,11 @@ export interface SendEmailOptions {
   subject: string;
   html: string;
   text?: string;
+  unsubscribeUrl?: string;
+  unsubscribePostUrl?: string;
 }
 
-export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
+export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsubscribePostUrl }: SendEmailOptions) {
   if (!resend) {
     console.log('[Email] No RESEND_API_KEY configured, skipping email');
     console.log(`[Email] Would send to: ${to}`);
@@ -27,6 +30,14 @@ export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
       subject,
       html,
       text,
+      headers: unsubscribeUrl
+        ? {
+            'List-Unsubscribe': unsubscribePostUrl
+              ? `<${unsubscribeUrl}>, <${unsubscribePostUrl}>`
+              : `<${unsubscribeUrl}>`,
+            ...(unsubscribePostUrl ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
+          }
+        : undefined,
     });
 
     if (error) {
@@ -41,7 +52,10 @@ export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
   }
 }
 
-function emailShell(content: string) {
+function emailShell(content: string, unsubscribeUrl?: string) {
+  const unsubFooter = unsubscribeUrl
+    ? `<br/><a href="${unsubscribeUrl}" style="color:#0891b2;text-decoration:underline;">Unsubscribe from these emails</a>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -67,7 +81,7 @@ function emailShell(content: string) {
   <tr><td align="center" style="padding-top:28px;">
     <p style="margin:0;font-size:12px;line-height:18px;color:#4a4a6a;">
       Lastest &mdash; Visual Regression Testing Platform<br/>
-      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace('https://', '')}</a>
+      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace('https://', '')}</a>${unsubFooter}
     </p>
   </td></tr>
 </table>
@@ -79,6 +93,8 @@ function emailShell(content: string) {
 
 export async function sendPasswordResetEmail(to: string, token: string) {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+  const unsubscribeUrl = buildUnsubscribeUrl(to);
+  const unsubscribePostUrl = buildUnsubscribePostUrl(to);
 
   const html = emailShell(`
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Reset your password</h1>
@@ -103,7 +119,7 @@ export async function sendPasswordResetEmail(to: string, token: string) {
             </p>
           </td></tr>
         </table>
-  `);
+  `, unsubscribeUrl);
 
   const text = `Reset your password
 
@@ -113,19 +129,25 @@ Reset here: ${resetUrl}
 
 This link expires in 1 hour. If you didn't request this, you can safely ignore this email.
 
-— Lastest`;
+— Lastest
+
+Unsubscribe: ${unsubscribeUrl}`;
 
   return sendEmail({
     to,
     subject: 'Reset your password — Lastest',
     html,
     text,
+    unsubscribeUrl,
+    unsubscribePostUrl,
   });
 }
 
 export async function sendInvitationEmail(to: string, token: string, inviterName?: string) {
   const inviteUrl = `${APP_URL}/invite?token=${token}`;
   const inviter = inviterName || 'Your team';
+  const unsubscribeUrl = buildUnsubscribeUrl(to);
+  const unsubscribePostUrl = buildUnsubscribePostUrl(to);
 
   const html = emailShell(`
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">You're invited</h1>
@@ -151,7 +173,7 @@ export async function sendInvitationEmail(to: string, token: string, inviterName
             </p>
           </td></tr>
         </table>
-  `);
+  `, unsubscribeUrl);
 
   const text = `You're invited!
 
@@ -161,12 +183,16 @@ Accept your invitation: ${inviteUrl}
 
 This invitation expires in 7 days.
 
-— Lastest`;
+— Lastest
+
+Unsubscribe: ${unsubscribeUrl}`;
 
   return sendEmail({
     to,
     subject: `${inviter} invited you to Lastest`,
     html,
     text,
+    unsubscribeUrl,
+    unsubscribePostUrl,
   });
 }
