@@ -122,6 +122,11 @@ interface TestDetailClientProps {
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
   csvDataSources?: CsvDataSource[];
+  googleSheetsAccount?: {
+    id: string;
+    googleEmail: string;
+    googleName: string | null;
+  } | null;
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
   earlyAdopterMode?: boolean;
@@ -234,7 +239,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], googleSheetsAccount = null, stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1183,6 +1188,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               variables={test.variables ?? []}
               sheetSources={sheetDataSources}
               csvSources={csvDataSources}
+              googleSheetsAccount={googleSheetsAccount}
               extractedValues={latestResult?.extractedVariables ?? null}
               assignedValues={latestResult?.assignedVariables ?? null}
               code={test.code ?? null}
