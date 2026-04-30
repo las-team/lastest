@@ -306,12 +306,12 @@ export async function getTest(id: string) {
 }
 
 export async function getTestDetailData(testId: string, repositoryId?: string | null) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return null;
 
   const repoId = test.repositoryId || repositoryId;
-  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, googleSheetsAccount, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
     queries.getPlannedScreenshotsByTest(testId),
@@ -320,6 +320,7 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
     repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
     repoId ? queries.getCsvDataSources(repoId) : Promise.resolve([]),
+    queries.getGoogleSheetsAccount(session.team.id),
     repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
     repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
     repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
@@ -337,6 +338,13 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     availableScripts: setupScripts,
     sheetDataSources,
     csvDataSources,
+    googleSheetsAccount: googleSheetsAccount
+      ? {
+          id: googleSheetsAccount.id,
+          googleEmail: googleSheetsAccount.googleEmail,
+          googleName: googleSheetsAccount.googleName,
+        }
+      : null,
     stabilizationDefaults: playwrightSettings?.stabilization ?? null,
     diffDefaults: diffSettings,
     playwrightDefaults: playwrightSettings,

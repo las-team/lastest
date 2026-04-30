@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Github } from 'lucide-react';
 import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
 import { recordRegistrationConsent } from '@/server/actions/consent';
@@ -34,6 +35,7 @@ function RegisterForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,6 +43,12 @@ function RegisterForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+
+    if (!termsAccepted) {
+      setError('Please accept the Terms of Service and Privacy Policy to continue.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -52,6 +60,7 @@ function RegisterForm() {
 
       if (result.error) {
         setError(result.error.message ?? 'Sign up failed');
+        setLoading(false);
         return;
       }
 
@@ -65,9 +74,10 @@ function RegisterForm() {
       // Hard navigation — RSC swap was racing with router.refresh and the
       // freshly-set better-auth session cookie wasn't visible to the next
       // server fetch in some cases. window.location.href avoids both.
+      // Keep `loading` true so the button stays disabled until the new page paints.
       window.location.href = emailPostAuthUrl;
-      return;
-    } finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign up failed');
       setLoading(false);
     }
   }
@@ -173,6 +183,27 @@ function RegisterForm() {
               />
             </div>
 
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="terms"
+                checked={termsAccepted}
+                onCheckedChange={(checked) => setTermsAccepted(checked === true)}
+                className="mt-0.5"
+                required
+              />
+              <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground leading-snug">
+                I have read and agree to the{' '}
+                <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+                  Terms of Service
+                </Link>{' '}
+                and{' '}
+                <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+                  Privacy Policy
+                </Link>
+                .
+              </Label>
+            </div>
+
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
                 Send me product updates, tips, and feature announcements
@@ -188,21 +219,9 @@ function RegisterForm() {
               <p className="text-sm text-destructive">{error}</p>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || !termsAccepted}>
               {loading ? 'Creating account...' : 'Create account'}
             </Button>
-
-            <p className="text-xs text-muted-foreground text-center">
-              By creating an account, you agree to our{' '}
-              <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
-                Terms of Service
-              </Link>{' '}
-              and{' '}
-              <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
-                Privacy Policy
-              </Link>
-              .
-            </p>
           </form>
         </CardContent>
       </Card>

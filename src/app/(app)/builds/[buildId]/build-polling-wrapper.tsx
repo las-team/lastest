@@ -22,6 +22,7 @@ interface BuildData {
   codeChangeTestIds?: string[] | null;
   diffs: VisualDiffWithTestStatus[];
   errorMessage?: string | null;
+  runningTests?: { testId: string; name: string }[];
 }
 
 interface BuildPollingWrapperProps {
@@ -135,6 +136,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
         hasPendingDiffs={pendingDiffs.length > 0}
         isRunning={isRunning}
         completedTests={completedTests}
+        runningTests={build.runningTests ?? []}
         codeChangeTestIds={build.codeChangeTestIds}
         isMainBranch={isMainBranch}
         banAiMode={banAiMode}

@@ -5,6 +5,14 @@ import { requireAuth } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import { TERMS_VERSION, PRIVACY_VERSION } from '@/lib/legal/versions';
 
+export async function checkEmailExists(email: string): Promise<boolean> {
+  if (!email || typeof email !== 'string') return false;
+  const trimmed = email.trim();
+  if (!trimmed) return false;
+  const user = await queries.getUserByEmail(trimmed);
+  return Boolean(user);
+}
+
 export async function recordRegistrationConsent(data: { marketingEmails: boolean }) {
   const session = await requireAuth();
   const userId = session.user.id;
