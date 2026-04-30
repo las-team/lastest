@@ -28,12 +28,17 @@ interface GoogleSheetsSettingsCardProps {
   } | null;
   dataSources: DataSource[];
   repositoryId?: string | null;
+  /** When provided, called instead of `router.refresh()` after import / sync /
+   *  delete. Mirrors the CSV card's hook so callers (e.g. the test-detail
+   *  panel) can refetch data that lives outside the server-component cache. */
+  onRefresh?: () => Promise<void> | void;
 }
 
 export function GoogleSheetsSettingsCard({
   account,
   dataSources,
   repositoryId,
+  onRefresh,
 }: GoogleSheetsSettingsCardProps) {
   const router = useRouter();
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -41,13 +46,18 @@ export function GoogleSheetsSettingsCard({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
 
+  const refresh = async () => {
+    if (onRefresh) await onRefresh();
+    else router.refresh();
+  };
+
   const handleDisconnect = async () => {
     if (!confirm('Disconnect Google Sheets? All imported data sources will be removed.')) return;
     setIsDisconnecting(true);
     try {
       await disconnectGoogleSheets();
       toast.success('Google Sheets disconnected');
-      router.refresh();
+      await refresh();
     } catch {
       toast.error('Failed to disconnect');
     } finally {
@@ -61,7 +71,7 @@ export function GoogleSheetsSettingsCard({
       const result = await syncDataSource(id);
       if (result.success) {
         toast.success('Data refreshed');
-        router.refresh();
+        await refresh();
       } else {
         toast.error(result.error || 'Failed to sync');
       }
@@ -78,7 +88,7 @@ export function GoogleSheetsSettingsCard({
     try {
       await deleteDataSource(id);
       toast.success('Data source removed');
-      router.refresh();
+      await refresh();
     } catch {
       toast.error('Failed to delete');
     } finally {
@@ -241,7 +251,7 @@ export function GoogleSheetsSettingsCard({
           open={showBrowser}
           onClose={() => {
             setShowBrowser(false);
-            router.refresh();
+            void refresh();
           }}
         />
       )}

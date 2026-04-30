@@ -1129,6 +1129,7 @@ export function DefinitionPageClient({
                     availableScripts={openTestDetailData.availableScripts}
                     sheetDataSources={openTestDetailData.sheetDataSources}
                     csvDataSources={openTestDetailData.csvDataSources}
+                    googleSheetsAccount={openTestDetailData.googleSheetsAccount}
                     stabilizationDefaults={openTestDetailData.stabilizationDefaults}
                     banAiMode={banAiMode}
                     earlyAdopterMode={true}

@@ -13,6 +13,7 @@ import type {
 } from '@/lib/db/schema';
 import { VarEditDialog } from './var-edit-dialog';
 import { CsvSourcesSettingsCard } from '@/components/settings/csv-sources-settings-card';
+import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
 import { collectExtractableSelectors } from '@/lib/playwright/extractable-selector';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,13 @@ export interface TestVarsTabProps {
   variables: TestVariable[];
   sheetSources: GoogleSheetsDataSource[];
   csvSources: CsvDataSource[];
+  /** Connected Google Sheets account for this team. Drives the connect /
+   *  disconnect / import controls in the embedded settings card. */
+  googleSheetsAccount?: {
+    id: string;
+    googleEmail: string;
+    googleName: string | null;
+  } | null;
   onSaveVariables: (next: TestVariable[]) => Promise<void>;
   /** Values pulled by extract-mode vars during the most recent run, keyed by
    *  variable name. Surfaced in the table as the "Last run" column. */
@@ -55,6 +63,7 @@ export function TestVarsTab({
   variables,
   sheetSources,
   csvSources,
+  googleSheetsAccount = null,
   onSaveVariables,
   extractedValues,
   assignedValues,
@@ -265,6 +274,13 @@ export function TestVarsTab({
 
       <CsvSourcesSettingsCard
         dataSources={csvSources}
+        repositoryId={repositoryId}
+        onRefresh={onRefresh}
+      />
+
+      <GoogleSheetsSettingsCard
+        account={googleSheetsAccount}
+        dataSources={sheetSources}
         repositoryId={repositoryId}
         onRefresh={onRefresh}
       />
