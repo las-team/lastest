@@ -266,6 +266,11 @@ export const tests = pgTable('tests', {
   // Keyed by TestVariable.id → next-row-to-use. Updated post-resolve by the
   // executor; wraps back to 2 (not 0) when it overflows the source's rowCount.
   variableRowCursors: jsonb('variable_row_cursors').$type<Record<string, number>>(),
+  // Last-known-good value cache for assign-mode AI-generated vars. Keyed by
+  // TestVariable.id. The executor writes the most recent successful AI output
+  // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
+  // fall back to it when AI is misconfigured / rate-limited.
+  aiVarLastValues: jsonb('ai_var_last_values').$type<Record<string, string>>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
@@ -339,10 +344,26 @@ export interface AssertionResult {
 // `assign` mode: value is sourced from gsheet/csv/static and replaces {{var:name}} in code at runtime.
 // `extract` mode: value is read from a page field after the test, optionally compared to expectedValue (eotest assertion).
 export type TestVariableMode = 'extract' | 'assign';
-export type TestVariableSourceType = 'gsheet' | 'csv' | 'static';
+export type TestVariableSourceType = 'gsheet' | 'csv' | 'static' | 'ai-generated';
 export type TestVariableAttribute = 'value' | 'textContent' | 'innerText' | 'innerHTML';
 
 export type TestVariableSourceRowMode = 'fixed' | 'increment' | 'random';
+
+// Built-in AI-generated attribute presets. 'custom' means use aiCustomPrompt.
+export type AIVarPreset =
+  | 'firstName'
+  | 'lastName'
+  | 'middleName'
+  | 'fullName'
+  | 'email'
+  | 'company'
+  | 'jobTitle'
+  | 'ukAddress'
+  | 'ukAddressMultiline'
+  | 'usAddress'
+  | 'ukPhone'
+  | 'usPhone'
+  | 'custom';
 
 export interface TestVariable {
   id: string;
@@ -359,8 +380,13 @@ export interface TestVariable {
   // How the row gets picked at run time. Default 'fixed' — uses sourceRow.
   // 'increment' walks forward across runs and wraps from rowCount-1 back to 2
   // (rows 0/1 reserved as defaults). 'random' picks any row each run.
+  // For 'ai-generated' source: 'fixed' = pinned to cached value, 'random' =
+  // regenerate per run with cache fallback. 'increment' is rejected for AI vars.
   sourceRowMode?: TestVariableSourceRowMode;
   staticValue?: string;
+  // AI-generated source
+  aiPreset?: AIVarPreset;
+  aiCustomPrompt?: string;
   // Eotest assertion
   expectedValue?: string;
   assertEnabled?: boolean;
@@ -1048,7 +1074,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = pgTable('ai_prompt_logs', {

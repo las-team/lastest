@@ -138,6 +138,10 @@ interface TestDetailClientProps {
   testSpec?: TestSpec | null;
   contentClassName?: string;
   onRefresh?: () => void | Promise<void>;
+  /** True when an AI provider is configured well enough to call from
+   *  variable resolution (provider !== 'claude-cli' AND its credentials are
+   *  present). Drives the AI-generated variable source enable/disable. */
+  aiAvailable?: boolean;
 }
 
 function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
@@ -241,7 +245,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], googleSheetsAccount = null, stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], googleSheetsAccount = null, stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh, aiAvailable = false }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1206,6 +1210,8 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               assignedValues={latestResult?.assignedVariables ?? null}
               code={test.code ?? null}
               onRefresh={onRefresh}
+              aiAvailable={aiAvailable}
+              aiVarLastValues={test.aiVarLastValues ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);

@@ -13,6 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Sparkles, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -23,9 +26,12 @@ import {
 import type {
   TestVariable,
   TestVariableSourceRowMode,
+  AIVarPreset,
   GoogleSheetsDataSource,
   CsvDataSource,
 } from '@/lib/db/schema';
+import { AI_VAR_PRESETS, AI_VAR_PRESET_KEYS } from '@/lib/vars/ai-presets';
+import { generateAIVarValuePreview } from '@/server/actions/tests';
 
 export interface VarEditDialogProps {
   open: boolean;
@@ -37,6 +43,17 @@ export interface VarEditDialogProps {
   onSave: (variable: TestVariable) => Promise<void> | void;
   /** Forces extract or assign mode (hides the toggle when set). */
   forcedMode?: 'extract' | 'assign';
+  /** When true, the AI-generated source option is enabled and the "Refresh"
+   *  button can call the AI provider. When false, the option is disabled with
+   *  a hint pointing the user to AI settings. */
+  aiAvailable?: boolean;
+  /** Cached last-known-good value for this AI variable (from
+   *  test.aiVarLastValues). Shown as the "Last generated value" preview. */
+  aiLastValue?: string;
+  /** Test id used to call the Refresh-now server action. When omitted, the
+   *  refresh button is hidden (e.g. when creating a brand-new variable on a
+   *  test that hasn't been saved yet). */
+  testId?: string;
 }
 
 function genId() {
@@ -62,6 +79,9 @@ export function VarEditDialog({
   csvSources,
   onSave,
   forcedMode,
+  aiAvailable = false,
+  aiLastValue,
+  testId,
 }: VarEditDialogProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [mode, setMode] = useState<'extract' | 'assign'>(forcedMode ?? initial?.mode ?? 'extract');
@@ -73,6 +93,10 @@ export function VarEditDialog({
   const [sourceRow, setSourceRow] = useState(String(initial?.sourceRow ?? 0));
   const [sourceRowMode, setSourceRowMode] = useState<TestVariableSourceRowMode>(initial?.sourceRowMode ?? 'fixed');
   const [staticValue, setStaticValue] = useState(initial?.staticValue ?? '');
+  const [aiPreset, setAiPreset] = useState<AIVarPreset>(initial?.aiPreset ?? 'firstName');
+  const [aiCustomPrompt, setAiCustomPrompt] = useState(initial?.aiCustomPrompt ?? '');
+  const [aiPreview, setAiPreview] = useState<string | undefined>(aiLastValue);
+  const [refreshing, setRefreshing] = useState(false);
   const [expectedValue, setExpectedValue] = useState(initial?.expectedValue ?? '');
   const [assertEnabled, setAssertEnabled] = useState(initial?.assertEnabled ?? false);
   const [assertSeverity, setAssertSeverity] = useState<'fail' | 'warn'>(initial?.assertSeverity ?? 'fail');
@@ -92,13 +116,21 @@ export function VarEditDialog({
     setSourceAlias(initial?.sourceAlias ?? '');
     setSourceColumn(initial?.sourceColumn ?? '');
     setSourceRow(String(initial?.sourceRow ?? 0));
-    setSourceRowMode(initial?.sourceRowMode ?? 'fixed');
+    // For AI-generated source, default to 'random' (regenerate per run); for
+    // tabular sources, keep the existing 'fixed' default.
+    setSourceRowMode(
+      initial?.sourceRowMode
+        ?? (initial?.sourceType === 'ai-generated' ? 'random' : 'fixed'),
+    );
     setStaticValue(initial?.staticValue ?? '');
+    setAiPreset(initial?.aiPreset ?? 'firstName');
+    setAiCustomPrompt(initial?.aiCustomPrompt ?? '');
+    setAiPreview(aiLastValue);
     setExpectedValue(initial?.expectedValue ?? '');
     setAssertEnabled(initial?.assertEnabled ?? false);
     setAssertSeverity(initial?.assertSeverity ?? 'fail');
     nameTouchedRef.current = !!initial?.name;
-  }, [open, initial, forcedMode]);
+  }, [open, initial, forcedMode, aiLastValue]);
 
   const aliasOptions = useMemo(() => {
     if (sourceType === 'gsheet') return sheetSources.map(s => ({ alias: s.alias, label: `${s.alias} — ${s.spreadsheetName}` }));
@@ -122,6 +154,18 @@ export function VarEditDialog({
     setName(suggestName(sourceAlias, sourceColumn));
   }, [mode, sourceType, sourceAlias, sourceColumn]);
 
+  // Auto-suggest a name from the chosen AI preset (e.g. middleName → middle_name)
+  // until the user types one themselves.
+  useEffect(() => {
+    if (mode !== 'assign') return;
+    if (sourceType !== 'ai-generated') return;
+    if (nameTouchedRef.current) return;
+    if (!aiPreset || aiPreset === 'custom') return;
+    // camelCase → snake_case
+    const snake = aiPreset.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_+/, '');
+    setName(snake);
+  }, [mode, sourceType, aiPreset]);
+
   const nameError = (() => {
     if (!name) return 'Name required';
     if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name)) return 'Letters, digits, underscore, hyphen — must start with a letter';
@@ -136,6 +180,10 @@ export function VarEditDialog({
       if (sourceType === 'static' && staticValue === '') return 'Static value is required';
       if ((sourceType === 'gsheet' || sourceType === 'csv') && (!sourceAlias || !sourceColumn)) {
         return 'Source alias and column are required';
+      }
+      if (sourceType === 'ai-generated') {
+        if (!aiPreset) return 'Pick a preset or "Custom prompt"';
+        if (aiPreset === 'custom' && !aiCustomPrompt.trim()) return 'Custom prompt is required';
       }
     }
     return null;
@@ -170,6 +218,15 @@ export function VarEditDialog({
                   staticValue: staticValue || undefined,
                 }
               : {}),
+            ...(sourceType === 'ai-generated'
+              ? {
+                  aiPreset,
+                  ...(aiPreset === 'custom' ? { aiCustomPrompt } : {}),
+                  // 'random' = regenerate per run, 'fixed' = pinned to cache.
+                  // Default to 'random' if user never touched the toggle.
+                  sourceRowMode: sourceRowMode === 'increment' ? 'random' : sourceRowMode,
+                }
+              : {}),
           }),
     };
     setSubmitting(true);
@@ -193,7 +250,9 @@ export function VarEditDialog({
         }}
         placeholder={mode === 'assign' && (sourceType === 'csv' || sourceType === 'gsheet')
           ? 'Auto-fills from alias + column'
-          : 'email'}
+          : mode === 'assign' && sourceType === 'ai-generated'
+            ? 'Auto-fills from preset'
+            : 'email'}
       />
       {nameError && <p className="text-xs text-destructive">{nameError}</p>}
     </div>
@@ -227,7 +286,7 @@ export function VarEditDialog({
             <>
               <div className="space-y-1.5">
                 <Label>Source</Label>
-                <Select value={sourceType} onValueChange={v => setSourceType(v as 'gsheet' | 'csv' | 'static')}>
+                <Select value={sourceType} onValueChange={v => setSourceType(v as TestVariable['sourceType'])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="static">Static value</SelectItem>
@@ -236,6 +295,9 @@ export function VarEditDialog({
                     </SelectItem>
                     <SelectItem value="csv" disabled={csvSources.length === 0}>
                       CSV column {csvSources.length === 0 && '(no CSVs uploaded)'}
+                    </SelectItem>
+                    <SelectItem value="ai-generated" disabled={!aiAvailable}>
+                      AI-generated {!aiAvailable && '(AI provider not configured)'}
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -314,6 +376,109 @@ export function VarEditDialog({
               )}
 
               {sourceType === 'static' && renderNameField()}
+
+              {sourceType === 'ai-generated' && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Attribute</Label>
+                    <Select value={aiPreset} onValueChange={v => setAiPreset(v as AIVarPreset)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {AI_VAR_PRESET_KEYS.map(k => (
+                          <SelectItem key={k} value={k}>{AI_VAR_PRESETS[k].label}</SelectItem>
+                        ))}
+                        <SelectItem value="custom">Custom prompt…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {aiPreset === 'custom' && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="var-ai-custom">Custom prompt</Label>
+                      <Textarea
+                        id="var-ai-custom"
+                        rows={3}
+                        value={aiCustomPrompt}
+                        onChange={e => setAiCustomPrompt(e.target.value)}
+                        placeholder='e.g. "A UK postcode in the SW1 area"'
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The AI is told to output the value verbatim — keep prompts short and specific.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <Label>When to generate</Label>
+                    <Select
+                      value={sourceRowMode === 'increment' ? 'random' : sourceRowMode}
+                      onValueChange={v => setSourceRowMode(v as TestVariableSourceRowMode)}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="random">Regenerate every run</SelectItem>
+                        <SelectItem value="fixed">Fixed (manual refresh)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {sourceRowMode === 'fixed'
+                        ? 'Reuses the cached value across runs. Click Refresh now to generate a new one.'
+                        : 'Calls AI on every run. If AI fails (rate limit, missing key, network), falls back to the last successful value.'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-md border p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="flex items-center gap-1.5">
+                        <Sparkles className="h-3.5 w-3.5" /> Last generated value
+                      </Label>
+                      {testId && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={refreshing || !aiAvailable || (aiPreset === 'custom' && !aiCustomPrompt.trim())}
+                          onClick={async () => {
+                            setRefreshing(true);
+                            try {
+                              const draftId = initial?.id ?? `__preview_${Date.now()}`;
+                              const draft: TestVariable = {
+                                id: draftId,
+                                name: name || '__preview',
+                                mode: 'assign',
+                                sourceType: 'ai-generated',
+                                aiPreset,
+                                ...(aiPreset === 'custom' ? { aiCustomPrompt } : {}),
+                                sourceRowMode: sourceRowMode === 'increment' ? 'random' : sourceRowMode,
+                              };
+                              const { value } = await generateAIVarValuePreview(testId, draft);
+                              setAiPreview(value);
+                              toast.success('Generated new value');
+                            } catch (err) {
+                              const msg = err instanceof Error ? err.message : String(err);
+                              toast.error(`AI generate failed: ${msg}`);
+                            } finally {
+                              setRefreshing(false);
+                            }
+                          }}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+                          {refreshing ? 'Generating…' : 'Refresh now'}
+                        </Button>
+                      )}
+                    </div>
+                    {aiPreview !== undefined && aiPreview !== '' ? (
+                      <pre className="text-xs whitespace-pre-wrap break-words bg-muted/50 rounded px-2 py-1.5">{aiPreview}</pre>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        No value yet — refresh to generate, or run the test once.
+                      </p>
+                    )}
+                  </div>
+
+                  {renderNameField()}
+                </>
+              )}
             </>
           )}
 

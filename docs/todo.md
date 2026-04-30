@@ -27,7 +27,9 @@ mcp-oauth flow
 ## ideas
 Auto-feedback to resolve loop
 
-Clear up area desc-spec, test desc-spec duplication
+Clear up area desc-spec, test desc-spec duplication ~/.claude/plans/please-
+ edit in    Codeassess-about-tests-adaptiv
+                e-sunset.md
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning                    

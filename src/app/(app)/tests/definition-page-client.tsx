@@ -1150,6 +1150,7 @@ export function DefinitionPageClient({
                     playwrightDefaults={openTestDetailData.playwrightDefaults}
                     envBaseUrl={openTestDetailData.envBaseUrl}
                     testSpec={openTestDetailData.testSpec}
+                    aiAvailable={openTestDetailData.aiAvailable}
                     contentClassName="max-w-5xl mx-0"
                     onRefresh={async () => {
                       if (!openTestId) return;
