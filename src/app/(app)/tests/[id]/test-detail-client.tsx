@@ -54,6 +54,8 @@ import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
 import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -450,6 +452,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setCurrentStepIndex(-1);
     setStepResults({});
     try {
+      track(Events.test_run_started, {
+        trigger: 'manual',
+        scope: 'single',
+        testId: test.id,
+        headless,
+        repoId: repositoryId ?? '',
+      });
       const result = await runTests([test.id], repositoryId, headless, 'auto', forceVideoRecording);
       const { jobId } = result;
       const runId = 'runId' in result ? (result.runId ?? null) : null;

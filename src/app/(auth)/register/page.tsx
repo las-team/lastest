@@ -14,6 +14,8 @@ import { Github } from 'lucide-react';
 import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
 import { recordRegistrationConsent } from '@/server/actions/consent';
 import { isValidShareSlug } from '@/lib/share/slug';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 export default function RegisterPage() {
   return (
@@ -70,6 +72,12 @@ function RegisterForm() {
         // Consent recording is secondary — user is already signed up.
         console.error('recordRegistrationConsent failed', err);
       }
+
+      track(Events.signup_completed, {
+        method: 'email',
+        marketingOptIn: marketingConsent,
+        claim: claim ? 'true' : 'false',
+      });
 
       // Hard navigation — RSC swap was racing with router.refresh and the
       // freshly-set better-auth session cookie wasn't visible to the next

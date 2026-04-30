@@ -84,6 +84,8 @@ import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig,
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 import type { SetupStep } from '@/server/actions/setup-steps';
 import type { TeardownStep } from '@/server/actions/teardown-steps';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
@@ -513,6 +515,11 @@ export function DefinitionPageClient({
         description: newAreaDescription.trim() || undefined,
         repositoryId,
         parentId: newAreaParentId,
+      });
+      track(Events.area_created, {
+        repoId: repositoryId,
+        hasParent: newAreaParentId ? 'true' : 'false',
+        hasDescription: newAreaDescription.trim() ? 'true' : 'false',
       });
       setIsNewAreaOpen(false);
       router.refresh();

@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
+import { UmamiScript } from "@/components/analytics/umami-script";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -56,6 +57,7 @@ export default function RootLayout({
           {children}
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
+        <UmamiScript />
       </body>
     </html>
   );

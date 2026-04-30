@@ -47,7 +47,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    return [
+    const rewrites = [
       { source: "/screenshots/:path*", destination: "/api/media/screenshots/:path*" },
       { source: "/diffs/:path*", destination: "/api/media/diffs/:path*" },
       { source: "/baselines/:path*", destination: "/api/media/baselines/:path*" },
@@ -56,6 +56,16 @@ const nextConfig: NextConfig = {
       { source: "/planned/:path*", destination: "/api/media/planned/:path*" },
       { source: "/bug-reports/:path*", destination: "/api/media/bug-reports/:path*" },
     ];
+
+    const umamiUrl = process.env.UMAMI_INTERNAL_URL?.replace(/\/$/, "");
+    if (umamiUrl) {
+      rewrites.push(
+        { source: "/_umami/script.js", destination: `${umamiUrl}/script.js` },
+        { source: "/_umami/api/send", destination: `${umamiUrl}/api/send` },
+      );
+    }
+
+    return rewrites;
   },
 };
 

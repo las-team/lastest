@@ -31,6 +31,8 @@ import {
 } from '@/server/actions/onboarding';
 import { selectRepo, createLocalRepo, fetchAndSyncRepos, fetchAndSyncGitlabRepos } from '@/server/actions/repos';
 import type { OnboardingPath } from '@/lib/db/schema';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 type RepoLite = {
   id: string;
@@ -203,12 +205,14 @@ export function OnboardingClient({
             onSelectRepo={(repoId) =>
               startTransition(async () => {
                 await selectRepo(repoId);
+                track(Events.repo_linked, { source: 'remote', repoId });
                 router.refresh();
               })
             }
             onCreateSandbox={(name, baseUrl) =>
               startTransition(async () => {
                 await createLocalRepo(name, baseUrl);
+                track(Events.repo_linked, { source: 'sandbox' });
                 router.refresh();
               })
             }

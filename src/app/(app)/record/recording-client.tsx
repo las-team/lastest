@@ -73,6 +73,8 @@ import { RecordingTutorialOverlay } from '@/components/recording-tutorial/record
 import { StepCard } from '@/components/recording/step-card';
 import { TraceScrub } from '@/components/recording/trace-scrub';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface SetupStepInfo {
   id: string;
@@ -842,6 +844,11 @@ export function RecordingClient({
       extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
       skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
       domSnapshot,
+    });
+    track(Events.test_recorded, {
+      testId: test.id,
+      repoId: repositoryId,
+      hasArea: areaId ? 'true' : 'false',
     });
     return test.id;
   };
@@ -1655,6 +1662,10 @@ export function RecordingClient({
                     onClick={async () => {
                       if (!capturedStorageState || !saveCookieName.trim()) return;
                       await saveStorageState(repositoryId ?? null, saveCookieName.trim(), capturedStorageState);
+                      track(Events.storage_state_saved, {
+                        repoId: repositoryId ?? '',
+                        source: 'recorder',
+                      });
                       const states = await listStorageStates(repositoryId ?? null);
                       setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
                       setCapturedStorageState(null);

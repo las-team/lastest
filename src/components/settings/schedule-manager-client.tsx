@@ -14,6 +14,8 @@ import { toast } from 'sonner';
 import { createScheduleAction, deleteScheduleAction, getSchedulesAction, toggleScheduleAction, triggerScheduleNowAction } from '@/server/actions/schedules';
 import { PRESET_SCHEDULES } from '@/lib/scheduling/cron';
 import type { PresetScheduleKey } from '@/lib/scheduling/cron';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface ScheduleWithDescription {
   id: string;
@@ -65,6 +67,11 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
         cronExpression,
         preset: selectedPreset !== 'custom' ? selectedPreset : undefined,
         gitBranch: gitBranch || undefined,
+      });
+      track(Events.schedule_created, {
+        repoId: repositoryId,
+        preset: selectedPreset,
+        hasBranch: gitBranch ? 'true' : 'false',
       });
       toast.success('Schedule created');
       setShowDialog(false);

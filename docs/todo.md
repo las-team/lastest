@@ -18,26 +18,20 @@ Openrouter agent sdk parity
 **Criteria**
 **CSV upload and use**
 ## bugs
-Enhance with AI is broken
-now running during build only shows:
-running…
 ## features
-Auto signup if no user?
-Add logo to signin, improve it, switch to eu comapatible explicit opt-in
+mobile view-shrink sidebar
+Google verification
 **Self-test**
 Chat agent for website
 Auto-feedback to resolve loop
 Default ai, openrouter test
-unsubscribe
-delete account
 mcp-oauth flow
 ## ideas
 Maybe workspace list w last 3 workspaces?
 Clear up area desc-spec, test desc-spec duplication
-
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
-  │ explosion detection      │ detection, coverage-weighted pruning              │                                     
+  │ explosion detection      │ detection, coverage-weighted pruning                    
   Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
   │ (--loop)       
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
@@ -45,9 +39,6 @@ The premium QA agent
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
 Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md
-debug - googlesheet data
-cookie sharing from host machine?
-Tweet about us
 Content comparison - compare text in 2 setups
 Component specific testing
 Figma plugin
@@ -61,7 +52,6 @@ DOM test repair
   2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
-B.5) Valamit ki kell majd találni, hogy a user feltölthessen asseteket, amiket böngészni tud file opennel. Very low prio MVP-re, csak megemlítem.
 ## marketing
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop

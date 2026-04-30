@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
@@ -160,6 +162,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     setIsProcessing(true);
     try {
       await approveDiff(diff.id);
+      track(Events.diff_approved, {
+        diffId: diff.id,
+        buildId,
+      });
       setShowUndo(true);
 
       // Auto-hide undo after 10 seconds
@@ -191,6 +197,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     setIsProcessing(true);
     try {
       await addDiffTodo(diff.id, todoDescription.trim());
+      track(Events.diff_rejected, {
+        diffId: diff.id,
+        buildId,
+      });
       setShowTodoInput(false);
       setTodoDescription('');
       router.refresh();
