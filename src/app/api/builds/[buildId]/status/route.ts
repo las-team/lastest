@@ -60,6 +60,7 @@ export async function GET(
     isMainBranch: build.isMainBranch,
     diffs: build.diffs,
     errorMessage: build.errorMessage,
+    runningTests: build.runningTests,
   }, {
     headers: {
       // Defeat browser HTTP cache: this endpoint is polled every 2s during

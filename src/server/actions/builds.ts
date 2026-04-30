@@ -172,6 +172,8 @@ export interface BuildSummary {
   isMainBranch: boolean;
   diffs: VisualDiffWithTestStatus[];
   errorMessage?: string | null;
+  /** Names of tests currently being executed (claimed by a runner, not yet completed). */
+  runningTests: { testId: string; name: string }[];
 }
 
 /**
@@ -1606,6 +1608,9 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
 
   const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
+  const runningTests = build.testRunId && !build.completedAt
+    ? await queries.getRunningTestNamesForTestRun(build.testRunId)
+    : [];
 
   // Determine if build is on the default branch
   const repo = testRun?.repositoryId ? await queries.getRepository(testRun.repositoryId) : null;
@@ -1640,6 +1645,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
     errorMessage,
+    runningTests,
   };
 }
 

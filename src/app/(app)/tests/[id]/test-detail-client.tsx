@@ -574,10 +574,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     try {
       const result = await aiEnhanceTest(repositoryId, test.id, enhancePrompt || undefined);
       if (result.success && result.code) {
-        await updateTestCode(test.id, result.code, 'ai_enhance');
-        toast.success('Test enhanced and saved');
-        setEnhancePrompt('');
-        router.refresh();
+        const saveResult = await updateTestCode(test.id, result.code, 'ai_enhance');
+        if (saveResult.success) {
+          toast.success('Test enhanced and saved');
+          setEnhancePrompt('');
+          router.refresh();
+        } else {
+          toast.error(saveResult.error || 'Failed to save enhanced test');
+        }
       } else {
         toast.error(result.error || 'Failed to enhance test');
       }

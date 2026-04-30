@@ -129,6 +129,7 @@ export interface BuildDetailClientProps {
   hasPendingDiffs: boolean;
   isRunning?: boolean;
   completedTests?: number;
+  runningTests?: { testId: string; name: string }[];
   codeChangeTestIds?: string[] | null;
   isMainBranch?: boolean;
   banAiMode?: boolean;
@@ -141,6 +142,7 @@ export function BuildDetailClient({
   a11y,
   isRunning = false,
   completedTests = 0,
+  runningTests = [],
   codeChangeTestIds,
   isMainBranch = false,
   banAiMode = false,
@@ -330,6 +332,7 @@ export function BuildDetailClient({
             onFilterChange={handleFilterChange}
             isRunning={isRunning}
             completedTests={completedTests}
+            activeRunningTests={runningTests}
             aiSafeCount={aiSafeCount}
             aiReviewCount={aiReviewCount}
             aiFlagCount={aiFlagCount}

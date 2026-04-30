@@ -52,6 +52,12 @@ interface MetricsRowProps {
   groupByTest?: boolean;
   onGroupByTestChange?: (v: boolean) => void;
   diffs?: VisualDiffWithTestStatus[];
+  /**
+   * Tests that have been claimed by a runner but haven't completed yet.
+   * Sourced from runner_commands so we can show real test names in the
+   * "now running" indicator before the first screenshot/diff arrives.
+   */
+  activeRunningTests?: { testId: string; name: string }[];
 }
 
 export function MetricsRow({
@@ -76,6 +82,7 @@ export function MetricsRow({
   groupByTest = true,
   onGroupByTestChange,
   diffs,
+  activeRunningTests = [],
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -256,16 +263,15 @@ export function MetricsRow({
             pending: 'bg-muted',
           };
 
-          const runningTests = isRunning
-            ? testTiles
-                .filter((t) => {
-                  const group = byTest.get(t.testId) ?? [];
-                  const hasFinalResult = group.some(
-                    (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
-                  );
-                  return !hasFinalResult;
-                })
-                .map((t) => {
+          // Prefer the authoritative list from runner_commands (claimed but not
+          // completed). It includes tests that haven't produced a screenshot
+          // yet, which is exactly the case that previously fell through to the
+          // "running…" placeholder. Fall back to diff-derived inference for
+          // older callers (e.g. dashboards) that don't pass activeRunningTests.
+          const runningTests = !isRunning
+            ? []
+            : activeRunningTests.length > 0
+              ? activeRunningTests.map((t) => {
                   const group = byTest.get(t.testId) ?? [];
                   const recent = group
                     .filter((d) => d.createdAt)
@@ -276,7 +282,25 @@ export function MetricsRow({
                     stepLabel: recent?.stepLabel ?? null,
                   };
                 })
-            : [];
+              : testTiles
+                  .filter((t) => {
+                    const group = byTest.get(t.testId) ?? [];
+                    const hasFinalResult = group.some(
+                      (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
+                    );
+                    return !hasFinalResult;
+                  })
+                  .map((t) => {
+                    const group = byTest.get(t.testId) ?? [];
+                    const recent = group
+                      .filter((d) => d.createdAt)
+                      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())[0];
+                    return {
+                      testId: t.testId,
+                      name: t.name,
+                      stepLabel: recent?.stepLabel ?? null,
+                    };
+                  });
 
           const VISIBLE_LIMIT = 5;
           const visibleRunning = runningTests.slice(0, VISIBLE_LIMIT);
