@@ -3,6 +3,7 @@ import {
   runners,
   runnerCommands,
   runnerCommandResults,
+  tests,
 } from '../schema';
 import type {
   NewRunnerCommand,
@@ -58,6 +59,27 @@ export async function getCommandsByTestRun(testRunId: string) {
     .from(runnerCommands)
     .where(eq(runnerCommands.testRunId, testRunId))
     ;
+}
+
+/**
+ * Names of tests whose run_test commands have been claimed by a runner but not
+ * yet completed. Used by the build UI to show actual test names in the
+ * "now running" indicator before the first screenshot/diff arrives.
+ */
+export async function getRunningTestNamesForTestRun(
+  testRunId: string,
+): Promise<{ testId: string; name: string }[]> {
+  const rows = await db
+    .select({ testId: tests.id, name: tests.name })
+    .from(runnerCommands)
+    .innerJoin(tests, eq(tests.id, runnerCommands.testId))
+    .where(and(
+      eq(runnerCommands.testRunId, testRunId),
+      eq(runnerCommands.status, 'claimed' as RunnerCommandStatus),
+      eq(runnerCommands.type, 'command:run_test'),
+    ))
+    .orderBy(runnerCommands.claimedAt);
+  return rows;
 }
 
 export async function getRunnerCommandById(commandId: string) {

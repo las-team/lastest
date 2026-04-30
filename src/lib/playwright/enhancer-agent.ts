@@ -100,10 +100,30 @@ Navigate to the relevant page using MCP tools, inspect the current UI state via 
 
 ${seed.seedPrompt}`;
 
+    // Configure Playwright MCP for the AI provider (matches healer-agent pattern).
+    // The system prompt above expects browser_snapshot/browser_navigate from
+    // @playwright/mcp — NOT the test-runner MCP that generateWithAI's fallback
+    // would otherwise inject for claude-agent-sdk.
+    const mcpArgs = ['@playwright/mcp@latest', '--headless'];
+
+    if (config.provider === 'claude-agent-sdk') {
+      config.agentSdkStrictMcpConfig = true;
+      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
+      config.agentSdkAllowedTools = ['mcp__playwright__*'];
+      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+    }
+
+    const useMCP = config.provider !== 'claude-agent-sdk';
+
     const response = await generateWithAI(config, prompt, ENHANCER_SYSTEM_PROMPT, {
-      useMCP: true,
       repositoryId,
       actionType: 'enhance_test',
+      useMCP,
+      ...(useMCP && {
+        mcpConfig: {
+          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+        },
+      }),
     });
 
     const code = extractCodeFromResponse(response);
