@@ -22,6 +22,20 @@ const PRE_CREATE_SQL = `
     granted_at TIMESTAMP NOT NULL,
     revoked_at TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS csv_data_sources (
+    id TEXT PRIMARY KEY,
+    repository_id TEXT,
+    team_id TEXT,
+    alias TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    storage_path TEXT,
+    cached_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cached_data JSONB NOT NULL DEFAULT '[]'::jsonb,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    last_synced_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+  );
 `;
 
 async function preCreate() {

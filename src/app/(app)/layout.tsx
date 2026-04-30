@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { SidebarServer } from '@/components/layout/sidebar-server';
+import { MobileTopBarServer } from '@/components/layout/mobile-shell-server';
+import { MobileBottomNav } from '@/components/layout/mobile-bottom-nav-client';
 import { JobPollingProvider } from '@/components/queue/job-polling-context';
 import { ContextCollectorProvider } from '@/components/bug-report/context-collector';
 import { BugReportWidget } from '@/components/bug-report/bug-report-widget';
@@ -35,12 +37,16 @@ export default async function AppLayout({
       <ContextCollectorProvider>
         <ActivityFeedProvider>
           <div className="flex h-screen">
-            <SidebarServer />
+            <div className="hidden md:flex">
+              <SidebarServer />
+            </div>
             <div className="flex-1 flex flex-col overflow-hidden">
+              <MobileTopBarServer />
               {showConsentBanner && <ConsentBanner />}
-              <main className="flex-1 overflow-auto relative">
+              <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                 {children}
               </main>
+              <MobileBottomNav sidebar={<SidebarServer />} />
             </div>
           </div>
           <BugReportWidget />

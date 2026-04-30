@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
+import { SwipeDeck } from '@/components/diff/swipe-deck-client';
+import { useIsMobile } from '@/lib/hooks/use-is-mobile';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
 import { track } from '@/lib/analytics/umami';
@@ -135,6 +137,7 @@ interface DiffViewerClientProps {
 export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], allDiffs = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isMobile = useIsMobile();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUndo, setShowUndo] = useState(false);
@@ -481,6 +484,12 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           )}
 
           {/* Diff Comparison */}
+          <SwipeDeck
+            disabled={!isMobile}
+            onSwipeRight={diff.status === 'pending' && !isProcessing ? handleApprove : undefined}
+            onSwipeLeft={diff.status === 'pending' && !isProcessing ? handleShowTodoInput : undefined}
+            onSwipeUp={nextDiffId ? handleSkip : undefined}
+          >
           {diff.currentImagePath ? (
             (() => {
               // On main branch (no mainBaselineImagePath), only show one tab
@@ -622,6 +631,14 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               No screenshot available
             </div>
           )}
+          </SwipeDeck>
+
+          {/* Mobile hint */}
+          {isMobile && diff.status === 'pending' && (
+            <p className="md:hidden text-center text-xs text-muted-foreground -mt-2">
+              Swipe right to approve · left for todo · up to skip
+            </p>
+          )}
 
           {/* Color-coded thumbnail queue strip */}
           {allDiffs.length > 0 && (
@@ -633,8 +650,8 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           )}
 
           {/* Action Bar */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 onClick={handleApprove}
                 disabled={isProcessing || diff.status === 'approved' || diff.status === 'auto_approved'}

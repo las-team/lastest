@@ -19,15 +19,14 @@ Openrouter agent sdk parity
 **CSV upload and use**
 ## bugs
 ## features
-mobile view-shrink sidebar
 Google verification
 **Self-test**
 Chat agent for website
-Auto-feedback to resolve loop
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas
-Maybe workspace list w last 3 workspaces?
+Auto-feedback to resolve loop
+
 Clear up area desc-spec, test desc-spec duplication
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
