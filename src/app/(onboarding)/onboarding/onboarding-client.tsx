@@ -143,9 +143,13 @@ export function OnboardingClient({
   const finish = useCallback(
     async (target: string) => {
       await completeOnboarding();
-      router.push(target);
+      // Hard navigation — router.push triggers an RSC swap of (onboarding)/layout
+      // while its redirect guard fires (onboardingCompletedAt was just set), and
+      // Next.js dev throws "OnboardingLayout cannot have a negative time stamp"
+      // from the layout perf.measure. window.location.href sidesteps the swap.
+      window.location.href = target;
     },
-    [router],
+    [],
   );
 
   const currentIndex = visibleSteps.indexOf(step);

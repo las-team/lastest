@@ -60,6 +60,7 @@ function RegisterForm() {
 
       if (result.error) {
         setError(result.error.message ?? 'Sign up failed');
+        setLoading(false);
         return;
       }
 
@@ -73,9 +74,10 @@ function RegisterForm() {
       // Hard navigation — RSC swap was racing with router.refresh and the
       // freshly-set better-auth session cookie wasn't visible to the next
       // server fetch in some cases. window.location.href avoids both.
+      // Keep `loading` true so the button stays disabled until the new page paints.
       window.location.href = emailPostAuthUrl;
-      return;
-    } finally {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign up failed');
       setLoading(false);
     }
   }
