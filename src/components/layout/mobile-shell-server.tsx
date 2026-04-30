@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
+import { getSelectedRepository, getRepositoriesByTeamWithTestCounts } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { MobileTopBar } from './mobile-top-bar-client';
 
@@ -10,7 +10,7 @@ export async function MobileTopBarServer() {
 
   const [selectedRepo, repos] = await Promise.all([
     teamId && userId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
-    teamId ? getRepositoriesByTeam(teamId) : Promise.resolve([]),
+    teamId ? getRepositoriesByTeamWithTestCounts(teamId) : Promise.resolve([]),
   ]);
 
   return (

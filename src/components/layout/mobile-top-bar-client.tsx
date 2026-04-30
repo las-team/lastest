@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { RepoSelector } from './repo-selector';
+import { RepoSelector, type RepositoryWithTestCount } from './repo-selector';
 import type { Repository } from '@/lib/db/schema';
 
 interface MobileTopBarProps {
-  repos?: Repository[];
+  repos?: RepositoryWithTestCount[];
   selectedRepo?: Repository | null;
 }
 
