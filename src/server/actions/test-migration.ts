@@ -84,7 +84,6 @@ export async function migrateTests(
   const payload = {
     functionalAreas: areas.map((a) => ({
       name: a.name,
-      description: a.description,
       parentName: getParentName(a.id),
       orderIndex: a.orderIndex ?? 0,
       isRouteFolder: a.isRouteFolder ?? false,
@@ -96,11 +95,9 @@ export async function migrateTests(
         ? areaIdToName.get(t.functionalAreaId) ?? null
         : null,
       code: t.code,
-      description: t.description,
       targetUrl: t.targetUrl,
       assertions: t.assertions,
       executionMode: t.executionMode ?? 'procedural',
-      agentPrompt: t.agentPrompt,
       setupOverrides: t.setupOverrides,
       teardownOverrides: t.teardownOverrides,
       stabilizationOverrides: t.stabilizationOverrides,

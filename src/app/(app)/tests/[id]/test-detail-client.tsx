@@ -779,15 +779,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               />
             ) : (
               <>
-                {test.description && (
-                  test.description.includes('\n') ? (
+                {testSpec?.spec && testSpec.spec !== test.name && (
+                  testSpec.spec.includes('\n') ? (
                     <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
-                      {test.description.split('\n').filter(Boolean).map((line, i) => (
-                        <li key={i}>{line}</li>
+                      {testSpec.spec.split('\n').filter(Boolean).slice(0, 5).map((line, i) => (
+                        <li key={i}>{line.replace(/^[-*]\s+/, '')}</li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-sm text-muted-foreground">{test.description}</p>
+                    <p className="text-sm text-muted-foreground">{testSpec.spec}</p>
                   )
                 )}
                 <CardDescription>
@@ -864,9 +864,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 <AlertTriangle className="h-5 w-5 text-amber-600" />
                 <span className="font-semibold text-sm">Placeholder Test &mdash; Ready to Record</span>
               </div>
-              {test.description && (
+              {testSpec?.title && testSpec.title !== test.name && (
                 <div className="bg-background/60 rounded-md px-3 py-2 text-sm text-muted-foreground">
-                  {test.description}
+                  {testSpec.title}
                 </div>
               )}
               <div className="flex items-center gap-2">

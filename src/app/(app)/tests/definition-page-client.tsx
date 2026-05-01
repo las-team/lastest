@@ -91,11 +91,13 @@ import { Events } from '@/lib/analytics/events';
 interface TestWithStatus extends Test {
   latestStatus: string | null;
   lastRunAt: Date | null;
+  // Denormalized from test_specs.title (1:1 LEFT JOIN). Short-form display string.
+  specTitle?: string | null;
 }
 
 interface DefinitionPageClientProps {
   tree: FunctionalAreaWithChildren[];
-  uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder: boolean }[];
+  uncategorizedTests: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder: boolean }[];
   repository: Repository;
   repositoryId: string;
   selectedBranch: string;
@@ -191,7 +193,7 @@ export function DefinitionPageClient({
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
   const [newAreaParentId, setNewAreaParentId] = useState<string | undefined>();
   const [newAreaName, setNewAreaName] = useState('');
-  const [newAreaDescription, setNewAreaDescription] = useState('');
+  const [newAreaPlan, setNewAreaPlan] = useState('');
   const [isCreatingArea, setIsCreatingArea] = useState(false);
   const [deleteAreaId, setDeleteAreaId] = useState<string | null>(null);
   const [deleteAreaIds, setDeleteAreaIds] = useState<string[]>([]);
@@ -202,7 +204,7 @@ export function DefinitionPageClient({
   const [isEditingArea, setIsEditingArea] = useState(false);
   const [isSavingArea, setIsSavingArea] = useState(false);
   const [editAreaName, setEditAreaName] = useState('');
-  const [editAreaDescription, setEditAreaDescription] = useState('');
+  const [editAreaPlan, setEditAreaPlan] = useState('');
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [newPlaceholderName, setNewPlaceholderName] = useState('');
   const [isSubmittingPlaceholder, setIsSubmittingPlaceholder] = useState(false);
@@ -306,7 +308,7 @@ export function DefinitionPageClient({
       const area = findAreaInTree(tree, treeSelection.id);
       if (area) {
         setEditAreaName(area.name);
-        setEditAreaDescription(area.description || '');
+        setEditAreaPlan(area.agentPlan || '');
       }
     }
   }, [treeSelection, tree]);
@@ -454,7 +456,7 @@ export function DefinitionPageClient({
             repositoryId: a.repositoryId,
             path: a.name,
             type: a.name.includes('[') ? 'dynamic' : 'static',
-            description: a.description,
+            description: null as string | null,
             filePath: null,
             framework: null,
             routerType: null,
@@ -504,7 +506,7 @@ export function DefinitionPageClient({
   const handleNewArea = (parentId?: string) => {
     setNewAreaParentId(parentId);
     setNewAreaName('');
-    setNewAreaDescription('');
+    setNewAreaPlan('');
     setIsNewAreaOpen(true);
   };
 
@@ -514,14 +516,14 @@ export function DefinitionPageClient({
     try {
       await createArea({
         name: newAreaName.trim(),
-        description: newAreaDescription.trim() || undefined,
+        agentPlan: newAreaPlan.trim() || undefined,
         repositoryId,
         parentId: newAreaParentId,
       });
       track(Events.area_created, {
         repoId: repositoryId,
         hasParent: newAreaParentId ? 'true' : 'false',
-        hasDescription: newAreaDescription.trim() ? 'true' : 'false',
+        hasPlan: newAreaPlan.trim() ? 'true' : 'false',
       });
       setIsNewAreaOpen(false);
       router.refresh();
@@ -606,7 +608,7 @@ export function DefinitionPageClient({
     try {
       await updateArea(treeSelection.id, {
         name: editAreaName,
-        description: editAreaDescription || undefined,
+        agentPlan: editAreaPlan || undefined,
       });
       setIsEditingArea(false);
       router.refresh();
@@ -620,7 +622,7 @@ export function DefinitionPageClient({
       const area = findAreaInTree(tree, treeSelection.id);
       if (area) {
         setEditAreaName(area.name);
-        setEditAreaDescription(area.description || '');
+        setEditAreaPlan(area.agentPlan || '');
       }
     }
     setIsEditingArea(false);
@@ -920,13 +922,13 @@ export function DefinitionPageClient({
   const flatAreas = flattenAreas(tree);
 
   const testsByArea = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; description: string | null; isPlaceholder: boolean }[]>();
+    const map = new Map<string, { id: string; name: string; specTitle: string | null; isPlaceholder: boolean }[]>();
     function collect(areas: FunctionalAreaWithChildren[]) {
       for (const area of areas) {
         map.set(area.id, area.tests.map(t => ({
           id: t.id,
           name: t.name,
-          description: t.description,
+          specTitle: t.specTitle,
           isPlaceholder: t.isPlaceholder ?? false,
         })));
         collect(area.children);
@@ -1306,16 +1308,6 @@ export function DefinitionPageClient({
                             </div>
                           </div>
 
-                          {selectedArea && !isEditingArea && (
-                            <div className="mt-2">
-                              {selectedArea.description ? (
-                                <p className="text-sm text-muted-foreground">{selectedArea.description}</p>
-                              ) : (
-                                <p className="text-sm text-muted-foreground/60 italic">No description</p>
-                              )}
-                            </div>
-                          )}
-
                           {selectedArea && isEditingArea && (
                             <div className="mt-3 space-y-3">
                               <div className="space-y-1.5">
@@ -1323,8 +1315,8 @@ export function DefinitionPageClient({
                                 <Input id="edit-area-name" value={editAreaName} onChange={(e) => setEditAreaName(e.target.value)} className="h-8 text-sm" />
                               </div>
                               <div className="space-y-1.5">
-                                <Label htmlFor="edit-area-desc" className="text-xs">Description</Label>
-                                <Textarea id="edit-area-desc" value={editAreaDescription} onChange={(e) => setEditAreaDescription(e.target.value)} rows={2} className="text-sm" />
+                                <Label htmlFor="edit-area-plan" className="text-xs">Plan (markdown)</Label>
+                                <Textarea id="edit-area-plan" value={editAreaPlan} onChange={(e) => setEditAreaPlan(e.target.value)} rows={6} className="text-sm font-mono" />
                               </div>
                             </div>
                           )}
@@ -1581,7 +1573,6 @@ export function DefinitionPageClient({
                       <PlanAreaEditor
                         areaId={area.id}
                         areaName={area.name}
-                        description={area.description}
                         agentPlan={area.agentPlan || ''}
                         planGeneratedAt={area.planGeneratedAt}
                         depth={area.depth}
@@ -1702,8 +1693,8 @@ export function DefinitionPageClient({
               <Input id="area-name" value={newAreaName} onChange={(e) => setNewAreaName(e.target.value)} placeholder="e.g., Authentication, Dashboard" autoFocus />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="area-description">Description (optional)</Label>
-              <Textarea id="area-description" value={newAreaDescription} onChange={(e) => setNewAreaDescription(e.target.value)} placeholder="What tests belong in this area?" rows={3} />
+              <Label htmlFor="area-plan">Initial plan (optional, markdown)</Label>
+              <Textarea id="area-plan" value={newAreaPlan} onChange={(e) => setNewAreaPlan(e.target.value)} placeholder="What tests belong in this area? (use the planner agent later to expand)" rows={3} className="font-mono text-sm" />
             </div>
           </div>
           <DialogFooter>
@@ -1866,14 +1857,12 @@ export function DefinitionPageClient({
 function PlanAreaEditor({
   areaId,
   areaName,
-  description,
   agentPlan,
   planGeneratedAt,
   depth,
 }: {
   areaId: string;
   areaName: string;
-  description: string | null;
   agentPlan: string;
   planGeneratedAt: Date | null;
   depth: number;
@@ -1943,9 +1932,6 @@ function PlanAreaEditor({
           </span>
         )}
       </div>
-      {description && (
-        <p className="text-xs text-muted-foreground">{description}</p>
-      )}
       <Textarea
         ref={textareaRef}
         value={content}

@@ -227,11 +227,10 @@ export const functionalAreas = pgTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   name: text('name').notNull(),
-  description: text('description'),
   parentId: text('parent_id'),
   isRouteFolder: boolean('is_route_folder').default(false),
   orderIndex: integer('order_index').default(0),
-  agentPlan: text('agent_plan'), // markdown test plan from Planner agent
+  agentPlan: text('agent_plan'), // markdown test plan from Planner agent — canonical "what's in this area" field
   planGeneratedAt: timestamp('plan_generated_at'),
   planSnapshot: text('plan_snapshot'), // JSON: FunctionalAreaPlanSnapshot for rollback
   deletedAt: timestamp('deleted_at'),
@@ -243,7 +242,7 @@ export const tests = pgTable('tests', {
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
-  description: text('description'),
+  // NB: per-test description/spec lives in `test_specs` (1:1 via specId). Fetch via getTestSpec().
   isPlaceholder: boolean('is_placeholder').default(false),
   targetUrl: text('target_url'),
   // Setup configuration - setupTestId takes precedence over setupScriptId
@@ -272,7 +271,6 @@ export const tests = pgTable('tests', {
   // fall back to it when AI is misconfigured / rate-limited.
   aiVarLastValues: jsonb('ai_var_last_values').$type<Record<string, string>>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
-  agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
@@ -688,7 +686,6 @@ export type NewFunctionalArea = typeof functionalAreas.$inferInsert;
 
 export interface FunctionalAreaPlanSnapshot {
   previousPlan: string | null;
-  previousDescription: string | null;
   generatedTestIds: string[];
 }
 export type Test = typeof tests.$inferSelect;
@@ -1699,7 +1696,10 @@ export interface AgentSubstep {
 export interface AgentRichResultPlanArea {
   id: string;
   name: string;
-  description: string;
+  // Short hint string from the planner agent (transient — not persisted; the persistence
+  // target is the area's `agentPlan` column). Kept distinct from `testPlan` so the UI
+  // can show a one-line preview alongside the full plan.
+  summary: string;
   routes: string[];
   testPlan: string;
   approved?: boolean;

@@ -18,7 +18,8 @@ import { Wand2, FileCode2 } from 'lucide-react';
 interface AreaTestCase {
   id: string;
   name: string;
-  description: string | null;
+  // Linked test_specs.title (canonical short-form description). Tree/list views denormalize this in.
+  specTitle: string | null;
   isPlaceholder: boolean;
 }
 
@@ -133,8 +134,8 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
           }
           <div className="flex-1 min-w-0">
             <span className="text-sm font-medium truncate block">{test.name}</span>
-            {test.description && (
-              <p className="text-xs text-muted-foreground truncate mt-0.5">{test.description.split('\n')[0]}</p>
+            {test.specTitle && test.specTitle !== test.name && (
+              <p className="text-xs text-muted-foreground truncate mt-0.5">{test.specTitle}</p>
             )}
           </div>
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">

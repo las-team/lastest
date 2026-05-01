@@ -486,7 +486,7 @@ export interface RouteWithContext {
   routerType: string | null;
   functionalAreaId: string | null;
   functionalAreaName: string | null;
-  functionalAreaDescription: string | null;
+  functionalAreaPlan: string | null;
   testSuggestions: string[];
 }
 
@@ -502,7 +502,7 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
       routerType: routes.routerType,
       functionalAreaId: routes.functionalAreaId,
       functionalAreaName: functionalAreas.name,
-      functionalAreaDescription: functionalAreas.description,
+      functionalAreaPlan: functionalAreas.agentPlan,
     })
     .from(routes)
     .leftJoin(functionalAreas, eq(routes.functionalAreaId, functionalAreas.id))

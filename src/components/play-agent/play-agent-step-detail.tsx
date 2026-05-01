@@ -115,8 +115,8 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
             </div>
             {expandedId === area.id && (
               <div className="mt-2 ml-5 space-y-1.5">
-                {area.description && (
-                  <p className="text-[11px] text-muted-foreground">{area.description}</p>
+                {area.summary && (
+                  <p className="text-[11px] text-muted-foreground">{area.summary}</p>
                 )}
                 {area.routes.length > 0 && (
                   <div className="flex flex-wrap gap-1">

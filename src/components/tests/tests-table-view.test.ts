@@ -16,7 +16,6 @@ const baseTest = (overrides: Partial<TestWithStatus> = {}): TestWithStatus =>
     id: 't1',
     name: 'Test',
     code: '',
-    description: null,
     functionalAreaId: null,
     repositoryId: null,
     isPlaceholder: false,

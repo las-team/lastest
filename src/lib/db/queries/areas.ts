@@ -2,16 +2,16 @@ import { db } from '../index';
 import {
   functionalAreas,
   tests,
+  testSpecs,
 } from '../schema';
 import { getTestsByRepo, getLatestStatusMapForTestIds } from './tests';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, inArray } from 'drizzle-orm';
 
 // Functional Areas Tree
 export interface FunctionalAreaWithChildren {
   id: string;
   repositoryId: string | null;
   name: string;
-  description: string | null;
   parentId: string | null;
   isRouteFolder: boolean | null;
   orderIndex: number | null;
@@ -19,7 +19,7 @@ export interface FunctionalAreaWithChildren {
   planGeneratedAt: Date | null;
   planSnapshot: string | null;
   children: FunctionalAreaWithChildren[];
-  tests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
+  tests: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
 }
 
 export async function getFunctionalAreasTree(repositoryId: string): Promise<FunctionalAreaWithChildren[]> {
@@ -43,6 +43,16 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
 
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
 
+  // Fetch spec titles for tests via the 1:1 link
+  const specTitleByTestId = new Map<string, string>();
+  if (allTests.length > 0) {
+    const rows = await db
+      .select({ testId: testSpecs.testId, title: testSpecs.title })
+      .from(testSpecs)
+      .where(inArray(testSpecs.testId, allTests.map(t => t.id)));
+    for (const r of rows) if (r.testId) specTitleByTestId.set(r.testId, r.title);
+  }
+
   // Build tree structure
   const areaMap = new Map<string, FunctionalAreaWithChildren>();
   const rootAreas: FunctionalAreaWithChildren[] = [];
@@ -52,7 +62,7 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     areaMap.set(area.id, {
       ...area,
       children: [],
-      tests: areaTests.map(t => ({ id: t.id, name: t.name, description: t.description, latestStatus: statusMap.get(t.id)?.status ?? null, isPlaceholder: t.isPlaceholder ?? false })),
+      tests: areaTests.map(t => ({ id: t.id, name: t.name, specTitle: specTitleByTestId.get(t.id) ?? null, latestStatus: statusMap.get(t.id)?.status ?? null, isPlaceholder: t.isPlaceholder ?? false })),
     });
   }
 
@@ -94,12 +104,11 @@ export async function getOrCreateRoutesFolder(repositoryId: string) {
     id,
     repositoryId,
     name: 'Routes',
-    description: 'Auto-generated folder containing discovered routes',
     isRouteFolder: true,
     orderIndex: 0,
   });
 
-  return { id, repositoryId, name: 'Routes', description: 'Auto-generated folder containing discovered routes', parentId: null, isRouteFolder: true, orderIndex: 0 };
+  return { id, repositoryId, name: 'Routes', parentId: null, isRouteFolder: true, orderIndex: 0 };
 }
 
 export async function moveTestToArea(testId: string, areaId: string | null) {

@@ -33,7 +33,6 @@ const TEST_DEFINITIONS: Array<{
   description?: string;
   functionalArea?: string;
   executionMode?: string;
-  agentPrompt?: string;
   setupOverrides?: string;
   teardownOverrides?: string;
   viewportOverride?: string;
@@ -4960,7 +4959,6 @@ async function seed() {
       targetUrl: testDef.targetUrl,
       description: testDef.description ?? null,
       executionMode: testDef.executionMode ?? 'procedural',
-      agentPrompt: testDef.agentPrompt ?? null,
       setupOverrides: testDef.setupOverrides ?? null,
       teardownOverrides: testDef.teardownOverrides ?? null,
       viewportOverride: testDef.viewportOverride ?? null,

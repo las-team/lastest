@@ -99,7 +99,8 @@ export async function createStandaloneSpec(
   return specId;
 }
 
-/** Create a placeholder test with a linked spec in one action */
+/** Create a placeholder test with a linked spec in one action.
+ * `description` is no longer stored on the test directly — it lives on the linked test_specs row. */
 export async function createPlaceholderTestCase(
   repositoryId: string,
   functionalAreaId: string,
@@ -113,7 +114,6 @@ export async function createPlaceholderTestCase(
     functionalAreaId,
     name,
     code: PLACEHOLDER_CODE,
-    description,
     isPlaceholder: true,
   });
 
@@ -166,7 +166,6 @@ export async function generateTestFromSpec(
       functionalAreaId: spec.functionalAreaId,
       name: spec.title,
       code,
-      description: spec.spec.split('\n')[0],
       targetUrl: baseUrl,
       specId,
     })).id;
@@ -331,11 +330,11 @@ export async function convertPlanToPlaceholders(
   const existingTests = await queries.getTestsByFunctionalArea(functionalAreaId);
   const existingNames = new Set(existingTests.map(t => t.name.toLowerCase()));
 
-  // Build spec body with area context
+  // Build spec body with area context (area's full plan is the canonical source)
   const areaContext = [
     area.name ? `**Area:** ${area.name}` : '',
-    area.description ? `**Description:** ${area.description}` : '',
-  ].filter(Boolean).join('\n');
+    area.agentPlan ? `**Plan:**\n${area.agentPlan}` : '',
+  ].filter(Boolean).join('\n\n');
 
   let created = 0;
   for (const { title, body } of items) {
@@ -348,7 +347,6 @@ export async function convertPlanToPlaceholders(
       functionalAreaId,
       name: title,
       code: PLACEHOLDER_CODE,
-      description: body || title,
       isPlaceholder: true,
     });
 
@@ -386,7 +384,7 @@ export async function generatePlanFromSpecs(
   const specs = await queries.getSpecsForArea(functionalAreaId);
   if (specs.length === 0) return { success: false, error: 'No specs to compose plan from' };
 
-  const header = `## ${area.name}${area.description ? `\n\n${area.description}` : ''}`;
+  const header = `## ${area.name}`;
   const scenarios = specs.map((s, idx) => {
     const body = s.spec?.trim() ? s.spec.trim() : s.title;
     return `### Scenario ${idx + 1}: ${s.title}\n${body}`;
@@ -426,8 +424,7 @@ export async function generateSpecsFromTests(
 
     const specBody = [
       area.name ? `**Area:** ${area.name}` : '',
-      area.description ? `**Description:** ${area.description}` : '',
-      test.description || '',
+      area.agentPlan ? `**Plan:**\n${area.agentPlan}` : '',
     ].filter(Boolean).join('\n\n') || test.name;
 
     const specId = await queries.createTestSpec({
@@ -469,9 +466,16 @@ export async function generatePlanFromTests(
 
   if (targetTests.length === 0) return { success: false, error: 'No tests to compose plan from' };
 
-  const header = `## ${area.name}${area.description ? `\n\n${area.description}` : ''}`;
+  // Pull spec markdown for each test (canonical "what does this test do" source)
+  const specsByTestId = new Map<string, string>();
+  for (const t of targetTests) {
+    const s = await queries.getTestSpec(t.id);
+    if (s?.spec?.trim()) specsByTestId.set(t.id, s.spec.trim());
+  }
+
+  const header = `## ${area.name}`;
   const scenarios = targetTests.map((t, idx) => {
-    const body = t.description?.trim() ? t.description.trim() : t.name;
+    const body = specsByTestId.get(t.id) ?? t.name;
     return `### Scenario ${idx + 1}: ${t.name}\n${body}`;
   });
   const plan = `${header}\n\n${scenarios.join('\n\n')}`;

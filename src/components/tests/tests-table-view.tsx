@@ -25,6 +25,9 @@ import type { Test } from '@/lib/db/schema';
 export interface TestWithStatus extends Test {
   latestStatus: string | null;
   lastRunAt: Date | null;
+  // Denormalized from test_specs.title via a 1:1 LEFT JOIN. Surfaces a short
+  // "what does this test do" string for list/tree views without a per-row spec fetch.
+  specTitle?: string | null;
 }
 
 export type TestsTableColumnKey =
@@ -32,7 +35,7 @@ export type TestsTableColumnKey =
   | 'lastRun'
   | 'lastModified'
   | 'area'
-  | 'description'
+  | 'spec'
   | 'targetUrl';
 
 export type TestsTableSortKey =
@@ -53,7 +56,7 @@ export const TESTS_TABLE_TOGGLEABLE_COLUMNS: TestsTableColumnKey[] = [
   'lastRun',
   'lastModified',
   'area',
-  'description',
+  'spec',
   'targetUrl',
 ];
 
@@ -62,7 +65,7 @@ export const TESTS_TABLE_COLUMN_LABELS: Record<TestsTableColumnKey, string> = {
   lastRun: 'Last run',
   lastModified: 'Last modified',
   area: 'Area',
-  description: 'Description',
+  spec: 'Spec',
   targetUrl: 'Target URL',
 };
 
@@ -303,9 +306,9 @@ export function TestsTableView({
                   {renderSortHeader('Area', 'area')}
                 </th>
               )}
-              {visibleColumns.has('description') && (
+              {visibleColumns.has('spec') && (
                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                  Description
+                  Spec
                 </th>
               )}
               {visibleColumns.has('targetUrl') && (
@@ -373,13 +376,13 @@ export function TestsTableView({
                       </span>
                     </td>
                   )}
-                  {visibleColumns.has('description') && (
+                  {visibleColumns.has('spec') && (
                     <td className="px-3 py-2 align-middle text-muted-foreground">
                       <span
                         className="truncate block max-w-[24rem]"
-                        title={test.description ?? undefined}
+                        title={test.specTitle ?? undefined}
                       >
-                        {test.description ?? '—'}
+                        {test.specTitle ?? '—'}
                       </span>
                     </td>
                   )}

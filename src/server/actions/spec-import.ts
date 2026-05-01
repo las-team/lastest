@@ -850,7 +850,6 @@ export async function generateTestsFromStories(
               functionalAreaId: task.areaId,
               name: testName,
               code,
-              description: acDescription,
               targetUrl: options?.targetUrl || null,
             });
 
@@ -1002,7 +1001,6 @@ export async function createPlaceholdersFromStories(
             functionalAreaId: area.id,
             name: testName,
             code: PLACEHOLDER_CODE,
-            description: acDescription,
             isPlaceholder: true,
             targetUrl: options?.targetUrl || null,
           });

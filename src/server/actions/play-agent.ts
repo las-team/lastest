@@ -1101,13 +1101,12 @@ async function runPlanWithAgents(
     const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
       repositoryId,
       area.name,
-      area.description,
+      area.testPlan ?? area.description,
     );
     if (area.testPlan) {
       // Save snapshot for rollback before overwriting
       const snapshot = JSON.stringify({
         previousPlan: dbArea.agentPlan,
-        previousDescription: dbArea.description,
         generatedTestIds: [],
       });
       await queries.updateFunctionalArea(dbArea.id, {
@@ -1121,7 +1120,7 @@ async function runPlanWithAgents(
     richAreas.push({
       id: dbArea.id,
       name: area.name,
-      description: area.description || '',
+      summary: area.description || '',
       routes: newRoutes,
       testPlan: area.testPlan || '',
     });
@@ -1278,15 +1277,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
     const allRoutes = await queries.getRoutesByRepo(repositoryId);
 
     for (const area of targetAreas) {
-      // Save scenario summary to area description if not already set
-      if (area.agentPlan && !area.description) {
-        const scenarioLines = area.agentPlan.split('\n').filter(l => /^###\s+Scenario\s+\d+:/.test(l));
-        const desc = scenarioLines.length > 0
-          ? scenarioLines.map(l => l.replace(/^###\s+Scenario\s+\d+:\s*/, '- ')).join('\n')
-          : area.agentPlan.slice(0, 500);
-        await queries.updateFunctionalArea(area.id, { description: desc });
-      }
-
       // Get known routes for this area to help grouping
       const routePaths = allRoutes
         .filter(r => r.functionalAreaId === area.id)
@@ -1300,8 +1290,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
         workItems.push({ area, group });
       }
     }
-
-    const totalWork = workItems.length;
 
     type GeneratorSubstep = NonNullable<AgentStepState['substeps']>[number];
     const generatorStates: GeneratorSubstep[] = [];
@@ -1354,7 +1342,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
             if (existingPlaceholder) {
               await queries.updateTest(existingPlaceholder.id, {
                 code: genResult.code,
-                description: group.description,
                 targetUrl: baseUrl,
                 isPlaceholder: false,
               });
@@ -1374,7 +1361,6 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 repositoryId,
                 functionalAreaId: area.id,
                 name: group.name,
-                description: group.description,
                 code: genResult.code,
                 targetUrl: baseUrl,
                 ...(playAgentBot ? { createdByBotId: playAgentBot.id } : {}),
@@ -1405,7 +1391,7 @@ async function runGenerate(sessionId: string, repositoryId: string, teamId: stri
                 if (!existingForTest) {
                   const specBody = [
                     `**Area:** ${area.name}`,
-                    area.description ? `**Description:** ${area.description}` : '',
+                    area.agentPlan ? `**Plan:**\n${area.agentPlan}` : '',
                     group.description || group.name,
                   ].filter(Boolean).join('\n\n');
                   const specId = await queries.createTestSpec({
@@ -2360,17 +2346,16 @@ export async function rerunPlanner(
   // Save merged areas to DB and build rich result
   const richAreas: AgentRichResultPlanArea[] = [];
   for (const area of mergedAreas) {
-    const dbArea = await queries.getOrCreateFunctionalAreaByRepo(session.repositoryId, area.name, area.description);
+    const dbArea = await queries.getOrCreateFunctionalAreaByRepo(session.repositoryId, area.name, area.testPlan ?? area.description);
     if (area.testPlan) {
       const snapshot = JSON.stringify({
         previousPlan: dbArea.agentPlan,
-        previousDescription: dbArea.description,
         generatedTestIds: [],
       });
       await queries.updateFunctionalArea(dbArea.id, { agentPlan: area.testPlan, planGeneratedAt: new Date(), planSnapshot: snapshot });
     }
     const newRoutes = area.routes.filter(r => !existingRerunPaths.has(r));
-    richAreas.push({ id: dbArea.id, name: area.name, description: area.description || '', routes: newRoutes, testPlan: area.testPlan || '' });
+    richAreas.push({ id: dbArea.id, name: area.name, summary: area.description || '', routes: newRoutes, testPlan: area.testPlan || '' });
   }
 
   const richResult: AgentStepRichResult = { type: 'plan', areas: richAreas };

@@ -219,7 +219,6 @@ export function AIScanRoutesDialog({
             name: `${testName} - Visual Test`,
             code: result.code,
             targetUrl: route.path,
-            description: route.testSuggestions.length > 0 ? route.testSuggestions.join('\n') : undefined,
           });
           successCount++;
           setGenerateResults(prev => [...prev, { path: route.path, success: true }]);
