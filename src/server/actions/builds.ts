@@ -709,23 +709,37 @@ async function runBuildAsync(
       }
     }
 
-    // Compute DOM diff and store on the first visual diff's metadata
+    // DOM diff: bootstrap baseline on first run, otherwise diff against it
+    // and write the result to every visual diff produced by this test result.
     const testRecord2 = tests.find(t => t.id === result.testId);
-    if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+    if (!testRecord2?.domSnapshot && result.domSnapshot) {
+      // First run for this test (or legacy test created before DOM capture
+      // was wired). Promote the current snapshot to the baseline; nothing to
+      // diff against on this run.
+      await queries.updateTest(result.testId, { domSnapshot: result.domSnapshot });
+      console.info('[dom-diff] bootstrapped baseline DOM snapshot', { testId: result.testId });
+    } else if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
       try {
         const { computeDomDiff } = await import('@/lib/diff/dom-diff');
         const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
         if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
-          // Store DOM diff on the first visual diff's metadata
-          const firstDiffId = diffResults[0].diffId;
-          const existingDiff = await queries.getVisualDiff(firstDiffId);
-          if (existingDiff) {
-            const updatedMetadata = { ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata || { changedRegions: [] }), domDiff };
-            await queries.updateVisualDiff(firstDiffId, { metadata: updatedMetadata });
-          }
+          // DOM diff is per-test-result, so attach it to every diff that
+          // points at this test result — not just diffResults[0].
+          await Promise.all(diffResults.map(async ({ diffId }) => {
+            const existingDiff = await queries.getVisualDiff(diffId);
+            if (!existingDiff) return;
+            const updatedMetadata = {
+              ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata ?? { changedRegions: [] }),
+              domDiff,
+            };
+            await queries.updateVisualDiff(diffId, { metadata: updatedMetadata });
+          }));
         }
-      } catch {
-        // Non-critical — DOM diff is optional
+      } catch (err) {
+        console.warn('[dom-diff] computation failed', {
+          testId: result.testId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
