@@ -7,8 +7,9 @@
  * Source-of-truth: the `sessions.kind` column. Browser sessions are 'browser';
  * programmatic API tokens are 'api' (see schema.ts).
  *
- * Cheap fast-path: if the request carries a `Bearer` token at all, treat it
- * as runner-class without a DB roundtrip. Cookie-only requests must verify.
+ * Bearer tokens are verified against the DB before granting runner status —
+ * trusting the header alone would let any anonymous client bypass throttling
+ * by attaching a junk `Authorization: Bearer x`.
  */
 
 import * as queries from '@/lib/db/queries';
@@ -22,7 +23,10 @@ export interface RunnerCheck {
 export async function classifyRequest(request: Request): Promise<RunnerCheck> {
   const auth = request.headers.get('authorization');
   if (auth?.startsWith('Bearer ')) {
-    return { isRunner: true, reason: 'bearer-token' };
+    const token = auth.slice('Bearer '.length).trim();
+    if (token && (await isApiSessionToken(token))) {
+      return { isRunner: true, reason: 'api-session' };
+    }
   }
 
   // For cookie sessions we'd need to parse the better-auth cookie and look up

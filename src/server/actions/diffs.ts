@@ -12,6 +12,35 @@ import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths'
 import { awardScore } from '@/server/actions/gamification';
 import { buildVisualDiffIssue, createVisualDiffIssue } from '@/lib/integrations/github-issues';
 
+// Cross-team protection: ignore/focus regions are scoped to (testId, stepLabel),
+// but the test row already pins the owning repository. Verify the caller's team
+// owns that repo before any mutation — `requireTeamAccess` only proves a team
+// exists, not that it owns this particular test.
+async function requireTestOwnership(testId: string) {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (!test.repositoryId) throw new Error('Forbidden: Test has no repository');
+  const repo = await queries.getRepository(test.repositoryId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Test does not belong to your team');
+  }
+  return { session, test, repo };
+}
+
+async function requireDiffOwnership(diffId: string) {
+  const session = await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+  const test = await queries.getTest(diff.testId);
+  if (!test || !test.repositoryId) throw new Error('Forbidden: Diff has no repository');
+  const repo = await queries.getRepository(test.repositoryId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Diff does not belong to your team');
+  }
+  return { session, diff, test, repo };
+}
+
 /**
  * Approve a single visual diff — core logic, no auth check.
  * Called by both session-authenticated and token-authenticated paths.
@@ -346,7 +375,7 @@ export async function addIgnoreRegion(
   region: { x: number; y: number; width: number; height: number },
   reason?: string
 ) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.createIgnoreRegion({
     testId,
     stepLabel,
@@ -359,7 +388,15 @@ export async function addIgnoreRegion(
  * Remove an ignore region
  */
 export async function removeIgnoreRegion(regionId: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  const region = await queries.getIgnoreRegionById(regionId);
+  if (!region) throw new Error('Ignore region not found');
+  const test = await queries.getTest(region.testId);
+  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  const repo = await queries.getRepository(test.repositoryId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Ignore region does not belong to your team');
+  }
   await queries.deleteIgnoreRegion(regionId);
   return { success: true };
 }
@@ -368,7 +405,7 @@ export async function removeIgnoreRegion(regionId: string) {
  * Get ignore regions for a test step
  */
 export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getIgnoreRegions(testId, stepLabel);
 }
 
@@ -382,9 +419,7 @@ export async function addIgnoreRegionForDiff(
   region: { x: number; y: number; width: number; height: number },
   reason?: string,
 ) {
-  await requireTeamAccess();
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  const { diff } = await requireDiffOwnership(diffId);
 
   const created = await queries.createIgnoreRegion({
     testId: diff.testId,
@@ -402,11 +437,21 @@ export async function addIgnoreRegionForDiff(
  * if one is provided so the UI updates in-place.
  */
 export async function removeIgnoreRegionForDiff(regionId: string, diffId?: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  const region = await queries.getIgnoreRegionById(regionId);
+  if (!region) throw new Error('Ignore region not found');
+  const test = await queries.getTest(region.testId);
+  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  const repo = await queries.getRepository(test.repositoryId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Ignore region does not belong to your team');
+  }
   await queries.deleteIgnoreRegion(regionId);
   if (diffId) {
     const diff = await queries.getVisualDiff(diffId);
-    if (diff) await recalculateDiff(diffId, diff.stepLabel ?? null);
+    if (diff && diff.testId === region.testId) {
+      await recalculateDiff(diffId, diff.stepLabel ?? null);
+    }
   }
   return { success: true };
 }
@@ -415,9 +460,7 @@ export async function removeIgnoreRegionForDiff(regionId: string, diffId?: strin
  * Get ignore regions for this diff's specific (testId, stepLabel).
  */
 export async function getIgnoreRegionsForDiff(diffId: string) {
-  await requireTeamAccess();
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  const { diff } = await requireDiffOwnership(diffId);
   return queries.getIgnoreRegions(diff.testId, diff.stepLabel ?? null);
 }
 
@@ -431,9 +474,7 @@ export async function addFocusRegion(
   diffId: string,
   region: { x: number; y: number; width: number; height: number },
 ) {
-  await requireTeamAccess();
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  const { diff } = await requireDiffOwnership(diffId);
 
   const created = await queries.createFocusRegion({
     testId: diff.testId,
@@ -450,11 +491,21 @@ export async function addFocusRegion(
  * if one is provided so the UI updates in-place.
  */
 export async function removeFocusRegion(regionId: string, diffId?: string) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
+  const region = await queries.getFocusRegionById(regionId);
+  if (!region) throw new Error('Focus region not found');
+  const test = await queries.getTest(region.testId);
+  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  const repo = await queries.getRepository(test.repositoryId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: Focus region does not belong to your team');
+  }
   await queries.deleteFocusRegion(regionId);
   if (diffId) {
     const diff = await queries.getVisualDiff(diffId);
-    if (diff) await recalculateDiff(diffId, diff.stepLabel ?? null);
+    if (diff && diff.testId === region.testId) {
+      await recalculateDiff(diffId, diff.stepLabel ?? null);
+    }
   }
   return { success: true };
 }
@@ -463,9 +514,7 @@ export async function removeFocusRegion(regionId: string, diffId?: string) {
  * Get focus regions for the (testId, stepLabel) owning this diff.
  */
 export async function getFocusRegionsForDiff(diffId: string) {
-  await requireTeamAccess();
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  const { diff } = await requireDiffOwnership(diffId);
   return queries.getFocusRegions(diff.testId, diff.stepLabel ?? null);
 }
 
@@ -474,7 +523,7 @@ export async function getFocusRegionsForDiff(diffId: string) {
  * Used by the test-detail criteria tab to show which screenshots are restricted.
  */
 export async function listFocusRegionsByTest(testId: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getFocusRegionsByTest(testId);
 }
 

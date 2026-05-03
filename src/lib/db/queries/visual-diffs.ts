@@ -368,6 +368,11 @@ export async function deleteIgnoreRegion(id: string) {
   await db.delete(ignoreRegions).where(eq(ignoreRegions.id, id));
 }
 
+export async function getIgnoreRegionById(id: string) {
+  const [row] = await db.select().from(ignoreRegions).where(eq(ignoreRegions.id, id));
+  return row;
+}
+
 // Focus Regions (per-screenshot positive mask)
 export async function getFocusRegions(testId: string, stepLabel: string | null) {
   return db

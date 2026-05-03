@@ -1,5 +1,4 @@
 import { Resend } from 'resend';
-import { buildUnsubscribeUrl, buildUnsubscribePostUrl } from './unsubscribe';
 
 // Only instantiate Resend if API key is available
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -24,17 +23,23 @@ export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsub
   }
 
   try {
+    // RFC 8058 one-click expects the POST endpoint to be the URL the mail
+    // client hits. List the POST URL first; the GET landing page is a
+    // fallback so users can still click an "Unsubscribe" link.
+    const listUnsubscribeUrls = [unsubscribePostUrl, unsubscribeUrl]
+      .filter((u): u is string => Boolean(u))
+      .map((u) => `<${u}>`)
+      .join(', ');
+
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
       subject,
       html,
       text,
-      headers: unsubscribeUrl
+      headers: listUnsubscribeUrls
         ? {
-            'List-Unsubscribe': unsubscribePostUrl
-              ? `<${unsubscribeUrl}>, <${unsubscribePostUrl}>`
-              : `<${unsubscribeUrl}>`,
+            'List-Unsubscribe': listUnsubscribeUrls,
             ...(unsubscribePostUrl ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
           }
         : undefined,
@@ -92,9 +97,10 @@ function emailShell(content: string, unsubscribeUrl?: string) {
 }
 
 export async function sendPasswordResetEmail(to: string, token: string) {
+  // Transactional: no List-Unsubscribe — that header is reserved for marketing
+  // mail per RFC 8058, and a click here would revoke marketing consent for an
+  // email the user didn't perceive as marketing.
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
-  const unsubscribeUrl = buildUnsubscribeUrl(to);
-  const unsubscribePostUrl = buildUnsubscribePostUrl(to);
 
   const html = emailShell(`
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Reset your password</h1>
@@ -119,7 +125,7 @@ export async function sendPasswordResetEmail(to: string, token: string) {
             </p>
           </td></tr>
         </table>
-  `, unsubscribeUrl);
+  `);
 
   const text = `Reset your password
 
@@ -129,25 +135,20 @@ Reset here: ${resetUrl}
 
 This link expires in 1 hour. If you didn't request this, you can safely ignore this email.
 
-— Lastest
-
-Unsubscribe: ${unsubscribeUrl}`;
+— Lastest`;
 
   return sendEmail({
     to,
     subject: 'Reset your password — Lastest',
     html,
     text,
-    unsubscribeUrl,
-    unsubscribePostUrl,
   });
 }
 
 export async function sendInvitationEmail(to: string, token: string, inviterName?: string) {
+  // Transactional: no List-Unsubscribe (see sendPasswordResetEmail).
   const inviteUrl = `${APP_URL}/invite?token=${token}`;
   const inviter = inviterName || 'Your team';
-  const unsubscribeUrl = buildUnsubscribeUrl(to);
-  const unsubscribePostUrl = buildUnsubscribePostUrl(to);
 
   const html = emailShell(`
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">You're invited</h1>
@@ -173,7 +174,7 @@ export async function sendInvitationEmail(to: string, token: string, inviterName
             </p>
           </td></tr>
         </table>
-  `, unsubscribeUrl);
+  `);
 
   const text = `You're invited!
 
@@ -183,16 +184,12 @@ Accept your invitation: ${inviteUrl}
 
 This invitation expires in 7 days.
 
-— Lastest
-
-Unsubscribe: ${unsubscribeUrl}`;
+— Lastest`;
 
   return sendEmail({
     to,
     subject: `${inviter} invited you to Lastest`,
     html,
     text,
-    unsubscribeUrl,
-    unsubscribePostUrl,
   });
 }

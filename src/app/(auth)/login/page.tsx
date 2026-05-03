@@ -14,6 +14,8 @@ import { Github } from 'lucide-react';
 import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
 import { isValidShareSlug } from '@/lib/share/slug';
 import { checkEmailExists, recordRegistrationConsent } from '@/server/actions/consent';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 export default function LoginPage() {
   return (
@@ -90,6 +92,13 @@ function LoginForm() {
       } catch (err) {
         console.error('recordRegistrationConsent failed', err);
       }
+
+      track(Events.signup_completed, {
+        method: 'email',
+        marketingOptIn: marketingConsent,
+        claim: claim ? 'true' : 'false',
+        source: 'login-auto-signup',
+      });
 
       window.location.href = signupPostAuthUrl;
       return;
