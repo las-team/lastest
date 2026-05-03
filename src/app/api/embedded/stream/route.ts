@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { toProxyStreamUrl } from '@/lib/eb/stream-url';
@@ -13,6 +14,15 @@ export async function GET() {
   try {
     await requireAuth();
   } catch {
+    // B4 diagnostics: log which path failed (cookie absent vs token absent vs
+    // both) so 403/401 incidents on /record can be triaged from a build's
+    // consoleErrors instead of needing a server log dive.
+    const h = await headers();
+    const hasCookie = Boolean(h.get('cookie'));
+    const hasBearer = h.get('authorization')?.startsWith('Bearer ');
+    console.warn(
+      `[stream] 401 Unauthorized — cookie=${hasCookie ? 'present' : 'missing'} bearer=${hasBearer ? 'present' : 'missing'} ua=${h.get('user-agent')?.slice(0, 80) || 'unknown'}`,
+    );
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

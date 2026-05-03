@@ -57,6 +57,15 @@ const statusConfig = {
     textColor: 'text-warning',
     iconColor: 'text-warning',
   },
+  executor_failed: {
+    icon: XCircle,
+    label: 'EXECUTOR FAILED',
+    description: 'Build orchestrator crashed before any test ran',
+    bgColor: 'bg-destructive/10',
+    borderColor: 'border-destructive/40',
+    textColor: 'text-destructive',
+    iconColor: 'text-destructive',
+  },
 };
 
 export function BuildSummaryHero({ status, changesDetected, isRunning = false, errorMessage }: BuildSummaryHeroProps) {

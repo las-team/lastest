@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { getEmbeddedSession } from '@/server/actions/embedded-sessions';
 import { toProxyStreamUrl } from '@/lib/eb/stream-url';
@@ -16,6 +17,14 @@ export async function GET(
   try {
     await requireAuth();
   } catch {
+    // B4 diagnostics — see /api/embedded/stream/route.ts for context.
+    const h = await headers();
+    const hasCookie = Boolean(h.get('cookie'));
+    const hasBearer = h.get('authorization')?.startsWith('Bearer ');
+    const { sessionId: sid } = await params;
+    console.warn(
+      `[stream/${sid}] 401 Unauthorized — cookie=${hasCookie ? 'present' : 'missing'} bearer=${hasBearer ? 'present' : 'missing'}`,
+    );
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

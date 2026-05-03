@@ -1119,12 +1119,32 @@ async function runBuildAsync(
         completedAt: new Date(),
         status: 'failed',
       });
+
+      // B6: distinguish executor-level failure (no test results landed) from
+      // mid-run failure (some results landed, others didn't). The former
+      // points at infrastructure (EB pod scheduling, runner unreachable);
+      // the latter at the failing test(s) themselves.
+      const writtenResults = await queries.countTestResultsByBuild(buildId).catch(() => 0);
+      const errorMessage = error instanceof Error ? error.message : 'Build failed';
+      const errorStack = error instanceof Error && error.stack ? error.stack : null;
+      const overallStatus: 'executor_failed' | 'blocked' =
+        writtenResults === 0 ? 'executor_failed' : 'blocked';
+      const executorErrorBody = errorStack
+        ? `${errorMessage}\n\n${errorStack}`
+        : errorMessage;
+
+      console.error(
+        `[build] runBuildAsync threw for ${buildId} after ${writtenResults} results — status=${overallStatus}: ${errorMessage}`
+      );
+
       await queries.updateBuild(buildId, {
-        overallStatus: 'blocked',
+        overallStatus,
         completedAt: new Date(),
         elapsedMs: Date.now() - startTime,
+        executorError: overallStatus === 'executor_failed' ? executorErrorBody.slice(0, 8_000) : null,
+        executorFailedAt: overallStatus === 'executor_failed' ? new Date() : null,
       });
-      await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
+      await failJob(jobId, errorMessage);
     }
   }
 

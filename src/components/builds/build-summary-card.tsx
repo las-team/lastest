@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CheckCircle, AlertTriangle, XCircle, ListTodo, Clock, GitBranch, Globe, Shield } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, ListTodo, Clock, GitBranch, Globe, Shield, ServerCrash } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Build, BuildStatus } from '@/lib/db/schema';
@@ -72,6 +72,14 @@ const statusConfig: Record<BuildStatus, {
     borderColor: 'border-warning/30',
     textColor: 'text-warning',
     iconColor: 'text-warning',
+  },
+  executor_failed: {
+    icon: ServerCrash,
+    label: 'Executor Failed',
+    bgColor: 'bg-destructive/10',
+    borderColor: 'border-destructive/40',
+    textColor: 'text-destructive',
+    iconColor: 'text-destructive',
   },
 };
 
@@ -163,6 +171,17 @@ export function BuildSummaryCard({ build, gitBranch, gitCommit, isActiveBranch, 
           {formatDuration(build.elapsedMs)}
         </div>
       </div>
+      {status === 'executor_failed' && build.executorError && (
+        <div className="mt-2 pt-2 border-t border-destructive/20 text-xs">
+          <div className="flex items-start gap-2 text-destructive">
+            <ServerCrash className="w-3 h-3 mt-0.5 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Executor crashed before any test ran</div>
+              <pre className="mt-1 text-[11px] text-destructive/80 whitespace-pre-wrap break-all line-clamp-3">{build.executorError.split('\n').slice(0, 3).join('\n')}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </Link>
   );
 }

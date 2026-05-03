@@ -43,6 +43,8 @@ const STATUS_COLORS: Record<BuildStatus, string> = {
   review_required: '#E09836', // brand amber (--c-amber)
   blocked: '#E03E36',         // brand red (--c-red)
   has_todos: '#E09836',       // brand amber (--c-amber)
+  executor_failed: '#7C2D12', // dark red — distinct from 'blocked' so the build graph
+                              // makes infra failures visible at a glance.
 };
 
 const STATUS_LABELS: Record<BuildStatus, string> = {
@@ -50,6 +52,7 @@ const STATUS_LABELS: Record<BuildStatus, string> = {
   review_required: 'Review Required',
   blocked: 'Blocked',
   has_todos: 'Has Todos',
+  executor_failed: 'Executor Failed',
 };
 
 function formatDuration(elapsedMs: number | null): string {

@@ -15,6 +15,8 @@
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
  *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
+ *   EB_RESERVED_INTERACTIVE_SLOTS = pool slots reserved for recording/debug/AI
+ *                                   (kept off-limits to build dispatch). Default: 2.
  *   EB_CPU_REQUEST / EB_CPU_LIMIT / EB_MEM_REQUEST / EB_MEM_LIMIT
  *   EB_SHM_SIZE        = /dev/shm size (default: '512Mi') — Chromium crash guard
  *   EB_ACTIVE_DEADLINE_SECONDS (default: 1800)
@@ -79,6 +81,16 @@ export async function ebIdleTTLMs(): Promise<number> {
 
 export function warmPoolMin(): number {
   const n = parseInt(process.env.EB_WARM_POOL_MIN || '2', 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2;
+}
+
+// Pool slots held back from build dispatch so interactive callers
+// (recording, debug, AI) can always provision a fresh EB even when builds
+// have saturated the cluster. Recurring "Live-stream canvas never mounted"
+// failures traced to bursty cron-build overlap pushing currentPoolSize() to
+// ebPoolMax before a recording test could provision its target EB.
+export function interactiveReservedSlots(): number {
+  const n = parseInt(process.env.EB_RESERVED_INTERACTIVE_SLOTS || '2', 10);
   return Number.isFinite(n) && n >= 0 ? n : 2;
 }
 

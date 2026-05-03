@@ -371,6 +371,55 @@ export async function getIgnoreRegions(testId: string) {
 }
 
 /**
+ * Add an ignore region from the diff page. Resolves testId from the diff,
+ * then triggers recalculation so the UI reflects the new mask immediately.
+ * Ignore regions are test-level (apply to every screenshot of this test);
+ * other diffs of the same test will pick up the mask on their next recalc.
+ */
+export async function addIgnoreRegionForDiff(
+  diffId: string,
+  region: { x: number; y: number; width: number; height: number },
+  reason?: string,
+) {
+  await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+
+  const created = await queries.createIgnoreRegion({
+    testId: diff.testId,
+    ...region,
+    reason,
+  });
+
+  await recalculateDiff(diffId, diff.stepLabel ?? null);
+  return created;
+}
+
+/**
+ * Remove an ignore region. Triggers recalculation for the owning diff
+ * if one is provided so the UI updates in-place.
+ */
+export async function removeIgnoreRegionForDiff(regionId: string, diffId?: string) {
+  await requireTeamAccess();
+  await queries.deleteIgnoreRegion(regionId);
+  if (diffId) {
+    const diff = await queries.getVisualDiff(diffId);
+    if (diff) await recalculateDiff(diffId, diff.stepLabel ?? null);
+  }
+  return { success: true };
+}
+
+/**
+ * Get ignore regions for the test owning this diff.
+ */
+export async function getIgnoreRegionsForDiff(diffId: string) {
+  await requireTeamAccess();
+  const diff = await queries.getVisualDiff(diffId);
+  if (!diff) throw new Error('Diff not found');
+  return queries.getIgnoreRegions(diff.testId);
+}
+
+/**
  * Add a focus region to a specific (testId, stepLabel) screenshot.
  * Focus regions define a positive mask — only pixels inside any focus rect participate
  * in the diff. Without focus regions, the whole image is checked (default behavior).

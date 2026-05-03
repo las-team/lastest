@@ -572,6 +572,11 @@ export const builds = pgTable('builds', {
   }>(),
   createdAt: timestamp('created_at'),
   completedAt: timestamp('completed_at'),
+  // Captured when runBuildAsync's outer try/catch fires AND no per-test
+  // results landed — surfaces executor-level failures (B6) instead of
+  // silently coercing to 'blocked'.
+  executorError: text('executor_error'),
+  executorFailedAt: timestamp('executor_failed_at'),
 });
 
 // Visual diffs with approval workflow
@@ -1011,8 +1016,12 @@ export const DEFAULT_DIFF_THRESHOLDS = {
 // Diff classification type
 export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 
-// Build status enum
-export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos';
+// Build status enum.
+// 'executor_failed' = build orchestration crashed before per-test results could
+// be written (e.g. EB pod schedule failure, runner unreachable). Distinguished
+// from 'blocked' so the UI / MCP surface can differentiate "review needed" from
+// "infrastructure broke". See `runBuildAsync` catch block.
+export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos' | 'executor_failed';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
 export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled';
 

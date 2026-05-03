@@ -513,7 +513,15 @@ export function createServer(client: LastestClient): McpServer {
       const failed = build.failedCount as number ?? 0;
       const total = build.totalTests as number ?? 0;
 
+      const executorError = build.executorError as string | null | undefined;
+      const executorFailedAt = build.executorFailedAt as string | Date | null | undefined;
+
       const actionRequired: string[] = [];
+      if (status === 'executor_failed') {
+        actionRequired.push(
+          `Executor crashed before any test ran — inspect executorError and runner/EB pod logs (build won't recover by retry)`,
+        );
+      }
       if (pending.length > 0) {
         actionRequired.push(`Review ${pending.length} pending diff(s) — use lastest_get_diff, lastest_approve_diff, or lastest_reject_diff`);
       }
@@ -523,7 +531,9 @@ export function createServer(client: LastestClient): McpServer {
 
       const response: ToolResponse = {
         status,
-        summary: `Build ${params.buildId}: ${status}. ${passed}/${total} passed. ${diffs.length} diffs (${pending.length} pending, ${approved.length} approved, ${rejected.length} rejected).`,
+        summary: status === 'executor_failed'
+          ? `Build ${params.buildId}: EXECUTOR FAILED. ${passed}/${total} tests ran (executor crashed before completion). ${executorError ? executorError.split('\n')[0] : ''}`
+          : `Build ${params.buildId}: ${status}. ${passed}/${total} passed. ${diffs.length} diffs (${pending.length} pending, ${approved.length} approved, ${rejected.length} rejected).`,
         actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
         details: {
           build: {
@@ -534,6 +544,8 @@ export function createServer(client: LastestClient): McpServer {
             passed,
             failed,
             total,
+            ...(executorError ? { executorError } : {}),
+            ...(executorFailedAt ? { executorFailedAt } : {}),
           },
           diffs: {
             total: diffs.length,

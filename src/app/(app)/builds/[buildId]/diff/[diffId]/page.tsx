@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff } from '@/server/actions/diffs';
+import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
@@ -47,6 +47,8 @@ export default async function DiffPage({ params }: PageProps) {
 
   // Focus regions for this (testId, stepLabel) — positive mask shared across tabs
   const focusRegions = await getFocusRegionsForDiff(diffId);
+  // Ignore regions are test-level — apply to every screenshot of this test
+  const ignoreRegions = await getIgnoreRegionsForDiff(diffId);
 
   // Get all diffs sorted by test/step for consistent navigation
   const allDiffs = await getSortedDiffsByBuild(buildId);
@@ -152,6 +154,9 @@ export default async function DiffPage({ params }: PageProps) {
           nextDiffId={nextDiff?.id}
           banAiMode={banAiMode}
           initialFocusRegions={focusRegions.map(r => ({
+            id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
+          }))}
+          initialIgnoreRegions={ignoreRegions.map(r => ({
             id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
           }))}
           allDiffs={allDiffs}

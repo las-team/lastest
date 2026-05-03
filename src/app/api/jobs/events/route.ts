@@ -106,14 +106,15 @@ export async function GET(request: Request) {
         }
       });
 
-      // Keepalive every 8 seconds (under Envoy's 10s idle timeout)
+      // Keepalive every 5 seconds (under Envoy's 10s idle timeout AND under
+      // any 30s intermediary idle limit; previous 8s was too close to bound).
       const keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           clearInterval(keepalive);
         }
-      }, 8000);
+      }, 5000);
 
       // Periodic cleanup while connected
       const cleanupTimer = setInterval(() => {
@@ -125,9 +126,23 @@ export async function GET(request: Request) {
         }
       }, CLEANUP_INTERVAL_MS);
 
+      // Cloudflare 524 prevention — close the stream at 90s so we never hit CF's
+      // ~100s hard request timeout. Browser EventSource auto-reconnects on close,
+      // so the user sees no interruption. Emit an explicit reconnect event for
+      // any client that wants to log the cycle.
+      const lifetimeCap = setTimeout(() => {
+        try {
+          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }, 90_000);
+
       request.signal.addEventListener('abort', () => {
         clearInterval(keepalive);
         clearInterval(cleanupTimer);
+        clearTimeout(lifetimeCap);
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;

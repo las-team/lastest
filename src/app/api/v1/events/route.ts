@@ -73,18 +73,30 @@ export async function GET(request: NextRequest) {
         }
       });
 
-      // Send keepalive every 8 seconds (must be under envoy's 10s idle_timeout on Olares)
+      // Send keepalive every 5 seconds (under envoy's 10s idle_timeout on Olares
+      // and under any 30s intermediary idle limit).
       const keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           clearInterval(keepalive);
         }
-      }, 8000);
+      }, 5000);
+
+      // Cloudflare 524 prevention — close at 90s; EventSource auto-reconnects.
+      const lifetimeCap = setTimeout(() => {
+        try {
+          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }, 90_000);
 
       // Cleanup on close
       request.signal.addEventListener('abort', () => {
         clearInterval(keepalive);
+        clearTimeout(lifetimeCap);
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;

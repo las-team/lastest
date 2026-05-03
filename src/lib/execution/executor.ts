@@ -936,7 +936,7 @@ async function executeViaPoolWorkers(
     const deadline = Date.now() + claimMaxWaitMs;
     let wait = 500;
     while (Date.now() < deadline) {
-      const c = await claimOrProvisionPoolEB();
+      const c = await claimOrProvisionPoolEB({ purpose: 'build' });
       if (c) return c;
       await new Promise((r) => setTimeout(r, wait));
       wait = Math.min(wait * 2, 5000);

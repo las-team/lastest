@@ -87,6 +87,8 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       a11yViolationCount: builds.a11yViolationCount,
       a11yCriticalCount: builds.a11yCriticalCount,
       a11yTotalRulesChecked: builds.a11yTotalRulesChecked,
+      executorError: builds.executorError,
+      executorFailedAt: builds.executorFailedAt,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })
@@ -227,6 +229,15 @@ export async function getBuildTestSummaries(buildId: string) {
 
 // Build Summary helpers
 export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
+  // Preserve sticky `executor_failed` — that status is set explicitly by
+  // runBuildAsync's catch block when no per-test results landed and must not
+  // be overwritten by diff-driven recompute.
+  const [buildRow] = await db
+    .select({ overallStatus: builds.overallStatus })
+    .from(builds)
+    .where(eq(builds.id, buildId));
+  if (buildRow?.overallStatus === 'executor_failed') return 'executor_failed';
+
   const allDiffs = await db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId));
 
   if (allDiffs.length === 0) return 'safe_to_merge';
@@ -247,6 +258,18 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
   if (hasPending) return 'review_required';
   if (hasTodo) return 'has_todos';
   return 'safe_to_merge';
+}
+
+/**
+ * Count the test_result rows that have been written for a build's testRun.
+ * Used by the executor-failure path to distinguish "executor crashed before
+ * any test ran" (→ executor_failed) from "executor ran but had errors" (→ blocked).
+ */
+export async function countTestResultsByBuild(buildId: string): Promise<number> {
+  const [build] = await db.select({ testRunId: builds.testRunId }).from(builds).where(eq(builds.id, buildId));
+  if (!build?.testRunId) return 0;
+  const rows = await db.select({ id: testResults.id }).from(testResults).where(eq(testResults.testRunId, build.testRunId));
+  return rows.length;
 }
 
 export async function hasApprovedDiffs(repositoryId?: string | null) {
