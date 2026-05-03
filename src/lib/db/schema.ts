@@ -654,17 +654,21 @@ export const plannedScreenshots = pgTable('planned_screenshots', {
 export type PlannedScreenshot = typeof plannedScreenshots.$inferSelect;
 export type NewPlannedScreenshot = typeof plannedScreenshots.$inferInsert;
 
-// Ignore regions for masking areas during diff
+// Ignore regions for masking areas during diff. Per-(testId, stepLabel) like
+// focusRegions — a region applies only to the screenshot it was drawn on.
 export const ignoreRegions = pgTable('ignore_regions', {
   id: text('id').primaryKey(),
   testId: text('test_id').references(() => tests.id).notNull(),
+  stepLabel: text('step_label'),
   x: integer('x').notNull(),
   y: integer('y').notNull(),
   width: integer('width').notNull(),
   height: integer('height').notNull(),
   reason: text('reason'),
   createdAt: timestamp('created_at'),
-});
+}, (table) => ([
+  index('idx_ignore_regions_test_step').on(table.testId, table.stepLabel),
+]));
 
 // Focus regions: per-screenshot positive mask. If any exist for a (testId, stepLabel),
 // the diff engine blanks everything *outside* their union — the inverse of ignoreRegions.

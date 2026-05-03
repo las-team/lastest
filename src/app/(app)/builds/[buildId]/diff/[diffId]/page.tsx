@@ -47,7 +47,7 @@ export default async function DiffPage({ params }: PageProps) {
 
   // Focus regions for this (testId, stepLabel) — positive mask shared across tabs
   const focusRegions = await getFocusRegionsForDiff(diffId);
-  // Ignore regions are test-level — apply to every screenshot of this test
+  // Ignore regions for this (testId, stepLabel) — per-step mask
   const ignoreRegions = await getIgnoreRegionsForDiff(diffId);
 
   // Get all diffs sorted by test/step for consistent navigation

@@ -338,16 +338,18 @@ export async function getPendingDiffsCount(buildId: string) {
 }
 
 /**
- * Add an ignore region to a test
+ * Add an ignore region to a test step
  */
 export async function addIgnoreRegion(
   testId: string,
+  stepLabel: string | null,
   region: { x: number; y: number; width: number; height: number },
   reason?: string
 ) {
   await requireTeamAccess();
   return queries.createIgnoreRegion({
     testId,
+    stepLabel,
     ...region,
     reason,
   });
@@ -363,18 +365,17 @@ export async function removeIgnoreRegion(regionId: string) {
 }
 
 /**
- * Get ignore regions for a test
+ * Get ignore regions for a test step
  */
-export async function getIgnoreRegions(testId: string) {
+export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
   await requireTeamAccess();
-  return queries.getIgnoreRegions(testId);
+  return queries.getIgnoreRegions(testId, stepLabel);
 }
 
 /**
- * Add an ignore region from the diff page. Resolves testId from the diff,
- * then triggers recalculation so the UI reflects the new mask immediately.
- * Ignore regions are test-level (apply to every screenshot of this test);
- * other diffs of the same test will pick up the mask on their next recalc.
+ * Add an ignore region from the diff page. Resolves (testId, stepLabel) from
+ * the diff, then triggers recalculation so the UI reflects the new mask
+ * immediately. Ignore regions are per-step — only this diff is affected.
  */
 export async function addIgnoreRegionForDiff(
   diffId: string,
@@ -387,6 +388,7 @@ export async function addIgnoreRegionForDiff(
 
   const created = await queries.createIgnoreRegion({
     testId: diff.testId,
+    stepLabel: diff.stepLabel ?? null,
     ...region,
     reason,
   });
@@ -410,13 +412,13 @@ export async function removeIgnoreRegionForDiff(regionId: string, diffId?: strin
 }
 
 /**
- * Get ignore regions for the test owning this diff.
+ * Get ignore regions for this diff's specific (testId, stepLabel).
  */
 export async function getIgnoreRegionsForDiff(diffId: string) {
   await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) throw new Error('Diff not found');
-  return queries.getIgnoreRegions(diff.testId);
+  return queries.getIgnoreRegions(diff.testId, diff.stepLabel ?? null);
 }
 
 /**
@@ -830,10 +832,10 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
   const diffEngine = (settings.diffEngine as DiffEngineType) ?? 'pixelmatch';
   const regionDetectionMode = (settings.regionDetectionMode as RegionDetectionMode) ?? 'grid';
 
-  // Fetch ignore regions (test-level) and focus regions (per-step)
-  const testIgnoreRegions = await queries.getIgnoreRegions(diff.testId);
-  const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
-    ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+  // Fetch per-step ignore + focus regions for this screenshot
+  const stepIgnoreRegions = await queries.getIgnoreRegions(diff.testId, stepLabel);
+  const ignoreRects: Rectangle[] | undefined = stepIgnoreRegions.length > 0
+    ? stepIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
   const stepFocusRegions = await queries.getFocusRegions(diff.testId, stepLabel);
   const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0

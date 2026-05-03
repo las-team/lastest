@@ -1289,10 +1289,10 @@ async function processVisualDiff(
   const defaultBranch = repo?.defaultBranch || 'main';
   const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
-  // Fetch ignore regions (test-level) and focus regions (per-step) for this screenshot
-  const testIgnoreRegions = await queries.getIgnoreRegions(testId);
-  const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
-    ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+  // Fetch per-step ignore + focus regions for this screenshot
+  const stepIgnoreRegions = await queries.getIgnoreRegions(testId, stepLabel || null);
+  const ignoreRects: Rectangle[] | undefined = stepIgnoreRegions.length > 0
+    ? stepIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
   const stepFocusRegions = await queries.getFocusRegions(testId, stepLabel || null);
   const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0

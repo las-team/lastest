@@ -345,9 +345,17 @@ export async function getStepLabelsForTest(testId: string): Promise<string[]> {
     .sort();
 }
 
-// Ignore Regions
-export async function getIgnoreRegions(testId: string) {
-  return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId));
+// Ignore Regions (per-screenshot mask, mirrors focusRegions)
+export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
+  return db
+    .select()
+    .from(ignoreRegions)
+    .where(
+      and(
+        eq(ignoreRegions.testId, testId),
+        stepLabel === null ? isNull(ignoreRegions.stepLabel) : eq(ignoreRegions.stepLabel, stepLabel),
+      ),
+    );
 }
 
 export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
