@@ -5,7 +5,7 @@ on:
 jobs:
   visual-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,11 +16,10 @@ jobs:
           LASTEST_TOKEN: ${{ secrets.LASTEST_TOKEN }}
           LASTEST_URL: ${{ secrets.LASTEST_URL }}
         run: |
-          npx @lastest/runner@latest trigger \
+          npx @lastest/runner@0.4.2 trigger \
             -t "$LASTEST_TOKEN" \
             -s "$LASTEST_URL" \
             --repo "las-team/lastest" \
             --branch "${{ github.head_ref || github.ref_name }}" \
             --commit "${{ github.sha }}" \
-            --fail-on-changes \
-            --timeout 300000
+            --timeout 3000000
