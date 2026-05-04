@@ -19,15 +19,14 @@ Openrouter agent sdk parity
 **CSV upload and use**
 ## bugs
 ## features
-Google verification
+Welcome email, follow-up
+Google verification for gsheets
 **Self-test**
 Chat agent for website
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas
 Auto-feedback to resolve loop
-
-~~Clear up area desc-spec, test desc-spec duplication~~ DONE — code landed, run `pnpm tsx --env-file=.env.local scripts/backfill-desc-spec.ts` then `pnpm db:push` to drop the legacy `tests.description` / `functional_areas.description` / `tests.agent_prompt` columns.
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning                    

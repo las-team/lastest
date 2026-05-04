@@ -64,8 +64,7 @@ import {
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
-import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, Test } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
@@ -92,8 +91,6 @@ interface RecordingClientProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   defaultBaseUrl?: string;
-  enabledEngines?: RecordingEngine[];
-  defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
@@ -386,8 +383,6 @@ export function RecordingClient({
   settings,
   repositoryId,
   defaultBaseUrl,
-  enabledEngines = DEFAULT_RECORDING_ENGINES,
-  defaultEngine = 'lastest',
   rerecordTest,
   repositorySetupSteps = [],
   availableTests = [],
@@ -399,7 +394,6 @@ export function RecordingClient({
   useEffect(() => {
     onStepChange?.(step);
   }, [step, onStepChange]);
-  const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
   const [skippedDefaultStepIds, setSkippedDefaultStepIds] = useState<Set<string>>(new Set());
@@ -1085,31 +1079,6 @@ export function RecordingClient({
                         className="flex-1"
                       />
                     </div>
-                  </div>
-                )}
-
-                {/* Recording Engine */}
-                {enabledEngines.length > 1 && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Recording Engine</label>
-                    <Select value={selectedEngine} onValueChange={(v) => setSelectedEngine(v as RecordingEngine)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {enabledEngines.includes('lastest') && (
-                          <SelectItem value="lastest">Lastest Recorder</SelectItem>
-                        )}
-                        {enabledEngines.includes('playwright-inspector') && (
-                          <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedEngine === 'lastest'
-                        ? 'Multi-selector recording with real-time preview'
-                        : 'Official Playwright codegen tool'}
-                    </p>
                   </div>
                 )}
 
