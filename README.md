@@ -29,7 +29,7 @@
 ---
 
 <p align="center">
-  <img src="./docs/demo.gif" alt="Lastest Demo — Record, Test, Diff, Approve" width="720" />
+  <img src="./docs/lastest-intro.gif" alt="Lastest Demo — Record, Test, Diff, Approve" width="720" />
 </p>
 
 ## The Problem
