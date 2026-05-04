@@ -44,6 +44,8 @@ ARG GIT_COMMIT_COUNT=0
 # Stable key so Server Action IDs survive rebuilds (otherwise Next.js mints a
 # random key per build and every redeploy invalidates open tabs).
 ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=""
+# Inlined into the client bundle by Next at build time; per-target umami site.
+ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID=""
 
 # Set production environment for build
 ENV NODE_ENV=production
@@ -51,6 +53,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
 ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
 ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
 # Dummy secret for build-time page data collection (overridden at runtime)
 ENV BETTER_AUTH_SECRET=build-time-placeholder
 

@@ -1,11 +1,11 @@
 <p align="center">
-  <h1 align="center">Lastest</h1>
-  <p align="center">
-    <strong>Free, open-source visual regression testing with AI-generated tests</strong>
-  </p>
-  <p align="center">
-    Record it. Test it. Ship it.
-  </p>
+  <img src="./docs/logo-lockup.svg" alt="Lastest" width="420" />
+</p>
+<p align="center">
+  <strong>Free, open-source visual regression testing with AI-generated tests</strong>
+</p>
+<p align="center">
+  Record it. Test it. Ship it.
 </p>
 
 <p align="center">
@@ -232,6 +232,18 @@ git clone https://github.com/las-team/lastest.git
 cd lastest
 docker compose up -d         # postgres on :5432 (named volume `lastest-pgdata`)
 pnpm install
+
+# Configure env (required before pnpm dev — without EB_PROVISIONER the app
+# starts but no test can ever provision an Embedded Browser).
+cp .env.example .env.local
+cat >> .env.local <<EOF
+EB_PROVISIONER=kubernetes
+EB_NAMESPACE=lastest
+EB_IMAGE=lastest-embedded-browser:latest
+LASTEST_URL=http://host.k3d.internal:3000
+SYSTEM_EB_TOKEN=$(openssl rand -hex 32)
+EOF
+
 pnpm db:push                 # apply schema
 pnpm stack                   # REQUIRED: create k3d cluster + build/import EB image
 pnpm dev                     # http://localhost:3000
@@ -254,7 +266,7 @@ pnpm stack:refresh   # rebuild the EB image after editing packages/embedded-brow
 pnpm stack:stop      # delete the cluster
 ```
 
-Required `.env.local` keys:
+The `.env.local` keys the EB stack requires (already added by the Quick Start block above):
 
 ```
 EB_PROVISIONER=kubernetes
@@ -264,6 +276,8 @@ LASTEST_URL=http://host.k3d.internal:3000
 SYSTEM_EB_TOKEN=<openssl rand -hex 32>
 DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest
 ```
+
+> Note on defaults: `EB_PROVISIONER` defaults to `'none'` in code, so omitting it lets `pnpm dev` start cleanly but every test will silently fail to provision an EB. Always set it for any environment that runs tests.
 
 See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bootstrap scripts.
 
@@ -308,6 +322,22 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 4. **Review**: Visual diffs are classified (unchanged/flaky/changed). AI can optionally auto-classify with confidence scores. Approve intentional changes — they become the new baseline.
 
 5. **Fix**: When tests break, AI can propose fixes (human-in-the-loop) or the Play Agent can fix and re-run autonomously. Or edit the code by hand — your choice.
+
+### Development & Review Flow
+
+End-to-end view of how Lastest fits into a CI/CD workflow — from `git push` through preview-env validation to merge approval.
+
+<p align="center">
+  <img src="./docs/development-flow.png" alt="Development & Review Flow — code push → PR → CI/CD → preview env or staging → Lastest visual validation → manager review → approve & merge or request changes" width="900" />
+</p>
+
+### Remote Runners Architecture
+
+Distributed test execution via HTTP polling. The Lastest server queues commands; runners (Docker / CI / Cloud VM / local machine) poll for work, execute Playwright tests, capture screenshots, and report results back.
+
+<p align="center">
+  <img src="./docs/runner-logic.png" alt="Remote Runners architecture — Lastest server (test executor + command queue + screenshot storage) communicates via HTTP polling with multiple remote runners that authenticate, claim commands, execute Playwright tests, and upload results" width="900" />
+</p>
 
 ---
 

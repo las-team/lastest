@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 200" width="820" height="200" role="img" aria-label="Lastest logo and wordmark">
+  <title>Lastest</title>
+  <g shape-rendering="crispEdges">
+    <rect x="34" y="34" width="110" height="110" fill="none" stroke="#1F2A33" stroke-width="6"/>
+    <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
+    <rect x="56" y="56" width="88" height="88" fill="#1F2A33"/>
+    <path d="M 70 34 L 80 18 L 90 34 Z" fill="#1F2A33"/>
+    <path d="M 110 34 L 120 18 L 130 34 Z" fill="#1F2A33"/>
+  </g>
+  <text x="200" y="140"
+        font-family="'Archivo Black','Archivo','Arial Black','Helvetica Neue Bold','Helvetica',Arial,sans-serif"
+        font-weight="900"
+        font-size="130"
+        fill="#1F2A33">LAS<tspan fill="#E03E36">T</tspan>EST</text>
+</svg>
