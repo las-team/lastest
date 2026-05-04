@@ -166,6 +166,7 @@ build_olares() {
     --build-arg GIT_COMMIT_COUNT="$GIT_COMMIT_COUNT" \
     --build-arg NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" \
     --build-arg NEXT_PUBLIC_UMAMI_WEBSITE_ID="${OLARES_UMAMI_WEBSITE_ID:-}" \
+    --build-arg UMAMI_INTERNAL_URL="${UMAMI_INTERNAL_URL:-}" \
     -f Dockerfile .
   ok "Built $IMAGE_APP:olares"
 

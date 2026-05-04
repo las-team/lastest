@@ -46,6 +46,10 @@ ARG GIT_COMMIT_COUNT=0
 ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=""
 # Inlined into the client bundle by Next at build time; per-target umami site.
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID=""
+# Next evaluates next.config.ts rewrites() at build time and bakes the result
+# into routes-manifest.json — runtime UMAMI_INTERNAL_URL is too late, the
+# /_umami/* rewrite must be present when `next build` runs.
+ARG UMAMI_INTERNAL_URL=""
 
 # Set production environment for build
 ENV NODE_ENV=production
@@ -54,6 +58,7 @@ ENV NEXT_PUBLIC_GIT_HASH=$GIT_HASH
 ENV NEXT_PUBLIC_GIT_COMMIT_COUNT=$GIT_COMMIT_COUNT
 ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
+ENV UMAMI_INTERNAL_URL=$UMAMI_INTERNAL_URL
 # Dummy secret for build-time page data collection (overridden at runtime)
 ENV BETTER_AUTH_SECRET=build-time-placeholder
 
