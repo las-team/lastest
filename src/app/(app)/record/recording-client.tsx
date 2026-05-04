@@ -424,6 +424,8 @@ export function RecordingClient({
   // Setup form state - pre-fill from rerecordTest if available
   const [url, setUrl] = useState(rerecordTest?.targetUrl || defaultBaseUrl || 'https://');
   const [testName, setTestName] = useState(rerecordTest?.name || '');
+  const [testNameMissing, setTestNameMissing] = useState(false);
+  const testNameInputRef = useRef<HTMLInputElement>(null);
   const [areaId, setAreaId] = useState<string>(rerecordTest?.functionalAreaId || '');
   const [newAreaName, setNewAreaName] = useState('');
   const [areas, setAreas] = useState(initialAreas);
@@ -607,7 +609,12 @@ export function RecordingClient({
   }, [step, repositoryId]);
 
   const handleStartRecording = async () => {
-    if (!url || !testName) return;
+    if (!testName.trim()) {
+      setTestNameMissing(true);
+      testNameInputRef.current?.focus();
+      return;
+    }
+    if (!url) return;
 
     setIsLoading(true);
     setError(null);
@@ -1027,18 +1034,27 @@ export function RecordingClient({
 
                 {/* Test Name */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Test Name</label>
+                  <label className={`text-sm font-medium ${testNameMissing ? 'text-destructive' : ''}`}>
+                    Test Name
+                  </label>
                   <Input
+                    ref={testNameInputRef}
                     placeholder="login-success"
                     value={testName}
-                    onChange={(e) => setTestName(e.target.value)}
+                    onChange={(e) => {
+                      setTestName(e.target.value);
+                      if (testNameMissing && e.target.value.trim()) setTestNameMissing(false);
+                    }}
                     disabled={isRerecording}
+                    className={testNameMissing ? 'border-destructive ring-2 ring-destructive/40 focus-visible:ring-destructive/40' : ''}
                   />
-                  {isRerecording && (
+                  {isRerecording ? (
                     <p className="text-xs text-muted-foreground">
                       Test name cannot be changed when re-recording
                     </p>
-                  )}
+                  ) : testNameMissing ? (
+                    <p className="text-xs text-destructive">Enter a test name to start recording</p>
+                  ) : null}
                 </div>
 
                 {/* Functional Area - hidden when re-recording */}
@@ -1183,7 +1199,7 @@ export function RecordingClient({
                 {/* Start Button */}
                 <Button
                   onClick={handleStartRecording}
-                  disabled={!url || !testName || isLoading}
+                  disabled={!url || isLoading}
                   className="w-full"
                   size="lg"
                 >
