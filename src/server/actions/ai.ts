@@ -140,7 +140,6 @@ export async function saveGeneratedTest(data: {
   name: string;
   code: string;
   targetUrl?: string;
-  description?: string;
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   await requireRepoAccess(data.repositoryId);
   try {
@@ -150,7 +149,6 @@ export async function saveGeneratedTest(data: {
       name: data.name,
       code: data.code,
       targetUrl: data.targetUrl || null,
-      description: data.description || null,
     });
 
     revalidatePath('/tests');
@@ -327,14 +325,16 @@ export async function startGeneratePlaceholderTestAgent(data: {
     const test = await queries.getTest(data.testId);
     if (!test) return { success: false, error: 'Test not found' };
 
-    // Build prompt from test description + area context
+    // Build prompt from spec (canonical test intent) + area plan (canonical area context).
+    // Single source per layer — no description/spec/plan double-injection.
     const promptParts: string[] = [];
-    if (test.description) promptParts.push(test.description);
+    const testSpec = await queries.getTestSpec(data.testId);
+    if (testSpec?.spec) promptParts.push(testSpec.spec);
 
     if (test.functionalAreaId) {
       const area = await queries.getFunctionalArea(test.functionalAreaId);
-      if (area?.description) promptParts.push(`Area: ${area.name}\nArea Description: ${area.description}`);
-      if (area?.agentPlan) promptParts.push(`Test Plan:\n${area.agentPlan}`);
+      if (area?.agentPlan) promptParts.push(`Area: ${area.name}\nTest Plan:\n${area.agentPlan}`);
+      else if (area?.name) promptParts.push(`Area: ${area.name}`);
     }
 
     if (promptParts.length === 0) promptParts.push(`Generate a test for: ${test.name}`);

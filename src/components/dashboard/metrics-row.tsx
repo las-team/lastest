@@ -52,6 +52,12 @@ interface MetricsRowProps {
   groupByTest?: boolean;
   onGroupByTestChange?: (v: boolean) => void;
   diffs?: VisualDiffWithTestStatus[];
+  /**
+   * Tests that have been claimed by a runner but haven't completed yet.
+   * Sourced from runner_commands so we can show real test names in the
+   * "now running" indicator before the first screenshot/diff arrives.
+   */
+  activeRunningTests?: { testId: string; name: string }[];
 }
 
 export function MetricsRow({
@@ -76,6 +82,7 @@ export function MetricsRow({
   groupByTest = true,
   onGroupByTestChange,
   diffs,
+  activeRunningTests = [],
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
     if (!ms) return '-';
@@ -101,40 +108,40 @@ export function MetricsRow({
       label: 'Passed',
       value: passedCount,
       icon: CheckCircle,
-      color: passedCount > 0 ? 'text-green-600' : 'text-muted-foreground/50',
-      bgColor: passedCount > 0 ? 'bg-green-50' : 'bg-muted',
+      color: passedCount > 0 ? 'text-success' : 'text-muted-foreground/50',
+      bgColor: passedCount > 0 ? 'bg-success/10' : 'bg-muted',
       filterKey: 'passed',
     },
     {
       label: 'Failed',
       value: failedCount,
       icon: XCircle,
-      color: failedCount > 0 ? 'text-red-600' : 'text-muted-foreground/50',
-      bgColor: failedCount > 0 ? 'bg-red-50' : 'bg-muted',
+      color: failedCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
+      bgColor: failedCount > 0 ? 'bg-destructive/10' : 'bg-muted',
       filterKey: 'failed',
     },
     {
       label: 'Errors',
       value: errorsCount,
       icon: Bug,
-      color: errorsCount > 0 ? 'text-orange-600' : 'text-muted-foreground/50',
-      bgColor: errorsCount > 0 ? 'bg-orange-50' : 'bg-muted',
+      color: errorsCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
+      bgColor: errorsCount > 0 ? 'bg-destructive/10' : 'bg-muted',
       filterKey: 'errors',
     },
     {
       label: 'Changed',
       value: changesDetected,
       icon: AlertTriangle,
-      color: changesDetected > 0 ? 'text-yellow-600' : 'text-muted-foreground/50',
-      bgColor: changesDetected > 0 ? 'bg-yellow-50' : 'bg-muted',
+      color: changesDetected > 0 ? 'text-warning' : 'text-muted-foreground/50',
+      bgColor: changesDetected > 0 ? 'bg-warning/10' : 'bg-muted',
       filterKey: 'changed',
     },
     {
       label: 'Flaky',
       value: flakyCount,
       icon: RefreshCw,
-      color: flakyCount > 0 ? 'text-orange-600' : 'text-muted-foreground/50',
-      bgColor: flakyCount > 0 ? 'bg-orange-50' : 'bg-muted',
+      color: flakyCount > 0 ? 'text-warning' : 'text-muted-foreground/50',
+      bgColor: flakyCount > 0 ? 'bg-warning/10' : 'bg-muted',
       filterKey: 'flaky',
     },
     {
@@ -160,24 +167,24 @@ export function MetricsRow({
       label: 'AI Safe',
       value: aiSafeCount,
       icon: Sparkles,
-      color: aiSafeCount > 0 ? 'text-green-600' : 'text-gray-400',
-      bgColor: aiSafeCount > 0 ? 'bg-green-50' : 'bg-gray-50',
+      color: aiSafeCount > 0 ? 'text-success' : 'text-muted-foreground/50',
+      bgColor: aiSafeCount > 0 ? 'bg-success/10' : 'bg-muted',
       filterKey: 'ai-approve',
     },
     {
       label: 'AI Review',
       value: aiReviewCount,
       icon: AlertTriangle,
-      color: aiReviewCount > 0 ? 'text-yellow-600' : 'text-gray-400',
-      bgColor: aiReviewCount > 0 ? 'bg-yellow-50' : 'bg-gray-50',
+      color: aiReviewCount > 0 ? 'text-warning' : 'text-muted-foreground/50',
+      bgColor: aiReviewCount > 0 ? 'bg-warning/10' : 'bg-muted',
       filterKey: 'ai-review',
     },
     {
       label: 'AI Flag',
       value: aiFlagCount,
       icon: Flag,
-      color: aiFlagCount > 0 ? 'text-red-600' : 'text-gray-400',
-      bgColor: aiFlagCount > 0 ? 'bg-red-50' : 'bg-gray-50',
+      color: aiFlagCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
+      bgColor: aiFlagCount > 0 ? 'bg-destructive/10' : 'bg-muted',
       filterKey: 'ai-flag',
     },
   ];
@@ -250,22 +257,21 @@ export function MetricsRow({
           const pendingTiles = Math.max(0, totalTests - testTiles.length);
 
           const tileBg: Record<TileStatus, string> = {
-            passed: 'bg-green-500',
-            failed: 'bg-red-500',
-            changed: 'bg-yellow-500',
+            passed: 'bg-success',
+            failed: 'bg-destructive',
+            changed: 'bg-warning',
             pending: 'bg-muted',
           };
 
-          const runningTests = isRunning
-            ? testTiles
-                .filter((t) => {
-                  const group = byTest.get(t.testId) ?? [];
-                  const hasFinalResult = group.some(
-                    (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
-                  );
-                  return !hasFinalResult;
-                })
-                .map((t) => {
+          // Prefer the authoritative list from runner_commands (claimed but not
+          // completed). It includes tests that haven't produced a screenshot
+          // yet, which is exactly the case that previously fell through to the
+          // "running…" placeholder. Fall back to diff-derived inference for
+          // older callers (e.g. dashboards) that don't pass activeRunningTests.
+          const runningTests = !isRunning
+            ? []
+            : activeRunningTests.length > 0
+              ? activeRunningTests.map((t) => {
                   const group = byTest.get(t.testId) ?? [];
                   const recent = group
                     .filter((d) => d.createdAt)
@@ -276,7 +282,25 @@ export function MetricsRow({
                     stepLabel: recent?.stepLabel ?? null,
                   };
                 })
-            : [];
+              : testTiles
+                  .filter((t) => {
+                    const group = byTest.get(t.testId) ?? [];
+                    const hasFinalResult = group.some(
+                      (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
+                    );
+                    return !hasFinalResult;
+                  })
+                  .map((t) => {
+                    const group = byTest.get(t.testId) ?? [];
+                    const recent = group
+                      .filter((d) => d.createdAt)
+                      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())[0];
+                    return {
+                      testId: t.testId,
+                      name: t.name,
+                      stepLabel: recent?.stepLabel ?? null,
+                    };
+                  });
 
           const VISIBLE_LIMIT = 5;
           const visibleRunning = runningTests.slice(0, VISIBLE_LIMIT);
@@ -287,10 +311,10 @@ export function MetricsRow({
           const headerValueClass = isRunning
             ? 'text-primary'
             : passRate === 100
-              ? 'text-green-600'
+              ? 'text-success'
               : passRate >= 80
-                ? 'text-yellow-600'
-                : 'text-red-600';
+                ? 'text-warning'
+                : 'text-destructive';
 
           return (
             <>

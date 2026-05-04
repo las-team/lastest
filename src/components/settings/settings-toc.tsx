@@ -18,6 +18,7 @@ const SECTIONS = [
   { id: 'playwright', label: 'Playwright' },
   { id: 'test-migration', label: 'Migration' },
   { id: 'team', label: 'Team' },
+  { id: 'danger-zone', label: 'Danger Zone' },
   { id: 'about', label: 'About' },
 ];
 

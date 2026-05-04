@@ -25,6 +25,8 @@ import { Play, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { createSetupScript, updateSetupScript, testSetupScript } from '@/server/actions/setup-scripts';
 import { toast } from 'sonner';
 import type { SetupScript, SetupScriptType } from '@/lib/db/schema';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface SetupScriptEditorProps {
   open: boolean;
@@ -125,6 +127,7 @@ export function SetupScriptEditor({
           code,
           description: description.trim() || undefined,
         });
+        track(Events.setup_script_saved, { repoId: repositoryId, type, action: 'update' });
         toast.success('Script updated');
       } else {
         await createSetupScript({
@@ -134,6 +137,7 @@ export function SetupScriptEditor({
           code,
           description: description.trim() || undefined,
         });
+        track(Events.setup_script_saved, { repoId: repositoryId, type, action: 'create' });
         toast.success('Script created');
       }
       onClose();

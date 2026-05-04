@@ -110,8 +110,11 @@ export function parseAssertions(code: string): TestAssertion[] {
       continue;
     }
 
-    // Pattern 3b: Inline expect(page.locator/getByRole/getByText/...) assertions
-    const locatorElMatch = trimmed.match(/await\s+expect\((page\.\w+\([^)]*\)(?:\.\w+\([^)]*\))*)\)\.(not\.)?(\w+)\((.*)?\)/);
+    // Pattern 3b: Inline expect(<base>.method(...).method(...)) assertions.
+    // <base> is any identifier — `page`, `frame`, or a stored locator like
+    // `resultTypeSection`. Restricting to `page.` would miss tests that hoist
+    // a section into a const and then assert against it.
+    const locatorElMatch = trimmed.match(/await\s+expect\((\w+\.\w+\([^)]*\)(?:\.\w+\([^)]*\))*)\)\.(not\.)?(\w+)\((.*)?\)/);
     if (locatorElMatch) {
       const target = locatorElMatch[1];
       const negated = !!locatorElMatch[2];

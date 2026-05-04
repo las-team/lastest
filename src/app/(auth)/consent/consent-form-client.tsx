@@ -5,13 +5,16 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { recordRegistrationConsent } from '@/server/actions/consent';
 
 export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleContinue() {
+    if (!termsAccepted) return;
     setLoading(true);
     try {
       await recordRegistrationConsent({ marketingEmails: marketingConsent });
@@ -31,17 +34,25 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
       </div>
 
       <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          By continuing, you agree to our{' '}
-          <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
-            Terms of Service
-          </Link>{' '}
-          and{' '}
-          <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
-            Privacy Policy
-          </Link>
-          .
-        </p>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="terms"
+            checked={termsAccepted}
+            onCheckedChange={(checked) => setTermsAccepted(checked === true)}
+            className="mt-0.5"
+          />
+          <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground leading-snug">
+            I have read and agree to the{' '}
+            <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+              Privacy Policy
+            </Link>
+            .
+          </Label>
+        </div>
 
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
@@ -54,7 +65,7 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
           />
         </div>
 
-        <Button className="w-full" onClick={handleContinue} disabled={loading}>
+        <Button className="w-full" onClick={handleContinue} disabled={loading || !termsAccepted}>
           {loading ? 'Setting up...' : 'Continue'}
         </Button>
       </div>

@@ -22,7 +22,7 @@ import { postPRComment } from '@/lib/integrations/github-pr';
 import { postMRComment } from '@/lib/integrations/gitlab-mr';
 import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
 import path from 'path';
-import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
+import { createJob, createPendingJob, updateJobProgress, updateJobActivity, completeJob, failJob, isRunnerBusy } from './jobs';
 import { emitJobEvent } from '@/lib/ws/job-events';
 import { triggerAIDiffAnalysis } from './ai-diffs';
 import { forkBaselinesForBranch } from './baselines';
@@ -172,6 +172,8 @@ export interface BuildSummary {
   isMainBranch: boolean;
   diffs: VisualDiffWithTestStatus[];
   errorMessage?: string | null;
+  /** Names of tests currently being executed (claimed by a runner, not yet completed). */
+  runningTests: { testId: string; name: string }[];
 }
 
 /**
@@ -707,23 +709,37 @@ async function runBuildAsync(
       }
     }
 
-    // Compute DOM diff and store on the first visual diff's metadata
+    // DOM diff: bootstrap baseline on first run, otherwise diff against it
+    // and write the result to every visual diff produced by this test result.
     const testRecord2 = tests.find(t => t.id === result.testId);
-    if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+    if (!testRecord2?.domSnapshot && result.domSnapshot) {
+      // First run for this test (or legacy test created before DOM capture
+      // was wired). Promote the current snapshot to the baseline; nothing to
+      // diff against on this run.
+      await queries.updateTest(result.testId, { domSnapshot: result.domSnapshot });
+      console.info('[dom-diff] bootstrapped baseline DOM snapshot', { testId: result.testId });
+    } else if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
       try {
         const { computeDomDiff } = await import('@/lib/diff/dom-diff');
         const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
         if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
-          // Store DOM diff on the first visual diff's metadata
-          const firstDiffId = diffResults[0].diffId;
-          const existingDiff = await queries.getVisualDiff(firstDiffId);
-          if (existingDiff) {
-            const updatedMetadata = { ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata || { changedRegions: [] }), domDiff };
-            await queries.updateVisualDiff(firstDiffId, { metadata: updatedMetadata });
-          }
+          // DOM diff is per-test-result, so attach it to every diff that
+          // points at this test result — not just diffResults[0].
+          await Promise.all(diffResults.map(async ({ diffId }) => {
+            const existingDiff = await queries.getVisualDiff(diffId);
+            if (!existingDiff) return;
+            const updatedMetadata = {
+              ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata ?? { changedRegions: [] }),
+              domDiff,
+            };
+            await queries.updateVisualDiff(diffId, { metadata: updatedMetadata });
+          }));
         }
-      } catch {
-        // Non-critical — DOM diff is optional
+      } catch (err) {
+        console.warn('[dom-diff] computation failed', {
+          testId: result.testId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -753,12 +769,11 @@ async function runBuildAsync(
     });
   };
 
-  // Progress callback for parallel execution tracking
+  // Progress callback for parallel execution tracking. Only updates the
+  // activeCount/activeTests metadata — completedSteps is owned by onResult so
+  // the two callbacks can't race-overwrite each other on the same row.
   const onProgress = async (progress: { completed: number; total: number; activeCount?: number; activeTests?: string[] }) => {
-    await updateJobProgress(jobId, progress.completed, progress.total, {
-      activeCount: progress.activeCount,
-      activeTests: progress.activeTests,
-    });
+    await updateJobActivity(jobId, progress.activeCount, progress.activeTests);
   };
 
   try {
@@ -1104,12 +1119,32 @@ async function runBuildAsync(
         completedAt: new Date(),
         status: 'failed',
       });
+
+      // B6: distinguish executor-level failure (no test results landed) from
+      // mid-run failure (some results landed, others didn't). The former
+      // points at infrastructure (EB pod scheduling, runner unreachable);
+      // the latter at the failing test(s) themselves.
+      const writtenResults = await queries.countTestResultsByBuild(buildId).catch(() => 0);
+      const errorMessage = error instanceof Error ? error.message : 'Build failed';
+      const errorStack = error instanceof Error && error.stack ? error.stack : null;
+      const overallStatus: 'executor_failed' | 'blocked' =
+        writtenResults === 0 ? 'executor_failed' : 'blocked';
+      const executorErrorBody = errorStack
+        ? `${errorMessage}\n\n${errorStack}`
+        : errorMessage;
+
+      console.error(
+        `[build] runBuildAsync threw for ${buildId} after ${writtenResults} results — status=${overallStatus}: ${errorMessage}`
+      );
+
       await queries.updateBuild(buildId, {
-        overallStatus: 'blocked',
+        overallStatus,
         completedAt: new Date(),
         elapsedMs: Date.now() - startTime,
+        executorError: overallStatus === 'executor_failed' ? executorErrorBody.slice(0, 8_000) : null,
+        executorFailedAt: overallStatus === 'executor_failed' ? new Date() : null,
       });
-      await failJob(jobId, error instanceof Error ? error.message : 'Build failed');
+      await failJob(jobId, errorMessage);
     }
   }
 
@@ -1254,10 +1289,10 @@ async function processVisualDiff(
   const defaultBranch = repo?.defaultBranch || 'main';
   const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
-  // Fetch ignore regions (test-level) and focus regions (per-step) for this screenshot
-  const testIgnoreRegions = await queries.getIgnoreRegions(testId);
-  const ignoreRects: Rectangle[] | undefined = testIgnoreRegions.length > 0
-    ? testIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
+  // Fetch per-step ignore + focus regions for this screenshot
+  const stepIgnoreRegions = await queries.getIgnoreRegions(testId, stepLabel || null);
+  const ignoreRects: Rectangle[] | undefined = stepIgnoreRegions.length > 0
+    ? stepIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
     : undefined;
   const stepFocusRegions = await queries.getFocusRegions(testId, stepLabel || null);
   const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
@@ -1606,6 +1641,9 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
 
   const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
+  const runningTests = build.testRunId && !build.completedAt
+    ? await queries.getRunningTestNamesForTestRun(build.testRunId)
+    : [];
 
   // Determine if build is on the default branch
   const repo = testRun?.repositoryId ? await queries.getRepository(testRun.repositoryId) : null;
@@ -1640,6 +1678,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     gitCommit: testRun?.gitCommit || 'unknown',
     diffs,
     errorMessage,
+    runningTests,
   };
 }
 

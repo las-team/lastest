@@ -22,7 +22,18 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
-import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo } from '@lastest/shared';
+import {
+  instrumentAssertionTracking,
+  instrumentStepTracking,
+  stripTypeAnnotations,
+  watermarkVideo,
+  hashSelectors,
+  sortSelectorsByStats,
+  selectorTimeoutFor,
+  type SelectorOutcome,
+  type SelectorRef,
+  type SelectorStatRow,
+} from '@lastest/shared';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -82,6 +93,10 @@ export interface EmbeddedTestResult {
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
+  /** Per-attempt selector outcomes captured by `locateWithFallback`. The
+   *  host writes these to `selector_stats` so future runs can promote
+   *  the winning candidate. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 export interface EmbeddedSetupResult {
@@ -143,6 +158,22 @@ export interface RunTestPayload {
     codeLineStart?: number;
     codeLineEnd?: number;
   }>;
+  /** Parsed steps from the host's `parseSteps(body)`. When present, the
+   *  runner emits per-step lifecycle events keyed by index so the host can
+   *  render a live timeline. Index N maps to the N-th step in this list. */
+  steps?: Array<{
+    id: number;
+    label: string;
+    lineStart: number;
+    lineEnd: number;
+    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  }>;
+  /** Selector_stats rows for this test, used by `locateWithFallback` to
+   *  sort fallback candidates by historical success before iterating. */
+  selectorStats?: SelectorStatRow[];
+  /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
+   *  Resolved on the host. Defaults to 3000ms when omitted. */
+  selectorTimeoutMs?: number;
 }
 
 /**
@@ -231,6 +262,15 @@ export class EmbeddedTestExecutor {
     callbacks?: {
       onPageCreated?: (page: Page) => Promise<void> | void;
       onBeforePageClose?: () => Promise<void> | void;
+      onStepEvent?: (event: {
+        stepIndex: number;
+        totalSteps: number;
+        status: 'started' | 'passed' | 'failed';
+        label?: string;
+        stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+        durationMs?: number;
+        error?: string;
+      }) => void;
     },
   ): Promise<EmbeddedTestResult> {
     const abortCtrl = new AbortController();
@@ -241,6 +281,7 @@ export class EmbeddedTestExecutor {
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
     const softErrors: string[] = [];
     const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
+    const selectorOutcomes: SelectorOutcome[] = [];
     const consoleErrors: string[] = [];
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
@@ -347,6 +388,9 @@ export class EmbeddedTestExecutor {
     let result: EmbeddedTestResult | undefined;
     let reachedStep = -1;
     let stepCount = 0;
+    // Hoisted so the outer catch can finalize the in-flight step as failed
+    // when the test body throws. Set during step instrumentation.
+    let lastFinishStep: ((status: 'passed' | 'failed', error?: string) => void) | undefined;
     let domSnapshot: DomSnapshotResult | undefined;
     // Hoisted so the catch path can also try to extract — failed tests still
     // expose values for any extract-mode TestVariables whose selectors resolve.
@@ -745,7 +789,56 @@ export class EmbeddedTestExecutor {
       body = instrumentResult.instrumentedBody;
       stepCount = instrumentResult.stepCount;
       reachedStep = -1;
-      const __stepReached = async (n: number) => { reachedStep = Math.max(reachedStep, n); };
+
+      // Live per-step lifecycle events for the host's playback timeline.
+      // Bracket steps via __stepReached(N): when N advances, the previous
+      // step is implicitly completed as passed. The catch in this method
+      // emits a final 'failed' event for the in-flight step.
+      const stepDescriptors = command.steps ?? [];
+      const totalStepsForEvents = stepDescriptors.length || stepCount || 0;
+      let currentStepIdx = -1;
+      let currentStepStart = 0;
+      const onStepEvent = callbacks?.onStepEvent;
+      const emitStep: typeof onStepEvent extends undefined ? () => void : NonNullable<typeof onStepEvent> = (event) => {
+        if (!onStepEvent) return;
+        try { onStepEvent(event); } catch (e) {
+          logFn('warn', `onStepEvent threw: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      };
+      const finishCurrentStep = (status: 'passed' | 'failed', error?: string) => {
+        if (currentStepIdx < 0) return;
+        const desc = stepDescriptors[currentStepIdx];
+        emitStep({
+          stepIndex: currentStepIdx,
+          totalSteps: totalStepsForEvents,
+          status,
+          label: desc?.label,
+          stepType: desc?.type,
+          durationMs: Date.now() - currentStepStart,
+          error,
+        });
+      };
+      // Expose to the outer try/catch so a thrown error can finalize the
+      // in-flight step as failed.
+      lastFinishStep = finishCurrentStep;
+
+      const __stepReached = async (n: number) => {
+        reachedStep = Math.max(reachedStep, n);
+        if (n === currentStepIdx) return;
+        if (currentStepIdx >= 0 && n > currentStepIdx) {
+          finishCurrentStep('passed');
+        }
+        currentStepIdx = n;
+        currentStepStart = Date.now();
+        const desc = stepDescriptors[n];
+        emitStep({
+          stepIndex: n,
+          totalSteps: totalStepsForEvents,
+          status: 'started',
+          label: desc?.label,
+          stepType: desc?.type,
+        });
+      };
 
       // Per-assertion bookkeeping invoked by lines wrapped by
       // `instrumentAssertionTracking`. Push one row per call (so a loop
@@ -893,6 +986,9 @@ export class EmbeddedTestExecutor {
       };
 
       // locateWithFallback — supports { type, value } format, ocr-text, role-name, coordinate fallback
+      const lwfStats = command.selectorStats ?? [];
+      const lwfDefaultTimeoutMs = command.selectorTimeoutMs ?? 3000;
+      const lwfSortCache = new Map<string, Array<{ type: string; value: string }>>();
       const locateWithFallback = async (
         pg: Page,
         selectors: Array<{ type: string; value: string } | string | { selector?: string; css?: string; text?: string }>,
@@ -912,9 +1008,19 @@ export class EmbeddedTestExecutor {
           })
           .filter((s) => s.value && s.value.trim() && !s.value.includes('undefined'));
 
-        logFn('info', `[action] ${action}${value ? ` "${value}"` : ''} (${validSelectors.length} selectors)`);
+        const lwfHash = hashSelectors(validSelectors as SelectorRef[]);
+        let ordered = lwfSortCache.get(lwfHash);
+        if (!ordered) {
+          ordered = lwfStats.length > 0
+            ? sortSelectorsByStats(validSelectors, lwfStats.filter((r) => r.hash === lwfHash))
+            : validSelectors;
+          lwfSortCache.set(lwfHash, ordered);
+        }
 
-        for (const sel of validSelectors) {
+        logFn('info', `[action] ${action}${value ? ` "${value}"` : ''} (${ordered.length} selectors)`);
+
+        for (const sel of ordered) {
+          const attemptStart = Date.now();
           try {
             let locator;
             if (sel.type === 'ocr-text') {
@@ -932,18 +1038,25 @@ export class EmbeddedTestExecutor {
             }
 
             const target = locator.first();
-            await target.waitFor({ timeout: 3000 });
+            const lwfStat = lwfStats.find((r) => r.hash === lwfHash && r.type === sel.type && r.value === sel.value);
+            const lwfCandidateTimeout = selectorTimeoutFor(lwfStat, lwfDefaultTimeoutMs);
+            await target.waitFor({ timeout: lwfCandidateTimeout });
 
             logFn('info', `[action] ${action} matched via ${sel.type}`);
-            if (action === 'locate') return target;
+            if (action === 'locate') {
+              selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
+              return target;
+            }
             if (action === 'click') await target.click(options || {});
             else if (action === 'fill') await target.fill(value || '');
             else if (action === 'selectOption') await target.selectOption(value || '');
             else if (action === 'check') await target.check();
             else if (action === 'uncheck') await target.uncheck();
 
+            selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: true, responseTimeMs: Date.now() - attemptStart });
             return target;
           } catch {
+            selectorOutcomes.push({ hash: lwfHash, type: sel.type, value: sel.value, success: false });
             continue;
           }
         }
@@ -1064,6 +1177,9 @@ export class EmbeddedTestExecutor {
 
       logFn('info', 'Test code execution completed');
 
+      // Test body finished cleanly — close out the in-flight step.
+      try { lastFinishStep?.('passed'); } catch { /* never break the run on telemetry */ }
+
       // Extract values from page fields for extract-mode TestVariables.
       // Done before close so locators still resolve. Failures are best-effort
       // (logged + recorded as empty string), never fail the whole test.
@@ -1136,12 +1252,17 @@ export class EmbeddedTestExecutor {
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
         extractedVariables,
+        selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       const isCancelled = errorMessage.includes('cancelled') || abortCtrl.signal.aborted;
+
+      // Mark the in-flight step as failed (or cancelled-as-failed) so the
+      // live timeline halts on the exact step that threw.
+      try { lastFinishStep?.('failed', errorMessage); } catch { /* telemetry */ }
 
       if (isCancelled) {
         logFn('info', 'Test cancelled');
@@ -1154,6 +1275,7 @@ export class EmbeddedTestExecutor {
           lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
@@ -1186,6 +1308,7 @@ export class EmbeddedTestExecutor {
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
           extractedVariables,
+          selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       }
     } finally {

@@ -68,6 +68,7 @@ export function PlaywrightSettingsCard({
   const [headlessMode, setHeadlessMode] = useState<HeadlessMode>(settings.headlessMode as HeadlessMode || 'true');
   const [navigationTimeout, setNavigationTimeout] = useState(settings.navigationTimeout || 30000);
   const [actionTimeout, setActionTimeout] = useState(settings.actionTimeout || 5000);
+  const [selectorTimeoutMs, setSelectorTimeoutMs] = useState(settings.selectorTimeoutMs || 3000);
   const [pointerGestures, setPointerGestures] = useState(settings.pointerGestures ?? false);
   const [cursorFPS, setCursorFPS] = useState(settings.cursorFPS ?? 30);
   const [cursorPlaybackSpeed, setCursorPlaybackSpeed] = useState(settings.cursorPlaybackSpeed ?? 1);
@@ -109,6 +110,7 @@ export function PlaywrightSettingsCard({
     headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
     navigationTimeout: settings.navigationTimeout || 30000,
     actionTimeout: settings.actionTimeout || 5000,
+    selectorTimeoutMs: settings.selectorTimeoutMs || 3000,
     pointerGestures: settings.pointerGestures ?? false,
     cursorFPS: settings.cursorFPS ?? 30,
     cursorPlaybackSpeed: settings.cursorPlaybackSpeed ?? 1,
@@ -141,6 +143,7 @@ export function PlaywrightSettingsCard({
     setHeadlessMode((settings.headlessMode as HeadlessMode) || 'true');
     setNavigationTimeout(settings.navigationTimeout || 30000);
     setActionTimeout(settings.actionTimeout || 5000);
+    setSelectorTimeoutMs(settings.selectorTimeoutMs || 3000);
     setPointerGestures(settings.pointerGestures ?? false);
     setCursorFPS(settings.cursorFPS ?? 30);
     setCursorPlaybackSpeed(settings.cursorPlaybackSpeed ?? 1);
@@ -170,6 +173,7 @@ export function PlaywrightSettingsCard({
       headlessMode: (settings.headlessMode as HeadlessMode) || 'true',
       navigationTimeout: settings.navigationTimeout || 30000,
       actionTimeout: settings.actionTimeout || 5000,
+      selectorTimeoutMs: settings.selectorTimeoutMs || 3000,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
       cursorPlaybackSpeed: settings.cursorPlaybackSpeed ?? 1,
@@ -226,6 +230,7 @@ export function PlaywrightSettingsCard({
         headlessMode,
         navigationTimeout,
         actionTimeout,
+        selectorTimeoutMs,
         pointerGestures,
         cursorFPS,
         cursorPlaybackSpeed,
@@ -254,7 +259,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -267,6 +272,7 @@ export function PlaywrightSettingsCard({
       headlessMode !== orig.headlessMode ||
       navigationTimeout !== orig.navigationTimeout ||
       actionTimeout !== orig.actionTimeout ||
+      selectorTimeoutMs !== orig.selectorTimeoutMs ||
       pointerGestures !== orig.pointerGestures ||
       cursorFPS !== orig.cursorFPS ||
       cursorPlaybackSpeed !== orig.cursorPlaybackSpeed ||
@@ -303,7 +309,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -1302,6 +1308,24 @@ export function PlaywrightSettingsCard({
                 />
                 <span className="text-xs text-muted-foreground">ms</span>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="selectorTimeout">Selector Timeout</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="selectorTimeout"
+                  type="number"
+                  min={500}
+                  value={selectorTimeoutMs}
+                  onChange={(e) => setSelectorTimeoutMs(parseInt(e.target.value) || 3000)}
+                  className="w-24"
+                />
+                <span className="text-xs text-muted-foreground">ms</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Per-candidate budget inside locateWithFallback. Known-slow selectors are skipped sooner via historical stats.
+              </p>
             </div>
           </div>
         </>

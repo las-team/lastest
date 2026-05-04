@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,8 +25,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest } from '@/server/actions/tests';
-import { runTests, getJobStatus } from '@/server/actions/runs';
+import { deleteTest, updateTest, getTestVersionHistory, restoreTestVersion, getVisualDiffsForTestResult, restoreTest, permanentlyDeleteTest, cloneTest, getSelectorStatsForTestAction } from '@/server/actions/tests';
+import type { SelectorStatRow } from '@lastest/shared/selector-stats';
+import { runTests, getJobStatus, getTestRunStepState } from '@/server/actions/runs';
+import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
+import { PlaybackTimeline, type StepResultsMap } from '@/components/playback/playback-timeline';
 import { startHealTestAgent, aiEnhanceTest, updateTestCode, startGeneratePlaceholderTestAgent } from '@/server/actions/ai';
 import { toast } from 'sonner';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
@@ -51,6 +54,8 @@ import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
 import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface StepDiff {
   stepLabel: string | null;
@@ -119,6 +124,11 @@ interface TestDetailClientProps {
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
   csvDataSources?: CsvDataSource[];
+  googleSheetsAccount?: {
+    id: string;
+    googleEmail: string;
+    googleName: string | null;
+  } | null;
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
   earlyAdopterMode?: boolean;
@@ -128,6 +138,10 @@ interface TestDetailClientProps {
   testSpec?: TestSpec | null;
   contentClassName?: string;
   onRefresh?: () => void | Promise<void>;
+  /** True when an AI provider is configured well enough to call from
+   *  variable resolution (provider !== 'claude-cli' AND its credentials are
+   *  present). Drives the AI-generated variable source enable/disable. */
+  aiAvailable?: boolean;
 }
 
 function splitBoilerplate(code: string): { boilerplate: string; testBody: string } | null {
@@ -231,7 +245,7 @@ function CollapsibleTestCode({ code, highlightLine }: { code: string; highlightL
   );
 }
 
-export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh }: TestDetailClientProps) {
+export function TestDetailClient({ test, results, repositoryId, screenshotGroups = [], plannedScreenshots = [], defaultSetupSteps = [], availableTests = [], availableScripts = [], sheetDataSources = [], csvDataSources = [], googleSheetsAccount = null, stabilizationDefaults, banAiMode = false, earlyAdopterMode = false, diffDefaults, playwrightDefaults, envBaseUrl, testSpec, contentClassName, onRefresh, aiAvailable = false }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isDeleting, setIsDeleting] = useState(false);
@@ -255,6 +269,31 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [showViewer, setShowViewer] = useState(true);
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
+
+  // Live step timeline state
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
+  const [stepResults, setStepResults] = useState<StepResultsMap>({});
+
+  // Per-step selector fallback stats from the selector_stats table. Loaded
+  // once on mount and refreshed when a run completes so newly recorded
+  // outcomes show up in the hover panel without a page reload.
+  const [selectorStats, setSelectorStats] = useState<SelectorStatRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getSelectorStatsForTestAction(test.id)
+      .then((rows) => { if (!cancelled) setSelectorStats(rows); })
+      .catch(() => { /* best-effort — diagnostic only */ });
+    return () => { cancelled = true; };
+  }, [test.id]);
+
+  // Parsed steps from the current test code — feeds the upcoming-step list
+  // ahead of time so the timeline shows what's coming, not just what's done.
+  const plannedSteps = useMemo(() => {
+    const code = isEditing ? editCode : test.code;
+    if (!code) return [];
+    const body = extractTestBody(code);
+    return body ? parseSteps(body) : [];
+  }, [test.code, editCode, isEditing]);
 
   const toggleViewerFullscreen = useCallback(() => {
     if (!viewerLayoutRef.current) return;
@@ -414,9 +453,19 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     }
 
     setIsRunning(true);
+    setCurrentStepIndex(-1);
+    setStepResults({});
     try {
+      track(Events.test_run_started, {
+        trigger: 'manual',
+        scope: 'single',
+        testId: test.id,
+        headless,
+        repoId: repositoryId ?? '',
+      });
       const result = await runTests([test.id], repositoryId, headless, 'auto', forceVideoRecording);
       const { jobId } = result;
+      const runId = 'runId' in result ? (result.runId ?? null) : null;
       notifyJobStarted();
       if ('queued' in result && result.queued) {
         toast.success('Test queued — will run when current tests finish');
@@ -447,6 +496,20 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           }
         }
 
+        // Pull live step state for the headed timeline. Cheap call; only
+        // active while this poll is running.
+        if (runId && !headless) {
+          try {
+            const stepState = await getTestRunStepState(runId);
+            if (stepState) {
+              setCurrentStepIndex(stepState.currentStepIndex);
+              setStepResults(stepState.results as StepResultsMap);
+            }
+          } catch {
+            // Non-critical
+          }
+        }
+
         if (isComplete) {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current);
@@ -455,6 +518,11 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           setIsRunning(false);
           setStreamUrl(null);
           router.refresh();
+          // Pull fresh selector_stats so the per-step hover reflects this
+          // run's outcomes. Best-effort.
+          getSelectorStatsForTestAction(test.id)
+            .then(setSelectorStats)
+            .catch(() => { /* diagnostic only */ });
           if (onRefresh) {
             try {
               await onRefresh();
@@ -524,10 +592,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     try {
       const result = await aiEnhanceTest(repositoryId, test.id, enhancePrompt || undefined);
       if (result.success && result.code) {
-        await updateTestCode(test.id, result.code, 'ai_enhance');
-        toast.success('Test enhanced and saved');
-        setEnhancePrompt('');
-        router.refresh();
+        const saveResult = await updateTestCode(test.id, result.code, 'ai_enhance');
+        if (saveResult.success) {
+          toast.success('Test enhanced and saved');
+          setEnhancePrompt('');
+          router.refresh();
+        } else {
+          toast.error(saveResult.error || 'Failed to save enhanced test');
+        }
       } else {
         toast.error(result.error || 'Failed to enhance test');
       }
@@ -707,15 +779,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               />
             ) : (
               <>
-                {test.description && (
-                  test.description.includes('\n') ? (
+                {testSpec?.spec && testSpec.spec !== test.name && (
+                  testSpec.spec.includes('\n') ? (
                     <ul className="text-sm text-muted-foreground list-disc list-inside space-y-0.5">
-                      {test.description.split('\n').filter(Boolean).map((line, i) => (
-                        <li key={i}>{line}</li>
+                      {testSpec.spec.split('\n').filter(Boolean).slice(0, 5).map((line, i) => (
+                        <li key={i}>{line.replace(/^[-*]\s+/, '')}</li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-sm text-muted-foreground">{test.description}</p>
+                    <p className="text-sm text-muted-foreground">{testSpec.spec}</p>
                   )
                 )}
                 <CardDescription>
@@ -792,9 +864,9 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 <AlertTriangle className="h-5 w-5 text-amber-600" />
                 <span className="font-semibold text-sm">Placeholder Test &mdash; Ready to Record</span>
               </div>
-              {test.description && (
+              {testSpec?.title && testSpec.title !== test.name && (
                 <div className="bg-background/60 rounded-md px-3 py-2 text-sm text-muted-foreground">
-                  {test.description}
+                  {testSpec.title}
                 </div>
               )}
               <div className="flex items-center gap-2">
@@ -854,8 +926,21 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                     fit
                     className="flex-1 min-h-0"
                   />
+                  {plannedSteps.length > 0 && (
+                    <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 layer-playback-timeline hidden md:block">
+                      <PlaybackTimeline
+                        steps={plannedSteps}
+                        currentStepIndex={currentStepIndex}
+                        results={stepResults}
+                        isRunning={isRunning}
+                        selectorStats={selectorStats}
+                        compact
+                        className="h-full pointer-events-auto"
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
                   <div className="flex items-center gap-2 px-1">
                     <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
                     <span className="text-sm font-medium text-foreground">Running</span>
@@ -873,41 +958,56 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                 </div>
               </>
             ) : (
-              <Card className="overflow-hidden py-0">
-                <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
-                    onClick={() => setShowViewer(!showViewer)}
-                  >
-                    <Tv2 className="h-4 w-4 text-purple-500" />
-                    <span>Live Browser View</span>
-                    {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-                  </button>
-                  {showViewer && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      onClick={toggleViewerFullscreen}
-                      title="Fullscreen"
+              <div className={cn(
+                'grid gap-3',
+                plannedSteps.length > 0 ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : 'grid-cols-1',
+              )}>
+                <Card className="overflow-hidden py-0 min-w-0">
+                  <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 flex-1 hover:bg-muted transition-colors rounded px-1 -mx-1"
+                      onClick={() => setShowViewer(!showViewer)}
                     >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
+                      <Tv2 className="h-4 w-4 text-purple-500" />
+                      <span>Live Browser View</span>
+                      {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                    </button>
+                    {showViewer && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        onClick={toggleViewerFullscreen}
+                        title="Fullscreen"
+                      >
+                        <Maximize2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {showViewer && (
+                    <BrowserViewer
+                      streamUrl={streamUrl}
+                      className="h-[500px]"
+                      fit
+                      hideFullscreenToggle
+                      hideScreenshot
+                      hideViewportSelector
+                      readOnlyUrl
+                    />
                   )}
-                </div>
-                {showViewer && (
-                  <BrowserViewer
-                    streamUrl={streamUrl}
-                    className="h-[500px]"
-                    fit
-                    hideFullscreenToggle
-                    hideScreenshot
-                    hideViewportSelector
-                    readOnlyUrl
+                </Card>
+                {plannedSteps.length > 0 && showViewer && (
+                  <PlaybackTimeline
+                    steps={plannedSteps}
+                    currentStepIndex={currentStepIndex}
+                    results={stepResults}
+                    isRunning={isRunning}
+                    selectorStats={selectorStats}
+                    className="h-[540px]"
                   />
                 )}
-              </Card>
+              </div>
             )}
           </div>
         )}
@@ -1080,6 +1180,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               screenshots={latestResult?.screenshots ?? null}
               stepCriteria={test.stepCriteria ?? null}
               assertions={test.assertions ?? null}
+              code={test.code ?? null}
               variables={test.variables ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
@@ -1104,10 +1205,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               variables={test.variables ?? []}
               sheetSources={sheetDataSources}
               csvSources={csvDataSources}
+              googleSheetsAccount={googleSheetsAccount}
               extractedValues={latestResult?.extractedVariables ?? null}
               assignedValues={latestResult?.assignedVariables ?? null}
               code={test.code ?? null}
               onRefresh={onRefresh}
+              aiAvailable={aiAvailable}
+              aiVarLastValues={test.aiVarLastValues ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } = await import('@/server/actions/tests');
                 await saveTestVariables(test.id, next);

@@ -80,6 +80,19 @@ export async function GET(request: Request) {
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let keepalive: ReturnType<typeof setInterval> | null = null;
+  let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  let lifetimeCap: ReturnType<typeof setTimeout> | null = null;
+  let closed = false;
+
+  const teardown = () => {
+    if (closed) return;
+    closed = true;
+    if (keepalive) { clearInterval(keepalive); keepalive = null; }
+    if (cleanupTimer) { clearInterval(cleanupTimer); cleanupTimer = null; }
+    if (lifetimeCap) { clearTimeout(lifetimeCap); lifetimeCap = null; }
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  };
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -94,6 +107,7 @@ export async function GET(request: Request) {
 
       // Subscribe to job events
       unsubscribe = subscribeToJobEvents((event: JobEvent) => {
+        if (closed) return;
         // Filter by team — only send events for jobs in team's repos (or no repo)
         if (event.type === 'job:update' && event.repositoryId && !teamRepoIds.has(event.repositoryId)) {
           return;
@@ -102,21 +116,26 @@ export async function GET(request: Request) {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch (error) {
-          console.error('[JobSSE] Failed to send event:', error);
+          // Controller was closed underneath us — drop the listener now.
+          teardown();
+          if ((error as { code?: string })?.code !== 'ERR_INVALID_STATE') {
+            console.error('[JobSSE] Failed to send event:', error);
+          }
         }
       });
 
-      // Keepalive every 8 seconds (under Envoy's 10s idle timeout)
-      const keepalive = setInterval(() => {
+      // Keepalive every 5 seconds (under Envoy's 10s idle timeout AND under
+      // any 30s intermediary idle limit; previous 8s was too close to bound).
+      keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
-          clearInterval(keepalive);
+          teardown();
         }
-      }, 8000);
+      }, 5000);
 
       // Periodic cleanup while connected
-      const cleanupTimer = setInterval(() => {
+      cleanupTimer = setInterval(() => {
         const t = Date.now();
         if (t - lastCleanupTime > CLEANUP_INTERVAL_MS) {
           lastCleanupTime = t;
@@ -125,20 +144,24 @@ export async function GET(request: Request) {
         }
       }, CLEANUP_INTERVAL_MS);
 
-      request.signal.addEventListener('abort', () => {
-        clearInterval(keepalive);
-        clearInterval(cleanupTimer);
-        if (unsubscribe) {
-          unsubscribe();
-          unsubscribe = null;
+      // Cloudflare 524 prevention — close the stream at 90s so we never hit CF's
+      // ~100s hard request timeout. Browser EventSource auto-reconnects on close,
+      // so the user sees no interruption. Emit an explicit reconnect event for
+      // any client that wants to log the cycle.
+      lifetimeCap = setTimeout(() => {
+        try {
+          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.close();
+        } catch {
+          // already closed
         }
-      });
+        teardown();
+      }, 90_000);
+
+      request.signal.addEventListener('abort', teardown);
     },
     cancel() {
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
+      teardown();
     },
   });
 

@@ -176,6 +176,9 @@ export interface TestPlaywrightOverrides {
   maxParallelTests?: number;
   baseUrl?: string;
   cursorPlaybackSpeed?: number;
+  // Per-candidate waitFor budget inside locateWithFallback. Falls back to
+  // playwrightSettings.selectorTimeoutMs, then a 3000ms default.
+  selectorTimeoutMs?: number;
 }
 
 // Per-step pass/fail rules. Extensible: add new `kind`s and handle them in
@@ -224,11 +227,10 @@ export const functionalAreas = pgTable('functional_areas', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
   name: text('name').notNull(),
-  description: text('description'),
   parentId: text('parent_id'),
   isRouteFolder: boolean('is_route_folder').default(false),
   orderIndex: integer('order_index').default(0),
-  agentPlan: text('agent_plan'), // markdown test plan from Planner agent
+  agentPlan: text('agent_plan'), // markdown test plan from Planner agent — canonical "what's in this area" field
   planGeneratedAt: timestamp('plan_generated_at'),
   planSnapshot: text('plan_snapshot'), // JSON: FunctionalAreaPlanSnapshot for rollback
   deletedAt: timestamp('deleted_at'),
@@ -240,7 +242,7 @@ export const tests = pgTable('tests', {
   functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   code: text('code').notNull(), // Playwright test code
-  description: text('description'),
+  // NB: per-test description/spec lives in `test_specs` (1:1 via specId). Fetch via getTestSpec().
   isPlaceholder: boolean('is_placeholder').default(false),
   targetUrl: text('target_url'),
   // Setup configuration - setupTestId takes precedence over setupScriptId
@@ -263,8 +265,12 @@ export const tests = pgTable('tests', {
   // Keyed by TestVariable.id → next-row-to-use. Updated post-resolve by the
   // executor; wraps back to 2 (not 0) when it overflows the source's rowCount.
   variableRowCursors: jsonb('variable_row_cursors').$type<Record<string, number>>(),
+  // Last-known-good value cache for assign-mode AI-generated vars. Keyed by
+  // TestVariable.id. The executor writes the most recent successful AI output
+  // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
+  // fall back to it when AI is misconfigured / rate-limited.
+  aiVarLastValues: jsonb('ai_var_last_values').$type<Record<string, string>>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
-  agentPrompt: text('agent_prompt'), // NL description for agent mode
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
@@ -336,10 +342,26 @@ export interface AssertionResult {
 // `assign` mode: value is sourced from gsheet/csv/static and replaces {{var:name}} in code at runtime.
 // `extract` mode: value is read from a page field after the test, optionally compared to expectedValue (eotest assertion).
 export type TestVariableMode = 'extract' | 'assign';
-export type TestVariableSourceType = 'gsheet' | 'csv' | 'static';
+export type TestVariableSourceType = 'gsheet' | 'csv' | 'static' | 'ai-generated';
 export type TestVariableAttribute = 'value' | 'textContent' | 'innerText' | 'innerHTML';
 
 export type TestVariableSourceRowMode = 'fixed' | 'increment' | 'random';
+
+// Built-in AI-generated attribute presets. 'custom' means use aiCustomPrompt.
+export type AIVarPreset =
+  | 'firstName'
+  | 'lastName'
+  | 'middleName'
+  | 'fullName'
+  | 'email'
+  | 'company'
+  | 'jobTitle'
+  | 'ukAddress'
+  | 'ukAddressMultiline'
+  | 'usAddress'
+  | 'ukPhone'
+  | 'usPhone'
+  | 'custom';
 
 export interface TestVariable {
   id: string;
@@ -356,8 +378,13 @@ export interface TestVariable {
   // How the row gets picked at run time. Default 'fixed' — uses sourceRow.
   // 'increment' walks forward across runs and wraps from rowCount-1 back to 2
   // (rows 0/1 reserved as defaults). 'random' picks any row each run.
+  // For 'ai-generated' source: 'fixed' = pinned to cached value, 'random' =
+  // regenerate per run with cache fallback. 'increment' is rejected for AI vars.
   sourceRowMode?: TestVariableSourceRowMode;
   staticValue?: string;
+  // AI-generated source
+  aiPreset?: AIVarPreset;
+  aiCustomPrompt?: string;
   // Eotest assertion
   expectedValue?: string;
   assertEnabled?: boolean;
@@ -545,6 +572,11 @@ export const builds = pgTable('builds', {
   }>(),
   createdAt: timestamp('created_at'),
   completedAt: timestamp('completed_at'),
+  // Captured when runBuildAsync's outer try/catch fires AND no per-test
+  // results landed — surfaces executor-level failures (B6) instead of
+  // silently coercing to 'blocked'.
+  executorError: text('executor_error'),
+  executorFailedAt: timestamp('executor_failed_at'),
 });
 
 // Visual diffs with approval workflow
@@ -581,6 +613,9 @@ export const visualDiffs = pgTable('visual_diffs', {
   aiRecommendation: text('ai_recommendation'), // 'approve' | 'review' | 'flag' | null
   aiAnalysisStatus: text('ai_analysis_status'), // 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | null
   browser: text('browser').default('chromium'), // browser used for this diff
+  // External issue tracker submission (e.g. GitHub issue created from this diff)
+  issueUrl: text('issue_url'),
+  issueProvider: text('issue_provider'), // 'github' | 'gitlab' | …
 });
 
 // Baselines for carry-forward logic
@@ -619,17 +654,21 @@ export const plannedScreenshots = pgTable('planned_screenshots', {
 export type PlannedScreenshot = typeof plannedScreenshots.$inferSelect;
 export type NewPlannedScreenshot = typeof plannedScreenshots.$inferInsert;
 
-// Ignore regions for masking areas during diff
+// Ignore regions for masking areas during diff. Per-(testId, stepLabel) like
+// focusRegions — a region applies only to the screenshot it was drawn on.
 export const ignoreRegions = pgTable('ignore_regions', {
   id: text('id').primaryKey(),
   testId: text('test_id').references(() => tests.id).notNull(),
+  stepLabel: text('step_label'),
   x: integer('x').notNull(),
   y: integer('y').notNull(),
   width: integer('width').notNull(),
   height: integer('height').notNull(),
   reason: text('reason'),
   createdAt: timestamp('created_at'),
-});
+}, (table) => ([
+  index('idx_ignore_regions_test_step').on(table.testId, table.stepLabel),
+]));
 
 // Focus regions: per-screenshot positive mask. If any exist for a (testId, stepLabel),
 // the diff engine blanks everything *outside* their union — the inverse of ignoreRegions.
@@ -656,7 +695,6 @@ export type NewFunctionalArea = typeof functionalAreas.$inferInsert;
 
 export interface FunctionalAreaPlanSnapshot {
   previousPlan: string | null;
-  previousDescription: string | null;
   generatedTestIds: string[];
 }
 export type Test = typeof tests.$inferSelect;
@@ -818,6 +856,10 @@ export const playwrightSettings = pgTable('playwright_settings', {
   headlessMode: text('headless_mode').default('true'), // 'true' | 'false' | 'shell'
   navigationTimeout: integer('navigation_timeout').default(30000),
   actionTimeout: integer('action_timeout').default(5000),
+  // Per-candidate waitFor budget for locateWithFallback. The 4 runner sites
+  // also adaptively shorten this when selector_stats indicate a known-slow
+  // selector (see `selectorTimeoutFor` in @lastest/shared/selector-stats).
+  selectorTimeoutMs: integer('selector_timeout_ms').default(3000),
   pointerGestures: boolean('pointer_gestures').default(false),
   cursorFPS: integer('cursor_fps').default(30),
   cursorPlaybackSpeed: integer('cursor_playback_speed').default(1), // 1 = realtime, 0 = instant (skip delays)
@@ -833,7 +875,7 @@ export const playwrightSettings = pgTable('playwright_settings', {
   //   ebIdleTTLSeconds: idle timeout before a released EB Job is torn down.
   maxParallelEBs: integer('max_parallel_ebs').default(30),
   ebPoolMax: integer('eb_pool_max').default(50),
-  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(90),
+  ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(120),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
   networkErrorMode: text('network_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
@@ -978,8 +1020,12 @@ export const DEFAULT_DIFF_THRESHOLDS = {
 // Diff classification type
 export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 
-// Build status enum
-export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos';
+// Build status enum.
+// 'executor_failed' = build orchestration crashed before per-test results could
+// be written (e.g. EB pod schedule failure, runner unreachable). Distinguished
+// from 'blocked' so the UI / MCP surface can differentiate "review needed" from
+// "infrastructure broke". See `runBuildAsync` catch block.
+export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos' | 'executor_failed';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
 export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled';
 
@@ -1038,7 +1084,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = pgTable('ai_prompt_logs', {
@@ -1148,12 +1194,15 @@ export const notificationSettings = pgTable('notification_settings', {
   customWebhookUrl: text('custom_webhook_url'),
   customWebhookMethod: text('custom_webhook_method').default('POST'),
   customWebhookHeaders: text('custom_webhook_headers'), // JSON: {"Authorization": "Bearer xxx"}
+  // Where "Submit as Issue" on a visual diff posts the issue. Only 'github' is wired today.
+  issueTrackerProvider: text('issue_tracker_provider').default('github').notNull(),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
 
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type NewNotificationSettings = typeof notificationSettings.$inferInsert;
+export type IssueTrackerProvider = 'github' | 'gitlab';
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
   slackEnabled: false,
@@ -1162,6 +1211,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   gitlabMrCommentsEnabled: false,
   customWebhookEnabled: false,
   customWebhookMethod: 'POST' as const,
+  issueTrackerProvider: 'github' as IssueTrackerProvider,
 };
 
 // Selector statistics for optimizing fallback strategy
@@ -1659,7 +1709,10 @@ export interface AgentSubstep {
 export interface AgentRichResultPlanArea {
   id: string;
   name: string;
-  description: string;
+  // Short hint string from the planner agent (transient — not persisted; the persistence
+  // target is the area's `agentPlan` column). Kept distinct from `testPlan` so the UI
+  // can show a one-line preview alongside the full plan.
+  summary: string;
   routes: string[];
   testPlan: string;
   approved?: boolean;

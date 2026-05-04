@@ -54,25 +54,26 @@ export async function deleteFunctionalArea(id: string) {
   await db.update(functionalAreas).set({ deletedAt: new Date() }).where(eq(functionalAreas.id, id));
 }
 
-// Get or create functional area with case-insensitive name matching within a repo
+// Get or create functional area with case-insensitive name matching within a repo.
+// `agentPlan` is the canonical "what's in this area" field — passed through verbatim
+// when creating a new area, and merged into the existing row only when it has no plan yet.
 export async function getOrCreateFunctionalAreaByRepo(
   repositoryId: string,
   name: string,
-  description?: string
+  agentPlan?: string
 ) {
   const areas = await getFunctionalAreasByRepo(repositoryId);
   const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
 
   if (existing) {
-    // Optionally merge description if provided and existing is empty
-    if (description && !existing.description) {
-      await updateFunctionalArea(existing.id, { description });
-      return { ...existing, description };
+    if (agentPlan && !existing.agentPlan) {
+      await updateFunctionalArea(existing.id, { agentPlan, planGeneratedAt: new Date() });
+      return { ...existing, agentPlan, planGeneratedAt: new Date() };
     }
     return existing;
   }
 
-  return createFunctionalArea({ repositoryId, name, description });
+  return createFunctionalArea({ repositoryId, name, agentPlan, planGeneratedAt: agentPlan ? new Date() : null });
 }
 
 // Tests
@@ -551,12 +552,26 @@ export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<M
   return map;
 }
 
+// Lightweight helper — for a list of test IDs, return Map<testId, spec.title>.
+// Used by list/tree queries that previously denormalized `description`.
+async function getSpecTitleMapForTestIds(testIds: string[]): Promise<Map<string, string>> {
+  if (testIds.length === 0) return new Map();
+  const rows = await db
+    .select({ testId: testSpecs.testId, title: testSpecs.title })
+    .from(testSpecs)
+    .where(inArray(testSpecs.testId, testIds));
+  const m = new Map<string, string>();
+  for (const r of rows) if (r.testId) m.set(r.testId, r.title);
+  return m;
+}
+
 // Get tests with their latest result status
 export async function getTestsWithStatus() {
   const allTests = await getTests();
   const areas = await getFunctionalAreas();
   const areaMap = new Map(areas.map(a => [a.id, a]));
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
+  const specTitleMap = await getSpecTitleMapForTestIds(allTests.map(t => t.id));
 
   return allTests.map((test) => {
     const info = statusMap.get(test.id);
@@ -565,6 +580,7 @@ export async function getTestsWithStatus() {
       area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
       latestStatus: info?.status ?? null,
       lastRunAt: info?.startedAt ?? null,
+      specTitle: specTitleMap.get(test.id) ?? null,
     };
   });
 }
@@ -575,6 +591,7 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
   const areas = await getFunctionalAreasByRepo(repositoryId);
   const areaMap = new Map(areas.map(a => [a.id, a]));
   const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
+  const specTitleMap = await getSpecTitleMapForTestIds(allTests.map(t => t.id));
 
   return allTests.map((test) => {
     const info = statusMap.get(test.id);
@@ -583,6 +600,7 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
       area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
       latestStatus: info?.status ?? null,
       lastRunAt: info?.startedAt ?? null,
+      specTitle: specTitleMap.get(test.id) ?? null,
     };
   });
 }

@@ -117,7 +117,6 @@ async function getFailedTests(
       testName: tests.name,
       testCode: tests.code,
       targetUrl: tests.targetUrl,
-      description: tests.description,
       errorMessage: testResults.errorMessage,
       areaName: functionalAreas.name,
     })
@@ -172,7 +171,7 @@ export async function evalRouteAccuracy(
     try {
       const prompt = createBranchAwareTestPrompt({
         testName: f.testName || 'test',
-        acceptanceCriteria: f.description || f.testName || '',
+        acceptanceCriteria: f.testName || '',
         userStoryTitle: f.areaName || 'Unknown',
         userStoryDescription: `Testing: ${f.areaName || 'Unknown'}`,
         targetUrl: f.targetUrl || undefined,
@@ -246,7 +245,7 @@ export async function evalTestGeneration(
     try {
       const prompt = createBranchAwareTestPrompt({
         testName: f.testName || 'test',
-        acceptanceCriteria: f.description || f.testName || '',
+        acceptanceCriteria: f.testName || '',
         userStoryTitle: f.areaName || 'Unknown',
         userStoryDescription: `Testing: ${f.areaName || 'Unknown'}`,
         targetUrl: f.targetUrl || undefined,

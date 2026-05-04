@@ -14,6 +14,7 @@ import {
   listEBJobNames,
   poolMax,
   warmPoolMin,
+  interactiveReservedSlots,
   currentPoolSize,
   incInFlightProvisions,
   decInFlightProvisions,
@@ -482,9 +483,21 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
       .update(runners)
       .set({ status: 'offline', lastSeen: new Date() })
       .where(eq(runners.id, runnerId));
+    // Null out connection URLs so a stale `embedded_sessions` row can't hand a
+    // dead pod IP to a browser that re-fetches by sessionId after the Job is
+    // torn down. Without this the WS proxy gets a "WebSocket connection failed"
+    // with no diagnostics until the row is reaped.
     await db
       .update(embeddedSessions)
-      .set({ status: 'stopped', userId: null, busySince: null, lastActivityAt: new Date() })
+      .set({
+        status: 'stopped',
+        userId: null,
+        busySince: null,
+        streamUrl: null,
+        cdpUrl: null,
+        containerUrl: null,
+        lastActivityAt: new Date(),
+      })
       .where(eq(embeddedSessions.runnerId, runnerId));
 
     if (previousStatus === 'busy' || previousStatus === 'online') {
@@ -650,15 +663,24 @@ export async function processPoolQueue(): Promise<void> {
  * mode (EB_PROVISIONER=kubernetes), provision a new Job and wait for it to
  * register, then claim it.
  *
+ * `purpose` controls how the cap is enforced when provisioning a new Job:
+ *   - 'interactive' (default): may use the full ebPoolMax. Recording/debug/AI
+ *     paths take this so they can always launch a fresh EB even mid-burst.
+ *   - 'build': may use up to ebPoolMax - EB_RESERVED_INTERACTIVE_SLOTS, leaving
+ *     headroom for interactive callers. Build dispatch passes this.
+ *
  * Returns null if:
  *   - not in kubernetes mode and no idle EB available
- *   - pool is at ebPoolMax capacity (global playwright_settings)
+ *   - pool is at the effective cap for this purpose
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
-  opts: { waitTimeoutMs?: number } = {},
+  opts: { waitTimeoutMs?: number; purpose?: 'build' | 'interactive' } = {},
 ): Promise<{ runnerId: string; sessionId: string | null } | null> {
-  // Fast path: an idle EB is already online
+  // Fast path: an idle EB is already online. Claiming an existing EB doesn't
+  // change pool size so reservation does not apply here — interactive callers
+  // can still provision new EBs above the build-effective cap if every idle
+  // slot ended up claimed by builds.
   const claimed = await claimPoolEB();
   if (claimed) return claimed;
 
@@ -666,11 +688,20 @@ export async function claimOrProvisionPoolEB(
 
   // Enforce global cap (currentPoolSize now includes in-flight provisions so
   // concurrent callers during an app restart or burst claim can't collectively
-  // blow past the cap).
+  // blow past the cap). Build dispatch is throttled below the interactive cap
+  // to leave provisioning headroom for recording/debug.
   const size = await currentPoolSize();
   const cap = await poolMax();
-  if (size >= cap) {
-    console.warn(`[Pool] At capacity (${size}/${cap}) — cannot provision new EB`);
+  const reserved = opts.purpose === 'build' ? interactiveReservedSlots() : 0;
+  const effectiveCap = Math.max(0, cap - reserved);
+  if (size >= effectiveCap) {
+    if (reserved > 0) {
+      console.warn(
+        `[Pool] At build cap (${size}/${effectiveCap}, hard cap ${cap}, reserved ${reserved} for interactive) — cannot provision new EB for build`,
+      );
+    } else {
+      console.warn(`[Pool] At capacity (${size}/${cap}) — cannot provision new EB`);
+    }
     return null;
   }
 
@@ -808,16 +839,28 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
   const minKeep = warmPoolMin();
 
   const cutoff = new Date(Date.now() - idleTtlMs);
+  // Join sessions to get lastActivityAt (bumped on claim/release/register —
+  // NOT on heartbeat). Using runners.lastSeen instead would never trigger:
+  // a healthy idle EB heartbeats every few seconds, so lastSeen stays fresh
+  // and the reaper never finds anything to clean up. Symptom seen in prod:
+  // a build that bursts the pool to 50 leaves the surplus online-idle EBs
+  // sitting forever (they only get claimed if another build runs).
   const candidates = await db
-    .select({ id: runners.id, name: runners.name, status: runners.status, lastSeen: runners.lastSeen })
+    .select({
+      id: runners.id,
+      name: runners.name,
+      status: runners.status,
+      lastActivityAt: embeddedSessions.lastActivityAt,
+    })
     .from(runners)
+    .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
     .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
 
   let terminated = 0;
   let onlineReaped = 0;
   for (const row of candidates) {
     const isOffline = row.status === 'offline';
-    const isIdle = row.status === 'online' && (!row.lastSeen || row.lastSeen < cutoff);
+    const isIdle = row.status === 'online' && (!row.lastActivityAt || row.lastActivityAt < cutoff);
     if (!isOffline && !isIdle) continue;
 
     // Protect warm pool: only reap an idle-online row if doing so would still

@@ -8,6 +8,8 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { ChevronDown, ChevronUp, Tv2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface BuildData {
   id: string;
@@ -22,6 +24,7 @@ interface BuildData {
   codeChangeTestIds?: string[] | null;
   diffs: VisualDiffWithTestStatus[];
   errorMessage?: string | null;
+  runningTests?: { testId: string; name: string }[];
 }
 
 interface BuildPollingWrapperProps {
@@ -67,6 +70,15 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
 
         if (data.completedAt) {
           setIsPolling(false);
+          track(Events.test_run_completed, {
+            buildId,
+            status: data.overallStatus,
+            totalTests: data.totalTests,
+            passedCount: data.passedCount,
+            failedCount: data.failedCount,
+            changesDetected: data.changesDetected,
+            elapsedMs: data.elapsedMs ?? 0,
+          });
           router.refresh();
         }
       } catch (error) {
@@ -135,6 +147,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
         hasPendingDiffs={pendingDiffs.length > 0}
         isRunning={isRunning}
         completedTests={completedTests}
+        runningTests={build.runningTests ?? []}
         codeChangeTestIds={build.codeChangeTestIds}
         isMainBranch={isMainBranch}
         banAiMode={banAiMode}

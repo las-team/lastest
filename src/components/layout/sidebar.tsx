@@ -16,7 +16,7 @@ import {
   Trophy,
 } from 'lucide-react';
 import Image from 'next/image';
-import { RepoSelector, CreateLocalRepoButton } from './repo-selector';
+import { RepoSelector, CreateLocalRepoButton, type RepositoryWithTestCount } from './repo-selector';
 import { QueueIndicator } from '@/components/queue/queue-indicator';
 import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-indicator-client';
 import { UserMenu } from '@/components/auth/user-menu';
@@ -25,7 +25,7 @@ import { SidebarQuickActions } from './sidebar-quick-actions';
 import type { Repository, User, Team, EmbeddedSession } from '@/lib/db/schema';
 
 interface SidebarProps {
-  repos?: Repository[];
+  repos?: RepositoryWithTestCount[];
   selectedRepo?: Repository | null;
   currentUser?: User | null;
   team?: Team | null;

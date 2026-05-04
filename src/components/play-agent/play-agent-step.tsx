@@ -21,7 +21,7 @@ const AGENT_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string; label:
   scout: { bg: 'bg-cyan-500/15', text: 'text-cyan-600 dark:text-cyan-400', label: 'Scout' },
   diver: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400', label: 'Diver' },
   generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400', label: 'Generator' },
-  healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400', label: 'Healer' },
+  healer: { bg: 'bg-warning/15', text: 'text-warning', label: 'Healer' },
 };
 
 export function AgentBadge({ agent }: { agent: PwAgentType }) {
@@ -43,7 +43,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
         {/* Step icon */}
         <div className="flex-shrink-0">
           {step.status === 'completed' ? (
-            <div className="h-5 w-5 rounded-full bg-green-500 flex items-center justify-center">
+            <div className="h-5 w-5 rounded-full bg-success flex items-center justify-center">
               <Check className="h-3 w-3 text-white" />
             </div>
           ) : step.status === 'active' ? (
@@ -51,11 +51,11 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
               <Loader2 className="h-3 w-3 text-white animate-spin" />
             </div>
           ) : step.status === 'waiting_user' ? (
-            <div className="h-5 w-5 rounded-full bg-blue-500 flex items-center justify-center">
+            <div className="h-5 w-5 rounded-full bg-info flex items-center justify-center">
               <Pause className="h-3 w-3 text-white" />
             </div>
           ) : step.status === 'failed' ? (
-            <div className="h-5 w-5 rounded-full bg-red-500 flex items-center justify-center">
+            <div className="h-5 w-5 rounded-full bg-destructive flex items-center justify-center">
               <X className="h-3 w-3 text-white" />
             </div>
           ) : step.status === 'skipped' ? (
@@ -75,8 +75,8 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
             'text-sm flex-1',
             step.status === 'completed' && 'text-muted-foreground',
             step.status === 'active' && 'font-medium',
-            step.status === 'waiting_user' && 'font-medium text-blue-600 dark:text-blue-400',
-            step.status === 'failed' && 'font-medium text-red-600 dark:text-red-400',
+            step.status === 'waiting_user' && 'font-medium text-info',
+            step.status === 'failed' && 'font-medium text-destructive',
             step.status === 'skipped' && 'text-muted-foreground',
             step.status === 'pending' && 'text-muted-foreground',
           )}
@@ -94,9 +94,9 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
                 {sub.status === 'running' ? (
                   <Loader2 className="h-3 w-3 animate-spin text-primary flex-shrink-0" />
                 ) : sub.status === 'done' ? (
-                  <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
+                  <Check className="h-3 w-3 text-success flex-shrink-0" />
                 ) : sub.status === 'error' ? (
-                  <X className="h-3 w-3 text-red-500 flex-shrink-0" />
+                  <X className="h-3 w-3 text-destructive flex-shrink-0" />
                 ) : (
                   <Circle className="h-3 w-3 flex-shrink-0" />
                 )}
@@ -115,7 +115,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
               )}
               {/* Show full error for failed planners */}
               {sub.rawError && sub.status === 'error' && (
-                <div className="ml-5 text-[10px] text-red-500/80 max-w-[400px] break-words">
+                <div className="ml-5 text-[10px] text-destructive/80 max-w-[400px] break-words">
                   {sub.rawError}
                 </div>
               )}
@@ -127,7 +127,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
       {/* Review step: show plan areas with checkboxes + approve button */}
       {isReviewWaiting && onApprovePlan && (
         <div className="ml-7 mt-2">
-          <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">{step.userAction}</p>
+          <p className="text-xs text-info mb-2">{step.userAction}</p>
           <PlayAgentStepDetail step={step} loading={loading} onApprovePlan={onApprovePlan} />
         </div>
       )}
@@ -141,14 +141,14 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
             const missingAI = highlights.includes('ai-settings');
             return (
               <div className="space-y-1.5">
-                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">Configure these to continue:</p>
+                <p className="text-xs font-medium text-warning">Configure these to continue:</p>
                 <div className="space-y-1">
                   {missingGH && (
                     <a
                       href="/settings?highlight=github"
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
                     >
-                      <X className="h-3 w-3 text-red-500 shrink-0" />
+                      <X className="h-3 w-3 text-destructive shrink-0" />
                       <span>GitHub account</span>
                       <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </a>
@@ -158,7 +158,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
                       href="/settings?highlight=ai-settings"
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group"
                     >
-                      <X className="h-3 w-3 text-red-500 shrink-0" />
+                      <X className="h-3 w-3 text-destructive shrink-0" />
                       <span>AI provider</span>
                       <ExternalLink className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </a>
@@ -168,11 +168,11 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
             );
           })()}
           {step.id === 'select_repo' && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">Select a repository from the sidebar to continue</p>
+            <p className="text-xs text-warning">Select a repository from the sidebar to continue</p>
           )}
           {step.id === 'env_setup' && (
             <>
-              <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
+              <p className="text-xs text-warning">{step.userAction}</p>
               <a
                 href="/settings?highlight=environment"
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -182,7 +182,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
             </>
           )}
           {step.id !== 'settings_check' && step.id !== 'select_repo' && step.id !== 'env_setup' && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{step.userAction}</p>
+            <p className="text-xs text-warning">{step.userAction}</p>
           )}
           <div className="flex gap-2">
             {onResume && (
@@ -204,7 +204,7 @@ export function PlayAgentStep({ step, stepNumber, loading, onResume, onSkip, onA
       {/* Error */}
       {step.status === 'failed' && step.error && (
         <div className="ml-7 mt-1.5 space-y-1.5">
-          <p className="text-xs text-red-600 dark:text-red-400">{step.error}</p>
+          <p className="text-xs text-destructive">{step.error}</p>
           {onResume && (
             <Button size="sm" variant="outline" onClick={onResume} disabled={loading}>
               {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}

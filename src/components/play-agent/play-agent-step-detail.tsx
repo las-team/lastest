@@ -101,7 +101,7 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
                 <button
                   onClick={() => handleDiscoverMore(area)}
                   disabled={divingArea === area.id}
-                  className="text-[10px] text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 flex items-center gap-0.5 shrink-0 disabled:opacity-50"
+                  className="text-[10px] text-info hover:text-info/80 flex items-center gap-0.5 shrink-0 disabled:opacity-50"
                   title="Launch diver agent to explore this area further"
                 >
                   {divingArea === area.id ? (
@@ -115,8 +115,8 @@ function PlanDetail({ areas, loading, onApprovePlan, onRerunPlanner }: {
             </div>
             {expandedId === area.id && (
               <div className="mt-2 ml-5 space-y-1.5">
-                {area.description && (
-                  <p className="text-[11px] text-muted-foreground">{area.description}</p>
+                {area.summary && (
+                  <p className="text-[11px] text-muted-foreground">{area.summary}</p>
                 )}
                 {area.routes.length > 0 && (
                   <div className="flex flex-wrap gap-1">
@@ -241,9 +241,9 @@ function FixTestsDetail({ fixes }: { fixes: Array<{ testName: string; originalEr
             className="flex items-center gap-1.5 w-full text-left"
           >
             {fix.fixed ? (
-              <Check className="h-3 w-3 text-green-500 shrink-0" />
+              <Check className="h-3 w-3 text-success shrink-0" />
             ) : (
-              <X className="h-3 w-3 text-red-500 shrink-0" />
+              <X className="h-3 w-3 text-destructive shrink-0" />
             )}
             <span className={cn('text-xs flex-1', fix.fixed ? 'text-foreground' : 'text-muted-foreground')}>
               {fix.testName}
@@ -251,7 +251,7 @@ function FixTestsDetail({ fixes }: { fixes: Array<{ testName: string; originalEr
           </button>
           {expandedIdx === i && (
             <div className="mt-2 ml-5 space-y-1.5">
-              <div className="text-[10px] text-red-500">{fix.originalError}</div>
+              <div className="text-[10px] text-destructive">{fix.originalError}</div>
               {fix.newCode && (
                 <pre className="text-[10px] bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-32 overflow-y-auto">
                   {fix.newCode}
@@ -291,7 +291,7 @@ function ScanAndTemplateDetail({ routes, framework, template, intelligence }: {
             key={i}
             className={cn(
               'inline-flex px-1.5 py-0.5 rounded text-[10px] font-mono',
-              route.type === 'dynamic' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-muted text-muted-foreground',
+              route.type === 'dynamic' ? 'bg-info/10 text-info' : 'bg-muted text-muted-foreground',
             )}
           >
             {route.path}
@@ -338,7 +338,7 @@ function PlannerLogViewer({ sessionId, logId }: { sessionId: string; logId: stri
 
   return (
     <div>
-      <button onClick={fetchLog} disabled={loading} className="text-[10px] text-blue-500 hover:text-blue-400 disabled:opacity-50 flex items-center gap-1">
+      <button onClick={fetchLog} disabled={loading} className="text-[10px] text-info hover:text-info/80 disabled:opacity-50 flex items-center gap-1">
         {loading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Eye className="h-2.5 w-2.5" />}
         {expanded ? 'Hide' : 'View'} AI Log
       </button>
@@ -360,8 +360,8 @@ function PlannerLogViewer({ sessionId, logId }: { sessionId: string; logId: stri
           )}
           {log.errorMessage && (
             <div>
-              <div className="text-[9px] uppercase text-red-400/70 font-medium">Error</div>
-              <pre className="text-[10px] bg-red-500/5 text-red-500 rounded p-1.5 overflow-x-auto whitespace-pre-wrap max-h-16 overflow-y-auto">
+              <div className="text-[9px] uppercase text-destructive/70 font-medium">Error</div>
+              <pre className="text-[10px] bg-destructive/5 text-destructive rounded p-1.5 overflow-x-auto whitespace-pre-wrap max-h-16 overflow-y-auto">
                 {log.errorMessage}
               </pre>
             </div>
@@ -399,9 +399,9 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
         <div key={i} className="border rounded-md p-2 space-y-1">
           <div className="flex items-center gap-2">
             {sub.status === 'done' ? (
-              <Check className="h-3 w-3 text-green-500 shrink-0" />
+              <Check className="h-3 w-3 text-success shrink-0" />
             ) : sub.status === 'error' ? (
-              <X className="h-3 w-3 text-red-500 shrink-0" />
+              <X className="h-3 w-3 text-destructive shrink-0" />
             ) : sub.status === 'running' ? (
               <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
             ) : null}
@@ -423,7 +423,7 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
           )}
 
           {sub.rawError && sub.status === 'error' && (
-            <div className="text-[10px] text-red-500/80 ml-5 break-words">{sub.rawError}</div>
+            <div className="text-[10px] text-destructive/80 ml-5 break-words">{sub.rawError}</div>
           )}
 
           <div className="flex items-center gap-2 ml-5">
@@ -437,7 +437,7 @@ function PlannerObservabilityDetail({ substeps, sessionId, onRerunPlanner }: {
                 className={cn(
                   'text-[10px] flex items-center gap-1 disabled:opacity-50',
                   sub.status === 'error'
-                    ? 'text-amber-500 hover:text-amber-400'
+                    ? 'text-warning hover:text-warning/80'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
               >

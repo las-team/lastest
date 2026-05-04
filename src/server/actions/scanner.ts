@@ -74,7 +74,6 @@ export async function startRemoteRouteScan(repositoryId: string, branch: string)
       const area = await queries.createFunctionalArea({
         repositoryId,
         name: route.path,
-        description: `Route: ${route.path}`,
         parentId: routesFolder.id,
         isRouteFolder: true,
       });
@@ -143,7 +142,6 @@ export async function addRoutesAsFunctionalAreas(repositoryId: string, routeIds:
       area = await queries.createFunctionalArea({
         repositoryId,
         name: route.path,
-        description: `Auto-generated area for route ${route.path}`,
       });
       areasCreated++;
     }
@@ -171,7 +169,6 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
         repositoryId,
         path: area.name,
         type: area.name.includes('[') ? 'dynamic' : 'static',
-        description: area.description,
         functionalAreaId: area.id,
         hasTest: false,
         scannedAt: new Date(),
@@ -191,7 +188,6 @@ export async function generateBasicTests(repositoryId: string, routeIds: string[
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
         route.path,
-        `Auto-generated area for route ${route.path}`
       );
       functionalAreaId = area.id;
       await queries.linkRouteToFunctionalArea(route.id, area.id);
@@ -269,17 +265,31 @@ export async function createResponsiveVariants(
       const existing = await queries.getTestsByRepo(repositoryId);
       if (existing.some(t => t.name === variantName)) continue;
 
-      await queries.createTest({
+      const variantTest = await queries.createTest({
         repositoryId,
         functionalAreaId: test.functionalAreaId,
         name: variantName,
         code: test.code,
-        description: `${vpConfig.label} (${vpConfig.width}x${vpConfig.height}) variant of: ${test.name}`,
         targetUrl: test.targetUrl,
         setupTestId: test.setupTestId,
         setupScriptId: test.setupScriptId,
         viewportOverride: { width: vpConfig.width, height: vpConfig.height },
       });
+      // Carry the variant context as a linked spec so the canonical "what is this test"
+      // signal isn't lost — viewport variants only differ in viewport, not in intent.
+      const variantSpecBody = `${vpConfig.label} (${vpConfig.width}x${vpConfig.height}) variant of: ${test.name}`;
+      const sourceSpec = await queries.getTestSpec(testId);
+      const specId = await queries.createTestSpec({
+        repositoryId,
+        testId: variantTest.id,
+        functionalAreaId: test.functionalAreaId,
+        title: variantName,
+        spec: sourceSpec?.spec ? `${variantSpecBody}\n\n${sourceSpec.spec}` : variantSpecBody,
+        source: 'manual',
+        status: 'has_test',
+        codeHash: null,
+      });
+      await queries.linkSpecToTest(specId, variantTest.id);
       testsCreated++;
     }
   }

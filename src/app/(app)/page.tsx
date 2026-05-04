@@ -104,22 +104,22 @@ export default async function DashboardPage({
   const flakyTrend = trends.map(t => t.flakyRate);
 
   // Health score color
-  const healthColor = healthScore >= 80 ? 'text-green-600' : healthScore >= 50 ? 'text-yellow-600' : 'text-red-600';
-  const healthBg = healthScore >= 80 ? 'bg-green-500/10' : healthScore >= 50 ? 'bg-yellow-500/10' : 'bg-red-500/10';
+  const healthColor = healthScore >= 80 ? 'text-success' : healthScore >= 50 ? 'text-warning' : 'text-destructive';
+  const healthBg = healthScore >= 80 ? 'bg-success/10' : healthScore >= 50 ? 'bg-warning/10' : 'bg-destructive/10';
 
   return (
     <div className="flex flex-col h-full">
       {focusActivity && <ActivityAutoFocus />}
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 md:p-6 space-y-4 md:space-y-6">
         {/* Setup Guide — surfaces unfinished onboarding/setup items */}
         <SetupGuide initialStatus={setupStatus} latestBuildId={recentBuilds[0]?.id ?? null} />
 
         {/* Health Score + Stats Cards */}
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
           {/* Health Score */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className={`${healthBg} cursor-default`}>
+              <Card className={`${healthBg} cursor-default col-span-2 md:col-span-1`}>
                 <CardHeader className="pb-2">
                   <CardDescription className="flex items-center gap-1">
                     <Shield className="h-3.5 w-3.5" />
@@ -186,9 +186,9 @@ export default async function DashboardPage({
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center justify-between">
                 Passing
-                <Sparkline data={passRateTrend} color="var(--color-green-500, #22c55e)" />
+                <Sparkline data={passRateTrend} color="var(--c-teal)" />
               </CardDescription>
-              <CardTitle className="text-3xl flex items-center gap-2 text-green-600">
+              <CardTitle className="text-3xl flex items-center gap-2 text-success">
                 <CheckCircle className="h-5 w-5" />
                 {passingCount}
               </CardTitle>
@@ -211,9 +211,9 @@ export default async function DashboardPage({
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center justify-between">
                 Flaky
-                <Sparkline data={flakyTrend} color="var(--color-yellow-500, #eab308)" />
+                <Sparkline data={flakyTrend} color="var(--c-amber)" />
               </CardDescription>
-              <CardTitle className="text-3xl flex items-center gap-2 text-yellow-600">
+              <CardTitle className="text-3xl flex items-center gap-2 text-warning">
                 <Zap className="h-5 w-5" />
                 {flakyCount}
               </CardTitle>
@@ -222,7 +222,7 @@ export default async function DashboardPage({
         </div>
 
         {/* Coverage + Last Build Row */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center gap-1">
@@ -292,17 +292,17 @@ export default async function DashboardPage({
                     <Link
                       key={build.id}
                       href={`/builds/${build.id}`}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         {isRunning ? (
-                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                          <Loader2 className="h-4 w-4 text-info animate-spin" />
                         ) : build.overallStatus === 'safe_to_merge' ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <CheckCircle className="h-4 w-4 text-success" />
                         ) : build.overallStatus === 'blocked' ? (
                           <XCircle className="h-4 w-4 text-destructive" />
                         ) : (
-                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                          <AlertTriangle className="h-4 w-4 text-warning" />
                         )}
                         <div>
                           <span className="font-medium">Build #{build.id.slice(0, 8)}</span>
@@ -310,18 +310,18 @@ export default async function DashboardPage({
                             {buildTotal} tests
                           </span>
                           {buildFlaky > 0 && (
-                            <span className="text-xs text-yellow-600 ml-2">
+                            <span className="text-xs text-warning ml-2">
                               {buildFlaky} flaky
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 shrink-0">
                         {/* Pass rate mini bar */}
-                        <div className="flex items-center gap-2">
+                        <div className="hidden sm:flex items-center gap-2">
                           <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className={`h-full transition-all ${buildPassRate === 100 ? 'bg-green-500' : buildPassRate > 80 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              className={`h-full transition-all ${buildPassRate === 100 ? 'bg-success' : buildPassRate > 80 ? 'bg-warning' : 'bg-destructive'}`}
                               style={{ width: `${buildPassRate}%` }}
                             />
                           </div>
@@ -357,7 +357,7 @@ export default async function DashboardPage({
           </CardHeader>
           <CardContent>
             {areas.length > 0 ? (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {areas.map((area) => {
                   const areaTests = tests.filter(t => t.functionalAreaId === area.id);
                   return (

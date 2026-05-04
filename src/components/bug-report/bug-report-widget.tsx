@@ -98,7 +98,7 @@ export function BugReportWidget() {
         <Button
           variant="outline"
           size="icon"
-          className="fixed bottom-4 right-4 z-50 h-10 w-10 rounded-full shadow-lg"
+          className="fixed bottom-20 right-4 md:bottom-4 z-50 h-10 w-10 rounded-full shadow-lg"
           aria-label="Report a bug"
         >
           <Bug className="h-5 w-5" />

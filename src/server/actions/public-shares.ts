@@ -266,10 +266,8 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
       functionalAreaId: null,
       name: sourceTest.name,
       code: sourceTest.code,
-      description: sourceTest.description,
       targetUrl: sourceTest.targetUrl,
       executionMode: sourceTest.executionMode ?? 'procedural',
-      agentPrompt: sourceTest.agentPrompt,
       createdByUserId: session.user.id,
       createdByBotId: null,
     });

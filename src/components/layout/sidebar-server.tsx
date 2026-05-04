@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { getSelectedRepository, getRepositoriesByTeam } from '@/lib/db/queries';
+import { getSelectedRepository, getRepositoriesByTeamWithTestCounts } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { syncReposIfStale } from '@/server/actions/repos';
 import { getEnvironmentConfig } from '@/server/actions/environment';
@@ -27,7 +27,7 @@ export async function SidebarServer() {
 
   const [selectedRepo, repos, ebSessions] = await Promise.all([
     teamId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
-    teamId ? getRepositoriesByTeam(teamId) : Promise.resolve([]),
+    teamId ? getRepositoriesByTeamWithTestCounts(teamId) : Promise.resolve([]),
     listSystemEmbeddedSessions().catch(() => []),
   ]);
 

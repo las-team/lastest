@@ -84,7 +84,7 @@ export interface ScanContext {
   specDescription?: string;
   testSuggestions?: string[];
   functionalAreaName?: string;
-  functionalAreaDescription?: string;
+  functionalAreaPlan?: string;
 }
 
 export interface CodebaseIntelligenceContext {

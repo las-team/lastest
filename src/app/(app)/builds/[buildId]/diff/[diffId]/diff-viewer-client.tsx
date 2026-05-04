@@ -3,9 +3,14 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { SliderComparison, type FocusRegionRect } from '@/components/diff/slider-comparison';
+import { SliderComparison, type FocusRegionRect, type IgnoreRegionRect } from '@/components/diff/slider-comparison';
+import { SwipeDeck } from '@/components/diff/swipe-deck-client';
+import { useIsMobile } from '@/lib/hooks/use-is-mobile';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion } from '@/server/actions/diffs';
+import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion, addIgnoreRegionForDiff, removeIgnoreRegionForDiff, submitDiffAsIssue } from '@/server/actions/diffs';
+import { toast } from 'sonner';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
 
 type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
@@ -115,7 +120,7 @@ function DiffStrip({
 }
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair } from 'lucide-react';
+import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair, EyeOff, CircleAlert, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -127,12 +132,14 @@ interface DiffViewerClientProps {
   nextDiffId?: string;
   banAiMode?: boolean;
   initialFocusRegions?: FocusRegionRect[];
+  initialIgnoreRegions?: IgnoreRegionRect[];
   allDiffs?: VisualDiffWithTestStatus[];
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], allDiffs = [] }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isMobile = useIsMobile();
   const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUndo, setShowUndo] = useState(false);
@@ -160,6 +167,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     setIsProcessing(true);
     try {
       await approveDiff(diff.id);
+      track(Events.diff_approved, {
+        diffId: diff.id,
+        buildId,
+      });
       setShowUndo(true);
 
       // Auto-hide undo after 10 seconds
@@ -191,6 +202,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     setIsProcessing(true);
     try {
       await addDiffTodo(diff.id, todoDescription.trim());
+      track(Events.diff_rejected, {
+        diffId: diff.id,
+        buildId,
+      });
       setShowTodoInput(false);
       setTodoDescription('');
       router.refresh();
@@ -223,6 +238,35 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
       router.push(buildDiffUrl(nextDiffId));
     }
   }, [nextDiffId, buildDiffUrl, router]);
+
+  const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [issueUrl, setIssueUrl] = useState<string | null>(diff.issueUrl ?? null);
+
+  const handleSubmitAsIssue = useCallback(async () => {
+    if (issueSubmitting) return;
+    if (issueUrl) {
+      window.open(issueUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setIssueSubmitting(true);
+    try {
+      const res = await submitDiffAsIssue(diff.id);
+      if (!res.success || !res.issueUrl) {
+        toast.error(res.error || 'Failed to create issue');
+        return;
+      }
+      setIssueUrl(res.issueUrl);
+      const url = res.issueUrl;
+      toast.success(res.alreadyExists ? 'Issue already exists' : 'Issue created', {
+        action: { label: 'Open', onClick: () => window.open(url, '_blank', 'noopener,noreferrer') },
+      });
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create issue');
+    } finally {
+      setIssueSubmitting(false);
+    }
+  }, [diff.id, issueSubmitting, issueUrl, router]);
 
   const handlePrev = useCallback(() => {
     if (prevDiffId) {
@@ -289,9 +333,13 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const [drawFocusMode, setDrawFocusMode] = useState(false);
   const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
   const [focusPending, setFocusPending] = useState(false);
+  const [drawIgnoreMode, setDrawIgnoreMode] = useState(false);
+  const [ignoreRegions, setIgnoreRegions] = useState<IgnoreRegionRect[]>(initialIgnoreRegions);
+  const [ignorePending, setIgnorePending] = useState(false);
 
-  // Sync if server reloads with new focus regions (e.g. after router.refresh)
+  // Sync if server reloads with new regions (e.g. after router.refresh)
   useEffect(() => { setFocusRegions(initialFocusRegions); }, [initialFocusRegions]);
+  useEffect(() => { setIgnoreRegions(initialIgnoreRegions); }, [initialIgnoreRegions]);
 
   const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
     if (focusPending) return;
@@ -321,6 +369,37 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
       setFocusPending(false);
     }
   }, [diff.id, focusPending, router]);
+
+  const handleIgnoreDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (ignorePending) return;
+    setIgnorePending(true);
+    try {
+      const created = await addIgnoreRegionForDiff(diff.id, rect);
+      setIgnoreRegions(prev => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawIgnoreMode(false);
+      toast.success('Ignore region added — applies to every screenshot of this test');
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to add ignore region:', error);
+      toast.error('Failed to add ignore region');
+    } finally {
+      setIgnorePending(false);
+    }
+  }, [diff.id, ignorePending, router]);
+
+  const handleIgnoreDelete = useCallback(async (regionId: string) => {
+    if (ignorePending) return;
+    setIgnorePending(true);
+    setIgnoreRegions(prev => prev.filter(r => r.id !== regionId));
+    try {
+      await removeIgnoreRegionForDiff(regionId, diff.id);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to remove ignore region:', error);
+    } finally {
+      setIgnorePending(false);
+    }
+  }, [diff.id, ignorePending, router]);
   const changedRegions = metadata?.changedRegions;
   const domDiff = metadata?.domDiff;
   const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
@@ -471,6 +550,12 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           )}
 
           {/* Diff Comparison */}
+          <SwipeDeck
+            disabled={!isMobile}
+            onSwipeRight={diff.status === 'pending' && !isProcessing ? handleApprove : undefined}
+            onSwipeLeft={diff.status === 'pending' && !isProcessing ? handleShowTodoInput : undefined}
+            onSwipeUp={nextDiffId ? handleSkip : undefined}
+          >
           {diff.currentImagePath ? (
             (() => {
               // On main branch (no mainBaselineImagePath), only show one tab
@@ -534,6 +619,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     drawFocusMode={drawFocusMode}
                     onFocusRegionDrawn={handleFocusDrawn}
                     onFocusRegionDelete={handleFocusDelete}
+                    ignoreRegions={ignoreRegions}
+                    drawIgnoreMode={drawIgnoreMode}
+                    onIgnoreRegionDrawn={handleIgnoreDrawn}
+                    onIgnoreRegionDelete={handleIgnoreDelete}
                     initialViewMode={viewParam || undefined}
                     onViewModeChange={handleViewModeChange}
                   />
@@ -579,6 +668,14 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                           changedRegions={changedRegions}
                           domOverlayRegions={domOverlayRegions}
                           showRegions={showRegions}
+                          focusRegions={focusRegions}
+                          drawFocusMode={drawFocusMode}
+                          onFocusRegionDrawn={handleFocusDrawn}
+                          onFocusRegionDelete={handleFocusDelete}
+                          ignoreRegions={ignoreRegions}
+                          drawIgnoreMode={drawIgnoreMode}
+                          onIgnoreRegionDrawn={handleIgnoreDrawn}
+                          onIgnoreRegionDelete={handleIgnoreDelete}
                           initialViewMode={viewParam || undefined}
                           onViewModeChange={handleViewModeChange}
                         />
@@ -612,6 +709,14 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               No screenshot available
             </div>
           )}
+          </SwipeDeck>
+
+          {/* Mobile hint */}
+          {isMobile && diff.status === 'pending' && (
+            <p className="md:hidden text-center text-xs text-muted-foreground -mt-2">
+              Swipe right to approve · left for todo · up to skip
+            </p>
+          )}
 
           {/* Color-coded thumbnail queue strip */}
           {allDiffs.length > 0 && (
@@ -623,8 +728,8 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           )}
 
           {/* Action Bar */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 onClick={handleApprove}
                 disabled={isProcessing || diff.status === 'approved' || diff.status === 'auto_approved'}
@@ -684,14 +789,42 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
               </Button>
 
               <Button
+                variant="outline"
+                onClick={handleSubmitAsIssue}
+                disabled={issueSubmitting}
+                className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                title={issueUrl ? 'Open the GitHub issue created from this diff' : 'Create an issue in your configured tracker'}
+              >
+                {issueSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : issueUrl ? (
+                  <ExternalLink className="w-4 h-4" />
+                ) : (
+                  <CircleAlert className="w-4 h-4" />
+                )}
+                {issueUrl ? 'View Issue' : 'Submit as Issue'}
+              </Button>
+
+              <Button
                 variant={drawFocusMode ? 'default' : 'outline'}
-                onClick={() => setDrawFocusMode(prev => !prev)}
+                onClick={() => { setDrawFocusMode(prev => !prev); setDrawIgnoreMode(false); }}
                 disabled={focusPending}
                 className={drawFocusMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-300 text-green-700 hover:bg-green-50'}
                 title="Click and drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions."
               >
                 <Crosshair className="w-4 h-4" />
                 {drawFocusMode ? 'Drawing — click + drag' : focusRegions.length > 0 ? `Focus (${focusRegions.length})` : 'Draw Focus Region'}
+              </Button>
+
+              <Button
+                variant={drawIgnoreMode ? 'default' : 'outline'}
+                onClick={() => { setDrawIgnoreMode(prev => !prev); setDrawFocusMode(false); }}
+                disabled={ignorePending}
+                className={drawIgnoreMode ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'border-rose-300 text-rose-700 hover:bg-rose-50'}
+                title="Click and drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test."
+              >
+                <EyeOff className="w-4 h-4" />
+                {drawIgnoreMode ? 'Drawing — click + drag' : ignoreRegions.length > 0 ? `Ignore (${ignoreRegions.length})` : 'Draw Ignore Region'}
               </Button>
             </div>
 

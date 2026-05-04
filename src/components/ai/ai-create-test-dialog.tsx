@@ -25,6 +25,8 @@ import { Switch } from '@/components/ui/switch';
 import { Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import type { FunctionalArea } from '@/lib/db/schema';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface AICreateTestDialogProps {
   open: boolean;
@@ -66,6 +68,12 @@ export function AICreateTestDialog({
       });
 
       if (result.success) {
+        track(Events.test_created, {
+          source: 'ai',
+          repoId: repositoryId,
+          hasArea: functionalAreaId && functionalAreaId !== '__none__' ? 'true' : 'false',
+          hasTargetUrl: targetUrl ? 'true' : 'false',
+        });
         toast.success('Test generation started — check the activity feed for progress');
         handleClose();
       } else {

@@ -285,12 +285,12 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
     return [];
   }
 
-  // Get failed tests with their info
+  // Get failed tests with their info (legacy tests.description column dropped — use empty string here;
+  // autoresearch evaluation uses test name + error to triage, not the description).
   const failed = await db.select({
     testName: tests.name,
     testCode: tests.code,
     targetUrl: tests.targetUrl,
-    description: tests.description,
     errorMessage: testResults.errorMessage,
     areaName: functionalAreas.name,
   })
@@ -306,7 +306,7 @@ async function loadReplayScenarios(): Promise<ReplayScenario[]> {
     testName: f.testName || 'Unknown',
     targetUrl: f.targetUrl || BASE_URL,
     userStoryTitle: f.areaName || 'Unknown Area',
-    acceptanceCriteria: f.description || f.testName || '',
+    acceptanceCriteria: f.testName || '',
     previousError: f.errorMessage || 'Unknown error',
     repositoryId: latestRun.repositoryId!,
   }));

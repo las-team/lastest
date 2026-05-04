@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { getEmbeddedSession } from '@/server/actions/embedded-sessions';
 import { toProxyStreamUrl } from '@/lib/eb/stream-url';
@@ -16,6 +17,14 @@ export async function GET(
   try {
     await requireAuth();
   } catch {
+    // B4 diagnostics — see /api/embedded/stream/route.ts for context.
+    const h = await headers();
+    const hasCookie = Boolean(h.get('cookie'));
+    const hasBearer = h.get('authorization')?.startsWith('Bearer ');
+    const { sessionId: sid } = await params;
+    console.warn(
+      `[stream/${sid}] 401 Unauthorized — cookie=${hasCookie ? 'present' : 'missing'} bearer=${hasBearer ? 'present' : 'missing'}`,
+    );
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -28,12 +37,16 @@ export async function GET(
     }
 
     const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
-
+    // Suppress the streamUrl once the session has been released or is shutting
+    // down — even if the DB row still has the old URL (e.g. EB crashed before
+    // releasePoolEB could clear it), handing it back would lead the client to
+    // a dead pod IP and a silent WebSocket failure.
+    const isLive = session.status !== 'stopped' && session.status !== 'stopping';
     return NextResponse.json({
       sessionId: session.id,
       runnerId: session.runnerId,
       status: session.status,
-      streamUrl: toProxyStreamUrl(session.streamUrl),
+      streamUrl: isLive ? toProxyStreamUrl(session.streamUrl) : null,
       viewport: session.viewport,
       currentUrl: session.currentUrl,
       streamAuthToken,

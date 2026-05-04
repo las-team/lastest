@@ -1,5 +1,6 @@
 import type { Page, Locator } from 'playwright';
-import { stripTypeAnnotations } from '@lastest/shared';
+import { stripTypeAnnotations, hashSelectors, sortSelectorsByStats, selectorTimeoutFor, type SelectorRef, type SelectorStatRow } from '@lastest/shared';
+import { getSelectorStatsForTest, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries/misc';
 import type { SetupScript, SetupContext, SetupResult } from './types';
 
 /**
@@ -151,9 +152,34 @@ function createAppState(page: Page) {
 }
 
 /**
- * Create a simple locateWithFallback function for setup scripts
+ * Create a simple locateWithFallback function for setup scripts.
+ *
+ * When `testId` is provided (test-as-setup path), candidates are sorted by
+ * historical success on the first call (cached for the rest of the run)
+ * and per-attempt outcomes are recorded fire-and-forget against
+ * `selector_stats`. Pure setup scripts call without a testId and skip the
+ * optimization — selector_stats is keyed on the tests table FK.
+ *
+ * `defaultTimeoutMs` is the per-candidate `waitFor` budget. When stats are
+ * available, `selectorTimeoutFor` further shortens it for known-slow
+ * candidates so we don't burn the full budget on selectors that are
+ * historically dead weight.
  */
-function createLocateWithFallback(_page: Page) {
+function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs = 3000) {
+  // Per-call sort cache: hash → sorted selectors. Reused across actions so a
+  // test that locates the same array repeatedly only pays the DB read once.
+  const sortCache = new Map<string, { type: string; value: string }[]>();
+  // Lazy single-shot fetch of every selector_stats row for the test. Used
+  // both to sort candidates and to compute adaptive per-candidate timeouts.
+  let allStatsPromise: Promise<SelectorStatRow[]> | null = null;
+  const getAllStats = (): Promise<SelectorStatRow[]> => {
+    if (!testId) return Promise.resolve([]);
+    if (!allStatsPromise) {
+      allStatsPromise = getSelectorStatsForTest(testId).catch(() => [] as SelectorStatRow[]);
+    }
+    return allStatsPromise;
+  };
+
   return async (
     pg: Page,
     selectors: { type: string; value: string }[],
@@ -163,7 +189,19 @@ function createLocateWithFallback(_page: Page) {
   ) => {
     const validSelectors = selectors.filter(s => s.value && s.value.trim() && !s.value.includes('undefined'));
 
-    for (const sel of validSelectors) {
+    const hash = hashSelectors(validSelectors as SelectorRef[]);
+
+    const allStats = await getAllStats();
+    let ordered = sortCache.get(hash);
+    if (!ordered) {
+      ordered = allStats.length > 0
+        ? sortSelectorsByStats(validSelectors, allStats.filter(r => r.hash === hash))
+        : validSelectors;
+      sortCache.set(hash, ordered);
+    }
+
+    for (const sel of ordered) {
+      const attemptStart = Date.now();
       try {
         let locator: Locator;
         if (sel.type === 'ocr-text') {
@@ -177,12 +215,21 @@ function createLocateWithFallback(_page: Page) {
           locator = pg.locator(sel.value);
         }
         const target = locator.first();
-        await target.waitFor({ timeout: 3000 });
+        const stat = allStats.find(r => r.hash === hash && r.type === sel.type && r.value === sel.value);
+        const candidateTimeout = selectorTimeoutFor(stat, defaultTimeoutMs);
+        await target.waitFor({ timeout: candidateTimeout });
         if (action === 'click') await target.click();
         else if (action === 'fill') await target.fill(value || '');
         else if (action === 'selectOption') await target.selectOption(value || '');
+        if (testId) {
+          const elapsed = Date.now() - attemptStart;
+          recordSelectorSuccess(testId, hash, sel.type, sel.value, elapsed).catch(() => {});
+        }
         return;
       } catch {
+        if (testId) {
+          recordSelectorFailure(testId, hash, sel.type, sel.value).catch(() => {});
+        }
         continue;
       }
     }
@@ -250,7 +297,8 @@ export async function runPlaywrightSetup(
 export async function runTestAsSetup(
   page: Page,
   testCode: string,
-  context: SetupContext
+  context: SetupContext,
+  testId?: string,
 ): Promise<SetupResult> {
   const startTime = Date.now();
 
@@ -264,7 +312,7 @@ export async function runTestAsSetup(
     }
 
     // Execute the test code but intercept screenshot calls
-    const extractedVariables = await executeSetupCode(page, testCode, context, true);
+    const extractedVariables = await executeSetupCode(page, testCode, context, true, testId);
 
     return {
       success: true,
@@ -287,7 +335,8 @@ async function executeSetupCode(
   page: Page,
   code: string,
   context: SetupContext,
-  _isTestAsSetup = false
+  _isTestAsSetup = false,
+  testId?: string,
 ): Promise<Record<string, unknown>> {
   // Strip TypeScript type annotations
   const processedCode = stripTypeAnnotations(code);
@@ -313,7 +362,7 @@ async function executeSetupCode(
     // Create helper functions that tests expect
     const expectFn = createExpect(5000);
     const appStateFn = createAppState(page);
-    const locateWithFallbackFn = createLocateWithFallback(page);
+    const locateWithFallbackFn = createLocateWithFallback(page, testId, context.selectorTimeoutMs ?? 3000);
 
     // Create a stepLogger that logs to console for debugging
     const stepLogger = {

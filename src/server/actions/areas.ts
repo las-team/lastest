@@ -7,7 +7,7 @@ import type { NewFunctionalArea, FunctionalAreaPlanSnapshot } from '@/lib/db/sch
 
 export async function createArea(data: {
   name: string;
-  description?: string;
+  agentPlan?: string;
   repositoryId?: string;
   parentId?: string;
 }) {
@@ -25,9 +25,9 @@ export async function createArea(data: {
   );
 
   if (existing) {
-    // Merge description if provided and existing is empty
-    if (data.description && !existing.description) {
-      await queries.updateFunctionalArea(existing.id, { description: data.description });
+    // Merge plan if provided and existing has none
+    if (data.agentPlan && !existing.agentPlan) {
+      await queries.updateFunctionalArea(existing.id, { agentPlan: data.agentPlan, planGeneratedAt: new Date() });
     }
     revalidatePath('/areas');
     revalidatePath('/tests');
@@ -36,7 +36,8 @@ export async function createArea(data: {
 
   const result = await queries.createFunctionalArea({
     name: trimmedName,
-    description: data.description,
+    agentPlan: data.agentPlan,
+    planGeneratedAt: data.agentPlan ? new Date() : null,
     repositoryId: data.repositoryId,
     parentId: data.parentId,
   });
@@ -45,7 +46,7 @@ export async function createArea(data: {
   return result;
 }
 
-export async function updateArea(id: string, data: Partial<Pick<NewFunctionalArea, 'name' | 'description' | 'parentId'>>) {
+export async function updateArea(id: string, data: Partial<Pick<NewFunctionalArea, 'name' | 'agentPlan' | 'parentId'>>) {
   await requireTeamAccess();
   await queries.updateFunctionalArea(id, data);
   revalidatePath('/areas');
@@ -151,11 +152,10 @@ export async function updateAreaPlan(id: string, agentPlan: string) {
   // Save current plan to snapshot for rollback
   const currentSnapshot: FunctionalAreaPlanSnapshot = area.planSnapshot
     ? JSON.parse(area.planSnapshot)
-    : { previousPlan: null, previousDescription: null, generatedTestIds: [] };
+    : { previousPlan: null, generatedTestIds: [] };
 
   const snapshot: FunctionalAreaPlanSnapshot = {
     previousPlan: area.agentPlan,
-    previousDescription: area.description,
     generatedTestIds: currentSnapshot.generatedTestIds,
   };
 
@@ -175,10 +175,9 @@ export async function rollbackAreaPlan(id: string) {
 
   const snapshot: FunctionalAreaPlanSnapshot = JSON.parse(area.planSnapshot);
 
-  // Restore plan and description
+  // Restore plan
   await queries.updateFunctionalArea(id, {
     agentPlan: snapshot.previousPlan,
-    description: snapshot.previousDescription,
     planSnapshot: null,
     planGeneratedAt: snapshot.previousPlan ? new Date() : null,
   });
@@ -213,7 +212,7 @@ export async function rollbackAllAreaPlans(repositoryId: string) {
 export async function exportAllPlans(repositoryId: string) {
   await requireRepoAccess(repositoryId);
   const areas = await queries.getFunctionalAreasByRepo(repositoryId);
-  const areasWithPlans = areas.filter(a => a.agentPlan || a.description);
+  const areasWithPlans = areas.filter(a => a.agentPlan);
 
   if (areasWithPlans.length === 0) return '# Testing Manifesto\n\nNo test plans generated yet.\n';
 
@@ -228,9 +227,6 @@ export async function exportAllPlans(repositoryId: string) {
 
   for (const area of areasWithPlans) {
     sections.push(`## ${area.name}`);
-    if (area.description) {
-      sections.push('', area.description);
-    }
     if (area.agentPlan) {
       sections.push('', area.agentPlan);
     }
@@ -246,12 +242,13 @@ export async function exportAllPlans(repositoryId: string) {
       }
     }
 
-    // Include test cases
+    // Include test cases — uses linked test_specs.title for the short form
     const areaTests = await queries.getTestsByFunctionalArea(area.id);
     if (areaTests.length > 0) {
       sections.push('', '### Test Cases', '');
       for (const test of areaTests) {
-        const desc = test.description ? `: ${test.description.split('\n')[0]}` : '';
+        const spec = await queries.getTestSpec(test.id);
+        const desc = spec?.title && spec.title !== test.name ? `: ${spec.title}` : '';
         sections.push(`- **${test.name}**${desc}`);
       }
     }
@@ -268,14 +265,14 @@ export async function exportAreaPlan(areaId: string) {
   if (!area) throw new Error('Area not found');
 
   const sections: string[] = [`# ${area.name}`];
-  if (area.description) sections.push('', area.description);
   if (area.agentPlan) sections.push('', area.agentPlan);
 
   const areaTests = await queries.getTestsByFunctionalArea(areaId);
   if (areaTests.length > 0) {
     sections.push('', '## Test Cases', '');
     for (const test of areaTests) {
-      const desc = test.description ? `: ${test.description.split('\n')[0]}` : '';
+      const spec = await queries.getTestSpec(test.id);
+      const desc = spec?.title && spec.title !== test.name ? `: ${spec.title}` : '';
       sections.push(`- **${test.name}**${desc}`);
     }
   }

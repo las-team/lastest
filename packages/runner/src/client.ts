@@ -16,6 +16,7 @@ import type {
   HeartbeatMessage,
   TestResultResponse,
   TestProgressResponse,
+  StepEventResponse,
   SetupResultResponse,
   ScreenshotUploadResponse,
   RecordingEventResponse,
@@ -416,15 +417,28 @@ export class RunnerClient {
     try {
       console.log(`[Test ${testId}] Starting test execution (commandId: ${command.id.slice(0, 8)}, timeout: ${command.payload.timeout}ms)`);
 
-      const result = await this.runner.runTest(command.payload, (step, progress) => {
-        // Send progress update
-        const progressMsg = createMessage<TestProgressResponse>('response:test_progress', {
-          correlationId: command.id,
-          step,
-          progress,
-        });
-        this.sendMessage(progressMsg);
-      });
+      const result = await this.runner.runTest(
+        command.payload,
+        (step, progress) => {
+          // Send progress update
+          const progressMsg = createMessage<TestProgressResponse>('response:test_progress', {
+            correlationId: command.id,
+            step,
+            progress,
+          });
+          this.sendMessage(progressMsg);
+        },
+        (event) => {
+          // Live per-step lifecycle events for the host's playback timeline.
+          // Override correlationId with the runner's commandId so the host
+          // can map events back to the queued command in runner_commands.
+          const stepMsg = createMessage<StepEventResponse>('response:step_event', {
+            ...event,
+            correlationId: command.id,
+          });
+          this.sendMessage(stepMsg);
+        },
+      );
 
       console.log(`[Test ${testId}] runTest returned: status=${result.status}, screenshots=${result.screenshots.length}, duration=${result.durationMs}ms`);
 

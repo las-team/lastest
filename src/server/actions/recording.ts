@@ -8,7 +8,7 @@ import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand } from '@/lib/ws/protocol';
+import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand, PromoteSelectorCommand } from '@/lib/ws/protocol';
 import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import {
   queueCommandToDB,
@@ -18,6 +18,7 @@ import {
   completeRemoteRecordingSession,
   clearRemoteRecordingSession,
   type RemoteRecordingEvent,
+  type RemoteRecordingEventUpdate,
 } from '@/app/api/ws/runner/route';
 
 export async function startRecording(
@@ -127,10 +128,12 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Generate code from the stored events (merged in-memory + DB-forwarded)
     const allEvents = await getRemoteRecordingEvents(repositoryId);
+    const recordingSettings = await getPlaywrightSettings(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
       allEvents,
       remoteSession.selectorPriority,
-      remoteSession.targetUrl
+      remoteSession.targetUrl,
+      recordingSettings.selectorTimeoutMs ?? 3000,
     );
     completeRemoteRecordingSession(repositoryId, generatedCode);
 
@@ -249,6 +252,28 @@ export async function insertTimestamp(repositoryId?: string | null): Promise<{ s
   return { success: false };
 }
 
+export async function promoteSelector(
+  actionId: string,
+  selectorValue: string,
+  repositoryId?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  await requireTeamAccess();
+  if (!actionId || !selectorValue) {
+    return { success: false, error: 'actionId and selectorValue are required' };
+  }
+  const remoteSession = getRemoteRecordingSession(repositoryId);
+  if (remoteSession?.isRecording) {
+    const command = createMessage<PromoteSelectorCommand>('command:promote_selector', {
+      sessionId: remoteSession.sessionId,
+      actionId,
+      selectorValue,
+    });
+    await queueCommandToDB(remoteSession.runnerId, command);
+    return { success: true };
+  }
+  return { success: false, error: 'No active recording session' };
+}
+
 export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
   await requireTeamAccess();
 
@@ -287,11 +312,19 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     // If recording stopped and we have generated code, return as completed session
     const isCompleted = !remoteSession.isRecording && remoteSession.generatedCode;
 
+    // Drain late updates (verification settled, thumbnails arrived,
+    // autorepair fired) for events whose sequence the UI already polled
+    // past. The UI reconciles them by actionId.
+    const verificationUpdates = remoteSession.pendingEventUpdates ?? [];
+    if (verificationUpdates.length > 0) {
+      remoteSession.pendingEventUpdates = [];
+    }
+
     return {
       isRecording: remoteSession.isRecording,
       events,
       lastSequence,
-      verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
+      verificationUpdates,
       session: remoteSession.isRecording ? {
         id: remoteSession.sessionId,
         url: remoteSession.targetUrl,
@@ -311,7 +344,7 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
     isRecording: false,
     events: [],
     lastSequence: 0,
-    verificationUpdates: [] as Array<{ actionId: string; verified: boolean }>,
+    verificationUpdates: [] as RemoteRecordingEventUpdate[],
     session: null,
     lastCompletedSession: null,
     errorMessage: null,
@@ -469,16 +502,28 @@ export async function getOrCreateFunctionalArea(name: string) {
 function generateCodeFromRemoteEvents(
   events: RemoteRecordingEvent[],
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
-  targetUrl: string
+  targetUrl: string,
+  selectorTimeoutMs = 3000,
 ): string {
   const baseOrigin = new URL(targetUrl).origin;
   const coordsEnabled = selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
   const hasCursorEvents = events.some(e => e.type === 'cursor-move');
+  // Baked into the recorded test so plain `npx playwright test` runs respect
+  // the user's selector-timeout setting at record time. When the runner /
+  // EB executes the test, both strip this inline `locateWithFallback` and
+  // substitute their own helper which reads the live setting from the run
+  // command — so changes after recording still apply via the runtime path.
+  const recordedTimeoutMs = Number.isFinite(selectorTimeoutMs) && selectorTimeoutMs > 0
+    ? Math.floor(selectorTimeoutMs)
+    : 3000;
 
   const lines: string[] = [
     `import { Page } from 'playwright';`,
     '',
     `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
+    `  // Per-candidate waitFor budget for locateWithFallback, baked at record time`,
+    `  const __SELECTOR_TIMEOUT_MS = ${recordedTimeoutMs};`,
+    ``,
     `  // Helper to build URLs safely (handles trailing/leading slashes)`,
     `  function buildUrl(base, path) {`,
     `    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;`,
@@ -517,7 +562,7 @@ function generateCodeFromRemoteEvents(
     `          locator = page.locator(sel.value);`,
     `        }`,
     `        const target = locator.first();`,
-    `        await target.waitFor({ timeout: 3000 });`,
+    `        await target.waitFor({ timeout: __SELECTOR_TIMEOUT_MS });`,
     `        await target.scrollIntoViewIfNeeded().catch(() => {});`,
     `        if (action === 'locate') return target;`,
     `        if (action === 'click') await target.click(options || {});`,

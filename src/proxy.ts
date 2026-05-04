@@ -26,6 +26,7 @@ const PUBLIC_PATHS = [
   '/videos/',
   '/planned/',
   '/bug-reports/',
+  '/_umami/',
 ];
 
 export default function proxy(request: NextRequest) {

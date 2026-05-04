@@ -34,6 +34,8 @@ interface BrowserViewerProps {
   className?: string;
   expiresAt?: Date | string | null;
   hideControls?: boolean;
+  hideToolbar?: boolean; // Suppress the URL/controls bar entirely (no translucent header strip)
+  hideStatusBar?: boolean; // Suppress the FPS/viewport-size strip below the canvas
   hideFullscreenToggle?: boolean;
   hideScreenshot?: boolean;
   hideViewportSelector?: boolean;
@@ -43,6 +45,7 @@ interface BrowserViewerProps {
   fit?: boolean;
   onInspectResult?: (result: InspectElementResult | null) => void;
   onDomSnapshot?: (result: DomSnapshotResult) => void;
+  onViewportChange?: (viewport: { width: number; height: number }) => void;
 }
 
 export interface BrowserViewerHandle {
@@ -50,7 +53,7 @@ export interface BrowserViewerHandle {
   sendInspectMode: (enabled: boolean) => void;
 }
 
-export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot }, ref) {
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideToolbar, hideStatusBar, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot, onViewportChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -89,8 +92,20 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [expiresAt]);
-  // Render a frame onto the canvas
-  const renderFrame = useCallback((base64Data: string, width: number, height: number) => {
+
+  // Track the latest frame dimensions so the canvas/wrapper can match the
+  // *real* stream aspect ratio. CDP's deviceWidth/Height drifts from the
+  // requested viewport (browser chrome, scrollbar, device-metrics rounding)
+  // — especially after setup restarts the screencast on a different page.
+  const lastFrameSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+
+  // Render a frame onto the canvas. CDP's metadata width/height can drift
+  // from the encoded JPEG's natural dimensions (DPR, scrollbar, device-metrics
+  // rounding) — drawing the image unscaled into a metadata-sized buffer would
+  // misalign content with the box. Use the image's actual pixel size instead.
+  const renderFrame = useCallback((base64Data: string) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
@@ -100,9 +115,21 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     }
     const img = imageRef.current;
     img.onload = () => {
-      canvas.width = width;
-      canvas.height = height;
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
       ctx.drawImage(img, 0, 0);
+
+      // Sync display aspect with the real frame size when it changes
+      const last = lastFrameSizeRef.current;
+      if (!last || last.width !== w || last.height !== h) {
+        lastFrameSizeRef.current = { width: w, height: h };
+        setViewport({ width: w, height: h });
+        onViewportChangeRef.current?.({ width: w, height: h });
+      }
     };
     img.src = `data:image/jpeg;base64,${base64Data}`;
   }, []);
@@ -200,8 +227,8 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
           switch (message.type) {
             case 'stream:frame': {
-              const { data, width, height } = message.payload;
-              renderFrame(data, width, height);
+              const { data } = message.payload;
+              renderFrame(data);
 
               // Reset stall timer on every frame
               lastFrameTimeRef.current = Date.now();
@@ -670,24 +697,26 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
   return (
     <div ref={containerRef} className={`flex flex-col ${className ?? ''}`}>
-      <BrowserToolbar
-        currentUrl={currentUrl}
-        viewport={viewport}
-        isFullscreen={isFullscreen}
-        onNavigate={handleNavigate}
-        onViewportChange={handleViewportChange}
-        onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
-        hideControls={hideControls}
-        hideFullscreenToggle={hideFullscreenToggle}
-        hideScreenshot={hideScreenshot}
-        hideViewportSelector={hideViewportSelector}
-        readOnly={readOnlyUrl}
-      />
+      {!hideToolbar && (
+        <BrowserToolbar
+          currentUrl={currentUrl}
+          viewport={viewport}
+          isFullscreen={isFullscreen}
+          onNavigate={handleNavigate}
+          onViewportChange={handleViewportChange}
+          onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
+          hideControls={hideControls}
+          hideFullscreenToggle={hideFullscreenToggle}
+          hideScreenshot={hideScreenshot}
+          hideViewportSelector={hideViewportSelector}
+          readOnly={readOnlyUrl}
+        />
+      )}
 
       {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
-      <div className={`relative rounded-b-lg border bg-black ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
+      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} ${hideToolbar && hideStatusBar ? '' : 'bg-black'} ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
               <div className="flex flex-col items-center gap-2 text-white">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -716,7 +745,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         )}
 
         {fileChooserPending && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
             <Upload className="h-8 w-8 text-muted-foreground" />
             <p className="text-sm font-medium">File upload requested</p>
             <Button onClick={handleFileUpload} size="sm">Choose Files</Button>
@@ -770,6 +799,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       </div>
 
       {/* Status bar */}
+      {!hideStatusBar && (
       <div className="flex items-center justify-between px-2 py-1">
         {connectionStatus === 'connecting' && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -808,6 +838,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           </span>
         </div>
       </div>
+      )}
     </div>
   );
 });

@@ -9,6 +9,19 @@ import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
 
+/**
+ * Fetch all selector_stats rows for a test so the UI can display per-step
+ * fallback success rates on hover. Best-effort — returns [] on auth or DB
+ * errors, since this is purely diagnostic information.
+ */
+export async function getSelectorStatsForTestAction(testId: string) {
+  const test = await queries.getTest(testId);
+  if (!test) return [];
+  if (test.repositoryId) await requireRepoAccess(test.repositoryId);
+  else await requireTeamAccess();
+  return queries.getSelectorStatsForTest(testId);
+}
+
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
@@ -137,6 +150,17 @@ export async function saveTestVariables(
       if ((v.sourceType === 'gsheet' || v.sourceType === 'csv') && (!v.sourceAlias || !v.sourceColumn)) {
         throw new Error(`${v.sourceType} variable "${v.name}" requires sourceAlias and sourceColumn`);
       }
+      if (v.sourceType === 'ai-generated') {
+        if (!v.aiPreset) {
+          throw new Error(`AI variable "${v.name}" requires aiPreset`);
+        }
+        if (v.aiPreset === 'custom' && !v.aiCustomPrompt?.trim()) {
+          throw new Error(`AI variable "${v.name}" with custom preset requires aiCustomPrompt`);
+        }
+        if (v.sourceRowMode === 'increment') {
+          throw new Error(`AI variable "${v.name}" cannot use increment mode`);
+        }
+      }
     }
   }
 
@@ -144,6 +168,86 @@ export async function saveTestVariables(
   revalidatePath('/tests');
   revalidatePath(`/tests/${testId}`);
   return { success: true };
+}
+
+/**
+ * Generate an AI value for a single variable on demand (used by the "Refresh
+ * now" button in the variable editor) and persist it as the cached value on
+ * the test. Returns the generated string. Throws clear errors when AI is
+ * misconfigured / rate-limited so the caller can surface a useful toast.
+ */
+export async function generateAIVarValuePreview(
+  testId: string,
+  variable: import('@/lib/db/schema').TestVariable,
+): Promise<{ value: string }> {
+  const session = await requireTeamAccess();
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error('Test not found');
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+  }
+  if (variable.sourceType !== 'ai-generated') {
+    throw new Error('Variable is not AI-generated');
+  }
+
+  // Lazy imports to keep the action file's bundle slim and avoid cycles.
+  const { buildAIVarPrompt, sanitizeAIVarOutput } = await import('@/lib/vars/ai-presets');
+  const { generateWithAI } = await import('@/lib/ai');
+  const prompt = buildAIVarPrompt(variable);
+  if (!prompt) throw new Error('AI variable has no prompt configured');
+
+  const settings = await queries.getAISettings(test.repositoryId ?? undefined);
+  if (!settings) throw new Error('AI provider not configured');
+  const provider = settings.provider as import('@/lib/ai').AIProviderConfig['provider'];
+  if (provider === 'claude-cli') throw new Error('AI provider not configured (CLI provider is not used for variable generation — pick a different provider in AI settings)');
+  if (provider === 'openrouter' && !settings.openrouterApiKey) throw new Error('OpenRouter API key is missing');
+  if (provider === 'anthropic' && !settings.anthropicApiKey) throw new Error('Anthropic API key is missing');
+  if (provider === 'openai' && !settings.openaiApiKey) throw new Error('OpenAI API key is missing');
+  if (provider === 'ollama' && !settings.ollamaModel) throw new Error('Ollama model is not set');
+
+  const config: import('@/lib/ai').AIProviderConfig = {
+    provider,
+    openrouterApiKey: settings.openrouterApiKey ?? undefined,
+    openrouterModel: settings.openrouterModel ?? undefined,
+    agentSdkPermissionMode: (settings.agentSdkPermissionMode ?? undefined) as import('@/lib/ai').AIProviderConfig['agentSdkPermissionMode'],
+    agentSdkModel: settings.agentSdkModel ?? undefined,
+    agentSdkWorkingDir: settings.agentSdkWorkingDir ?? undefined,
+    ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
+    ollamaModel: settings.ollamaModel ?? undefined,
+    anthropicApiKey: settings.anthropicApiKey ?? undefined,
+    anthropicModel: settings.anthropicModel ?? undefined,
+    openaiApiKey: settings.openaiApiKey ?? undefined,
+    openaiModel: settings.openaiModel ?? undefined,
+    customInstructions: settings.customInstructions ?? undefined,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  let raw: string;
+  try {
+    raw = await generateWithAI(
+      config,
+      prompt,
+      'You generate short, realistic test data values. Output the value verbatim — no quotes, no labels, no commentary.',
+      {
+        actionType: 'generate_var_value',
+        repositoryId: test.repositoryId ?? undefined,
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+  const value = sanitizeAIVarOutput(raw);
+  if (!value) throw new Error('AI returned an empty value');
+
+  // Persist into the test row's aiVarLastValues cache so subsequent runs
+  // (and the editor preview) see it without another AI call.
+  const merged = { ...(test.aiVarLastValues ?? {}), [variable.id]: value };
+  await queries.updateTest(testId, { aiVarLastValues: merged });
+  revalidatePath(`/tests/${testId}`);
+  return { value };
 }
 
 export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
@@ -293,12 +397,12 @@ export async function getTest(id: string) {
 }
 
 export async function getTestDetailData(testId: string, repositoryId?: string | null) {
-  await requireTeamAccess();
+  const session = await requireTeamAccess();
   const test = await queries.getTest(testId);
   if (!test) return null;
 
   const repoId = test.repositoryId || repositoryId;
-  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, playwrightSettings, diffSettings, envConfig, testSpec] = await Promise.all([
+  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, googleSheetsAccount, playwrightSettings, diffSettings, envConfig, testSpec, aiSettings] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
     queries.getPlannedScreenshotsByTest(testId),
@@ -307,11 +411,28 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
     repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
     repoId ? queries.getCsvDataSources(repoId) : Promise.resolve([]),
+    queries.getGoogleSheetsAccount(session.team.id),
     repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
     repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),
     repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
     queries.getTestSpec(testId),
+    queries.getAISettings(repoId ?? undefined),
   ]);
+
+  // AI is "available" for variable generation when a non-CLI provider is
+  // chosen AND its credentials/model are present. Mirrors the gating in
+  // executor.buildAIVarRuntime so the editor stays honest about whether the
+  // Refresh-now button will work.
+  const aiAvailable = !!aiSettings && (() => {
+    const p = aiSettings.provider;
+    if (!p || p === 'claude-cli') return false;
+    if (p === 'openrouter') return !!aiSettings.openrouterApiKey;
+    if (p === 'anthropic') return !!aiSettings.anthropicApiKey;
+    if (p === 'openai') return !!aiSettings.openaiApiKey;
+    if (p === 'ollama') return !!aiSettings.ollamaModel;
+    if (p === 'claude-agent-sdk') return true;
+    return false;
+  })();
 
   return {
     test,
@@ -324,11 +445,19 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
     availableScripts: setupScripts,
     sheetDataSources,
     csvDataSources,
+    googleSheetsAccount: googleSheetsAccount
+      ? {
+          id: googleSheetsAccount.id,
+          googleEmail: googleSheetsAccount.googleEmail,
+          googleName: googleSheetsAccount.googleName,
+        }
+      : null,
     stabilizationDefaults: playwrightSettings?.stabilization ?? null,
     diffDefaults: diffSettings,
     playwrightDefaults: playwrightSettings,
     envBaseUrl: envConfig?.baseUrl ?? null,
     testSpec,
+    aiAvailable,
   };
 }
 

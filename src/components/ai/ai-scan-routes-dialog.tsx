@@ -15,6 +15,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { aiScanRoutes, saveDiscoveredRoutes, type SavedRouteInfo, type DiscoveredArea } from '@/server/actions/ai-routes';
 import { createTest, saveGeneratedTest } from '@/server/actions/ai';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 import { Loader2, Sparkles, Save, RefreshCw, Check, Minus, Route, FlaskConical, CheckCircle2, XCircle, ChevronDown, ChevronRight, FolderOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -158,6 +160,11 @@ export function AIScanRoutesDialog({
           onSaved?.();
           handleClose();
         } else {
+          track(Events.route_added, {
+            repoId: repositoryId,
+            count: result.count,
+            source: 'ai-scan',
+          });
           toast.success(`Saved ${result.count} new routes`);
           onSaved?.();
           if (result.savedRoutes && result.savedRoutes.length > 0) {
@@ -212,7 +219,6 @@ export function AIScanRoutesDialog({
             name: `${testName} - Visual Test`,
             code: result.code,
             targetUrl: route.path,
-            description: route.testSuggestions.length > 0 ? route.testSuggestions.join('\n') : undefined,
           });
           successCount++;
           setGenerateResults(prev => [...prev, { path: route.path, success: true }]);

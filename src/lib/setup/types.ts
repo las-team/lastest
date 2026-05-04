@@ -42,6 +42,7 @@ export interface SetupContext {
   variables: Record<string, unknown>;  // Shared state between setups
   repositoryId?: string | null;
   storageState?: string;    // JSON from context.storageState() — carries cookies/localStorage across browser contexts
+  selectorTimeoutMs?: number; // Per-candidate waitFor budget for locateWithFallback inside setup scripts
 }
 
 // Result returned from running a setup

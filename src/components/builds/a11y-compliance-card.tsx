@@ -14,15 +14,15 @@ interface A11yComplianceCardProps {
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 90) return 'text-green-600';
-  if (score >= 70) return 'text-yellow-600';
-  return 'text-red-600';
+  if (score >= 90) return 'text-success';
+  if (score >= 70) return 'text-warning';
+  return 'text-destructive';
 }
 
 function getScoreBg(score: number): string {
-  if (score >= 90) return 'bg-green-100 dark:bg-green-900/30';
-  if (score >= 70) return 'bg-yellow-100 dark:bg-yellow-900/30';
-  return 'bg-red-100 dark:bg-red-900/30';
+  if (score >= 90) return 'bg-success/15';
+  if (score >= 70) return 'bg-warning/15';
+  return 'bg-destructive/15';
 }
 
 export function A11yComplianceCard({
@@ -59,7 +59,7 @@ export function A11yComplianceCard({
                 {totalRulesChecked ? `${passedRules}/${totalRulesChecked} rules passed` : 'No rules data collected'}
               </span>
               {scoreDelta != null && scoreDelta !== 0 && (
-                <Badge variant="outline" className={cn('text-xs', scoreDelta > 0 ? 'text-green-600' : 'text-red-600')}>
+                <Badge variant="outline" className={cn('text-xs', scoreDelta > 0 ? 'text-success' : 'text-destructive')}>
                   {scoreDelta > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
                   {scoreDelta > 0 ? '+' : ''}{scoreDelta}
                 </Badge>
@@ -73,13 +73,13 @@ export function A11yComplianceCard({
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {(criticalCount ?? 0) > 0 && (
-                <span className="text-red-600">{criticalCount} critical/serious</span>
+                <span className="text-destructive">{criticalCount} critical/serious</span>
               )}
               {(violationCount ?? 0) > 0 && (
                 <span>{violationCount} total violations</span>
               )}
               {(violationCount ?? 0) === 0 && (
-                <span className="text-green-600">No violations found</span>
+                <span className="text-success">No violations found</span>
               )}
             </div>
           </div>
@@ -99,8 +99,8 @@ export function A11yComplianceCard({
                     className={cn(
                       'w-3 rounded-sm transition-all',
                       isLatest ? 'bg-primary' : 'bg-muted-foreground/30',
-                      s >= 90 ? 'bg-green-500/60' : s >= 70 ? 'bg-yellow-500/60' : 'bg-red-500/60',
-                      isLatest && (s >= 90 ? 'bg-green-500' : s >= 70 ? 'bg-yellow-500' : 'bg-red-500'),
+                      s >= 90 ? 'bg-success/60' : s >= 70 ? 'bg-warning/60' : 'bg-destructive/60',
+                      isLatest && (s >= 90 ? 'bg-success' : s >= 70 ? 'bg-warning' : 'bg-destructive'),
                     )}
                     style={{ height: `${height}px` }}
                     title={`Score: ${s}`}

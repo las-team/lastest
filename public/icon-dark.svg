@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" shape-rendering="crispEdges" role="img" aria-label="lasTest Delta Mark (dark)">
-  <title>lasTest — Delta Mark (dark mode)</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" shape-rendering="crispEdges" role="img" aria-label="Lastest Delta Mark (dark)">
+  <title>Lastest — Delta Mark (dark mode)</title>
   <rect x="34" y="34" width="110" height="110" fill="none" stroke="#ffffff" stroke-width="6"/>
-  <rect x="56" y="56" width="110" height="110" fill="#ff3c2a"/>
+  <rect x="56" y="56" width="110" height="110" fill="#E03E36"/>
   <rect x="56" y="56" width="88" height="88" fill="#ffffff"/>
   <path d="M 70 34 L 80 18 L 90 34 Z" fill="#ffffff"/>
   <path d="M 110 34 L 120 18 L 130 34 Z" fill="#ffffff"/>

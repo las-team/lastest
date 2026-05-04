@@ -65,10 +65,21 @@ export async function GET(request: NextRequest) {
         } catch {
           clearInterval(keepalive);
         }
-      }, 8000);
+      }, 5000);
+
+      // Cloudflare 524 prevention — close at 90s; EventSource auto-reconnects.
+      const lifetimeCap = setTimeout(() => {
+        try {
+          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.close();
+        } catch {
+          // already closed
+        }
+      }, 90_000);
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepalive);
+        clearTimeout(lifetimeCap);
         if (unsubscribe) {
           unsubscribe();
           unsubscribe = null;

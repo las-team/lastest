@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
+import { UmamiScript } from "@/components/analytics/umami-script";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -44,6 +45,12 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -56,6 +63,7 @@ export default function RootLayout({
           {children}
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
+        <UmamiScript />
       </body>
     </html>
   );

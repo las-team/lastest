@@ -4,11 +4,13 @@
     <strong>Free, open-source visual regression testing with AI-generated tests</strong>
   </p>
   <p align="center">
-    Record it. Test it. Ship it. — $0 forever.
+    Record it. Test it. Ship it.
   </p>
 </p>
 
 <p align="center">
+  <a href="https://lastest.cloud">Website</a> •
+  <a href="https://github.com/las-team/lastest/wiki">Wiki</a> •
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#how-it-works">How It Works</a> •
@@ -20,9 +22,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg" alt="License" />
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <img src="https://img.shields.io/badge/self--hosted-yes-green" alt="Self Hosted" />
-  <img src="https://img.shields.io/badge/cost-%240%20forever-brightgreen" alt="$0 Forever" />
+  <a href="https://lastest.cloud"><img src="https://img.shields.io/badge/website-lastest.cloud-0a84ff" alt="lastest.cloud" /></a>
 </p>
 
 ---
@@ -49,12 +50,12 @@ Lastest is a free, self-hosted visual regression testing platform that **records
 1. Point it at your app
 2. Record your user flows (point-and-click, no code)
 3. AI generates resilient test code with multi-selector fallback
-4. Run locally, on remote runners, or in an embedded browser container
+4. Run on remote runners or in an embedded browser container (EB setup required)
 5. Screenshots compared with 3 diff engines (pixelmatch, SSIM, Butteraugli)
 6. Review and approve visual changes — or let AI auto-classify them
 ```
 
-Your data stays on your server. Your screenshots never leave your infra. It costs $0 forever.
+When self-hosted, your data stays on your server and your screenshots never leave your infra.
 
 ---
 
@@ -82,31 +83,30 @@ One click kicks off an 11-step pipeline: check settings, select repo, set up env
 
 ---
 
-## Three Ways to Run
+## Two Ways to Run
 
-Once your tests exist, you have three execution modes:
+Once your tests exist, you have two execution modes. **Local Playwright execution on the host is no longer supported** — every test runs inside an Embedded Browser pod, so EB setup is required even for development.
 
 | Mode | How | When |
 |------|-----|------|
-| **Local** | Playwright runs on the same machine as Lastest | Development, debugging |
-| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers |
-| **Embedded Browser** | Browser runs in a container with live streaming back to the UI | Cloud deployments, recording/running without local Playwright |
+| **Embedded Browser** (default) | Browser runs in a container with live streaming back to the UI. Provisioned dynamically into k3d locally, or into your cluster in production. | Default for all dev and prod runs — no local Playwright install needed |
+| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers, CI/CD |
 
-All three modes support both **running** and **recording** tests. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
+Both modes support **running** and **recording**. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
 
 ---
 
-## Build Once, Run Forever — $0
+## Build Once, Run Forever
 
 Tests are recorded or generated once, then stored as code. Every subsequent run re-executes the same code, captures new screenshots, and diffs them against approved baselines.
 
 - **First run**: screenshot becomes the baseline
 - **Every run after**: new screenshot is SHA256-hashed — if it matches the baseline, instant pass (no pixel comparison needed). If it differs, the diff engine runs and you review the change.
 - **AI costs are one-time**: AI is only used during test creation and fixing. Running tests uses zero AI — it's pure Playwright execution.
-- **No per-screenshot pricing**: every run is free regardless of volume.
+- **No per-screenshot pricing on self-hosted**: every run is unlimited regardless of volume.
 
 ```
-Create tests (one-time)          Run tests (forever, $0)
+Create tests (one-time)          Run tests (forever)
 ┌──────────────────────┐         ┌──────────────────────┐
 │ Manual recording     │         │ Execute Playwright    │
 │   — or —             │  ────▶  │ Capture screenshots   │
@@ -191,7 +191,7 @@ Create tests (one-time)          Run tests (forever, $0)
 
 - **Smart Run** — Analyzes git diffs to run only tests affected by your changes.
 - **Remote Runners (v2)** — Distributed test execution with concurrent multi-task support, SHA256 code integrity verification, remote recording, DB-backed command queue with result tracking, heartbeat polling, and per-test abort support.
-- **Parallel Test Execution** — Configurable max parallel tests for local and remote runners.
+- **Parallel Test Execution** — Configurable max parallel tests for the embedded-browser pool and remote runners.
 - **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
 - **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 29 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
@@ -225,12 +225,15 @@ Create tests (one-time)          Run tests (forever, $0)
 
 ### Local dev
 
+Running tests requires the Embedded Browser stack — there is **no local-Playwright fallback**. Bring up the database, the host app, and the k3d EB cluster together:
+
 ```bash
 git clone https://github.com/las-team/lastest.git
 cd lastest
 docker compose up -d         # postgres on :5432 (named volume `lastest-pgdata`)
 pnpm install
 pnpm db:push                 # apply schema
+pnpm stack                   # REQUIRED: create k3d cluster + build/import EB image
 pnpm dev                     # http://localhost:3000
 ```
 
@@ -239,9 +242,9 @@ Open [http://localhost:3000](http://localhost:3000).
 - Stop the DB: `docker compose down` (data persists in the `lastest-pgdata` volume).
 - Wipe the DB: `docker compose down -v`.
 
-### Run tests locally (adds k3d for embedded browsers)
+### Embedded Browser stack (required for any test run)
 
-The dev app keeps running on the host. EB pods are dynamically provisioned into a local k3d cluster on demand — one EB per test.
+The dev app runs on the host while EB pods are dynamically provisioned into a local k3d cluster — one EB per test. Without `pnpm stack` running, **no test can execute or record**.
 
 ```bash
 pnpm stack           # create k3d cluster, build + import the EB image
@@ -251,7 +254,7 @@ pnpm stack:refresh   # rebuild the EB image after editing packages/embedded-brow
 pnpm stack:stop      # delete the cluster
 ```
 
-Add to `.env.local`:
+Required `.env.local` keys:
 
 ```
 EB_PROVISIONER=kubernetes
@@ -276,7 +279,7 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ### Requirements
 - **Docker**: Docker 20+ with Compose v2
 - **Node.js**: 18+ and pnpm 10.x
-- **For local test execution (optional)**: `k3d` ≥ 5.6, `kubectl`, `openssl`
+- **Required for running/recording tests**: `k3d` ≥ 5.6, `kubectl`, `openssl` (the EB stack — no local-Playwright fallback)
 
 ---
 
@@ -286,19 +289,19 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ┌──────────────────┐     ┌─────────────┐     ┌─────────────┐
 │   Create Tests   │ ──▶ │   Run       │ ──▶ │   Review    │
 │                  │     │             │     │             │
-│ Record manually  │     │ Local or    │     │ Approve/    │
-│ AI-assisted      │     │ remote or   │     │ Reject      │
-│ Play Agent auto  │     │ CI/CD       │     │ changes     │
+│ Record manually  │     │ Embedded    │     │ Approve/    │
+│ AI-assisted      │     │ Browser or  │     │ Reject      │
+│ Play Agent auto  │     │ remote/CI   │     │ changes     │
 └──────────────────┘     └─────────────┘     └─────────────┘
-   One-time cost           $0 per run         New baseline
-   (AI optional)           (no AI needed)     saved
+   One-time cost           No AI per run      New baseline
+   (AI optional)           (pure Playwright)  saved
 ```
 
 ### Core Flow
 
 1. **Create**: Build tests your way — record manually in the browser, let AI generate from a URL or spec, or let the Play Agent autonomously scan your entire app.
 
-2. **Run**: Execute tests locally, on remote runners, or in CI/CD. Screenshots are captured at key steps. No AI needed — pure Playwright execution at zero cost.
+2. **Run**: Execute tests in an Embedded Browser pod (default), on remote runners, or in CI/CD. Screenshots are captured at key steps. No AI needed — pure Playwright execution at zero cost. Local Playwright on the host is no longer supported; the EB stack is required.
 
 3. **Compare**: New screenshots are diffed against baselines using your chosen engine (pixelmatch, SSIM, or Butteraugli). Text-region-aware comparison available. Accessibility audits run automatically.
 
@@ -316,8 +319,8 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 
 | Capability | Lastest | Percy | Applitools | Chromatic | Argos | Meticulous | Playwright |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Price** | **$0** | Paid | Paid | Paid | Paid | Paid | $0 |
-| **Free screenshots** | **Unlimited** | Limited | OSS only | Limited | Limited | None | Unlimited |
+| **Price** | **Free self-hosted / hosted plans** | Paid | Paid | Paid | Paid | Paid | Free |
+| **Screenshot volume (self-hosted)** | **Unlimited** | Limited | OSS only | Limited | Limited | None | Unlimited |
 | **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
 | **Open source** | **FSL-1.1-ALv2** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
 | **No-code recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
@@ -359,10 +362,10 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 ### What makes Lastest different
 
 - **Record + AI generate + run + diff + approve** in one self-hosted tool — no competitor does all five
-- **Three execution modes**: local, remote runners (`@lastest/runner` on npm), or embedded browser container with live streaming — no local Playwright install needed
+- **Two execution modes**: embedded browser container with live streaming (default — no local Playwright install needed), or remote runners (`@lastest/runner` on npm) for distributed/CI runs
 - **Autonomous Play Agent**: one-click 11-step pipeline scans routes, generates tests, runs them, fixes failures, and reports results
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
-- **$0 with unlimited screenshots** — no per-screenshot pricing, no volume limits
+- **Self-hosted with unlimited screenshots** — no per-screenshot pricing, no volume limits when you run it on your own infra
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
 - **MCP server with 29 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
 - **Scheduled test runs** — cron-based automation with smart failure handling
@@ -408,258 +411,56 @@ pnpm stack:stop         # delete cluster
 
 ---
 
-## CLI Test Runner (CI/CD)
-
-Run visual regression tests from the command line for GitHub Actions or other CI pipelines:
-
-```bash
-pnpm test:visual --repo-id <id> [options]
-```
-
-### Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--repo-id <id>` | Repository ID (required) | - |
-| `--base-url <url>` | Override target URL | `http://localhost:3000` |
-| `--headless` | Run in headless mode | `true` |
-| `--no-headless` | Run with visible browser | - |
-| `--output-dir <dir>` | Screenshot output directory | `./test-output` |
-
-### GitHub Actions Example
-
-```yaml
-- name: Run Visual Tests
-  run: pnpm test:visual --repo-id ${{ env.REPO_ID }} --base-url http://localhost:3000
-  env:
-    REPO_ID: your-repo-id
-```
-
-The runner automatically captures `GITHUB_HEAD_REF`, `GITHUB_REF_NAME`, and `GITHUB_SHA` for git tracking.
-
----
-
-## GitHub Action
-
-Use the reusable GitHub Action for zero-config CI/CD integration. No local Playwright install needed — tests run on your Lastest server via a remote runner.
-
-```yaml
-- name: Run visual regression tests
-  uses: las-team/lastest/action@main
-  with:
-    server-url: ${{ secrets.LASTEST_SERVER_URL }}
-    runner-token: ${{ secrets.LASTEST_RUNNER_TOKEN }}
-    timeout: '300'
-    fail-on-changes: 'false'
-```
-
-### Inputs
-
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
-| `server-url` | Lastest server URL | Yes | - |
-| `runner-token` | Runner authentication token | Yes | - |
-| `timeout` | Build completion timeout (seconds) | No | `300` |
-| `fail-on-changes` | Fail when visual changes detected | No | `false` |
-
-### Outputs
-
-| Output | Description |
-|--------|-------------|
-| `status` | Build status (`passed`, `failed`, `review_required`, `safe_to_merge`, `blocked`) |
-| `build-url` | Link to build results in Lastest |
-| `changed-count` | Number of visual changes detected |
-| `passed-count` | Number of passed tests |
-| `failed-count` | Number of failed tests |
-| `total-tests` | Total number of tests run |
-
-Results are automatically posted to the GitHub Actions step summary.
-
----
-
-## Smart Run
-
-Run only tests affected by your code changes:
-
-1. Select a feature branch (not main/master)
-2. Lastest compares against the default branch via GitHub/GitLab API
-3. Tests are matched to changed files by URL patterns and code references
-4. Only affected tests run, skipping unchanged areas
-
-This dramatically reduces test time for large suites while maintaining coverage for changed code.
-
----
-
-## Self-Hosted Deployment
-
-The first-party deploy targets are homeservers — `pnpm deploy:zima` (ZimaBoard / CasaOS via SSH + docker compose) and `pnpm deploy:olares` (Olares via SSH + kubectl). Both build the production image from `Dockerfile` (multi-stage, Playwright base image, non-root, `GET /api/health`).
-
-Required environment for any self-hosted run: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN`. OAuth secrets (`GITHUB_CLIENT_ID`, `GOOGLE_CLIENT_ID`, …) are optional.
-
----
-
-## Remote Runners
-
-Run tests on remote machines by deploying runners that connect back to your Lastest server via WebSocket.
-
-### Setup
-
-1. **Register a runner** in Settings → Runners
-2. **Copy the token** (shown only once)
-3. **Install and run** on your target machine
-
-```bash
-# Install from npm
-npm install -g @lastest/runner
-
-# Start as daemon
-lastest-runner start -t YOUR_TOKEN -s https://your-lastest-server
-
-# Or run in foreground
-lastest-runner run -t YOUR_TOKEN -s https://your-lastest-server
-```
-
-### Runner CLI
-
-```bash
-lastest-runner start -t <token> -s <server-url>  # Start as background daemon
-lastest-runner stop                               # Stop the daemon
-lastest-runner status                             # Show runner status
-lastest-runner log [-f] [-n <lines>]              # View logs (-f to follow)
-lastest-runner run -t <token> -s <server-url>     # Run in foreground
-```
-
-### Runner Capabilities
-
-- **Run**: Execute tests remotely
-- **Record**: Record new tests on remote machines
-- **Parallel**: Configurable max parallel tests per runner
-- **System Info**: Automatic OS, architecture, memory, and CPU reporting
-
-Config stored in `~/.lastest/` (runner.pid, runner.log, runner.config.json).
-
----
-
-## MCP Server (AI Agent Integration)
-
-Let AI agents interact with Lastest programmatically via the Model Context Protocol:
-
-```bash
-npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY
-```
-
-### Available Tools
-
-| Tool | Description |
-|------|-------------|
-| `lastest_run_tests` | Trigger a test build. Returns build ID for polling. |
-| `lastest_get_build_status` | Get build results: pass/fail counts, visual diffs, overall status. |
-| `lastest_list_tests` | List all tests with latest pass/fail status. |
-| `lastest_list_failing_tests` | List currently failing tests with error details. |
-| `lastest_get_visual_diff` | Get visual diff details with AI classification and confidence. |
-| `lastest_approve_baseline` | Approve visual changes (updates baselines). |
-| `lastest_reject_baseline` | Reject visual changes (blocks build). |
-| `lastest_create_test` | Generate a test via AI from a URL or natural language prompt. |
-| `lastest_heal_test` | Auto-fix a failing test using AI healer agent. |
-| `lastest_get_coverage` | Get test coverage stats by functional area and route. |
-
-### Typical Agent Workflow
-
-1. `lastest_run_tests` — start a build
-2. `lastest_get_build_status` — poll until complete
-3. If visual changes: `lastest_get_visual_diff` — inspect diffs
-4. `lastest_approve_baseline` or `lastest_reject_baseline` — act on diffs
-5. If failures: `lastest_heal_test` — auto-fix, then re-run
-
-Every tool returns structured JSON: `{ status, summary, actionRequired, details }`.
-
----
-
-## Scheduled Test Runs
-
-Automate test execution with cron-based schedules:
-
-1. Go to **Settings → Schedules**
-2. Choose a preset (daily at 3am, weekly on Sunday, every 6 hours, hourly, every 15 minutes) or enter a custom cron expression
-3. Optionally target a specific git branch
-4. Enable/disable schedules at any time
-
-Schedules auto-disable after 5 consecutive failures. Manual trigger available for testing.
-
----
-
-## Google Sheets Integration
-
-Use spreadsheet data as test data sources:
-
-1. **Connect** your Google account in Settings → Google Sheets
-2. **Select spreadsheets** and configure data sources with aliases (e.g., "users", "products")
-3. **Reference data** in test code via the cached headers and rows
-
-Supports per-team OAuth, automatic token refresh, multi-tab spreadsheets, custom header row selection, and fixed data ranges.
-
----
-
-## Custom Webhooks
-
-Send build results to any HTTP endpoint. Configure in Settings → Notifications. Supports custom HTTP methods and headers.
-
-### Payload Format
-
-```json
-{
-  "event": "build.completed",
-  "buildId": "abc123",
-  "status": "safe_to_merge | review_required | blocked",
-  "totalTests": 10,
-  "passedCount": 8,
-  "failedCount": 1,
-  "changesDetected": 1,
-  "flakyCount": 0,
-  "gitBranch": "main",
-  "gitCommit": "abc123",
-  "buildUrl": "https://your-instance/builds/abc123",
-  "timestamp": "2024-01-01T00:00:00.000Z"
-}
-```
-
----
-
-## VSCode Extension
-
-A dedicated VS Code extension (`lastest-vscode`) provides full IDE integration:
-
-- **Test Explorer** — Tree view of all tests organized by functional area in the Activity Bar
-- **Run Tests** — Run individual tests or all tests directly from VS Code
-- **Status Bar** — Live build status and test counts in the VS Code status bar
-- **Real-Time Updates** — WebSocket-based live updates for test run progress
-- **REST + SSE API** — Backend API at `/api/v1/` powering the extension: repos, functional areas, tests CRUD, builds, runs, and SSE event stream at `/api/v1/events`
+## Tech Guides
+
+In-depth docs for every integration live on the [Lastest Wiki](https://github.com/las-team/lastest/wiki). The README keeps things at a glance — click through for flags, payloads, and CI examples.
+
+| Guide | What it covers | Wiki |
+|-------|----------------|------|
+| **CLI Test Runner (CI/CD)** | `pnpm test:visual --repo-id <id>` for GitHub Actions / other pipelines; auto-captures `GITHUB_HEAD_REF` / `GITHUB_REF_NAME` / `GITHUB_SHA` | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration) |
+| **GitHub Action** | Reusable composite action `las-team/lastest/action@main` — zero local Playwright, runs on your Lastest server via a remote runner; outputs status + build URL + counts | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration) · [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration) |
+| **Smart Run** | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests) |
+| **Self-Hosted Deployment** | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment) |
+| **Remote Runners** | `@lastest/runner` on npm — register in Settings → Runners, then `lastest-runner start -t <token> -s <url>`; supports run, record, parallel, daemon mode, system-info reporting | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
+| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 29 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
+| **Scheduled Runs** | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
+| **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
+| **Custom Webhooks** | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
+| **VSCode Extension** | `lastest-vscode` — Test Explorer in the Activity Bar, run tests from the editor, live status bar, real-time WebSocket updates; powered by `/api/v1/` REST + SSE | [VSCode Extension API](https://github.com/las-team/lastest/wiki/VSCode-Extension-API) |
+| **API Tokens** | Long-lived Bearer tokens for programmatic access (CI runners, MCP server, REST clients) | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens) |
+| **Bug Reports** | In-app reporting with auto-captured browser/network/console context, optional GitHub-issue creation | [Bug Reports](https://github.com/las-team/lastest/wiki/Bug-Reports) |
+| **Agent Monitoring** | Real-time SSE activity feed tracking Play Agent sessions step-by-step | [Agent Monitoring](https://github.com/las-team/lastest/wiki/Agent-Monitoring) |
+| **Gamification** | "Beat the Bot" — scoring, seasons, leaderboards, Bug Blitz multiplier events | [Gamification](https://github.com/las-team/lastest/wiki/Gamification) |
+| **Test Migration** | Cross-instance export / import of tests, areas, and configs via REST API or in-app UI | [Test Migration](https://github.com/las-team/lastest/wiki/Test-Migration) |
 
 ---
 
 ## Settings
 
-All configuration lives under a unified Settings page:
+All configuration lives under a unified Settings page. Per-section deep dives live on the [Settings Reference wiki](https://github.com/las-team/lastest/wiki/Settings-Reference) — the table below is the quick map.
 
-| Section | Description |
-|---------|-------------|
-| **GitHub** | Connect account, select repositories |
-| **GitLab** | Connect account, supports self-hosted instances |
-| **Google Sheets** | Connect to Google Drive, manage data sources |
-| **Playwright** | Browser type, viewport, headless mode (including shell mode), selector priority, recording engine, animation freezing, screenshot delay, max parallel tests |
-| **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content |
-| **Environment** | Server startup (manual vs auto-start), health check URLs |
-| **Diff Sensitivity** | Diff engine selection (pixelmatch/SSIM/Butteraugli), text-region-aware diffing, pixel/percentage thresholds, page shift detection |
-| **AI** | Test generation provider, diff analysis provider, API keys, model, custom instructions, Ollama support |
-| **Notifications** | Slack, Discord, custom webhook configuration |
-| **Branches** | Baseline and scanning branch selection |
-| **AI Logs** | Audit trail of all AI requests (last 50 entries) |
-| **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS |
-| **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types) |
-| **Teardown** | Default repository-wide multi-step teardown scripts with per-test overrides |
-| **Schedules** | Cron-based automated test runs with presets and custom expressions |
-| **Users** | Team member management, invitations (admin only) |
-| **Runners** | Remote runner registration and management (admin only) |
+| Section | Description | Wiki |
+|---------|-------------|------|
+| **GitHub** | Connect account, select repositories, manage PR-comment + issue-creation hooks | [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration) |
+| **GitLab** | Connect account (supports self-hosted instances), MR comments, webhooks | [GitLab Integration](https://github.com/las-team/lastest/wiki/GitLab-Integration) |
+| **Google Sheets** | Connect Google Drive, manage data sources, surface vars on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
+| **Playwright** | Browser type, viewport, headless/shell mode, selector priority, recording engine, animation freezing, screenshot delay, max parallel tests, headed playback for debugging | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
+| **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading-indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content | [Stabilization](https://github.com/las-team/lastest/wiki/Stabilization-Features) |
+| **Environment** | Server startup (manual vs auto-start), health check URLs, EB-mode toggles | [Environment Vars](https://github.com/las-team/lastest/wiki/Environment-Variables) |
+| **Diff Sensitivity** | Diff engine selection (pixelmatch / SSIM / Butteraugli), text-region-aware diffing, DOM-diff fallback, pixel/percentage thresholds, page-shift detection, per-step ignore regions | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
+| **AI** | Test-generation provider, diff-analysis provider, API keys, model, custom instructions, Ollama / OpenAI / Claude / OpenRouter support, MCP wiring for "Enhance with AI" | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration) |
+| **Notifications** | Slack, Discord, custom webhook config, auto-create GitHub issue from a visual diff | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
+| **Branches** | Baseline and scanning branch selection, branch baseline fork/merge/promote | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
+| **AI Logs** | Audit trail of all AI requests (last 50 entries) with cost + latency | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration) |
+| **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS | [Testing Templates](https://github.com/las-team/lastest/wiki/Testing-Templates) |
+| **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types), with per-test overrides | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
+| **Teardown** | Default repository-wide multi-step teardown scripts with per-test overrides | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
+| **Schedules** | Cron-based automated test runs with presets and custom expressions | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
+| **Vars** | Test-data variables — static, AI-generated (with presets), and Google Sheets-backed | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
+| **API Tokens** | Long-lived Bearer tokens for programmatic + MCP access | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens) |
+| **Account** | Email preferences, unsubscribe, GDPR / self-serve account deletion | — |
+| **Users** | Team member management, invitations (admin only) | [Getting Started](https://github.com/las-team/lastest/wiki/Getting-Started) |
+| **Runners** | Remote runner registration and management (admin only) | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
 
 ---
 
@@ -782,14 +583,36 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] GitHub issues integration (cached issues for analytics and bug report linking)
 - [x] DB-backed runner commands (persistent command queue replacing in-memory approach)
 - [x] Embedded session lifecycle management (claim/release with status tracking)
-- [ ] Gamification / "Beat the Bot" (scoring, seasons, leaderboards, Bug Blitz — in progress)
+- [x] On-demand Kubernetes EB pool (1 test per browser, worker-pool per build, warm-pool keep-alive)
+- [x] EB busy-state tracking + graceful reaping during deploy
+- [x] Per-step ignore regions (per-screenshot dynamic-content masking instead of per-test)
+- [x] Test spec & agent plan consolidation (`test_specs` + `agent_plan` replace freeform descriptions)
+- [x] Step-level success criteria parsing (per-step assertions tracked individually)
+- [x] AI test data variables (AI-generated values + presets, Google Sheets vars surfaced on Vars tab)
+- [x] Auto-create GitHub issues from visual diffs (notification setting + per-diff one-click)
+- [x] DOM-based diff fallback (catches structural changes when pixel diff is inconclusive)
+- [x] Favorite repos (pin frequently-used repos in the selector)
+- [x] Mobile-responsive shell (mobile top bar, sidebar, recording flows)
+- [x] Headed playback for debugging (replay tests with visible browser)
+- [x] Recording verification step (sanity-check captured selectors before save)
+- [x] Selector resolution speedup (faster fallback chain evaluation at runtime)
+- [x] Auto-reload page on transient sub-resource failures during `goto`
+- [x] CNI burst protection (throttle pod creation to avoid k8s networking storms)
+- [x] Runner TypeScript stripping (annotations stripped at execution time)
+- [x] Refreshed auth pages (brand logo + card layout, GDPR opt-in, auto-signup on unknown email)
+- [x] Email unsubscribe flow + self-serve account deletion
+- [x] Umami analytics integration (privacy-friendly product analytics)
+- [x] Watermarked share links + share-link refactor (publicly viewable runs/diffs)
+- [x] Gamification / "Beat the Bot" (scoring, seasons, leaderboards, Bug Blitz)
+- [x] "Enhance with AI" MCP wiring (live test names while AI builds)
+- [ ] Hosted (managed) deployment option — in progress
 
 
 ---
 
 ## Contributing
 
-PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+External pull requests are not being accepted at this time. For bugs, feature requests, or questions, please open an issue or visit [lastest.cloud](https://lastest.cloud).
 
 ---
 

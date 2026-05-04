@@ -11,8 +11,10 @@ import type {
   GoogleSheetsDataSource,
   CsvDataSource,
 } from '@/lib/db/schema';
+import { AI_VAR_PRESETS } from '@/lib/vars/ai-presets';
 import { VarEditDialog } from './var-edit-dialog';
 import { CsvSourcesSettingsCard } from '@/components/settings/csv-sources-settings-card';
+import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
 import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
 import { collectExtractableSelectors } from '@/lib/playwright/extractable-selector';
 import { cn } from '@/lib/utils';
@@ -23,6 +25,13 @@ export interface TestVarsTabProps {
   variables: TestVariable[];
   sheetSources: GoogleSheetsDataSource[];
   csvSources: CsvDataSource[];
+  /** Connected Google Sheets account for this team. Drives the connect /
+   *  disconnect / import controls in the embedded settings card. */
+  googleSheetsAccount?: {
+    id: string;
+    googleEmail: string;
+    googleName: string | null;
+  } | null;
   onSaveVariables: (next: TestVariable[]) => Promise<void>;
   /** Values pulled by extract-mode vars during the most recent run, keyed by
    *  variable name. Surfaced in the table as the "Last run" column. */
@@ -39,6 +48,12 @@ export interface TestVarsTabProps {
    *  panel's cached `csvSources`. When omitted, the inner card falls back to
    *  `router.refresh()`. */
   onRefresh?: () => Promise<void> | void;
+  /** Whether the configured AI provider is usable for variable generation.
+   *  When false, the AI-generated source option is disabled in the dialog. */
+  aiAvailable?: boolean;
+  /** Cached last-known-good values for AI-generated vars, keyed by
+   *  TestVariable.id. Read from tests.aiVarLastValues. */
+  aiVarLastValues?: Record<string, string> | null;
 }
 
 function describeSource(v: TestVariable): string {
@@ -46,20 +61,29 @@ function describeSource(v: TestVariable): string {
   if (v.sourceType === 'static') return `static: ${v.staticValue ?? ''}`;
   if (v.sourceType === 'gsheet') return `gsheet:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
   if (v.sourceType === 'csv') return `csv:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
+  if (v.sourceType === 'ai-generated') {
+    const refresh = v.sourceRowMode === 'fixed' ? 'fixed' : 'per-run';
+    if (v.aiPreset === 'custom') return `ai (custom · ${refresh})`;
+    const label = v.aiPreset ? AI_VAR_PRESETS[v.aiPreset]?.label ?? v.aiPreset : 'unset';
+    return `ai · ${label} · ${refresh}`;
+  }
   return '—';
 }
 
 export function TestVarsTab({
-  testId: _testId,
+  testId,
   repositoryId,
   variables,
   sheetSources,
   csvSources,
+  googleSheetsAccount = null,
   onSaveVariables,
   extractedValues,
   assignedValues,
   code,
   onRefresh,
+  aiAvailable = false,
+  aiVarLastValues,
 }: TestVarsTabProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TestVariable | null>(null);
@@ -168,7 +192,11 @@ export function TestVarsTab({
                     // where the user can't tell at a glance which row was used.
                     const lastRun = v.mode === 'extract'
                       ? extractedValues?.[v.name]
-                      : assignedValues?.[v.name];
+                      : assignedValues?.[v.name]
+                        // AI vars: fall back to the cached last-known-good
+                        // value when this run hasn't recorded an
+                        // assignedVariables entry yet.
+                        ?? (v.sourceType === 'ai-generated' ? aiVarLastValues?.[v.id] : undefined);
                     const orphan = isOrphan(v);
                     return (
                       <tr
@@ -269,6 +297,13 @@ export function TestVarsTab({
         onRefresh={onRefresh}
       />
 
+      <GoogleSheetsSettingsCard
+        account={googleSheetsAccount}
+        dataSources={sheetSources}
+        repositoryId={repositoryId}
+        onRefresh={onRefresh}
+      />
+
       <VarEditDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -277,6 +312,9 @@ export function TestVarsTab({
         sheetSources={sheetSources}
         csvSources={csvSources}
         onSave={handleSave}
+        aiAvailable={aiAvailable}
+        aiLastValue={editing?.id ? aiVarLastValues?.[editing.id] : undefined}
+        testId={testId}
       />
     </div>
   );

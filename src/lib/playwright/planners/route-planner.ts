@@ -32,7 +32,9 @@ export async function runRoutePlanner(
 
       if (!groupedByArea.has(key)) {
         if (area) {
-          groupedByArea.set(key, { name: area.name, description: area.description || undefined, routes: [] });
+          // The route-planner produces a transient runtime "description" hint that downstream
+          // merging uses for fuzzy area dedup. Drawing it from agentPlan keeps that signal alive.
+          groupedByArea.set(key, { name: area.name, description: area.agentPlan || undefined, routes: [] });
         } else {
           // Group uncategorized routes by first path segment
           const segments = route.path.split('/').filter(Boolean);

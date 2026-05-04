@@ -66,7 +66,7 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
   const baseUrl = props.defaultBaseUrl ?? '';
 
   const triggerClass =
-    'flex-1 px-6 text-sm gap-1.5 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm';
+    'flex-1 min-w-0 px-2 sm:px-6 text-xs sm:text-sm gap-1 sm:gap-1.5 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm';
 
   return (
     <Tabs
@@ -75,29 +75,29 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
       className="flex flex-col flex-1 overflow-hidden"
     >
       <div
-        className="px-6 pt-4 pb-0 shrink-0 flex justify-center data-[hidden=true]:hidden"
+        className="px-3 sm:px-6 pt-3 sm:pt-4 pb-0 shrink-0 flex justify-center data-[hidden=true]:hidden"
         data-hidden={hideTabBar}
       >
         <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
           <TabsTrigger value="record" className={triggerClass}>
-            <Video className="h-3.5 w-3.5" />
-            Record
+            <Video className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Record</span>
           </TabsTrigger>
           <TabsTrigger value="explore" disabled={rerecording} className={triggerClass}>
-            <Compass className="h-3.5 w-3.5" />
-            Explore (URL)
+            <Compass className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate"><span className="sm:hidden">URL</span><span className="hidden sm:inline">Explore (URL)</span></span>
           </TabsTrigger>
           <TabsTrigger value="auto" disabled={rerecording} className={triggerClass}>
-            <Telescope className="h-3.5 w-3.5" />
-            Auto-Explore
+            <Telescope className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate"><span className="sm:hidden">Auto</span><span className="hidden sm:inline">Auto-Explore</span></span>
           </TabsTrigger>
           <TabsTrigger value="spec" disabled={rerecording} className={triggerClass}>
-            <FileText className="h-3.5 w-3.5" />
-            Spec
+            <FileText className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Spec</span>
           </TabsTrigger>
           <TabsTrigger value="import" disabled={rerecording} className={triggerClass}>
-            <Code2 className="h-3.5 w-3.5" />
-            Import code
+            <Code2 className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate"><span className="sm:hidden">Import</span><span className="hidden sm:inline">Import code</span></span>
           </TabsTrigger>
         </TabsList>
       </div>

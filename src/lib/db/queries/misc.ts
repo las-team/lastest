@@ -11,6 +11,13 @@ import type {
 } from '../schema';
 import { eq, desc, and, inArray, gte } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
+import {
+  hashSelectors,
+  sortSelectorsByStats,
+  type SelectorOutcome,
+  type SelectorRef,
+  type SelectorStatRow,
+} from '@lastest/shared';
 
 // Selector Stats - for optimizing fallback selector strategy
 export async function getSelectorStats(testId: string, selectorArrayHash: string) {
@@ -114,6 +121,82 @@ export async function recordSelectorFailure(
       lastUsedAt: now,
       createdAt: now,
     });
+  }
+}
+
+/**
+ * Fetch every selector_stats row for a test as `SelectorStatRow[]` so
+ * runner / EB can sort their candidates locally without additional round-
+ * trips. Cheap — bounded by total fallback selectors ever seen for the
+ * test, typically <100 rows.
+ */
+export async function getSelectorStatsForTest(testId: string): Promise<SelectorStatRow[]> {
+  const rows = await db.select().from(selectorStats).where(eq(selectorStats.testId, testId));
+  return rows.map((r) => ({
+    hash: r.selectorArrayHash,
+    type: r.selectorType,
+    value: r.selectorValue,
+    successCount: r.successCount ?? 0,
+    failureCount: r.failureCount ?? 0,
+    totalAttempts: r.totalAttempts ?? 0,
+    avgResponseTimeMs: r.avgResponseTimeMs,
+  }));
+}
+
+/**
+ * Host-side helper for code paths with direct DB access (currently
+ * `src/lib/setup/script-runner.ts`). Reads stats for the (test, hash)
+ * pair and returns the input array sorted by historical success.
+ *
+ * Falls back to the original order if stats lookup fails — selector stats
+ * are best-effort and must never break test execution.
+ */
+export async function getSortedSelectors<T extends SelectorRef>(
+  testId: string,
+  selectors: ReadonlyArray<T>,
+): Promise<T[]> {
+  const hash = hashSelectors(selectors);
+  try {
+    const rows = await db
+      .select()
+      .from(selectorStats)
+      .where(and(eq(selectorStats.testId, testId), eq(selectorStats.selectorArrayHash, hash)));
+    const stats: SelectorStatRow[] = rows.map((r) => ({
+      hash: r.selectorArrayHash,
+      type: r.selectorType,
+      value: r.selectorValue,
+      successCount: r.successCount ?? 0,
+      failureCount: r.failureCount ?? 0,
+      totalAttempts: r.totalAttempts ?? 0,
+      avgResponseTimeMs: r.avgResponseTimeMs,
+    }));
+    return sortSelectorsByStats(selectors, stats);
+  } catch {
+    return [...selectors];
+  }
+}
+
+/**
+ * Batch-write per-attempt outcomes reported by the runner / EB at the end
+ * of a test run. Each row is an upsert against the existing
+ * `recordSelectorSuccess` / `recordSelectorFailure` recorders. Failures
+ * are swallowed — the test result must not be lost on a stats write blip.
+ */
+export async function recordSelectorOutcomes(
+  testId: string,
+  outcomes: ReadonlyArray<SelectorOutcome>,
+): Promise<void> {
+  if (outcomes.length === 0) return;
+  for (const o of outcomes) {
+    try {
+      if (o.success) {
+        await recordSelectorSuccess(testId, o.hash, o.type, o.value, o.responseTimeMs ?? 0);
+      } else {
+        await recordSelectorFailure(testId, o.hash, o.type, o.value);
+      }
+    } catch (err) {
+      console.warn(`[selector-stats] write failed for ${testId}/${o.hash}:${o.type}:${o.value}:`, err);
+    }
   }
 }
 

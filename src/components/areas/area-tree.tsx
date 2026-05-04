@@ -38,7 +38,7 @@ export interface TreeSelection {
 
 interface AreaTreeProps {
   tree: FunctionalAreaWithChildren[];
-  uncategorizedTests: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
+  uncategorizedTests: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
   selection: TreeSelection | null;
   selectedAreaIds: Set<string>;
   onSelect: (selection: TreeSelection | null) => void;
@@ -285,7 +285,7 @@ function AreaNode({
 }
 
 interface TestNodeProps {
-  test: { id: string; name: string; description: string | null; latestStatus: string | null; isPlaceholder?: boolean };
+  test: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean };
   depth: number;
   selection: TreeSelection | null;
   onSelect: (selection: TreeSelection | null) => void;
@@ -300,7 +300,8 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const descriptionLines = test.description?.split('\n').filter(Boolean) || [];
+  // The tree shows linked spec title (single short line). Full markdown spec lives in the Spec tab.
+  const specPreview = test.specTitle && test.specTitle !== test.name ? test.specTitle : null;
 
   return (
     <div
@@ -347,12 +348,8 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
           </DropdownMenu>
         )}
       </div>
-      {descriptionLines.length > 0 && (
-        <ul className="ml-[52px] mt-0.5 space-y-0 text-xs text-muted-foreground list-disc list-inside">
-          {descriptionLines.map((line, i) => (
-            <li key={i} className="truncate">{line}</li>
-          ))}
-        </ul>
+      {specPreview && (
+        <p className="ml-[52px] mt-0.5 text-xs text-muted-foreground truncate">{specPreview}</p>
       )}
     </div>
   );

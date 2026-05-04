@@ -10,11 +10,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { validateRunnerToken, updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
-import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
-import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
-import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse } from '@/lib/ws/protocol';
+import { validateRunnerToken, updateRunnerStatus } from '@/server/actions/runners';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse } from '@/lib/ws/protocol';
+import { recordStepEvent } from '@/lib/ws/step-state';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
 import path from 'path';
@@ -23,11 +21,15 @@ import {
   claimPendingCommands,
   completeRunnerCommand,
   insertCommandResult,
-  cleanupOldCommands,
-  timeoutStaleCommands,
   createRunnerCommand,
   cancelPendingCommandsByTestRun,
+  recordSelectorOutcomes,
 } from '@/lib/db/queries';
+// activeRunnerSessions + the cleanup interval moved to `@/lib/eb/cleanup-loop`
+// so `instrumentation.ts` can boot the loop without depending on /api/ws/runner
+// traffic. The route still calls `startCleanupLoop()` defensively for paths
+// that bypass instrumentation (e.g. `next dev` without instrumentation).
+import { activeRunnerSessions, SESSION_TIMEOUT_MS, startCleanupLoop } from '@/lib/eb/cleanup-loop';
 
 // ============================================
 // Security Validation Functions
@@ -78,126 +80,8 @@ function validateScreenshotSize(base64Data: string): void {
   }
 }
 
-// Track active polling sessions by runner ID (in-memory is fine — duplicate detection only)
-const globalSessionState = globalThis as typeof globalThis & {
-  __runnerActiveSessions?: Map<string, { lastPoll: number; sessionId: string; connectCount: number; firstConnectAt: number }>;
-};
-if (!globalSessionState.__runnerActiveSessions) {
-  globalSessionState.__runnerActiveSessions = new Map<string, { lastPoll: number; sessionId: string; connectCount: number; firstConnectAt: number }>();
-}
-const activeRunnerSessions = globalSessionState.__runnerActiveSessions;
-
-// Session timeout in milliseconds (60s — held long-poll connections prove liveness)
-const SESSION_TIMEOUT_MS = 60_000;
-
-// Cleanup interval (60 seconds)
-const CLEANUP_INTERVAL_MS = 60_000;
-
-// Lazy initialization guard — defers DB calls until first request
-// so that `next build` can import this module without hitting the database.
-let initialized = false;
-
 function ensureInitialized() {
-  if (initialized) return;
-  initialized = true;
-
-  // Mark stale runners offline on first request
-  markStaleRunnersOffline(SESSION_TIMEOUT_MS).then((count) => {
-    if (count > 0) {
-      console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
-    }
-  }).catch((error) => {
-    console.error('[Startup] Failed to mark stale runners offline:', error);
-  });
-
-  // Ensure the global playwright_settings row exists — poolMax() / ebIdleTTLMs()
-  // read from it and throw if it's missing. Must run before the warm-pool top-up.
-  ensureGlobalPlaywrightSettings()
-    .then(() => {
-      // Top up the warm EB pool so the first claim hits an already-online EB
-      if (isKubernetesMode()) {
-        return ensureWarmPool();
-      }
-    })
-    .catch((error) => {
-      console.error('[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:', error);
-    });
-
-  // Start cleanup interval to remove stale sessions, mark runners offline, and GC old commands
-  setInterval(async () => {
-    const now = Date.now();
-    for (const [runnerId, session] of activeRunnerSessions) {
-      if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
-        activeRunnerSessions.delete(runnerId);
-        try {
-          await updateRunnerStatus(runnerId, 'offline');
-          console.log(`[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`);
-        } catch (error) {
-          console.error(`[Cleanup] Failed to mark runner ${runnerId} offline:`, error);
-        }
-      }
-    }
-
-    try {
-      await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
-    } catch (error) {
-      console.error('[Cleanup] Failed to mark stale runners offline:', error);
-    }
-
-    try {
-      const deleted = await deleteStaleSystemRunners(5 * 60 * 1000);
-      if (deleted > 0) {
-        console.log(`[GC] Deleted ${deleted} stale system runners`);
-      }
-    } catch (error) {
-      console.error('[GC] Failed to delete stale system runners:', error);
-    }
-
-    // Garbage collection: delete old completed commands (24h)
-    try {
-      const cleaned = await cleanupOldCommands(24 * 60 * 60 * 1000);
-      if (cleaned > 0) {
-        console.log(`[GC] Cleaned up ${cleaned} old runner commands`);
-      }
-    } catch (error) {
-      console.error('[GC] Failed to clean old commands:', error);
-    }
-
-    // Timeout stale commands: pending > 30min, claimed > 10min
-    try {
-      await timeoutStaleCommands(30 * 60 * 1000, 10 * 60 * 1000);
-    } catch (error) {
-      console.error('[GC] Failed to timeout stale commands:', error);
-    }
-
-    // Reap stale pool EBs: busy + no heartbeat longer than EB_HEARTBEAT_TIMEOUT_MS.
-    // Default 300s; must comfortably exceed the slowest expected test + upload time on
-    // a contended node, otherwise we kill live test runs mid-execution.
-    try {
-      const heartbeatTimeoutMs = parseInt(process.env.EB_HEARTBEAT_TIMEOUT_MS || '300000', 10);
-      const reaped = await reapStalePoolEBs(heartbeatTimeoutMs);
-      if (reaped > 0) {
-        console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
-      }
-    } catch (error) {
-      console.error('[Reaper] Failed to reap stale pool EBs:', error);
-    }
-
-    // Tear down idle/offline on-demand EB Jobs above the warm-pool minimum
-    try {
-      const idleTtlMs = await ebIdleTTLMs();
-      await reapIdleEBJobs(idleTtlMs);
-    } catch (error) {
-      console.error('[Reaper] Failed to reap idle EB Jobs:', error);
-    }
-
-    // Top up the warm pool if it has drifted below the minimum
-    try {
-      await ensureWarmPool();
-    } catch (error) {
-      console.error('[WarmPool] ensureWarmPool failed:', error);
-    }
-  }, CLEANUP_INTERVAL_MS);
+  startCleanupLoop();
 }
 
 /**
@@ -332,6 +216,15 @@ export async function POST(request: NextRequest) {
         }
         delete payload.videoData;
 
+        // Persist per-attempt selector outcomes into selector_stats so the
+        // next run can sort fallback candidates by historical success.
+        // Best-effort — never block the test result on stats writes.
+        if (Array.isArray(result.payload.selectorOutcomes) && result.payload.testId) {
+          recordSelectorOutcomes(result.payload.testId, result.payload.selectorOutcomes).catch(
+            (err) => console.warn(`[Runner] selector_stats ingest failed:`, err),
+          );
+        }
+
         // Store result in DB and mark command completed
         const resultStatus = result.payload.status === 'passed' ? 'completed' : 'failed';
         try {
@@ -448,6 +341,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:step_event': {
+        // Record live step lifecycle into the in-memory step-state store so
+        // the test detail page can poll it during headed playback.
+        const stepMsg = message as StepEventResponse;
+        try { recordStepEvent(stepMsg.payload); } catch (err) {
+          console.warn('[step_event] recordStepEvent failed:', err);
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       case 'response:recording_event': {
         const recordingMsg = message as RecordingEventResponse;
         const { sessionId: recSessionId, events } = recordingMsg.payload;
@@ -477,11 +380,34 @@ export async function POST(request: NextRequest) {
         }
 
         // If the session exists in THIS process's memory, append directly too
-        // so same-pod consumers don't wait for the next DB poll.
+        // so same-pod consumers don't wait for the next DB poll. Re-emits
+        // (verification updates, thumbnail attachments) reuse the same
+        // sequence — replace in place so the in-memory view shows the
+        // latest copy, and queue an eventUpdate so the UI poll (which uses
+        // sinceSequence and otherwise wouldn't re-fetch older events) can
+        // reconcile in place.
         const session = findRemoteSessionBySessionId(recSessionId);
         if (session) {
           for (const event of events) {
-            session.events.push(event as RemoteRecordingEvent);
+            const incoming = event as RemoteRecordingEvent;
+            const existingIdx = session.events.findIndex(e => e.sequence === incoming.sequence);
+            if (existingIdx >= 0) {
+              session.events[existingIdx] = incoming;
+              const actionId = (incoming.data as { actionId?: string })?.actionId;
+              if (actionId) {
+                session.pendingEventUpdates ??= [];
+                session.pendingEventUpdates.push({
+                  actionId,
+                  verified: incoming.verification?.domVerified ?? false,
+                  selectorMatches: incoming.verification?.selectorMatches,
+                  chosenSelector: incoming.verification?.chosenSelector,
+                  autoRepaired: incoming.verification?.autoRepaired,
+                  thumbnailPath: (incoming.data as { thumbnailPath?: string })?.thumbnailPath,
+                });
+              }
+            } else {
+              session.events.push(incoming);
+            }
           }
         }
 
@@ -719,9 +645,25 @@ export interface RemoteRecordingEvent {
     syntaxValid: boolean;
     domVerified?: boolean;
     lastChecked?: number;
+    selectorMatches?: Array<{ type: string; value: string; count: number }>;
+    chosenSelector?: string;
+    autoRepaired?: boolean;
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: Record<string, any>;
+}
+
+/** Late update for an action event whose sequence the UI already saw —
+ *  verification finished, autorepair settled, or a thumbnail came back from
+ *  the runner. Drained on each `getRecordingStatus` poll so the timeline
+ *  can reconcile in place without re-fetching the whole event list. */
+export interface RemoteRecordingEventUpdate {
+  actionId: string;
+  verified: boolean;
+  selectorMatches?: Array<{ type: string; value: string; count: number }>;
+  chosenSelector?: string;
+  autoRepaired?: boolean;
+  thumbnailPath?: string;
 }
 
 export interface RemoteRecordingSession {
@@ -736,6 +678,7 @@ export interface RemoteRecordingSession {
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData;
   errorMessage?: string;
+  pendingEventUpdates?: RemoteRecordingEventUpdate[];
 }
 
 function findRemoteSessionBySessionId(sessionId: string): RemoteRecordingSession | undefined {

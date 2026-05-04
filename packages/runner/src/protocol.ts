@@ -13,6 +13,7 @@ export type MessageType =
   | 'command:shutdown'
   | 'response:test_result'
   | 'response:test_progress'
+  | 'response:step_event'
   | 'response:setup_result'
   | 'response:recording_event'
   | 'response:screenshot'
@@ -37,9 +38,10 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type { CoreStabilizationSettings } from '@lastest/shared';
+import type { CoreStabilizationSettings, SelectorOutcome, SelectorStatRow } from '@lastest/shared';
 
 export type StabilizationPayload = CoreStabilizationSettings;
+export type { SelectorOutcome, SelectorStatRow };
 
 export interface RunTestCommandPayload {
   testId: string;
@@ -67,6 +69,17 @@ export interface RunTestCommandPayload {
   // soft-wrap so broken test bodies fail the run. Driven by the test's
   // `all_steps_executed` Criteria rule (default ON, off only when opted out).
   failOnRuntimeError?: boolean;
+  /** Parsed steps from `parseSteps(body)`. When present, the runner emits
+   *  `response:step_event` messages keyed by step index so the host can
+   *  render a live step timeline. Order-sensitive — index N corresponds to
+   *  the N-th step in this array. */
+  steps?: Array<{
+    id: number;
+    label: string;
+    lineStart: number;
+    lineEnd: number;
+    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  }>;
   /** Parsed assertions from the host. Used by the runner's
    *  `instrumentAssertionTracking` to wrap each `expect(...)` line with a
    *  pass/fail recorder keyed by the host-computed `id`. Order-sensitive —
@@ -76,6 +89,13 @@ export interface RunTestCommandPayload {
     codeLineStart?: number;
     codeLineEnd?: number;
   }>;
+  /** Selector_stats rows for this test (see host protocol). Used by
+   *  `locateWithFallback` to sort candidates by historical success
+   *  before iterating. */
+  selectorStats?: SelectorStatRow[];
+  /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
+   *  Resolved on the host. Defaults to 3000ms when omitted. */
+  selectorTimeoutMs?: number;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -172,6 +192,12 @@ export interface CaptureScreenshotCommand extends BaseMessage {
   payload: { sessionId: string };
 }
 
+export interface RecordingSelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 export interface RecordingEventData {
   type: string;
   timestamp: number;
@@ -181,6 +207,9 @@ export interface RecordingEventData {
     syntaxValid: boolean;
     domVerified?: boolean;
     lastChecked?: number;
+    selectorMatches?: RecordingSelectorMatch[];
+    chosenSelector?: string;
+    autoRepaired?: boolean;
   };
   data: {
     action?: string;
@@ -190,6 +219,7 @@ export interface RecordingEventData {
     url?: string;
     relativePath?: string;
     screenshotPath?: string;
+    thumbnailPath?: string;
     assertionType?: string;
     coordinates?: { x: number; y: number };
     button?: number;
@@ -286,6 +316,10 @@ export interface TestResultPayload {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotPayload;
+  /** Per-attempt selector outcomes captured by `locateWithFallback`. The
+   *  host writes these to `selector_stats` so the next run can promote
+   *  the winning candidate. */
+  selectorOutcomes?: SelectorOutcome[];
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -302,6 +336,23 @@ export interface TestProgressPayload {
 export interface TestProgressResponse extends BaseMessage {
   type: 'response:test_progress';
   payload: TestProgressPayload;
+}
+
+export interface StepEventPayload {
+  correlationId: string;
+  testRunId: string;
+  stepIndex: number;
+  totalSteps: number;
+  status: 'started' | 'passed' | 'failed';
+  label?: string;
+  stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  durationMs?: number;
+  error?: string;
+}
+
+export interface StepEventResponse extends BaseMessage {
+  type: 'response:step_event';
+  payload: StepEventPayload;
 }
 
 export interface ScreenshotUploadPayload {
@@ -390,6 +441,7 @@ export type Message =
   | CaptureScreenshotCommand
   | TestResultResponse
   | TestProgressResponse
+  | StepEventResponse
   | SetupResultResponse
   | ScreenshotUploadResponse
   | RecordingEventResponse

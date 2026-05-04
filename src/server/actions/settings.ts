@@ -19,6 +19,7 @@ export async function savePlaywrightSettings(data: {
   headlessMode?: string;
   navigationTimeout?: number;
   actionTimeout?: number;
+  selectorTimeoutMs?: number;
   pointerGestures?: boolean;
   cursorFPS?: number;
   cursorPlaybackSpeed?: number;
@@ -153,6 +154,7 @@ export async function saveNotificationSettings(data: {
   customWebhookUrl?: string | null;
   customWebhookMethod?: string;
   customWebhookHeaders?: string | null;
+  issueTrackerProvider?: 'github' | 'gitlab';
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

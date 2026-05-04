@@ -10,9 +10,11 @@ export interface SendEmailOptions {
   subject: string;
   html: string;
   text?: string;
+  unsubscribeUrl?: string;
+  unsubscribePostUrl?: string;
 }
 
-export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
+export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsubscribePostUrl }: SendEmailOptions) {
   if (!resend) {
     console.log('[Email] No RESEND_API_KEY configured, skipping email');
     console.log(`[Email] Would send to: ${to}`);
@@ -21,12 +23,26 @@ export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
   }
 
   try {
+    // RFC 8058 one-click expects the POST endpoint to be the URL the mail
+    // client hits. List the POST URL first; the GET landing page is a
+    // fallback so users can still click an "Unsubscribe" link.
+    const listUnsubscribeUrls = [unsubscribePostUrl, unsubscribeUrl]
+      .filter((u): u is string => Boolean(u))
+      .map((u) => `<${u}>`)
+      .join(', ');
+
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to,
       subject,
       html,
       text,
+      headers: listUnsubscribeUrls
+        ? {
+            'List-Unsubscribe': listUnsubscribeUrls,
+            ...(unsubscribePostUrl ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
+          }
+        : undefined,
     });
 
     if (error) {
@@ -41,7 +57,10 @@ export async function sendEmail({ to, subject, html, text }: SendEmailOptions) {
   }
 }
 
-function emailShell(content: string) {
+function emailShell(content: string, unsubscribeUrl?: string) {
+  const unsubFooter = unsubscribeUrl
+    ? `<br/><a href="${unsubscribeUrl}" style="color:#0891b2;text-decoration:underline;">Unsubscribe from these emails</a>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -67,7 +86,7 @@ function emailShell(content: string) {
   <tr><td align="center" style="padding-top:28px;">
     <p style="margin:0;font-size:12px;line-height:18px;color:#4a4a6a;">
       Lastest &mdash; Visual Regression Testing Platform<br/>
-      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace('https://', '')}</a>
+      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace('https://', '')}</a>${unsubFooter}
     </p>
   </td></tr>
 </table>
@@ -78,6 +97,9 @@ function emailShell(content: string) {
 }
 
 export async function sendPasswordResetEmail(to: string, token: string) {
+  // Transactional: no List-Unsubscribe — that header is reserved for marketing
+  // mail per RFC 8058, and a click here would revoke marketing consent for an
+  // email the user didn't perceive as marketing.
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   const html = emailShell(`
@@ -124,6 +146,7 @@ This link expires in 1 hour. If you didn't request this, you can safely ignore t
 }
 
 export async function sendInvitationEmail(to: string, token: string, inviterName?: string) {
+  // Transactional: no List-Unsubscribe (see sendPasswordResetEmail).
   const inviteUrl = `${APP_URL}/invite?token=${token}`;
   const inviter = inviterName || 'Your team';
 

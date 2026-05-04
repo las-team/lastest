@@ -22,6 +22,20 @@ const PRE_CREATE_SQL = `
     granted_at TIMESTAMP NOT NULL,
     revoked_at TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS csv_data_sources (
+    id TEXT PRIMARY KEY,
+    repository_id TEXT,
+    team_id TEXT,
+    alias TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    storage_path TEXT,
+    cached_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cached_data JSONB NOT NULL DEFAULT '[]'::jsonb,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    last_synced_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+  );
 `;
 
 async function preCreate() {
@@ -84,10 +98,13 @@ async function bumpPoolDefaults() {
     sql = require('postgres')(process.env.DATABASE_URL);
     const r = await sql.unsafe(`
       UPDATE "playwright_settings"
-      SET "max_parallel_ebs" = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
-          "eb_pool_max"      = GREATEST(COALESCE("eb_pool_max", 0), 50)
+      SET "max_parallel_ebs"      = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
+          "eb_pool_max"            = GREATEST(COALESCE("eb_pool_max", 0), 50),
+          "eb_idle_ttl_seconds"    = GREATEST(COALESCE("eb_idle_ttl_seconds", 0), 120)
       WHERE "repository_id" IS NULL
-        AND (COALESCE("max_parallel_ebs", 0) < 30 OR COALESCE("eb_pool_max", 0) < 50)
+        AND (COALESCE("max_parallel_ebs", 0) < 30
+          OR COALESCE("eb_pool_max", 0) < 50
+          OR COALESCE("eb_idle_ttl_seconds", 0) < 120)
     `);
     const c = (r && r.count) || 0;
     if (c > 0) {

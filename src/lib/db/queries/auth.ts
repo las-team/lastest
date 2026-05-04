@@ -10,6 +10,7 @@ import {
   userConsents,
   repositories,
   githubAccounts,
+  tests,
 } from '../schema';
 import type {
   NewTeam,
@@ -20,7 +21,7 @@ import type {
   UserRole,
   ConsentType,
 } from '../schema';
-import { eq, desc, and, gte, lt, isNull } from 'drizzle-orm';
+import { eq, desc, and, gte, lt, isNull, count, getTableColumns } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 function generateSlug(name: string): string {
@@ -91,6 +92,20 @@ export async function removeUserFromTeam(userId: string) {
 // Team-scoped repositories
 export async function getRepositoriesByTeam(teamId: string) {
   return db.select().from(repositories).where(eq(repositories.teamId, teamId)).orderBy(desc(repositories.createdAt));
+}
+
+// Team-scoped repositories with non-deleted test counts (for repo selector)
+export async function getRepositoriesByTeamWithTestCounts(teamId: string) {
+  return db
+    .select({
+      ...getTableColumns(repositories),
+      testCount: count(tests.id),
+    })
+    .from(repositories)
+    .leftJoin(tests, and(eq(tests.repositoryId, repositories.id), isNull(tests.deletedAt)))
+    .where(eq(repositories.teamId, teamId))
+    .groupBy(repositories.id)
+    .orderBy(desc(repositories.createdAt));
 }
 
 // Team-scoped GitHub account

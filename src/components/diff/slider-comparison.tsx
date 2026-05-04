@@ -39,6 +39,14 @@ export interface FocusRegionRect {
   height: number;
 }
 
+export interface IgnoreRegionRect {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 function FocusRegionOverlay({
   dims,
   regions,
@@ -92,12 +100,69 @@ function FocusRegionOverlay({
   );
 }
 
+function IgnoreRegionOverlay({
+  dims,
+  regions,
+  onDelete,
+}: {
+  dims: { width: number; height: number } | null;
+  regions: IgnoreRegionRect[];
+  onDelete?: (id: string) => void;
+}) {
+  if (!dims || regions.length === 0) return null;
+  // Slate fill + rose-500 dashed stroke = "masked out" semantics, visually
+  // distinct from green focus rects and from the dashed-red changed-regions overlay.
+  return (
+    <>
+      <svg
+        className="absolute inset-0 w-full h-full pointer-events-none"
+        viewBox={`0 0 ${dims.width} ${dims.height}`}
+        preserveAspectRatio="none"
+      >
+        {regions.map((r) => (
+          <rect
+            key={r.id}
+            x={r.x}
+            y={r.y}
+            width={r.width}
+            height={r.height}
+            fill="rgba(15,23,42,0.45)"
+            stroke="rgba(244,63,94,0.95)"
+            strokeWidth="2"
+            strokeDasharray="6 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      {onDelete && regions.map((r) => {
+        const leftPct = ((r.x + r.width) / dims.width) * 100;
+        const topPct = (r.y / dims.height) * 100;
+        return (
+          <button
+            key={`del-${r.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(r.id);
+            }}
+            title="Remove ignore region"
+            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-rose-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-rose-700"
+            style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+          >
+            ×
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 interface DrawLayerProps {
   dims: { width: number; height: number } | null;
   onDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  variant?: 'focus' | 'ignore';
 }
 
-function DrawLayer({ dims, onDrawn }: DrawLayerProps) {
+function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const [start, setStart] = useState<{ x: number; y: number } | null>(null);
   const [current, setCurrent] = useState<{ x: number; y: number } | null>(null);
@@ -144,6 +209,9 @@ function DrawLayer({ dims, onDrawn }: DrawLayerProps) {
     height: Math.abs(current.y - start.y),
   } : null;
 
+  const previewFill = variant === 'ignore' ? 'rgba(15,23,42,0.30)' : 'rgba(34,197,94,0.15)';
+  const previewStroke = variant === 'ignore' ? 'rgba(244,63,94,0.95)' : 'rgba(34,197,94,0.9)';
+
   return (
     <div
       ref={layerRef}
@@ -164,8 +232,8 @@ function DrawLayer({ dims, onDrawn }: DrawLayerProps) {
             y={preview.y}
             width={preview.width}
             height={preview.height}
-            fill="rgba(34,197,94,0.15)"
-            stroke="rgba(34,197,94,0.9)"
+            fill={previewFill}
+            stroke={previewStroke}
             strokeWidth="2"
             strokeDasharray="4"
             vectorEffect="non-scaling-stroke"
@@ -225,6 +293,10 @@ interface SliderComparisonProps {
   drawFocusMode?: boolean;
   onFocusRegionDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
   onFocusRegionDelete?: (id: string) => void;
+  ignoreRegions?: IgnoreRegionRect[];
+  drawIgnoreMode?: boolean;
+  onIgnoreRegionDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onIgnoreRegionDelete?: (id: string) => void;
   leftLabel?: string;
   rightLabel?: string;
   className?: string;
@@ -249,6 +321,10 @@ export function SliderComparison({
   drawFocusMode = false,
   onFocusRegionDrawn,
   onFocusRegionDelete,
+  ignoreRegions,
+  drawIgnoreMode = false,
+  onIgnoreRegionDrawn,
+  onIgnoreRegionDelete,
   leftLabel = 'Baseline',
   rightLabel = 'Current',
   className = '',
@@ -470,6 +546,7 @@ export function SliderComparison({
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
               <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
               <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
+              <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} />
             </div>
           </div>
         </div>
@@ -572,6 +649,7 @@ export function SliderComparison({
           <RegionOverlay dims={imageDims} regions={visibleRegions} />
           <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
           <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
+          <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} />
         </div>
       </div>
     );
@@ -606,10 +684,10 @@ export function SliderComparison({
           <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
         </div>
 
-        {/* Current (right side, clipped — fully revealed while drawing focus regions) */}
+        {/* Current (right side, clipped — fully revealed while drawing regions) */}
         <div
           className="absolute inset-0 overflow-hidden"
-          style={{ clipPath: `inset(0 0 0 ${drawFocusMode ? 0 : sliderPosition}%)` }}
+          style={{ clipPath: `inset(0 0 0 ${drawFocusMode || drawIgnoreMode ? 0 : sliderPosition}%)` }}
         >
           <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
@@ -618,12 +696,16 @@ export function SliderComparison({
         <RegionOverlay dims={imageDims} regions={visibleRegions} />
         <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
         <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} onDelete={onFocusRegionDelete} />
-        {drawFocusMode && onFocusRegionDrawn && (
-          <DrawLayer dims={imageDims} onDrawn={onFocusRegionDrawn} />
+        <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} onDelete={onIgnoreRegionDelete} />
+        {drawFocusMode && onFocusRegionDrawn && !drawIgnoreMode && (
+          <DrawLayer dims={imageDims} onDrawn={onFocusRegionDrawn} variant="focus" />
+        )}
+        {drawIgnoreMode && onIgnoreRegionDrawn && !drawFocusMode && (
+          <DrawLayer dims={imageDims} onDrawn={onIgnoreRegionDrawn} variant="ignore" />
         )}
 
         {/* Slider handle — hidden while drawing so it doesn't intercept the mouse mid-drag */}
-        {!drawFocusMode && (
+        {!drawFocusMode && !drawIgnoreMode && (
           <div
             className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
             style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}

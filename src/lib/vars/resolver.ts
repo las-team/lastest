@@ -126,12 +126,19 @@ function resolveSingleVar(
   gsheetSources: GoogleSheetsDataSource[],
   csvSources: CsvDataSource[],
   rowOverride?: number,
+  aiLastValues?: Record<string, string>,
 ): { value: string; error?: string } {
   if (variable.mode !== 'assign') {
     return { value: '', error: `Variable "${variable.name}" is not in assign mode` };
   }
   if (variable.sourceType === 'static') {
     return { value: variable.staticValue ?? '' };
+  }
+  if (variable.sourceType === 'ai-generated') {
+    // Sync path can't call AI — fall back to the cached last-known-good value.
+    const cached = aiLastValues?.[variable.id];
+    if (cached !== undefined) return { value: cached };
+    return { value: '', error: `AI variable "${variable.name}" has no cached value yet (run the test or use Refresh)` };
   }
   const synthetic = buildSyntheticRefForVar(variable, rowOverride);
   if (!synthetic) {
@@ -153,6 +160,61 @@ function resolveSingleVar(
   return { value: variable.staticValue ?? '' };
 }
 
+export interface AIVarRuntime {
+  /** Generate a value for one AI-mode variable. Throws on hard failure
+   *  (provider not configured, key missing, rate limit, network error). */
+  generate(variable: TestVariable): Promise<string>;
+}
+
+interface SingleVarAsyncResult {
+  value: string;
+  error?: string;
+  /** Set when AI was called and succeeded — caller should persist this back. */
+  generatedNewValue?: string;
+}
+
+async function resolveSingleVarAsync(
+  variable: TestVariable,
+  gsheetSources: GoogleSheetsDataSource[],
+  csvSources: CsvDataSource[],
+  rowOverride: number | undefined,
+  ai: AIVarRuntime | null,
+  aiLastValues: Record<string, string> | undefined,
+): Promise<SingleVarAsyncResult> {
+  if (variable.mode !== 'assign') {
+    return { value: '', error: `Variable "${variable.name}" is not in assign mode` };
+  }
+  if (variable.sourceType !== 'ai-generated') {
+    return resolveSingleVar(variable, gsheetSources, csvSources, rowOverride, aiLastValues);
+  }
+
+  const cached = aiLastValues?.[variable.id];
+  const refreshMode = variable.sourceRowMode ?? 'random';
+
+  // Fixed mode: only call AI when we have nothing cached.
+  if (refreshMode === 'fixed' && cached !== undefined) {
+    return { value: cached };
+  }
+
+  if (!ai) {
+    if (cached !== undefined) {
+      return { value: cached, error: `AI variable "${variable.name}": AI runtime unavailable, used cached value` };
+    }
+    return { value: '', error: `AI variable "${variable.name}": AI runtime unavailable and no cached value` };
+  }
+
+  try {
+    const fresh = await ai.generate(variable);
+    return { value: fresh, generatedNewValue: fresh };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (cached !== undefined) {
+      return { value: cached, error: `AI variable "${variable.name}" failed (${reason}); used cached value` };
+    }
+    return { value: '', error: `AI variable "${variable.name}" failed and no cached value: ${reason}` };
+  }
+}
+
 export function resolveVarReferences(
   code: string,
   variables: TestVariable[] | null | undefined,
@@ -162,6 +224,9 @@ export function resolveVarReferences(
    *  executor to pin a single row across all {{var:x}} occurrences in a run
    *  (so increment/random vars stay consistent within one run). */
   rowOverrides?: Record<string, number>,
+  /** Cached last-known-good values for AI-generated vars, keyed by
+   *  TestVariable.id. Sync path uses this purely as fallback (no AI call). */
+  aiLastValues?: Record<string, string>,
 ): VarResolveResult {
   const vars = variables ?? [];
   const byName = new Map<string, TestVariable>();
@@ -193,7 +258,7 @@ export function resolveVarReferences(
       continue;
     }
     const rowOverride = rowOverrides?.[variable.id];
-    const { value, error } = resolveSingleVar(variable, gsheetSources, csvSources, rowOverride);
+    const { value, error } = resolveSingleVar(variable, gsheetSources, csvSources, rowOverride, aiLastValues);
     if (error) errors.push(`${fullMatch}: ${error}`);
     references.push({ fullMatch, varName, resolvedValue: value, error });
     // replace all occurrences of this token at once
@@ -201,6 +266,82 @@ export function resolveVarReferences(
   }
 
   return { resolvedCode, references, errors };
+}
+
+export interface VarResolveAsyncResult extends VarResolveResult {
+  /** Newly generated values from AI calls keyed by TestVariable.id. The
+   *  executor merges these into tests.aiVarLastValues. */
+  nextLastValues: Record<string, string>;
+  /** True when an AI variable failed AND no cached value was available — the
+   *  caller should treat this as a hard pre-flight failure and abort the run. */
+  hardError: boolean;
+}
+
+/** Async sibling of resolveVarReferences that calls the supplied AI runtime
+ *  for {{var:name}} references whose source is 'ai-generated'. */
+export async function resolveVarReferencesAsync(
+  code: string,
+  variables: TestVariable[] | null | undefined,
+  gsheetSources: GoogleSheetsDataSource[],
+  csvSources: CsvDataSource[],
+  rowOverrides: Record<string, number> | undefined,
+  ai: AIVarRuntime | null,
+  aiLastValues: Record<string, string> | undefined,
+): Promise<VarResolveAsyncResult> {
+  const vars = variables ?? [];
+  const byName = new Map<string, TestVariable>();
+  for (const v of vars) byName.set(v.name, v);
+
+  const references: ResolvedVarReference[] = [];
+  const errors: string[] = [];
+  const nextLastValues: Record<string, string> = {};
+  let hardError = false;
+  let resolvedCode = code;
+
+  const matches: Array<{ fullMatch: string; varName: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = VAR_REF_RE.exec(code)) !== null) {
+    matches.push({ fullMatch: m[0], varName: m[1] });
+  }
+
+  // Pre-resolve each unique variable name once so that multiple {{var:x}}
+  // occurrences agree on a single AI-generated value within one run.
+  const resolvedByName = new Map<string, SingleVarAsyncResult>();
+
+  for (const { varName } of matches) {
+    if (resolvedByName.has(varName)) continue;
+    const variable = byName.get(varName);
+    if (!variable) {
+      resolvedByName.set(varName, { value: '', error: `Variable "${varName}" not defined` });
+      continue;
+    }
+    if (variable.mode === 'extract') {
+      resolvedByName.set(varName, {
+        value: '',
+        error: `Variable "${varName}" is extract-mode — cannot use {{var:...}} in code`,
+      });
+      continue;
+    }
+    const rowOverride = rowOverrides?.[variable.id];
+    const result = await resolveSingleVarAsync(variable, gsheetSources, csvSources, rowOverride, ai, aiLastValues);
+    if (result.generatedNewValue !== undefined) {
+      nextLastValues[variable.id] = result.generatedNewValue;
+    }
+    // Hard error: AI failed AND nothing usable returned.
+    if (result.error && variable.sourceType === 'ai-generated' && !result.value) {
+      hardError = true;
+    }
+    resolvedByName.set(varName, result);
+  }
+
+  for (const { fullMatch, varName } of matches) {
+    const r = resolvedByName.get(varName)!;
+    if (r.error) errors.push(`${fullMatch}: ${r.error}`);
+    references.push({ fullMatch, varName, resolvedValue: r.value, error: r.error });
+    resolvedCode = resolvedCode.split(fullMatch).join(r.value);
+  }
+
+  return { resolvedCode, references, errors, nextLastValues, hardError };
 }
 
 /** Resolve every assign-mode var to its current value. Mirrors how the
@@ -213,14 +354,51 @@ export function resolveAssignedValues(
   gsheetSources: GoogleSheetsDataSource[],
   csvSources: CsvDataSource[],
   rowOverrides?: Record<string, number>,
+  aiLastValues?: Record<string, string>,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const v of variables ?? []) {
     if (v.mode !== 'assign') continue;
-    const { value } = resolveSingleVar(v, gsheetSources, csvSources, rowOverrides?.[v.id]);
+    const { value } = resolveSingleVar(v, gsheetSources, csvSources, rowOverrides?.[v.id], aiLastValues);
     out[v.name] = value;
   }
   return out;
+}
+
+/** Async sibling of resolveAssignedValues — resolves AI vars through the
+ *  supplied runtime so that the executor's `assignedVariables` payload
+ *  reflects what was actually used in the run (fresh AI value for `random`
+ *  mode, cached value for `fixed`). */
+export async function resolveAssignedValuesAsync(
+  variables: TestVariable[] | null | undefined,
+  gsheetSources: GoogleSheetsDataSource[],
+  csvSources: CsvDataSource[],
+  rowOverrides: Record<string, number> | undefined,
+  ai: AIVarRuntime | null,
+  aiLastValues: Record<string, string> | undefined,
+  /** Pre-computed map of newly generated values from a prior call to
+   *  resolveVarReferencesAsync — avoids re-calling the AI for the same vars. */
+  alreadyGenerated?: Record<string, string>,
+): Promise<{ values: Record<string, string>; nextLastValues: Record<string, string> }> {
+  const values: Record<string, string> = {};
+  const nextLastValues: Record<string, string> = { ...(alreadyGenerated ?? {}) };
+  // Effective cache combines persisted cache + values just generated this run.
+  const effectiveCache = { ...(aiLastValues ?? {}), ...nextLastValues };
+  for (const v of variables ?? []) {
+    if (v.mode !== 'assign') continue;
+    if (v.sourceType === 'ai-generated' && nextLastValues[v.id] !== undefined) {
+      // AI was already called for this var — reuse the fresh value.
+      values[v.name] = nextLastValues[v.id];
+      continue;
+    }
+    const result = await resolveSingleVarAsync(v, gsheetSources, csvSources, rowOverrides?.[v.id], ai, effectiveCache);
+    if (result.generatedNewValue !== undefined) {
+      nextLastValues[v.id] = result.generatedNewValue;
+      effectiveCache[v.id] = result.generatedNewValue;
+    }
+    values[v.name] = result.value;
+  }
+  return { values, nextLastValues };
 }
 
 export function previewVarReferences(
@@ -228,6 +406,7 @@ export function previewVarReferences(
   variables: TestVariable[] | null | undefined,
   gsheetSources: GoogleSheetsDataSource[],
   csvSources: CsvDataSource[],
+  aiLastValues?: Record<string, string>,
 ) {
   const vars = variables ?? [];
   const byName = new Map<string, TestVariable>();
@@ -247,7 +426,7 @@ export function previewVarReferences(
     if (variable.mode === 'extract') {
       return { fullMatch, varName, mode: variable.mode, error: 'Extract-mode vars cannot be referenced in code' };
     }
-    const { value, error } = resolveSingleVar(variable, gsheetSources, csvSources);
+    const { value, error } = resolveSingleVar(variable, gsheetSources, csvSources, undefined, aiLastValues);
     return {
       fullMatch,
       varName,
@@ -257,6 +436,7 @@ export function previewVarReferences(
       sourceColumn: variable.sourceColumn,
       sourceRow: variable.sourceRow,
       sourceRowMode: variable.sourceRowMode,
+      aiPreset: variable.aiPreset,
       previewValue: error ? undefined : value,
       error,
     };

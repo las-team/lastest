@@ -46,6 +46,8 @@ import { BranchSelector } from '@/components/settings/branch-selector';
 import { ReviewContent, type TodoRow } from '@/components/review/review-content';
 import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { cn } from '@/lib/utils';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface BuildWithBranch extends Build {
   gitBranch?: string;
@@ -229,6 +231,14 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
       await saveAndTestBaseUrl();
       const testIds = composeConfig?.selectedTestIds ?? undefined;
       const versionOverrides = composeConfig?.versionOverrides ?? undefined;
+
+      track(Events.test_run_started, {
+        trigger: 'manual',
+        scope: testIds ? 'subset' : 'all',
+        testCount: testIds ? testIds.length : tests.length,
+        comparison: comparisonEnabled,
+        repoId: repositoryId ?? '',
+      });
 
       if (comparisonEnabled && repositoryId) {
         const featureBranch = activeBranch || currentBranch || 'main';

@@ -313,8 +313,8 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
   // Add functional area context
   if (scanContext.functionalAreaName) {
     lines.push(`\nFunctional area: ${scanContext.functionalAreaName}`);
-    if (scanContext.functionalAreaDescription) {
-      lines.push(`Context: ${scanContext.functionalAreaDescription}`);
+    if (scanContext.functionalAreaPlan) {
+      lines.push(`Test plan:\n${scanContext.functionalAreaPlan}`);
     }
   }
 

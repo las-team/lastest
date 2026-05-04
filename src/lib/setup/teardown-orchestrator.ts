@@ -58,7 +58,7 @@ export class TeardownOrchestrator {
       return { success: true, duration: 0, variables: {} };
     }
 
-    return runTestAsSetup(page, test.code, context);
+    return runTestAsSetup(page, test.code, context, testId);
   }
 
   /**

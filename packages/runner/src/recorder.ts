@@ -62,10 +62,12 @@ export class RemoteRecorder {
     const relativePath = this.getRelativePath(payload.targetUrl);
     this.addEvent('navigation', { url: payload.targetUrl, relativePath });
 
-    // Batch events and send to server periodically
+    // Batch events and send to server periodically. 150 ms keeps perceived
+    // timeline latency under the Doherty threshold (~400 ms end-to-end with
+    // a 150 ms client poll on top).
     this.eventBatchInterval = setInterval(() => {
       this.flushPendingEvents();
-    }, 500);
+    }, 150);
 
     // Handle browser close (user closed the window)
     this.browser.on('disconnected', () => {
@@ -122,6 +124,13 @@ export class RemoteRecorder {
         domVerified: undefined,
         lastChecked: undefined,
       });
+
+      // Best-effort element thumbnail. Fires immediately so the timeline can
+      // show a visual confirmation of what was clicked, but never awaited —
+      // a slow screenshot must not block the user's next interaction.
+      if (actionId && boundingBox) {
+        void this.captureElementThumbnail(actionId, boundingBox);
+      }
     });
 
     if (pointerGestures) {
@@ -160,11 +169,30 @@ export class RemoteRecorder {
       this.addEvent('assertion', { elementAssertion: assertion });
     });
 
-    await this.page.exposeFunction('__updateVerification', (actionId: string, verified: boolean) => {
+    await this.page.exposeFunction('__updateVerification', (
+      actionId: string,
+      verified: boolean,
+      extra?: {
+        selectorMatches?: Array<{ type: string; value: string; count: number }>;
+        chosenSelector?: string;
+        autoRepaired?: boolean;
+      },
+    ) => {
       const event = this.events.find(e => e.data.actionId === actionId);
       if (event && event.verification) {
         event.verification.domVerified = verified;
         event.verification.lastChecked = Date.now();
+        if (extra?.selectorMatches) event.verification.selectorMatches = extra.selectorMatches;
+        if (extra?.chosenSelector) event.verification.chosenSelector = extra.chosenSelector;
+        if (extra?.autoRepaired !== undefined) event.verification.autoRepaired = extra.autoRepaired;
+        // Re-queue for emission so the server (and UI poll) sees the updated
+        // verification — events and pendingEvents share refs, so if it's
+        // still pending the same flush carries the update; if it was already
+        // flushed, the dedup-by-sequence in getRemoteRecordingEvents picks
+        // the newer copy.
+        if (!this.pendingEvents.includes(event)) {
+          this.pendingEvents.push(event);
+        }
       }
     });
 
@@ -183,7 +211,7 @@ export class RemoteRecorder {
     type: string,
     data: Record<string, unknown>,
     status: 'preview' | 'committed' = 'committed',
-    verification?: { syntaxValid: boolean; domVerified?: boolean; lastChecked?: number }
+    verification?: NonNullable<RecordingEventData['verification']>
   ): void {
     const event: RecordingEventData = {
       type,
@@ -213,6 +241,41 @@ export class RemoteRecorder {
       return url.slice(this.baseOrigin.length) || '/';
     }
     return url;
+  }
+
+  /**
+   * Best-effort capture of a small thumbnail centered on the just-clicked
+   * element's bounding box. Embedded as a data URL on the action event so
+   * the live timeline can render a visual confirmation of what the user
+   * clicked. Padded by 8 px and capped at 240×240 so the payload stays
+   * small (typical ~5–25 KB base64).
+   */
+  private async captureElementThumbnail(
+    actionId: string,
+    boundingBox: { x: number; y: number; width: number; height: number },
+  ): Promise<void> {
+    if (!this.page) return;
+    try {
+      const padding = 8;
+      const maxSide = 240;
+      const x = Math.max(0, boundingBox.x - padding);
+      const y = Math.max(0, boundingBox.y - padding);
+      const width = Math.max(1, Math.min(boundingBox.width + padding * 2, maxSide));
+      const height = Math.max(1, Math.min(boundingBox.height + padding * 2, maxSide));
+      const buf = await this.page.screenshot({
+        clip: { x, y, width, height },
+        animations: 'disabled',
+        timeout: 500,
+      });
+      const event = this.events.find(e => e.data.actionId === actionId);
+      if (!event) return;
+      event.data.thumbnailPath = `data:image/png;base64,${buf.toString('base64')}`;
+      if (!this.pendingEvents.includes(event)) {
+        this.pendingEvents.push(event);
+      }
+    } catch {
+      // Element gone, navigation in flight, or screenshot timeout — skip.
+    }
   }
 
   async takeScreenshot(): Promise<{ data: string; width: number; height: number } | null> {

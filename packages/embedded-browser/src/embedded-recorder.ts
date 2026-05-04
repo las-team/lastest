@@ -28,6 +28,12 @@ interface StartRecordingPayload {
   setupSteps?: Array<{ code: string; codeHash: string }>;
 }
 
+interface RecordingSelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 interface RecordingEventData {
   type: string;
   timestamp: number;
@@ -37,6 +43,9 @@ interface RecordingEventData {
     syntaxValid: boolean;
     domVerified?: boolean;
     lastChecked?: number;
+    selectorMatches?: RecordingSelectorMatch[];
+    chosenSelector?: string;
+    autoRepaired?: boolean;
   };
   data: Record<string, unknown>;
 }
@@ -199,10 +208,12 @@ export class EmbeddedRecorder {
       });
     });
 
-    // Batch events and send to server periodically
+    // Batch events and send to server periodically. 150 ms keeps timeline
+    // perceived latency under the Doherty threshold even with the 150 ms UI
+    // poll on the other side.
     this.eventBatchInterval = setInterval(() => {
       this.flushPendingEvents();
-    }, 500);
+    }, 150);
 
     console.log(`  [EmbeddedRecorder] Recording started, viewport: ${viewport.width}x${viewport.height}`);
     return this.page;
@@ -250,6 +261,11 @@ export class EmbeddedRecorder {
         domVerified: undefined,
         lastChecked: undefined,
       });
+
+      // Best-effort element thumbnail (see runner recorder for rationale).
+      if (actionId && boundingBox) {
+        void this.captureElementThumbnail(actionId, boundingBox);
+      }
     });
 
     if (pointerGestures) {
@@ -314,11 +330,25 @@ export class EmbeddedRecorder {
       this.takeScreenshot();
     });
 
-    await this.page.exposeFunction('__updateVerification', (actionId: string, verified: boolean) => {
+    await this.page.exposeFunction('__updateVerification', (
+      actionId: string,
+      verified: boolean,
+      extra?: {
+        selectorMatches?: RecordingSelectorMatch[];
+        chosenSelector?: string;
+        autoRepaired?: boolean;
+      },
+    ) => {
       const event = this.events.find(e => e.data.actionId === actionId);
       if (event && event.verification) {
         event.verification.domVerified = verified;
         event.verification.lastChecked = Date.now();
+        if (extra?.selectorMatches) event.verification.selectorMatches = extra.selectorMatches;
+        if (extra?.chosenSelector) event.verification.chosenSelector = extra.chosenSelector;
+        if (extra?.autoRepaired !== undefined) event.verification.autoRepaired = extra.autoRepaired;
+        if (!this.pendingEvents.includes(event)) {
+          this.pendingEvents.push(event);
+        }
       }
     });
 
@@ -337,7 +367,7 @@ export class EmbeddedRecorder {
     type: string,
     data: Record<string, unknown>,
     status: 'preview' | 'committed' = 'committed',
-    verification?: { syntaxValid: boolean; domVerified?: boolean; lastChecked?: number }
+    verification?: NonNullable<RecordingEventData['verification']>
   ): void {
     const event: RecordingEventData = {
       type,
@@ -355,10 +385,64 @@ export class EmbeddedRecorder {
     this.pendingEvents.push(event);
   }
 
+  /**
+   * Best-effort capture of a small thumbnail centered on the just-clicked
+   * element's bounding box. Embedded as a data URL on the action event so
+   * the live timeline can render a visual confirmation. Capped at 240×240
+   * to keep payloads small (~5–25 KB base64).
+   */
+  private async captureElementThumbnail(
+    actionId: string,
+    boundingBox: { x: number; y: number; width: number; height: number },
+  ): Promise<void> {
+    if (!this.page) return;
+    try {
+      const padding = 8;
+      const maxSide = 240;
+      const x = Math.max(0, boundingBox.x - padding);
+      const y = Math.max(0, boundingBox.y - padding);
+      const width = Math.max(1, Math.min(boundingBox.width + padding * 2, maxSide));
+      const height = Math.max(1, Math.min(boundingBox.height + padding * 2, maxSide));
+      const buf = await this.page.screenshot({
+        clip: { x, y, width, height },
+        animations: 'disabled',
+        timeout: 500,
+      });
+      const event = this.events.find(e => e.data.actionId === actionId);
+      if (!event) return;
+      event.data.thumbnailPath = `data:image/png;base64,${buf.toString('base64')}`;
+      if (!this.pendingEvents.includes(event)) {
+        this.pendingEvents.push(event);
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
   private flushPendingEvents(): void {
     if (this.pendingEvents.length > 0 && this.onEvent) {
       this.onEvent([...this.pendingEvents]);
       this.pendingEvents = [];
+    }
+  }
+
+  /**
+   * User-initiated selector promotion from the timeline UI. Updates the
+   * action event's chosenSelector + autoRepaired flag and re-queues for
+   * emission so the generated test code at stop-time uses the new selector.
+   * Only updates events that are still in committed state with the same
+   * actionId — older sessions or stale IDs are silently ignored.
+   */
+  promoteSelector(actionId: string, selectorValue: string): void {
+    const event = this.events.find(e => e.data.actionId === actionId);
+    if (!event) return;
+    if (!event.verification) {
+      event.verification = { syntaxValid: true };
+    }
+    event.verification.chosenSelector = selectorValue;
+    event.verification.autoRepaired = true;
+    if (!this.pendingEvents.includes(event)) {
+      this.pendingEvents.push(event);
     }
   }
 

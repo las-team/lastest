@@ -41,11 +41,36 @@ async function syncGithubAccount(account: { userId: string; accessToken?: string
   }
 }
 
+// B4: cookie attributes need to permit the auth cookie to ride along on the
+// EB recorder iframe / WebSocket handshake. SameSite=Lax (the better-auth
+// default) drops the cookie on cross-site WS upgrade, which surfaces as a
+// 403 on /api/embedded/stream during a Recording Meta run.
+//
+// We honour env overrides so prod can opt into SameSite=None + Secure +
+// shared cookie domain (`.lastest.cloud`) without a code change. The defaults
+// stay dev-friendly (lax / non-secure / no domain) so localhost still works.
+const COOKIE_SAMESITE = (process.env.BETTER_AUTH_COOKIE_SAMESITE as 'strict' | 'lax' | 'none' | undefined) || 'lax';
+const COOKIE_SECURE = process.env.BETTER_AUTH_COOKIE_SECURE
+  ? process.env.BETTER_AUTH_COOKIE_SECURE === 'true'
+  : process.env.NODE_ENV === 'production';
+const COOKIE_DOMAIN = process.env.BETTER_AUTH_COOKIE_DOMAIN || undefined;
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
     : undefined,
+
+  advanced: {
+    defaultCookieAttributes: {
+      sameSite: COOKIE_SAMESITE,
+      secure: COOKIE_SECURE,
+      ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
+    },
+    ...(COOKIE_DOMAIN
+      ? { crossSubDomainCookies: { enabled: true, domain: COOKIE_DOMAIN } }
+      : {}),
+  },
 
   database: drizzleAdapter(db, {
     provider: "pg",

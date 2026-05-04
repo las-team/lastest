@@ -96,6 +96,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     headlessMode: 'true' as const,
     navigationTimeout: 30000,
     actionTimeout: 5000,
+    selectorTimeoutMs: 3000,
     pointerGestures: false,
     cursorFPS: 30,
     cursorPlaybackSpeed: 1,
@@ -509,6 +510,7 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     customWebhookUrl: null,
     customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
     customWebhookHeaders: null,
+    issueTrackerProvider: DEFAULT_NOTIFICATION_SETTINGS.issueTrackerProvider,
     createdAt: null,
     updatedAt: null,
   };

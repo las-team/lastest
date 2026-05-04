@@ -32,11 +32,16 @@ import {
   getTestFixtures,
   getGoogleSheetsDataSources,
   getCsvDataSources,
+  getSelectorStatsForTest,
 } from '@/lib/db/queries';
-import { resolveVarReferences, pickRowsForVariables, resolveAssignedValues } from '@/lib/vars/resolver';
+import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
+import { resolveVarReferencesAsync, pickRowsForVariables, resolveAssignedValuesAsync, type AIVarRuntime } from '@/lib/vars/resolver';
 import { resolveSheetReferences } from '@/lib/google-sheets/resolver';
 import { resolveCsvReferences } from '@/lib/csv/resolver';
-import type { GoogleSheetsDataSource, CsvDataSource } from '@/lib/db/schema';
+import type { GoogleSheetsDataSource, CsvDataSource, TestVariable } from '@/lib/db/schema';
+import { getAISettings } from '@/lib/db/queries';
+import { generateWithAI, type AIProviderConfig } from '@/lib/ai';
+import { buildAIVarPrompt, sanitizeAIVarOutput } from '@/lib/vars/ai-presets';
 /**
  * Generate SHA256 hash of test code for integrity verification.
  */
@@ -45,15 +50,78 @@ function hashCode(code: string): string {
 }
 
 /**
+ * Build an AI runtime for resolving `ai-generated` variables at run time. Returns
+ * `null` when the configured provider has no usable credentials — callers
+ * (resolveSingleVarAsync) then fall back to the cached value or fail clearly.
+ */
+async function buildAIVarRuntime(repositoryId?: string | null): Promise<AIVarRuntime | null> {
+  const settings = await getAISettings(repositoryId ?? undefined);
+  if (!settings) return null;
+
+  const provider = settings.provider as AIProviderConfig['provider'];
+  // Skip the local CLI provider for AI vars: it's the default fallback when
+  // nothing has been configured, and silently spawning a CLI subprocess per
+  // variable per run would be slow and fragile in CI / containers.
+  if (provider === 'claude-cli') return null;
+  if (provider === 'openrouter' && !settings.openrouterApiKey) return null;
+  if (provider === 'anthropic' && !settings.anthropicApiKey) return null;
+  if (provider === 'openai' && !settings.openaiApiKey) return null;
+  if (provider === 'ollama' && !settings.ollamaModel) return null;
+
+  const config: AIProviderConfig = {
+    provider,
+    openrouterApiKey: settings.openrouterApiKey ?? undefined,
+    openrouterModel: settings.openrouterModel ?? undefined,
+    agentSdkPermissionMode: (settings.agentSdkPermissionMode ?? undefined) as AIProviderConfig['agentSdkPermissionMode'],
+    agentSdkModel: settings.agentSdkModel ?? undefined,
+    agentSdkWorkingDir: settings.agentSdkWorkingDir ?? undefined,
+    ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
+    ollamaModel: settings.ollamaModel ?? undefined,
+    anthropicApiKey: settings.anthropicApiKey ?? undefined,
+    anthropicModel: settings.anthropicModel ?? undefined,
+    openaiApiKey: settings.openaiApiKey ?? undefined,
+    openaiModel: settings.openaiModel ?? undefined,
+    customInstructions: settings.customInstructions ?? undefined,
+  };
+
+  return {
+    async generate(variable: TestVariable): Promise<string> {
+      const prompt = buildAIVarPrompt(variable);
+      if (!prompt) throw new Error(`AI variable "${variable.name}" has no prompt`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20_000);
+      try {
+        const raw = await generateWithAI(
+          config,
+          prompt,
+          'You generate short, realistic test data values. Output the value verbatim — no quotes, no labels, no commentary.',
+          {
+            actionType: 'generate_var_value',
+            repositoryId: repositoryId ?? undefined,
+            signal: controller.signal,
+          },
+        );
+        const cleaned = sanitizeAIVarOutput(raw);
+        if (!cleaned) throw new Error(`AI returned empty value for "${variable.name}"`);
+        return cleaned;
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
+/**
  * Resolve {{sheet:...}}, {{csv:...}}, and {{var:...}} references in test code
  * before sending to the runner. Also returns the extract-mode TestVariable
  * specs the runner should pull from page fields after the test body completes.
  */
-function resolveTestCodeForRunner(
+async function resolveTestCodeForRunner(
   test: Test,
   gsheetSources: GoogleSheetsDataSource[],
   csvSources: CsvDataSource[],
-): {
+  ai: AIVarRuntime | null,
+): Promise<{
   resolvedCode: string;
   extractVariables: Array<{
     name: string;
@@ -67,7 +135,13 @@ function resolveTestCodeForRunner(
   /** Updated cursor map for increment-mode vars — caller writes back to
    *  tests.variableRowCursors. Empty when nothing changed. */
   nextRowCursors: Record<string, number>;
-} {
+  /** Newly generated AI-var values keyed by TestVariable.id — caller writes
+   *  back to tests.aiVarLastValues. Empty when no AI calls happened. */
+  nextAiLastValues: Record<string, string>;
+  /** Pre-flight resolution errors that should fail the run before sending
+   *  it to the runner (e.g. AI failure with no cached fallback). */
+  preflightErrors: string[];
+}> {
   let code = test.code;
   // Direct {{sheet:...}} references
   if (gsheetSources.length > 0 && code.includes('{{sheet:')) {
@@ -87,13 +161,31 @@ function resolveTestCodeForRunner(
     csvSources,
     test.variableRowCursors ?? null,
   );
+
+  const aiCache = test.aiVarLastValues ?? undefined;
+  const preflightErrors: string[] = [];
+  let nextAiLastValues: Record<string, string> = {};
+
   // {{var:...}} references — resolve via TestVariables (assign-mode only)
   if (test.variables && test.variables.length > 0 && code.includes('{{var:')) {
-    const r = resolveVarReferences(code, test.variables, gsheetSources, csvSources, rowPicks);
+    const r = await resolveVarReferencesAsync(code, test.variables, gsheetSources, csvSources, rowPicks, ai, aiCache);
     code = r.resolvedCode;
+    nextAiLastValues = { ...nextAiLastValues, ...r.nextLastValues };
+    if (r.hardError) {
+      preflightErrors.push(...r.errors);
+    }
   }
 
-  const assignedVariables = resolveAssignedValues(test.variables, gsheetSources, csvSources, rowPicks);
+  const { values: assignedVariables, nextLastValues: assignedNextLastValues } = await resolveAssignedValuesAsync(
+    test.variables,
+    gsheetSources,
+    csvSources,
+    rowPicks,
+    ai,
+    aiCache,
+    nextAiLastValues,
+  );
+  nextAiLastValues = { ...nextAiLastValues, ...assignedNextLastValues };
 
   const extractVariables = (test.variables ?? [])
     .filter(v => v.mode === 'extract' && !!v.targetSelector)
@@ -103,7 +195,14 @@ function resolveTestCodeForRunner(
       attribute: v.attribute,
     }));
 
-  return { resolvedCode: code, extractVariables, assignedVariables, nextRowCursors: nextCursors };
+  return {
+    resolvedCode: code,
+    extractVariables,
+    assignedVariables,
+    nextRowCursors: nextCursors,
+    nextAiLastValues,
+    preflightErrors,
+  };
 }
 
 /**
@@ -148,6 +247,7 @@ export interface ExecutionOptions {
   forceVideoRecording?: boolean; // Force video recording for this run regardless of global setting
   jobId?: string; // Background job ID for cancellation checks
   setupInfo?: { code: string; setupId: string }; // Setup code to run on remote runner before tests
+  cursorPlaybackSpeedOverride?: number; // One-shot per-call override (e.g. recording preview replay at 2x); takes precedence over per-test/global settings
 }
 
 export interface ExecutionProgress {
@@ -354,6 +454,15 @@ async function executeViaRunner(
   // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
   const gsheetSources = options.repositoryId ? await getGoogleSheetsDataSources(options.repositoryId) : [];
   const csvSources = options.repositoryId ? await getCsvDataSources(options.repositoryId) : [];
+  // Build the AI runtime once per run. Returns null when no provider is
+  // configured — resolveSingleVarAsync then falls back to the cached value
+  // or surfaces a clear preflight error.
+  let aiVarRuntime: AIVarRuntime | null = null;
+  try {
+    aiVarRuntime = await buildAIVarRuntime(options.repositoryId);
+  } catch (err) {
+    console.warn('[executor] Failed to build AI var runtime:', err);
+  }
 
   // Track in-flight tests: commandId → { testId, testName, startTime }
   const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
@@ -447,7 +556,24 @@ async function executeViaRunner(
 
       // Resolve {{sheet:}}, {{csv:}}, {{var:}} tokens before sending. Hash the resolved code
       // so the runner's integrity check matches what it actually executes.
-      const { resolvedCode, extractVariables, assignedVariables, nextRowCursors } = resolveTestCodeForRunner(test, gsheetSources, csvSources);
+      const { resolvedCode, extractVariables, assignedVariables, nextRowCursors, nextAiLastValues, preflightErrors } =
+        await resolveTestCodeForRunner(test, gsheetSources, csvSources, aiVarRuntime);
+
+      // Hard pre-flight failure — e.g. an AI variable referenced in the code
+      // could not be resolved AND has no cached fallback. Don't ship the test
+      // to the runner with unresolved {{var:...}} tokens; mark it failed
+      // immediately with a clear error message.
+      if (preflightErrors.length > 0) {
+        results.push({
+          testId: test.id,
+          status: 'failed',
+          durationMs: 0,
+          screenshots: [],
+          errorMessage: `Variable resolution failed: ${preflightErrors.join('; ')}`,
+        });
+        completedCount++;
+        continue;
+      }
 
       // Persist the updated row cursors so increment-mode vars walk forward
       // across runs. Best-effort — never fail the run on a cursor write fail.
@@ -461,12 +587,43 @@ async function executeViaRunner(
         }
       }
 
+      // Persist newly generated AI-var values so 'fixed' refresh-mode reuses
+      // them and 'random' mode has a fallback when AI later becomes
+      // unavailable. Best-effort — never fail the run on a cache write.
+      if (Object.keys(nextAiLastValues).length > 0) {
+        try {
+          const merged = { ...(test.aiVarLastValues ?? {}), ...nextAiLastValues };
+          await db.update(testsTable)
+            .set({ aiVarLastValues: merged })
+            .where(eq(testsTable.id, test.id));
+        } catch (err) {
+          console.warn(`[executor] Failed to persist aiVarLastValues for test ${test.id}:`, err);
+        }
+      }
+
       // Default-ON `all_steps_executed`: only off when the user explicitly
       // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis
       // logic in src/lib/execution/evaluation.ts.
       const failOnRuntimeError = !(test.stepCriteria ?? []).some(c =>
         c.rules.some(r => r.kind === 'all_steps_executed' && r.severity === 'warn'),
       );
+
+      // Parse steps from the resolved code so the runner can emit per-step
+      // lifecycle events keyed to the same indices the host UI uses. Compute
+      // here (single source of truth) rather than re-deriving on the runner.
+      const resolvedBody = extractTestBody(resolvedCode) ?? '';
+      const parsedSteps = resolvedBody ? parseSteps(resolvedBody) : [];
+
+      // Fetch all selector_stats rows for this test so the runner / EB can
+      // sort fallback candidates by historical success without a per-action
+      // DB round-trip. Best-effort — first run of any test sees an empty
+      // list, runner falls back to the captured order.
+      let selectorStatsForRunner: Awaited<ReturnType<typeof getSelectorStatsForTest>> = [];
+      try {
+        selectorStatsForRunner = await getSelectorStatsForTest(test.id);
+      } catch (err) {
+        console.warn(`[executor] Failed to load selector_stats for test ${test.id}:`, err);
+      }
 
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
@@ -480,7 +637,7 @@ async function executeViaRunner(
         viewport: test.viewportOverride || viewport,
         storageState: options.setupContext?.storageState,
         setupVariables: options.setupContext?.variables,
-        cursorPlaybackSpeed: pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
+        cursorPlaybackSpeed: options.cursorPlaybackSpeedOverride ?? pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
         consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
         networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
@@ -496,6 +653,13 @@ async function executeViaRunner(
         lockViewportToRecording: options.playwrightSettings?.lockViewportToRecording ?? false,
         extractVariables: extractVariables.length > 0 ? extractVariables : undefined,
         failOnRuntimeError,
+        steps: parsedSteps.length > 0 ? parsedSteps.map(s => ({
+          id: s.id,
+          label: s.label,
+          lineStart: s.lineStart,
+          lineEnd: s.lineEnd,
+          type: s.type,
+        })) : undefined,
         // Pass the host-parsed assertions so the runner can wrap each
         // `expect(...)` line with a structured pass/fail recorder. The
         // criteria evaluator on the host keys on these ids to fail the test
@@ -505,6 +669,11 @@ async function executeViaRunner(
           codeLineStart: a.codeLineStart,
           codeLineEnd: a.codeLineEnd,
         })),
+        selectorStats: selectorStatsForRunner.length > 0 ? selectorStatsForRunner : undefined,
+        selectorTimeoutMs:
+          pwOverrides?.selectorTimeoutMs
+          ?? options.playwrightSettings?.selectorTimeoutMs
+          ?? 3000,
       });
 
       // Queue command to DB
@@ -767,7 +936,7 @@ async function executeViaPoolWorkers(
     const deadline = Date.now() + claimMaxWaitMs;
     let wait = 500;
     while (Date.now() < deadline) {
-      const c = await claimOrProvisionPoolEB();
+      const c = await claimOrProvisionPoolEB({ purpose: 'build' });
       if (c) return c;
       await new Promise((r) => setTimeout(r, wait));
       wait = Math.min(wait * 2, 5000);
@@ -822,7 +991,11 @@ async function executeViaPoolWorkers(
         break;
       }
       everClaimed = true;
-      await recordActualRunner(eb.runnerId);
+      // Don't record the setup EB as the job's actualRunnerId. The recording
+      // UI polls actualRunnerId to find which EB to attach its BrowserViewer
+      // to; if it locks on the setup EB, that EB gets released as soon as
+      // setup finishes and the viewer ends up with a dead/cleared streamUrl.
+      // The test EB (recorded in runOneTest) is the only user-visible runner.
       console.log(`[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for broadcast setup (attempt ${attempt}/${MAX_EB_ATTEMPTS})`);
       try {
         const setupResult = await executeSetupViaRunner(
@@ -877,22 +1050,30 @@ async function executeViaPoolWorkers(
         screenshots: [],
         errorMessage: `Broadcast setup failed: ${setupErr}`,
       }));
+      for (const r of failed) {
+        try { await onResult?.(r); } catch (err) { console.error('[Dispatch] onResult threw for broadcast-setup-failed test:', err); }
+      }
       return everClaimed ? failed : null;
     }
   }
+
+  const fireResult = async (r: TestRunResult): Promise<TestRunResult> => {
+    try { await onResult?.(r); } catch (err) { console.error('[Dispatch] onResult threw:', err); }
+    return r;
+  };
 
   const runOneTest = async (test: Test): Promise<TestRunResult> => {
     let lastError: string | undefined;
     for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
       const eb = await claimWithRetry();
       if (!eb) {
-        return {
+        return fireResult({
           testId: test.id,
           status: 'setup_failed',
           durationMs: 0,
           screenshots: [],
           errorMessage: `Could not claim an EB within ${claimMaxWaitMs}ms`,
-        };
+        });
       }
       everClaimed = true;
       await recordActualRunner(eb.runnerId);
@@ -938,24 +1119,24 @@ async function executeViaPoolWorkers(
           console.warn(`[Dispatch] Dead-EB exception on attempt ${attempt} for "${test.name}", retrying: ${msg}`);
           continue;
         }
-        return {
+        return fireResult({
           testId: test.id,
           status: 'failed',
           durationMs: 0,
           screenshots: [],
           errorMessage: msg,
-        };
+        });
       } finally {
         try { await releasePoolEB(eb.runnerId); } catch { /* ignore */ }
       }
     }
-    return {
+    return fireResult({
       testId: test.id,
       status: 'setup_failed',
       durationMs: 0,
       screenshots: [],
       errorMessage: lastError || `Exhausted ${MAX_EB_ATTEMPTS} EB attempts`,
-    };
+    });
   };
 
   console.log(`[Dispatch] Starting build run=${runId} — ${tests.length} tests, concurrency=${maxParallelEBs}`);
@@ -1001,13 +1182,15 @@ async function executeViaPoolWorkers(
     if (r) {
       results.push(r);
     } else {
-      results.push({
+      const missing: TestRunResult = {
         testId: t.id,
-        status: 'setup_failed' as const,
+        status: 'setup_failed',
         durationMs: 0,
         screenshots: [],
         errorMessage: 'Dispatch ended without recording a result',
-      });
+      };
+      try { await onResult?.(missing); } catch (err) { console.error('[Dispatch] onResult threw for missing-result test:', err); }
+      results.push(missing);
     }
   }
 

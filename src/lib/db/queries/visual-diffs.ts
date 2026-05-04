@@ -69,6 +69,8 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       networkRequests: testResults.networkRequests,
       downloads: testResults.downloads,
       browser: visualDiffs.browser,
+      issueUrl: visualDiffs.issueUrl,
+      issueProvider: visualDiffs.issueProvider,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
@@ -105,6 +107,10 @@ export async function updateVisualDiff(id: string, data: Partial<NewVisualDiff>)
 
 export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVisualDiff>) {
   await db.update(visualDiffs).set(data).where(inArray(visualDiffs.id, ids));
+}
+
+export async function setDiffIssue(id: string, issueUrl: string, issueProvider: string) {
+  await db.update(visualDiffs).set({ issueUrl, issueProvider }).where(eq(visualDiffs.id, id));
 }
 
 export async function getAIDiffSummaryForBuild(buildId: string) {
@@ -339,9 +345,17 @@ export async function getStepLabelsForTest(testId: string): Promise<string[]> {
     .sort();
 }
 
-// Ignore Regions
-export async function getIgnoreRegions(testId: string) {
-  return db.select().from(ignoreRegions).where(eq(ignoreRegions.testId, testId));
+// Ignore Regions (per-screenshot mask, mirrors focusRegions)
+export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
+  return db
+    .select()
+    .from(ignoreRegions)
+    .where(
+      and(
+        eq(ignoreRegions.testId, testId),
+        stepLabel === null ? isNull(ignoreRegions.stepLabel) : eq(ignoreRegions.stepLabel, stepLabel),
+      ),
+    );
 }
 
 export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
@@ -352,6 +366,11 @@ export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
 
 export async function deleteIgnoreRegion(id: string) {
   await db.delete(ignoreRegions).where(eq(ignoreRegions.id, id));
+}
+
+export async function getIgnoreRegionById(id: string) {
+  const [row] = await db.select().from(ignoreRegions).where(eq(ignoreRegions.id, id));
+  return row;
 }
 
 // Focus Regions (per-screenshot positive mask)
@@ -480,7 +499,7 @@ export interface RouteWithContext {
   routerType: string | null;
   functionalAreaId: string | null;
   functionalAreaName: string | null;
-  functionalAreaDescription: string | null;
+  functionalAreaPlan: string | null;
   testSuggestions: string[];
 }
 
@@ -496,7 +515,7 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
       routerType: routes.routerType,
       functionalAreaId: routes.functionalAreaId,
       functionalAreaName: functionalAreas.name,
-      functionalAreaDescription: functionalAreas.description,
+      functionalAreaPlan: functionalAreas.agentPlan,
     })
     .from(routes)
     .leftJoin(functionalAreas, eq(routes.functionalAreaId, functionalAreas.id))

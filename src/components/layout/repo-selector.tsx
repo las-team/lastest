@@ -14,6 +14,8 @@ import { cn } from '@/lib/utils';
 import { selectRepo, createLocalRepo } from '@/server/actions/repos';
 import type { Repository } from '@/lib/db/schema';
 
+export type RepositoryWithTestCount = Repository & { testCount: number };
+
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
   return (
@@ -77,13 +79,13 @@ export function CreateLocalRepoButton() {
 }
 
 interface RepoSelectorProps {
-  initialRepos?: Repository[];
+  initialRepos?: RepositoryWithTestCount[];
   initialSelected?: Repository | null;
 }
 
 export function RepoSelector({ initialRepos = [], initialSelected = null }: RepoSelectorProps) {
   const router = useRouter();
-  const [repos, setRepos] = useState<Repository[]>(initialRepos);
+  const [repos, setRepos] = useState<RepositoryWithTestCount[]>(initialRepos);
   const [selected, setSelected] = useState<Repository | null>(initialSelected);
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
@@ -106,9 +108,13 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
   }, [open]);
 
   const filtered = useMemo(() => {
-    if (!search) return repos;
     const q = search.toLowerCase();
-    return repos.filter((r) => r.fullName.toLowerCase().includes(q));
+    const list = search ? repos.filter((r) => r.fullName.toLowerCase().includes(q)) : repos;
+    return [...list].sort((a, b) => {
+      const aHas = a.testCount > 0 ? 1 : 0;
+      const bHas = b.testCount > 0 ? 1 : 0;
+      return bHas - aHas;
+    });
   }, [repos, search]);
 
   const handleSelect = (repoId: string) => {
@@ -149,7 +155,7 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
             className="h-9 border-0 shadow-none focus-visible:ring-0"
           />
         </div>
-        <div className="max-h-60 overflow-y-auto p-1">
+        <div className="max-h-96 overflow-y-auto p-1">
           {filtered.map((repo) => (
             <button
               key={repo.id}
@@ -162,7 +168,7 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
             >
               <Check className={cn('h-3.5 w-3.5 shrink-0', selected?.id === repo.id ? 'opacity-100' : 'opacity-0')} />
               <RepoIcon provider={repo.provider} className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{repo.fullName}</span>
+              <span className={cn('truncate', repo.testCount > 0 && 'font-semibold')}>{repo.fullName}</span>
             </button>
           ))}
           {filtered.length === 0 && repos.length > 0 && (

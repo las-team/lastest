@@ -47,6 +47,7 @@ import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
+import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 
 export default async function SettingsPage({
   searchParams,
@@ -551,6 +552,30 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
 
 
             </div>
+          )}
+
+          {/* Danger Zone */}
+          {currentUser && (
+            <Card id="danger-zone" className="border-destructive/40">
+              <CardHeader>
+                <CardTitle className="text-destructive">Danger Zone</CardTitle>
+                <CardDescription>
+                  Permanently delete your account and associated data. This cannot be undone.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Delete account</p>
+                  <p className="text-xs text-muted-foreground">
+                    You will need to type your{' '}
+                    {currentUser.name ? 'name' : 'email'} to confirm.
+                  </p>
+                </div>
+                <DeleteAccountDialog
+                  expectedConfirmation={(currentUser.name || currentUser.email).trim()}
+                />
+              </CardContent>
+            </Card>
           )}
 
           {/* Version */}

@@ -29,6 +29,9 @@ import {
   clearLastCompletedSession,
 } from '@/server/actions/recording';
 import { listStorageStates, saveStorageState } from '@/server/actions/storage-states';
+import { runTests, getJobStatus } from '@/server/actions/runs';
+import { useIsMobile } from '@/lib/hooks/use-is-mobile';
+import { deleteTest } from '@/server/actions/tests';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,18 +48,12 @@ import {
   Loader2,
   ExternalLink,
   Clock,
-  MousePointer,
-  Navigation,
   Settings2,
   CheckCircle2,
   ChevronDown,
-  MousePointerClick,
-  Eye,
-  FormInput,
   ListFilter,
   AlertTriangle,
   Check,
-  Keyboard,
   ShieldCheck,
   Play,
   Pause,
@@ -74,6 +71,11 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { toast } from 'sonner';
 import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recording-setup-picker';
 import { RecordingTutorialOverlay } from '@/components/recording-tutorial/recording-tutorial-overlay';
+import { StepCard } from '@/components/recording/step-card';
+import { TraceScrub } from '@/components/recording/trace-scrub';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { track } from '@/lib/analytics/umami';
+import { Events } from '@/lib/analytics/events';
 
 interface SetupStepInfo {
   id: string;
@@ -312,10 +314,19 @@ interface ActionSelector {
   value: string;
 }
 
+interface SelectorMatch {
+  type: string;
+  value: string;
+  count: number;
+}
+
 interface VerificationStatus {
   syntaxValid: boolean;
   domVerified?: boolean;
   lastChecked?: number;
+  selectorMatches?: SelectorMatch[];
+  chosenSelector?: string;
+  autoRepaired?: boolean;
 }
 
 type KeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
@@ -334,6 +345,10 @@ interface RecordingEvent {
     url?: string;
     relativePath?: string;
     screenshotPath?: string;
+    /** data: URL for the post-action element thumbnail captured by the
+     *  recorder. Populated late via verificationUpdates — may be undefined
+     *  if the screenshot timed out or the user nav'd before it landed. */
+    thumbnailPath?: string;
     assertionType?: string;
     elementAssertion?: {
       type: string;
@@ -409,6 +424,8 @@ export function RecordingClient({
   // Setup form state - pre-fill from rerecordTest if available
   const [url, setUrl] = useState(rerecordTest?.targetUrl || defaultBaseUrl || 'https://');
   const [testName, setTestName] = useState(rerecordTest?.name || '');
+  const [testNameMissing, setTestNameMissing] = useState(false);
+  const testNameInputRef = useRef<HTMLInputElement>(null);
   const [areaId, setAreaId] = useState<string>(rerecordTest?.functionalAreaId || '');
   const [newAreaName, setNewAreaName] = useState('');
   const [areas, setAreas] = useState(initialAreas);
@@ -425,10 +442,38 @@ export function RecordingClient({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
+  const [savedTestId, setSavedTestId] = useState<string | null>(null);
+  const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'finished' | 'error'>('idle');
+  const [playbackStreamUrl, setPlaybackStreamUrl] = useState<string | null>(null);
+  const [playbackJobId, setPlaybackJobId] = useState<string | null>(null);
+  const [playbackFrameSize, setPlaybackFrameSize] = useState<{ width: number; height: number } | null>(null);
+  const autoTriggeredRef = useRef(false);
+  const isMobile = useIsMobile();
   const [timelineOpen, setTimelineOpen] = useState(true);
+  // On mobile, close the timeline by default once we know we're on a small screen.
+  useEffect(() => {
+    if (isMobile) setTimelineOpen(false);
+  }, [isMobile]);
   const [isRecordingFullscreen, setIsRecordingFullscreen] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const recordingLayoutRef = useRef<HTMLDivElement>(null);
+
+  // Optimistic update for selector promotion from a step card. The runner
+  // round-trip will re-emit the event with the same selector chosen, so
+  // this just shortens the perceived gap until the timeline reflects it.
+  const handlePromoteOptimistic = useCallback((actionId: string, selectorValue: string) => {
+    setEvents(prev => {
+      const updated = [...prev];
+      const event = updated.find(e => e.data.actionId === actionId);
+      if (!event) return prev;
+      event.verification = {
+        ...(event.verification ?? { syntaxValid: true }),
+        chosenSelector: selectorValue,
+        autoRepaired: true,
+      };
+      return updated;
+    });
+  }, []);
 
   // Insert-Wait popover state
   const [waitPopoverOpen, setWaitPopoverOpen] = useState(false);
@@ -442,7 +487,18 @@ export function RecordingClient({
   useEffect(() => {
     if (step !== 'recording') return;
 
+    // Guard against overlapping polls. setInterval fires on a fixed clock —
+    // when getRecordingStatus takes longer than the interval (DB busy,
+    // large event payloads, etc.) callbacks pile up and React batches the
+    // resulting setEvents(prev => […, …event]) calls, causing the same
+    // sequence to be appended multiple times. Symptom: 6× duplicated rows
+    // for a single click. Skip the tick when one is already in flight; the
+    // next tick will pick up any new state.
+    let pollInFlight = false;
+
     const pollInterval = setInterval(async () => {
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const status = await getRecordingStatus(repositoryId, lastSequenceRef.current);
 
@@ -475,41 +531,58 @@ export function RecordingClient({
           setIsPaused((status as Record<string, unknown>).isPaused as boolean);
         }
 
-        // Apply verification updates to existing events
+        // Apply late updates (verification settled, autorepair fired,
+        // thumbnail came back) to events the timeline has already rendered.
+        // Widened from the prior verified-only signal so the selector pill
+        // and element thumbnail can refresh without a full re-fetch.
         if (status.verificationUpdates && status.verificationUpdates.length > 0) {
           setEvents(prev => {
             const updated = [...prev];
             for (const update of status.verificationUpdates) {
               const event = updated.find(e => e.data.actionId === update.actionId);
-              if (event && event.verification) {
-                event.verification = {
-                  ...event.verification,
-                  domVerified: update.verified,
-                  lastChecked: Date.now(),
-                };
+              if (!event) continue;
+              event.verification = {
+                ...(event.verification ?? { syntaxValid: true }),
+                domVerified: update.verified,
+                lastChecked: Date.now(),
+                ...(update.selectorMatches !== undefined ? { selectorMatches: update.selectorMatches } : {}),
+                ...(update.chosenSelector !== undefined ? { chosenSelector: update.chosenSelector } : {}),
+                ...(update.autoRepaired !== undefined ? { autoRepaired: update.autoRepaired } : {}),
+              };
+              if (update.thumbnailPath !== undefined) {
+                event.data = { ...event.data, thumbnailPath: update.thumbnailPath };
               }
             }
             return updated;
           });
         }
 
-        // Process new events
+        // Process new events. Re-emissions (verification settled,
+        // thumbnail attached) reuse their original sequence — replace in
+        // place rather than append so timing races (overlapping polls,
+        // out-of-order responses) can't grow the timeline unboundedly.
         if (status.events.length > 0) {
           setEvents(prev => {
-            // Replace any preview events with committed versions or add new ones
             const newEvents = [...prev];
             for (const event of status.events) {
-              // Skip cursor-move events for display (too noisy)
               if (event.type === 'cursor-move') continue;
 
-              // For hover-preview, replace the last one if exists
+              // hover-preview events get fresh sequences each time but the
+              // recorder always replaces the previous preview rather than
+              // accumulating — keep that splice-by-type semantic.
               if (event.type === 'hover-preview') {
                 const lastIdx = newEvents.findLastIndex(e => e.type === 'hover-preview');
-                if (lastIdx !== -1) {
-                  newEvents.splice(lastIdx, 1);
-                }
+                if (lastIdx !== -1) newEvents.splice(lastIdx, 1);
+                newEvents.push(event);
+                continue;
               }
-              newEvents.push(event);
+
+              const existingIdx = newEvents.findIndex(e => e.sequence === event.sequence);
+              if (existingIdx >= 0) {
+                newEvents[existingIdx] = event;
+              } else {
+                newEvents.push(event);
+              }
             }
             return newEvents;
           });
@@ -525,14 +598,23 @@ export function RecordingClient({
         }
       } catch (err) {
         console.error('Failed to poll recording status:', err);
+      } finally {
+        pollInFlight = false;
       }
-    }, 500); // Poll every 500ms for better responsiveness
+    }, 150); // 150 ms keeps perceived row-appearance latency under the
+            // Doherty 400 ms responsiveness threshold (paired with the
+            // 150 ms recorder batch flush on the runner/EB side).
 
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
 
   const handleStartRecording = async () => {
-    if (!url || !testName) return;
+    if (!testName.trim()) {
+      setTestNameMissing(true);
+      testNameInputRef.current?.focus();
+      return;
+    }
+    if (!url) return;
 
     setIsLoading(true);
     setError(null);
@@ -543,7 +625,6 @@ export function RecordingClient({
         const area = await getOrCreateFunctionalArea(newAreaName);
         setAreas([...areas, {
           ...area,
-          description: area.description ?? null,
           repositoryId: area.repositoryId ?? null,
           parentId: area.parentId ?? null,
           isRouteFolder: area.isRouteFolder ?? null,
@@ -752,42 +833,168 @@ export function RecordingClient({
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
+  const persistRecording = async (): Promise<string | null> => {
+    if (isRerecording && rerecordTest) {
+      await updateRerecordedTest({
+        testId: rerecordTest.id,
+        code: generatedCode,
+        targetUrl: url,
+        viewportWidth: settings.viewportWidth ?? 1280,
+        viewportHeight: settings.viewportHeight ?? 720,
+      });
+      return rerecordTest.id;
+    }
+    const test = await saveRecordedTest({
+      name: testName,
+      functionalAreaId: areaId || null,
+      targetUrl: url,
+      code: generatedCode,
+      repositoryId,
+      requiredCapabilities,
+      viewportWidth: settings.viewportWidth ?? 1280,
+      viewportHeight: settings.viewportHeight ?? 720,
+      extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
+      skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
+      domSnapshot,
+    });
+    track(Events.test_recorded, {
+      testId: test.id,
+      repoId: repositoryId,
+      hasArea: areaId ? 'true' : 'false',
+    });
+    return test.id;
+  };
+
   const handleSaveTest = async () => {
     setIsLoading(true);
     try {
-      if (isRerecording && rerecordTest) {
-        // Update existing test with new code
-        await updateRerecordedTest({
-          testId: rerecordTest.id,
-          code: generatedCode,
-          targetUrl: url,
-          viewportWidth: settings.viewportWidth ?? 1280,
-          viewportHeight: settings.viewportHeight ?? 720,
-        });
-        router.push(`/tests?test=${encodeURIComponent(rerecordTest.id)}`);
-      } else {
-        // Create new test
-        const test = await saveRecordedTest({
-          name: testName,
-          functionalAreaId: areaId || null,
-          targetUrl: url,
-          code: generatedCode,
-          repositoryId,
-          requiredCapabilities,
-          viewportWidth: settings.viewportWidth ?? 1280,
-          viewportHeight: settings.viewportHeight ?? 720,
-          extraSetupSteps: runSetupBeforeRecording && extraSetupSteps.length > 0 ? extraSetupSteps : undefined,
-          skippedDefaultStepIds: runSetupBeforeRecording && skippedDefaultStepIds.size > 0 ? Array.from(skippedDefaultStepIds) : undefined,
-          domSnapshot,
-        });
-        router.push(`/tests?test=${encodeURIComponent(test.id)}`);
+      const id = await persistRecording();
+      if (id) {
+        setSavedTestId(id);
+        router.push(`/tests?test=${encodeURIComponent(id)}`);
       }
     } catch (error) {
       console.error('Failed to save test:', error);
+      toast.error('Failed to save test');
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Auto-save the recording and immediately fire a headed 2x replay so the
+  // user can watch the test play back while reviewing the generated code.
+  // Triggered whether the user clicked Stop or the EB session ended on its own.
+  useEffect(() => {
+    if (step !== 'saving') return;
+    if (autoTriggeredRef.current) return;
+    if (!generatedCode) return;
+    autoTriggeredRef.current = true;
+
+    (async () => {
+      setAutoPlayStatus('saving');
+      let id: string | null = null;
+      try {
+        id = await persistRecording();
+      } catch (err) {
+        console.error('Auto-save after recording failed:', err);
+        toast.error('Could not save the recorded test — try Save Test below.');
+        setAutoPlayStatus('error');
+        autoTriggeredRef.current = false;
+        return;
+      }
+      if (!id) {
+        setAutoPlayStatus('error');
+        autoTriggeredRef.current = false;
+        return;
+      }
+      setSavedTestId(id);
+      setAutoPlayStatus('playing');
+      try {
+        const result = await runTests([id], repositoryId, /*headless*/ false, 'auto', undefined, /*cursorPlaybackSpeedOverride*/ 2);
+        if (result?.jobId) setPlaybackJobId(result.jobId);
+        toast.success('Recording saved · headed 2x replay started');
+      } catch (err) {
+        console.error('Auto-replay after recording failed:', err);
+        toast.error('Saved, but the headed replay could not start');
+        setAutoPlayStatus('error');
+      }
+    })();
+    // generatedCode is the trigger payload; the rest are stable inputs into persistRecording
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, generatedCode]);
+
+  // While the playback run is in flight, find the EB session the executor
+  // claimed and wire its stream URL into the BrowserViewer below the code.
+  // Mirrors the recorder's approach (line ~597) — poll the same shared endpoint.
+  useEffect(() => {
+    if (!playbackJobId) return;
+    if (playbackStreamUrl) return;
+    let cancelled = false;
+    let runnerId: string | undefined;
+
+    (async () => {
+      // Step 1: wait for the executor to claim a runner.
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt++) {
+        try {
+          const status = await getJobStatus(playbackJobId);
+          if (status.actualRunnerId) {
+            runnerId = status.actualRunnerId;
+            break;
+          }
+          if (status.isComplete) return;
+        } catch {
+          // keep polling
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!runnerId || cancelled) return;
+
+      // Step 2: wait for the EB session to register and surface a streamUrl.
+      for (let attempt = 0; attempt < 30 && !cancelled; attempt++) {
+        try {
+          const res = await fetch('/api/embedded/stream');
+          if (res.ok) {
+            const data = await res.json();
+            const session = data?.sessions?.find((s: { runnerId: string }) => s.runnerId === runnerId);
+            if (session?.streamUrl) {
+              const token = data.streamAuthToken;
+              setPlaybackStreamUrl(
+                token ? `${session.streamUrl}?token=${encodeURIComponent(token)}` : session.streamUrl
+              );
+              return;
+            }
+          }
+        } catch {
+          // keep polling
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [playbackJobId, playbackStreamUrl]);
+
+  // When the playback job finishes, flip status and tear down the stream so the
+  // BrowserViewer doesn't keep hammering a torn-down EB.
+  useEffect(() => {
+    if (!playbackJobId) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const status = await getJobStatus(playbackJobId);
+        if (cancelled) return;
+        if (status.isComplete) {
+          clearInterval(interval);
+          setPlaybackStreamUrl(null);
+          setPlaybackFrameSize(null);
+          setAutoPlayStatus(status.status === 'failed' ? 'error' : 'finished');
+        }
+      } catch {
+        // keep polling
+      }
+    }, 1500);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [playbackJobId]);
 
   if (step === 'setup') {
     return (
@@ -827,18 +1034,27 @@ export function RecordingClient({
 
                 {/* Test Name */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Test Name</label>
+                  <label className={`text-sm font-medium ${testNameMissing ? 'text-destructive' : ''}`}>
+                    Test Name
+                  </label>
                   <Input
+                    ref={testNameInputRef}
                     placeholder="login-success"
                     value={testName}
-                    onChange={(e) => setTestName(e.target.value)}
+                    onChange={(e) => {
+                      setTestName(e.target.value);
+                      if (testNameMissing && e.target.value.trim()) setTestNameMissing(false);
+                    }}
                     disabled={isRerecording}
+                    className={testNameMissing ? 'border-destructive ring-2 ring-destructive/40 focus-visible:ring-destructive/40' : ''}
                   />
-                  {isRerecording && (
+                  {isRerecording ? (
                     <p className="text-xs text-muted-foreground">
                       Test name cannot be changed when re-recording
                     </p>
-                  )}
+                  ) : testNameMissing ? (
+                    <p className="text-xs text-destructive">Enter a test name to start recording</p>
+                  ) : null}
                 </div>
 
                 {/* Functional Area - hidden when re-recording */}
@@ -983,7 +1199,7 @@ export function RecordingClient({
                 {/* Start Button */}
                 <Button
                   onClick={handleStartRecording}
-                  disabled={!url || !testName || isLoading}
+                  disabled={!url || isLoading}
                   className="w-full"
                   size="lg"
                 >
@@ -1061,83 +1277,31 @@ export function RecordingClient({
                 <span className="text-sm font-medium text-foreground">Timeline</span>
                 <span className="text-xs text-muted-foreground">{events.length} events</span>
               </div>
-              <div ref={timelineRef} className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1.5 w-72" style={{ maxHeight: 'calc(100% - 41px)' }}>
-                {events.length === 0 ? (
-                  <div className="text-center py-4 text-muted-foreground text-sm">
-                    Waiting for interactions...
-                  </div>
-                ) : (
-                  events.map((event, i) => {
-                    const replayStatus = isActionReplayable(event);
-                    const verification = event.verification;
-                    return (
-                      <div
+              <TooltipProvider delayDuration={120}>
+                <div ref={timelineRef} className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1 w-72" style={{ maxHeight: 'calc(100% - 41px)' }}>
+                  {events.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      Waiting for interactions...
+                    </div>
+                  ) : (
+                    events.map((event, i) => (
+                      <StepCard
                         key={`${event.sequence}-${i}`}
-                        className={`flex items-start gap-2 text-sm ${
-                          event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
-                        }`}
-                      >
-                        <div className="mt-0.5">
-                          {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                          {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                          {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
-                          {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
-                          {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                          {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                          {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
-                          {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
-                          {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
-                          {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
-                          {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
-                          {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
-                          {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
-                          {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
-                          {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
-                          {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-muted-foreground text-xs">
-                            {new Date(event.timestamp).toLocaleTimeString()}
-                          </span>
-                          <span className="ml-2 truncate text-foreground">
-                            {getEventDescription(event)}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
-                          {event.type === 'action' && event.status === 'committed' && (
-                            <div title={
-                              !replayStatus.replayable ? 'No selectors - may not replay' :
-                              replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
-                              verification?.domVerified ? 'Verified' :
-                              verification?.syntaxValid ? 'Verifying...' : 'Checking...'
-                            }>
-                              {!replayStatus.replayable ? (
-                                <AlertTriangle className="h-3 w-3 text-red-500" />
-                              ) : replayStatus.reason === 'coords-only' ? (
-                                <Check className="h-3 w-3 text-yellow-500" />
-                              ) : verification?.domVerified ? (
-                                <CheckCircle2 className="h-3 w-3 text-green-500" />
-                              ) : verification?.syntaxValid ? (
-                                <div className="flex items-center">
-                                  <Check className="h-3 w-3 text-green-500" />
-                                  <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
-                                </div>
-                              ) : (
-                                <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+                        event={event}
+                        description={getEventDescription(event)}
+                        replayStatus={isActionReplayable(event)}
+                        repositoryId={repositoryId}
+                        onPromoteOptimistic={handlePromoteOptimistic}
+                      />
+                    ))
+                  )}
+                </div>
+              </TooltipProvider>
             </div>
           </div>
 
           {/* Floating mini-menu — fixed at bottom center */}
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
             <div className="flex items-center gap-2 px-1">
               <div className={`h-2.5 w-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
               <span className="text-sm font-medium text-foreground">{isPaused ? 'Paused' : 'Recording'}</span>
@@ -1342,79 +1506,26 @@ export function RecordingClient({
                 <CardTitle className="text-sm">Interaction Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div ref={timelineRef} className="space-y-2 max-h-64 overflow-y-auto overflow-x-hidden">
-                  {events.length === 0 ? (
-                    <div className="text-center py-4 text-muted-foreground text-sm">
-                      Waiting for interactions...
-                    </div>
-                  ) : (
-                    events.map((event, i) => {
-                      const replayStatus = isActionReplayable(event);
-                      const verification = event.verification;
-                      return (
-                        <div
+                <TooltipProvider delayDuration={120}>
+                  <div ref={timelineRef} className="space-y-1 max-h-64 overflow-y-auto overflow-x-hidden">
+                    {events.length === 0 ? (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        Waiting for interactions...
+                      </div>
+                    ) : (
+                      events.map((event, i) => (
+                        <StepCard
                           key={`${event.sequence}-${i}`}
-                          className={`flex items-start gap-2 text-sm ${
-                            event.status === 'preview' ? 'opacity-50 border-l-2 border-dashed border-muted-foreground pl-2' : ''
-                          }`}
-                        >
-                          <div className="mt-0.5">
-                            {event.type === 'navigation' && <Navigation className="h-3 w-3 text-blue-500" />}
-                            {event.type === 'action' && event.data.action === 'click' && <MousePointer className="h-3 w-3 text-green-500" />}
-                            {event.type === 'action' && event.data.action === 'fill' && <FormInput className="h-3 w-3 text-orange-500" />}
-                            {event.type === 'action' && event.data.action === 'selectOption' && <ListFilter className="h-3 w-3 text-cyan-500" />}
-                            {event.type === 'screenshot' && <Camera className="h-3 w-3 text-yellow-500" />}
-                            {event.type === 'assertion' && !event.data.elementAssertion && <CheckCircle2 className="h-3 w-3 text-purple-500" />}
-                            {event.type === 'assertion' && event.data.elementAssertion && <ShieldCheck className="h-3 w-3 text-teal-500" />}
-                            {event.type === 'mouse-down' && <MousePointerClick className="h-3 w-3 text-red-500" />}
-                            {event.type === 'mouse-up' && <MousePointerClick className="h-3 w-3 text-red-300" />}
-                            {event.type === 'hover-preview' && <Eye className="h-3 w-3 text-gray-400" />}
-                            {event.type === 'keypress' && <Keyboard className="h-3 w-3 text-indigo-500" />}
-                            {event.type === 'keydown' && <Keyboard className="h-3 w-3 text-green-500" />}
-                            {event.type === 'keyup' && <Keyboard className="h-3 w-3 text-orange-400" />}
-                            {event.type === 'download' && <Download className="h-3 w-3 text-emerald-500" />}
-                            {event.type === 'wait' && <Timer className="h-3 w-3 text-sky-500" />}
-                            {event.type === 'insert-timestamp' && <CalendarClock className="h-3 w-3 text-amber-500" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-muted-foreground text-xs">
-                              {new Date(event.timestamp).toLocaleTimeString()}
-                            </span>
-                            <span className="ml-2 truncate">
-                              {getEventDescription(event)}
-                            </span>
-                          </div>
-                          {/* Verification indicator - fixed width to prevent layout shift */}
-                          <div className="mt-0.5 flex items-center justify-end w-5 shrink-0">
-                            {event.type === 'action' && event.status === 'committed' && (
-                              <div title={
-                                !replayStatus.replayable ? 'No selectors - may not replay' :
-                                replayStatus.reason === 'coords-only' ? 'Coords fallback only' :
-                                verification?.domVerified ? 'Verified' :
-                                verification?.syntaxValid ? 'Verifying...' : 'Checking...'
-                              }>
-                                {!replayStatus.replayable ? (
-                                  <AlertTriangle className="h-3 w-3 text-red-500" />
-                                ) : replayStatus.reason === 'coords-only' ? (
-                                  <Check className="h-3 w-3 text-yellow-500" />
-                                ) : verification?.domVerified ? (
-                                  <CheckCircle2 className="h-3 w-3 text-green-500" />
-                                ) : verification?.syntaxValid ? (
-                                  <div className="flex items-center">
-                                    <Check className="h-3 w-3 text-green-500" />
-                                    <Loader2 className="h-2.5 w-2.5 text-muted-foreground animate-spin ml-0.5" />
-                                  </div>
-                                ) : (
-                                  <Loader2 className="h-3 w-3 text-muted-foreground animate-spin" />
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                          event={event}
+                          description={getEventDescription(event)}
+                          replayStatus={isActionReplayable(event)}
+                          repositoryId={repositoryId}
+                          onPromoteOptimistic={handlePromoteOptimistic}
+                        />
+                      ))
+                    )}
+                  </div>
+                </TooltipProvider>
               </CardContent>
             </Card>
 
@@ -1470,6 +1581,13 @@ export function RecordingClient({
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-4xl mx-auto space-y-6">
+        <TraceScrub
+          events={events}
+          describe={getEventDescription}
+          replayStatusOf={isActionReplayable}
+          repositoryId={repositoryId}
+          onPromoteOptimistic={handlePromoteOptimistic}
+        />
         <Card>
           <CardHeader>
             <CardTitle>{isRerecording ? 'Update Test' : 'Save Recording'}</CardTitle>
@@ -1486,6 +1604,53 @@ export function RecordingClient({
                 <span className="ml-2 font-medium">{testName}</span>
               </div>
             </div>
+
+            {autoPlayStatus !== 'idle' && (
+              <section className="rounded-lg bg-card text-card-foreground overflow-hidden">
+                <header className="flex items-center justify-between px-3 py-2 bg-card">
+                  <span className="text-sm font-medium">Headed 2x Replay</span>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    {autoPlayStatus === 'saving' && (<><Loader2 className="h-3 w-3 animate-spin" /> Saving recording…</>)}
+                    {autoPlayStatus === 'playing' && !playbackStreamUrl && (<><Loader2 className="h-3 w-3 animate-spin" /> Provisioning browser…</>)}
+                    {autoPlayStatus === 'playing' && playbackStreamUrl && (<><Play className="h-3 w-3" /> Replaying at 2x</>)}
+                    {autoPlayStatus === 'finished' && (<><Check className="h-3 w-3" /> Replay finished</>)}
+                    {autoPlayStatus === 'error' && (<><AlertTriangle className="h-3 w-3" /> Replay error</>)}
+                  </span>
+                </header>
+                <div
+                  className="relative flex items-center justify-center bg-card mx-auto w-full"
+                  style={{
+                    aspectRatio: `${playbackFrameSize?.width ?? settings.viewportWidth ?? 1280} / ${playbackFrameSize?.height ?? settings.viewportHeight ?? 720}`,
+                    maxWidth: `${360 * ((playbackFrameSize?.width ?? settings.viewportWidth ?? 1280) / (playbackFrameSize?.height ?? settings.viewportHeight ?? 720))}px`,
+                  }}
+                >
+                  {playbackStreamUrl && (
+                    <BrowserViewer
+                      streamUrl={playbackStreamUrl}
+                      initialViewport={{
+                        width: settings.viewportWidth ?? 1280,
+                        height: settings.viewportHeight ?? 720,
+                      }}
+                      className="h-full w-full"
+                      fit
+                      hideControls
+                      hideToolbar
+                      hideStatusBar
+                      onViewportChange={setPlaybackFrameSize}
+                    />
+                  )}
+                  {!playbackStreamUrl && (
+                    <p className="relative z-10 text-xs text-card-foreground p-8">
+                      {autoPlayStatus === 'finished'
+                        ? 'Replay finished — open the test to see the run.'
+                        : autoPlayStatus === 'error'
+                          ? 'Replay could not start.'
+                          : 'Spinning up a headed browser to replay your recording…'}
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
 
             <div>
               <label className="text-sm font-medium">Generated Code</label>
@@ -1518,6 +1683,10 @@ export function RecordingClient({
                     onClick={async () => {
                       if (!capturedStorageState || !saveCookieName.trim()) return;
                       await saveStorageState(repositoryId ?? null, saveCookieName.trim(), capturedStorageState);
+                      track(Events.storage_state_saved, {
+                        repoId: repositoryId ?? '',
+                        source: 'recorder',
+                      });
                       const states = await listStorageStates(repositoryId ?? null);
                       setStorageStateOptions(states.map(s => ({ id: s.id, name: s.name, cookieCount: s.cookieCount ?? 0, originCount: s.originCount ?? 0 })));
                       setCapturedStorageState(null);
@@ -1533,24 +1702,55 @@ export function RecordingClient({
             <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
-                onClick={() => {
+                disabled={isLoading || autoPlayStatus === 'saving'}
+                onClick={async () => {
+                  // For a fresh recording that auto-saved, Discard means delete
+                  // the persisted test so the user actually walks away clean.
+                  // For re-records, the prior version is preserved by
+                  // updateTestWithVersion — Discard just navigates back.
+                  if (savedTestId && !isRerecording) {
+                    setIsLoading(true);
+                    try {
+                      await deleteTest(savedTestId);
+                    } catch (err) {
+                      console.error('Failed to discard auto-saved test:', err);
+                      toast.error('Could not delete the auto-saved test');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }
                   setStep('setup');
                   setGeneratedCode('');
                   setRequiredCapabilities(null);
                   setCapturedStorageState(null);
                   setEvents([]);
                   setScreenshots([]);
+                  setSavedTestId(null);
+                  setAutoPlayStatus('idle');
+                  setPlaybackStreamUrl(null);
+                  setPlaybackJobId(null);
+                  setPlaybackFrameSize(null);
+                  autoTriggeredRef.current = false;
                   lastSequenceRef.current = 0;
                 }}
               >
                 Discard
               </Button>
-              <Button onClick={handleSaveTest} disabled={isLoading}>
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : null}
-                {isRerecording ? 'Update Test' : 'Save Test'}
-              </Button>
+              {savedTestId ? (
+                <Button
+                  onClick={() => router.push(`/tests?test=${encodeURIComponent(savedTestId)}`)}
+                  disabled={isLoading}
+                >
+                  Open Test
+                </Button>
+              ) : (
+                <Button onClick={handleSaveTest} disabled={isLoading || autoPlayStatus === 'saving'}>
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : null}
+                  {isRerecording ? 'Update Test' : 'Save Test'}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

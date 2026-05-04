@@ -740,12 +740,53 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   }, true);
 
   // DOM verification system
+  interface BrowserSelectorMatch {
+    type: string;
+    value: string;
+    count: number;
+  }
   interface PendingVerification {
     actionId: string;
     selectors: BrowserActionSelector[];
+    primary: string;
     verified: boolean;
   }
   const pendingVerifications: PendingVerification[] = [];
+
+  function countMatches(sel: BrowserActionSelector): number {
+    if (sel.type === 'role-name' || sel.type === 'text' || sel.type === 'ocr-text') return -1;
+    try {
+      return document.querySelectorAll(sel.value).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  function evaluatePending(pending: PendingVerification): { matches: BrowserSelectorMatch[]; chosen: string; autoRepaired: boolean; anyVerified: boolean } {
+    const matches: BrowserSelectorMatch[] = pending.selectors.map(sel => ({
+      type: sel.type,
+      value: sel.value,
+      count: countMatches(sel),
+    }));
+    const unique = matches.find(m => m.count === 1);
+    const positive = unique ?? matches.find(m => m.count > 0 || m.count === -1);
+    const chosen = (positive ?? matches[0]).value;
+    const anyVerified = matches.some(m => m.count !== 0);
+    const autoRepaired = anyVerified && chosen !== pending.primary;
+    return { matches, chosen, autoRepaired, anyVerified };
+  }
+
+  function emitVerification(pending: PendingVerification): boolean {
+    const result = evaluatePending(pending);
+    if (!result.anyVerified) return false;
+    // @ts-expect-error - exposed function
+    window.__updateVerification?.(pending.actionId, true, {
+      selectorMatches: result.matches,
+      chosenSelector: result.chosen,
+      autoRepaired: result.autoRepaired,
+    });
+    return true;
+  }
 
   const originalRecordAction = (window as any).__recordAction;
   if (originalRecordAction) {
@@ -753,27 +794,23 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       originalRecordAction(action, selectors, value, boundingBox, actionId);
       if (!actionId) return;
       const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-      if (validSelectors.length > 0) {
-        pendingVerifications.push({ actionId, selectors: validSelectors, verified: false });
-        if (pendingVerifications.length > 50) pendingVerifications.shift();
-      }
+      if (validSelectors.length === 0) return;
+      const pending: PendingVerification = {
+        actionId,
+        selectors: validSelectors,
+        primary: validSelectors[0]?.value ?? '',
+        verified: false,
+      };
+      pendingVerifications.push(pending);
+      if (pendingVerifications.length > 50) pendingVerifications.shift();
+      pending.verified = emitVerification(pending);
     };
   }
 
   setInterval(() => {
     for (const pending of pendingVerifications) {
       if (pending.verified) continue;
-      const found = pending.selectors.some(sel => {
-        try {
-          if (sel.type === 'role-name' || sel.type === 'text' || sel.type === 'ocr-text') return true;
-          return document.querySelector(sel.value) !== null;
-        } catch { return false; }
-      });
-      if (found) {
-        pending.verified = true;
-        // @ts-expect-error - exposed function
-        window.__updateVerification?.(pending.actionId, true);
-      }
+      pending.verified = emitVerification(pending);
     }
   }, 1000);
 };

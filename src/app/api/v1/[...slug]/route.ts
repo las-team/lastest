@@ -176,7 +176,6 @@ export async function GET(
 
         const exportedAreas = areas.map(a => ({
           name: a.name,
-          description: a.description,
           parentName: a.parentId ? areaMap.get(a.parentId)?.name ?? null : null,
           orderIndex: a.orderIndex,
           isRouteFolder: a.isRouteFolder,
@@ -187,11 +186,9 @@ export async function GET(
         const exportedTests = repoTests.map(t => ({
           name: t.name,
           code: t.code,
-          description: t.description,
           targetUrl: t.targetUrl,
           functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId)?.name ?? null : null,
           executionMode: t.executionMode,
-          agentPrompt: t.agentPrompt,
           assertions: t.assertions,
           setupOverrides: t.setupOverrides,
           teardownOverrides: t.teardownOverrides,
@@ -460,11 +457,27 @@ export async function POST(
         name,
         code,
         targetUrl: targetUrl ?? null,
-        description: description ?? null,
         functionalAreaId: functionalAreaId ?? null,
         createdByBotId: mcpBot?.id ?? null,
         createdByUserId: mcpBot ? null : (session.user?.id ?? null),
       });
+      // If a `description` was supplied via the legacy field, store it on the linked
+      // test_specs row instead — that's where short-form intent lives now.
+      if (description && typeof description === 'string') {
+        const { createHash } = await import('crypto');
+        const codeHash = createHash('sha256').update(code).digest('hex');
+        const specId = await queries.createTestSpec({
+          repositoryId,
+          testId: created.id,
+          functionalAreaId: functionalAreaId ?? null,
+          title: name,
+          spec: description,
+          source: 'manual',
+          status: 'has_test',
+          codeHash,
+        });
+        await queries.linkSpecToTest(specId, created.id);
+      }
       return NextResponse.json(created, { status: 201 });
     }
 
@@ -558,7 +571,6 @@ export async function POST(
           );
           if (existing) {
             await queries.updateFunctionalArea(existing.id, {
-              description: area.description ?? existing.description,
               orderIndex: area.orderIndex ?? existing.orderIndex,
               isRouteFolder: area.isRouteFolder ?? existing.isRouteFolder,
               agentPlan: area.agentPlan ?? existing.agentPlan,
@@ -569,7 +581,6 @@ export async function POST(
             const created = await queries.createFunctionalArea({
               repositoryId: id,
               name: area.name,
-              description: area.description ?? null,
               parentId: null,
               orderIndex: area.orderIndex ?? 0,
               isRouteFolder: area.isRouteFolder ?? false,
@@ -616,12 +627,10 @@ export async function POST(
             repositoryId: id,
             name: t.name,
             code: t.code,
-            description: t.description ?? null,
             targetUrl: t.targetUrl ?? null,
             functionalAreaId,
             assertions: t.assertions ?? null,
             executionMode: t.executionMode ?? 'procedural',
-            agentPrompt: t.agentPrompt ?? null,
             setupOverrides: t.setupOverrides ?? null,
             teardownOverrides: t.teardownOverrides ?? null,
             stabilizationOverrides: t.stabilizationOverrides ?? null,
@@ -671,7 +680,6 @@ export async function POST(
       const result = await queries.createFunctionalArea({
         repositoryId: repositoryId ?? null,
         name,
-        description: null,
         parentId: parentId ?? null,
       });
       return NextResponse.json(result, { status: 201 });

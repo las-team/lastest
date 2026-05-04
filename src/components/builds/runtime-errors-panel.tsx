@@ -24,10 +24,10 @@ export function stripRuntimeErrorsFromMessage(errorMessage: string | null | unde
 }
 
 function getStatusTextColor(status: number, failed?: boolean) {
-  if (failed) return 'text-red-500';
-  if (status >= 400) return 'text-red-500';
-  if (status >= 300) return 'text-yellow-500';
-  if (status >= 200) return 'text-green-500';
+  if (failed) return 'text-destructive';
+  if (status >= 400) return 'text-destructive';
+  if (status >= 300) return 'text-warning';
+  if (status >= 200) return 'text-success';
   return 'text-muted-foreground';
 }
 

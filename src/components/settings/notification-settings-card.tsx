@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { saveNotificationSettings, testCustomWebhookAction } from '@/server/actions/settings';
 import { getPayloadPreview } from '@/lib/integrations/custom-webhook';
-import type { NotificationSettings } from '@/lib/db/schema';
-import { Bell, MessageSquare, Webhook, Plus, Trash2, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import type { NotificationSettings, IssueTrackerProvider } from '@/lib/db/schema';
+import { Bell, MessageSquare, Webhook, Plus, Trash2, Loader2, CheckCircle, XCircle, CircleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 // GitLab icon SVG component
@@ -51,6 +51,9 @@ export function NotificationSettingsCard({
   const [customWebhookMethod, setCustomWebhookMethod] = useState<'POST' | 'PUT'>(
     (settings.customWebhookMethod as 'POST' | 'PUT') || 'POST'
   );
+  const [issueTrackerProvider, setIssueTrackerProvider] = useState<IssueTrackerProvider>(
+    (settings.issueTrackerProvider as IssueTrackerProvider) || 'github'
+  );
   const [customWebhookHeaders, setCustomWebhookHeaders] = useState<Array<{ key: string; value: string }>>(() => {
     if (settings.customWebhookHeaders) {
       try {
@@ -79,6 +82,7 @@ export function NotificationSettingsCard({
     customWebhookUrl: settings.customWebhookUrl || '',
     customWebhookMethod: settings.customWebhookMethod || 'POST',
     customWebhookHeaders: settings.customWebhookHeaders || '',
+    issueTrackerProvider: (settings.issueTrackerProvider as IssueTrackerProvider) || 'github',
   });
 
   // Convert headers array to JSON string
@@ -105,10 +109,11 @@ export function NotificationSettingsCard({
         customWebhookUrl: customWebhookUrl || null,
         customWebhookMethod,
         customWebhookHeaders: headersJson,
+        issueTrackerProvider,
       });
       toast.success('Notification settings saved');
     });
-  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson]);
+  }, [repositoryId, slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, issueTrackerProvider]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -123,7 +128,8 @@ export function NotificationSettingsCard({
       customWebhookEnabled !== orig.customWebhookEnabled ||
       customWebhookUrl !== orig.customWebhookUrl ||
       customWebhookMethod !== orig.customWebhookMethod ||
-      (headersJson || '') !== orig.customWebhookHeaders;
+      (headersJson || '') !== orig.customWebhookHeaders ||
+      issueTrackerProvider !== orig.issueTrackerProvider;
 
     if (!hasChanges) return;
 
@@ -140,7 +146,7 @@ export function NotificationSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, doSave]);
+  }, [slackWebhookUrl, slackEnabled, discordWebhookUrl, discordEnabled, githubPrCommentsEnabled, gitlabMrCommentsEnabled, customWebhookEnabled, customWebhookUrl, customWebhookMethod, headersJson, issueTrackerProvider, doSave]);
 
   const handleTestWebhook = async () => {
     if (!customWebhookUrl) {
@@ -315,6 +321,39 @@ export function NotificationSettingsCard({
               Build results will be posted as notes on open MRs matching the build branch
             </p>
           )}
+        </div>
+
+        {/* Issue Tracker Provider — where "Submit as Issue" on a diff posts to */}
+        <div className="space-y-3 p-4 border rounded-lg">
+          <div className="flex items-center gap-2">
+            <CircleAlert className="w-4 h-4" />
+            <Label className="font-medium">Issue Tracker</Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Where the &quot;Submit as Issue&quot; button on a visual diff creates the issue.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="issueTrackerProvider">Provider</Label>
+            <Select
+              value={issueTrackerProvider}
+              onValueChange={(v) => setIssueTrackerProvider(v as IssueTrackerProvider)}
+            >
+              <SelectTrigger id="issueTrackerProvider" className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="github">GitHub</SelectItem>
+                <SelectItem value="gitlab" disabled>
+                  GitLab (coming soon)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            {issueTrackerProvider === 'github' && !hasGithubAccount && (
+              <p className="text-xs text-amber-600">
+                Connect a GitHub account above to enable issue submission.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Custom Webhook */}
