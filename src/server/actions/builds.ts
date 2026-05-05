@@ -1233,7 +1233,7 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
 
   // Delete the queue placeholder — createAndRunBuild creates its own running job.
   await queries.deleteBackgroundJob(nextJob.id);
-  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id, repositoryId: nextJob.repositoryId });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
   // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB.

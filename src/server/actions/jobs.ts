@@ -4,6 +4,29 @@ import * as queries from '@/lib/db/queries';
 import type { BackgroundJob, BackgroundJobType } from '@/lib/db/schema';
 import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 import { emitJobEvent, type JobUpdateEvent } from '@/lib/ws/job-events';
+import { requireTeamAccess } from '@/lib/auth';
+
+// Verify the caller's team owns this job before mutating it. Without this guard,
+// any signed-in user who knows a jobId can cancel/dismiss jobs from other teams.
+// Returns the loaded job to avoid a second DB round-trip.
+async function assertJobMutateAccess(jobId: string): Promise<BackgroundJob> {
+  const session = await requireTeamAccess();
+  const job = await queries.getBackgroundJob(jobId);
+  if (!job) throw new Error('Job not found');
+
+  if (job.repositoryId) {
+    const repo = await queries.getRepository(job.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) {
+      throw new Error('Forbidden: Job does not belong to your team');
+    }
+    return job;
+  }
+
+  // Repo-less ("global") jobs have no team binding on the row; refuse to
+  // mutate them from a per-team server action so one team can't interfere
+  // with another team's system-level work.
+  throw new Error('Forbidden: Job does not belong to your team');
+}
 
 function jobToEvent(job: BackgroundJob): JobUpdateEvent {
   return {
@@ -190,13 +213,17 @@ export async function createChildJob(
 }
 
 export async function cancelJob(jobId: string, repositoryId?: string | null, runnerId?: string | null) {
-  const job = await queries.getBackgroundJob(jobId);
-  if (!job) return { success: false, error: 'Job not found' };
+  let job: BackgroundJob;
+  try {
+    job = await assertJobMutateAccess(jobId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Forbidden' };
+  }
 
   // For pending (queued) jobs that haven't started, just delete them entirely
   if (job.status === 'pending') {
     await queries.deleteBackgroundJob(jobId);
-    emitJobEvent({ type: 'job:delete', jobId });
+    emitJobEvent({ type: 'job:delete', jobId, repositoryId: job.repositoryId });
     return { success: true };
   }
 
@@ -268,18 +295,28 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
 }
 
 export async function dismissJob(jobId: string) {
-  const job = await queries.getBackgroundJob(jobId);
-  if (!job) return { success: false, error: 'Job not found' };
+  let job: BackgroundJob;
+  try {
+    job = await assertJobMutateAccess(jobId);
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Forbidden' };
+  }
   if (job.status === 'running' || job.status === 'pending') {
     return { success: false, error: 'Cannot dismiss an active job' };
   }
   await queries.deleteBackgroundJob(jobId);
-  emitJobEvent({ type: 'job:delete', jobId });
+  emitJobEvent({ type: 'job:delete', jobId, repositoryId: job.repositoryId });
   return { success: true };
 }
 
 export async function getActiveJobs() {
-  return queries.getRecentBackgroundJobs(10000);
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const all = await queries.getRecentBackgroundJobs(10000);
+  // Only surface jobs that belong to one of this team's repos. Repo-less
+  // ("global") jobs are deliberately excluded — see assertJobMutateAccess.
+  return all.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
 }
 
 export async function cleanupStaleJobs(staleThresholdMs = 300000) {

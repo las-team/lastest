@@ -19,6 +19,7 @@ Openrouter agent sdk parity
 **CSV upload and use**
 ## bugs
 ## features
+Build a skill to find startupideas and test them
 Welcome email, follow-up
 Google verification for gsheets
 **Self-test**

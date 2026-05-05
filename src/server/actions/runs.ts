@@ -381,7 +381,7 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
 
   // Delete the queue placeholder — runTests creates its own running job.
   await queries.deleteBackgroundJob(nextJob.id);
-  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id, repositoryId: nextJob.repositoryId });
 
   // Run the tests — for pool-managed jobs, runnerId is undefined so
   // runTestsCore goes through auto mode → executeFallbackChain → claimPoolEB.
