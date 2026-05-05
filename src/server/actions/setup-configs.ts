@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
 import { requireSetupConfigOwnership } from '@/lib/auth/ownership';
 import type { SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
 import { runApiSetup } from '@/lib/setup/api-seeder';

@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { hashImage } from '@/lib/diff/hasher';
-import { getCurrentSession, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
+import { requireTestOwnership, requirePlannedScreenshotOwnership } from '@/lib/auth/ownership';
 import path from 'path';
 import fs from 'fs/promises';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -41,15 +42,21 @@ export async function uploadPlannedScreenshot(
 
   const dir = await ensurePlannedDir(input.repositoryId);
 
-  // Generate unique filename with sanitized inputs
+  // Generate unique filename with sanitized inputs. The testId/routeId fields
+  // come from the upload form and would otherwise allow path traversal via
+  // `path.join(dir, "../../../etc/foo-…png")`. Strip every unsafe character
+  // first, then re-base the result via path.basename as defense-in-depth.
   const timestamp = Date.now();
   const rawExt = path.extname(fileName).toLowerCase();
   const ext = ['.png', '.jpg', '.jpeg', '.webp'].includes(rawExt) ? rawExt : '.png';
   const safeStepLabel = input.stepLabel?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
-  const baseName = input.testId
-    ? `${input.testId}${safeStepLabel ? `-${safeStepLabel}` : ''}`
-    : input.routeId || 'planned';
-  const newFileName = `${baseName}-${timestamp}${ext}`;
+  const cleanTestId = input.testId?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
+  const cleanRouteId = input.routeId?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
+  const baseName = cleanTestId
+    ? `${cleanTestId}${safeStepLabel ? `-${safeStepLabel}` : ''}`
+    : cleanRouteId || 'planned';
+  const rawFileName = `${baseName}-${timestamp}${ext}`;
+  const newFileName = path.basename(rawFileName);
   const filePath = path.join(dir, newFileName);
 
   // Write file
@@ -99,7 +106,7 @@ export async function uploadPlannedScreenshot(
  * Get planned screenshot for a test (optionally with step label)
  */
 export async function getPlannedScreenshot(testId: string, stepLabel?: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getPlannedScreenshotByTest(testId, stepLabel || null);
 }
 
@@ -107,8 +114,13 @@ export async function getPlannedScreenshot(testId: string, stepLabel?: string) {
  * Get planned screenshot by route
  */
 export async function getPlannedScreenshotByRoute(routeId: string) {
-  await requireTeamAccess();
-  return queries.getPlannedScreenshotByRoute(routeId);
+  // Look up the planned screenshot first; verify caller's team owns its
+  // repository before returning it.
+  const planned = await queries.getPlannedScreenshotByRoute(routeId);
+  if (!planned) return null;
+  if (!planned.repositoryId) return null;
+  await requireRepoAccess(planned.repositoryId);
+  return planned;
 }
 
 /**
@@ -123,7 +135,7 @@ export async function listPlannedScreenshots(repositoryId: string) {
  * List all planned screenshots for a specific test
  */
 export async function listPlannedScreenshotsForTest(testId: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getPlannedScreenshotsByTest(testId);
 }
 
@@ -131,7 +143,7 @@ export async function listPlannedScreenshotsForTest(testId: string) {
  * Delete a planned screenshot (soft delete)
  */
 export async function deletePlannedScreenshot(id: string) {
-  await requireTeamAccess();
+  await requirePlannedScreenshotOwnership(id);
   await queries.deletePlannedScreenshot(id);
   revalidatePath('/tests');
   revalidatePath('/routes');
@@ -145,7 +157,7 @@ export async function updatePlannedScreenshot(
   id: string,
   data: { name?: string; description?: string; sourceUrl?: string }
 ) {
-  await requireTeamAccess();
+  await requirePlannedScreenshotOwnership(id);
   await queries.updatePlannedScreenshot(id, data);
   revalidatePath('/tests');
   revalidatePath('/routes');
@@ -156,8 +168,8 @@ export async function updatePlannedScreenshot(
  * Get planned screenshot by ID
  */
 export async function getPlannedScreenshotById(id: string) {
-  await requireTeamAccess();
-  return queries.getPlannedScreenshot(id);
+  const { planned } = await requirePlannedScreenshotOwnership(id);
+  return planned;
 }
 
 /**
@@ -168,14 +180,12 @@ export async function assignPlannedToStep(
   testId: string,
   stepLabel: string
 ) {
-  await requireTeamAccess();
-  // Verify the planned screenshot exists and belongs to this test
-  const planned = await queries.getPlannedScreenshot(plannedId);
-  if (!planned) {
-    return { success: false, error: 'Planned screenshot not found' };
+  const { planned } = await requirePlannedScreenshotOwnership(plannedId);
+  const { test } = await requireTestOwnership(testId);
+  if (planned.repositoryId !== test.repositoryId) {
+    return { success: false, error: 'Forbidden: planned screenshot and test belong to different repositories' };
   }
 
-  // Update the stepLabel
   await queries.updatePlannedScreenshot(plannedId, {
     testId,
     stepLabel,
@@ -189,11 +199,7 @@ export async function assignPlannedToStep(
  * Remove the step assignment from a planned screenshot
  */
 export async function unassignPlannedFromStep(plannedId: string) {
-  await requireTeamAccess();
-  const planned = await queries.getPlannedScreenshot(plannedId);
-  if (!planned) {
-    return { success: false, error: 'Planned screenshot not found' };
-  }
+  const { planned } = await requirePlannedScreenshotOwnership(plannedId);
 
   await queries.updatePlannedScreenshot(plannedId, {
     stepLabel: null,

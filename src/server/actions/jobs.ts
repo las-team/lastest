@@ -55,6 +55,44 @@ async function emitJobUpdate(jobId: string) {
   if (job) emitJobEvent(jobToEvent(job));
 }
 
+// Internal job lifecycle helpers below are RPC-callable because of `'use server'`.
+// Internal callers (executor, queue workers, async runBuildAsync chains) reach
+// them via direct server-side imports — often from fire-and-forget promises
+// where the request scope has already returned. In that detached state
+// `getCurrentSession()` either returns null or throws (Next's `headers()`
+// requires a live request). Treat both as "internal caller — pass through";
+// only refuse when we have proof of a foreign user session.
+async function safeCurrentSession() {
+  try {
+    const { getCurrentSession } = await import('@/lib/auth');
+    return await getCurrentSession();
+  } catch {
+    return null;
+  }
+}
+
+async function refuseCrossTeamJobMutation(jobId: string): Promise<void> {
+  const sess = await safeCurrentSession();
+  if (!sess?.team) return; // internal caller — pass through
+  const job = await queries.getBackgroundJob(jobId);
+  if (!job) return; // let the underlying update report the missing row
+  if (!job.repositoryId) return;
+  const repo = await queries.getRepository(job.repositoryId);
+  if (!repo || repo.teamId !== sess.team.id) {
+    throw new Error('Forbidden: job does not belong to your team');
+  }
+}
+
+async function refuseCrossTeamRepoMutation(repositoryId?: string | null): Promise<void> {
+  if (!repositoryId) return;
+  const sess = await safeCurrentSession();
+  if (!sess?.team) return;
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo || repo.teamId !== sess.team.id) {
+    throw new Error('Forbidden: repository does not belong to your team');
+  }
+}
+
 export async function isRunnerBusy(targetRunnerId: string): Promise<boolean> {
   const running = await queries.getRunningJobsForRunner(targetRunnerId);
   return running.length > 0;
@@ -68,6 +106,7 @@ export async function createJob(
   metadata?: Record<string, unknown>,
   targetRunnerId?: string,
 ) {
+  await refuseCrossTeamRepoMutation(repositoryId);
   const { id } = await queries.createBackgroundJob({
     type,
     label,
@@ -94,6 +133,7 @@ export async function createPendingJob(
   metadata?: Record<string, unknown>,
   targetRunnerId?: string,
 ) {
+  await refuseCrossTeamRepoMutation(repositoryId);
   const { id } = await queries.createBackgroundJob({
     type,
     label,
@@ -107,6 +147,7 @@ export async function createPendingJob(
 }
 
 export async function startJob(jobId: string) {
+  await refuseCrossTeamJobMutation(jobId);
   const now = new Date();
   await queries.updateBackgroundJob(jobId, {
     status: 'running',
@@ -122,6 +163,7 @@ export async function updateJobProgress(
   totalSteps?: number,
   parallelInfo?: { activeCount?: number; activeTests?: string[] }
 ) {
+  await refuseCrossTeamJobMutation(jobId);
   const progress = totalSteps && totalSteps > 0
     ? Math.round((completedSteps / totalSteps) * 100)
     : 0;
@@ -157,6 +199,7 @@ export async function updateJobActivity(
   activeCount?: number,
   activeTests?: string[],
 ) {
+  await refuseCrossTeamJobMutation(jobId);
   const existingJob = await queries.getBackgroundJob(jobId);
   const mergedMetadata = {
     ...((existingJob?.metadata as Record<string, unknown>) ?? {}),
@@ -171,6 +214,7 @@ export async function updateJobActivity(
 }
 
 export async function completeJob(jobId: string) {
+  await refuseCrossTeamJobMutation(jobId);
   await queries.updateBackgroundJob(jobId, {
     status: 'completed',
     progress: 100,
@@ -180,6 +224,7 @@ export async function completeJob(jobId: string) {
 }
 
 export async function failJob(jobId: string, error: string) {
+  await refuseCrossTeamJobMutation(jobId);
   await queries.updateBackgroundJob(jobId, {
     status: 'failed',
     error,
@@ -195,6 +240,8 @@ export async function createChildJob(
   repositoryId?: string | null,
   metadata?: Record<string, unknown>
 ) {
+  await refuseCrossTeamJobMutation(parentJobId);
+  await refuseCrossTeamRepoMutation(repositoryId);
   const { id } = await queries.createBackgroundJob({
     type,
     label,

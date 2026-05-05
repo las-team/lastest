@@ -173,6 +173,13 @@ export async function upsertEmbeddedSession(params: {
   containerUrl: string;
   viewport?: { width: number; height: number };
 }, tx?: DBExecutor): Promise<EmbeddedSession> {
+  // Note: this is `'use server'` so it's RPC-callable, but the system EB
+  // pool is intentionally cross-team — the executor + auto-register flow
+  // both need to write rows where `teamId=__system__` regardless of the
+  // calling user's team. A session-aware check here breaks recording for
+  // any user. Tighter ownership belongs in the higher-level claim/release
+  // helpers, not in the row-write primitives.
+
   const exec = tx ?? db;
   const [existing] = await exec
     .select()
@@ -228,6 +235,8 @@ export async function createEmbeddedSession(params: {
   containerUrl: string;
   viewport?: { width: number; height: number };
 }, tx?: DBExecutor): Promise<EmbeddedSession> {
+  // See upsertEmbeddedSession — system EB pool is cross-team by design,
+  // so we don't gate row writes on session.team here.
   const exec = tx ?? db;
   const id = crypto.randomUUID();
   const now = new Date();
@@ -286,6 +295,11 @@ export async function updateEmbeddedSessionStatus(
   status: EmbeddedSessionStatus,
   updates?: { currentUrl?: string; lastActivityAt?: Date }
 ): Promise<void> {
+  // System EBs carry teamId=__system__; the executor (running inside a
+  // user's session) needs to flip them busy/ready/stopped during a
+  // recording. A session-aware team check would refuse those legitimate
+  // writes. Ownership for user-initiated lifecycle actions is enforced by
+  // the higher-level claim/release helpers instead.
   await db
     .update(embeddedSessions)
     .set({
@@ -300,6 +314,9 @@ export async function updateEmbeddedSessionStatus(
  * Get embedded session by runner ID
  */
 export async function getEmbeddedSessionForRunner(runnerId: string): Promise<EmbeddedSession | null> {
+  // System EBs carry teamId=__system__ but are claimed by any team's users
+  // through the pool. Don't filter by session.team here or the executor's
+  // streamUrl/cdpUrl lookup returns null mid-recording.
   const [result] = await db
     .select()
     .from(embeddedSessions)

@@ -2,25 +2,39 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess } from '@/lib/auth';
+import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { awardScore } from '@/server/actions/gamification';
 
-export async function getReviewTodos({ repositoryId, branch, buildId }: { repositoryId?: string; branch?: string; buildId?: string }) {
-  await requireTeamAccess();
+async function assertTodoOwnership(todoId: string, teamId: string) {
+  const todo = await queries.getReviewTodo(todoId);
+  if (!todo) throw new Error('Todo not found');
+  if (!todo.repositoryId) {
+    throw new Error('Forbidden: Todo has no team binding');
+  }
+  const repo = await queries.getRepository(todo.repositoryId);
+  if (!repo || repo.teamId !== teamId) {
+    throw new Error('Forbidden: Todo does not belong to your team');
+  }
+  return todo;
+}
 
+export async function getReviewTodos({ repositoryId, branch, buildId }: { repositoryId?: string; branch?: string; buildId?: string }) {
   if (buildId) {
+    await requireBuildOwnership(buildId);
     return queries.getReviewTodosByBuild(buildId);
   }
   if (repositoryId && branch) {
+    await requireRepoAccess(repositoryId);
     return queries.getReviewTodosByBranch(repositoryId, branch);
   }
+  await requireTeamAccess();
   return [];
 }
 
 export async function resolveReviewTodo(todoId: string) {
   const session = await requireTeamAccess();
-  const todo = await queries.getReviewTodo(todoId);
-  if (!todo) throw new Error('Todo not found');
+  const todo = await assertTodoOwnership(todoId, session.team.id);
 
   await queries.updateReviewTodo(todoId, {
     status: 'resolved',
@@ -47,9 +61,8 @@ export async function resolveReviewTodo(todoId: string) {
 }
 
 export async function reopenReviewTodo(todoId: string) {
-  await requireTeamAccess();
-  const todo = await queries.getReviewTodo(todoId);
-  if (!todo) throw new Error('Todo not found');
+  const session = await requireTeamAccess();
+  await assertTodoOwnership(todoId, session.team.id);
 
   await queries.updateReviewTodo(todoId, {
     status: 'open',
@@ -64,9 +77,8 @@ export async function reopenReviewTodo(todoId: string) {
 }
 
 export async function deleteReviewTodoAction(todoId: string) {
-  await requireTeamAccess();
-  const todo = await queries.getReviewTodo(todoId);
-  if (!todo) throw new Error('Todo not found');
+  const session = await requireTeamAccess();
+  const todo = await assertTodoOwnership(todoId, session.team.id);
 
   await queries.deleteReviewTodo(todoId);
 

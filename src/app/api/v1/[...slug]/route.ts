@@ -42,7 +42,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuildCore } from '@/server/actions/builds';
-import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
+import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/lib/diff/core';
 import { awardScore } from '@/server/actions/gamification';
 import { getCurrentSession } from '@/lib/auth';
 
@@ -372,14 +372,49 @@ export async function POST(
       const { testIds, functionalAreaId, repositoryId } = body;
 
       let testIdsToRun: string[] = [];
+      let scopedRepoId: string | null = null;
+
+      // Verify ownership of every supplied id BEFORE doing anything.
+      // Without this, a bearer-token holder for team A could trigger a
+      // build under team B's repo by passing team B's testIds/repositoryId.
+      if (repositoryId) {
+        if (!(await verifyRepoOwnership(repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        scopedRepoId = repositoryId;
+      }
 
       if (testIds && testIds.length > 0) {
+        for (const tid of testIds) {
+          const t = await queries.getTest(tid);
+          if (!t || !t.repositoryId) {
+            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          }
+          if (!(await verifyRepoOwnership(t.repositoryId, session))) {
+            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          }
+          if (scopedRepoId && t.repositoryId !== scopedRepoId) {
+            return NextResponse.json({ error: 'Tests must belong to the same repository' }, { status: 400 });
+          }
+          scopedRepoId ??= t.repositoryId;
+        }
         testIdsToRun = testIds;
       } else if (functionalAreaId) {
+        const area = await queries.getFunctionalArea(functionalAreaId);
+        if (!area || !area.repositoryId) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        if (!(await verifyRepoOwnership(area.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        if (scopedRepoId && area.repositoryId !== scopedRepoId) {
+          return NextResponse.json({ error: 'Area does not belong to the supplied repository' }, { status: 400 });
+        }
+        scopedRepoId ??= area.repositoryId;
         const tests = await queries.getTestsByFunctionalArea(functionalAreaId);
         testIdsToRun = tests.map((t) => t.id);
-      } else if (repositoryId) {
-        const tests = await queries.getTestsByRepo(repositoryId);
+      } else if (scopedRepoId) {
+        const tests = await queries.getTestsByRepo(scopedRepoId);
         testIdsToRun = tests.map((t) => t.id);
       }
 
@@ -387,8 +422,7 @@ export async function POST(
         return NextResponse.json({ error: 'No tests to run' }, { status: 400 });
       }
 
-      // Use build system for visual diff tracking (auth already verified above)
-      const result = await createAndRunBuildCore('manual', testIdsToRun, repositoryId);
+      const result = await createAndRunBuildCore('manual', testIdsToRun, scopedRepoId);
 
       return NextResponse.json(result);
     }

@@ -83,6 +83,14 @@ export async function createRunnerInternal(
   type: RunnerType = 'remote',
   authOnly: boolean = false,
 ): Promise<{ runner: Runner; token: string } | { error: string }> {
+  // `'use server'` makes this RPC-callable. Without an admin check + caller's
+  // team match, any authenticated user could mint a runner token in another
+  // team by passing that team's id.
+  const session = await requireTeamAdmin();
+  if (session.team.id !== teamId || session.user.id !== createdById) {
+    return { error: 'Forbidden: team or user mismatch' };
+  }
+
   const id = uuid();
   const token = generateRunnerToken();
   const tokenHash = hashToken(token);
@@ -145,6 +153,10 @@ export async function updateRunnerName(runnerId: string, name: string): Promise<
  * Returns the new plain token.
  */
 export async function regenerateRunnerTokenInternal(runnerId: string, teamId: string): Promise<{ token: string } | { error: string }> {
+  const session = await requireTeamAdmin();
+  if (session.team.id !== teamId) {
+    return { error: 'Forbidden: team mismatch' };
+  }
   const [runner] = await db
     .select()
     .from(runners)
@@ -229,6 +241,8 @@ export async function deleteRunner(runnerId: string): Promise<{ success: boolean
  * Internal runner deletion (no auth check — caller must verify permissions).
  */
 export async function deleteRunnerInternal(runnerId: string, teamId: string): Promise<void> {
+  const session = await requireTeamAdmin();
+  if (session.team.id !== teamId) throw new Error('Forbidden: team mismatch');
   await db.delete(runners).where(and(eq(runners.id, runnerId), eq(runners.teamId, teamId)));
 }
 
@@ -279,6 +293,10 @@ export async function updateRunnerStatus(
   // Get current status to detect changes
   const [current] = await db.select().from(runners).where(eq(runners.id, runnerId));
   const previousStatus = current?.status;
+  // System EBs (teamId=__system__) are intentionally cross-team — the WS
+  // heartbeat handler and the executor (running inside a user's session)
+  // both must flip system runners busy/online during a recording. A
+  // session-aware team-match check would refuse those legitimate writes.
 
   // If heartbeat says 'online' but the embedded session is still busy,
   // keep runner as 'busy' — the pool claimed it and the session hasn't been released yet.

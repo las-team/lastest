@@ -135,6 +135,13 @@ export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; cou
 export async function selectRepo(repositoryId: string | null) {
   const session = await requireTeamAccess();
 
+  // If a repo is being selected, confirm it belongs to the caller's team.
+  // Without this, a user could plant a foreign repoId in their session
+  // that downstream readers blindly trust.
+  if (repositoryId) {
+    await requireRepoAccess(repositoryId);
+  }
+
   // Write to user-level selection
   await queries.updateUser(session.user.id, { selectedRepositoryId: repositoryId });
 

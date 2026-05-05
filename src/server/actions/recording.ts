@@ -445,14 +445,13 @@ export async function updateRerecordedTest(data: {
   viewportWidth?: number;
   viewportHeight?: number;
 }) {
-  await requireTeamAccess();
-  const { updateTestWithVersion, getTest } = await import('@/lib/db/queries');
+  const { requireTestOwnership } = await import('@/lib/auth/ownership');
+  const { test } = await requireTestOwnership(data.testId);
+
+  const { updateTestWithVersion, updateTest } = await import('@/lib/db/queries');
   const { getCurrentBranchForRepo } = await import('@/lib/git-utils');
 
-  const { updateTest } = await import('@/lib/db/queries');
-
-  const test = await getTest(data.testId);
-  const branch = await getCurrentBranchForRepo(test?.repositoryId);
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
 
   // Use passed viewport or null
   const viewport = data.viewportWidth

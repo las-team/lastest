@@ -227,6 +227,11 @@ export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id
   return { id, ...data, createdAt: new Date() };
 }
 
+export async function getDefaultSetupStep(id: string) {
+  const [row] = await db.select().from(defaultSetupSteps).where(eq(defaultSetupSteps.id, id));
+  return row ?? null;
+}
+
 export async function deleteDefaultSetupStep(id: string) {
   await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.id, id));
 }
@@ -368,6 +373,11 @@ export async function createDefaultTeardownStep(data: Omit<NewDefaultTeardownSte
     createdAt: new Date(),
   });
   return { id, ...data, createdAt: new Date() };
+}
+
+export async function getDefaultTeardownStep(id: string) {
+  const [row] = await db.select().from(defaultTeardownSteps).where(eq(defaultTeardownSteps.id, id));
+  return row ?? null;
 }
 
 export async function deleteDefaultTeardownStep(id: string) {

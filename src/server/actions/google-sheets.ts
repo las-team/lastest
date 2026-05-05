@@ -1,7 +1,7 @@
 'use server';
 
 import * as queries from '@/lib/db/queries';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import {
   listSpreadsheets,
   getSpreadsheetInfo,
@@ -142,6 +142,7 @@ export async function importSheetDataSource(data: {
   sheetGid?: number;
   alias: string;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
+  await requireRepoAccess(data.repositoryId);
   const user = await getCurrentUser();
   if (!user?.teamId) return { success: false, error: 'Not authenticated' };
 
@@ -186,11 +187,15 @@ export async function syncDataSource(dataSourceId: string): Promise<{
   success: boolean;
   error?: string;
 }> {
-  const auth = await getValidAccessToken();
-  if (!auth) return { success: false, error: 'Google Sheets not connected' };
-
+  const session = await requireTeamAccess();
   const source = await queries.getGoogleSheetsDataSource(dataSourceId);
   if (!source) return { success: false, error: 'Data source not found' };
+  if (source.teamId !== session.team.id) {
+    return { success: false, error: 'Forbidden: Data source does not belong to your team' };
+  }
+
+  const auth = await getValidAccessToken();
+  if (!auth) return { success: false, error: 'Google Sheets not connected' };
 
   try {
     const range = source.dataRange || source.sheetName;
@@ -217,6 +222,12 @@ export async function deleteDataSource(dataSourceId: string): Promise<{
   success: boolean;
   error?: string;
 }> {
+  const session = await requireTeamAccess();
+  const source = await queries.getGoogleSheetsDataSource(dataSourceId);
+  if (!source) return { success: false, error: 'Data source not found' };
+  if (source.teamId !== session.team.id) {
+    return { success: false, error: 'Forbidden: Data source does not belong to your team' };
+  }
   await queries.deleteGoogleSheetsDataSource(dataSourceId);
   revalidatePath('/settings');
   revalidatePath('/tests');
@@ -227,6 +238,7 @@ export async function deleteDataSource(dataSourceId: string): Promise<{
  * Get all data sources for a repository.
  */
 export async function getDataSources(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
   return queries.getGoogleSheetsDataSources(repositoryId);
 }
 
@@ -238,6 +250,13 @@ export async function updateDataSourceAlias(
   alias: string,
   repositoryId: string
 ): Promise<{ success: boolean; error?: string }> {
+  const session = await requireRepoAccess(repositoryId);
+  const source = await queries.getGoogleSheetsDataSource(dataSourceId);
+  if (!source) return { success: false, error: 'Data source not found' };
+  if (source.teamId !== session.team.id || source.repositoryId !== repositoryId) {
+    return { success: false, error: 'Forbidden: Data source does not belong to that repository' };
+  }
+
   // Check uniqueness
   const existing = await queries.getGoogleSheetsDataSourceByAlias(repositoryId, alias);
   if (existing && existing.id !== dataSourceId) {

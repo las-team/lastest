@@ -2,8 +2,17 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
+import { requireTestOwnership } from '@/lib/auth/ownership';
 import type { TestTeardownOverrides } from '@/lib/db/schema';
+
+async function assertDefaultTeardownStepAccess(stepId: string) {
+  const step = await queries.getDefaultTeardownStep(stepId);
+  if (!step) throw new Error('Teardown step not found');
+  if (!step.repositoryId) throw new Error('Forbidden: step has no repository binding');
+  await requireRepoAccess(step.repositoryId);
+  return step;
+}
 
 export interface TeardownStep {
   id: string;
@@ -27,6 +36,7 @@ export interface TeardownStepInput {
  * Get all default teardown steps for a repository
  */
 export async function getDefaultTeardownSteps(repositoryId: string): Promise<TeardownStep[]> {
+  await requireRepoAccess(repositoryId);
   const steps = await queries.getDefaultTeardownSteps(repositoryId);
   return steps.map((step) => ({
     id: step.id,
@@ -71,7 +81,7 @@ export async function addDefaultTeardownStep(
  * Remove a step from the default teardown
  */
 export async function removeDefaultTeardownStep(stepId: string) {
-  await requireTeamAccess();
+  await assertDefaultTeardownStepAccess(stepId);
   await queries.deleteDefaultTeardownStep(stepId);
   revalidatePath('/tests');
   return { success: true };
@@ -98,24 +108,21 @@ export async function reorderDefaultTeardownSteps(
 // ============================================
 
 export async function getTestTeardownOverrides(testId: string) {
-  const test = await queries.getTest(testId);
-  if (!test) return { overrides: null, resolvedSteps: [] };
+  const { test } = await requireTestOwnership(testId);
 
   const resolvedSteps = await queries.getResolvedTeardownStepsForTest(test);
   return { overrides: test.teardownOverrides, resolvedSteps };
 }
 
 export async function saveTestTeardownOverrides(testId: string, overrides: TestTeardownOverrides | null) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   await queries.updateTestTeardownOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
 
 export async function skipDefaultTeardownStepForTest(testId: string, defaultStepId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestTeardownOverrides = test.teardownOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   if (!overrides.skippedDefaultStepIds.includes(defaultStepId)) {
@@ -127,9 +134,7 @@ export async function skipDefaultTeardownStepForTest(testId: string, defaultStep
 }
 
 export async function unskipDefaultTeardownStepForTest(testId: string, defaultStepId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestTeardownOverrides = test.teardownOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   overrides.skippedDefaultStepIds = overrides.skippedDefaultStepIds.filter((id) => id !== defaultStepId);
@@ -143,9 +148,7 @@ export async function unskipDefaultTeardownStepForTest(testId: string, defaultSt
 }
 
 export async function addExtraTeardownStep(testId: string, stepType: 'test' | 'script', itemId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestTeardownOverrides = test.teardownOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   overrides.extraSteps.push({
@@ -159,9 +162,7 @@ export async function addExtraTeardownStep(testId: string, stepType: 'test' | 's
 }
 
 export async function removeExtraTeardownStep(testId: string, index: number) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestTeardownOverrides = test.teardownOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   if (index >= 0 && index < overrides.extraSteps.length) {
@@ -177,9 +178,7 @@ export async function removeExtraTeardownStep(testId: string, index: number) {
 }
 
 export async function reorderExtraTeardownSteps(testId: string, newOrder: number[]) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestTeardownOverrides = test.teardownOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   const reordered = newOrder.map((i) => overrides.extraSteps[i]).filter(Boolean);

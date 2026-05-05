@@ -2,7 +2,7 @@
 
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import type { DebugState, DebugCommand } from '@/lib/playwright/types';
-import { getTest, getPlaywrightSettings, getEnvironmentConfig } from '@/lib/db/queries';
+import { getTest, getPlaywrightSettings, getEnvironmentConfig, getRepository } from '@/lib/db/queries';
 import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
 import { stripTypeAnnotations } from '@/lib/playwright/types';
 import { queueCommandToDB } from '@/app/api/ws/runner/route';
@@ -12,17 +12,51 @@ import { executeSetupViaRunner } from '@/lib/execution/executor';
 import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
 import type { Message } from '@/lib/ws/protocol';
 
+// Confirm the debug session's repository belongs to the caller's team. Used
+// to gate getDebugState / sendDebugCommand / stopDebugSession against
+// cross-team session-ID guesses.
+async function assertDebugSessionAccess(remoteSession: { repositoryId: string | null; testId: string }) {
+  const session = await requireTeamAccess();
+  let repoId = remoteSession.repositoryId;
+  if (!repoId) {
+    // Fall back to test → repo lookup for sessions stored before repoId was
+    // populated (or for tests whose repo binding is the only available link).
+    const test = await getTest(remoteSession.testId);
+    repoId = test?.repositoryId ?? null;
+  }
+  if (!repoId) throw new Error('Forbidden: debug session has no repository binding');
+  const repo = await getRepository(repoId);
+  if (!repo || repo.teamId !== session.team.id) {
+    throw new Error('Forbidden: debug session does not belong to your team');
+  }
+}
+
 export async function startDebugSession(
   testId: string,
   repositoryId?: string | null,
   runnerId?: string | null
 ): Promise<{ sessionId: string; error?: string; actualRunnerId?: string }> {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
+  const session = repositoryId
+    ? await requireRepoAccess(repositoryId)
+    : await requireTeamAccess();
 
   const test = await getTest(testId);
   if (!test) {
     return { sessionId: '', error: 'Test not found' };
+  }
+
+  // Must verify the test belongs to the caller's team. Without this, an
+  // attacker can pass their own repositoryId + a victim's testId, and the
+  // function will load the victim's test code into the debug session.
+  if (!test.repositoryId) {
+    return { sessionId: '', error: 'Forbidden: test has no repository binding' };
+  }
+  if (repositoryId && test.repositoryId !== repositoryId) {
+    return { sessionId: '', error: 'Forbidden: test does not belong to that repository' };
+  }
+  const testRepo = await getRepository(test.repositoryId);
+  if (!testRepo || testRepo.teamId !== session.team.id) {
+    return { sessionId: '', error: 'Forbidden: test does not belong to your team' };
   }
 
   const repoId = repositoryId || test.repositoryId;
@@ -122,6 +156,7 @@ export async function getDebugState(
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
+    await assertDebugSessionAccess(remoteSession);
     if (!remoteSession.state) {
       // Session exists but no state yet — return initializing placeholder
       return {
@@ -161,6 +196,7 @@ export async function sendDebugCommand(
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
+    await assertDebugSessionAccess(remoteSession);
     if (command.type === 'update_code' && 'code' in command) {
       // Re-parse steps on server
       const body = extractTestBody(command.code);
@@ -205,6 +241,7 @@ export async function stopDebugSession(
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
+    await assertDebugSessionAccess(remoteSession);
     await queueCommandToDB(remoteSession.runnerId, {
       id: crypto.randomUUID(),
       type: 'command:stop_debug',
