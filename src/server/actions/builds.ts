@@ -712,14 +712,17 @@ async function runBuildAsync(
 
     // DOM diff: bootstrap baseline on first run, otherwise diff against it
     // and write the result to every visual diff produced by this test result.
+    // Gated by playwrightSettings.enableDomDiff — when off, snapshots may
+    // still be captured for healing/triage but no diffs are persisted to UI.
+    const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
     const testRecord2 = tests.find(t => t.id === result.testId);
-    if (!testRecord2?.domSnapshot && result.domSnapshot) {
+    if (domDiffEnabled && !testRecord2?.domSnapshot && result.domSnapshot) {
       // First run for this test (or legacy test created before DOM capture
       // was wired). Promote the current snapshot to the baseline; nothing to
       // diff against on this run.
       await queries.updateTest(result.testId, { domSnapshot: result.domSnapshot });
       console.info('[dom-diff] bootstrapped baseline DOM snapshot', { testId: result.testId });
-    } else if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+    } else if (domDiffEnabled && testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
       try {
         const { computeDomDiff } = await import('@/lib/diff/dom-diff');
         const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);

@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
+import { getPlaywrightSettings } from '@/server/actions/settings';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
@@ -24,6 +25,8 @@ export default async function DiffPage({ params }: PageProps) {
 
   // Get build to resolve the correct base URL for "Open Page" link
   const build = await getBuild(buildId);
+  const playwrightSettings = await getPlaywrightSettings(diff.test?.repositoryId ?? null);
+  const enableDomDiff = playwrightSettings?.enableDomDiff ?? false;
 
   // Replace the test's targetUrl origin with the build's baseUrl
   let openPageUrl = diff.test?.targetUrl ?? null;
@@ -153,6 +156,7 @@ export default async function DiffPage({ params }: PageProps) {
           prevDiffId={prevDiff?.id}
           nextDiffId={nextDiff?.id}
           banAiMode={banAiMode}
+          enableDomDiff={enableDomDiff}
           initialFocusRegions={focusRegions.map(r => ({
             id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
           }))}

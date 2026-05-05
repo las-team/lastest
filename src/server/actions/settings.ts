@@ -38,6 +38,7 @@ export async function savePlaywrightSettings(data: {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   enableNetworkInterception?: boolean;
+  enableDomDiff?: boolean;
   lockViewportToRecording?: boolean;
   browsers?: string[];
   customAttributeName?: string | null;

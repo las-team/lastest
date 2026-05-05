@@ -19,11 +19,12 @@ Openrouter agent sdk parity
 **CSV upload and use**
 ## bugs
 ## features
-Build a skill to find startupideas and test them
+Build a skill to find startupideas and test them, provide testing feedback
 Welcome email, follow-up
 Google verification for gsheets
 **Self-test**
 Chat agent for website
+Lastest - verification is the final frontier for ai development
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas

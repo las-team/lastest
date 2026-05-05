@@ -1133,7 +1133,7 @@ function ClaimCTA({
     <section className="rounded-xl border bg-muted/40 p-6 sm:p-8 space-y-4">
       <h2 className="text-xl sm:text-2xl font-semibold">Claim this test — free</h2>
       <p className="text-sm text-muted-foreground">
-        We&apos;ll copy the test into your own Lastest workspace. You supply the environment,
+        We&apos;ll copy the test into your own Lastest workspace. You supply the ideas,
         we supply the regression coverage.
       </p>
       <div className="flex flex-col sm:flex-row gap-2">

@@ -117,6 +117,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     grantClipboardAccess: false,
     acceptDownloads: false,
     enableNetworkInterception: false,
+    enableDomDiff: false,
     browsers: ['chromium'] as string[],
     autoRetryCount: 0,
     enableA11y: false,

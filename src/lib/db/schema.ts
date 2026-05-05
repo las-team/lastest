@@ -884,6 +884,7 @@ export const playwrightSettings = pgTable('playwright_settings', {
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
+  enableDomDiff: boolean('enable_dom_diff').default(false), // capture DOM snapshots and overlay element changes on screenshots
   browsers: jsonb('browsers').$type<string[]>().default(['chromium']), // browsers to use for build execution
   autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
   enableA11y: boolean('enable_a11y').default(false), // enable WCAG accessibility checks with axe-core

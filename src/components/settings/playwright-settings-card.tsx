@@ -24,7 +24,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Code2 } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -85,6 +85,7 @@ export function PlaywrightSettingsCard({
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
+  const [enableDomDiff, setEnableDomDiff] = useState(settings.enableDomDiff ?? false);
   const [lockViewportToRecording, setLockViewportToRecording] = useState(settings.lockViewportToRecording ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
   const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
@@ -125,6 +126,7 @@ export function PlaywrightSettingsCard({
     grantClipboardAccess: settings.grantClipboardAccess ?? false,
     acceptDownloads: settings.acceptDownloads ?? false,
     enableNetworkInterception: settings.enableNetworkInterception ?? false,
+    enableDomDiff: settings.enableDomDiff ?? false,
     lockViewportToRecording: settings.lockViewportToRecording ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
     maxParallelTests: settings.maxParallelTests ?? 1,
@@ -158,6 +160,7 @@ export function PlaywrightSettingsCard({
     setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
     setAcceptDownloads(settings.acceptDownloads ?? false);
     setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
+    setEnableDomDiff(settings.enableDomDiff ?? false);
     setLockViewportToRecording(settings.lockViewportToRecording ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
     setMaxParallelTests(settings.maxParallelTests ?? 1);
@@ -188,6 +191,7 @@ export function PlaywrightSettingsCard({
       grantClipboardAccess: settings.grantClipboardAccess ?? false,
       acceptDownloads: settings.acceptDownloads ?? false,
       enableNetworkInterception: settings.enableNetworkInterception ?? false,
+      enableDomDiff: settings.enableDomDiff ?? false,
       lockViewportToRecording: settings.lockViewportToRecording ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
       maxParallelTests: settings.maxParallelTests ?? 1,
@@ -245,6 +249,7 @@ export function PlaywrightSettingsCard({
         grantClipboardAccess,
         acceptDownloads,
         enableNetworkInterception,
+        enableDomDiff,
         lockViewportToRecording,
         screenshotDelay,
         maxParallelTests,
@@ -259,7 +264,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -287,6 +292,7 @@ export function PlaywrightSettingsCard({
       grantClipboardAccess !== orig.grantClipboardAccess ||
       acceptDownloads !== orig.acceptDownloads ||
       enableNetworkInterception !== orig.enableNetworkInterception ||
+      enableDomDiff !== orig.enableDomDiff ||
       lockViewportToRecording !== orig.lockViewportToRecording ||
       screenshotDelay !== orig.screenshotDelay ||
       maxParallelTests !== orig.maxParallelTests ||
@@ -309,7 +315,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -335,6 +341,7 @@ export function PlaywrightSettingsCard({
       setGrantClipboardAccess(false);
       setAcceptDownloads(false);
       setEnableNetworkInterception(false);
+      setEnableDomDiff(false);
       setLockViewportToRecording(false);
       setScreenshotDelay(0);
       setMaxParallelTests(1);
@@ -562,6 +569,22 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
           <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
+        </div>
+
+        {/* DOM Diff */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Code2 className="w-4 h-4 text-muted-foreground" />
+            <div className="space-y-0.5">
+              <Label className="text-sm">DOM Diff</Label>
+              {!compact && (
+                <p className="text-xs text-muted-foreground">
+                  Compare DOM snapshots and overlay added/removed/changed elements on screenshots
+                </p>
+              )}
+            </div>
+          </div>
+          <Switch checked={enableDomDiff} onCheckedChange={setEnableDomDiff} />
         </div>
 
         {/* Error Handling */}

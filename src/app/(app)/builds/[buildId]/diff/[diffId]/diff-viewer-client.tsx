@@ -131,12 +131,13 @@ interface DiffViewerClientProps {
   prevDiffId?: string;
   nextDiffId?: string;
   banAiMode?: boolean;
+  enableDomDiff?: boolean;
   initialFocusRegions?: FocusRegionRect[];
   initialIgnoreRegions?: IgnoreRegionRect[];
   allDiffs?: VisualDiffWithTestStatus[];
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [] }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, enableDomDiff = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [] }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -329,7 +330,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
   const aiStatus = diff.aiAnalysisStatus;
   const [showRegions, setShowRegions] = useState(false);
-  const [showDomOverlay, setShowDomOverlay] = useState(false);
+  const [showDomOverlay, setShowDomOverlay] = useState(enableDomDiff);
   const [drawFocusMode, setDrawFocusMode] = useState(false);
   const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
   const [focusPending, setFocusPending] = useState(false);
@@ -401,7 +402,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     }
   }, [diff.id, ignorePending, router]);
   const changedRegions = metadata?.changedRegions;
-  const domDiff = metadata?.domDiff;
+  const domDiff = enableDomDiff ? metadata?.domDiff : undefined;
   const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
 
   // Build DOM overlay regions from DOM diff bounding boxes
@@ -545,7 +546,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           <A11yViolationsPanel violations={diff.a11yViolations ?? []} />
 
           {/* DOM Changes Panel */}
-          {metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
+          {enableDomDiff && metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
             <DomChangesPanel domDiff={metadata.domDiff} />
           )}
 
@@ -851,7 +852,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                   </span>
                 </>
               )}
-              {hasDomChanges && (
+              {enableDomDiff && hasDomChanges && (
                 <button
                   onClick={() => setShowDomOverlay(!showDomOverlay)}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
