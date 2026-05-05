@@ -1,18 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import crypto from 'crypto';
 import { getCurrentSession } from '@/lib/auth';
 import { exchangeCodeForToken, getGitHubUser } from '@/lib/github/oauth';
 import * as queries from '@/lib/db/queries';
 import { getPublicUrl } from '@/lib/utils';
 
+const GITHUB_OAUTH_STATE_COOKIE = 'github_oauth_state';
+
+interface OAuthStatePayload {
+  state: string;
+  userId: string;
+}
+
+async function consumeStateCookie(): Promise<OAuthStatePayload | null> {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(GITHUB_OAUTH_STATE_COOKIE)?.value;
+  cookieStore.delete(GITHUB_OAUTH_STATE_COOKIE);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as OAuthStatePayload;
+    if (!parsed.state || !parsed.userId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function timingSafeStringEq(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
+    await consumeStateCookie();
     return NextResponse.redirect(new URL('/login', getPublicUrl(request)));
   }
 
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const error = searchParams.get('error');
+  const stateParam = searchParams.get('state');
+
+  // Always consume the cookie up front so a failed callback can't leave
+  // a stale state lying around for a later replay attempt.
+  const stateRecord = await consumeStateCookie();
 
   if (error) {
     return NextResponse.redirect(new URL('/settings?error=github_auth_denied', getPublicUrl(request)));
@@ -20,6 +56,18 @@ export async function GET(request: NextRequest) {
 
   if (!code) {
     return NextResponse.redirect(new URL('/settings?error=no_code', getPublicUrl(request)));
+  }
+
+  // Strict state validation — required to prevent OAuth CSRF.
+  if (!stateRecord || !stateParam || !timingSafeStringEq(stateRecord.state, stateParam)) {
+    return NextResponse.redirect(new URL('/settings?error=state_mismatch', getPublicUrl(request)));
+  }
+
+  // Bind the cookie to the user it was issued for. If the session changed
+  // between initiation and callback (e.g. logout/login as another user),
+  // refuse the link instead of writing a token to the wrong account.
+  if (stateRecord.userId !== session.user.id) {
+    return NextResponse.redirect(new URL('/settings?error=session_mismatch', getPublicUrl(request)));
   }
 
   const tokenResponse = await exchangeCodeForToken(code);
@@ -32,7 +80,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/settings?error=user_fetch_failed', getPublicUrl(request)));
   }
 
-  // Check if this GitHub account is already linked to a different user
+  // Refuse to re-link a GitHub account that already maps to a different user.
+  // Even with state validation passing, never allow an attacker-supplied code
+  // (whose access token belongs to ghUser) to be silently re-bound onto the
+  // current session if that ghUser is already connected elsewhere.
   const existingOAuth = await queries.getOAuthAccount('github', ghUser.id.toString());
   if (existingOAuth && existingOAuth.userId !== session.user.id) {
     const conflictUser = await queries.getUserById(existingOAuth.userId);

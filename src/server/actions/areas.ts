@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import { requireAreaOwnership, requireTestOwnership } from '@/lib/auth/ownership';
 import type { NewFunctionalArea, FunctionalAreaPlanSnapshot } from '@/lib/db/schema';
 
 export async function createArea(data: {
@@ -47,14 +48,14 @@ export async function createArea(data: {
 }
 
 export async function updateArea(id: string, data: Partial<Pick<NewFunctionalArea, 'name' | 'agentPlan' | 'parentId'>>) {
-  await requireTeamAccess();
+  await requireAreaOwnership(id);
   await queries.updateFunctionalArea(id, data);
   revalidatePath('/areas');
   revalidatePath('/tests');
 }
 
 export async function deleteArea(id: string) {
-  await requireTeamAccess();
+  await requireAreaOwnership(id);
   // Get all tests in this area and move them to uncategorized
   const tests = await queries.getTestsByFunctionalArea(id);
   for (const test of tests) {
@@ -74,7 +75,7 @@ export async function deleteArea(id: string) {
 }
 
 export async function deleteAreaWithContents(id: string) {
-  await requireTeamAccess();
+  await requireAreaOwnership(id);
   const allAreas = await queries.getFunctionalAreas();
 
   // Collect this area and all descendant area IDs
@@ -101,9 +102,14 @@ export async function deleteAreaWithContents(id: string) {
 }
 
 export async function moveArea(id: string, newParentId: string | null) {
-  await requireTeamAccess();
-  // Prevent circular references
+  const { area } = await requireAreaOwnership(id);
+  // If moving under a parent, ensure parent area is owned by same team and
+  // belongs to the same repository as the area being moved.
   if (newParentId) {
+    const { area: parentArea } = await requireAreaOwnership(newParentId);
+    if (parentArea.repositoryId !== area.repositoryId) {
+      throw new Error('Forbidden: parent area belongs to a different repository');
+    }
     const allAreas = await queries.getFunctionalAreas();
     const areaMap = new Map(allAreas.map(a => [a.id, a]));
 
@@ -123,7 +129,13 @@ export async function moveArea(id: string, newParentId: string | null) {
 }
 
 export async function moveTestToArea(testId: string, areaId: string | null) {
-  await requireTeamAccess();
+  const { test } = await requireTestOwnership(testId);
+  if (areaId) {
+    const { area } = await requireAreaOwnership(areaId);
+    if (area.repositoryId !== test.repositoryId) {
+      throw new Error('Forbidden: target area belongs to a different repository');
+    }
+  }
   await queries.moveTestToArea(testId, areaId);
   revalidatePath('/areas');
   revalidatePath('/tests');

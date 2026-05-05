@@ -11,6 +11,7 @@ import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
 import { PNG } from 'pngjs';
@@ -1216,9 +1217,37 @@ async function queueBuild(
 }
 
 /**
- * Process the next queued build if any
+ * Process the next queued build if any.
+ *
+ * Internal helper: invoked fire-and-forget by the queue worker / pool consumer
+ * when there is no request context. To prevent direct RPC abuse from clients
+ * (this lives in a `'use server'` file so every export is reachable as a
+ * server action), we detect a live request context and gate the call:
+ * RPC callers must own the supplied `repositoryId`; pure background
+ * invocations (no headers, no `repositoryId`) pass through.
  */
 export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
+  // Detect request context and authorize. If `headers()` succeeds we are on
+  // the server-action RPC path → require team ownership of the queue scope.
+  // If `headers()` throws we are in fire-and-forget context (no request) →
+  // allow the internal queue worker through.
+  try {
+    const { headers } = await import('next/headers');
+    await headers();
+    // We have a request: enforce ownership.
+    if (repositoryId) {
+      await requireRepoAccess(repositoryId);
+    } else {
+      // Without a repo scope, only signed-in team members may drain the
+      // global queue (best we can do without an internal-secret).
+      await requireTeamAccess();
+    }
+  } catch (err) {
+    // No request context: internal call. Proceed without auth.
+    if (err instanceof Error && err.message.startsWith('Forbidden')) throw err;
+    if (err instanceof Error && err.message === 'Unauthorized') throw err;
+  }
+
   const effectiveRunner = targetRunnerId || undefined;
 
   // Skip busy check for pool-managed jobs — the execution flow handles claiming
@@ -1636,6 +1665,7 @@ async function processVisualDiff(
  * Get build summary with all metrics
  */
 export async function getBuildSummary(buildId: string): Promise<BuildSummary | null> {
+  await requireBuildOwnership(buildId);
   const build = await queries.getBuild(buildId);
   if (!build) return null;
 
@@ -1686,13 +1716,26 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
  * Get recent builds for dashboard
  */
 export async function getRecentBuilds(limit = 5) {
-  return queries.getRecentBuilds(limit);
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  // Over-fetch so post-filter still has enough rows for `limit`.
+  const all = await queries.getRecentBuilds(Math.max(limit * 4, 50));
+  const filtered: typeof all = [];
+  for (const b of all) {
+    if (filtered.length >= limit) break;
+    if (!b.testRunId) continue;
+    const run = await queries.getTestRun(b.testRunId);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+  }
+  return filtered;
 }
 
 /**
  * Get recent builds for a specific repository
  */
 export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
+  await requireRepoAccess(repositoryId);
   return queries.getBuildsByRepo(repositoryId, limit);
 }
 
@@ -1700,13 +1743,25 @@ export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
  * Get all builds
  */
 export async function getBuilds(limit = 10) {
-  return queries.getBuilds(limit);
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const all = await queries.getBuilds(Math.max(limit * 4, 50));
+  const filtered: typeof all = [];
+  for (const b of all) {
+    if (filtered.length >= limit) break;
+    if (!b.testRunId) continue;
+    const run = await queries.getTestRun(b.testRunId);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+  }
+  return filtered;
 }
 
 /**
  * Get builds for a specific repository
  */
 export async function getBuildsByRepo(repositoryId: string, limit = 10) {
+  await requireRepoAccess(repositoryId);
   return queries.getBuildsByRepo(repositoryId, limit);
 }
 
@@ -1714,6 +1769,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
  * Get build by ID
  */
 export async function getBuild(buildId: string) {
+  await requireBuildOwnership(buildId);
   return queries.getBuild(buildId);
 }
 
@@ -1726,6 +1782,7 @@ export interface BuildChanges {
 }
 
 export async function getLatestBuildChanges(repositoryId: string): Promise<BuildChanges | null> {
+  await requireRepoAccess(repositoryId);
   const recentBuilds = await queries.getBuildsByRepo(repositoryId, 10);
   if (recentBuilds.length === 0) return null;
 

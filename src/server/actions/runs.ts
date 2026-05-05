@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireRunOwnership, requireBackgroundJobOwnership } from '@/lib/auth/ownership';
 import { getBranchInfo } from '@/lib/github/content';
 import * as queries from '@/lib/db/queries';
 import type { Test } from '@/lib/db/schema';
@@ -278,18 +279,29 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
 }
 
 export async function getTestRun(runId: string) {
+  await requireRunOwnership(runId);
   return queries.getTestRun(runId);
 }
 
 export async function getTestRunResults(runId: string) {
+  await requireRunOwnership(runId);
   return queries.getTestResultsByRun(runId);
 }
 
 export async function getTestRuns() {
-  return queries.getTestRuns();
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const all = await queries.getTestRuns();
+  return all.filter(r => r.repositoryId !== null && teamRepoIds.has(r.repositoryId));
 }
 
-export async function getRunStatus(_repositoryId?: string | null) {
+export async function getRunStatus(repositoryId?: string | null) {
+  if (repositoryId) {
+    await requireRepoAccess(repositoryId);
+  } else {
+    await requireTeamAccess();
+  }
   // Check DB for running jobs
   const runningJobs = await queries.getRunningJobsForRunner('auto');
   return {
@@ -298,6 +310,7 @@ export async function getRunStatus(_repositoryId?: string | null) {
 }
 
 export async function getJobStatus(jobId: string) {
+  await requireBackgroundJobOwnership(jobId);
   const job = await queries.getBackgroundJob(jobId);
   return {
     status: job?.status || 'unknown',
@@ -314,6 +327,7 @@ export async function getJobStatus(jobId: string) {
  * has already been GC'd).
  */
 export async function getTestRunStepState(testRunId: string) {
+  await requireRunOwnership(testRunId);
   const { getStepState } = await import('@/lib/ws/step-state');
   return getStepState(testRunId);
 }

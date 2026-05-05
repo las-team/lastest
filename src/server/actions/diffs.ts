@@ -3,7 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess } from '@/lib/auth';
-import { hashImageWithDimensions } from '@/lib/diff/hasher';
+import {
+  requireDiffOwnership,
+  requireBuildOwnership,
+  requireTestOwnership,
+  requireTestResultOwnership,
+} from '@/lib/auth/ownership';
 import { generateDiff, type Rectangle } from '@/lib/diff/generator';
 import type { DiffEngineType, RegionDetectionMode } from '@/lib/db/schema';
 import fs from 'fs';
@@ -11,96 +16,13 @@ import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import { awardScore } from '@/server/actions/gamification';
 import { buildVisualDiffIssue, createVisualDiffIssue } from '@/lib/integrations/github-issues';
-
-// Cross-team protection: ignore/focus regions are scoped to (testId, stepLabel),
-// but the test row already pins the owning repository. Verify the caller's team
-// owns that repo before any mutation — `requireTeamAccess` only proves a team
-// exists, not that it owns this particular test.
-async function requireTestOwnership(testId: string) {
-  const session = await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
-  if (!test.repositoryId) throw new Error('Forbidden: Test has no repository');
-  const repo = await queries.getRepository(test.repositoryId);
-  if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Test does not belong to your team');
-  }
-  return { session, test, repo };
-}
-
-async function requireDiffOwnership(diffId: string) {
-  const session = await requireTeamAccess();
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
-  const test = await queries.getTest(diff.testId);
-  if (!test || !test.repositoryId) throw new Error('Forbidden: Diff has no repository');
-  const repo = await queries.getRepository(test.repositoryId);
-  if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Diff does not belong to your team');
-  }
-  return { session, diff, test, repo };
-}
-
-/**
- * Approve a single visual diff — core logic, no auth check.
- * Called by both session-authenticated and token-authenticated paths.
- */
-export async function approveDiffCore(diffId: string, approvedBy?: string) {
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
-  if (!diff.currentImagePath) throw new Error('Cannot approve diff without screenshot');
-
-  // Update diff status (preserve original baselineImagePath for historical comparison)
-  await queries.updateVisualDiff(diffId, {
-    status: 'approved',
-    approvedBy: approvedBy || 'user',
-    approvedAt: new Date(),
-  });
-
-  // Update baseline with the approved image
-  const currentHash = hashImageWithDimensions(
-    path.join(STORAGE_ROOT, diff.currentImagePath)
-  );
-
-  // Get the test run to find the branch
-  const testResult = diff.testResultId
-    ? await queries.getTestResultById(diff.testResultId)
-    : null;
-  const testRun = testResult?.testRunId
-    ? await queries.getTestRun(testResult.testRunId)
-    : null;
-  const branch = testRun?.gitBranch || 'main';
-
-  // Determine the browser from the diff record (defaults to chromium for legacy diffs)
-  const browser = diff.browser || 'chromium';
-
-  // Branch-scoped approval: only deactivate/create baselines for THIS branch + browser
-  // Main baselines are only updated via PR merge promotion or direct main builds
-  await queries.deactivateBaselines(diff.testId, diff.stepLabel, branch, browser);
-  await queries.createBaseline({
-    testId: diff.testId,
-    stepLabel: diff.stepLabel,
-    imagePath: diff.currentImagePath,
-    imageHash: currentHash,
-    branch,
-    browser,
-    approvedFromDiffId: diffId,
-  });
-
-  // Update build status
-  if (diff.buildId) {
-    const newStatus = await queries.computeBuildStatus(diff.buildId);
-    await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
-  }
-
-  revalidatePath('/builds');
-  revalidatePath(`/builds/${diff.buildId}`);
-
-  return { success: true };
-}
+import {
+  approveDiffCore,
+  rejectDiffCore,
+} from '@/lib/diff/core';
 
 export async function approveDiff(diffId: string, approvedBy?: string) {
-  const session = await requireTeamAccess();
+  const { session } = await requireDiffOwnership(diffId);
   // Snapshot the diff BEFORE approval so we can see its classification.
   const diffBefore = await queries.getVisualDiff(diffId);
   const result = await approveDiffCore(diffId, approvedBy);
@@ -137,37 +59,13 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   return result;
 }
 
-/**
- * Reject a visual diff — core logic, no auth check.
- */
-export async function rejectDiffCore(diffId: string) {
-  const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
-
-  await queries.updateVisualDiff(diffId, {
-    status: 'rejected',
-  });
-
-  // Update build status to blocked
-  if (diff.buildId) {
-    await queries.updateBuild(diff.buildId, { overallStatus: 'blocked' });
-  }
-
-  revalidatePath('/builds');
-  revalidatePath(`/builds/${diff.buildId}`);
-
-  return { success: true };
-}
-
 export async function rejectDiff(diffId: string) {
-  await requireTeamAccess();
+  await requireDiffOwnership(diffId);
   return rejectDiffCore(diffId);
 }
 
-/**
- * Approve all pending diffs in a build — core logic, no auth check.
- */
-export async function approveAllDiffsCore(buildId: string, approvedBy?: string) {
+export async function approveAllDiffs(buildId: string, approvedBy?: string) {
+  await requireBuildOwnership(buildId);
   const pendingDiffs = await queries.getPendingDiffsByBuild(buildId);
 
   for (const diff of pendingDiffs) {
@@ -180,18 +78,13 @@ export async function approveAllDiffsCore(buildId: string, approvedBy?: string) 
   return { approvedCount: pendingDiffs.length };
 }
 
-export async function approveAllDiffs(buildId: string, approvedBy?: string) {
-  await requireTeamAccess();
-  return approveAllDiffsCore(buildId, approvedBy);
-}
-
 /**
  * Test-level "Promote latest run as baseline" — approves every pending diff
  * for one test result. Wraps the same logic as the build-page Approve All
  * button but scoped to a single run. See mwhis review #21.
  */
 export async function promoteTestResultBaselines(testResultId: string, approvedBy?: string) {
-  await requireTeamAccess();
+  await requireTestResultOwnership(testResultId);
   const diffs = await queries.getVisualDiffsByTestResult(testResultId);
   const pending = diffs.filter(d => d.status !== 'approved' && d.status !== 'auto_approved');
   for (const d of pending) {
@@ -201,10 +94,13 @@ export async function promoteTestResultBaselines(testResultId: string, approvedB
   return { approvedCount: pending.length };
 }
 
-/**
- * Batch approve selected diffs — core logic, no auth check.
- */
-export async function batchApproveDiffsCore(diffIds: string[], approvedBy?: string) {
+export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
+  // Verify ownership on every diff before mutating any of them, so a single
+  // foreign id aborts the whole batch instead of approving the legitimate
+  // ones first.
+  for (const diffId of diffIds) {
+    await requireDiffOwnership(diffId);
+  }
   for (const diffId of diffIds) {
     await approveDiffCore(diffId, approvedBy);
   }
@@ -214,15 +110,10 @@ export async function batchApproveDiffsCore(diffIds: string[], approvedBy?: stri
   return { approvedCount: diffIds.length };
 }
 
-export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
-  await requireTeamAccess();
-  return batchApproveDiffsCore(diffIds, approvedBy);
-}
-
-/**
- * Batch reject selected diffs — core logic, no auth check.
- */
-export async function batchRejectDiffsCore(diffIds: string[]) {
+export async function batchRejectDiffs(diffIds: string[]) {
+  for (const diffId of diffIds) {
+    await requireDiffOwnership(diffId);
+  }
   for (const diffId of diffIds) {
     await rejectDiffCore(diffId);
   }
@@ -232,16 +123,11 @@ export async function batchRejectDiffsCore(diffIds: string[]) {
   return { rejectedCount: diffIds.length };
 }
 
-export async function batchRejectDiffs(diffIds: string[]) {
-  await requireTeamAccess();
-  return batchRejectDiffsCore(diffIds);
-}
-
 /**
  * Get diffs for a build (raw, unordered)
  */
 export async function getDiffsByBuild(buildId: string) {
-  await requireTeamAccess();
+  await requireBuildOwnership(buildId);
   return queries.getVisualDiffsByBuild(buildId);
 }
 
@@ -250,7 +136,7 @@ export async function getDiffsByBuild(buildId: string) {
  * Failed/changed/flaky tests first, then by test name → step label (natural sort).
  */
 export async function getSortedDiffsByBuild(buildId: string) {
-  await requireTeamAccess();
+  await requireBuildOwnership(buildId);
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
 
   // Per-test tier: tier 0 if any diff in test is failed/rejected

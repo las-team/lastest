@@ -1,11 +1,13 @@
 'use server';
 
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireStorageStateOwnership } from '@/lib/auth/ownership';
 import { getStorageStates, getStorageState, createStorageState, deleteStorageState } from '@/lib/db/queries';
 import { revalidatePath } from 'next/cache';
 
 export async function listStorageStates(repositoryId: string | null) {
-  await requireTeamAccess();
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return getStorageStates(repositoryId);
 }
 
@@ -35,7 +37,6 @@ export async function removeStorageState(id: string) {
 }
 
 export async function getStorageStateJson(id: string) {
-  await requireTeamAccess();
-  const state = await getStorageState(id);
+  const { state } = await requireStorageStateOwnership(id);
   return state?.storageStateJson ?? null;
 }

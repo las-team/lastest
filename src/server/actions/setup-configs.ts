@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireSetupConfigOwnership } from '@/lib/auth/ownership';
 import type { SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
 import { runApiSetup } from '@/lib/setup/api-seeder';
 import type { SetupConfig, SetupContext } from '@/lib/setup/types';
@@ -27,6 +28,7 @@ export interface UpdateSetupConfigInput {
  * Get all setup configs for a repository
  */
 export async function getSetupConfigs(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
   return queries.getSetupConfigs(repositoryId);
 }
 
@@ -34,7 +36,8 @@ export async function getSetupConfigs(repositoryId: string) {
  * Get a single setup config by ID
  */
 export async function getSetupConfig(id: string) {
-  return queries.getSetupConfig(id);
+  const { config } = await requireSetupConfigOwnership(id);
+  return config;
 }
 
 /**
@@ -81,7 +84,7 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
  * Update a setup config
  */
 export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput) {
-  await requireTeamAccess();
+  await requireSetupConfigOwnership(id);
   // Validate base URL if provided
   if (data.baseUrl) {
     try {
@@ -104,7 +107,7 @@ export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput
  * Delete a setup config
  */
 export async function deleteSetupConfig(id: string) {
-  await requireTeamAccess();
+  await requireSetupConfigOwnership(id);
   await queries.deleteSetupConfig(id);
   revalidatePath('/settings/setup');
   return { success: true };
@@ -114,11 +117,7 @@ export async function deleteSetupConfig(id: string) {
  * Test a setup config by making a simple request
  */
 export async function testSetupConfig(id: string): Promise<{ success: boolean; error?: string }> {
-  await requireTeamAccess();
-  const config = await queries.getSetupConfig(id);
-  if (!config) {
-    return { success: false, error: 'Setup config not found' };
-  }
+  const { config } = await requireSetupConfigOwnership(id);
 
   try {
     // Create a simple test script that just makes a GET request
@@ -165,11 +164,7 @@ export async function testApiEndpoint(
   endpoint: string,
   body?: unknown
 ): Promise<{ success: boolean; error?: string; response?: unknown }> {
-  await requireTeamAccess();
-  const config = await queries.getSetupConfig(configId);
-  if (!config) {
-    return { success: false, error: 'Setup config not found' };
-  }
+  const { config } = await requireSetupConfigOwnership(configId);
 
   try {
     const url = `${config.baseUrl}${endpoint}`;

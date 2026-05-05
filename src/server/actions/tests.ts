@@ -5,6 +5,11 @@ import fs from 'fs';
 import path from 'path';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import {
+  requireAreaOwnership,
+  requireTestOwnership,
+  requireTestResultOwnership,
+} from '@/lib/auth/ownership';
 import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -32,14 +37,14 @@ export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) 
 }
 
 export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
-  await requireTeamAccess();
+  await requireAreaOwnership(id);
   await queries.updateFunctionalArea(id, data);
   revalidatePath('/tests');
   revalidatePath('/');
 }
 
 export async function deleteFunctionalArea(id: string) {
-  await requireTeamAccess();
+  await requireAreaOwnership(id);
   await queries.deleteFunctionalArea(id);
   revalidatePath('/tests');
   revalidatePath('/');
@@ -387,19 +392,18 @@ export async function permanentlyDeleteTests(testIds: string[]) {
 }
 
 export async function getDeletedTests(repositoryId?: string) {
-  await requireTeamAccess();
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return queries.getDeletedTests(repositoryId);
 }
 
 export async function getTest(id: string) {
-  await requireTeamAccess();
-  return queries.getTest(id);
+  const { test } = await requireTestOwnership(id);
+  return test;
 }
 
 export async function getTestDetailData(testId: string, repositoryId?: string | null) {
-  const session = await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return null;
+  const { session, test } = await requireTestOwnership(testId);
 
   const repoId = test.repositoryId || repositoryId;
   const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, googleSheetsAccount, playwrightSettings, diffSettings, envConfig, testSpec, aiSettings] = await Promise.all([
@@ -461,18 +465,20 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
   };
 }
 
-export async function getTests() {
-  await requireTeamAccess();
+export async function getTests(repositoryId?: string) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return queries.getTests();
 }
 
 export async function getTestsByArea(areaId: string) {
-  await requireTeamAccess();
+  await requireAreaOwnership(areaId);
   return queries.getTestsByFunctionalArea(areaId);
 }
 
-export async function getFunctionalAreas() {
-  await requireTeamAccess();
+export async function getFunctionalAreas(repositoryId?: string) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return queries.getFunctionalAreas();
 }
 
@@ -490,8 +496,18 @@ export async function getTestScreenshots(
   testId: string,
   repositoryId?: string | null
 ): Promise<string[]> {
+  if (repositoryId) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(repositoryId)) {
+      throw new Error('Forbidden: invalid repositoryId');
+    }
+    await requireRepoAccess(repositoryId);
+  } else {
+    await requireTeamAccess();
+  }
+
   const baseDir = STORAGE_DIRS.screenshots;
-  const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
+  const safeRepoId = repositoryId ? path.basename(repositoryId) : null;
+  const dir = safeRepoId ? path.join(baseDir, safeRepoId) : baseDir;
 
   if (!fs.existsSync(dir)) return [];
 
@@ -500,7 +516,7 @@ export async function getTestScreenshots(
     .filter(f => f.includes(testId) && f.endsWith('.png'))
     .sort();
 
-  const prefix = repositoryId ? `/screenshots/${repositoryId}` : '/screenshots';
+  const prefix = safeRepoId ? `/screenshots/${safeRepoId}` : '/screenshots';
   return testFiles.map(f => `${prefix}/${f}`);
 }
 
@@ -580,12 +596,12 @@ export async function getTestScreenshotsGrouped(
 
 // Test Version Actions
 export async function getTestVersionHistory(testId: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getTestVersions(testId);
 }
 
 export async function restoreTestVersion(testId: string, version: number) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   const versionData = await queries.getTestVersion(testId, version);
   if (!versionData) {
     throw new Error(`Version ${version} not found`);
@@ -613,7 +629,7 @@ export async function restoreTestVersion(testId: string, version: number) {
 
 // Get visual diffs for a specific test result (step-level diffs)
 export async function getVisualDiffsForTestResult(testResultId: string) {
-  await requireTeamAccess();
+  await requireTestResultOwnership(testResultId);
   return queries.getVisualDiffsByTestResult(testResultId);
 }
 
