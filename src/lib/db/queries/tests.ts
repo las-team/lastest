@@ -1,4 +1,5 @@
 import { db } from '../index';
+import { incrementTeamRuntimeFromTestRun } from './billing';
 import {
   functionalAreas,
   tests,
@@ -491,6 +492,15 @@ export async function getTestResultsByTest(testId: string) {
 export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
   const id = uuid();
   await db.insert(testResults).values({ ...data, id });
+  // Bump the team's monthly runtime usage. Best-effort — a metering miss
+  // should never fail the run.
+  if (data.testRunId && typeof data.durationMs === 'number' && data.durationMs > 0) {
+    try {
+      await incrementTeamRuntimeFromTestRun(data.testRunId, data.durationMs);
+    } catch (err) {
+      console.warn('[billing] failed to record team runtime:', err);
+    }
+  }
   return { id, ...data };
 }
 

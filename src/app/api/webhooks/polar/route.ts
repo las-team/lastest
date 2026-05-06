@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readWebhookHeaders, verifyWebhookSignature } from '@/lib/polar/webhook';
-import { planForProductId } from '@/lib/polar/plans';
+import { planForProductId, PLAN_RANK } from '@/lib/polar/plans';
 import * as queries from '@/lib/db/queries';
 import type { SubscriptionPlan, SubscriptionStatus } from '@/lib/db/schema';
 
@@ -42,6 +42,17 @@ function normalizeStatus(raw: string): SubscriptionStatus | null {
   return SUBSCRIPTION_STATUSES.has(raw as SubscriptionStatus)
     ? (raw as SubscriptionStatus)
     : null;
+}
+
+function classifyAction(
+  eventType: string,
+  fromPlan: SubscriptionPlan,
+  toPlan: SubscriptionPlan,
+): 'cancel' | 'resume' | 'upgrade' | 'downgrade' | null {
+  if (eventType === 'subscription.canceled' || eventType === 'subscription.revoked') return 'cancel';
+  if (eventType === 'subscription.uncanceled') return 'resume';
+  if (fromPlan === toPlan) return null;
+  return PLAN_RANK[toPlan] > PLAN_RANK[fromPlan] ? 'upgrade' : 'downgrade';
 }
 
 async function resolveTeamId(payload: PolarSubscriptionPayload): Promise<string | null> {
@@ -87,14 +98,19 @@ async function applySubscriptionEvent(envelope: PolarWebhookEnvelope): Promise<{
     cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
   });
 
+  const fromPlan = team.subscriptionPlan ?? 'free';
+  const toPlan = isTerminal ? 'free' : plan;
+  const action = classifyAction(envelope.type, fromPlan, toPlan);
+
   await queries.logSubscriptionEvent({
     teamId,
     subscriptionId: sub.id,
-    fromPlan: team.subscriptionPlan ?? 'free',
-    toPlan: isTerminal ? 'free' : plan,
+    fromPlan,
+    toPlan,
     fromStatus: team.subscriptionStatus ?? null,
     toStatus: isTerminal ? null : status,
     source: 'webhook',
+    action,
   });
 
   return { teamId };

@@ -150,15 +150,49 @@ export async function getSubscription(subscriptionId: string): Promise<PolarSubs
   });
 }
 
+export type CancellationReason =
+  | 'too_expensive'
+  | 'missing_features'
+  | 'switched_service'
+  | 'unused'
+  | 'customer_service'
+  | 'low_quality'
+  | 'too_complex'
+  | 'other';
+
 export async function cancelSubscription(
   subscriptionId: string,
-  opts: { atPeriodEnd: boolean } = { atPeriodEnd: true },
+  opts: {
+    atPeriodEnd: boolean;
+    reason?: CancellationReason;
+    comment?: string;
+  } = { atPeriodEnd: true },
 ): Promise<PolarSubscription> {
+  if (opts.atPeriodEnd) {
+    // Soft cancel — keeps the customer on the plan until period end and lets
+    // them resume by clearing the flag.
+    return polarFetch<PolarSubscription>(
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          cancel_at_period_end: true,
+          customer_cancellation_reason: opts.reason,
+          customer_cancellation_comment: opts.comment,
+        }),
+      },
+    );
+  }
+  // Hard cancel — Polar's DELETE endpoint terminates the subscription
+  // immediately, prorating any unused time.
   return polarFetch<PolarSubscription>(
     `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
     {
-      method: 'PATCH',
-      body: JSON.stringify({ cancel_at_period_end: opts.atPeriodEnd }),
+      method: 'DELETE',
+      body: JSON.stringify({
+        customer_cancellation_reason: opts.reason,
+        customer_cancellation_comment: opts.comment,
+      }),
     },
   );
 }

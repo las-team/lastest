@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,9 +10,9 @@ import { PLANS, PLAN_RANK, type PlanDefinition } from '@/lib/polar/plans';
 import {
   startCheckout,
   openCustomerPortal,
-  cancelTeamSubscription,
   resumeTeamSubscription,
 } from '@/server/actions/billing';
+import { CancelSubscriptionDialog } from './cancel-subscription-dialog';
 import type { TeamSubscription } from '@/lib/auth';
 import type { SubscriptionPlan } from '@/lib/db/schema';
 
@@ -53,6 +53,7 @@ function statusLabel(sub: TeamSubscription): string {
 
 export function BillingCard({ subscription, isAdmin, hasCustomer }: BillingCardProps) {
   const [pending, startTransition] = useTransition();
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   function go(label: string, fn: () => Promise<{ url?: string; success?: boolean }>) {
     startTransition(async () => {
@@ -149,6 +150,10 @@ export function BillingCard({ subscription, isAdmin, hasCustomer }: BillingCardP
                 <ul className="text-sm space-y-1.5 flex-1">
                   <PlanRow label="Repositories" value={limits.maxRepositories === -1 ? 'Unlimited' : `Up to ${limits.maxRepositories}`} />
                   <PlanRow label="Builds / mo" value={limits.maxBuildsPerMonth.toLocaleString()} />
+                  <PlanRow
+                    label="Test runtime / mo"
+                    value={limits.maxRuntimeMinutesPerMonth === -1 ? 'Unlimited' : `${limits.maxRuntimeMinutesPerMonth.toLocaleString()} min`}
+                  />
                   <PlanRow label="Storage" value={`${limits.maxStorageGb} GB`} />
                   <PlanFeature on={limits.aiFailureTriage} label="AI failure triage" />
                   <PlanFeature on={limits.customRunners} label="Custom runners" />
@@ -180,9 +185,9 @@ export function BillingCard({ subscription, isAdmin, hasCustomer }: BillingCardP
                         size="sm"
                         className="w-full"
                         disabled={pending}
-                        onClick={() => go('Cancel subscription', cancelTeamSubscription)}
+                        onClick={() => setCancelOpen(true)}
                       >
-                        Cancel at period end
+                        Cancel subscription
                       </Button>
                     )
                   ) : plan.id === 'free' ? (
@@ -205,6 +210,14 @@ export function BillingCard({ subscription, isAdmin, hasCustomer }: BillingCardP
           })}
         </div>
       </CardContent>
+      {subscription.plan !== 'free' && (
+        <CancelSubscriptionDialog
+          open={cancelOpen}
+          onOpenChange={setCancelOpen}
+          currentPlan={subscription.plan}
+          periodEndLabel={formatDate(subscription.currentPeriodEnd)}
+        />
+      )}
     </Card>
   );
 }

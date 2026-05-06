@@ -15,6 +15,8 @@ export {
   describeSubscription,
   requirePlan,
   canUseFeature,
+  evaluateRuntimeUsage,
   PlanRequiredError,
   type TeamSubscription,
+  type UsageVsQuota,
 } from './subscription';

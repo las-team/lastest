@@ -9,9 +9,21 @@ import {
   createCustomerPortalSession as polarCreatePortalSession,
   getOrCreateCustomer,
   resumeSubscription as polarResumeSubscription,
+  type CancellationReason,
 } from '@/lib/polar/client';
 import { getProductIdForPlan } from '@/lib/polar/plans';
 import type { SubscriptionPlan } from '@/lib/db/schema';
+
+export const CANCELLATION_REASONS: ReadonlyArray<{ id: CancellationReason; label: string }> = [
+  { id: 'too_expensive', label: 'Too expensive' },
+  { id: 'missing_features', label: 'Missing features' },
+  { id: 'switched_service', label: 'Switching to another service' },
+  { id: 'unused', label: "Don't use it enough" },
+  { id: 'too_complex', label: 'Too complex / hard to use' },
+  { id: 'low_quality', label: 'Quality not good enough' },
+  { id: 'customer_service', label: 'Customer service' },
+  { id: 'other', label: 'Other' },
+];
 
 function appBaseUrl(): string {
   return (
@@ -76,24 +88,60 @@ export async function openCustomerPortal(): Promise<{ url: string }> {
   return { url: portal.customer_portal_url };
 }
 
-export async function cancelTeamSubscription() {
+export interface CancelSubscriptionInput {
+  // 'period_end' keeps access until current_period_end; 'immediate' terminates
+  // the subscription right now (Polar prorates).
+  mode: 'period_end' | 'immediate';
+  reason?: CancellationReason;
+  comment?: string;
+}
+
+export async function cancelTeamSubscription(input: CancelSubscriptionInput) {
   const session = await requireTeamAdmin();
   if (!session.team.subscriptionId) {
     throw new Error('No active subscription to cancel');
   }
-  await polarCancelSubscription(session.team.subscriptionId, { atPeriodEnd: true });
-  await queries.applyTeamSubscription(session.team.id, { cancelAtPeriodEnd: true });
+
+  const trimmedComment = input.comment?.trim().slice(0, 1000);
+  const atPeriodEnd = input.mode === 'period_end';
+
+  await polarCancelSubscription(session.team.subscriptionId, {
+    atPeriodEnd,
+    reason: input.reason,
+    comment: trimmedComment,
+  });
+
+  if (atPeriodEnd) {
+    // Plan stays the same until period end; webhook will downgrade later.
+    await queries.applyTeamSubscription(session.team.id, { cancelAtPeriodEnd: true });
+  } else {
+    // Hard cancel: drop access immediately. The `subscription.revoked`
+    // webhook will fire shortly after and confirm the same state, but we
+    // don't want to leave the UI showing paid features in the meantime.
+    await queries.applyTeamSubscription(session.team.id, {
+      subscriptionId: null,
+      subscriptionStatus: null,
+      subscriptionPlan: 'free',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+    });
+  }
+
   await queries.logSubscriptionEvent({
     teamId: session.team.id,
     subscriptionId: session.team.subscriptionId,
     fromPlan: session.team.subscriptionPlan ?? 'free',
-    toPlan: session.team.subscriptionPlan ?? 'free',
+    toPlan: atPeriodEnd ? (session.team.subscriptionPlan ?? 'free') : 'free',
     fromStatus: session.team.subscriptionStatus ?? null,
-    toStatus: session.team.subscriptionStatus ?? null,
+    toStatus: atPeriodEnd ? (session.team.subscriptionStatus ?? null) : null,
     source: 'admin',
+    action: 'cancel',
+    cancellationReason: input.reason ?? null,
+    cancellationComment: trimmedComment ?? null,
+    actorUserId: session.user.id,
   });
   revalidatePath('/settings/billing');
-  return { success: true };
+  return { success: true, mode: input.mode };
 }
 
 export async function resumeTeamSubscription() {
@@ -103,6 +151,17 @@ export async function resumeTeamSubscription() {
   }
   await polarResumeSubscription(session.team.subscriptionId);
   await queries.applyTeamSubscription(session.team.id, { cancelAtPeriodEnd: false });
+  await queries.logSubscriptionEvent({
+    teamId: session.team.id,
+    subscriptionId: session.team.subscriptionId,
+    fromPlan: session.team.subscriptionPlan ?? 'free',
+    toPlan: session.team.subscriptionPlan ?? 'free',
+    fromStatus: session.team.subscriptionStatus ?? null,
+    toStatus: session.team.subscriptionStatus ?? null,
+    source: 'admin',
+    action: 'resume',
+    actorUserId: session.user.id,
+  });
   revalidatePath('/settings/billing');
   return { success: true };
 }

@@ -4,6 +4,10 @@ export interface PlanLimits {
   maxRepositories: number; // -1 = unlimited
   maxBuildsPerMonth: number;
   maxStorageGb: number;
+  // Bundled test runtime per calendar month. -1 = unlimited. Once exceeded
+  // we either soft-warn (free → upgrade prompt) or charge for overages
+  // depending on plan; that policy lives in the metering helpers.
+  maxRuntimeMinutesPerMonth: number;
   aiFailureTriage: boolean;
   customRunners: boolean;
   prioritySupport: boolean;
@@ -31,6 +35,7 @@ export const PLANS: Record<SubscriptionPlan, PlanDefinition> = {
       maxRepositories: 1,
       maxBuildsPerMonth: 100,
       maxStorageGb: 1,
+      maxRuntimeMinutesPerMonth: 60,
       aiFailureTriage: false,
       customRunners: false,
       prioritySupport: false,
@@ -47,6 +52,7 @@ export const PLANS: Record<SubscriptionPlan, PlanDefinition> = {
       maxRepositories: 10,
       maxBuildsPerMonth: 5_000,
       maxStorageGb: 50,
+      maxRuntimeMinutesPerMonth: 1_500,
       aiFailureTriage: true,
       customRunners: true,
       prioritySupport: false,
@@ -63,6 +69,7 @@ export const PLANS: Record<SubscriptionPlan, PlanDefinition> = {
       maxRepositories: -1,
       maxBuildsPerMonth: 50_000,
       maxStorageGb: 500,
+      maxRuntimeMinutesPerMonth: -1,
       aiFailureTriage: true,
       customRunners: true,
       prioritySupport: true,

@@ -59,3 +59,32 @@ export function canUseFeature(team: Team, feature: keyof PlanLimits): boolean {
   const value = sub.limits[feature];
   return typeof value === 'boolean' ? value : value !== 0;
 }
+
+export interface UsageVsQuota {
+  usedMs: number;
+  testRunCount: number;
+  quotaMinutes: number; // -1 = unlimited
+  quotaMs: number; // -1 = unlimited
+  percent: number; // 0..100, capped at 100; 0 when unlimited
+  exceeded: boolean;
+}
+
+// Compare a team's current-month runtime against the plan's bundled minutes.
+// `usedMs` is the value from `getTeamMonthlyUsage(...)`.
+export function evaluateRuntimeUsage(team: Team, usedMs: number, testRunCount = 0): UsageVsQuota {
+  const sub = describeSubscription(team);
+  const quotaMinutes = sub.limits.maxRuntimeMinutesPerMonth;
+  const quotaMs = quotaMinutes < 0 ? -1 : quotaMinutes * 60_000;
+  if (quotaMs < 0) {
+    return { usedMs, testRunCount, quotaMinutes, quotaMs, percent: 0, exceeded: false };
+  }
+  const percent = quotaMs > 0 ? Math.min(100, Math.round((usedMs / quotaMs) * 100)) : 0;
+  return {
+    usedMs,
+    testRunCount,
+    quotaMinutes,
+    quotaMs,
+    percent,
+    exceeded: usedMs > quotaMs,
+  };
+}

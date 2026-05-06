@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, primaryKey } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -2355,7 +2355,8 @@ export type NewPolarWebhookEvent = typeof polarWebhookEvents.$inferInsert;
 
 // Subscription state-transition audit log. Lets admins reconstruct the
 // chronology of a team's plan when reconciling support tickets against
-// Polar's dashboard.
+// Polar's dashboard. Cancellation reasons captured here feed retention
+// analytics without leaving the app.
 export const subscriptionEvents = pgTable('subscription_events', {
   id: text('id').primaryKey(),
   teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
@@ -2365,10 +2366,48 @@ export const subscriptionEvents = pgTable('subscription_events', {
   fromStatus: text('from_status').$type<SubscriptionStatus>(),
   toStatus: text('to_status').$type<SubscriptionStatus>(),
   source: text('source').notNull(), // 'webhook' | 'admin' | 'checkout'
+  action: text('action'), // 'cancel' | 'resume' | 'upgrade' | 'downgrade' | null for plain status sync
+  cancellationReason: text('cancellation_reason'),
+  cancellationComment: text('cancellation_comment'),
+  actorUserId: text('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
 }, (table) => ([
   index('idx_subscription_events_team').on(table.teamId),
+  index('idx_subscription_events_action').on(table.action),
 ]));
 
 export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;
 export type NewSubscriptionEvent = typeof subscriptionEvents.$inferInsert;
+
+// ============================================
+// Per-team monthly usage roll-up (billing input)
+// ============================================
+//
+// One row per (team, calendar-month) capturing:
+//   - runtimeMs: total wall-clock test runtime for the month, derived from
+//     test_results.duration_ms as runs land. This is the primary metering
+//     dimension we charge against.
+//   - testRunCount: number of test results recorded that month — useful for
+//     dashboards and abuse detection (e.g. tight retry loops).
+//
+// `yearMonth` is encoded as YYYYMM (e.g. 202605) so range queries stay simple
+// without a full date column. The composite PK (team_id, year_month) makes
+// the upsert path trivially correct under concurrent writes.
+export const teamUsageMonthly = pgTable('team_usage_monthly', {
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
+  yearMonth: integer('year_month').notNull(),
+  runtimeMs: bigint('runtime_ms', { mode: 'number' }).notNull().default(0),
+  testRunCount: integer('test_run_count').notNull().default(0),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  primaryKey({ columns: [table.teamId, table.yearMonth] }),
+  index('idx_team_usage_monthly_team').on(table.teamId),
+]));
+
+export type TeamUsageMonthly = typeof teamUsageMonthly.$inferSelect;
+export type NewTeamUsageMonthly = typeof teamUsageMonthly.$inferInsert;
+
+export function yearMonthOf(date: Date | number): number {
+  const d = typeof date === 'number' ? new Date(date) : date;
+  return d.getUTCFullYear() * 100 + (d.getUTCMonth() + 1);
+}
