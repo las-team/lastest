@@ -296,7 +296,16 @@ export async function togglePauseRecording(_repositoryId?: string | null): Promi
   return { paused: false, error: 'Pause is not supported for remote recording sessions' };
 }
 
-export async function getRecordingStatus(repositoryId?: string | null, sinceSequence?: number) {
+export async function getRecordingStatus(
+  repositoryId?: string | null,
+  sinceSequence?: number,
+  // Optional client hints — let any pod confirm an active recording even when
+  // the in-process `remoteRecordingSessionsMap` is empty on this pod (Olares
+  // runs two app pods that share DB but not memory). Without these, polls
+  // that round-robin to the "wrong" pod report isRecording=false and the UI
+  // tears down the BrowserViewer mid-recording.
+  hint?: { sessionId?: string; runnerId?: string },
+) {
   await requireTeamAccess();
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
@@ -337,6 +346,71 @@ export async function getRecordingStatus(repositoryId?: string | null, sinceSequ
       } : null,
       errorMessage: remoteSession.errorMessage ?? null,
     };
+  }
+
+  // No in-memory session on this pod. Before reporting "stopped", check the
+  // DB for evidence the recording is still alive on a peer pod: if the runner
+  // is busy and its embedded_sessions row is busy, the recording is active —
+  // we just don't have local mirror state. Returning isRecording=false here
+  // would unmount the BrowserViewer mid-recording (canvas disappears).
+  if (hint?.runnerId) {
+    const { db } = await import('@/lib/db');
+    const { runners, embeddedSessions, remoteRecordingEvents } = await import('@/lib/db/schema');
+    const { and: andOp, eq: eqOp, gt: gtOp } = await import('drizzle-orm');
+    const [runnerRow] = await db
+      .select({
+        runnerStatus: runners.status,
+        sessionStatus: embeddedSessions.status,
+      })
+      .from(runners)
+      .leftJoin(embeddedSessions, eqOp(embeddedSessions.runnerId, runners.id))
+      .where(eqOp(runners.id, hint.runnerId))
+      .limit(1);
+
+    const stillBusy = !!runnerRow
+      && runnerRow.runnerStatus === 'busy'
+      && (runnerRow.sessionStatus === null || runnerRow.sessionStatus === 'busy');
+
+    if (stillBusy) {
+      // Pull DB-forwarded events for this sessionId so the UI continues to
+      // grow the timeline even when polls bounce to the wrong pod.
+      let dbEvents: RemoteRecordingEvent[] = [];
+      if (hint.sessionId) {
+        const where = sinceSequence !== undefined
+          ? andOp(eqOp(remoteRecordingEvents.sessionId, hint.sessionId), gtOp(remoteRecordingEvents.sequence, sinceSequence))
+          : eqOp(remoteRecordingEvents.sessionId, hint.sessionId);
+        const rows = await db
+          .select()
+          .from(remoteRecordingEvents)
+          .where(where)
+          .orderBy(remoteRecordingEvents.sequence);
+        dbEvents = rows.map((r) => ({
+          type: r.type,
+          timestamp: r.timestamp,
+          sequence: r.sequence,
+          status: r.status as 'preview' | 'committed',
+          verification: (r.verification ?? undefined) as RemoteRecordingEvent['verification'],
+          data: (r.data ?? {}) as Record<string, unknown>,
+        }));
+      }
+      const lastSequence = dbEvents.length > 0
+        ? dbEvents[dbEvents.length - 1]!.sequence
+        : (sinceSequence ?? 0);
+      return {
+        isRecording: true,
+        events: dbEvents,
+        lastSequence,
+        verificationUpdates: [] as RemoteRecordingEventUpdate[],
+        session: hint.sessionId ? {
+          id: hint.sessionId,
+          url: '',
+          startedAt: new Date(),
+          eventsCount: dbEvents.length,
+        } : null,
+        lastCompletedSession: null,
+        errorMessage: null,
+      };
+    }
   }
 
   // No active session

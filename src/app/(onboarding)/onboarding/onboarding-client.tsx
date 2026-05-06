@@ -145,13 +145,21 @@ export function OnboardingClient({
   const finish = useCallback(
     async (target: string) => {
       await completeOnboarding();
+      // Wait for the server-side onboardingCompletedAt write + sandbox repo
+      // row to be visible to a fresh request before we hard-navigate. Without
+      // this, the post-onboarding GET /api/v1/repos can race the just-created
+      // sandbox row and return an empty (or stale) repo list, surfacing as
+      // "Sandbox repo not found" downstream.
+      try {
+        await router.refresh();
+      } catch {}
       // Hard navigation — router.push triggers an RSC swap of (onboarding)/layout
       // while its redirect guard fires (onboardingCompletedAt was just set), and
       // Next.js dev throws "OnboardingLayout cannot have a negative time stamp"
       // from the layout perf.measure. window.location.href sidesteps the swap.
       window.location.href = target;
     },
-    [],
+    [router],
   );
 
   const currentIndex = visibleSteps.indexOf(step);
@@ -211,9 +219,22 @@ export function OnboardingClient({
             }
             onCreateSandbox={(name, baseUrl) =>
               startTransition(async () => {
-                await createLocalRepo(name, baseUrl);
-                track(Events.repo_linked, { source: 'sandbox' });
-                router.refresh();
+                try {
+                  await createLocalRepo(name, baseUrl);
+                  track(Events.repo_linked, { source: 'sandbox' });
+                } catch (err) {
+                  // Without surfacing this, a silent createLocalRepo failure
+                  // leaves the user on Step 2 with no recent-repos entry —
+                  // they keep clicking "Create sandbox" with no feedback.
+                  toast.error(err instanceof Error ? err.message : 'Could not create sandbox');
+                  return;
+                }
+                // Wait for the server to re-render Step 2 (with the new repo
+                // populated as `selectedRepoId` / `selectedRepoBaseUrl`) before
+                // letting the user advance. Otherwise the next Continue click
+                // can race ahead of the prop update and Step 3 mounts with
+                // stale (empty) base URL.
+                await router.refresh();
               })
             }
             onSyncGithub={() =>
@@ -776,6 +797,16 @@ function Step3Url({
   onSkip: () => void;
 }) {
   const [url, setUrl] = useState(currentBaseUrl ?? '');
+  // Sync the input when the parent's `currentBaseUrl` arrives late — e.g. the
+  // sandbox repo was just created and `router.refresh()` hadn't propagated by
+  // the time this component first mounted. Using the React-recommended
+  // "store previous prop" pattern (set state during render) avoids the
+  // useEffect cascading-render lint rule and produces a single render pass.
+  const [prevBaseUrl, setPrevBaseUrl] = useState(currentBaseUrl);
+  if (prevBaseUrl !== currentBaseUrl) {
+    setPrevBaseUrl(currentBaseUrl);
+    setUrl(currentBaseUrl ?? '');
+  }
 
   return (
     <div className="space-y-6">
