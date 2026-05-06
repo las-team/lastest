@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { Github, Check, X, Users, Bot, Mail, Terminal } from 'lucide-react';
+import { Github, Check, X, Users, Bot, Mail, Terminal, CreditCard } from 'lucide-react';
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -345,6 +345,29 @@ export default async function SettingsPage({
               isAdmin={isAdmin}
               enforcementEnabled={enforcementEnabled}
             />
+          )}
+
+          {/* Billing */}
+          {teamId && (
+            <Card id="billing">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5" />
+                  Billing & Plan
+                </CardTitle>
+                <CardDescription>
+                  Current plan: <Badge variant="outline">{session?.team?.subscriptionPlan ?? 'free'}</Badge>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <a
+                  href="/settings/billing"
+                  className="text-sm text-primary underline-offset-4 hover:underline"
+                >
+                  Manage subscription, change plan, view invoices →
+                </a>
+              </CardContent>
+            </Card>
           )}
 
           {/* Environment Config */}

@@ -1238,6 +1238,17 @@ export type NewSelectorStat = typeof selectorStats.$inferInsert;
 
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+// Subscription state mirrored from Polar. Source of truth lives in Polar; we
+// cache enough to gate features without a round-trip on every request.
+export type SubscriptionPlan = 'free' | 'pro' | 'business';
+export type SubscriptionStatus =
+  | 'incomplete'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'unpaid';
+
 // Teams - Multi-tenancy support
 export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
@@ -1250,6 +1261,14 @@ export const teams = pgTable('teams', {
   storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
   storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
   storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
+  // Polar billing — team is the customer
+  polarCustomerId: text('polar_customer_id').unique(),
+  subscriptionId: text('subscription_id').unique(),
+  subscriptionStatus: text('subscription_status').$type<SubscriptionStatus>(),
+  subscriptionPlan: text('subscription_plan').$type<SubscriptionPlan>().notNull().default('free'),
+  subscriptionPriceId: text('subscription_price_id'),
+  currentPeriodEnd: timestamp('current_period_end'),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -2311,3 +2330,45 @@ export const remoteDebugSessions = pgTable('remote_debug_sessions', {
 
 export type RemoteDebugSessionRow = typeof remoteDebugSessions.$inferSelect;
 export type NewRemoteDebugSessionRow = typeof remoteDebugSessions.$inferInsert;
+
+// ============================================
+// Polar billing — webhook idempotency + audit log
+// ============================================
+
+// Persist every webhook delivery we accept. Polar may retry, so the (eventId)
+// PK lets us short-circuit duplicates.
+export const polarWebhookEvents = pgTable('polar_webhook_events', {
+  eventId: text('event_id').primaryKey(),
+  type: text('type').notNull(),
+  receivedAt: timestamp('received_at').$defaultFn(() => new Date()).notNull(),
+  processedAt: timestamp('processed_at'),
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'set null' }),
+  payload: jsonb('payload').notNull(),
+  error: text('error'),
+}, (table) => ([
+  index('idx_polar_webhook_events_team').on(table.teamId),
+  index('idx_polar_webhook_events_type').on(table.type),
+]));
+
+export type PolarWebhookEvent = typeof polarWebhookEvents.$inferSelect;
+export type NewPolarWebhookEvent = typeof polarWebhookEvents.$inferInsert;
+
+// Subscription state-transition audit log. Lets admins reconstruct the
+// chronology of a team's plan when reconciling support tickets against
+// Polar's dashboard.
+export const subscriptionEvents = pgTable('subscription_events', {
+  id: text('id').primaryKey(),
+  teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
+  subscriptionId: text('subscription_id'),
+  fromPlan: text('from_plan').$type<SubscriptionPlan>(),
+  toPlan: text('to_plan').$type<SubscriptionPlan>(),
+  fromStatus: text('from_status').$type<SubscriptionStatus>(),
+  toStatus: text('to_status').$type<SubscriptionStatus>(),
+  source: text('source').notNull(), // 'webhook' | 'admin' | 'checkout'
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_subscription_events_team').on(table.teamId),
+]));
+
+export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;
+export type NewSubscriptionEvent = typeof subscriptionEvents.$inferInsert;

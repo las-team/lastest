@@ -10,3 +10,11 @@ export {
   isAuthenticated,
   type SessionData,
 } from './session';
+
+export {
+  describeSubscription,
+  requirePlan,
+  canUseFeature,
+  PlanRequiredError,
+  type TeamSubscription,
+} from './subscription';
