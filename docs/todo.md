@@ -1,22 +1,14 @@
 ## tasks
 Videos explaining use
-    Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     video2: claude uses lastest mcp
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
-**Gitlab**
 Teardown
-**Accept Downloads**
 triage
-a11y
-DOM delta
 Create modes
 Openrouter agent sdk parity
-**Onboarding**
-**Criteria**
-**CSV upload and use**
 ## bugs
 ## features
 Build a skill to find startupideas and test them, provide testing feedback
@@ -53,6 +45,10 @@ DOM test repair
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
 ## marketing
+screenshot diff tool
+    - /integrations/<github|gitlab|playwright|...> pages (one per integration)
+    -     - Open dataset: common UI flake patterns from anonymized runs                 
+    -         - Free WCAG 2.2 AA scorecard generator (you already have a11y scoring)     
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop
 Do you trust ai? I dont human in the loop

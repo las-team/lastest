@@ -1,14 +1,41 @@
 {
   "name": "lastest-vscode",
   "displayName": "Lastest Visual Testing",
-  "description": "Visual regression testing integration for Lastest",
+  "description": "Visual regression testing integration for Lastest — record, run, and review screenshot diffs without leaving VS Code.",
   "version": "0.1.0",
   "publisher": "lastest",
+  "license": "MIT",
+  "icon": "icon.png",
+  "homepage": "https://lastest.cloud",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/las-team/lastest.git",
+    "directory": "packages/vscode-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/las-team/lastest/issues"
+  },
+  "keywords": [
+    "visual regression",
+    "testing",
+    "playwright",
+    "screenshot diff",
+    "baseline",
+    "qa",
+    "ai testing",
+    "lastest"
+  ],
+  "galleryBanner": {
+    "color": "#0a0a0a",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Testing"
+    "Testing",
+    "Visualization",
+    "AI"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -114,6 +141,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build": "npm run compile",
     "watch": "npm run compile -- --watch",
     "package": "vsce package",
     "lint": "eslint src"
