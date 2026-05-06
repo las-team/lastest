@@ -299,6 +299,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
     regionDetectionMode: DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    textDiffEnabled: DEFAULT_DIFF_THRESHOLDS.textDiffEnabled,
     createdAt: null,
     updatedAt: null,
   };
