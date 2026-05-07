@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import { requireRepoAccess, requireTeamAccess, requireWriteAccess, requireRepoWriteAccess } from '@/lib/auth';
 import { requireAreaOwnership, requireTestOwnership } from '@/lib/auth/ownership';
 import type { NewFunctionalArea, FunctionalAreaPlanSnapshot } from '@/lib/db/schema';
 
@@ -12,8 +12,8 @@ export async function createArea(data: {
   repositoryId?: string;
   parentId?: string;
 }) {
-  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
-  else await requireTeamAccess();
+  if (data.repositoryId) await requireRepoWriteAccess(data.repositoryId);
+  else await requireWriteAccess();
 
   // Deduplicate: find existing area with same name (case-insensitive) in same repo+parent
   const allAreas = data.repositoryId
@@ -143,7 +143,7 @@ export async function moveTestToArea(testId: string, areaId: string | null) {
 }
 
 export async function reorderAreas(repositoryId: string, orderedIds: string[]) {
-  await requireRepoAccess(repositoryId);
+  await requireRepoWriteAccess(repositoryId);
   await queries.reorderFunctionalAreas(repositoryId, orderedIds);
   revalidatePath('/areas');
 }
@@ -157,7 +157,7 @@ export async function getArea(id: string) {
 }
 
 export async function updateAreaPlan(id: string, agentPlan: string) {
-  await requireTeamAccess();
+  await requireWriteAccess();
   const area = await queries.getFunctionalArea(id);
   if (!area) throw new Error('Area not found');
 
@@ -181,7 +181,7 @@ export async function updateAreaPlan(id: string, agentPlan: string) {
 }
 
 export async function rollbackAreaPlan(id: string) {
-  await requireTeamAccess();
+  await requireWriteAccess();
   const area = await queries.getFunctionalArea(id);
   if (!area || !area.planSnapshot) throw new Error('No snapshot to rollback');
 
@@ -206,7 +206,7 @@ export async function rollbackAreaPlan(id: string) {
 }
 
 export async function rollbackAllAreaPlans(repositoryId: string) {
-  await requireRepoAccess(repositoryId);
+  await requireRepoWriteAccess(repositoryId);
   const areas = await queries.getFunctionalAreasByRepo(repositoryId);
   const areasWithSnapshot = areas.filter(a => a.planSnapshot);
 
