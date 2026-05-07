@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import fs from 'fs';
 import path from 'path';
 import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess, requireWriteAccess, requireRepoWriteAccess } from '@/lib/auth';
+import { requireRepoAccess, requireTeamAccess, requireCapability, requireRepoCapability } from '@/lib/auth';
 import {
   requireAreaOwnership,
   requireTestOwnership,
@@ -28,8 +28,8 @@ export async function getSelectorStatsForTestAction(testId: string) {
 }
 
 export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
-  if (data.repositoryId) await requireRepoWriteAccess(data.repositoryId);
-  else await requireWriteAccess();
+  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'areas:write');
+  else await requireCapability('areas:write');
   const result = await queries.createFunctionalArea(data);
   revalidatePath('/tests');
   revalidatePath('/');
@@ -51,11 +51,11 @@ export async function deleteFunctionalArea(id: string) {
 }
 
 export async function cloneTest(id: string) {
-  await requireWriteAccess();
+  await requireCapability('tests:write');
   const test = await queries.getTest(id);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
-    await requireRepoWriteAccess(test.repositoryId);
+    await requireRepoCapability(test.repositoryId, 'tests:write');
   }
   const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, deletedAt: _deletedAt, ...data } = test;
   const result = await queries.createTest({
@@ -68,8 +68,8 @@ export async function cloneTest(id: string) {
 }
 
 export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
-  if (data.repositoryId) await requireRepoWriteAccess(data.repositoryId);
-  else await requireWriteAccess();
+  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'tests:write');
+  else await requireCapability('tests:write');
   // Gamification stamping + awarding happens inside queries.createTest via
   // the onTestCreated hook — it handles every caller, not just this one.
   const result = await queries.createTest(data);
@@ -79,7 +79,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(id);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -94,7 +94,7 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
 
 // Updates only the parsed assertions metadata — no version history entry
 export async function syncTestAssertions(id: string, assertions: import('@/lib/db/schema').TestAssertion[]) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(id);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -110,7 +110,7 @@ export async function saveStepCriteria(
   stepLabel: string,
   rules: import('@/lib/db/schema').StepRule[],
 ) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -126,7 +126,7 @@ export async function saveTestVariables(
   testId: string,
   variables: import('@/lib/db/schema').TestVariable[],
 ) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -185,7 +185,7 @@ export async function generateAIVarValuePreview(
   testId: string,
   variable: import('@/lib/db/schema').TestVariable,
 ): Promise<{ value: string }> {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -256,7 +256,7 @@ export async function generateAIVarValuePreview(
 }
 
 export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   const test = await queries.getTest(testId);
   if (!test) throw new Error('Test not found');
   if (test.repositoryId) {
@@ -336,7 +336,7 @@ async function verifyTestOwnership(testId: string, teamId: string) {
 }
 
 export async function deleteTest(id: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   await verifyTestOwnership(id, session.team.id);
   await queries.softDeleteTest(id);
   revalidatePath('/tests');
@@ -345,7 +345,7 @@ export async function deleteTest(id: string) {
 }
 
 export async function deleteTests(testIds: string[]) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.softDeleteTest(id);
@@ -355,7 +355,7 @@ export async function deleteTests(testIds: string[]) {
 }
 
 export async function restoreTest(id: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   await verifyTestOwnership(id, session.team.id);
   await queries.restoreTest(id);
   revalidatePath('/tests');
@@ -364,7 +364,7 @@ export async function restoreTest(id: string) {
 }
 
 export async function restoreTests(testIds: string[]) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.restoreTest(id);
@@ -374,7 +374,7 @@ export async function restoreTests(testIds: string[]) {
 }
 
 export async function permanentlyDeleteTest(id: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   await verifyTestOwnership(id, session.team.id);
   await queries.permanentlyDeleteTest(id);
   revalidatePath('/tests');
@@ -382,7 +382,7 @@ export async function permanentlyDeleteTest(id: string) {
 }
 
 export async function permanentlyDeleteTests(testIds: string[]) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('tests:write');
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.permanentlyDeleteTest(id);

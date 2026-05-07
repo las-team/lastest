@@ -1,14 +1,17 @@
 /**
  * Demo-mode bootstrap.
  *
- * A single team identified by slug='demo' acts as the home for all demo users.
- * Members of the demo team are created with role='viewer', which combined with
- * the slug check in `isDemoSession` makes their sessions read-only at every
- * `requireWriteAccess` / `requireRepoWriteAccess` boundary.
+ * A single team with `plan='demo'` acts as the home for all demo users.
+ * The capability layer (`src/lib/auth/capabilities.ts`) treats `plan='demo'`
+ * as read-only for every role, so demo membership alone is enough to gate
+ * writes — slug/role are not part of the authorization decision.
  *
- * The demo team owns one provider='local' sample repo so demo users can run
- * the pre-recorded sample tests and inspect builds/diffs without needing
- * GitHub/GitLab connectivity.
+ * Demo users are still created with role='viewer' as a defense-in-depth
+ * fallback in case a demo team is ever moved off the demo plan.
+ *
+ * The demo team owns one provider='local' sample repo so demo users can
+ * run the pre-recorded sample tests and inspect builds/diffs without
+ * needing GitHub/GitLab connectivity.
  */
 import * as queries from '@/lib/db/queries';
 import type { Team, Repository } from '@/lib/db/schema';
@@ -25,8 +28,16 @@ export function isDemoEmail(email: string): boolean {
 
 export async function getOrCreateDemoTeam(): Promise<Team> {
   const existing = await queries.getTeamBySlug(DEMO_TEAM_SLUG);
-  if (existing) return existing;
-  return queries.createTeam({ name: DEMO_TEAM_NAME, slug: DEMO_TEAM_SLUG });
+  if (existing) {
+    if (existing.plan !== 'demo') {
+      await queries.updateTeam(existing.id, { plan: 'demo' });
+      return { ...existing, plan: 'demo' };
+    }
+    return existing;
+  }
+  const team = await queries.createTeam({ name: DEMO_TEAM_NAME, slug: DEMO_TEAM_SLUG });
+  await queries.updateTeam(team.id, { plan: 'demo' });
+  return { ...team, plan: 'demo' };
 }
 
 export async function getOrCreateDemoRepo(teamId: string): Promise<Repository> {

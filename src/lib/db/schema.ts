@@ -1251,11 +1251,21 @@ export type NewSelectorStat = typeof selectorStats.$inferInsert;
 
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+// Subscription tier the team is on. Demo teams are shared, read-only
+// sandboxes; the rest are normal billable tiers. The capability layer in
+// `src/lib/auth/capabilities.ts` derives the allowed action set from
+// (role, plan, status) — adding a new tier means one branch there, not
+// editing every server action.
+export type TeamPlan = 'demo' | 'free' | 'trial' | 'pro';
+export type TeamStatus = 'active' | 'suspended';
+
 // Teams - Multi-tenancy support
 export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  plan: text('plan').$type<TeamPlan>().notNull().default('free'),
+  status: text('status').$type<TeamStatus>().notNull().default('active'),
   selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
   banAiMode: boolean('ban_ai_mode').default(false),
