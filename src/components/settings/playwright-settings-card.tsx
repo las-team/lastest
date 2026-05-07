@@ -24,8 +24,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, Layers, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Code2 } from 'lucide-react';
-import { Slider } from '@/components/ui/slider';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Code2, Lock, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -35,19 +34,17 @@ import type { SelectorTypeStats } from '@/lib/db/queries';
 function CollapsibleSection({
   title,
   icon: Icon,
-  defaultOpen = false,
   enabled,
   children,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
-  defaultOpen?: boolean;
   enabled: boolean;
   children: React.ReactNode;
 }) {
   if (!enabled) return <>{children}</>;
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible defaultOpen>
       <CollapsibleTrigger asChild>
         <Button variant="ghost" className="w-full justify-between p-2 h-auto">
           <div className="flex items-center gap-2">
@@ -120,7 +117,6 @@ export function PlaywrightSettingsCard({
   const [enableDomDiff, setEnableDomDiff] = useState(settings.enableDomDiff ?? false);
   const [lockViewportToRecording, setLockViewportToRecording] = useState(settings.lockViewportToRecording ?? false);
   const [screenshotDelay, setScreenshotDelay] = useState(settings.screenshotDelay ?? 0);
-  const [maxParallelTests, setMaxParallelTests] = useState(settings.maxParallelTests ?? 1);
   const [stabilization, setStabilization] = useState<StabilizationSettings>(
     { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization }
   );
@@ -161,7 +157,6 @@ export function PlaywrightSettingsCard({
     enableDomDiff: settings.enableDomDiff ?? false,
     lockViewportToRecording: settings.lockViewportToRecording ?? false,
     screenshotDelay: settings.screenshotDelay ?? 0,
-    maxParallelTests: settings.maxParallelTests ?? 1,
     stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
     browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
     customAttributeName: settings.customAttributeName ?? '',
@@ -195,7 +190,6 @@ export function PlaywrightSettingsCard({
     setEnableDomDiff(settings.enableDomDiff ?? false);
     setLockViewportToRecording(settings.lockViewportToRecording ?? false);
     setScreenshotDelay(settings.screenshotDelay ?? 0);
-    setMaxParallelTests(settings.maxParallelTests ?? 1);
     setStabilization({ ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization });
     setBrowsers((settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium']);
     setCustomAttributeName(settings.customAttributeName ?? '');
@@ -226,7 +220,6 @@ export function PlaywrightSettingsCard({
       enableDomDiff: settings.enableDomDiff ?? false,
       lockViewportToRecording: settings.lockViewportToRecording ?? false,
       screenshotDelay: settings.screenshotDelay ?? 0,
-      maxParallelTests: settings.maxParallelTests ?? 1,
       stabilization: { ...DEFAULT_STABILIZATION_SETTINGS, ...settings.stabilization },
       browsers: (settings as PlaywrightSettings & { browsers?: string[] }).browsers || ['chromium'],
       customAttributeName: settings.customAttributeName ?? '',
@@ -284,7 +277,6 @@ export function PlaywrightSettingsCard({
         enableDomDiff,
         lockViewportToRecording,
         screenshotDelay,
-        maxParallelTests,
         stabilization,
         browsers,
         customAttributeName: customAttributeName.trim() || null,
@@ -296,7 +288,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -327,7 +319,6 @@ export function PlaywrightSettingsCard({
       enableDomDiff !== orig.enableDomDiff ||
       lockViewportToRecording !== orig.lockViewportToRecording ||
       screenshotDelay !== orig.screenshotDelay ||
-      maxParallelTests !== orig.maxParallelTests ||
       JSON.stringify(stabilization) !== JSON.stringify(orig.stabilization) ||
       JSON.stringify(browsers) !== JSON.stringify(orig.browsers) ||
       customAttributeName !== orig.customAttributeName;
@@ -347,7 +338,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, maxParallelTests, stabilization, browsers, customAttributeName, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -376,7 +367,6 @@ export function PlaywrightSettingsCard({
       setEnableDomDiff(false);
       setLockViewportToRecording(false);
       setScreenshotDelay(0);
-      setMaxParallelTests(1);
       setStabilization(DEFAULT_STABILIZATION_SETTINGS);
       setBrowsers(['chromium']);
       setCustomAttributeName('');
@@ -389,7 +379,7 @@ export function PlaywrightSettingsCard({
   const content = (
     <div className={compact ? 'space-y-3' : 'space-y-2'}>
       {/* Selectors */}
-      <CollapsibleSection title="Selectors" icon={List} defaultOpen enabled={!compact}>
+      <CollapsibleSection title="Selectors" icon={List} enabled={!compact}>
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
         {compact && (
           <div className="flex items-center gap-2">
@@ -491,240 +481,216 @@ export function PlaywrightSettingsCard({
       </div>
       </CollapsibleSection>
 
-      {/* Snapshot Stabilization */}
-      <CollapsibleSection title="Snapshot Stabilization" icon={Camera} enabled={!compact}>
-      <div className={compact ? 'space-y-2' : 'space-y-4'}>
-
-        {/* Freeze Animations */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Pause className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Freeze Animations</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Disable CSS animations and transitions before screenshots
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={freezeAnimations} onCheckedChange={setFreezeAnimations} />
-        </div>
-
-        {/* Video Recording */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Video className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Video Recording</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Record test runs as WebM video for playback
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
-        </div>
-
-        {/* Accessibility Checks */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Accessibility className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Accessibility Checks</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Run WCAG 2.2 AA compliance checks with axe-core
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
-        </div>
-
-        {/* Accept Any Certificate */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Accept Any Certificate</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Ignore HTTPS/SSL certificate errors when testing external sites
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
-        </div>
-
-        {/* Clipboard Access */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ClipboardCopy className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Clipboard Access</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Grant clipboard read/write permissions for copy/paste tests
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={grantClipboardAccess} onCheckedChange={setGrantClipboardAccess} />
-        </div>
-
-        {/* Accept Downloads */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Download className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Accept Downloads</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Allow file downloads during tests for export verification
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
-        </div>
-
-        {/* Network Interception */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">Network Interception</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Enable API mocking, request blocking, and network capture in tests
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
-        </div>
-
-        {/* DOM Diff */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Code2 className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label className="text-sm">DOM Diff</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Compare DOM snapshots and overlay added/removed/changed elements on screenshots
-                </p>
-              )}
-            </div>
-          </div>
-          <Switch checked={enableDomDiff} onCheckedChange={setEnableDomDiff} />
-        </div>
-
-        {/* Error Handling */}
-        <Collapsible>
-          <CollapsibleTrigger className="flex items-center justify-between w-full py-1">
+      {/* Stabilization */}
+      <CollapsibleSection title="Stabilization" icon={Pause} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Freeze Animations */}
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-muted-foreground" />
-              <Label className="text-sm cursor-pointer">Error Handling</Label>
-            </div>
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-4 pt-3 pl-6">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Network Error Mode</Label>
-              <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
-                  <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                  <SelectItem value="ignore">Ignore network errors</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between">
+              <Pause className="w-4 h-4 text-muted-foreground" />
               <div className="space-y-0.5">
-                <Label className="text-xs">Ignore External Network Errors</Label>
-                <p className="text-xs text-muted-foreground">
-                  Skip errors from domains other than the target URL
-                </p>
+                <Label className="text-sm">Freeze Animations</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Disable CSS animations and transitions before screenshots
+                  </p>
+                )}
               </div>
-              <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
             </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Console Error Mode</Label>
-              <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fail">Fail test on console errors</SelectItem>
-                  <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                  <SelectItem value="ignore">Ignore console errors</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Screenshot Delay */}
-        <div className={compact ? 'flex items-center justify-between' : 'flex items-center gap-4'}>
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-muted-foreground" />
-            <div className="space-y-0.5">
-              <Label htmlFor="screenshotDelay" className="text-sm">Screenshot Delay</Label>
-              {!compact && (
-                <p className="text-xs text-muted-foreground">
-                  Wait before capturing screenshot for content to stabilize
-                </p>
-              )}
-            </div>
+            <Switch checked={freezeAnimations} onCheckedChange={setFreezeAnimations} />
           </div>
-          <div className={compact ? 'flex items-center gap-1' : 'flex items-center gap-2 ml-auto'}>
-            <Input
-              id="screenshotDelay"
-              type="number"
-              min={0}
-              max={5000}
-              step={100}
-              value={screenshotDelay}
-              onChange={(e) => setScreenshotDelay(Math.max(0, parseInt(e.target.value) || 0))}
-              className={compact ? 'w-16 h-7 text-sm' : 'w-24'}
-            />
-            <span className="text-xs text-muted-foreground">ms</span>
+
+          {/* Screenshot Delay */}
+          <div className={compact ? 'flex items-center justify-between' : 'flex items-center gap-4'}>
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label htmlFor="screenshotDelay" className="text-sm">Screenshot Delay</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Wait before capturing screenshot for content to stabilize
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className={compact ? 'flex items-center gap-1' : 'flex items-center gap-2 ml-auto'}>
+              <Input
+                id="screenshotDelay"
+                type="number"
+                min={0}
+                max={5000}
+                step={100}
+                value={screenshotDelay}
+                onChange={(e) => setScreenshotDelay(Math.max(0, parseInt(e.target.value) || 0))}
+                className={compact ? 'w-16 h-7 text-sm' : 'w-24'}
+              />
+              <span className="text-xs text-muted-foreground">ms</span>
+            </div>
           </div>
         </div>
-      </div>
       </CollapsibleSection>
 
-      {/* Parallel Execution */}
-      <CollapsibleSection title="Parallel Execution" icon={Layers} enabled={!compact}>
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-muted-foreground" />
+      {/* Capture */}
+      <CollapsibleSection title="Capture" icon={Camera} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Video Recording */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Video className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Video Recording</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Record test runs as WebM video for playback
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
+          </div>
+
+          {/* DOM Diff */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Code2 className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">DOM Diff</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Compare DOM snapshots and overlay added/removed/changed elements on screenshots
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableDomDiff} onCheckedChange={setEnableDomDiff} />
+          </div>
+
+          {/* Accessibility Checks */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Accessibility className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accessibility Checks</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Run WCAG 2.2 AA compliance checks with axe-core
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* Permissions */}
+      <CollapsibleSection title="Permissions" icon={Lock} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Accept Any Certificate */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accept Any Certificate</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Ignore HTTPS/SSL certificate errors when testing external sites
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
+          </div>
+
+          {/* Clipboard Access */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardCopy className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Clipboard Access</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Grant clipboard read/write permissions for copy/paste tests
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={grantClipboardAccess} onCheckedChange={setGrantClipboardAccess} />
+          </div>
+
+          {/* Accept Downloads */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accept Downloads</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Allow file downloads during tests for export verification
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* Errors & Network */}
+      <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Network Interception */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Network Interception</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Enable API mocking, request blocking, and network capture in tests
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Network Error Mode</Label>
+            <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
+                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                <SelectItem value="ignore">Ignore network errors</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-sm">Parallel Tests (Local)</Label>
+              <Label className="text-xs">Ignore External Network Errors</Label>
               <p className="text-xs text-muted-foreground">
-                Number of tests to run simultaneously on local execution
+                Skip errors from domains other than the target URL
               </p>
             </div>
+            <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
           </div>
-          <div className="flex items-center gap-4">
-            <Slider
-              value={[maxParallelTests]}
-              onValueChange={([value]) => setMaxParallelTests(value)}
-              min={1}
-              max={8}
-              step={1}
-              className="flex-1"
-            />
-            <span className="text-sm font-medium w-8 text-center">{maxParallelTests}</span>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Console Error Mode</Label>
+            <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fail">Fail test on console errors</SelectItem>
+                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                <SelectItem value="ignore">Ignore console errors</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </CollapsibleSection>
