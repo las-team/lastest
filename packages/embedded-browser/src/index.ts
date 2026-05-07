@@ -350,6 +350,7 @@ async function startup(): Promise<void> {
           headed?: boolean;
           forceVideoRecording?: boolean;
           selectorStats?: import('./test-executor.js').RunTestPayload['selectorStats'];
+          textCaptureEnabled?: boolean;
         };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
@@ -484,6 +485,29 @@ async function startup(): Promise<void> {
                 })
               ));
               console.log(`[Command] All screenshots uploaded for test ${payload.testId}`);
+            }
+
+            // Upload page-text blobs alongside screenshots (only present when
+            // text-diff is enabled in repo settings). Same pattern as
+            // screenshots — host saves them as `.txt` next to the `.png`.
+            if (result.texts && result.texts.length > 0) {
+              console.log(`[Command] Uploading ${result.texts.length} text captures for test ${payload.testId}...`);
+              await Promise.all(result.texts.map((textFile) =>
+                capturedClient.sendMessage({
+                  id: crypto.randomUUID(),
+                  type: 'response:screenshot_text',
+                  timestamp: Date.now(),
+                  payload: {
+                    correlationId: capturedCommand.id,
+                    testRunId: payload.testRunId,
+                    repositoryId: payload.repositoryId,
+                    filename: textFile.filename,
+                    data: textFile.data,
+                    capturedAt: Date.now(),
+                  },
+                })
+              ));
+              console.log(`[Command] All text captures uploaded for test ${payload.testId}`);
             }
 
             // Split network requests: summary for inline result, full bodies sent separately

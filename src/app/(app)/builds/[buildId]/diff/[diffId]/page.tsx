@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
 import { getPlaywrightSettings } from '@/server/actions/settings';
+import { computePageTextDiff } from '@/lib/diff/page-text-diff';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
@@ -58,6 +59,12 @@ export default async function DiffPage({ params }: PageProps) {
   const currentIndex = allDiffs.findIndex((d) => d.id === diffId);
   const prevDiff = currentIndex > 0 ? allDiffs[currentIndex - 1] : null;
   const nextDiff = currentIndex < allDiffs.length - 1 ? allDiffs[currentIndex + 1] : null;
+
+  // Page-text diff: read both stored text blobs and run the line-level diff.
+  // Hidden in the UI when status is `skipped` and both paths are null.
+  const textDiff = (diff.baselineTextPath || diff.currentTextPath || diff.textDiffStatus)
+    ? await computePageTextDiff(diff.baselineTextPath ?? null, diff.currentTextPath ?? null)
+    : null;
 
   return (
     <div className="flex-1 p-6 overflow-auto">
@@ -164,6 +171,11 @@ export default async function DiffPage({ params }: PageProps) {
             id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
           }))}
           allDiffs={allDiffs}
+          textDiff={textDiff ? {
+            status: textDiff.status,
+            summary: textDiff.summary,
+            lines: textDiff.lines,
+          } : null}
         />
 
         {/* Keyboard shortcuts hint */}

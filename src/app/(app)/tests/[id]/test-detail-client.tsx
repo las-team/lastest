@@ -1255,6 +1255,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   textRegionPadding: diffDefaults?.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
                   textDetectionGranularity: (diffDefaults?.textDetectionGranularity as 'word' | 'line' | 'block') ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
                   regionDetectionMode: (diffDefaults?.regionDetectionMode as 'grid' | 'flood-fill') ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+                  textDiffEnabled: diffDefaults?.textDiffEnabled ?? DEFAULT_DIFF_THRESHOLDS.textDiffEnabled,
                 }}
               />
             )}

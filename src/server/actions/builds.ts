@@ -14,6 +14,7 @@ import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
+import { computePageTextDiffSummary } from '@/lib/diff/page-text-diff';
 import { PNG } from 'pngjs';
 import fs from 'fs';
 import { sendSlackNotification } from '@/lib/integrations/slack';
@@ -1315,6 +1316,47 @@ async function processVisualDiff(
   const diffEngine = (merged.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
   const textRegionAwareDiffing = merged.textRegionAwareDiffing ?? false;
   const regionDetectionMode = (merged.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
+  const textDiffEnabled = settings.textDiffEnabled ?? false;
+
+  // Resolve text-diff fields for a single createVisualDiff call. The text
+  // file lives next to the screenshot (`.png` → `.txt`); we only attach a
+  // path when the file actually exists on disk so legacy baselines (created
+  // before the feature was enabled) cleanly degrade to `current_only`.
+  const resolveTextDiffFields = async (
+    baselineImagePath: string | null | undefined,
+    currentImagePath: string | null | undefined,
+  ): Promise<{
+    baselineTextPath: string | null;
+    currentTextPath: string | null;
+    textDiffStatus: import('@/lib/db/schema').TextDiffStatus;
+    textDiffSummary: NonNullable<import('@/lib/db/schema').DiffMetadata['textDiffSummary']> | null;
+  }> => {
+    if (!textDiffEnabled) {
+      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+    }
+    const swap = (p: string | null | undefined) => p ? p.replace(/\.png$/i, '.txt') : null;
+    const baselineCandidate = swap(baselineImagePath);
+    const currentCandidate = swap(currentImagePath);
+
+    const exists = async (rel: string | null) => {
+      if (!rel) return null;
+      try {
+        await fs.promises.access(path.join(STORAGE_ROOT, rel));
+        return rel;
+      } catch {
+        return null;
+      }
+    };
+    const [baselineTextPath, currentTextPath] = await Promise.all([
+      exists(baselineCandidate),
+      exists(currentCandidate),
+    ]);
+    if (!baselineTextPath && !currentTextPath) {
+      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+    }
+    const { status, summary } = await computePageTextDiffSummary(baselineTextPath, currentTextPath);
+    return { baselineTextPath, currentTextPath, textDiffStatus: status, textDiffSummary: summary };
+  };
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
@@ -1484,6 +1526,7 @@ async function processVisualDiff(
       // Auto-approve: identical to previously approved baseline
       const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
       const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+      const textDiff = await resolveTextDiffFields(matchingBaseline.imagePath, currentScreenshotPath);
 
       const diff = await queries.createVisualDiff({
         buildId,
@@ -1496,8 +1539,11 @@ async function processVisualDiff(
         classification: 'unchanged',
         pixelDifference: 0,
         percentageDifference: '0',
-        metadata: { changedRegions: [] },
+        metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
         browser,
+        baselineTextPath: textDiff.baselineTextPath,
+        currentTextPath: textDiff.currentTextPath,
+        textDiffStatus: textDiff.textDiffStatus,
         ...plannedDiff,
         ...mainDiff,
       });
@@ -1510,6 +1556,7 @@ async function processVisualDiff(
   if (!baseline) {
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    const textDiff = await resolveTextDiffFields(null, currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1521,8 +1568,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
-      metadata: { changedRegions: [], isNewTest: true },
+      metadata: { changedRegions: [], isNewTest: true, ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });
@@ -1599,10 +1649,15 @@ async function processVisualDiff(
       metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
     }
 
-    const [plannedDiff, mainDiff] = await Promise.all([
+    const [plannedDiff, mainDiff, textDiff] = await Promise.all([
       generatePlannedDiff(currentScreenshotPath),
       generateMainBaselineDiff(currentScreenshotPath),
+      resolveTextDiffFields(baseline.imagePath, currentScreenshotPath),
     ]);
+
+    if (textDiff.textDiffSummary) {
+      metadata.textDiffSummary = textDiff.textDiffSummary;
+    }
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1618,6 +1673,9 @@ async function processVisualDiff(
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata,
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });
@@ -1639,9 +1697,10 @@ async function processVisualDiff(
     return { hasChanges, diffId: diff.id, classification };
   } catch {
     // Diff generation failed, mark as pending for review
-    const [plannedDiff, mainDiff] = await Promise.all([
+    const [plannedDiff, mainDiff, textDiff] = await Promise.all([
       generatePlannedDiff(currentScreenshotPath),
       generateMainBaselineDiff(currentScreenshotPath),
+      resolveTextDiffFields(baseline.imagePath, currentScreenshotPath),
     ]);
 
     const diff = await queries.createVisualDiff({
@@ -1655,8 +1714,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: -1,
       percentageDifference: '-1',
-      metadata: { changedRegions: [] },
+      metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });

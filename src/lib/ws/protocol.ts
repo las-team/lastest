@@ -35,6 +35,7 @@ export type MessageType =
   | 'response:debug_state'
   | 'command:capture_screenshot'
   | 'response:screenshot'
+  | 'response:screenshot_text'
   | 'response:screenshot_ack'
   | 'response:network_bodies'
   | 'response:error'
@@ -149,6 +150,9 @@ export interface RunTestCommandPayload {
    *  Each runner additionally short-circuits known-slow selectors via
    *  `selectorTimeoutFor` from `@lastest/shared`. */
   selectorTimeoutMs?: number;
+  /** Capture page innerText alongside each screenshot for downstream
+   *  text-diff. Resolved from the repo's diff sensitivity settings. */
+  textCaptureEnabled?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -537,6 +541,20 @@ export interface ScreenshotUploadResponse extends BaseMessage {
   payload: ScreenshotUploadPayload;
 }
 
+export interface ScreenshotTextUploadPayload {
+  correlationId: string;
+  testRunId: string;
+  repositoryId?: string;
+  filename: string; // matches the screenshot filename with `.txt` extension
+  data: string; // Base64 UTF-8 text
+  capturedAt: number;
+}
+
+export interface ScreenshotTextUploadResponse extends BaseMessage {
+  type: 'response:screenshot_text';
+  payload: ScreenshotTextUploadPayload;
+}
+
 export interface ScreenshotAckPayload {
   correlationId: string;
   storagePath: string;
@@ -657,6 +675,7 @@ export type AgentResponse =
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
+  | ScreenshotTextUploadResponse
   | NetworkBodiesResponse
   | DebugStateResponse
   | ErrorResponse

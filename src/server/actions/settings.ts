@@ -86,6 +86,7 @@ export async function saveDiffSensitivitySettings(data: {
   textRegionPadding?: number;
   textDetectionGranularity?: string;
   regionDetectionMode?: string;
+  textDiffEnabled?: boolean;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

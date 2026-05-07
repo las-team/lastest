@@ -11,7 +11,9 @@ import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegi
 import { toast } from 'sonner';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus, TextDiffStatus } from '@/lib/db/schema';
+import type { DiffLine } from '@/lib/diff/text-diff';
+import { TextDiffPanel } from '@/components/diffs/text-diff-panel';
 
 type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
 
@@ -135,9 +137,14 @@ interface DiffViewerClientProps {
   initialFocusRegions?: FocusRegionRect[];
   initialIgnoreRegions?: IgnoreRegionRect[];
   allDiffs?: VisualDiffWithTestStatus[];
+  textDiff?: {
+    status: TextDiffStatus;
+    summary: { added: number; removed: number; sameAsBaseline: boolean };
+    lines: DiffLine[];
+  } | null;
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, enableDomDiff = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [] }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, enableDomDiff = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [], textDiff = null }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -548,6 +555,15 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           {/* DOM Changes Panel */}
           {enableDomDiff && metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
             <DomChangesPanel domDiff={metadata.domDiff} />
+          )}
+
+          {/* Page Text Diff Panel — hidden when text capture wasn't enabled for this build */}
+          {textDiff && textDiff.status !== 'skipped' && (
+            <TextDiffPanel
+              status={textDiff.status}
+              summary={textDiff.summary}
+              lines={textDiff.lines}
+            />
           )}
 
           {/* Diff Comparison */}

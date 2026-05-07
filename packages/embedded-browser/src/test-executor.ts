@@ -73,6 +73,10 @@ export interface EmbeddedTestResult {
   error?: { message: string; stack?: string; screenshot?: string };
   logs: Array<{ timestamp: number; level: string; message: string }>;
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  /** Page innerText captured alongside each screenshot when textCaptureEnabled.
+   *  Filename is the screenshot's filename with `.txt` extension so the host
+   *  can pair them by replacing the extension. */
+  texts?: Array<{ filename: string; data: string }>;
   consoleErrors?: string[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
@@ -174,6 +178,10 @@ export interface RunTestPayload {
   /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
    *  Resolved on the host. Defaults to 3000ms when omitted. */
   selectorTimeoutMs?: number;
+  /** When true, capture `document.body.innerText` after each screenshot and
+   *  return it alongside `screenshots[]` so the host can run a text-diff
+   *  against the prior baseline. */
+  textCaptureEnabled?: boolean;
 }
 
 /**
@@ -279,6 +287,7 @@ export class EmbeddedTestExecutor {
     const startTime = Date.now();
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
+    const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
     const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
     const selectorOutcomes: SelectorOutcome[] = [];
@@ -569,6 +578,24 @@ export class EmbeddedTestExecutor {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
+
+          // Capture page text alongside the screenshot. Best-effort: failures
+          // must not block the screenshot path. Capped at 200KB; longer pages
+          // get a "[truncated]" marker so the diff still renders meaningfully.
+          if (command.textCaptureEnabled) {
+            try {
+              const TEXT_CAP_BYTES = 200 * 1024;
+              const rawText = await page.evaluate(() => document.body?.innerText ?? '');
+              const safeText = typeof rawText === 'string' ? rawText : '';
+              const capped = safeText.length > TEXT_CAP_BYTES
+                ? safeText.slice(0, TEXT_CAP_BYTES) + '\n\n[truncated — capture exceeded 200KB]'
+                : safeText;
+              const textFilename = filename.replace(/\.png$/i, '.txt');
+              texts.push({ filename: textFilename, data: Buffer.from(capped, 'utf8').toString('base64') });
+            } catch (textErr) {
+              logFn('warn', `Failed to capture page text for ${label}: ${textErr}`);
+            }
+          }
           // [Shot] probe: byte size + viewport-content signal to detect blank-render screenshots.
           // bytes << healthy or bodyChildren=0/hasCanvas=false on a canvas app → captured a non-rendered page.
           const probeUrl = page.url();
@@ -1244,6 +1271,7 @@ export class EmbeddedTestExecutor {
         durationMs,
         logs,
         screenshots,
+        texts: texts.length > 0 ? texts : undefined,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
@@ -1268,6 +1296,7 @@ export class EmbeddedTestExecutor {
         logFn('info', 'Test cancelled');
         result = {
           status: 'cancelled' as const, durationMs, logs, screenshots,
+          texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
@@ -1300,6 +1329,7 @@ export class EmbeddedTestExecutor {
           error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
           logs,
           screenshots,
+          texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
