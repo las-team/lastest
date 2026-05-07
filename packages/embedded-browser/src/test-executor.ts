@@ -96,6 +96,24 @@ export interface EmbeddedTestResult {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
+  /** axe-core violations harvested from `window.__urlDiffResult` when
+   *  `enableA11y` is set. Duck-typed shape matching `A11yViolation` in
+   *  `src/lib/db/schema.ts` (intentionally inline to avoid pulling the
+   *  schema dep into this package). */
+  a11yViolations?: Array<{
+    id: string;
+    impact: 'critical' | 'serious' | 'moderate' | 'minor';
+    description: string;
+    help: string;
+    helpUrl: string;
+    nodes: number;
+    tags?: string[];
+    wcagLevel?: 'A' | 'AA' | 'AAA';
+  }>;
+  a11yPassesCount?: number;
+  /** Playwright `page.accessibility.snapshot()` output, capped at ~512 KB
+   *  by the executor. Truncated trees are marked `{ _truncated: true }`. */
+  accessibilityTree?: unknown;
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
   /** Per-attempt selector outcomes captured by `locateWithFallback`. The
    *  host writes these to `selector_stats` so future runs can promote
@@ -146,6 +164,12 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  /** When true, after the test body completes the executor reads
+   *  `window.__urlDiffResult` and stamps `a11yViolations`/`a11yPassesCount`/
+   *  `accessibilityTree` onto the result. Used by the URL Diff feature; the
+   *  synthetic test body is responsible for running axe-core and assigning
+   *  the harvest payload. */
+  enableA11y?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
   extractVariables?: Array<{
@@ -1263,6 +1287,41 @@ export class EmbeddedTestExecutor {
       // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
       await captureFinalDomSnapshot();
 
+      // Harvest axe-core results + accessibility tree written by the synthetic
+      // URL-Diff test body to `window.__urlDiffResult`. Gated by `enableA11y`
+      // so normal tests don't pay the harvest cost. Truncate the a11y tree at
+      // 512 KB to keep `runner_command_results.payload` JSON sane.
+      let a11yViolations: EmbeddedTestResult['a11yViolations'];
+      let a11yPassesCount: number | undefined;
+      let accessibilityTree: unknown;
+      if (command.enableA11y) {
+        try {
+          const harvested = await page.evaluate(() => {
+            const w = window as unknown as { __urlDiffResult?: unknown };
+            return w.__urlDiffResult ?? null;
+          }) as null | {
+            violations?: EmbeddedTestResult['a11yViolations'];
+            passes?: number;
+            accessibilityTree?: unknown;
+          };
+          if (harvested && typeof harvested === 'object') {
+            a11yViolations = harvested.violations;
+            a11yPassesCount = typeof harvested.passes === 'number' ? harvested.passes : undefined;
+            const treeRaw = harvested.accessibilityTree;
+            if (treeRaw !== undefined && treeRaw !== null) {
+              const treeJson = JSON.stringify(treeRaw);
+              if (treeJson.length > 512_000) {
+                accessibilityTree = { _truncated: true, byteLength: treeJson.length };
+              } else {
+                accessibilityTree = treeRaw;
+              }
+            }
+          }
+        } catch (err) {
+          logFn('warn', `a11y harvest failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -1279,6 +1338,9 @@ export class EmbeddedTestExecutor {
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
+        a11yViolations,
+        a11yPassesCount,
+        accessibilityTree,
         extractedVariables,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };

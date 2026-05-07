@@ -6,6 +6,7 @@ import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { resolveStoragePath } from '@/lib/storage/paths';
 import { getRepository } from '@/lib/db/queries/repositories';
+import { getBackgroundJob } from '@/lib/db/queries';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -53,6 +54,26 @@ export async function GET(
       const repoId = segments[1];
       const repo = await getRepository(repoId);
       if (!repo || repo.teamId !== session.team?.id) {
+        return new Response('Forbidden', { status: 403 });
+      }
+    }
+
+    // URL-Diff artefacts are stateless but team-scoped via the originating
+    // background_jobs row. The first path segment after `url-diffs/` is the
+    // jobId. Validate that the requesting team owns that job; the job's
+    // metadata.teamId is set by `startUrlDiff`.
+    if (segments[0] === 'url-diffs' && segments[1]) {
+      const jobId = segments[1];
+      const job = await getBackgroundJob(jobId);
+      if (!job) return new Response('Not Found', { status: 404 });
+      const meta = (job.metadata ?? {}) as { teamId?: string };
+      const teamMatches = meta.teamId && meta.teamId === session.team?.id;
+      let repoMatches = false;
+      if (job.repositoryId) {
+        const repo = await getRepository(job.repositoryId);
+        repoMatches = !!repo && repo.teamId === session.team?.id;
+      }
+      if (!teamMatches && !repoMatches) {
         return new Response('Forbidden', { status: 403 });
       }
     }

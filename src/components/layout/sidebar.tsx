@@ -14,6 +14,7 @@ import {
   Building2,
   TrendingDown,
   Trophy,
+  SplitSquareHorizontal,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton, type RepositoryWithTestCount } from './repo-selector';
@@ -42,7 +43,7 @@ const gamificationNav = [
   { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact']);
+const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact', 'URL Diff']);
 
 const definitionNav = [
   { name: 'Tests', href: '/tests', icon: FileCode },
@@ -52,6 +53,7 @@ const definitionNav = [
 const executionNav = [
   { name: 'Runs', href: '/run', icon: Play },
   { name: 'Compare', href: '/compare', icon: GitCompare },
+  { name: 'URL Diff', href: '/url-diff', icon: SplitSquareHorizontal },
   { name: 'Impact', href: '/analytics/impact', icon: TrendingDown },
 ];
 

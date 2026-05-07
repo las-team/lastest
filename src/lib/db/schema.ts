@@ -1119,7 +1119,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup' | 'spec_import';
+export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup' | 'spec_import' | 'url_diff';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = pgTable('background_jobs', {
