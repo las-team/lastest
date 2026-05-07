@@ -32,6 +32,38 @@ import { toast } from 'sonner';
 import { calculateRecommendations } from '@/lib/selector-recommendations';
 import type { SelectorTypeStats } from '@/lib/db/queries';
 
+function CollapsibleSection({
+  title,
+  icon: Icon,
+  defaultOpen = false,
+  enabled,
+  children,
+}: {
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  defaultOpen?: boolean;
+  enabled: boolean;
+  children: React.ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+          <div className="flex items-center gap-2">
+            <Icon className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">{title}</span>
+          </div>
+          <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-4 pt-2 pl-2">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 const VIEWPORT_PRESETS = [
   { label: 'Mobile S', width: 320, height: 568 },
   { label: 'Mobile M', width: 375, height: 667 },
@@ -355,13 +387,16 @@ export function PlaywrightSettingsCard({
   };
 
   const content = (
-    <div className={compact ? 'space-y-3' : 'space-y-6'}>
-      {/* Selector Priority */}
+    <div className={compact ? 'space-y-3' : 'space-y-2'}>
+      {/* Selectors */}
+      <CollapsibleSection title="Selectors" icon={List} defaultOpen enabled={!compact}>
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
-        <div className="flex items-center gap-2">
-          <List className="w-4 h-4 text-muted-foreground" />
-          <Label className="text-sm font-medium">Selector Priority</Label>
-        </div>
+        {compact && (
+          <div className="flex items-center gap-2">
+            <List className="w-4 h-4 text-muted-foreground" />
+            <Label className="text-sm font-medium">Selector Priority</Label>
+          </div>
+        )}
         <SelectorPriorityList
           value={selectorPriority}
           onChange={setSelectorPriority}
@@ -390,9 +425,10 @@ export function PlaywrightSettingsCard({
           </p>
         </div>
       </div>
+      </CollapsibleSection>
 
-      {/* Default Recording Engine - only in full mode */}
-      {!compact && (
+      {/* Recording */}
+      <CollapsibleSection title="Recording" icon={Video} enabled={!compact}>
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <Video className="w-4 h-4 text-muted-foreground" />
@@ -408,7 +444,6 @@ export function PlaywrightSettingsCard({
             </SelectContent>
           </Select>
         </div>
-      )}
 
       {/* Cursor Movement Tracking */}
       <div className={compact ? 'space-y-2' : 'space-y-3'}>
@@ -454,10 +489,11 @@ export function PlaywrightSettingsCard({
           </div>
         )}
       </div>
+      </CollapsibleSection>
 
       {/* Snapshot Stabilization */}
+      <CollapsibleSection title="Snapshot Stabilization" icon={Camera} enabled={!compact}>
       <div className={compact ? 'space-y-2' : 'space-y-4'}>
-        {!compact && <Label className="text-sm font-medium">Snapshot Stabilization</Label>}
 
         {/* Freeze Animations */}
         <div className="flex items-center justify-between">
@@ -665,9 +701,10 @@ export function PlaywrightSettingsCard({
           </div>
         </div>
       </div>
+      </CollapsibleSection>
 
       {/* Parallel Execution */}
-      {!compact && (
+      <CollapsibleSection title="Parallel Execution" icon={Layers} enabled={!compact}>
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-muted-foreground" />
@@ -690,7 +727,7 @@ export function PlaywrightSettingsCard({
             <span className="text-sm font-medium w-8 text-center">{maxParallelTests}</span>
           </div>
         </div>
-      )}
+      </CollapsibleSection>
 
       {/* Advanced Stabilization Settings */}
       {!compact && (
@@ -1190,6 +1227,7 @@ export function PlaywrightSettingsCard({
       )}
 
       {/* Browser Settings */}
+      <CollapsibleSection title="Browser & Viewport" icon={Globe} enabled={!compact}>
       {/* Viewport */}
       <div className="space-y-2">
         <Label>Viewport</Label>
@@ -1302,8 +1340,13 @@ export function PlaywrightSettingsCard({
               </Select>
             </div>
           </div>
+        </>
+      )}
+      </CollapsibleSection>
 
-          {/* Timeouts */}
+      {/* Timeouts */}
+      <CollapsibleSection title="Timeouts" icon={Clock} enabled={!compact}>
+      {!compact && (
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="navTimeout">Navigation Timeout</Label>
@@ -1351,8 +1394,8 @@ export function PlaywrightSettingsCard({
               </p>
             </div>
           </div>
-        </>
       )}
+      </CollapsibleSection>
 
       {/* Saved Auth States - hidden in compact mode */}
       {!compact && savedStorageStates.length > 0 && (
