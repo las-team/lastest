@@ -81,7 +81,8 @@ import {
   LayoutList,
   Table as TableIcon,
 } from 'lucide-react';
-import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState } from '@/lib/db/schema';
+import type { FunctionalArea, Test, Route, Repository, SetupScript, SetupConfig, StorageState, UserStory } from '@/lib/db/schema';
+import { AreaStoriesPanel } from '@/components/areas/area-stories-panel';
 import type { FunctionalAreaWithChildren } from '@/lib/db/queries';
 import type { SetupStep } from '@/server/actions/setup-steps';
 import type { TeardownStep } from '@/server/actions/teardown-steps';
@@ -114,6 +115,9 @@ interface DefinitionPageClientProps {
   defaultSetupSteps: SetupStep[];
   defaultTeardownSteps: TeardownStep[];
   storageStates: StorageState[];
+  userStories: UserStory[];
+  /** AC id -> total test count covering it (across whole repo). */
+  coverageByAcId: Record<string, number>;
 }
 
 // Collect all test IDs recursively from an area subtree
@@ -168,13 +172,16 @@ export function DefinitionPageClient({
   defaultSetupSteps,
   defaultTeardownSteps,
   storageStates,
+  userStories,
+  coverageByAcId,
 }: DefinitionPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
   const isMobile = useIsMobile();
   const tabParam = searchParams.get('tab');
-  const initialTab = tabParam === 'plan' || tabParam === 'setup' ? tabParam : 'tests';
+  const initialTab =
+    tabParam === 'plan' || tabParam === 'setup' || tabParam === 'story' ? tabParam : 'tests';
 
   // --- Tree state (from Areas page) ---
   const [treeSelection, setTreeSelection] = useState<TreeSelection | null>(null);
@@ -1024,6 +1031,14 @@ export function DefinitionPageClient({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 overflow-hidden">
           <div className="px-3 md:px-6 pt-3 md:pt-4 pb-0 shrink-0">
             <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
+              <TabsTrigger value="story" className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                Story
+                {userStories.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 h-5 px-1.5 text-[10px] data-[state=active]:bg-accent-foreground/20 data-[state=active]:text-accent-foreground">
+                    {userStories.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="plan" className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
                 Plan
                 {flatAreas.length > 0 && (
@@ -1549,6 +1564,40 @@ export function DefinitionPageClient({
           </TabsContent>
 
           {/* ─── Plan Tab ─── */}
+          {/* ─── Story Tab ─── */}
+          <TabsContent value="story" className="overflow-auto flex-1">
+            <div className="p-6 pt-4">
+              <div className="max-w-4xl space-y-2">
+                <div className="text-xs text-muted-foreground mb-4">
+                  Capture the product spec and acceptance criteria here. Each story drives the
+                  Plan tab&apos;s test plan flow, which seeds the test placeholders on the Tests tab.
+                  Coverage badges show how many tests in the area validate each AC.
+                </div>
+                {flatAreas.length === 0 && (
+                  <div className="text-center py-16 text-muted-foreground">
+                    <p>No areas yet. Create areas first to attach stories.</p>
+                  </div>
+                )}
+                <div className="space-y-8">
+                  {flatAreas.map(area => {
+                    const storiesForArea = userStories.filter(s => s.functionalAreaId === area.id);
+                    return (
+                      <div key={area.id} className="space-y-2">
+                        <AreaStoriesPanel
+                          repositoryId={repositoryId}
+                          areaId={area.id}
+                          areaName={area.name}
+                          stories={storiesForArea}
+                          coverageByAcId={coverageByAcId}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
           <TabsContent value="plan" className="overflow-auto flex-1">
             <div className="p-6 pt-4">
               <div className="max-w-4xl">
@@ -1556,6 +1605,11 @@ export function DefinitionPageClient({
                   <div className="text-sm text-muted-foreground">
                     {flatAreas.length} area{flatAreas.length !== 1 ? 's' : ''}
                   </div>
+                  {userStories.some(s => s.planStale) && (
+                    <Badge variant="outline" className="text-amber-600 border-amber-500">
+                      plan stale — regenerate from Story tab
+                    </Badge>
+                  )}
                   {allAreaTests.length > 0 && (
                     <div className="text-sm text-muted-foreground">
                       Test case coverage: <span className="font-medium text-foreground">{realTestCount}/{allAreaTests.length}</span> ({Math.round((realTestCount / allAreaTests.length) * 100)}%)

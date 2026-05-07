@@ -274,6 +274,9 @@ export const tests = pgTable('tests', {
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
   specId: text('spec_id'), // FK to testSpecs (back-reference for 1:1 link)
+  // IDs of AcceptanceCriterion entries (across one or more userStories rows in the same area)
+  // that this test validates. Drives the coverage matrix on the Story / Tests tabs.
+  acceptanceCriterionIds: jsonb('acceptance_criterion_ids').$type<string[]>().default([]),
   // Gamification attribution: who authored this test. Mutually exclusive. Nullable for legacy rows.
   createdByUserId: text('created_by_user_id'),
   createdByBotId: text('created_by_bot_id'),
@@ -1084,7 +1087,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value' | 'generate_plan_from_story';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = pgTable('ai_prompt_logs', {
@@ -1483,6 +1486,50 @@ export const specImports = pgTable('spec_imports', {
 
 export type SpecImport = typeof specImports.$inferSelect;
 export type NewSpecImport = typeof specImports.$inferInsert;
+
+// ============================================
+// User Stories — first-class story / AC entity
+// ============================================
+//
+// Conceptual flow this table participates in:
+//   Product spec / User Story  →  Acceptance Criteria  →  Test Plan (flow)  →  Tests
+//
+// `functionalAreas.agentPlan` (markdown) holds the test-plan flow; tests carry
+// `acceptanceCriterionIds` to link back here, which gives us the coverage matrix.
+
+export type UserStorySource = 'manual' | 'imported' | 'agent';
+
+export type AcceptanceCriterionStatus = 'pending' | 'covered' | 'verified';
+
+export interface AcceptanceCriterion {
+  id: string;
+  text: string;
+  // Persisted hint; true status is recomputed from linked tests + last run results.
+  status?: AcceptanceCriterionStatus;
+}
+
+export const userStories = pgTable('user_stories', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').references(() => repositories.id),
+  functionalAreaId: text('functional_area_id').references(() => functionalAreas.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  asA: text('as_a'),
+  iWant: text('i_want'),
+  soThat: text('so_that'),
+  description: text('description'),
+  acceptanceCriteria: jsonb('acceptance_criteria').$type<AcceptanceCriterion[]>().default([]),
+  source: text('source').notNull().default('manual'), // UserStorySource
+  sourceImportId: text('source_import_id').references(() => specImports.id, { onDelete: 'set null' }),
+  // Set true whenever ACs / story body change after the area's plan was generated.
+  // The Plan tab shows a "Regenerate from Story" hint when this flips.
+  planStale: boolean('plan_stale').default(false),
+  orderIndex: integer('order_index').default(0),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+export type UserStory = typeof userStories.$inferSelect;
+export type NewUserStory = typeof userStories.$inferInsert;
 
 // ============================================
 // Setup Scripts & Configs Tables

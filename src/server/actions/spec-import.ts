@@ -805,6 +805,29 @@ export async function generateTestsFromStories(
       const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
       if (wasNew) areasCreated++;
 
+      // Persist the extracted story as a first-class userStories row. The AC ids from
+      // the import are reused verbatim so generated tests can carry them in
+      // `acceptanceCriterionIds` and the coverage matrix lights up immediately.
+      try {
+        await queries.createUserStory({
+          id: crypto.randomUUID(),
+          repositoryId,
+          functionalAreaId: area.id,
+          title: story.title,
+          description: story.description ?? null,
+          acceptanceCriteria: story.acceptanceCriteria.map(ac => ({
+            id: ac.id,
+            text: ac.description,
+            status: 'pending' as const,
+          })),
+          source: 'imported',
+          sourceImportId: importId ?? null,
+          planStale: false,
+        });
+      } catch {
+        // Non-critical: spec import keeps working even if the story persistence fails.
+      }
+
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
       for (const group of acGroups) {
         allTasks.push({ story, group, areaId: area.id });
@@ -851,6 +874,7 @@ export async function generateTestsFromStories(
               name: testName,
               code,
               targetUrl: options?.targetUrl || null,
+              acceptanceCriterionIds: task.group.map(ac => ac.id),
             });
 
             // Create a linked spec so the spec side is populated alongside the test.
@@ -978,6 +1002,28 @@ export async function createPlaceholdersFromStories(
       const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
       if (wasNew) areasCreated++;
 
+      // Persist this extracted story as a first-class userStories row so the Story tab
+      // has something to display, and so generated placeholder tests can reference its ACs.
+      try {
+        await queries.createUserStory({
+          id: crypto.randomUUID(),
+          repositoryId,
+          functionalAreaId: area.id,
+          title: story.title,
+          description: story.description ?? null,
+          acceptanceCriteria: story.acceptanceCriteria.map(ac => ({
+            id: ac.id,
+            text: ac.description,
+            status: 'pending' as const,
+          })),
+          source: 'imported',
+          sourceImportId: importId ?? null,
+          planStale: false,
+        });
+      } catch {
+        // Non-critical: spec import keeps working even if the story persistence fails.
+      }
+
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
 
       for (const group of acGroups) {
@@ -1003,6 +1049,7 @@ export async function createPlaceholdersFromStories(
             code: PLACEHOLDER_CODE,
             isPlaceholder: true,
             targetUrl: options?.targetUrl || null,
+            acceptanceCriterionIds: group.map(ac => ac.id),
           });
 
           // Create linked testSpec with story + area context

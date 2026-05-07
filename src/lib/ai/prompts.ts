@@ -675,6 +675,73 @@ Guidelines:
 - QUALITY CHECK: Before outputting, verify each AC has a clear GIVEN/WHEN/THEN structure or equivalent. Delete any AC that is a question, a request for permission, or meta-discussion about what to test`;
 }
 
+/**
+ * Test plan as a flow (Setup → Actions → Verifications), derived from a single user story.
+ * Each step that maps to one or more ACs is annotated with `<!-- AC: ac_xxx[, ac_yyy] -->`
+ * so the persisted markdown is reverse-parseable for the coverage matrix and for the
+ * placeholder-generation step that pre-links each test to its AC ids.
+ *
+ * Output is markdown only — no fence, no commentary — so it can be appended directly into
+ * `functionalAreas.agentPlan` without further processing.
+ */
+export function createPlanFromUserStoryPrompt(input: {
+  story: {
+    title: string;
+    asA?: string | null;
+    iWant?: string | null;
+    soThat?: string | null;
+    description?: string | null;
+  };
+  acceptanceCriteria: Array<{ id: string; text: string }>;
+  routes?: string[];
+}): string {
+  const { story, acceptanceCriteria, routes } = input;
+  const acList = acceptanceCriteria
+    .map(ac => `- ${ac.id}: ${ac.text}`)
+    .join('\n');
+  const storyBlock = [
+    story.asA ? `As a ${story.asA}` : null,
+    story.iWant ? `I want to ${story.iWant}` : null,
+    story.soThat ? `So that ${story.soThat}` : null,
+    story.description ? `Context: ${story.description}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const routesBlock = routes && routes.length > 0
+    ? `Known routes for this area:\n${routes.map(r => `- ${r}`).join('\n')}\n`
+    : '';
+
+  return `You are a senior QA engineer. Convert the user story below into a structured TEST PLAN FLOW.
+
+User Story: ${story.title}
+${storyBlock}
+
+Acceptance Criteria (use these IDs in your annotations):
+${acList}
+
+${routesBlock}Output requirements (markdown ONLY — no code fence, no preamble, no closing remarks):
+
+## Phase 1: Setup
+- Step 1: <prerequisite or navigation, e.g. "Navigate to /login">
+- Step 2: ...
+
+## Phase 2: Actions
+- Step 1: <single user-observable action> <!-- AC: ac_xxx -->
+- Step 2: <another action> <!-- AC: ac_xxx, ac_yyy -->
+
+## Phase 3: Verifications
+- Step 1: <observable expected result> <!-- AC: ac_xxx -->
+- Step 2: ...
+
+Rules:
+1. Every Action and Verification step that exercises an AC MUST end with an HTML comment listing the AC ids it covers, e.g. \`<!-- AC: ac_a1b2 -->\`. Setup steps usually have no AC annotation.
+2. Use only the AC ids listed above. Do not invent new ids.
+3. Steps must be concrete and browser-observable (clickable, fillable, visible). No internal implementation steps.
+4. Cover EVERY listed AC in at least one step under Actions or Verifications.
+5. Keep steps short (one sentence). Reference specific routes (e.g. "/login") and UI labels in quotes when known.
+6. Do NOT output anything besides the three phase sections shown above.`;
+}
+
 export function createBranchAwareTestPrompt(context: {
   testName: string;
   acceptanceCriteria: string;
