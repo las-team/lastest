@@ -1,4 +1,4 @@
-import type { NetworkRequest, DownloadRecord, A11yViolation, AssertionResult, DomSnapshotData } from '@/lib/db/schema';
+import type { NetworkRequest, DownloadRecord, A11yViolation, AssertionResult, DomSnapshotData, UrlTrajectoryStep, WebVitalsSample, StorageStateSnapshot } from '@/lib/db/schema';
 
 export interface CapturedScreenshot {
   path: string;
@@ -31,6 +31,10 @@ export interface TestRunResult {
   extractedVariables?: Record<string, string>;
   assignedVariables?: Record<string, string>;
   logs?: Array<{ timestamp: number; level: string; message: string }>;
+  // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
+  urlTrajectory?: UrlTrajectoryStep[];
+  webVitals?: WebVitalsSample[];
+  storageStateSnapshot?: StorageStateSnapshot;
 }
 
 export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';

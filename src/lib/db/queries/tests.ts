@@ -26,7 +26,7 @@ import type {
   StepCriterion,
   StepRule,
 } from '../schema';
-import { eq, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
+import { eq, ne, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
 
@@ -492,6 +492,28 @@ export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
   const id = uuid();
   await db.insert(testResults).values({ ...data, id });
   return { id, ...data };
+}
+
+/**
+ * Most recent test_result for `testId` from a test_run other than `excludeTestRunId`.
+ * Used as the multi-layer comparison baseline. Joins on test_runs to sort by
+ * startedAt; ignores results from the in-flight run.
+ */
+export async function getPreviousTestResultForTest(
+  testId: string,
+  excludeTestRunId: string,
+) {
+  const rows = await db
+    .select()
+    .from(testResults)
+    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
+    .where(and(
+      eq(testResults.testId, testId),
+      ne(testResults.testRunId, excludeTestRunId),
+    ))
+    .orderBy(desc(testRuns.startedAt))
+    .limit(1);
+  return rows[0]?.test_results ?? null;
 }
 
 export async function updateTestResult(id: string, data: Partial<NewTestResult>) {

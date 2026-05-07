@@ -358,6 +358,17 @@ export async function getDiff(diffId: string) {
 }
 
 /**
+ * Multi-layer step comparison for a visual diff (v1.13). Returns null when
+ * no comparison was scored — usually because there was no prior run to diff
+ * against. Authenticated; visual-diff ownership is implicit via getDiff.
+ */
+export async function getMultiLayerComparisonForDiff(diffId: string) {
+  await requireTeamAccess();
+  const comparison = await queries.getStepComparisonByVisualDiff(diffId);
+  return comparison ?? null;
+}
+
+/**
  * Get pending diffs count for a build
  */
 export async function getPendingDiffsCount(buildId: string) {

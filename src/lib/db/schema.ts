@@ -400,6 +400,67 @@ export interface WcagScoreSummary {
   bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
+// ── Multi-layer comparison types (v1.13) ─────────────────────────────────────
+
+/** Per-step URL trajectory entry. Captured by the EB executor at each
+ *  __stepReached boundary so we can detect routing/auth divergence between
+ *  baseline and feature runs (the classic "session expired → /login" case). */
+export interface UrlTrajectoryStep {
+  stepIndex: number;
+  stepLabel?: string;
+  finalUrl: string;
+  /** Each redirect target in order. Empty for non-navigating steps. */
+  redirectChain: string[];
+  /** Wall-clock ms from test start when this step's URL was sampled. */
+  capturedAtMs?: number;
+}
+
+/** Web Vitals captured per page-state. Sampled at screenshot points and at
+ *  end-of-test. Values mirror the standard web-vitals library names. */
+export interface WebVitalsSample {
+  stepIndex?: number;
+  stepLabel?: string;
+  url: string;
+  /** Largest Contentful Paint (ms) */
+  lcp?: number;
+  /** Cumulative Layout Shift (unitless score) */
+  cls?: number;
+  /** Interaction to Next Paint (ms) */
+  inp?: number;
+  /** First Contentful Paint (ms) */
+  fcp?: number;
+  /** Total Blocking Time (ms) */
+  tbt?: number;
+  /** Time to First Byte (ms) */
+  ttfb?: number;
+}
+
+/** Storage state snapshot — minimal cookie + localStorage capture for diff.
+ *  Mirrors a subset of Playwright's storageState() output. Token-shaped
+ *  values are redacted at capture time; we keep presence + a hash for diff. */
+export interface StorageStateSnapshot {
+  cookies: Array<{
+    name: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite?: 'Strict' | 'Lax' | 'None';
+    /** SHA-256 hash of the value (truncated to 16 hex chars). Never the raw value. */
+    valueHash?: string;
+    /** True if this cookie name matched a token denylist (token/sid/csrf/etc.) */
+    redacted?: boolean;
+  }>;
+  localStorage: Array<{
+    origin: string;
+    name: string;
+    /** Either a parsed JSON value (for diff-engine consumption) or a hash for opaque values. */
+    value?: unknown;
+    valueHash?: string;
+    redacted?: boolean;
+  }>;
+}
+
 export const testResults = pgTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
@@ -441,6 +502,13 @@ export const testResults = pgTable('test_results', {
   // with sourceRowMode='random'/'increment' where the user otherwise can't
   // tell which row was actually used).
   assignedVariables: jsonb('assigned_variables').$type<Record<string, string>>(),
+  // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
+  // URL trajectory: ordered list of {stepIndex, finalUrl, redirectChain}
+  urlTrajectory: jsonb('url_trajectory').$type<UrlTrajectoryStep[]>(),
+  // Web Vitals samples: per-screenshot LCP/CLS/INP/FCP/TBT
+  webVitals: jsonb('web_vitals').$type<WebVitalsSample[]>(),
+  // End-of-test cookie + localStorage snapshot (values are hashed, not stored raw)
+  storageStateSnapshot: jsonb('storage_state_snapshot').$type<StorageStateSnapshot>(),
 });
 
 // Repository provider type
@@ -2311,3 +2379,129 @@ export const remoteDebugSessions = pgTable('remote_debug_sessions', {
 
 export type RemoteDebugSessionRow = typeof remoteDebugSessions.$inferSelect;
 export type NewRemoteDebugSessionRow = typeof remoteDebugSessions.$inferInsert;
+
+// ── Multi-layer step comparisons (v1.13) ─────────────────────────────────────
+//
+// One row per (build, test, step) capturing the verdict and the per-layer
+// evidence summaries used to compute it. The visualDiffs table still owns the
+// pixel-diff record; this table is the unified roll-up across all layers.
+
+export type StepVerdict = 'green' | 'yellow' | 'red';
+
+export type EvidenceLayer =
+  | 'visual'
+  | 'dom'
+  | 'a11y'
+  | 'network'
+  | 'console'
+  | 'url'
+  | 'perf'
+  | 'variable';
+
+export interface EvidenceItem {
+  layer: EvidenceLayer;
+  /** 'high' = real-regression-by-itself (new console error, new 4xx/5xx, URL
+   *  divergence, new critical/serious a11y). 'medium' = needs corroboration
+   *  (visual change, structural DOM with non-interactive nodes, perf drift,
+   *  value-only variable change). */
+  signal: 'high' | 'medium' | 'low';
+  /** Short human-readable summary, e.g. "2 new 4xx responses". */
+  summary: string;
+  /** Optional structured payload — layer-specific details. */
+  details?: Record<string, unknown>;
+}
+
+export interface NetworkDiffSummary {
+  added: number;
+  removed: number;
+  changed: number;
+  unchanged: number;
+  newErrorCount: number;
+  newClientErrors: Array<{ url: string; method: string; status: number }>;
+  newServerErrors: Array<{ url: string; method: string; status: number }>;
+  statusFlips: Array<{ url: string; method: string; from: number; to: number }>;
+}
+
+export interface ConsoleDiffSummary {
+  newFingerprints: Array<{ fingerprint: string; sample: string; count: number }>;
+  disappeared: Array<{ fingerprint: string; sample: string; count: number }>;
+  countDelta: Record<string, number>;
+}
+
+export interface UrlTrajectoryDiffSummary {
+  divergedSteps: Array<{
+    stepIndex: number;
+    stepLabel?: string;
+    baselineUrl: string;
+    currentUrl: string;
+    /** True if redirect-chain length changed (often indicates auth/SSO regressions). */
+    redirectChainChanged: boolean;
+  }>;
+  totalStepsCompared: number;
+}
+
+export interface A11yDiffSummary {
+  newViolations: A11yViolation[];
+  disappeared: A11yViolation[];
+  /** New violations broken down by impact, for quick verdict scoring. */
+  newBySeverity: { critical: number; serious: number; moderate: number; minor: number };
+}
+
+export interface PerfDiffSummary {
+  /** Per-step deltas for each metric (current minus baseline). */
+  deltas: Array<{
+    stepIndex?: number;
+    stepLabel?: string;
+    metric: 'lcp' | 'cls' | 'inp' | 'fcp' | 'tbt' | 'ttfb';
+    baseline: number;
+    current: number;
+    delta: number;
+    /** True if `current` exceeds the absolute budget for the metric. */
+    budgetBreached: boolean;
+    /** True if `delta` exceeds the relative-drift threshold (default 20%). */
+    drifted: boolean;
+  }>;
+}
+
+export interface VariableDiffSummary {
+  /** Tier ordering: structural-break > type-change > value-change-numeric > value-change-string */
+  changes: Array<{
+    path: string;
+    tier: 'structural-break' | 'type-change' | 'value-change-numeric' | 'value-change-string';
+    baseline?: unknown;
+    current?: unknown;
+  }>;
+}
+
+export interface StepComparisonEvidence {
+  visual?: { pixelDifference: number; percentageDifference: string | null; diffId?: string };
+  dom?: DomDiffResult;
+  a11y?: A11yDiffSummary;
+  network?: NetworkDiffSummary;
+  consoleDiff?: ConsoleDiffSummary;
+  url?: UrlTrajectoryDiffSummary;
+  perf?: PerfDiffSummary;
+  variable?: VariableDiffSummary;
+}
+
+export const stepComparisons = pgTable('step_comparisons', {
+  id: text('id').primaryKey(),
+  buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }).notNull(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  testResultId: text('test_result_id').references(() => testResults.id, { onDelete: 'cascade' }),
+  visualDiffId: text('visual_diff_id').references(() => visualDiffs.id, { onDelete: 'set null' }),
+  stepIndex: integer('step_index'),
+  stepLabel: text('step_label'),
+  verdict: text('verdict').$type<StepVerdict>().notNull(),
+  /** Ordered list of evidence items contributing to the verdict. */
+  evidence: jsonb('evidence').$type<EvidenceItem[]>().notNull().default([]),
+  /** Layer-specific structured diff summaries. */
+  layers: jsonb('layers').$type<StepComparisonEvidence>().notNull().default({}),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_step_comparisons_build').on(table.buildId),
+  index('idx_step_comparisons_test').on(table.testId),
+]));
+
+export type StepComparison = typeof stepComparisons.$inferSelect;
+export type NewStepComparison = typeof stepComparisons.$inferInsert;

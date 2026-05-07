@@ -856,6 +856,15 @@ async function executeViaRunner(
         logs: Array.isArray(payload.logs) && payload.logs.length > 0
           ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
           : undefined,
+        urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
+          ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]
+          : undefined,
+        webVitals: Array.isArray(payload.webVitals) && payload.webVitals.length > 0
+          ? payload.webVitals as import('@/lib/db/schema').WebVitalsSample[]
+          : undefined,
+        storageStateSnapshot: payload.storageStateSnapshot && typeof payload.storageStateSnapshot === 'object'
+          ? payload.storageStateSnapshot as import('@/lib/db/schema').StorageStateSnapshot
+          : undefined,
       };
 
       results.push(testResult);

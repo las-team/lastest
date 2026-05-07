@@ -605,7 +605,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }> }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
     processedCount++;
 
     // Save test result immediately
@@ -635,6 +635,9 @@ async function runBuildAsync(
       extractedVariables: result.extractedVariables,
       assignedVariables: result.assignedVariables,
       logs: result.logs,
+      urlTrajectory: result.urlTrajectory,
+      webVitals: result.webVitals,
+      storageStateSnapshot: result.storageStateSnapshot,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -757,6 +760,56 @@ async function runBuildAsync(
         percentageDifference: '0',
         metadata: { changedRegions: [] },
       });
+    }
+
+    // ── Multi-layer step comparison (v1.13) ──────────────────────────────
+    // Run all non-visual diffs against the prior run's testResult and write
+    // a unified verdict to step_comparisons. Best-effort — failure here
+    // never blocks the build.
+    try {
+      const { scoreMultiLayer } = await import('@/lib/comparison/scorer');
+      const prevResult = await queries.getPreviousTestResultForTest(result.testId, testRunId);
+      const visualDiffs = await queries.getVisualDiffsByTestResult(testResult.id);
+      // Use the diff with the largest pixel delta as the visual signal.
+      const primaryVisual = visualDiffs
+        .slice()
+        .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
+      const verdict = scoreMultiLayer({
+        baseline: prevResult ? {
+          consoleErrors: prevResult.consoleErrors ?? null,
+          networkRequests: prevResult.networkRequests ?? null,
+          a11yViolations: prevResult.a11yViolations ?? null,
+          urlTrajectory: prevResult.urlTrajectory ?? null,
+          webVitals: prevResult.webVitals ?? null,
+          extractedVariables: prevResult.extractedVariables ?? null,
+        } : null,
+        current: {
+          consoleErrors: result.consoleErrors ?? null,
+          networkRequests: result.networkRequests ?? null,
+          a11yViolations: result.a11yViolations ?? null,
+          urlTrajectory: result.urlTrajectory ?? null,
+          webVitals: result.webVitals ?? null,
+          extractedVariables: result.extractedVariables ?? null,
+        },
+        visualDiff: primaryVisual ? {
+          pixelDifference: primaryVisual.pixelDifference ?? 0,
+          percentageDifference: primaryVisual.percentageDifference,
+          id: primaryVisual.id,
+        } : null,
+      });
+      await queries.createStepComparison({
+        buildId,
+        testId: result.testId,
+        testResultId: testResult.id,
+        visualDiffId: primaryVisual?.id ?? null,
+        stepIndex: null,
+        stepLabel: primaryVisual?.stepLabel ?? null,
+        verdict: verdict.verdict,
+        evidence: verdict.evidence,
+        layers: verdict.layers,
+      });
+    } catch (err) {
+      console.error('[multi-layer] failed to score step comparison:', err);
     }
 
     // Update build progress incrementally
@@ -968,6 +1021,9 @@ async function runBuildAsync(
                 extractedVariables: result.extractedVariables,
                 assignedVariables: result.assignedVariables,
                 logs: result.logs,
+                urlTrajectory: result.urlTrajectory,
+                webVitals: result.webVitals,
+                storageStateSnapshot: result.storageStateSnapshot,
                 retryOf: originalResult?.id ?? null,
                 isFlaky: false,
               });

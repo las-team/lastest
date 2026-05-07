@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff } from '@/server/actions/diffs';
+import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff, getMultiLayerComparisonForDiff } from '@/server/actions/diffs';
 import { getBuild } from '@/server/actions/builds';
 import { DiffViewerClient } from './diff-viewer-client';
 import { StepLabelEditor } from './step-label-editor';
+import { MultiLayerPanel } from '@/components/diff/multi-layer-panel';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { BrowserIcon } from '@/components/ui/browser-icon';
 
@@ -49,6 +50,10 @@ export default async function DiffPage({ params }: PageProps) {
   const focusRegions = await getFocusRegionsForDiff(diffId);
   // Ignore regions for this (testId, stepLabel) — per-step mask
   const ignoreRegions = await getIgnoreRegionsForDiff(diffId);
+
+  // Multi-layer comparison record (v1.13). Null on first runs / when no
+  // baseline existed for the scorer to diff against.
+  const multiLayerComparison = await getMultiLayerComparisonForDiff(diffId);
 
   // Get all diffs sorted by test/step for consistent navigation
   const allDiffs = await getSortedDiffsByBuild(buildId);
@@ -145,6 +150,12 @@ export default async function DiffPage({ params }: PageProps) {
             )}
           </div>
         </div>
+
+        {/* Multi-layer comparison summary (v1.13) — shown above the visual diff
+             so reviewers see the verdict and high-signal evidence first. */}
+        {multiLayerComparison && (
+          <MultiLayerPanel comparison={multiLayerComparison} />
+        )}
 
         {/* Diff Viewer */}
         <DiffViewerClient

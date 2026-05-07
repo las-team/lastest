@@ -7,6 +7,7 @@ import {
   testVersions,
   visualDiffs,
   functionalAreas,
+  stepComparisons,
 } from '../schema';
 import type {
   NewBuild,
@@ -255,6 +256,19 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
   const hasTodo = diffs.some(d => d.status === 'todo');
 
   if (hasFailed) return 'blocked';
+
+  // Multi-layer step verdicts can also escalate the build status. A `red`
+  // verdict from non-visual layers (new console errors, new 4xx/5xx, URL
+  // divergence, critical a11y) means there is high-signal evidence of a
+  // real regression even if the visual diffs were all auto-approved.
+  const stepRows = await db
+    .select({ verdict: stepComparisons.verdict, testId: stepComparisons.testId })
+    .from(stepComparisons)
+    .where(eq(stepComparisons.buildId, buildId));
+  const nonQuarantinedSteps = stepRows.filter(s => !quarantinedTestIds.has(s.testId));
+  const hasRedStep = nonQuarantinedSteps.some(s => s.verdict === 'red');
+  if (hasRedStep) return 'review_required';
+
   if (hasPending) return 'review_required';
   if (hasTodo) return 'has_todos';
   return 'safe_to_merge';
