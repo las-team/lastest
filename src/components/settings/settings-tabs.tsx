@@ -76,6 +76,13 @@ const TAB_ICONS: Record<SettingsTabKey, typeof SettingsIcon> = {
   account: AlertTriangle,
 };
 
+// Visual groups for the tab strip — separators are drawn between groups.
+const TAB_GROUPS: SettingsTabKey[][] = [
+  ['general', 'integrations', 'cicd'],
+  ['diff', 'playwright', 'ai'],
+  ['notifications', 'team', 'account'],
+];
+
 function readInitialTab(defaultValue: SettingsTabKey): SettingsTabKey {
   if (typeof window === 'undefined') return defaultValue;
   const url = new URL(window.location.href);
@@ -130,20 +137,38 @@ export function SettingsTabs({ tabs, defaultValue = 'general' }: SettingsTabsPro
     return () => window.removeEventListener('lastest:settings-tab', onSwitch);
   }, []);
 
+  const visibleByKey = new Map(visible.map((t) => [t.value, t] as const));
+
   return (
     <Tabs value={active} onValueChange={(v) => setActive(v as SettingsTabKey)} className="gap-6">
       <TabsList className="h-auto flex-wrap justify-start gap-1 bg-muted/60 p-1">
-        {visible.map((tab) => {
-          const Icon = TAB_ICONS[tab.value];
+        {TAB_GROUPS.map((group, groupIdx) => {
+          const groupTabs = group
+            .map((key) => visibleByKey.get(key))
+            .filter((t): t is NonNullable<typeof t> => Boolean(t));
+          if (groupTabs.length === 0) return null;
           return (
-            <TabsTrigger
-              key={tab.value}
-              value={tab.value}
-              className="data-[state=active]:bg-background data-[state=active]:shadow-sm px-3 py-1.5"
-            >
-              <Icon className="size-3.5" />
-              <span>{tab.label}</span>
-            </TabsTrigger>
+            <div key={groupIdx} className="flex items-center gap-1">
+              {groupIdx > 0 && (
+                <span
+                  aria-hidden
+                  className="mx-1 h-5 w-px bg-border/60"
+                />
+              )}
+              {groupTabs.map((tab) => {
+                const Icon = TAB_ICONS[tab.value];
+                return (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="data-[state=active]:bg-background data-[state=active]:shadow-sm px-3 py-1.5"
+                  >
+                    <Icon className="size-3.5" />
+                    <span>{tab.label}</span>
+                  </TabsTrigger>
+                );
+              })}
+            </div>
           );
         })}
       </TabsList>

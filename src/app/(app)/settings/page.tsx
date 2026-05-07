@@ -142,15 +142,6 @@ export default async function SettingsPage({
             <code className="text-sm">{selectedRepo?.defaultBranch || '-'}</code>
           </div>
           {selectedRepo && (
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">Testing Template</span>
-              <TestingTemplateSelector
-                repositoryId={selectedRepo.id}
-                currentTemplate={selectedRepo.testingTemplate}
-              />
-            </div>
-          )}
-          {selectedRepo && (
             <AutoApproveToggle
               repositoryId={selectedRepo.id}
               enabled={selectedRepo.autoApproveDefaultBranch ?? false}
@@ -199,19 +190,6 @@ export default async function SettingsPage({
               : null
           }
         />
-      )}
-
-      {/* Storage Usage */}
-      {storageUsage && (
-        <div id="storage">
-          <StorageUsageCard
-            usedBytes={storageUsage.storageUsedBytes}
-            quotaBytes={storageUsage.storageQuotaBytes}
-            lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
-            isAdmin={isAdmin}
-            enforcementEnabled={enforcementEnabled}
-          />
-        </div>
       )}
 
       {/* Version */}
@@ -394,12 +372,31 @@ export default async function SettingsPage({
   );
 
   const playwrightTab = (
-    <div id="playwright">
-      <PlaywrightSettingsCard
-        settings={playwrightSettings}
-        repositoryId={selectedRepo?.id}
-      />
-    </div>
+    <>
+      {selectedRepo && (
+        <Card id="testing-template">
+          <CardHeader>
+            <CardTitle>Testing Template</CardTitle>
+            <CardDescription>
+              Apply a preset that configures Playwright and diff sensitivity for a common app style.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-between items-center">
+            <span className="text-sm text-muted-foreground">Active template</span>
+            <TestingTemplateSelector
+              repositoryId={selectedRepo.id}
+              currentTemplate={selectedRepo.testingTemplate}
+            />
+          </CardContent>
+        </Card>
+      )}
+      <div id="playwright">
+        <PlaywrightSettingsCard
+          settings={playwrightSettings}
+          repositoryId={selectedRepo?.id}
+        />
+      </div>
+    </>
   );
 
   const aiTab = banAiMode ? (
@@ -447,10 +444,23 @@ export default async function SettingsPage({
     </>
   );
 
-  const teamTab = isAdmin && currentUser?.teamId ? (
+  const teamTab = currentUser?.teamId ? (
     <div id="team" className="space-y-6">
+      {/* Storage Usage — visible to all team members */}
+      {storageUsage && (
+        <div id="storage">
+          <StorageUsageCard
+            usedBytes={storageUsage.storageUsedBytes}
+            quotaBytes={storageUsage.storageQuotaBytes}
+            lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
+            isAdmin={isAdmin}
+            enforcementEnabled={enforcementEnabled}
+          />
+        </div>
+      )}
+
       {/* Pending Invitations */}
-      {pendingInvitations.length > 0 && (
+      {isAdmin && pendingInvitations.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -467,26 +477,29 @@ export default async function SettingsPage({
         </Card>
       )}
 
-      {/* Team Members */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2">
-              <Users className="w-5 h-5" />
-              Team Members ({teamMembers.length})
-            </CardTitle>
-            <CardDescription>
-              Manage members of your team
-            </CardDescription>
-          </div>
-          <InviteUserDialog />
-        </CardHeader>
-        <CardContent>
-          <UserList users={teamMembers} currentUserId={currentUser.id} />
-        </CardContent>
-      </Card>
+      {/* Team Members (admin-only) */}
+      {isAdmin && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Team Members ({teamMembers.length})
+              </CardTitle>
+              <CardDescription>
+                Manage members of your team
+              </CardDescription>
+            </div>
+            <InviteUserDialog />
+          </CardHeader>
+          <CardContent>
+            <UserList users={teamMembers} currentUserId={currentUser.id} />
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Runners & API Access */}
+      {/* Runners & API Access (admin-only) */}
+      {isAdmin && (
       <Card id="runners">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <div className="space-y-1">
@@ -570,9 +583,10 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
           </div>
         </CardContent>
       </Card>
+      )}
 
-      {/* Test Migration (Early Adopter) */}
-      {earlyAdopterMode && teamRepos.length > 0 && (
+      {/* Test Migration (Early Adopter, admin-only) */}
+      {isAdmin && earlyAdopterMode && teamRepos.length > 0 && (
         <div id="test-migration">
           <TestMigrationCard
             repositories={teamRepos.map(r => ({ id: r.id, fullName: r.fullName ?? `${r.owner}/${r.name}` }))}
