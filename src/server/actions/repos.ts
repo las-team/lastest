@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess, requireWriteAccess, requireRepoWriteAccess } from '@/lib/auth';
+import { requireTeamAccess, requireRepoAccess, requireCapability, requireRepoCapability } from '@/lib/auth';
 import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
 import { getUserProjectsDetailed, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
@@ -105,7 +105,7 @@ export async function syncReposIfStale(teamId: string): Promise<void> {
 }
 
 export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: number }> {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:manage');
   const account = await queries.getGithubAccountByTeam(session.team.id);
   if (!account) return { success: false, count: 0 };
 
@@ -119,7 +119,7 @@ export async function fetchAndSyncRepos(): Promise<{ success: boolean; count: nu
 }
 
 export async function fetchAndSyncGitlabRepos(): Promise<{ success: boolean; count: number }> {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:manage');
   const account = await queries.getGitlabAccountByTeam(session.team.id);
   if (!account) return { success: false, count: 0 };
 
@@ -166,7 +166,7 @@ export async function selectRepo(repositoryId: string | null) {
 }
 
 export async function createLocalRepo(name: string, baseUrl?: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:manage');
   const repo = await queries.createRepository({
     teamId: session.team.id,
     provider: 'local',
@@ -201,14 +201,14 @@ export async function getRepo(id: string) {
 }
 
 export async function updateRepoBaseline(repositoryId: string, branch: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:settings');
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return;
   await queries.updateRepository(repositoryId, { selectedBaseline: branch });
 }
 
 export async function updateRepoSelectedBranch(repositoryId: string, branch: string) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:settings');
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return;
   await queries.updateRepository(repositoryId, { selectedBranch: branch });
@@ -218,7 +218,7 @@ export async function updateRepoSelectedBranch(repositoryId: string, branch: str
 }
 
 export async function updateAutoApproveDefaultBranch(repositoryId: string, enabled: boolean) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:settings');
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return;
   await queries.updateRepository(repositoryId, { autoApproveDefaultBranch: enabled });
@@ -230,7 +230,7 @@ export async function updateComparisonRunSettings(
   enabled: boolean,
   baselineBranch?: string,
 ) {
-  const session = await requireWriteAccess();
+  const session = await requireCapability('repos:settings');
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return;
   await queries.updateRepository(repositoryId, {
@@ -297,7 +297,7 @@ export async function applyTestingTemplate(
   repositoryId: string,
   templateId: string | null,
 ): Promise<{ success: boolean; error?: string }> {
-  await requireRepoWriteAccess(repositoryId);
+  await requireRepoCapability(repositoryId, 'repos:settings');
 
   // "custom" or null → just clear the template field
   if (!templateId || templateId === 'custom') {

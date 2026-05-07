@@ -3,7 +3,7 @@
 import type { AssertionType, WaitParams } from '@/lib/playwright/types';
 import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript } from '@/lib/db/queries';
-import { requireWriteAccess, requireRepoWriteAccess } from '@/lib/auth';
+import { requireCapability, requireRepoCapability } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
@@ -28,7 +28,7 @@ export async function startRecording(
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
   _storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   // Validate URL format
   try {
     new URL(url);
@@ -109,7 +109,7 @@ export async function startRecording(
 }
 
 export async function stopRecording(repositoryId?: string | null) {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
@@ -160,7 +160,7 @@ export async function stopRecording(repositoryId?: string | null) {
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
@@ -179,7 +179,7 @@ export async function captureScreenshot(repositoryId?: string | null) {
 }
 
 export async function createAssertion(type: AssertionType, repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
@@ -196,7 +196,7 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
 }
 
 export async function createWait(params: WaitParams, repositoryId?: string | null): Promise<{ success: boolean; error?: string }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
 
   if (params.waitType === 'duration') {
     if (typeof params.durationMs !== 'number' || params.durationMs < 0 || !Number.isFinite(params.durationMs)) {
@@ -237,7 +237,7 @@ export async function createWait(params: WaitParams, repositoryId?: string | nul
 }
 
 export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
@@ -257,7 +257,7 @@ export async function promoteSelector(
   selectorValue: string,
   repositoryId?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   if (!actionId || !selectorValue) {
     return { success: false, error: 'actionId and selectorValue are required' };
   }
@@ -275,7 +275,7 @@ export async function promoteSelector(
 }
 
 export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
@@ -292,7 +292,7 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
 }
 
 export async function togglePauseRecording(_repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   return { paused: false, error: 'Pause is not supported for remote recording sessions' };
 }
 
@@ -306,7 +306,7 @@ export async function getRecordingStatus(
   // tears down the BrowserViewer mid-recording.
   hint?: { sessionId?: string; runnerId?: string },
 ) {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession) {
@@ -426,7 +426,7 @@ export async function getRecordingStatus(
 }
 
 export async function clearLastCompletedSession(repositoryId?: string | null) {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   // Clear remote session if it exists and is completed
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession && !remoteSession.isRecording) {
@@ -447,8 +447,8 @@ export async function saveRecordedTest(data: {
   skippedDefaultStepIds?: string[];
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData | null;
 }) {
-  if (data.repositoryId) await requireRepoWriteAccess(data.repositoryId);
-  else await requireWriteAccess();
+  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'tests:write');
+  else await requireCapability('tests:write');
   const test = await createTest({
     name: data.name,
     functionalAreaId: data.functionalAreaId,
@@ -553,7 +553,7 @@ export async function updateRerecordedTest(data: {
 }
 
 export async function getOrCreateFunctionalArea(name: string) {
-  await requireWriteAccess();
+  await requireCapability('recording:write');
   const areas = await getFunctionalAreas();
   const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
 

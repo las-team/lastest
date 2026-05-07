@@ -9,8 +9,9 @@ import { ensureDemoEnvironment, DEMO_EMAIL_DOMAIN } from '@/lib/auth/demo';
  * Provisions a fresh, ephemeral demo user and signs them in.
  *
  * The better-auth `user.create` hook detects the `@demo.lastest.local` email
- * suffix and assigns the new user to the shared demo team with role='viewer',
- * which makes every `requireWriteAccess` boundary reject mutations.
+ * suffix and assigns the new user to the shared demo team (plan='demo').
+ * The capability layer treats demo plan as read-only for every role, so
+ * every `requireCapability` boundary in the server actions rejects mutations.
  *
  * Cookie propagation relies on the `nextCookies()` plugin already configured
  * on the better-auth instance — it forwards the session cookie to the server

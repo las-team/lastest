@@ -100,35 +100,6 @@ export async function requireRepoAccess(
   return { ...session, repo };
 }
 
-// Demo users get role='viewer' on a team with slug='demo'. Both signals are
-// checked so a stray viewer on a real team can't be silently elevated and a
-// demo user with a hand-edited role can't write either.
-export function isDemoSession(
-  session: Pick<SessionData, "user" | "team">
-): boolean {
-  return session.user.role === "viewer" || session.team?.slug === "demo";
-}
-
-export async function requireWriteAccess(): Promise<
-  SessionData & { team: Team }
-> {
-  const session = await requireTeamAccess();
-  if (isDemoSession(session)) {
-    throw new Error("Forbidden: Demo accounts are read-only");
-  }
-  return session;
-}
-
-export async function requireRepoWriteAccess(
-  repoId: string
-): Promise<SessionData & { team: Team; repo: Repository }> {
-  const session = await requireRepoAccess(repoId);
-  if (isDemoSession(session)) {
-    throw new Error("Forbidden: Demo accounts are read-only");
-  }
-  return session;
-}
-
 export async function isAuthenticated(): Promise<boolean> {
   const session = await getCurrentSession();
   return session !== null;
