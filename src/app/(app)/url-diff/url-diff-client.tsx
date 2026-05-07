@@ -28,6 +28,14 @@ interface UrlDiffResultShape {
     diffRelPath: string;
     pixelDifference: number;
     percentageDifference: number;
+    defaultKey?: string;
+    variants?: Array<{
+      key: string;
+      label: string;
+      diffRelPath: string;
+      pixelDifference: number;
+      percentageDifference: number;
+    }>;
   };
   dom: {
     added: unknown[];
@@ -74,6 +82,11 @@ interface UrlDiffResultShape {
     scoreA: { score: number; violatedRules: number; passedRules: number };
     scoreB: { score: number; violatedRules: number; passedRules: number };
     scoreDelta: number;
+  };
+  text: {
+    status: 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped';
+    summary: { added: number; removed: number; sameAsBaseline: boolean };
+    lines: Array<{ op: 'add' | 'del' | 'eq'; line: string; oldLineNo?: number; newLineNo?: number }>;
   };
 }
 
@@ -236,20 +249,16 @@ function UrlDiffResultView({ result }: { result: UrlDiffResultShape }) {
             {result.a11y.scoreDelta}
           </Badge>
         </TabsTrigger>
+        <TabsTrigger value="text">
+          Text{' '}
+          <Badge variant="secondary" className="ml-2">
+            +{result.text.summary.added}/-{result.text.summary.removed}
+          </Badge>
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="visual">
-        <Card className="p-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <ScreenshotPanel label="A (baseline)" rel={result.visual.baselineRelPath} />
-            <ScreenshotPanel label="B (current)" rel={result.visual.currentRelPath} />
-            <ScreenshotPanel label="Diff" rel={result.visual.diffRelPath} />
-          </div>
-          <div className="text-sm text-muted-foreground mt-4">
-            {result.visual.pixelDifference.toLocaleString()} pixels different ·{' '}
-            {result.visual.percentageDifference.toFixed(2)}% of content area
-          </div>
-        </Card>
+        <VisualTab visual={result.visual} />
       </TabsContent>
 
       <TabsContent value="dom">
@@ -335,7 +344,92 @@ function UrlDiffResultView({ result }: { result: UrlDiffResultShape }) {
           )}
         </Card>
       </TabsContent>
+
+      <TabsContent value="text">
+        <Card className="p-4 space-y-3">
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <Stat label="Lines added" value={result.text.summary.added} />
+            <Stat label="Lines removed" value={result.text.summary.removed} />
+            <div>
+              <div className="text-xs text-muted-foreground">Status</div>
+              <div className="text-sm capitalize">
+                {result.text.status.replace(/_/g, ' ')}
+              </div>
+            </div>
+          </div>
+          {result.text.lines.length === 0 ? (
+            <div className="text-sm text-muted-foreground italic">
+              {result.text.status === 'unchanged'
+                ? 'Page text is identical between A and B.'
+                : result.text.status === 'skipped'
+                  ? 'Text capture not available for this run.'
+                  : 'No line-level diff to render.'}
+            </div>
+          ) : (
+            <pre className="text-xs font-mono bg-muted p-3 rounded max-h-96 overflow-auto">
+              {result.text.lines.map((l, i) => (
+                <div
+                  key={i}
+                  className={
+                    l.op === 'add'
+                      ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                      : l.op === 'del'
+                        ? 'bg-red-500/10 text-red-700 dark:text-red-400'
+                        : 'opacity-60'
+                  }
+                >
+                  {l.op === 'add' ? '+' : l.op === 'del' ? '-' : ' '} {l.line}
+                </div>
+              ))}
+            </pre>
+          )}
+        </Card>
+      </TabsContent>
     </Tabs>
+  );
+}
+
+function VisualTab({ visual }: { visual: UrlDiffResultShape['visual'] }) {
+  const variants =
+    visual.variants && visual.variants.length > 0
+      ? visual.variants
+      : [
+          {
+            key: 'pixelmatch',
+            label: 'Pixelmatch',
+            diffRelPath: visual.diffRelPath,
+            pixelDifference: visual.pixelDifference,
+            percentageDifference: visual.percentageDifference,
+          },
+        ];
+  const [selectedKey, setSelectedKey] = useState(visual.defaultKey ?? variants[0]!.key);
+  const selected = variants.find((v) => v.key === selectedKey) ?? variants[0]!;
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {variants.map((v) => (
+          <Button
+            key={v.key}
+            type="button"
+            size="sm"
+            variant={v.key === selected.key ? 'default' : 'outline'}
+            onClick={() => setSelectedKey(v.key)}
+          >
+            {v.label}
+            <span className="ml-2 opacity-70">{v.percentageDifference.toFixed(1)}%</span>
+          </Button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ScreenshotPanel label="A (baseline)" rel={visual.baselineRelPath} />
+        <ScreenshotPanel label="B (current)" rel={visual.currentRelPath} />
+        <ScreenshotPanel label={`Diff · ${selected.label}`} rel={selected.diffRelPath} />
+      </div>
+      <div className="text-sm text-muted-foreground">
+        {selected.pixelDifference.toLocaleString()} pixels different ·{' '}
+        {selected.percentageDifference.toFixed(2)}% of content area
+      </div>
+    </Card>
   );
 }
 

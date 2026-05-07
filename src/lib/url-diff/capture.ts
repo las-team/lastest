@@ -47,6 +47,9 @@ export interface UrlCapture {
   screenshotRelPath: string;
   /** Absolute disk path, used by buildUrlDiff to feed the visual engine. */
   screenshotAbsPath: string;
+  /** Relative path to captured `document.body.innerText` snapshot. Null when
+   *  text capture failed or returned empty. Used by the page-text-diff engine. */
+  pageTextRelPath: string | null;
   domSnapshot: DomSnapshotData | null;
   networkRequests: NetworkRequestLike[];
   a11yViolations: A11yViolation[];
@@ -130,24 +133,26 @@ async function pollForResults(commandId: string, timeoutMs: number): Promise<Res
   const deadline = Date.now() + timeoutMs;
   let testResultRow: ResultRow | undefined;
   const screenshotRows: ResultRow[] = [];
+  const textRows: ResultRow[] = [];
   while (Date.now() < deadline) {
     const rows = (await getUnacknowledgedResults([commandId])) as unknown as ResultRow[];
     for (const row of rows) {
       if (row.type === 'response:test_result') testResultRow = row;
       if (row.type === 'response:screenshot') screenshotRows.push(row);
+      if (row.type === 'response:screenshot_text') textRows.push(row);
     }
     if (testResultRow) {
-      // The screenshot uploads happen BEFORE the result message in EB index.ts,
-      // so by the time we see the test_result row, all screenshot rows are
-      // already inserted. One more fetch in case any landed late.
+      // The screenshot/text uploads happen BEFORE the result message in EB
+      // index.ts, so by the time we see the test_result row, all artefact
+      // rows are already inserted. One more fetch in case any landed late.
       const rows2 = (await getUnacknowledgedResults([commandId])) as unknown as ResultRow[];
-      const ids = new Set(screenshotRows.map((r) => r.id));
+      const seenIds = new Set([...screenshotRows, ...textRows].map((r) => r.id));
       for (const row of rows2) {
-        if (row.type === 'response:screenshot' && !ids.has(row.id)) {
-          screenshotRows.push(row);
-        }
+        if (seenIds.has(row.id)) continue;
+        if (row.type === 'response:screenshot') screenshotRows.push(row);
+        if (row.type === 'response:screenshot_text') textRows.push(row);
       }
-      return [testResultRow, ...screenshotRows];
+      return [testResultRow, ...screenshotRows, ...textRows];
     }
     await sleep(POLL_INTERVAL_MS);
   }
@@ -190,6 +195,7 @@ export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
         timeout: timeoutMs,
         viewport,
         enableA11y: true,
+        textCaptureEnabled: true,
         enableNetworkInterception: false,
         consoleErrorMode: 'ignore',
         networkErrorMode: 'ignore',
@@ -236,6 +242,25 @@ export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
     const destAbs = path.join(sideDir, 'screenshot.png');
     await fs.copyFile(sourceAbs, destAbs);
 
+    // Page-text companion (when textCaptureEnabled). Same upload pattern as
+    // screenshots: stored under storage/screenshots/<jobId>/ with `.txt`.
+    let pageTextRelPath: string | null = null;
+    const textRows = rows.filter((r) => r.type === 'response:screenshot_text');
+    if (textRows.length > 0) {
+      const textPayload = textRows[0]!.payload as { path?: string } | null;
+      const textSourceRel = textPayload?.path;
+      if (textSourceRel) {
+        const textSourceAbs = path.join(STORAGE_ROOT, textSourceRel.replace(/^\/+/, ''));
+        const textDestAbs = path.join(sideDir, 'page-text.txt');
+        try {
+          await fs.copyFile(textSourceAbs, textDestAbs);
+          pageTextRelPath = `/url-diffs/${opts.jobId}/${opts.side}/page-text.txt`;
+        } catch (err) {
+          console.warn(`[url-diff] page-text copy failed for ${opts.side}:`, err);
+        }
+      }
+    }
+
     const networkRequests = (Array.isArray(tp.networkRequests) ? tp.networkRequests : []) as NetworkRequestLike[];
     const domSnapshot = (tp.domSnapshot ?? null) as DomSnapshotData | null;
     const a11yViolations = (Array.isArray(tp.a11yViolations) ? tp.a11yViolations : []) as A11yViolation[];
@@ -265,6 +290,7 @@ export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
       primaryHost: hostOf(opts.url),
       screenshotRelPath: relScreenshot,
       screenshotAbsPath: destAbs,
+      pageTextRelPath,
       domSnapshot,
       networkRequests,
       a11yViolations,
@@ -302,12 +328,18 @@ export async function loadCaptureFromDisk(
     };
     const screenshotAbsPath = path.join(sideDir, 'screenshot.png');
     await fs.access(screenshotAbsPath);
+    let pageTextRelPath: string | null = null;
+    try {
+      await fs.access(path.join(sideDir, 'page-text.txt'));
+      pageTextRelPath = `/url-diffs/${jobOrSnapshotId}/${side}/page-text.txt`;
+    } catch { /* missing — pre-text-diff capture */ }
     return {
       url: meta.url,
       side,
       primaryHost: hostOf(meta.url),
       screenshotRelPath: `/url-diffs/${jobOrSnapshotId}/${side}/screenshot.png`,
       screenshotAbsPath,
+      pageTextRelPath,
       domSnapshot: dom,
       networkRequests: network,
       a11yViolations: a11y.violations,

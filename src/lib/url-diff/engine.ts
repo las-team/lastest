@@ -12,12 +12,28 @@ import { computeDomDiff, summarizeDomDiff } from '@/lib/diff/dom-diff';
 import type { DomDiffResult, DomSnapshotData } from '@/lib/db/schema';
 import { computeNetworkDiff, type NetworkDiffResult } from '@/lib/diff/network-diff';
 import { computeA11yDiff, type A11yDiffResult } from '@/lib/diff/a11y-diff';
+import { computePageTextDiff, type PageTextDiff } from '@/lib/diff/page-text-diff';
 import type { UrlCapture } from './capture';
+
+export type VisualEngineKey = 'pixelmatch' | 'pixelmatch-shift' | 'ssim' | 'butteraugli';
+
+export interface VisualVariant {
+  key: VisualEngineKey;
+  label: string;
+  diffRelPath: string;
+  pixelDifference: number;
+  percentageDifference: number;
+}
 
 export interface UrlDiffResult {
   visual: {
     baselineRelPath: string;
     currentRelPath: string;
+    /** Default variant rendered first ('pixelmatch'). */
+    defaultKey: VisualEngineKey;
+    variants: VisualVariant[];
+    /** Back-compat with v1 result shape: mirrors the default variant so older
+     *  callers (and the snapshot-stitch path) keep working unchanged. */
     diffRelPath: string;
     pixelDifference: number;
     percentageDifference: number;
@@ -26,6 +42,7 @@ export interface UrlDiffResult {
   dom: DomDiffResult & { summary: string };
   network: NetworkDiffResult;
   a11y: A11yDiffResult;
+  text: PageTextDiff;
   capturedAtA: number;
   capturedAtB: number;
   primaryHostA: string;
@@ -46,16 +63,52 @@ export async function buildUrlDiff(
   const diffOutDir = path.join(STORAGE_DIRS['url-diffs'], jobId, 'diff');
   await fs.mkdir(diffOutDir, { recursive: true });
 
-  const visualResult = await generateDiff(
-    captureA.screenshotAbsPath,
-    captureB.screenshotAbsPath,
-    diffOutDir,
-    0.1,
-    false,
-    undefined,
-    true, // ignorePageShift — different sites have different layouts; LCS gives saner output
-    'pixelmatch',
-  );
+  // Run all 4 visual engines so the UI can let users compare diffs side-by-side.
+  // ignorePageShift gates the LCS row-alignment pre-pass — useful when comparing
+  // two layouts of the same content. Run sequentially: pixelmatch is fast,
+  // butteraugli is slow; serial keeps memory bounded at ~one PNG pair at a time.
+  const visualConfigs: Array<{
+    key: VisualEngineKey;
+    label: string;
+    engine: 'pixelmatch' | 'ssim' | 'butteraugli';
+    ignorePageShift: boolean;
+  }> = [
+    { key: 'pixelmatch', label: 'Pixelmatch', engine: 'pixelmatch', ignorePageShift: false },
+    { key: 'pixelmatch-shift', label: 'Pixelmatch · page-shift aware', engine: 'pixelmatch', ignorePageShift: true },
+    { key: 'ssim', label: 'SSIM', engine: 'ssim', ignorePageShift: false },
+    { key: 'butteraugli', label: 'Butteraugli', engine: 'butteraugli', ignorePageShift: false },
+  ];
+  const visualRuns: Array<{ cfg: typeof visualConfigs[number]; result: DiffResult }> = [];
+  for (const cfg of visualConfigs) {
+    const subDir = path.join(diffOutDir, cfg.key);
+    await fs.mkdir(subDir, { recursive: true });
+    try {
+      const result = await generateDiff(
+        captureA.screenshotAbsPath,
+        captureB.screenshotAbsPath,
+        subDir,
+        0.1,
+        false,
+        undefined,
+        cfg.ignorePageShift,
+        cfg.engine,
+      );
+      visualRuns.push({ cfg, result });
+    } catch (err) {
+      console.warn(`[url-diff] visual engine '${cfg.key}' failed:`, err);
+    }
+  }
+  if (visualRuns.length === 0) {
+    throw new Error('All visual diff engines failed');
+  }
+  const primary = visualRuns[0]!;
+  const variants: VisualVariant[] = visualRuns.map(({ cfg, result }) => ({
+    key: cfg.key,
+    label: cfg.label,
+    diffRelPath: toRelativePath(result.diffImagePath),
+    pixelDifference: result.pixelDifference,
+    percentageDifference: result.percentageDifference,
+  }));
 
   const domA = captureA.domSnapshot ?? EMPTY_DOM;
   const domB = captureB.domSnapshot ?? EMPTY_DOM;
@@ -76,18 +129,26 @@ export async function buildUrlDiff(
     captureB.a11yPassesCount,
   );
 
+  const textDiff = await computePageTextDiff(
+    captureA.pageTextRelPath,
+    captureB.pageTextRelPath,
+  );
+
   return {
     visual: {
       baselineRelPath: captureA.screenshotRelPath,
       currentRelPath: captureB.screenshotRelPath,
-      diffRelPath: toRelativePath(visualResult.diffImagePath),
-      pixelDifference: visualResult.pixelDifference,
-      percentageDifference: visualResult.percentageDifference,
-      metadata: visualResult.metadata,
+      defaultKey: primary.cfg.key,
+      variants,
+      diffRelPath: variants[0]!.diffRelPath,
+      pixelDifference: variants[0]!.pixelDifference,
+      percentageDifference: variants[0]!.percentageDifference,
+      metadata: primary.result.metadata,
     },
     dom: domWithSummary,
     network: networkDiff,
     a11y: a11yDiff,
+    text: textDiff,
     capturedAtA: captureA.capturedAt,
     capturedAtB: captureB.capturedAt,
     primaryHostA: captureA.primaryHost,

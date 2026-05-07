@@ -31,10 +31,15 @@ export async function GET(
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
 
-  // Repo-less ("global") jobs have no team binding on the row, so we
-  // refuse them rather than leak across teams. See assertJobMutateAccess
-  // in src/server/actions/jobs.ts for the matching policy.
+  // Repo-less jobs are allowed only if the job's metadata pins them to
+  // the requesting team. URL Diff jobs (`type === 'url_diff'`) take this
+  // path: `startUrlDiff` writes `metadata.teamId`. Repo-scoped jobs use
+  // the standard repo→team check.
   if (!job.repositoryId) {
+    const meta = (job.metadata ?? {}) as { teamId?: string };
+    if (meta.teamId && meta.teamId === session.team.id) {
+      return NextResponse.json(job);
+    }
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   const repo = await queries.getRepository(job.repositoryId);

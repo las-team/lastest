@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -176,13 +176,19 @@ function AreaNode({
         aria-selected={isSelected}
         aria-expanded={hasChildren ? isExpanded : undefined}
         className={cn(
-          'group flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted',
+          'group flex items-center gap-1 py-1 px-2 rounded cursor-pointer hover:bg-muted select-none',
           isSelected && 'bg-primary/10 hover:bg-primary/15',
           isMultiSelected && !isSelected && 'bg-primary/10 hover:bg-primary/15'
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        onMouseDown={(e) => {
+          // Prevent the browser's default text selection on shift-click
+          // before it interferes with the click → drag interaction.
+          if (e.shiftKey) e.preventDefault();
+        }}
         onClick={(e) => {
           if (e.shiftKey) {
+            window.getSelection()?.removeAllRanges();
             onAreaClick(area.id, true);
           } else {
             onAreaClick(area.id, false);
@@ -383,9 +389,20 @@ export function AreaTree({
   addButtonClassName,
 }: AreaTreeProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [lastClickedAreaId, setLastClickedAreaId] = useState<string | null>(null);
+  // Anchor for shift-click range selection. A ref avoids stale closures and
+  // lets us seed it from `selection` so shift-click works even when the
+  // current single selection was set externally (URL, breadcrumb, etc).
+  const lastClickedAreaIdRef = useRef<string | null>(null);
 
   const flatIds = useMemo(() => flattenAreaIds(tree), [tree]);
+
+  // Keep the anchor in sync with the single-select area, so shift-click
+  // always extends from whatever is currently selected.
+  useEffect(() => {
+    if (selection?.type === 'area') {
+      lastClickedAreaIdRef.current = selection.id;
+    }
+  }, [selection]);
 
   const handleToggle = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -400,24 +417,23 @@ export function AreaTree({
   }, []);
 
   const handleAreaClick = useCallback((id: string, shiftKey: boolean) => {
-    if (shiftKey && lastClickedAreaId) {
-      // Range select between lastClickedAreaId and id
-      const startIdx = flatIds.indexOf(lastClickedAreaId);
+    const anchor = lastClickedAreaIdRef.current;
+    if (shiftKey && anchor && anchor !== id && flatIds.indexOf(anchor) !== -1) {
+      // Range select between anchor and id (replaces previous range, anchor stays)
+      const startIdx = flatIds.indexOf(anchor);
       const endIdx = flatIds.indexOf(id);
       if (startIdx !== -1 && endIdx !== -1) {
         const from = Math.min(startIdx, endIdx);
         const to = Math.max(startIdx, endIdx);
         const rangeIds = flatIds.slice(from, to + 1);
-        const next = new Set(selectedAreaIds);
-        for (const rid of rangeIds) next.add(rid);
-        onMultiSelect(next);
+        onMultiSelect(new Set(rangeIds));
       }
     } else {
-      // Normal click — clear multi-select
-      setLastClickedAreaId(id);
+      // Normal click — set anchor and clear multi-select
+      lastClickedAreaIdRef.current = id;
       onMultiSelect(new Set());
     }
-  }, [lastClickedAreaId, flatIds, selectedAreaIds, onMultiSelect]);
+  }, [flatIds, onMultiSelect]);
 
   const handleUnsortedDrop = (e: React.DragEvent) => {
     e.preventDefault();

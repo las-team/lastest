@@ -1,6 +1,7 @@
 ## tasks
 Videos explaining use
     video2: claude uses lastest mcp
+    record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
@@ -11,6 +12,7 @@ Create modes
 Openrouter agent sdk parity
 ## bugs
 ## features
+Demo mode - test without registration
 Build a skill to find startupideas and test them, provide testing feedback
 Welcome email, follow-up
 Google verification for gsheets
