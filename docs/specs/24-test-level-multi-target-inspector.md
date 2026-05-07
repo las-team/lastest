@@ -1,7 +1,7 @@
 # Feature Spec: Test-Level Multi-Target Inspector
 
 > Status: design • Branch: `claude/design-testing-framework-VAs2E` • Baseline: v1.3 platform
-> Scope: per-test, no-rebuild comparison across **Visual + DOM + Network + Variables**, with user-selectable run targets.
+> Scope: per-test, no-rebuild comparison across **Visual + DOM + Text + Network + Variables**, with user-selectable run targets.
 
 ## Problem
 
@@ -14,9 +14,10 @@ Today the platform captures rich per-test artifacts but only surfaces them in on
 A single inspector view, opened from a test, that:
 
 1. Lets the user **pick two targets** (current run, baseline run) from the test's run history.
-2. Diffs them across four dimensions in parallel:
+2. Diffs them across five dimensions in parallel:
    - **Visual** — runs the same engine the test is configured for (Pixelmatch / SSIM / Butteraugli — `src/lib/diff/engines.ts:362–380`).
    - **DOM** — structural diff of `testResults.domSnapshot` (`src/lib/db/schema.ts:432`).
+   - **Text** — line-level diff of the *visible text content* of the page, derived from `domSnapshot.elements[].textContent` (with optional OCR text from the visual diff metadata's `textRegions`). Uses the existing `diffLines()` LCS in `src/lib/diff/text-diff.ts:19`.
    - **Network** — request-by-request diff of `testResults.networkRequests` (line 417) and `networkBodiesPath` (line 427).
    - **Variables** — set-diff of `testResults.extractedVariables` (line 437) and `assignedVariables` (line 443), plus `consoleErrors` (line 416) and `logs` (line 423).
 3. Computes results **without re-running Playwright, without rebuilding the EB image, without scheduling a new build**. Pure server-side recompute over already-persisted JSON/binary artifacts.
@@ -63,7 +64,7 @@ Two-pane top bar for target selection, four-tab body for dimensions.
 │ Baseline ▼ [Run #4790 · 2026-05-05 09:01 · build #309 · main]    │
 │ Engine: (•) pixelmatch  ( ) ssim  ( ) butteraugli   [Recompute]  │
 └──────────────────────────────────────────────────────────────────┘
-┌─[Visual]─[DOM]─[Network]─[Variables]─────────────────────────────┐
+┌─[Visual]─[DOM]─[Text]─[Network]─[Variables]──────────────────────┐
 │                                                                  │
 │  (per-tab body — see below)                                      │
 │                                                                  │
@@ -87,6 +88,16 @@ Side-by-side tree (left = baseline, right = current) backed by `DomSnapshotData`
 - **Tree view**: collapsed by default; expanded automatically along the path of any changed node. Color rows: green added, red removed, amber attribute-changed, gray unchanged.
 - **Element panel** (right side, when a node selected): attribute table with per-attribute diff, computed selector, bounding box overlay button that highlights the node on the visual tab when toggled.
 - **Filter bar**: `Only changes`, `Hide attribute-only changes`, `Hide whitespace`, search by selector or text.
+
+#### Text
+Visible-text comparison of what the user actually reads on the page.
+
+- **Source**: concatenate `domSnapshot.elements[].textContent` in DOM order, normalize whitespace, drop empties. This produces a "text rendering" of the page.
+- **Diff**: feed both sides to existing `diffLines()` (`src/lib/diff/text-diff.ts:19`). Render unified-style with `+`/`−`/` ` markers and per-line word-level highlighting via a small inline char-diff for `eq`/`add` pairs.
+- **Stats**: header chip with `+N / -M` counts from `diffStats()`.
+- **OCR overlay (opt-in)**: when both runs have `metadata.textRegions` populated by the visual diff, allow toggling an "OCR text" view that shows text *as the camera sees it* (post-render). Useful for catching font-substitution / clipping bugs that DOM text wouldn't show.
+- **Filters**: "Only changes", regex search, ignore patterns (e.g. timestamps `\d{1,2}:\d{2}(:\d{2})?\s?(AM|PM)?`) which feed back into `inspectorSettings.text.ignorePatterns`.
+- **Click-through**: clicking a `+` or `−` line scrolls the DOM tab to the originating element (we keep the element index alongside the line during extraction).
 
 #### Network
 Two-column waterfall, baseline left, current right, aligned by URL+method. Backed by the `NetworkRequest` interface (`src/lib/db/schema.ts:14–28`).
@@ -113,7 +124,7 @@ Three sub-sections:
 3. **Console & logs** — merged stream of `consoleErrors: string[]` and `logs: Array<{timestamp, level, message}>`. Toggle filter for level (error/warn/info/log/debug). Side-by-side run vs run with line-aligned diff. New errors highlighted.
 
 ### Header summary chip
-Once all four diffs return, show a chip strip under the tabs: `Visual ●` `DOM ●` `Network ●` `Vars ●` — colored dots (green = unchanged, amber = minor diff, red = significant). Lets the user see "what's actually different" without clicking through every tab.
+Once all five diffs return, show a chip strip under the tabs: `Visual ●` `DOM ●` `Text ●` `Network ●` `Vars ●` — colored dots (green = unchanged, amber = minor diff, red = significant). Lets the user see "what's actually different" without clicking through every tab.
 
 ## Architecture
 
@@ -127,15 +138,16 @@ export interface InspectTargets {
   currentResultId: string;
   baselineResultId: string;
   engine?: DiffEngineType;     // default: test config
-  dimensions?: Array<'visual' | 'dom' | 'network' | 'variables'>;
+  dimensions?: Array<'visual' | 'dom' | 'text' | 'network' | 'variables'>;
 }
 
 export interface InspectResult {
   visual?: VisualDiffPayload;        // reuses existing DiffMetadata + image paths
   dom?: DomDiffPayload;              // tree of {path, kind, before, after}
+  text?: TextDiffPayload;            // unified line diff + stats
   network?: NetworkDiffPayload;      // matched-pair list + summary
   variables?: VariableDiffPayload;   // {extracted, assigned, console, logs}
-  classification: { visual: Severity, dom: Severity, network: Severity, variables: Severity };
+  classification: { visual: Severity, dom: Severity, text: Severity, network: Severity, variables: Severity };
   computedAtMs: number;
   cacheKey: string;
 }
@@ -148,9 +160,10 @@ Auth via `requireRepoAccess()` based on `testId → repoId` resolution (same pat
 ### Implementation plan
 
 1. **Visual** — call `generateDiff()` with the chosen engine, reading both `screenshotPath`s. Identical to `recalculateDiff()` minus the baseline mutation.
-2. **DOM** — extend `src/lib/diff/dom-diff.ts` with a pairwise comparator returning `{added, removed, modified, unchanged}` indexed by stable selector + DOM path. Currently dom-diff focuses on per-snapshot analysis; we add `compareDomSnapshots(a: DomSnapshotData, b: DomSnapshotData): DomDiffPayload`.
-3. **Network** — new `src/lib/diff/network-diff.ts`. Match by `(method, normalizedUrl, occurrenceIndex)`. Compute deltas; lazy-load bodies on request from `networkBodiesPath`.
-4. **Variables** — new `src/lib/diff/variables-diff.ts`. Pure object-diff over the four maps/arrays. Cheap; runs synchronously in the action.
+2. **DOM** — reuse existing `computeDomDiff()` from `src/lib/diff/dom-diff.ts:80`. It already returns `{added, removed, changed, unchangedCount}` over `DomSnapshotData`; the inspector consumes that shape directly.
+3. **Text** — new `src/lib/diff/text-content-diff.ts`. Extracts visible text from each `DomSnapshotData` (concatenating `textContent` in DOM order, normalizing whitespace), then calls existing `diffLines()` from `src/lib/diff/text-diff.ts:19`. Optional OCR overlay reads `metadata.textRegions` from the latest visualDiff for the same screenshot.
+4. **Network** — new `src/lib/diff/network-diff.ts`. Match by `(method, normalizedUrl, occurrenceIndex)`. Compute deltas; lazy-load bodies on request from `networkBodiesPath`.
+5. **Variables** — new `src/lib/diff/variables-diff.ts`. Pure object-diff over the four maps/arrays. Cheap; runs synchronously in the action.
 
 Each dimension is independent — the action executes them in `Promise.all` and returns partial results if one throws (with an error chip on the dimension's tab).
 

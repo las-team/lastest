@@ -54,6 +54,7 @@ import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
 import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
+import { InspectTabClient } from './inspect/inspect-tab-client';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 
@@ -1024,6 +1025,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             <TabsTrigger value="vars" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Vars</TabsTrigger>
             <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
             <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="inspect" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Inspect</TabsTrigger>
             <TabsTrigger value="history" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
             <TabsTrigger value="recordings" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
             <TabsTrigger value="versions" onClick={loadVersions} className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
@@ -1288,6 +1290,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               plannedScreenshots={plannedScreenshots}
               onUpdate={() => router.refresh()}
             />
+          </TabsContent>
+
+          <TabsContent value="inspect" className="mt-4">
+            <InspectTabClient testId={test.id} />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">
