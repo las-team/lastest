@@ -11,6 +11,18 @@ import type { DomSnapshotData, DomSnapshotElement, DomDiffResult } from '@/lib/d
 // Selector types ordered by stability (most stable first)
 const SELECTOR_PRIORITY = ['data-testid', 'id', 'label', 'role-name', 'aria-label', 'text', 'name'];
 
+/** Tags considered "interactive" for verdict scoring — these are the ones
+ *  that user research consistently shows produce real regressions when they
+ *  appear/disappear. Decorative DOM churn (divs, spans without role) is
+ *  excluded because in modern frameworks it's typical and noisy. */
+const INTERACTIVE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea', 'option', 'form', 'label']);
+
+function isInteractive(el: DomSnapshotElement): boolean {
+  if (INTERACTIVE_TAGS.has(el.tag.toLowerCase())) return true;
+  // Anything with a `role-name` selector is exposed to assistive tech
+  return el.selectors.some(s => s.type === 'role-name' || s.type === 'aria-label');
+}
+
 /**
  * Get the best stable identifier for an element.
  * Returns the first selector value found in priority order, or null.
@@ -74,13 +86,27 @@ function detectChanges(
   return changes;
 }
 
+interface DomDiffOptions {
+  /** When true, exclude non-interactive elements (decorative divs/spans without
+   *  ARIA role) from the diff. This is the right setting for verdict scoring —
+   *  "a div moved 6px" is rarely a real regression. */
+  interactiveOnly?: boolean;
+}
+
 /**
  * Compare two DOM snapshots and produce a structured diff.
  */
 export function computeDomDiff(
   baseline: DomSnapshotData,
   current: DomSnapshotData,
+  options: DomDiffOptions = {},
 ): DomDiffResult {
+  // Apply interactive-only filter at the input layer so the matching algorithm
+  // operates on a smaller, higher-signal element set.
+  if (options.interactiveOnly) {
+    baseline = { ...baseline, elements: baseline.elements.filter(isInteractive) };
+    current = { ...current, elements: current.elements.filter(isInteractive) };
+  }
   const added: DomSnapshotElement[] = [];
   const removed: DomSnapshotElement[] = [];
   const changed: DomDiffResult['changed'] = [];

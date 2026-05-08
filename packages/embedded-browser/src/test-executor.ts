@@ -23,6 +23,15 @@ import type { StabilizationPayload } from './protocol.js';
 import { setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
 import { getAllDomSelectors, type DomSnapshotResult, type SelectorPriorityConfig } from './selector-utils.js';
 import {
+  UrlTrajectoryRecorder,
+  VITALS_INIT_SCRIPT,
+  sampleWebVitals,
+  captureStorageStateSnapshot,
+  type UrlTrajectoryStep,
+  type WebVitalsSample,
+  type StorageStateSnapshot,
+} from './multi-layer-capture.js';
+import {
   instrumentAssertionTracking,
   instrumentStepTracking,
   stripTypeAnnotations,
@@ -119,6 +128,15 @@ export interface EmbeddedTestResult {
    *  host writes these to `selector_stats` so future runs can promote
    *  the winning candidate. */
   selectorOutcomes?: SelectorOutcome[];
+  // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
+  /** Per-step finalUrl + redirect chain. Empty array means the recorder
+   *  ran but no main-frame navigations were observed; undefined means the
+   *  layer was disabled or the recorder failed to install. */
+  urlTrajectory?: UrlTrajectoryStep[];
+  /** Per-screenshot Web Vitals samples (LCP/CLS/INP/FCP/TBT/TTFB). */
+  webVitals?: WebVitalsSample[];
+  /** End-of-test cookie + localStorage snapshot. Token-shaped names redacted. */
+  storageStateSnapshot?: StorageStateSnapshot;
 }
 
 export interface EmbeddedSetupResult {
@@ -414,6 +432,22 @@ export class EmbeddedTestExecutor {
     if (reusedPersistentContext) {
       try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
     }
+
+    // ── Multi-layer comparison capture (v1.13) ──────────────────────────
+    // URL trajectory recorder and Web Vitals init script must be installed
+    // BEFORE any navigation. The recorder listens to framenavigated; the
+    // init script must reach the document before observers can attach.
+    const urlTrajectory: UrlTrajectoryStep[] = [];
+    const webVitals: WebVitalsSample[] = [];
+    let storageStateSnapshot: StorageStateSnapshot | undefined;
+    let urlRecorder: UrlTrajectoryRecorder | undefined;
+    try {
+      urlRecorder = new UrlTrajectoryRecorder(page);
+      await testContext.addInitScript({ content: VITALS_INIT_SCRIPT });
+    } catch (e) {
+      logFn('warn', `Multi-layer capture install failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     if (callbacks?.onPageCreated) {
       await callbacks.onPageCreated(page);
     }
@@ -424,6 +458,10 @@ export class EmbeddedTestExecutor {
     // Hoisted so the outer catch can finalize the in-flight step as failed
     // when the test body throws. Set during step instrumentation.
     let lastFinishStep: ((status: 'passed' | 'failed', error?: string) => void) | undefined;
+    // Hoisted for the outer catch's multi-layer capture path — these mirror
+    // the inner-scope versions populated during step instrumentation.
+    let outerCurrentStepIdx = -1;
+    let outerStepDescriptors: NonNullable<RunTestPayload['steps']> = [];
     let domSnapshot: DomSnapshotResult | undefined;
     // Hoisted so the catch path can also try to extract — failed tests still
     // expose values for any extract-mode TestVariables whose selectors resolve.
@@ -846,6 +884,7 @@ export class EmbeddedTestExecutor {
       // step is implicitly completed as passed. The catch in this method
       // emits a final 'failed' event for the in-flight step.
       const stepDescriptors = command.steps ?? [];
+      outerStepDescriptors = stepDescriptors;
       const totalStepsForEvents = stepDescriptors.length || stepCount || 0;
       let currentStepIdx = -1;
       let currentStepStart = 0;
@@ -875,8 +914,27 @@ export class EmbeddedTestExecutor {
 
       const __stepReached = async (n: number) => {
         reachedStep = Math.max(reachedStep, n);
+        outerCurrentStepIdx = n;
         if (n === currentStepIdx) return;
         if (currentStepIdx >= 0 && n > currentStepIdx) {
+          // Sample URL trajectory + Web Vitals for the step we just finished,
+          // BEFORE we advance to step n. This way the sample reflects the
+          // page state at the end of step (currentStepIdx) rather than the
+          // start of step n.
+          if (urlRecorder) {
+            try {
+              urlTrajectory.push(urlRecorder.sampleAtStep(
+                page,
+                currentStepIdx,
+                stepDescriptors[currentStepIdx]?.label,
+                Date.now() - startTime,
+              ));
+            } catch { /* best-effort */ }
+          }
+          try {
+            const vitals = await sampleWebVitals(page, currentStepIdx, stepDescriptors[currentStepIdx]?.label);
+            if (vitals) webVitals.push(vitals);
+          } catch { /* best-effort */ }
           finishCurrentStep('passed');
         }
         currentStepIdx = n;
@@ -1322,6 +1380,31 @@ export class EmbeddedTestExecutor {
         }
       }
 
+      // Final URL trajectory + Web Vitals sample for the last step (which
+      // never triggers a finishCurrentStep advance because nothing followed it).
+      if (urlRecorder && currentStepIdx >= 0) {
+        try {
+          urlTrajectory.push(urlRecorder.sampleAtStep(
+            page,
+            currentStepIdx,
+            stepDescriptors[currentStepIdx]?.label,
+            Date.now() - startTime,
+          ));
+        } catch { /* best-effort */ }
+      }
+      try {
+        const vitals = await sampleWebVitals(
+          page,
+          currentStepIdx >= 0 ? currentStepIdx : undefined,
+          currentStepIdx >= 0 ? stepDescriptors[currentStepIdx]?.label : undefined,
+        );
+        if (vitals) webVitals.push(vitals);
+      } catch { /* best-effort */ }
+      // Storage state snapshot — token-shaped values are redacted in-helper.
+      try {
+        storageStateSnapshot = await captureStorageStateSnapshot(testContext, page);
+      } catch { /* best-effort */ }
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -1343,6 +1426,9 @@ export class EmbeddedTestExecutor {
         accessibilityTree,
         extractedVariables,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
+        urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
+        webVitals: webVitals.length > 0 ? webVitals : undefined,
+        storageStateSnapshot,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -1367,6 +1453,8 @@ export class EmbeddedTestExecutor {
           totalSteps: stepCount > 0 ? stepCount : undefined,
           domSnapshot,
           selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
+          urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
+          webVitals: webVitals.length > 0 ? webVitals : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes('timed out');
@@ -1385,6 +1473,33 @@ export class EmbeddedTestExecutor {
           await runExtractions();
         }
 
+        // Try a final URL trajectory + Web Vitals sample (skip on timeout — page is dead).
+        // Use the outer-scope mirrors of currentStepIdx/stepDescriptors because the
+        // inner-scope versions are out of reach from this catch.
+        if (!isTimeout && urlRecorder && outerCurrentStepIdx >= 0) {
+          try {
+            urlTrajectory.push(urlRecorder.sampleAtStep(
+              page,
+              outerCurrentStepIdx,
+              outerStepDescriptors[outerCurrentStepIdx]?.label,
+              Date.now() - startTime,
+            ));
+          } catch { /* best-effort */ }
+        }
+        if (!isTimeout) {
+          try {
+            const vitals = await sampleWebVitals(
+              page,
+              outerCurrentStepIdx >= 0 ? outerCurrentStepIdx : undefined,
+              outerCurrentStepIdx >= 0 ? outerStepDescriptors[outerCurrentStepIdx]?.label : undefined,
+            );
+            if (vitals) webVitals.push(vitals);
+          } catch { /* best-effort */ }
+          try {
+            storageStateSnapshot = await captureStorageStateSnapshot(testContext, page);
+          } catch { /* best-effort */ }
+        }
+
         result = {
           status: (isTimeout ? 'timeout' : 'failed') as 'timeout' | 'failed',
           durationMs,
@@ -1401,6 +1516,9 @@ export class EmbeddedTestExecutor {
           domSnapshot,
           extractedVariables,
           selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
+          urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
+          webVitals: webVitals.length > 0 ? webVitals : undefined,
+          storageStateSnapshot,
         };
       }
     } finally {
