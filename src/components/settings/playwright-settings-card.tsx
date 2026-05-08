@@ -633,28 +633,28 @@ export function PlaywrightSettingsCard({
             </div>
             <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
           </div>
-        </div>
-      </CollapsibleSection>
 
-      {/* Errors & Network */}
-      <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
-        <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          {/* Network Interception */}
+          {/* Network Mocking */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-muted-foreground" />
               <div className="space-y-0.5">
-                <Label className="text-sm">Network Interception</Label>
+                <Label className="text-sm">Network Mocking</Label>
                 {!compact && (
                   <p className="text-xs text-muted-foreground">
-                    Enable API mocking, request blocking, and network capture in tests
+                    Allow tests to mock API responses, block requests, and capture network traffic
                   </p>
                 )}
               </div>
             </div>
             <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
           </div>
+        </div>
+      </CollapsibleSection>
 
+      {/* Errors & Network */}
+      <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Network Error Mode</Label>
             <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
