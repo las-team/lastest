@@ -71,6 +71,9 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       browser: visualDiffs.browser,
       issueUrl: visualDiffs.issueUrl,
       issueProvider: visualDiffs.issueProvider,
+      baselineTextPath: visualDiffs.baselineTextPath,
+      currentTextPath: visualDiffs.currentTextPath,
+      textDiffStatus: visualDiffs.textDiffStatus,
     })
     .from(visualDiffs)
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))

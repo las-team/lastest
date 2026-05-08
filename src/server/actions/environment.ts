@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { validateUrlAsync } from '@/lib/security/url-validation';
 import type { EnvironmentMode } from '@/lib/db/schema';
 
 export interface EnvironmentConfigInput {
@@ -19,6 +20,8 @@ export interface EnvironmentConfigInput {
  * Get environment config for a repository
  */
 export async function getEnvironmentConfig(repositoryId?: string | null) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return queries.getEnvironmentConfig(repositoryId);
 }
 
@@ -51,6 +54,13 @@ export async function testServerConnection(url: string): Promise<{
   responseTime?: number;
 }> {
   await requireTeamAccess();
+
+  // Block SSRF: reject URLs targeting private/loopback/metadata addresses,
+  // including DNS names that resolve to those ranges.
+  const ssrfError = await validateUrlAsync(url);
+  if (ssrfError) {
+    return { success: false, error: ssrfError };
+  }
 
   const startTime = Date.now();
 
@@ -98,6 +108,8 @@ export async function saveBranchBaseUrl(repositoryId: string, branch: string, ba
  * Get current server status
  */
 export async function getServerStatus(repositoryId?: string | null) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const config = await queries.getEnvironmentConfig(repositoryId);
   return {
     mode: config?.mode || 'manual',

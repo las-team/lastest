@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
+import { requireTestOwnership, requireTestFixtureOwnership } from '@/lib/auth/ownership';
 import path from 'path';
 import fs from 'fs/promises';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
@@ -23,6 +24,13 @@ export async function uploadTestFixture(
   mimeType?: string,
 ) {
   await requireRepoAccess(repositoryId);
+  // Confirm the test belongs to that repo — without this, an attacker can
+  // pass their own repoId + a victim's testId and write fixtures into the
+  // victim's test directory.
+  const test = await queries.getTest(testId);
+  if (!test || test.repositoryId !== repositoryId) {
+    return { success: false, error: 'Forbidden: test does not belong to that repository' };
+  }
 
   if (fileBuffer.length > MAX_FIXTURE_SIZE) {
     return { success: false, error: 'File exceeds 10MB limit' };
@@ -61,22 +69,19 @@ export async function uploadTestFixture(
 }
 
 export async function getTestFixturesAction(testId: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   return queries.getTestFixtures(testId);
 }
 
 export async function deleteTestFixtureAction(id: string) {
-  await requireTeamAccess();
+  const { fixture } = await requireTestFixtureOwnership(id);
 
-  const fixture = await queries.getTestFixture(id);
-  if (fixture) {
-    // Try to remove file from disk
-    try {
-      const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
-      await fs.unlink(absPath);
-    } catch {}
-    await queries.deleteTestFixture(id);
-  }
+  // Try to remove file from disk
+  try {
+    const absPath = path.join(STORAGE_DIRS.fixtures, fixture.storagePath.replace(/^\/fixtures\//, ''));
+    await fs.unlink(absPath);
+  } catch {}
+  await queries.deleteTestFixture(id);
 
   revalidatePath('/tests');
   return { success: true };

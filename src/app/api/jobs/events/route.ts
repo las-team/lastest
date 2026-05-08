@@ -29,7 +29,10 @@ export type JobWithChildren = BackgroundJob & {
 
 async function getEnrichedJobs(teamRepoIds: Set<string>): Promise<JobWithChildren[]> {
   const allJobs = await queries.getRecentBackgroundJobs(10000);
-  const teamJobs = allJobs.filter(j => !j.repositoryId || teamRepoIds.has(j.repositoryId));
+  // Only the team's own repo-bound jobs. Repo-less ("global") jobs have no
+  // team binding on the row, so we deliberately drop them here instead of
+  // broadcasting them to every team.
+  const teamJobs = allJobs.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
 
   const activeParentIds = teamJobs
     .filter(j => j.status === 'running' || j.status === 'pending')
@@ -108,8 +111,11 @@ export async function GET(request: Request) {
       // Subscribe to job events
       unsubscribe = subscribeToJobEvents((event: JobEvent) => {
         if (closed) return;
-        // Filter by team — only send events for jobs in team's repos (or no repo)
-        if (event.type === 'job:update' && event.repositoryId && !teamRepoIds.has(event.repositoryId)) {
+        // Filter by team — only send events for jobs in this team's repos.
+        // Repo-less ("global") jobs are intentionally dropped here too, so
+        // they don't leak across teams via the live stream. Both update
+        // and delete events carry repositoryId so we can scope identically.
+        if (!event.repositoryId || !teamRepoIds.has(event.repositoryId)) {
           return;
         }
 

@@ -1,6 +1,6 @@
 {
   "name": "@lastest/mcp-server",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "mcpName": "io.github.las-team/lastest",
   "description": "MCP server for Lastest visual regression testing platform — lets AI agents run tests, review diffs, and manage baselines",
   "type": "module",
@@ -39,11 +39,14 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "visual-regression",
-    "testing",
-    "lastest",
+    "claude",
+    "cursor",
     "ai-agent",
-    "qa-automation"
+    "visual-regression",
+    "playwright",
+    "testing",
+    "qa-automation",
+    "lastest"
   ],
   "author": "Dexilion Team",
   "license": "FSL-1.1-ALv2",

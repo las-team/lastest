@@ -36,6 +36,18 @@ function isPrivateIPv6(hostname: string): boolean {
   return false;
 }
 
+function checkIPv4(ip: string): string | null {
+  for (const cidr of PRIVATE_CIDRS) {
+    if (isInCIDR(ip, cidr)) {
+      return 'URL targets a private network';
+    }
+  }
+  if (ip === '169.254.169.254') {
+    return 'URL targets a cloud metadata endpoint';
+  }
+  return null;
+}
+
 export function validateUrl(url: string): string | null {
   let parsed: URL;
   try {
@@ -66,16 +78,56 @@ export function validateUrl(url: string): string | null {
   // IPv4 private/reserved ranges
   const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4Match) {
-    for (const cidr of PRIVATE_CIDRS) {
-      if (isInCIDR(hostname, cidr)) {
-        return 'URL targets a private network';
-      }
-    }
-    // Cloud metadata endpoint
-    if (hostname === '169.254.169.254') {
-      return 'URL targets a cloud metadata endpoint';
-    }
+    const ipErr = checkIPv4(hostname);
+    if (ipErr) return ipErr;
   }
 
+  return null;
+}
+
+/**
+ * DNS-aware variant — additionally resolves the hostname and re-validates
+ * each resolved address against the private/loopback/metadata CIDRs.
+ *
+ * Without this, an attacker can bypass `validateUrl` by registering a
+ * public DNS record (e.g. `evil.example.com`) that resolves to
+ * `169.254.169.254` or an RFC1918 address.
+ *
+ * Note: there's still a tiny TOCTOU window between this lookup and the
+ * subsequent `fetch`. Mitigate by passing the resolved IP directly to
+ * `fetch` (host pinning) for high-risk callers.
+ */
+export async function validateUrlAsync(url: string): Promise<string | null> {
+  const synchronous = validateUrl(url);
+  if (synchronous) return synchronous;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'Invalid URL';
+  }
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Literal IP — validateUrl already covered it.
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) return null;
+  if (hostname.startsWith('[') || hostname.includes(':')) return null;
+
+  let addresses: { address: string; family: number }[] = [];
+  try {
+    const dns = await import('dns/promises');
+    addresses = await dns.lookup(hostname, { all: true });
+  } catch {
+    return 'DNS lookup failed';
+  }
+
+  for (const { address, family } of addresses) {
+    if (family === 4) {
+      const err = checkIPv4(address);
+      if (err) return err;
+    } else if (family === 6) {
+      if (isPrivateIPv6(address)) return 'URL targets a private network';
+    }
+  }
   return null;
 }

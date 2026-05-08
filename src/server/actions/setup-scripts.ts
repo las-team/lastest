@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
+import { requireSetupScriptOwnership, requireTestOwnership } from '@/lib/auth/ownership';
 import type { SetupScriptType } from '@/lib/db/schema';
 import { validateApiScript } from '@/lib/setup/api-seeder';
 import { chromium } from 'playwright';
@@ -28,6 +29,7 @@ export interface UpdateSetupScriptInput {
  * Get all setup scripts for a repository
  */
 export async function getSetupScripts(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
   return queries.getSetupScripts(repositoryId);
 }
 
@@ -35,7 +37,8 @@ export async function getSetupScripts(repositoryId: string) {
  * Get a single setup script by ID
  */
 export async function getSetupScript(id: string) {
-  return queries.getSetupScript(id);
+  const { script } = await requireSetupScriptOwnership(id);
+  return script;
 }
 
 /**
@@ -67,7 +70,7 @@ export async function createSetupScript(data: CreateSetupScriptInput) {
  * Update a setup script
  */
 export async function updateSetupScript(id: string, data: UpdateSetupScriptInput) {
-  await requireTeamAccess();
+  await requireSetupScriptOwnership(id);
   // Validate API scripts if code is being updated
   if (data.type === 'api' && data.code) {
     const validation = validateApiScript(data.code);
@@ -85,7 +88,7 @@ export async function updateSetupScript(id: string, data: UpdateSetupScriptInput
  * Delete a setup script
  */
 export async function deleteSetupScript(id: string) {
-  await requireTeamAccess();
+  await requireSetupScriptOwnership(id);
   // Check if script is in use
   const testsUsing = await queries.getTestsUsingSetupScript(id);
 
@@ -104,7 +107,7 @@ export async function deleteSetupScript(id: string) {
  * Duplicate a setup script
  */
 export async function duplicateSetupScript(id: string) {
-  await requireTeamAccess();
+  await requireSetupScriptOwnership(id);
   const result = await queries.duplicateSetupScript(id);
   if (!result) {
     throw new Error('Setup script not found');
@@ -121,11 +124,7 @@ export async function testSetupScript(
   id: string,
   targetUrl: string
 ): Promise<{ success: boolean; duration: number; error?: string; variables?: Record<string, unknown> }> {
-  await requireTeamAccess();
-  const script = await queries.getSetupScript(id);
-  if (!script) {
-    return { success: false, duration: 0, error: 'Setup script not found' };
-  }
+  const { script } = await requireSetupScriptOwnership(id);
 
   // Only test Playwright scripts directly
   // API scripts need a config and actual API endpoint
@@ -178,7 +177,13 @@ export async function testSetupScript(
  * Assign a setup script to a test
  */
 export async function assignSetupScriptToTest(testId: string, setupScriptId: string | null) {
-  await requireTeamAccess();
+  const { test } = await requireTestOwnership(testId);
+  if (setupScriptId) {
+    const { script } = await requireSetupScriptOwnership(setupScriptId);
+    if (script.repositoryId !== test.repositoryId) {
+      throw new Error('Forbidden: setup script and test belong to different repositories');
+    }
+  }
   await queries.updateTestSetup(testId, null, setupScriptId);
   revalidatePath('/tests');
   return { success: true };
@@ -188,7 +193,13 @@ export async function assignSetupScriptToTest(testId: string, setupScriptId: str
  * Assign a setup test to a test
  */
 export async function assignSetupTestToTest(testId: string, setupTestId: string | null) {
-  await requireTeamAccess();
+  const { test } = await requireTestOwnership(testId);
+  if (setupTestId) {
+    const { test: setupTest } = await requireTestOwnership(setupTestId);
+    if (setupTest.repositoryId !== test.repositoryId) {
+      throw new Error('Forbidden: setup test and target test belong to different repositories');
+    }
+  }
   await queries.updateTestSetup(testId, setupTestId, null);
   revalidatePath('/tests');
   return { success: true };
@@ -198,7 +209,7 @@ export async function assignSetupTestToTest(testId: string, setupTestId: string 
  * Clear setup from a test
  */
 export async function clearTestSetup(testId: string) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   await queries.updateTestSetup(testId, null, null);
   revalidatePath('/tests');
   return { success: true };
@@ -229,6 +240,7 @@ export async function updateRepositoryDefaultSetup(
  * Get tests that can be used as setup (excludes self-references)
  */
 export async function getAvailableSetupTests(repositoryId: string, excludeTestId?: string) {
+  await requireRepoAccess(repositoryId);
   const tests = await queries.getTestsByRepo(repositoryId);
   return tests.filter(t => t.id !== excludeTestId);
 }
@@ -237,6 +249,7 @@ export async function getAvailableSetupTests(repositoryId: string, excludeTestId
  * Get usage info for a setup script
  */
 export async function getSetupScriptUsage(scriptId: string) {
+  await requireSetupScriptOwnership(scriptId);
   const testsUsing = await queries.getTestsUsingSetupScript(scriptId);
 
   return {
@@ -249,6 +262,7 @@ export async function getSetupScriptUsage(scriptId: string) {
  * Get usage info for a test used as setup
  */
 export async function getSetupTestUsage(testId: string) {
+  await requireTestOwnership(testId);
   const testsUsing = await queries.getTestsUsingSetupTest(testId);
 
   return {

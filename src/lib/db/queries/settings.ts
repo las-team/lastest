@@ -117,6 +117,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     grantClipboardAccess: false,
     acceptDownloads: false,
     enableNetworkInterception: false,
+    enableDomDiff: false,
     browsers: ['chromium'] as string[],
     autoRetryCount: 0,
     enableA11y: false,
@@ -299,6 +300,7 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
     textRegionPadding: DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
     regionDetectionMode: DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    textDiffEnabled: DEFAULT_DIFF_THRESHOLDS.textDiffEnabled,
     createdAt: null,
     updatedAt: null,
   };

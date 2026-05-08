@@ -2132,10 +2132,20 @@ export async function cancelPlayAgent(sessionId: string): Promise<{ success: boo
 }
 
 export async function getPlayAgentSession(sessionId: string) {
-  return queries.getAgentSession(sessionId);
+  const { team } = await requireTeamAccess();
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return null;
+  if (session.teamId && session.teamId !== team.id) return null;
+  // Older rows may have null teamId — fall back to repo-team check.
+  if (!session.teamId) {
+    const repo = await queries.getRepository(session.repositoryId);
+    if (!repo || repo.teamId !== team.id) return null;
+  }
+  return session;
 }
 
 export async function getActivePlayAgentSession(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
   return queries.getActiveAgentSession(repositoryId);
 }
 

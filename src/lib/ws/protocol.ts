@@ -35,6 +35,7 @@ export type MessageType =
   | 'response:debug_state'
   | 'command:capture_screenshot'
   | 'response:screenshot'
+  | 'response:screenshot_text'
   | 'response:screenshot_ack'
   | 'response:network_bodies'
   | 'response:error'
@@ -105,6 +106,10 @@ export interface RunTestCommandPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  /** When true, the EB harvests `window.__urlDiffResult` after the body runs
+   *  and returns `a11yViolations`/`a11yPassesCount`/`accessibilityTree` on
+   *  the test result. Used by the URL Diff feature. */
+  enableA11y?: boolean;
   // Extract-mode TestVariables — runner reads these page fields after the test body runs.
   extractVariables?: Array<{
     name: string;
@@ -149,6 +154,9 @@ export interface RunTestCommandPayload {
    *  Each runner additionally short-circuits known-slow selectors via
    *  `selectorTimeoutFor` from `@lastest/shared`. */
   selectorTimeoutMs?: number;
+  /** Capture page innerText alongside each screenshot for downstream
+   *  text-diff. Resolved from the repo's diff sensitivity settings. */
+  textCaptureEnabled?: boolean;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -309,6 +317,13 @@ export interface TestResultPayload {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
+  /** axe-core violations harvested from the page (URL-Diff feature). Only
+   *  populated when the run command sets `enableA11y: true`. */
+  a11yViolations?: import('@/lib/db/schema').A11yViolation[];
+  a11yPassesCount?: number;
+  /** Playwright `page.accessibility.snapshot()` output (URL-Diff feature).
+   *  May be `{ _truncated: true, byteLength }` if the EB capped the payload. */
+  accessibilityTree?: unknown;
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
   /** Per-attempt selector outcomes from `locateWithFallback`. The host
    *  ingests these into `selector_stats` so the next run can promote the
@@ -537,6 +552,20 @@ export interface ScreenshotUploadResponse extends BaseMessage {
   payload: ScreenshotUploadPayload;
 }
 
+export interface ScreenshotTextUploadPayload {
+  correlationId: string;
+  testRunId: string;
+  repositoryId?: string;
+  filename: string; // matches the screenshot filename with `.txt` extension
+  data: string; // Base64 UTF-8 text
+  capturedAt: number;
+}
+
+export interface ScreenshotTextUploadResponse extends BaseMessage {
+  type: 'response:screenshot_text';
+  payload: ScreenshotTextUploadPayload;
+}
+
 export interface ScreenshotAckPayload {
   correlationId: string;
   storagePath: string;
@@ -657,6 +686,7 @@ export type AgentResponse =
   | RecordingEventResponse
   | RecordingStoppedResponse
   | ScreenshotUploadResponse
+  | ScreenshotTextUploadResponse
   | NetworkBodiesResponse
   | DebugStateResponse
   | ErrorResponse

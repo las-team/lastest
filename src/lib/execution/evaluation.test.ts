@@ -58,6 +58,11 @@ function makeDiff(overrides: Partial<VisualDiff> = {}): VisualDiff {
     aiRecommendation: null,
     aiAnalysisStatus: null,
     browser: 'chromium',
+    issueUrl: null,
+    issueProvider: null,
+    baselineTextPath: null,
+    currentTextPath: null,
+    textDiffStatus: null,
     ...overrides,
   };
 }

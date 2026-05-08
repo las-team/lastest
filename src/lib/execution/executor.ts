@@ -454,6 +454,18 @@ async function executeViaRunner(
   // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
   const gsheetSources = options.repositoryId ? await getGoogleSheetsDataSources(options.repositoryId) : [];
   const csvSources = options.repositoryId ? await getCsvDataSources(options.repositoryId) : [];
+
+  // Resolve the diff-sensitivity text-diff toggle once per run. The EB pod
+  // can't reach the host's settings DB, so each `command:run_test` payload
+  // carries the boolean inline.
+  let textCaptureEnabled = false;
+  try {
+    const { getDiffSensitivitySettings } = await import('@/lib/db/queries');
+    const diffSettings = await getDiffSensitivitySettings(options.repositoryId ?? null);
+    textCaptureEnabled = diffSettings?.textDiffEnabled ?? false;
+  } catch (err) {
+    console.warn('[executor] Failed to load diff-sensitivity settings for text capture:', err);
+  }
   // Build the AI runtime once per run. Returns null when no provider is
   // configured — resolveSingleVarAsync then falls back to the cached value
   // or surfaces a clear preflight error.
@@ -674,6 +686,7 @@ async function executeViaRunner(
           pwOverrides?.selectorTimeoutMs
           ?? options.playwrightSettings?.selectorTimeoutMs
           ?? 3000,
+        textCaptureEnabled,
       });
 
       // Queue command to DB

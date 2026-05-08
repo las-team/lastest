@@ -122,6 +122,7 @@ export interface DiffMetadata {
   nonTextRegionDiffPixels?: number;
   ocrDurationMs?: number;
   domDiff?: DomDiffResult;
+  textDiffSummary?: { added: number; removed: number; sameAsBaseline: boolean };
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -616,6 +617,13 @@ export const visualDiffs = pgTable('visual_diffs', {
   // External issue tracker submission (e.g. GitHub issue created from this diff)
   issueUrl: text('issue_url'),
   issueProvider: text('issue_provider'), // 'github' | 'gitlab' | …
+  // Text-diff fields (populated when textDiffEnabled in diffSensitivitySettings).
+  // Paths to plain-text page contents captured next to the screenshot via
+  // page.evaluate(() => document.body.innerText). Diffed lazily at report-view
+  // time; the count summary lives in metadata.textDiffSummary.
+  baselineTextPath: text('baseline_text_path'),
+  currentTextPath: text('current_text_path'),
+  textDiffStatus: text('text_diff_status'), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
 });
 
 // Baselines for carry-forward logic
@@ -715,6 +723,8 @@ export type VisualDiff = typeof visualDiffs.$inferSelect;
 export type AIDiffRecommendation = 'approve' | 'review' | 'flag';
 export type AIDiffAnalysisStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type AIDiffingProvider = 'openrouter' | 'anthropic' | 'same-as-test-gen' | 'claude-agent-sdk' | 'ollama';
+
+export type TextDiffStatus = 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped';
 
 export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;
@@ -884,6 +894,7 @@ export const playwrightSettings = pgTable('playwright_settings', {
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
+  enableDomDiff: boolean('enable_dom_diff').default(false), // capture DOM snapshots and overlay element changes on screenshots
   browsers: jsonb('browsers').$type<string[]>().default(['chromium']), // browsers to use for build execution
   autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
   enableA11y: boolean('enable_a11y').default(false), // enable WCAG accessibility checks with axe-core
@@ -996,6 +1007,7 @@ export const diffSensitivitySettings = pgTable('diff_sensitivity_settings', {
   textRegionPadding: integer('text_region_padding').default(4), // pixels to expand text bounding boxes
   textDetectionGranularity: text('text_detection_granularity').default('word'), // 'word' | 'line' | 'block'
   regionDetectionMode: text('region_detection_mode').default('flood-fill'), // 'grid' | 'flood-fill'
+  textDiffEnabled: boolean('text_diff_enabled').default(false), // capture page innerText alongside each screenshot and diff it
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1015,6 +1027,7 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textRegionPadding: 4,
   textDetectionGranularity: 'word' as TextDetectionGranularity,
   regionDetectionMode: 'flood-fill' as RegionDetectionMode,
+  textDiffEnabled: false,
 };
 
 // Diff classification type
@@ -1106,7 +1119,7 @@ export type AIPromptLog = typeof aiPromptLogs.$inferSelect;
 export type NewAIPromptLog = typeof aiPromptLogs.$inferInsert;
 
 // Background Jobs for queue tracking
-export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup' | 'spec_import';
+export type BackgroundJobType = 'ai_scan' | 'build_tests' | 'test_run' | 'build_run' | 'ai_fix' | 'ai_validate' | 'ai_diff' | 'storage_cleanup' | 'spec_import' | 'url_diff';
 export type BackgroundJobStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export const backgroundJobs = pgTable('background_jobs', {

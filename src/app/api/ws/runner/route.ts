@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus } from '@/server/actions/runners';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, ScreenshotTextUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse } from '@/lib/ws/protocol';
 import { recordStepEvent } from '@/lib/ws/step-state';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -77,6 +77,30 @@ function validateScreenshotSize(base64Data: string): void {
   const estimatedBytes = (base64Data.length * 3) / 4;
   if (estimatedBytes > MAX_SCREENSHOT_BYTES) {
     throw new Error(`Screenshot exceeds ${MAX_SCREENSHOT_BYTES / (1024 * 1024)}MB limit`);
+  }
+}
+
+const MAX_SCREENSHOT_TEXT_BYTES = 512 * 1024; // 512KB ceiling — capture-side caps at 200KB; this leaves headroom
+
+/**
+ * Sanitize a `.txt` companion filename. Same rules as the screenshot filename
+ * but the only allowed extension is `.txt`.
+ */
+function sanitizeTextFilename(filename: string): string {
+  let safe = filename.replace(/\0/g, '');
+  safe = safe.split(/[/\\]/).pop() || '';
+  safe = safe.replace(/\.\./g, '');
+  safe = safe.replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!/\.txt$/i.test(safe) || safe.length > 255 || !safe) {
+    throw new Error('Invalid text filename');
+  }
+  return safe;
+}
+
+function validateScreenshotTextSize(base64Data: string): void {
+  const estimatedBytes = (base64Data.length * 3) / 4;
+  if (estimatedBytes > MAX_SCREENSHOT_TEXT_BYTES) {
+    throw new Error(`Screenshot text exceeds ${MAX_SCREENSHOT_TEXT_BYTES / 1024}KB limit`);
   }
 }
 
@@ -298,6 +322,51 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           console.error(`[Screenshot] Validation or save failed:`, error);
           return NextResponse.json({ error: 'Screenshot upload failed' }, { status: 400 });
+        }
+
+        return NextResponse.json({ ok: true });
+      }
+
+      case 'response:screenshot_text': {
+        // Companion text file uploaded alongside a screenshot when text-diff
+        // capture is enabled. Stored under the same screenshots/<repoId>/
+        // directory so the relative path mirrors the screenshot's by simple
+        // extension swap.
+        const textMsg = message as ScreenshotTextUploadResponse;
+        const payload = textMsg.payload;
+
+        try {
+          const safeFilename = sanitizeTextFilename(payload.filename);
+          const safeRepoId = validateRepositoryId(payload.repositoryId);
+          validateScreenshotTextSize(payload.data);
+
+          const baseDir = STORAGE_DIRS.screenshots;
+          const dir = safeRepoId ? path.join(baseDir, safeRepoId) : baseDir;
+          await fs.mkdir(dir, { recursive: true });
+          const filePath = path.join(dir, safeFilename);
+          await fs.writeFile(filePath, Buffer.from(payload.data, 'base64'));
+          const relativePath = safeRepoId
+            ? `/screenshots/${safeRepoId}/${safeFilename}`
+            : `/screenshots/${safeFilename}`;
+
+          const commandId = payload.correlationId;
+          if (commandId) {
+            await insertCommandResult({
+              commandId,
+              runnerId: runner.id,
+              type: 'response:screenshot_text',
+              payload: {
+                filename: safeFilename,
+                path: relativePath,
+                repositoryId: safeRepoId,
+                testRunId: payload.testRunId,
+                capturedAt: payload.capturedAt,
+              },
+            });
+          }
+        } catch (error) {
+          console.error('[ScreenshotText] Validation or save failed:', error);
+          return NextResponse.json({ error: 'Screenshot text upload failed' }, { status: 400 });
         }
 
         return NextResponse.json({ ok: true });

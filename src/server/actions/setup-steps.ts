@@ -2,8 +2,18 @@
 
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
+import { requireTestOwnership } from '@/lib/auth/ownership';
 import type { TestSetupOverrides } from '@/lib/db/schema';
+
+// Default-setup-step rows hold a `repositoryId` we can use to check ownership.
+async function assertDefaultSetupStepAccess(stepId: string) {
+  const step = await queries.getDefaultSetupStep(stepId);
+  if (!step) throw new Error('Setup step not found');
+  if (!step.repositoryId) throw new Error('Forbidden: step has no repository binding');
+  await requireRepoAccess(step.repositoryId);
+  return step;
+}
 
 export interface SetupStep {
   id: string;
@@ -28,6 +38,7 @@ export interface SetupStepInput {
  * Get all default setup steps for a repository
  */
 export async function getDefaultSetupSteps(repositoryId: string): Promise<SetupStep[]> {
+  await requireRepoAccess(repositoryId);
   const steps = await queries.getDefaultSetupSteps(repositoryId);
   return steps.map((step) => ({
     id: step.id,
@@ -87,7 +98,7 @@ export async function addDefaultSetupStep(
  * Remove a step from the default setup
  */
 export async function removeDefaultSetupStep(stepId: string) {
-  await requireTeamAccess();
+  await assertDefaultSetupStepAccess(stepId);
   await queries.deleteDefaultSetupStep(stepId);
   revalidatePath('/tests');
   return { success: true };
@@ -115,24 +126,21 @@ export async function reorderDefaultSetupSteps(
 // ============================================
 
 export async function getTestSetupOverrides(testId: string) {
-  const test = await queries.getTest(testId);
-  if (!test) return { overrides: null, resolvedSteps: [] };
+  const { test } = await requireTestOwnership(testId);
 
   const resolvedSteps = await queries.getResolvedSetupStepsForTest(test);
   return { overrides: test.setupOverrides, resolvedSteps };
 }
 
 export async function saveTestSetupOverrides(testId: string, overrides: TestSetupOverrides | null) {
-  await requireTeamAccess();
+  await requireTestOwnership(testId);
   await queries.updateTestSetupOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
 
 export async function skipDefaultStepForTest(testId: string, defaultStepId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   if (!overrides.skippedDefaultStepIds.includes(defaultStepId)) {
@@ -144,9 +152,7 @@ export async function skipDefaultStepForTest(testId: string, defaultStepId: stri
 }
 
 export async function unskipDefaultStepForTest(testId: string, defaultStepId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   overrides.skippedDefaultStepIds = overrides.skippedDefaultStepIds.filter((id) => id !== defaultStepId);
@@ -160,9 +166,7 @@ export async function unskipDefaultStepForTest(testId: string, defaultStepId: st
 }
 
 export async function addExtraSetupStep(testId: string, stepType: 'test' | 'script' | 'storage_state', itemId: string) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   overrides.extraSteps.push({
@@ -177,9 +181,7 @@ export async function addExtraSetupStep(testId: string, stepType: 'test' | 'scri
 }
 
 export async function removeExtraSetupStep(testId: string, index: number) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   if (index >= 0 && index < overrides.extraSteps.length) {
@@ -195,9 +197,7 @@ export async function removeExtraSetupStep(testId: string, index: number) {
 }
 
 export async function reorderExtraSetupSteps(testId: string, newOrder: number[]) {
-  await requireTeamAccess();
-  const test = await queries.getTest(testId);
-  if (!test) return { success: false, error: 'Test not found' };
+  const { test } = await requireTestOwnership(testId);
 
   const overrides: TestSetupOverrides = test.setupOverrides ?? { skippedDefaultStepIds: [], extraSteps: [] };
   const reordered = newOrder.map((i) => overrides.extraSteps[i]).filter(Boolean);

@@ -340,6 +340,7 @@ export class TestRunner {
 
     const startTime = Date.now();
     const screenshots: Array<{ filename: string; data: string; width: number; height: number; capturedAt?: number }> = [];
+    const stepTracker: { lastReachedStep: number; totalSteps: number } = { lastReachedStep: -1, totalSteps: 0 };
     let result: TestRunResult | null = null;
 
     let context: BrowserContext | null = null;
@@ -540,7 +541,7 @@ export class TestRunner {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults, onStepEvent, selectorOutcomes)
+          this.executeTestCode(page, command.code, command.targetUrl, captureScreenshot, logFn, softErrors, command.cursorPlaybackSpeed, command.stabilization, command, assertionResults, onStepEvent, selectorOutcomes, stepTracker)
             .then(r => { clearTimeout(timeoutTimer); return r; })
             .catch(e => { clearTimeout(timeoutTimer); throw e; }),
           new Promise<never>((_, reject) => {
@@ -608,8 +609,8 @@ export class TestRunner {
         screenshots,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
-        lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
-        totalSteps: stepCount > 0 ? stepCount : undefined,
+        lastReachedStep: stepTracker.lastReachedStep >= 0 ? stepTracker.lastReachedStep : undefined,
+        totalSteps: stepTracker.totalSteps > 0 ? stepTracker.totalSteps : undefined,
         domSnapshot,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };
@@ -631,8 +632,8 @@ export class TestRunner {
           logs,
           screenshots,
           assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
-          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
-          totalSteps: stepCount > 0 ? stepCount : undefined,
+          lastReachedStep: stepTracker.lastReachedStep >= 0 ? stepTracker.lastReachedStep : undefined,
+          totalSteps: stepTracker.totalSteps > 0 ? stepTracker.totalSteps : undefined,
           selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
       } else {
@@ -678,8 +679,8 @@ export class TestRunner {
           screenshots,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           assertionResults: assertionResults.length > 0 ? assertionResults : undefined,
-          lastReachedStep: lastReachedStep >= 0 ? lastReachedStep : undefined,
-          totalSteps: stepCount > 0 ? stepCount : undefined,
+          lastReachedStep: stepTracker.lastReachedStep >= 0 ? stepTracker.lastReachedStep : undefined,
+          totalSteps: stepTracker.totalSteps > 0 ? stepTracker.totalSteps : undefined,
           domSnapshot: failureDomSnapshot,
           selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         };
@@ -884,6 +885,7 @@ export class TestRunner {
     assertionResults?: NonNullable<TestRunResult['assertionResults']>,
     onStepEvent?: (event: import('./protocol').StepEventPayload) => void,
     selectorOutcomes?: SelectorOutcome[],
+    stepTracker?: { lastReachedStep: number; totalSteps: number },
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
     // Extract function body from: export async function test/setup(page, ...) { ... }
@@ -961,6 +963,7 @@ export class TestRunner {
     const { instrumentedBody, stepCount } = instrumentStepTracking(body);
     body = instrumentedBody;
     let lastReachedStep = -1;
+    if (stepTracker) stepTracker.totalSteps = stepCount;
 
     // Live step event tracking — emits step:started / step:passed / step:failed
     // back to the host when payload.steps is provided. The instrumented body
@@ -995,6 +998,7 @@ export class TestRunner {
     };
     const __stepReached = async (n: number) => {
       lastReachedStep = Math.max(lastReachedStep, n);
+      if (stepTracker) stepTracker.lastReachedStep = lastReachedStep;
       if (n === currentStepIdx) return;
       // Implicit completion of previous step (if any) when we advance.
       if (currentStepIdx >= 0 && n > currentStepIdx) {

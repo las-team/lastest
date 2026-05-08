@@ -30,6 +30,9 @@ export interface JobUpdateEvent {
 export interface JobDeleteEvent {
   type: 'job:delete';
   jobId: string;
+  // Used by the SSE route to scope deletes to the owning team. May be null
+  // for repo-less jobs, which the SSE route already filters out.
+  repositoryId: string | null;
 }
 
 export type JobEvent = JobUpdateEvent | JobDeleteEvent;

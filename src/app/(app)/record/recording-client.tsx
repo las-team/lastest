@@ -64,8 +64,7 @@ import {
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
-import { DEFAULT_RECORDING_ENGINES } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, Test } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
@@ -92,8 +91,6 @@ interface RecordingClientProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   defaultBaseUrl?: string;
-  enabledEngines?: RecordingEngine[];
-  defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
@@ -386,8 +383,6 @@ export function RecordingClient({
   settings,
   repositoryId,
   defaultBaseUrl,
-  enabledEngines = DEFAULT_RECORDING_ENGINES,
-  defaultEngine = 'lastest',
   rerecordTest,
   repositorySetupSteps = [],
   availableTests = [],
@@ -399,7 +394,6 @@ export function RecordingClient({
   useEffect(() => {
     onStepChange?.(step);
   }, [step, onStepChange]);
-  const [selectedEngine, setSelectedEngine] = useState<RecordingEngine>(defaultEngine);
   const [runSetupBeforeRecording, setRunSetupBeforeRecording] = useState(true);
   const [extraSetupSteps, setExtraSetupSteps] = useState<ExtraStep[]>([]);
   const [skippedDefaultStepIds, setSkippedDefaultStepIds] = useState<Set<string>>(new Set());
@@ -439,6 +433,17 @@ export function RecordingClient({
   const [requiredCapabilities, setRequiredCapabilities] = useState<{ fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastSequenceRef = useRef(0);
+  // Active sessionId + runnerId mirrored as refs so the poll closure (created
+  // once per `step === 'recording'` mount) sees the current values without
+  // re-binding. Sent as hints to `getRecordingStatus` so any pod can confirm
+  // the recording is still alive even when the in-process session map is
+  // empty on this pod (Olares two-pod split).
+  const activeSessionIdRef = useRef<string | null>(null);
+  const activeRunnerIdRef = useRef<string | null>(null);
+  // A single false-isRecording reading is not enough to tear down the UI:
+  // polls sometimes hit a peer pod with a cold session map. Require N
+  // consecutive false readings before reverting to setup.
+  const stoppedPollsRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
@@ -500,10 +505,29 @@ export function RecordingClient({
       if (pollInFlight) return;
       pollInFlight = true;
       try {
-        const status = await getRecordingStatus(repositoryId, lastSequenceRef.current);
+        const status = await getRecordingStatus(
+          repositoryId,
+          lastSequenceRef.current,
+          (activeSessionIdRef.current || activeRunnerIdRef.current) ? {
+            sessionId: activeSessionIdRef.current ?? undefined,
+            runnerId: activeRunnerIdRef.current ?? undefined,
+          } : undefined,
+        );
 
         // If recording stopped (browser was closed), check for completed session
         if (!status.isRecording) {
+          // Cross-pod session-map miss: a single false reading is not enough.
+          // Olares load-balances polls across two app pods that share DB but
+          // not in-process state — a poll that lands on the peer pod sees no
+          // session. Require N consecutive false reads before tearing down.
+          // Completed-session and explicit-error signals bypass this guard
+          // (they're authoritative — written via DB-merged state).
+          if (!status.lastCompletedSession && !status.errorMessage) {
+            stoppedPollsRef.current += 1;
+            if (stoppedPollsRef.current < 6) {
+              return;
+            }
+          }
           if (status.lastCompletedSession) {
             setGeneratedCode(status.lastCompletedSession.generatedCode);
             setRequiredCapabilities((status.lastCompletedSession as Record<string, unknown>).requiredCapabilities as typeof requiredCapabilities ?? null);
@@ -525,6 +549,8 @@ export function RecordingClient({
           clearInterval(pollInterval);
           return;
         }
+        // Healthy poll — reset the stopped counter
+        stoppedPollsRef.current = 0;
 
         // Sync pause state
         if ((status as Record<string, unknown>).isPaused !== undefined) {
@@ -657,6 +683,9 @@ export function RecordingClient({
 
         if (result.sessionId) {
           setSessionId(result.sessionId);
+          activeSessionIdRef.current = result.sessionId;
+          activeRunnerIdRef.current = result.resolvedRunnerId ?? null;
+          stoppedPollsRef.current = 0;
           setStep('recording');
           setEvents([]);
           lastSequenceRef.current = 0;
@@ -672,7 +701,13 @@ export function RecordingClient({
           const resolvedTarget = result.resolvedRunnerId;
           if (resolvedTarget) {
             (async () => {
-              for (let attempt = 0; attempt < 10; attempt++) {
+              // Poll the cluster for the EB's streamUrl. Olares cold starts
+              // (image pull + Chromium boot + auto-register) can run 20-40s
+              // — a too-short window leaves the embedded layout stuck in the
+              // local-Playwright fallback (no canvas) for the rest of the
+              // session. 30 attempts × 500 ms = 15 s — long enough to cover
+              // typical cold starts without burning the test's 60 s window.
+              for (let attempt = 0; attempt < 30; attempt++) {
                 try {
                   const res = await fetch(`/api/embedded/stream`);
                   if (res.ok) {
@@ -797,6 +832,9 @@ export function RecordingClient({
       try { await document.exitFullscreen(); } catch {}
     }
     setEmbeddedStreamUrl(null);
+    activeSessionIdRef.current = null;
+    activeRunnerIdRef.current = null;
+    stoppedPollsRef.current = 0;
     try {
       const session = await stopRecording(repositoryId);
       if (session) {
@@ -1085,31 +1123,6 @@ export function RecordingClient({
                         className="flex-1"
                       />
                     </div>
-                  </div>
-                )}
-
-                {/* Recording Engine */}
-                {enabledEngines.length > 1 && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Recording Engine</label>
-                    <Select value={selectedEngine} onValueChange={(v) => setSelectedEngine(v as RecordingEngine)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {enabledEngines.includes('lastest') && (
-                          <SelectItem value="lastest">Lastest Recorder</SelectItem>
-                        )}
-                        {enabledEngines.includes('playwright-inspector') && (
-                          <SelectItem value="playwright-inspector">Playwright Inspector</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedEngine === 'lastest'
-                        ? 'Multi-selector recording with real-time preview'
-                        : 'Official Playwright codegen tool'}
-                    </p>
                   </div>
                 )}
 

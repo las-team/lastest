@@ -240,9 +240,15 @@ importers:
 
   packages/embedded-browser:
     dependencies:
+      '@axe-core/playwright':
+        specifier: ^4.11.0
+        version: 4.11.0(playwright-core@1.59.1)
       '@lastest/shared':
         specifier: workspace:*
         version: link:../shared
+      axe-core:
+        specifier: ^4.10.0
+        version: 4.11.1
       playwright:
         specifier: 1.57.0
         version: 1.57.0

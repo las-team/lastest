@@ -16,7 +16,8 @@ function maskSecret(value: string | null | undefined): string | null {
 }
 
 export async function getAISettings(repositoryId?: string | null) {
-  await requireTeamAccess();
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   const settings = await queries.getAISettings(repositoryId);
   return {
     ...settings,
@@ -32,7 +33,8 @@ export async function getAISettings(repositoryId?: string | null) {
 }
 
 export async function getAISettingsRaw(repositoryId?: string | null) {
-  await requireTeamAccess();
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
   return queries.getAISettings(repositoryId);
 }
 

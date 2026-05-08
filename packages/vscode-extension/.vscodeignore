@@ -1,8 +1,15 @@
 .vscode/**
 .vscode-test/**
 src/**
+node_modules/**
 .gitignore
+.eslintrc*
+.eslint.config*
 **/tsconfig.json
 **/*.map
 **/*.ts
-node_modules/**
+**/*.tsbuildinfo
+.editorconfig
+pnpm-lock.yaml
+package-lock.json
+yarn.lock

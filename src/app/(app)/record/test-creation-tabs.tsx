@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Code2, Compass, FileText, Telescope, Video } from 'lucide-react';
-import type { FunctionalArea, PlaywrightSettings, RecordingEngine, Test } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, Test } from '@/lib/db/schema';
 import { RecordingClient } from './recording-client';
 import { ExploreUrlPanel } from './panels/explore-url-panel';
 import { AutoExplorePanel } from './panels/auto-explore-panel';
@@ -29,8 +29,6 @@ interface TestCreationTabsProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   defaultBaseUrl?: string;
-  enabledEngines?: RecordingEngine[];
-  defaultEngine?: RecordingEngine;
   rerecordTest?: Test | null;
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
@@ -108,8 +106,6 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
           settings={props.settings}
           repositoryId={props.repositoryId}
           defaultBaseUrl={props.defaultBaseUrl}
-          enabledEngines={props.enabledEngines}
-          defaultEngine={props.defaultEngine}
           rerecordTest={props.rerecordTest}
           repositorySetupSteps={props.repositorySetupSteps}
           availableTests={props.availableTests}

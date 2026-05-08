@@ -11,7 +11,9 @@ import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegi
 import { toast } from 'sonner';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus } from '@/lib/db/schema';
+import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus, TextDiffStatus } from '@/lib/db/schema';
+import type { DiffLine } from '@/lib/diff/text-diff';
+import { TextDiffPanel } from '@/components/diffs/text-diff-panel';
 
 type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
 
@@ -131,12 +133,18 @@ interface DiffViewerClientProps {
   prevDiffId?: string;
   nextDiffId?: string;
   banAiMode?: boolean;
+  enableDomDiff?: boolean;
   initialFocusRegions?: FocusRegionRect[];
   initialIgnoreRegions?: IgnoreRegionRect[];
   allDiffs?: VisualDiffWithTestStatus[];
+  textDiff?: {
+    status: TextDiffStatus;
+    summary: { added: number; removed: number; sameAsBaseline: boolean };
+    lines: DiffLine[];
+  } | null;
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [] }: DiffViewerClientProps) {
+export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, enableDomDiff = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [], textDiff = null }: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -329,7 +337,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const aiAnalysis = diff.aiAnalysis as AIDiffAnalysis | null;
   const aiStatus = diff.aiAnalysisStatus;
   const [showRegions, setShowRegions] = useState(false);
-  const [showDomOverlay, setShowDomOverlay] = useState(false);
+  const [showDomOverlay, setShowDomOverlay] = useState(enableDomDiff);
   const [drawFocusMode, setDrawFocusMode] = useState(false);
   const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
   const [focusPending, setFocusPending] = useState(false);
@@ -401,7 +409,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     }
   }, [diff.id, ignorePending, router]);
   const changedRegions = metadata?.changedRegions;
-  const domDiff = metadata?.domDiff;
+  const domDiff = enableDomDiff ? metadata?.domDiff : undefined;
   const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
 
   // Build DOM overlay regions from DOM diff bounding boxes
@@ -545,8 +553,17 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           <A11yViolationsPanel violations={diff.a11yViolations ?? []} />
 
           {/* DOM Changes Panel */}
-          {metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
+          {enableDomDiff && metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
             <DomChangesPanel domDiff={metadata.domDiff} />
+          )}
+
+          {/* Page Text Diff Panel — hidden when text capture wasn't enabled for this build */}
+          {textDiff && textDiff.status !== 'skipped' && (
+            <TextDiffPanel
+              status={textDiff.status}
+              summary={textDiff.summary}
+              lines={textDiff.lines}
+            />
           )}
 
           {/* Diff Comparison */}
@@ -851,7 +868,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                   </span>
                 </>
               )}
-              {hasDomChanges && (
+              {enableDomDiff && hasDomChanges && (
                 <button
                   onClick={() => setShowDomOverlay(!showDomOverlay)}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${

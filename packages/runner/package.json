@@ -1,6 +1,6 @@
 {
   "name": "@lastest/runner",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Remote test execution runner for Lastest visual regression testing platform",
   "type": "module",
   "bin": {
@@ -39,9 +39,12 @@
     "playwright",
     "testing",
     "runner",
-    "lastest",
     "screenshot",
-    "ci-cd"
+    "e2e",
+    "ci",
+    "qa",
+    "baseline",
+    "lastest"
   ],
   "author": "Dexilion Team",
   "license": "FSL-1.1-ALv2",

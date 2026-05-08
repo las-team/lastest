@@ -21,6 +21,8 @@
  *   GET  /api/v1/jobs/active - List active background jobs
  *   GET  /api/v1/jobs/:id - Get background job status
  *   POST /api/v1/runs - Create and run tests
+ *   POST /api/v1/snapshot - Capture a single URL (synchronous; URL Diff feature)
+ *   POST /api/v1/diff - Diff two URLs (async; returns jobId for polling)
  *   POST /api/v1/diffs/approve - Batch approve visual diffs
  *   POST /api/v1/diffs/reject - Batch reject visual diffs
  *   POST /api/v1/diffs/:id/approve - Approve single visual diff
@@ -42,9 +44,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { createAndRunBuildCore } from '@/server/actions/builds';
-import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/server/actions/diffs';
+import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/lib/diff/core';
 import { awardScore } from '@/server/actions/gamification';
 import { getCurrentSession } from '@/lib/auth';
+import { startUrlDiff } from '@/server/actions/url-diff';
+import { captureUrl, loadCaptureFromDisk } from '@/lib/url-diff/capture';
+import { buildUrlDiff } from '@/lib/url-diff/engine';
+import { validateTargetUrl, SsrfBlockedError, extractSourceIp } from '@/lib/url-diff/ssrf';
+import { checkRateLimit } from '@/lib/url-diff/rate-limit';
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
@@ -372,14 +379,49 @@ export async function POST(
       const { testIds, functionalAreaId, repositoryId } = body;
 
       let testIdsToRun: string[] = [];
+      let scopedRepoId: string | null = null;
+
+      // Verify ownership of every supplied id BEFORE doing anything.
+      // Without this, a bearer-token holder for team A could trigger a
+      // build under team B's repo by passing team B's testIds/repositoryId.
+      if (repositoryId) {
+        if (!(await verifyRepoOwnership(repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        scopedRepoId = repositoryId;
+      }
 
       if (testIds && testIds.length > 0) {
+        for (const tid of testIds) {
+          const t = await queries.getTest(tid);
+          if (!t || !t.repositoryId) {
+            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          }
+          if (!(await verifyRepoOwnership(t.repositoryId, session))) {
+            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          }
+          if (scopedRepoId && t.repositoryId !== scopedRepoId) {
+            return NextResponse.json({ error: 'Tests must belong to the same repository' }, { status: 400 });
+          }
+          scopedRepoId ??= t.repositoryId;
+        }
         testIdsToRun = testIds;
       } else if (functionalAreaId) {
+        const area = await queries.getFunctionalArea(functionalAreaId);
+        if (!area || !area.repositoryId) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        if (!(await verifyRepoOwnership(area.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        if (scopedRepoId && area.repositoryId !== scopedRepoId) {
+          return NextResponse.json({ error: 'Area does not belong to the supplied repository' }, { status: 400 });
+        }
+        scopedRepoId ??= area.repositoryId;
         const tests = await queries.getTestsByFunctionalArea(functionalAreaId);
         testIdsToRun = tests.map((t) => t.id);
-      } else if (repositoryId) {
-        const tests = await queries.getTestsByRepo(repositoryId);
+      } else if (scopedRepoId) {
+        const tests = await queries.getTestsByRepo(scopedRepoId);
         testIdsToRun = tests.map((t) => t.id);
       }
 
@@ -387,10 +429,134 @@ export async function POST(
         return NextResponse.json({ error: 'No tests to run' }, { status: 400 });
       }
 
-      // Use build system for visual diff tracking (auth already verified above)
-      const result = await createAndRunBuildCore('manual', testIdsToRun, repositoryId);
+      const result = await createAndRunBuildCore('manual', testIdsToRun, scopedRepoId);
 
       return NextResponse.json(result);
+    }
+
+    // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
+    // Body: { url: string, viewport?: { width, height } }
+    // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }
+    if (resource === 'snapshot' && !id) {
+      if (!session.team) {
+        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+      }
+      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      const sourceIp = extractSourceIp(request.headers);
+      const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
+      if (!rl.ok) {
+        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: rl.headers });
+      }
+      const body = (await request.json().catch(() => ({}))) as { url?: string; viewport?: { width: number; height: number } };
+      if (!body.url || typeof body.url !== 'string') {
+        return NextResponse.json({ error: 'url required' }, { status: 400 });
+      }
+      try {
+        await validateTargetUrl(body.url, { isCookieSession: !isBearer, sourceIp });
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
+        }
+        throw err;
+      }
+      const snapshotId = crypto.randomUUID();
+      try {
+        const cap = await captureUrl({
+          url: body.url,
+          jobId: snapshotId,
+          side: 'a',
+          viewport: body.viewport,
+          poolTier: isBearer ? 'build' : 'interactive',
+        });
+        return NextResponse.json(
+          {
+            snapshotId,
+            screenshotUrl: `/api/media${cap.screenshotRelPath}`,
+            domSnapshot: cap.domSnapshot,
+            networkRequests: cap.networkRequests,
+            a11yViolations: cap.a11yViolations,
+            a11yPassesCount: cap.a11yPassesCount,
+            wcagScore: cap.wcagScore,
+            capturedAt: cap.capturedAt,
+          },
+          { headers: rl.headers },
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Capture failed';
+        return NextResponse.json({ error: msg }, { status: 502, headers: rl.headers });
+      }
+    }
+
+    // URL Diff — two-URL async diff: POST /api/v1/diff
+    // Body: { urlA, urlB, viewport?, snapshotIdA?, snapshotIdB? }
+    // Returns: { jobId, statusUrl } when capturing; or full result when both
+    // snapshotIdA/snapshotIdB are provided and present on disk.
+    if (resource === 'diff' && !id) {
+      if (!session.team) {
+        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+      }
+      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      const sourceIp = extractSourceIp(request.headers);
+      const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
+      if (!rl.ok) {
+        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: rl.headers });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        urlA?: string;
+        urlB?: string;
+        viewport?: { width: number; height: number };
+        snapshotIdA?: string;
+        snapshotIdB?: string;
+      };
+
+      // Snapshot reuse: both ids supplied and present → diff synchronously.
+      if (body.snapshotIdA && body.snapshotIdB) {
+        const [capA, capB] = await Promise.all([
+          loadCaptureFromDisk(body.snapshotIdA, 'a'),
+          loadCaptureFromDisk(body.snapshotIdB, 'a'),
+        ]);
+        if (!capA || !capB) {
+          return NextResponse.json(
+            { error: 'snapshot expired or not found — recapture and retry' },
+            { status: 404, headers: rl.headers },
+          );
+        }
+        const stitchJobId = crypto.randomUUID();
+        const result = await buildUrlDiff(capA, capB, stitchJobId);
+        return NextResponse.json(result, { headers: rl.headers });
+      }
+
+      if (!body.urlA || !body.urlB) {
+        return NextResponse.json(
+          { error: 'urlA and urlB required (or both snapshotIdA/snapshotIdB)' },
+          { status: 400, headers: rl.headers },
+        );
+      }
+      try {
+        await Promise.all([
+          validateTargetUrl(body.urlA, { isCookieSession: !isBearer, sourceIp }),
+          validateTargetUrl(body.urlB, { isCookieSession: !isBearer, sourceIp }),
+        ]);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
+        }
+        throw err;
+      }
+
+      const { jobId } = await startUrlDiff({
+        urlA: body.urlA,
+        urlB: body.urlB,
+        viewport: body.viewport,
+        poolTier: isBearer ? 'build' : 'interactive',
+        isCookieSession: !isBearer,
+        sourceIp,
+        repositoryId: null,
+      });
+      return NextResponse.json(
+        { jobId, statusUrl: `/api/v1/jobs/${jobId}` },
+        { headers: rl.headers, status: 202 },
+      );
     }
 
     // Batch approve diffs

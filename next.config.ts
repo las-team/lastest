@@ -12,6 +12,12 @@ function git(cmd: string): string {
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@lastest/shared"],
+  outputFileTracingIncludes: {
+    '/terms': ['./src/content/legal/terms.md'],
+    '/privacy': ['./src/content/legal/privacy.md'],
+    '/cookies': ['./src/content/legal/cookies.md'],
+    '/dpa': ['./src/content/legal/dpa.md'],
+  },
   env: {
     NEXT_PUBLIC_GIT_HASH: process.env.NEXT_PUBLIC_GIT_HASH || git("rev-parse --short HEAD"),
     NEXT_PUBLIC_GIT_COMMIT_COUNT: process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT || git("rev-list --count HEAD"),

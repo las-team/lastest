@@ -11,8 +11,10 @@ import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
 import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
 import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
+import { computePageTextDiffSummary } from '@/lib/diff/page-text-diff';
 import { PNG } from 'pngjs';
 import fs from 'fs';
 import { sendSlackNotification } from '@/lib/integrations/slack';
@@ -711,14 +713,17 @@ async function runBuildAsync(
 
     // DOM diff: bootstrap baseline on first run, otherwise diff against it
     // and write the result to every visual diff produced by this test result.
+    // Gated by playwrightSettings.enableDomDiff — when off, snapshots may
+    // still be captured for healing/triage but no diffs are persisted to UI.
+    const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
     const testRecord2 = tests.find(t => t.id === result.testId);
-    if (!testRecord2?.domSnapshot && result.domSnapshot) {
+    if (domDiffEnabled && !testRecord2?.domSnapshot && result.domSnapshot) {
       // First run for this test (or legacy test created before DOM capture
       // was wired). Promote the current snapshot to the baseline; nothing to
       // diff against on this run.
       await queries.updateTest(result.testId, { domSnapshot: result.domSnapshot });
       console.info('[dom-diff] bootstrapped baseline DOM snapshot', { testId: result.testId });
-    } else if (testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+    } else if (domDiffEnabled && testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
       try {
         const { computeDomDiff } = await import('@/lib/diff/dom-diff');
         const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
@@ -1216,9 +1221,37 @@ async function queueBuild(
 }
 
 /**
- * Process the next queued build if any
+ * Process the next queued build if any.
+ *
+ * Internal helper: invoked fire-and-forget by the queue worker / pool consumer
+ * when there is no request context. To prevent direct RPC abuse from clients
+ * (this lives in a `'use server'` file so every export is reachable as a
+ * server action), we detect a live request context and gate the call:
+ * RPC callers must own the supplied `repositoryId`; pure background
+ * invocations (no headers, no `repositoryId`) pass through.
  */
 export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
+  // Detect request context and authorize. If `headers()` succeeds we are on
+  // the server-action RPC path → require team ownership of the queue scope.
+  // If `headers()` throws we are in fire-and-forget context (no request) →
+  // allow the internal queue worker through.
+  try {
+    const { headers } = await import('next/headers');
+    await headers();
+    // We have a request: enforce ownership.
+    if (repositoryId) {
+      await requireRepoAccess(repositoryId);
+    } else {
+      // Without a repo scope, only signed-in team members may drain the
+      // global queue (best we can do without an internal-secret).
+      await requireTeamAccess();
+    }
+  } catch (err) {
+    // No request context: internal call. Proceed without auth.
+    if (err instanceof Error && err.message.startsWith('Forbidden')) throw err;
+    if (err instanceof Error && err.message === 'Unauthorized') throw err;
+  }
+
   const effectiveRunner = targetRunnerId || undefined;
 
   // Skip busy check for pool-managed jobs — the execution flow handles claiming
@@ -1233,7 +1266,7 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
 
   // Delete the queue placeholder — createAndRunBuild creates its own running job.
   await queries.deleteBackgroundJob(nextJob.id);
-  emitJobEvent({ type: 'job:delete', jobId: nextJob.id });
+  emitJobEvent({ type: 'job:delete', jobId: nextJob.id, repositoryId: nextJob.repositoryId });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
   // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB.
@@ -1283,6 +1316,47 @@ async function processVisualDiff(
   const diffEngine = (merged.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
   const textRegionAwareDiffing = merged.textRegionAwareDiffing ?? false;
   const regionDetectionMode = (merged.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
+  const textDiffEnabled = settings.textDiffEnabled ?? false;
+
+  // Resolve text-diff fields for a single createVisualDiff call. The text
+  // file lives next to the screenshot (`.png` → `.txt`); we only attach a
+  // path when the file actually exists on disk so legacy baselines (created
+  // before the feature was enabled) cleanly degrade to `current_only`.
+  const resolveTextDiffFields = async (
+    baselineImagePath: string | null | undefined,
+    currentImagePath: string | null | undefined,
+  ): Promise<{
+    baselineTextPath: string | null;
+    currentTextPath: string | null;
+    textDiffStatus: import('@/lib/db/schema').TextDiffStatus;
+    textDiffSummary: NonNullable<import('@/lib/db/schema').DiffMetadata['textDiffSummary']> | null;
+  }> => {
+    if (!textDiffEnabled) {
+      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+    }
+    const swap = (p: string | null | undefined) => p ? p.replace(/\.png$/i, '.txt') : null;
+    const baselineCandidate = swap(baselineImagePath);
+    const currentCandidate = swap(currentImagePath);
+
+    const exists = async (rel: string | null) => {
+      if (!rel) return null;
+      try {
+        await fs.promises.access(path.join(STORAGE_ROOT, rel));
+        return rel;
+      } catch {
+        return null;
+      }
+    };
+    const [baselineTextPath, currentTextPath] = await Promise.all([
+      exists(baselineCandidate),
+      exists(currentCandidate),
+    ]);
+    if (!baselineTextPath && !currentTextPath) {
+      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+    }
+    const { status, summary } = await computePageTextDiffSummary(baselineTextPath, currentTextPath);
+    return { baselineTextPath, currentTextPath, textDiffStatus: status, textDiffSummary: summary };
+  };
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
@@ -1452,6 +1526,7 @@ async function processVisualDiff(
       // Auto-approve: identical to previously approved baseline
       const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
       const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+      const textDiff = await resolveTextDiffFields(matchingBaseline.imagePath, currentScreenshotPath);
 
       const diff = await queries.createVisualDiff({
         buildId,
@@ -1464,8 +1539,11 @@ async function processVisualDiff(
         classification: 'unchanged',
         pixelDifference: 0,
         percentageDifference: '0',
-        metadata: { changedRegions: [] },
+        metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
         browser,
+        baselineTextPath: textDiff.baselineTextPath,
+        currentTextPath: textDiff.currentTextPath,
+        textDiffStatus: textDiff.textDiffStatus,
         ...plannedDiff,
         ...mainDiff,
       });
@@ -1478,6 +1556,7 @@ async function processVisualDiff(
   if (!baseline) {
     const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
     const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
+    const textDiff = await resolveTextDiffFields(null, currentScreenshotPath);
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1489,8 +1568,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
-      metadata: { changedRegions: [], isNewTest: true },
+      metadata: { changedRegions: [], isNewTest: true, ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });
@@ -1567,10 +1649,15 @@ async function processVisualDiff(
       metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
     }
 
-    const [plannedDiff, mainDiff] = await Promise.all([
+    const [plannedDiff, mainDiff, textDiff] = await Promise.all([
       generatePlannedDiff(currentScreenshotPath),
       generateMainBaselineDiff(currentScreenshotPath),
+      resolveTextDiffFields(baseline.imagePath, currentScreenshotPath),
     ]);
+
+    if (textDiff.textDiffSummary) {
+      metadata.textDiffSummary = textDiff.textDiffSummary;
+    }
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1586,6 +1673,9 @@ async function processVisualDiff(
       percentageDifference: diffResult.percentageDifference.toString(),
       metadata,
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });
@@ -1607,9 +1697,10 @@ async function processVisualDiff(
     return { hasChanges, diffId: diff.id, classification };
   } catch {
     // Diff generation failed, mark as pending for review
-    const [plannedDiff, mainDiff] = await Promise.all([
+    const [plannedDiff, mainDiff, textDiff] = await Promise.all([
       generatePlannedDiff(currentScreenshotPath),
       generateMainBaselineDiff(currentScreenshotPath),
+      resolveTextDiffFields(baseline.imagePath, currentScreenshotPath),
     ]);
 
     const diff = await queries.createVisualDiff({
@@ -1623,8 +1714,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: -1,
       percentageDifference: '-1',
-      metadata: { changedRegions: [] },
+      metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
       browser,
+      baselineTextPath: textDiff.baselineTextPath,
+      currentTextPath: textDiff.currentTextPath,
+      textDiffStatus: textDiff.textDiffStatus,
       ...plannedDiff,
       ...mainDiff,
     });
@@ -1636,6 +1730,7 @@ async function processVisualDiff(
  * Get build summary with all metrics
  */
 export async function getBuildSummary(buildId: string): Promise<BuildSummary | null> {
+  await requireBuildOwnership(buildId);
   const build = await queries.getBuild(buildId);
   if (!build) return null;
 
@@ -1686,13 +1781,26 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
  * Get recent builds for dashboard
  */
 export async function getRecentBuilds(limit = 5) {
-  return queries.getRecentBuilds(limit);
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  // Over-fetch so post-filter still has enough rows for `limit`.
+  const all = await queries.getRecentBuilds(Math.max(limit * 4, 50));
+  const filtered: typeof all = [];
+  for (const b of all) {
+    if (filtered.length >= limit) break;
+    if (!b.testRunId) continue;
+    const run = await queries.getTestRun(b.testRunId);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+  }
+  return filtered;
 }
 
 /**
  * Get recent builds for a specific repository
  */
 export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
+  await requireRepoAccess(repositoryId);
   return queries.getBuildsByRepo(repositoryId, limit);
 }
 
@@ -1700,13 +1808,25 @@ export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
  * Get all builds
  */
 export async function getBuilds(limit = 10) {
-  return queries.getBuilds(limit);
+  const session = await requireTeamAccess();
+  const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
+  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const all = await queries.getBuilds(Math.max(limit * 4, 50));
+  const filtered: typeof all = [];
+  for (const b of all) {
+    if (filtered.length >= limit) break;
+    if (!b.testRunId) continue;
+    const run = await queries.getTestRun(b.testRunId);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+  }
+  return filtered;
 }
 
 /**
  * Get builds for a specific repository
  */
 export async function getBuildsByRepo(repositoryId: string, limit = 10) {
+  await requireRepoAccess(repositoryId);
   return queries.getBuildsByRepo(repositoryId, limit);
 }
 
@@ -1714,6 +1834,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
  * Get build by ID
  */
 export async function getBuild(buildId: string) {
+  await requireBuildOwnership(buildId);
   return queries.getBuild(buildId);
 }
 
@@ -1726,6 +1847,7 @@ export interface BuildChanges {
 }
 
 export async function getLatestBuildChanges(repositoryId: string): Promise<BuildChanges | null> {
+  await requireRepoAccess(repositoryId);
   const recentBuilds = await queries.getBuildsByRepo(repositoryId, 10);
   if (recentBuilds.length === 0) return null;
 

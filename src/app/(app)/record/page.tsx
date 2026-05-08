@@ -1,7 +1,6 @@
 import { TestCreationTabs } from './test-creation-tabs';
 import { getFunctionalAreasByRepo, getPlaywrightSettings, getSelectedRepository, getEnvironmentConfig, getTest, getDefaultSetupSteps, getTestsByRepo, getSetupScripts } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import type { RecordingEngine } from '@/lib/db/schema';
 
 interface RecordPageProps {
   searchParams: Promise<{ rerecordId?: string }>;
@@ -62,8 +61,6 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
         settings={settings}
         repositoryId={selectedRepo?.id}
         defaultBaseUrl={rerecordTest?.targetUrl || envConfig.baseUrl}
-        enabledEngines={settings.enabledRecordingEngines as RecordingEngine[]}
-        defaultEngine={settings.defaultRecordingEngine as RecordingEngine}
         rerecordTest={rerecordTest}
         repositorySetupSteps={repositorySetupSteps}
         availableTests={availableTests}

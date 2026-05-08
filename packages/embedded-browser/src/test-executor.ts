@@ -73,6 +73,10 @@ export interface EmbeddedTestResult {
   error?: { message: string; stack?: string; screenshot?: string };
   logs: Array<{ timestamp: number; level: string; message: string }>;
   screenshots: Array<{ filename: string; data: string; width: number; height: number }>;
+  /** Page innerText captured alongside each screenshot when textCaptureEnabled.
+   *  Filename is the screenshot's filename with `.txt` extension so the host
+   *  can pair them by replacing the extension. */
+  texts?: Array<{ filename: string; data: string }>;
   consoleErrors?: string[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
@@ -92,6 +96,24 @@ export interface EmbeddedTestResult {
   lastReachedStep?: number;
   totalSteps?: number;
   domSnapshot?: DomSnapshotResult; // DOM state captured after test body ran
+  /** axe-core violations harvested from `window.__urlDiffResult` when
+   *  `enableA11y` is set. Duck-typed shape matching `A11yViolation` in
+   *  `src/lib/db/schema.ts` (intentionally inline to avoid pulling the
+   *  schema dep into this package). */
+  a11yViolations?: Array<{
+    id: string;
+    impact: 'critical' | 'serious' | 'moderate' | 'minor';
+    description: string;
+    help: string;
+    helpUrl: string;
+    nodes: number;
+    tags?: string[];
+    wcagLevel?: 'A' | 'AA' | 'AAA';
+  }>;
+  a11yPassesCount?: number;
+  /** Playwright `page.accessibility.snapshot()` output, capped at ~512 KB
+   *  by the executor. Truncated trees are marked `{ _truncated: true }`. */
+  accessibilityTree?: unknown;
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
   /** Per-attempt selector outcomes captured by `locateWithFallback`. The
    *  host writes these to `selector_stats` so future runs can promote
@@ -142,6 +164,12 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  /** When true, after the test body completes the executor reads
+   *  `window.__urlDiffResult` and stamps `a11yViolations`/`a11yPassesCount`/
+   *  `accessibilityTree` onto the result. Used by the URL Diff feature; the
+   *  synthetic test body is responsible for running axe-core and assigning
+   *  the harvest payload. */
+  enableA11y?: boolean;
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
   extractVariables?: Array<{
@@ -174,6 +202,10 @@ export interface RunTestPayload {
   /** Default per-candidate `waitFor` budget for `locateWithFallback` (ms).
    *  Resolved on the host. Defaults to 3000ms when omitted. */
   selectorTimeoutMs?: number;
+  /** When true, capture `document.body.innerText` after each screenshot and
+   *  return it alongside `screenshots[]` so the host can run a text-diff
+   *  against the prior baseline. */
+  textCaptureEnabled?: boolean;
 }
 
 /**
@@ -279,6 +311,7 @@ export class EmbeddedTestExecutor {
     const startTime = Date.now();
     const logs: Array<{ timestamp: number; level: string; message: string }> = [];
     const screenshots: Array<{ filename: string; data: string; width: number; height: number }> = [];
+    const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
     const assertionResults: NonNullable<EmbeddedTestResult['assertionResults']> = [];
     const selectorOutcomes: SelectorOutcome[] = [];
@@ -569,6 +602,24 @@ export class EmbeddedTestExecutor {
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, '_')}.png`;
           const base64 = buffer.toString('base64');
           screenshots.push({ filename, data: base64, width: viewport.width, height: viewport.height });
+
+          // Capture page text alongside the screenshot. Best-effort: failures
+          // must not block the screenshot path. Capped at 200KB; longer pages
+          // get a "[truncated]" marker so the diff still renders meaningfully.
+          if (command.textCaptureEnabled) {
+            try {
+              const TEXT_CAP_BYTES = 200 * 1024;
+              const rawText = await page.evaluate(() => document.body?.innerText ?? '');
+              const safeText = typeof rawText === 'string' ? rawText : '';
+              const capped = safeText.length > TEXT_CAP_BYTES
+                ? safeText.slice(0, TEXT_CAP_BYTES) + '\n\n[truncated — capture exceeded 200KB]'
+                : safeText;
+              const textFilename = filename.replace(/\.png$/i, '.txt');
+              texts.push({ filename: textFilename, data: Buffer.from(capped, 'utf8').toString('base64') });
+            } catch (textErr) {
+              logFn('warn', `Failed to capture page text for ${label}: ${textErr}`);
+            }
+          }
           // [Shot] probe: byte size + viewport-content signal to detect blank-render screenshots.
           // bytes << healthy or bodyChildren=0/hasCanvas=false on a canvas app → captured a non-rendered page.
           const probeUrl = page.url();
@@ -1236,6 +1287,41 @@ export class EmbeddedTestExecutor {
       // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
       await captureFinalDomSnapshot();
 
+      // Harvest axe-core results + accessibility tree written by the synthetic
+      // URL-Diff test body to `window.__urlDiffResult`. Gated by `enableA11y`
+      // so normal tests don't pay the harvest cost. Truncate the a11y tree at
+      // 512 KB to keep `runner_command_results.payload` JSON sane.
+      let a11yViolations: EmbeddedTestResult['a11yViolations'];
+      let a11yPassesCount: number | undefined;
+      let accessibilityTree: unknown;
+      if (command.enableA11y) {
+        try {
+          const harvested = await page.evaluate(() => {
+            const w = window as unknown as { __urlDiffResult?: unknown };
+            return w.__urlDiffResult ?? null;
+          }) as null | {
+            violations?: EmbeddedTestResult['a11yViolations'];
+            passes?: number;
+            accessibilityTree?: unknown;
+          };
+          if (harvested && typeof harvested === 'object') {
+            a11yViolations = harvested.violations;
+            a11yPassesCount = typeof harvested.passes === 'number' ? harvested.passes : undefined;
+            const treeRaw = harvested.accessibilityTree;
+            if (treeRaw !== undefined && treeRaw !== null) {
+              const treeJson = JSON.stringify(treeRaw);
+              if (treeJson.length > 512_000) {
+                accessibilityTree = { _truncated: true, byteLength: treeJson.length };
+              } else {
+                accessibilityTree = treeRaw;
+              }
+            }
+          }
+        } catch (err) {
+          logFn('warn', `a11y harvest failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       const durationMs = Date.now() - startTime;
       logFn('info', `Test passed in ${durationMs}ms (${screenshots.length} screenshots)`);
 
@@ -1244,6 +1330,7 @@ export class EmbeddedTestExecutor {
         durationMs,
         logs,
         screenshots,
+        texts: texts.length > 0 ? texts : undefined,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
@@ -1251,6 +1338,9 @@ export class EmbeddedTestExecutor {
         lastReachedStep: reachedStep >= 0 ? reachedStep : undefined,
         totalSteps: stepCount > 0 ? stepCount : undefined,
         domSnapshot,
+        a11yViolations,
+        a11yPassesCount,
+        accessibilityTree,
         extractedVariables,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
       };
@@ -1268,6 +1358,7 @@ export class EmbeddedTestExecutor {
         logFn('info', 'Test cancelled');
         result = {
           status: 'cancelled' as const, durationMs, logs, screenshots,
+          texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
@@ -1300,6 +1391,7 @@ export class EmbeddedTestExecutor {
           error: { message: errorMessage, stack: errorStack, screenshot: errorScreenshot },
           logs,
           screenshots,
+          texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests: allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,

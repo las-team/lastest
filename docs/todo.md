@@ -1,33 +1,27 @@
 ## tasks
 Videos explaining use
-    Saját demo felvétele ahol van egy laza scripted előre megírva, ami egy törött vibe kódolt appon bemutatja hogy lépésről lépésre hogyan használod a Lastestet. A végén elmondani hogy a runnereket bárhol tudja futtatni, de itt a cloud instance, like and subscribe, kommentelj, kérdezz, nagyon lelkes a szerző.
     video2: claude uses lastest mcp
+    record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 ## test
 VS Code extension
-**Gitlab**
 Teardown
-**Accept Downloads**
 triage
-a11y
-DOM delta
 Create modes
 Openrouter agent sdk parity
-**Onboarding**
-**Criteria**
-**CSV upload and use**
 ## bugs
 ## features
-Google verification
+Demo mode - test without registration
+Build a skill to find startupideas and test them, provide testing feedback
+Welcome email, follow-up
+Google verification for gsheets
 **Self-test**
-Chat agent for website
 Default ai, openrouter test
 mcp-oauth flow
+https://www.chromatic.com/start comp test?
 ## ideas
 Auto-feedback to resolve loop
-
-~~Clear up area desc-spec, test desc-spec duplication~~ DONE — code landed, run `pnpm tsx --env-file=.env.local scripts/backfill-desc-spec.ts` then `pnpm db:push` to drop the legacy `tests.description` / `functional_areas.description` / `tests.agent_prompt` columns.
 check tabs and enters
 Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
   │ explosion detection      │ detection, coverage-weighted pruning                    
@@ -51,6 +45,10 @@ DOM test repair
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
 ## marketing
+screenshot diff tool
+    - /integrations/<github|gitlab|playwright|...> pages (one per integration)
+    -     - Open dataset: common UI flake patterns from anonymized runs                 
+    -         - Free WCAG 2.2 AA scorecard generator (you already have a11y scoring)     
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop
 Do you trust ai? I dont human in the loop
@@ -82,8 +80,7 @@ Re-fetch search volume, CPC & competition from DataForSEO
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                         
-"tyű" - sanyi                          
+  work? AI testing or Agentic testing?                           
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.
@@ -95,3 +92,7 @@ Exp testing is kinda ok, at least you learn how your software works
 
 testuser1771664821751@example.com
 SecurePass123
+
+
+## Quotes:
+/home/ewyct/dev/lastest-quotes-website.md 

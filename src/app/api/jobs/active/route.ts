@@ -38,7 +38,10 @@ export async function GET() {
   const teamRepoIds = new Set(teamRepos.map(r => r.id));
 
   const allJobs = await queries.getRecentBackgroundJobs(10000);
-  const teamJobs = allJobs.filter(j => !j.repositoryId || teamRepoIds.has(j.repositoryId));
+  // Only the team's own repo-bound jobs. Repo-less ("global") jobs have no
+  // team binding on the row, so we deliberately drop them here instead of
+  // broadcasting them to every team.
+  const teamJobs = allJobs.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
 
   // Batch-fetch children for active parent jobs (single query instead of N+1)
   const activeParentIds = teamJobs

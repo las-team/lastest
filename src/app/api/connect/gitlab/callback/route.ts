@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import crypto from 'crypto';
 import { getCurrentSession } from '@/lib/auth';
 import { exchangeCodeForToken, getGitLabUser, getDefaultInstanceUrl } from '@/lib/gitlab/oauth';
 import * as queries from '@/lib/db/queries';
@@ -25,6 +26,13 @@ async function readStateCookie(): Promise<OAuthStatePayload | null> {
   } catch {
     return null;
   }
+}
+
+function timingSafeStringEq(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
 }
 
 async function clearStateCookie() {
@@ -55,11 +63,14 @@ export async function GET(request: NextRequest) {
 
   // Recover per-instance creds. Fall back to env defaults for the gitlab.com flow.
   const stateRecord = await readStateCookie();
-  const instanceUrl = stateRecord?.instanceUrl || getDefaultInstanceUrl();
-  if (stateRecord && stateParam && stateRecord.state !== stateParam) {
+  // Strict state validation — the cookie AND the query param both must be
+  // present and equal. The previous lenient form bypassed validation when
+  // the cookie was missing, allowing OAuth CSRF.
+  if (!stateRecord || !stateParam || !timingSafeStringEq(stateRecord.state, stateParam)) {
     await clearStateCookie();
     return NextResponse.redirect(new URL('/settings?error=state_mismatch', getPublicUrl(request)));
   }
+  const instanceUrl = stateRecord.instanceUrl || getDefaultInstanceUrl();
 
   const tokenResponse = await exchangeCodeForToken(code, {
     instanceUrl,

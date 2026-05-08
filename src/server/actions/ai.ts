@@ -2,7 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { validateTestCode } from '@lastest/shared';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { requireRepoAccess } from '@/lib/auth';
 import {
   generateWithAI,
   SYSTEM_PROMPT,
@@ -101,6 +101,9 @@ export async function aiFixTest(
     const test = await queries.getTest(testId);
     if (!test) {
       return { success: false, error: 'Test not found' };
+    }
+    if (test.repositoryId !== repositoryId) {
+      return { success: false, error: 'Forbidden: test does not belong to that repository' };
     }
 
     const config = await getAIConfig(repositoryId);
@@ -537,7 +540,9 @@ export async function updateTestCode(
   code: string,
   changeReason: 'ai_fix' | 'ai_enhance' = 'ai_fix'
 ): Promise<{ success: boolean; error?: string }> {
-  await requireTeamAccess();
+  const { requireTestOwnership } = await import('@/lib/auth/ownership');
+  const { test } = await requireTestOwnership(testId);
+
   // Refuse to persist syntactically broken AI output — otherwise the runner
   // throws a TypeError at execution time and the user sees a misleading
   // "Passed but broken" run.
@@ -546,8 +551,7 @@ export async function updateTestCode(
     return { success: false, error: `Generated code has a syntax error and was not saved: ${validation.error}` };
   }
   try {
-    const test = await queries.getTest(testId);
-    const branch = await getCurrentBranchForRepo(test?.repositoryId);
+    const branch = await getCurrentBranchForRepo(test.repositoryId);
     await queries.updateTestWithVersion(testId, { code }, changeReason, branch ?? undefined);
     revalidatePath('/tests');
     revalidatePath(`/tests/${testId}`);
@@ -573,6 +577,13 @@ export async function aiFixTests(
     if (!test) {
       failed++;
       errors.push(`Test ${testId}: Not found`);
+      continue;
+    }
+    if (test.repositoryId !== repositoryId) {
+      // Refuse to silently fix a test that belongs to a different repository
+      // — caller can only have proven access to the supplied repositoryId.
+      failed++;
+      errors.push(`Test ${testId}: does not belong to that repository`);
       continue;
     }
 
@@ -607,6 +618,12 @@ export async function healTest(
   repositoryId: string,
   testId: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
+  await requireRepoAccess(repositoryId);
+  const test = await queries.getTest(testId);
+  if (!test) return { success: false, error: 'Test not found' };
+  if (test.repositoryId !== repositoryId) {
+    return { success: false, error: 'Forbidden: test does not belong to that repository' };
+  }
   const { agentHealTest } = await import('@/lib/playwright/healer-agent');
   return agentHealTest(repositoryId, testId);
 }

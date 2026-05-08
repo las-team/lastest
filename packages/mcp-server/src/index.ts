@@ -23,13 +23,17 @@ export async function main() {
         apiKey: opts.apiKey,
       });
 
-      // Verify connectivity
-      try {
-        await client.health();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`Failed to connect to Lastest at ${opts.url}: ${msg}\n`);
-        process.exit(1);
+      // Verify connectivity (skipped when LASTEST_SKIP_HEALTH_CHECK=1 — used by
+      // tooling that introspects the MCP surface without a live backend, e.g.
+      // Glama's container check).
+      if (process.env.LASTEST_SKIP_HEALTH_CHECK !== '1') {
+        try {
+          await client.health();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`Failed to connect to Lastest at ${opts.url}: ${msg}\n`);
+          process.exit(1);
+        }
       }
 
       const server = createServer(client);

@@ -38,6 +38,7 @@ export async function savePlaywrightSettings(data: {
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   enableNetworkInterception?: boolean;
+  enableDomDiff?: boolean;
   lockViewportToRecording?: boolean;
   browsers?: string[];
   customAttributeName?: string | null;
@@ -85,6 +86,7 @@ export async function saveDiffSensitivitySettings(data: {
   textRegionPadding?: number;
   textDetectionGranularity?: string;
   regionDetectionMode?: string;
+  textDiffEnabled?: boolean;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

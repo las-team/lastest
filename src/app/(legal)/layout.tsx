@@ -15,6 +15,12 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
             <Link href="/privacy" className="hover:underline underline-offset-4">
               Privacy Policy
             </Link>
+            <Link href="/cookies" className="hover:underline underline-offset-4">
+              Cookie Policy
+            </Link>
+            <Link href="/dpa" className="hover:underline underline-offset-4">
+              DPA
+            </Link>
           </nav>
         </div>
       </header>

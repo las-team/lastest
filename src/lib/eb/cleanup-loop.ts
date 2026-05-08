@@ -22,6 +22,7 @@ import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sess
 import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
 import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
 import { cleanupOldCommands, timeoutStaleCommands } from '@/lib/db/queries';
+import { cleanupExpiredUrlDiffs } from '@/lib/url-diff/cleanup';
 
 export const SESSION_TIMEOUT_MS = 60_000;
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -134,6 +135,17 @@ export function startCleanupLoop(): void {
       await ensureWarmPool();
     } catch (error) {
       console.error('[WarmPool] ensureWarmPool failed:', error);
+    }
+
+    // URL-Diff artefacts are stateless with a 1h TTL. Run on the same
+    // 60s loop — the janitor is cheap and only descends into <jobId> dirs.
+    try {
+      const { deleted } = await cleanupExpiredUrlDiffs();
+      if (deleted > 0) {
+        console.log(`[GC] Cleaned up ${deleted} expired URL-Diff artefact dir(s)`);
+      }
+    } catch (error) {
+      console.error('[GC] Failed to clean URL-Diff artefacts:', error);
     }
   }, CLEANUP_INTERVAL_MS);
 

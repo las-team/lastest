@@ -606,6 +606,7 @@ async function extractStoriesFromContent(
 export async function getSpecImportSession(sessionId: string): Promise<SpecImportResponse> {
   const session = await queries.getAgentSession(sessionId);
   if (!session) return { success: false, error: 'Session not found' };
+  await requireRepoAccess(session.repositoryId);
 
   const meta = session.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
   if (!meta?.stories) return { success: false, error: 'No stories found in session' };
@@ -616,6 +617,7 @@ export async function getSpecImportSession(sessionId: string): Promise<SpecImpor
 export async function completeSpecImportSession(sessionId: string): Promise<void> {
   const session = await queries.getAgentSession(sessionId);
   if (!session) return;
+  await requireRepoAccess(session.repositoryId);
 
   const teamId = session.teamId || '';
 

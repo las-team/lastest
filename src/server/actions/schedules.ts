@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
+import { requireScheduleOwnership } from '@/lib/auth/ownership';
 import { isValidCron, getNextRunTime, describeCron, PRESET_SCHEDULES } from '@/lib/scheduling/cron';
 import type { PresetScheduleKey } from '@/lib/scheduling/cron';
 
@@ -60,6 +61,10 @@ export async function updateScheduleAction(id: string, input: {
   maxConsecutiveFailures?: number;
 }) {
   await requireRepoAccess(input.repositoryId);
+  const { schedule } = await requireScheduleOwnership(id);
+  if (schedule.repositoryId !== input.repositoryId) {
+    throw new Error('Forbidden: schedule does not belong to that repository');
+  }
 
   if (input.cronExpression && !isValidCron(input.cronExpression)) {
     throw new Error(`Invalid cron expression: ${input.cronExpression}`);

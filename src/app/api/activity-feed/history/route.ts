@@ -9,6 +9,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { getActivityEventsBySession, getRecentActivityEvents } from '@/lib/db/queries';
+import { db } from '@/lib/db';
+import { activityEvents } from '@/lib/db/schema';
+import { and, eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +39,17 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(Number(searchParams.get('limit') || '50'), 500);
 
   if (sessionId) {
+    // Confirm the session belongs to the caller's team before returning its
+    // events. Without this scope, any authenticated user could pass an
+    // arbitrary sessionId and read another team's activity stream.
+    const [scoped] = await db
+      .select({ teamId: activityEvents.teamId })
+      .from(activityEvents)
+      .where(and(eq(activityEvents.sessionId, sessionId), eq(activityEvents.teamId, teamId)))
+      .limit(1);
+    if (!scoped) {
+      return NextResponse.json({ events: [] });
+    }
     const events = await getActivityEventsBySession(sessionId, limit);
     return NextResponse.json({ events });
   }
