@@ -10,3 +10,13 @@ export {
   isAuthenticated,
   type SessionData,
 } from './session';
+
+export {
+  capabilitiesFor,
+  hasCapability,
+  isReadOnlySession,
+  requireCapability,
+  requireRepoCapability,
+  mutation,
+  type Capability,
+} from './capabilities';
