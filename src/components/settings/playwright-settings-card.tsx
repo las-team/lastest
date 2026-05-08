@@ -580,6 +580,22 @@ export function PlaywrightSettingsCard({
             </div>
             <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
           </div>
+
+          {/* Network Capture */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Network Capture</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Record every HTTP request and response during the test for inspection (Wireshark-style monitoring)
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
+          </div>
         </div>
       </CollapsibleSection>
 
@@ -632,22 +648,6 @@ export function PlaywrightSettingsCard({
               </div>
             </div>
             <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
-          </div>
-
-          {/* Network Mocking */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Network Mocking</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Allow tests to mock API responses, block requests, and capture network traffic
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
           </div>
         </div>
       </CollapsibleSection>
