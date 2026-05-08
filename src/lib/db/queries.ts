@@ -32,3 +32,4 @@ export * from './queries/gamification';
 export * from './queries/storage';
 export * from './queries/public-shares';
 export * from './queries/step-comparisons';
+export * from './queries/inspector';

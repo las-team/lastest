@@ -2575,3 +2575,142 @@ export const stepComparisons = pgTable('step_comparisons', {
 
 export type StepComparison = typeof stepComparisons.$inferSelect;
 export type NewStepComparison = typeof stepComparisons.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Test-Level Multi-Target Inspector (spec 24)
+// ---------------------------------------------------------------------------
+
+export type InspectorDimension = 'visual' | 'dom' | 'text' | 'network' | 'variables';
+export type InspectorSeverity = 'unchanged' | 'minor' | 'changed' | 'unavailable';
+
+export interface VisualInspectionPayload {
+  classification: 'unchanged' | 'flaky' | 'changed';
+  pixelDifference: number;
+  percentageDifference: number;
+  baselineImagePath: string | null;
+  currentImagePath: string | null;
+  diffImagePath: string | null;
+  engine: DiffEngineType;
+  metadata?: DiffMetadata;
+  error?: string;
+}
+
+export interface DomInspectionPayload {
+  diff: DomDiffResult;
+  baselineUrl?: string;
+  currentUrl?: string;
+  error?: string;
+}
+
+export interface TextDiffLine {
+  op: 'add' | 'del' | 'eq';
+  line: string;
+  oldLineNo?: number;
+  newLineNo?: number;
+}
+
+export interface TextInspectionPayload {
+  lines: TextDiffLine[];
+  added: number;
+  removed: number;
+  baselineLength: number;
+  currentLength: number;
+  error?: string;
+}
+
+export interface NetworkInspectionEntry {
+  url: string;
+  method: string;
+  resourceType: string;
+  baseline?: { status: number; bytes: number; durationMs: number };
+  current?: { status: number; bytes: number; durationMs: number };
+}
+
+export interface NetworkInspectionSummary {
+  countA: number;
+  countB: number;
+  bytesA: number;
+  bytesB: number;
+  byTypeA: Record<string, number>;
+  byTypeB: Record<string, number>;
+  thirdPartyDomainsA: string[];
+  thirdPartyDomainsB: string[];
+  failedCountA: number;
+  failedCountB: number;
+}
+
+export interface NetworkInspectionPayload {
+  added: NetworkInspectionEntry[];
+  removed: NetworkInspectionEntry[];
+  changedStatus: NetworkInspectionEntry[];
+  changedSize: NetworkInspectionEntry[];
+  slowdowns: NetworkInspectionEntry[];
+  failedA: NetworkInspectionEntry[];
+  failedB: NetworkInspectionEntry[];
+  summary: NetworkInspectionSummary;
+  error?: string;
+}
+
+export interface VariableMapDiffEntry {
+  key: string;
+  baseline: string | null;
+  current: string | null;
+  kind: 'added' | 'removed' | 'changed' | 'unchanged';
+}
+
+export interface VariableInspectionPayload {
+  extracted: VariableMapDiffEntry[];
+  assigned: VariableMapDiffEntry[];
+  consoleErrors: { added: string[]; removed: string[]; common: number };
+  logs: { addedCount: number; removedCount: number; sample: string[] };
+  error?: string;
+}
+
+export interface InspectorClassification {
+  visual: InspectorSeverity;
+  dom: InspectorSeverity;
+  text: InspectorSeverity;
+  network: InspectorSeverity;
+  variables: InspectorSeverity;
+}
+
+export interface InspectorOptions {
+  ignoreUrlParams?: string[];
+  ignoreHosts?: string[];
+  ignoreVariableKeys?: string[];
+  textIgnorePatterns?: string[];
+}
+
+export interface InspectionResult {
+  cacheKey: string;
+  computedAtMs: number;
+  testId: string;
+  currentResultId: string;
+  baselineResultId: string;
+  engine: DiffEngineType;
+  visual?: VisualInspectionPayload;
+  dom?: DomInspectionPayload;
+  text?: TextInspectionPayload;
+  network?: NetworkInspectionPayload;
+  variables?: VariableInspectionPayload;
+  classification: InspectorClassification;
+}
+
+// Cache table for the test-level inspector. Keyed by sha256 of the inputs so
+// repeat opens of the same target pair are instant. Cleared on baseline
+// approval and via TTL sweep.
+export const inspectorCache = pgTable('inspector_cache', {
+  cacheKey: text('cache_key').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  currentResultId: text('current_result_id').notNull(),
+  baselineResultId: text('baseline_result_id').notNull(),
+  engine: text('engine').notNull(),
+  payload: jsonb('payload').$type<InspectionResult>().notNull(),
+  computedAt: timestamp('computed_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_inspector_cache_test').on(table.testId),
+  index('idx_inspector_cache_current').on(table.currentResultId),
+]));
+
+export type InspectorCacheRow = typeof inspectorCache.$inferSelect;
+export type NewInspectorCacheRow = typeof inspectorCache.$inferInsert;
