@@ -1727,10 +1727,10 @@ async function processVisualDiff(
 }
 
 /**
- * Get build summary with all metrics
+ * Build summary loader without auth — callers must verify ownership themselves.
+ * Used by routes that authenticate via non-session credentials (runner Bearer tokens).
  */
-export async function getBuildSummary(buildId: string): Promise<BuildSummary | null> {
-  await requireBuildOwnership(buildId);
+export async function buildBuildSummary(buildId: string): Promise<BuildSummary | null> {
   const build = await queries.getBuild(buildId);
   if (!build) return null;
 
@@ -1775,6 +1775,14 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
     errorMessage,
     runningTests,
   };
+}
+
+/**
+ * Get build summary with all metrics (auth-checked).
+ */
+export async function getBuildSummary(buildId: string): Promise<BuildSummary | null> {
+  await requireBuildOwnership(buildId);
+  return buildBuildSummary(buildId);
 }
 
 /**
