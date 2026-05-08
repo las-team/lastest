@@ -41,8 +41,10 @@ interface AreaTreeProps {
   uncategorizedTests: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
   selection: TreeSelection | null;
   selectedAreaIds: Set<string>;
+  selectedTestIds?: Set<string>;
   onSelect: (selection: TreeSelection | null) => void;
   onMultiSelect: (ids: Set<string>) => void;
+  onMultiSelectTests?: (ids: Set<string>) => void;
   onNewArea: (parentId?: string) => void;
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
@@ -53,6 +55,8 @@ interface AreaTreeProps {
   headerExtra?: React.ReactNode;
   addButtonClassName?: string;
 }
+
+const EMPTY_SET: Set<string> = new Set();
 
 function StatusIcon({ status }: { status: string | null }) {
   switch (status) {
@@ -72,10 +76,12 @@ interface AreaNodeProps {
   depth: number;
   selection: TreeSelection | null;
   selectedAreaIds: Set<string>;
+  selectedTestIds: Set<string>;
   expandedIds: Set<string>;
   onToggle: (id: string) => void;
   onSelect: (selection: TreeSelection | null) => void;
   onAreaClick: (id: string, shiftKey: boolean) => void;
+  onTestClick: (id: string, shiftKey: boolean) => void;
   onNewArea: (parentId?: string) => void;
   onEditArea: (id: string) => void;
   onDeleteArea: (id: string) => void;
@@ -122,10 +128,12 @@ function AreaNode({
   depth,
   selection,
   selectedAreaIds,
+  selectedTestIds,
   expandedIds,
   onToggle,
   onSelect,
   onAreaClick,
+  onTestClick,
   onNewArea,
   onEditArea,
   onDeleteArea,
@@ -262,10 +270,12 @@ function AreaNode({
               depth={depth + 1}
               selection={selection}
               selectedAreaIds={selectedAreaIds}
+              selectedTestIds={selectedTestIds}
               expandedIds={expandedIds}
               onToggle={onToggle}
               onSelect={onSelect}
               onAreaClick={onAreaClick}
+              onTestClick={onTestClick}
               onNewArea={onNewArea}
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
@@ -280,7 +290,9 @@ function AreaNode({
               test={test}
               depth={depth + 1}
               selection={selection}
+              isMultiSelected={selectedTestIds.has(test.id)}
               onSelect={onSelect}
+              onTestClick={onTestClick}
               onDeleteTest={onDeleteTest}
             />
           ))}
@@ -294,11 +306,13 @@ interface TestNodeProps {
   test: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean };
   depth: number;
   selection: TreeSelection | null;
+  isMultiSelected: boolean;
   onSelect: (selection: TreeSelection | null) => void;
+  onTestClick: (id: string, shiftKey: boolean) => void;
   onDeleteTest?: (id: string) => void;
 }
 
-function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodeProps) {
+function TestNode({ test, depth, selection, isMultiSelected, onSelect, onTestClick, onDeleteTest }: TestNodeProps) {
   const isSelected = selection?.type === 'test' && selection.id === test.id;
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -315,11 +329,23 @@ function TestNode({ test, depth, selection, onSelect, onDeleteTest }: TestNodePr
       aria-label={test.name}
       aria-selected={isSelected}
       className={cn(
-        'group/test py-1 px-2 rounded cursor-pointer hover:bg-muted',
-        isSelected && 'bg-primary/10 hover:bg-primary/15'
+        'group/test py-1 px-2 rounded cursor-pointer hover:bg-muted select-none',
+        isSelected && 'bg-primary/10 hover:bg-primary/15',
+        isMultiSelected && !isSelected && 'bg-primary/10 hover:bg-primary/15'
       )}
       style={{ paddingLeft: `${depth * 16 + 8}px` }}
-      onClick={() => onSelect({ type: 'test', id: test.id })}
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.shiftKey) {
+          window.getSelection()?.removeAllRanges();
+          onTestClick(test.id, true);
+        } else {
+          onTestClick(test.id, false);
+          onSelect({ type: 'test', id: test.id });
+        }
+      }}
       draggable
       onDragStart={handleDragStart}
     >
@@ -371,13 +397,32 @@ function flattenAreaIds(areas: FunctionalAreaWithChildren[]): string[] {
   return result;
 }
 
+// Flatten tree into ordered list of test IDs (depth-first, then uncategorized).
+// All tests are included regardless of expansion state, so range selection
+// behaves predictably even when sub-folders are collapsed.
+function flattenTestIds(
+  areas: FunctionalAreaWithChildren[],
+  uncategorized: { id: string }[],
+): string[] {
+  const result: string[] = [];
+  function walk(area: FunctionalAreaWithChildren) {
+    for (const child of area.children) walk(child);
+    for (const t of area.tests) result.push(t.id);
+  }
+  for (const a of areas) walk(a);
+  for (const t of uncategorized) result.push(t.id);
+  return result;
+}
+
 export function AreaTree({
   tree,
   uncategorizedTests,
   selection,
   selectedAreaIds,
+  selectedTestIds,
   onSelect,
   onMultiSelect,
+  onMultiSelectTests,
   onNewArea,
   onEditArea,
   onDeleteArea,
@@ -388,19 +433,27 @@ export function AreaTree({
   headerExtra,
   addButtonClassName,
 }: AreaTreeProps) {
+  const effectiveSelectedTestIds = selectedTestIds ?? EMPTY_SET;
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  // Anchor for shift-click range selection. A ref avoids stale closures and
-  // lets us seed it from `selection` so shift-click works even when the
+  // Anchors for shift-click range selection. Refs avoid stale closures and
+  // let us seed them from `selection` so shift-click works even when the
   // current single selection was set externally (URL, breadcrumb, etc).
   const lastClickedAreaIdRef = useRef<string | null>(null);
+  const lastClickedTestIdRef = useRef<string | null>(null);
 
   const flatIds = useMemo(() => flattenAreaIds(tree), [tree]);
+  const flatTestIds = useMemo(
+    () => flattenTestIds(tree, uncategorizedTests),
+    [tree, uncategorizedTests],
+  );
 
-  // Keep the anchor in sync with the single-select area, so shift-click
+  // Keep the anchors in sync with the single selection, so shift-click
   // always extends from whatever is currently selected.
   useEffect(() => {
     if (selection?.type === 'area') {
       lastClickedAreaIdRef.current = selection.id;
+    } else if (selection?.type === 'test') {
+      lastClickedTestIdRef.current = selection.id;
     }
   }, [selection]);
 
@@ -434,6 +487,24 @@ export function AreaTree({
       onMultiSelect(new Set());
     }
   }, [flatIds, onMultiSelect]);
+
+  const handleTestClick = useCallback((id: string, shiftKey: boolean) => {
+    const anchor = lastClickedTestIdRef.current;
+    if (shiftKey && onMultiSelectTests && anchor && anchor !== id && flatTestIds.indexOf(anchor) !== -1) {
+      const startIdx = flatTestIds.indexOf(anchor);
+      const endIdx = flatTestIds.indexOf(id);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const from = Math.min(startIdx, endIdx);
+        const to = Math.max(startIdx, endIdx);
+        const rangeIds = flatTestIds.slice(from, to + 1);
+        onMultiSelectTests(new Set(rangeIds));
+      }
+    } else {
+      // Normal click — anchor and clear test multi-select
+      lastClickedTestIdRef.current = id;
+      onMultiSelectTests?.(new Set());
+    }
+  }, [flatTestIds, onMultiSelectTests]);
 
   const handleUnsortedDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -495,10 +566,12 @@ export function AreaTree({
               depth={0}
               selection={selection}
               selectedAreaIds={selectedAreaIds}
+              selectedTestIds={effectiveSelectedTestIds}
               expandedIds={expandedIds}
               onToggle={handleToggle}
               onSelect={onSelect}
               onAreaClick={handleAreaClick}
+              onTestClick={handleTestClick}
               onNewArea={onNewArea}
               onEditArea={onEditArea}
               onDeleteArea={onDeleteArea}
@@ -530,7 +603,9 @@ export function AreaTree({
                 test={test}
                 depth={0}
                 selection={selection}
+                isMultiSelected={effectiveSelectedTestIds.has(test.id)}
                 onSelect={onSelect}
+                onTestClick={handleTestClick}
                 onDeleteTest={onDeleteTest}
               />
             ))}

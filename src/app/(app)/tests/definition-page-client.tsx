@@ -1000,8 +1000,10 @@ export function DefinitionPageClient({
                 uncategorizedTests={uncategorizedTests}
                 selection={treeSelection}
                 selectedAreaIds={selectedAreaIds}
+                selectedTestIds={selectedTestIds}
                 onSelect={handleTreeSelect}
                 onMultiSelect={setSelectedAreaIds}
+                onMultiSelectTests={setSelectedTestIds}
                 onNewArea={handleNewArea}
                 onEditArea={(id) => setTreeSelection({ type: 'area', id })}
                 onDeleteArea={setDeleteAreaId}

@@ -17,8 +17,6 @@ Build a skill to find startupideas and test them, provide testing feedback
 Welcome email, follow-up
 Google verification for gsheets
 **Self-test**
-Chat agent for website
-Lastest - verification is the final frontier for ai development
 Default ai, openrouter test
 mcp-oauth flow
 https://www.chromatic.com/start comp test?
@@ -82,8 +80,7 @@ Re-fetch search volume, CPC & competition from DataForSEO
 buy a newsletter substack twitter: duuce.com newsletter investor
 AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                         
-"tyű" - sanyi                          
+  work? AI testing or Agentic testing?                           
 ## commands
 ## ourmotto
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.
@@ -98,21 +95,4 @@ SecurePass123
 
 
 ## Quotes:
-
-Quirky_Research_949
-OP
-Great idea, and I like that it’s open source. That said, I found the design a bit confusing. It took me more than a couple of minutes to understand what the project does. You might want to rethink the design to make the value clearer.
-
-
-hiten1818726363
-OP
-Profile Badge for the Achievement Top 1% Commenter Top 1% Commenter
-Thats just crazy ui bro. And concept is good too. It think you should add some video representation on how it works.
-
-LS
-Wed, May 6, 2026 at 08:58 AM
-Overall, the app feels pretty polished and thoughtfully designed. The onboarding was easy to follow, and I liked that the recorder automatically replayed the test after saving — that made the flow feel smooth and fast. The tooltips during recording were also genuinely helpful without being annoying. The biggest friction for me was needing to connect GitHub before getting much real value from the product. As someone just wanting to quickly test a URL, it felt a bit limiting because a lot of features seem blocked until a repo is connected. The recording experience itself worked well for the most part, although I noticed some clicks inside the embedded browser didn’t always trigger navigation correctly. Other than that, the UI is clean, defaults make sense, and the overall experience feels solid.
-
-Tested by Chaitnaya Bhagat
-Wed, May 6, 2026 at 06:13 AM
-Love your app, the vibe is really cool and the name is catchy too. you have too many things going on in your project, so focus your attention functionalities more and you have way too many settings options to choose from 😭
+/home/ewyct/dev/lastest-quotes-website.md 
