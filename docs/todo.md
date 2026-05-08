@@ -10,6 +10,8 @@ Teardown
 triage
 Create modes
 Openrouter agent sdk parity
+demo-mode, user-stories,   
+multi-layer-comparison design-testing-framework
 ## bugs
 ## features
 Demo mode - test without registration

@@ -24,7 +24,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Code2, Lock, AlertTriangle } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -44,9 +44,9 @@ function CollapsibleSection({
 }) {
   if (!enabled) return <>{children}</>;
   return (
-    <Collapsible defaultOpen>
+    <Collapsible defaultOpen className="border rounded-md bg-card">
       <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+        <Button variant="ghost" className="w-full justify-between px-3 py-2 h-auto rounded-md rounded-b-none">
           <div className="flex items-center gap-2">
             <Icon className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium">{title}</span>
@@ -54,7 +54,7 @@ function CollapsibleSection({
           <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-4 pt-2 pl-2">
+      <CollapsibleContent className="space-y-4 px-3 pb-3 pt-1">
         {children}
       </CollapsibleContent>
     </Collapsible>
@@ -528,173 +528,6 @@ export function PlaywrightSettingsCard({
             </div>
           </div>
         </div>
-      </CollapsibleSection>
-
-      {/* Capture */}
-      <CollapsibleSection title="Capture" icon={Camera} enabled={!compact}>
-        <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          {/* Video Recording */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Video className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Video Recording</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Record test runs as WebM video for playback
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
-          </div>
-
-          {/* DOM Diff */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">DOM Diff</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Compare DOM snapshots and overlay added/removed/changed elements on screenshots
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableDomDiff} onCheckedChange={setEnableDomDiff} />
-          </div>
-
-          {/* Accessibility Checks */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Accessibility className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Accessibility Checks</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Run WCAG 2.2 AA compliance checks with axe-core
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
-          </div>
-
-          {/* Network Capture */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Network Capture</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Record every HTTP request and response during the test for inspection (Wireshark-style monitoring)
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* Permissions */}
-      <CollapsibleSection title="Permissions" icon={Lock} enabled={!compact}>
-        <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          {/* Accept Any Certificate */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Accept Any Certificate</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Ignore HTTPS/SSL certificate errors when testing external sites
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
-          </div>
-
-          {/* Clipboard Access */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ClipboardCopy className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Clipboard Access</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Grant clipboard read/write permissions for copy/paste tests
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={grantClipboardAccess} onCheckedChange={setGrantClipboardAccess} />
-          </div>
-
-          {/* Accept Downloads */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Download className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Accept Downloads</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Allow file downloads during tests for export verification
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* Errors & Network */}
-      <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
-        <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Network Error Mode</Label>
-            <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore network errors</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">Ignore External Network Errors</Label>
-              <p className="text-xs text-muted-foreground">
-                Skip errors from domains other than the target URL
-              </p>
-            </div>
-            <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Console Error Mode</Label>
-            <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on console errors</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore console errors</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </CollapsibleSection>
-
       {/* Advanced Stabilization Settings */}
       {!compact && (
         <Collapsible open={stabilizationOpen} onOpenChange={setStabilizationOpen}>
@@ -1191,6 +1024,157 @@ export function PlaywrightSettingsCard({
           </CollapsibleContent>
         </Collapsible>
       )}
+
+      </CollapsibleSection>
+
+      {/* Capture */}
+      <CollapsibleSection title="Capture" icon={Camera} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Video Recording */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Video className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Video Recording</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Record test runs as WebM video for playback
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
+          </div>
+
+          {/* Accessibility Checks */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Accessibility className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accessibility Checks</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Run WCAG 2.2 AA compliance checks with axe-core
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
+          </div>
+
+          {/* Network Capture */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Network Capture</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Record every HTTP request and response during the test for inspection (Wireshark-style monitoring)
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* Permissions */}
+      <CollapsibleSection title="Permissions" icon={Lock} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          {/* Accept Any Certificate */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accept Any Certificate</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Ignore HTTPS/SSL certificate errors when testing external sites
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={acceptAnyCertificate} onCheckedChange={setAcceptAnyCertificate} />
+          </div>
+
+          {/* Clipboard Access */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardCopy className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Clipboard Access</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Grant clipboard read/write permissions for copy/paste tests
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={grantClipboardAccess} onCheckedChange={setGrantClipboardAccess} />
+          </div>
+
+          {/* Accept Downloads */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Download className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Accept Downloads</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Allow file downloads during tests for export verification
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={acceptDownloads} onCheckedChange={setAcceptDownloads} />
+          </div>
+        </div>
+      </CollapsibleSection>
+
+      {/* Errors & Network */}
+      <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
+        <div className={compact ? 'space-y-2' : 'space-y-4'}>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Network Error Mode</Label>
+            <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
+                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                <SelectItem value="ignore">Ignore network errors</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">Ignore External Network Errors</Label>
+              <p className="text-xs text-muted-foreground">
+                Skip errors from domains other than the target URL
+              </p>
+            </div>
+            <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Console Error Mode</Label>
+            <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fail">Fail test on console errors</SelectItem>
+                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
+                <SelectItem value="ignore">Ignore console errors</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CollapsibleSection>
 
       {/* Browser Settings */}
       <CollapsibleSection title="Browser & Viewport" icon={Globe} enabled={!compact}>

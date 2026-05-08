@@ -6,31 +6,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Settings as SettingsIcon,
   Plug,
-  GitBranch,
-  Image as ImageIcon,
   TestTube,
   Bot,
-  Bell,
-  Users,
-  AlertTriangle,
+  User,
 } from 'lucide-react';
 
 export type SettingsTabKey =
   | 'general'
   | 'integrations'
-  | 'cicd'
-  | 'diff'
-  | 'playwright'
+  | 'testing'
   | 'ai'
-  | 'notifications'
-  | 'team'
   | 'account';
 
 export interface SettingsTabsProps {
   tabs: Array<{
     value: SettingsTabKey;
     label: string;
-    /** Optional: hide the tab entirely (e.g., team tab for non-admins) */
+    /** Optional: hide the tab entirely (e.g., account tab when no user) */
     hidden?: boolean;
     content: ReactNode;
   }>;
@@ -39,49 +31,42 @@ export interface SettingsTabsProps {
 
 // Maps the legacy section/highlight ids to the tab they now live in.
 const SECTION_TO_TAB: Record<string, SettingsTabKey> = {
+  repository: 'general',
+  features: 'general',
+  about: 'general',
   github: 'integrations',
   gitlab: 'integrations',
   'google-sheets': 'integrations',
-  repository: 'general',
-  features: 'general',
-  storage: 'general',
-  about: 'general',
-  environment: 'general',
-  schedules: 'cicd',
-  'github-actions': 'cicd',
-  'gitlab-pipelines': 'cicd',
-  'diff-sensitivity': 'diff',
-  playwright: 'playwright',
+  schedules: 'integrations',
+  'github-actions': 'integrations',
+  'gitlab-pipelines': 'integrations',
+  cicd: 'integrations',
+  'diff-sensitivity': 'testing',
+  diff: 'testing',
+  playwright: 'testing',
   'ai-settings': 'ai',
   ai: 'ai',
   'ai-logs': 'ai',
-  'email-preferences': 'notifications',
-  notifications: 'notifications',
-  team: 'team',
-  runners: 'team',
-  'api-tokens': 'team',
-  'test-migration': 'team',
+  'ban-ai': 'ai',
+  'email-preferences': 'account',
+  notifications: 'account',
+  team: 'account',
+  storage: 'account',
+  runners: 'account',
+  'api-tokens': 'account',
+  'test-migration': 'account',
   'danger-zone': 'account',
 };
 
 const TAB_ICONS: Record<SettingsTabKey, typeof SettingsIcon> = {
   general: SettingsIcon,
   integrations: Plug,
-  cicd: GitBranch,
-  diff: ImageIcon,
-  playwright: TestTube,
+  testing: TestTube,
   ai: Bot,
-  notifications: Bell,
-  team: Users,
-  account: AlertTriangle,
+  account: User,
 };
 
-// Visual groups for the tab strip — separators are drawn between groups.
-const TAB_GROUPS: SettingsTabKey[][] = [
-  ['general', 'integrations', 'cicd'],
-  ['diff', 'playwright', 'ai'],
-  ['notifications', 'team', 'account'],
-];
+const TAB_ORDER: SettingsTabKey[] = ['general', 'integrations', 'testing', 'ai', 'account'];
 
 function readInitialTab(defaultValue: SettingsTabKey): SettingsTabKey {
   if (typeof window === 'undefined') return defaultValue;
@@ -96,17 +81,7 @@ function readInitialTab(defaultValue: SettingsTabKey): SettingsTabKey {
 }
 
 function isTabKey(value: string): value is SettingsTabKey {
-  return [
-    'general',
-    'integrations',
-    'cicd',
-    'diff',
-    'playwright',
-    'ai',
-    'notifications',
-    'team',
-    'account',
-  ].includes(value);
+  return TAB_ORDER.includes(value as SettingsTabKey);
 }
 
 export function SettingsTabs({ tabs, defaultValue = 'general' }: SettingsTabsProps) {
@@ -137,38 +112,20 @@ export function SettingsTabs({ tabs, defaultValue = 'general' }: SettingsTabsPro
     return () => window.removeEventListener('lastest:settings-tab', onSwitch);
   }, []);
 
-  const visibleByKey = new Map(visible.map((t) => [t.value, t] as const));
-
   return (
     <Tabs value={active} onValueChange={(v) => setActive(v as SettingsTabKey)} className="gap-6">
-      <TabsList className="h-auto flex-wrap justify-start gap-1 bg-muted/60 p-1">
-        {TAB_GROUPS.map((group, groupIdx) => {
-          const groupTabs = group
-            .map((key) => visibleByKey.get(key))
-            .filter((t): t is NonNullable<typeof t> => Boolean(t));
-          if (groupTabs.length === 0) return null;
+      <TabsList className="h-11 w-full max-w-5xl p-1 bg-white dark:bg-zinc-950 border">
+        {visible.map((tab) => {
+          const Icon = TAB_ICONS[tab.value];
           return (
-            <div key={groupIdx} className="flex items-center gap-1">
-              {groupIdx > 0 && (
-                <span
-                  aria-hidden
-                  className="mx-1 h-5 w-px bg-border/60"
-                />
-              )}
-              {groupTabs.map((tab) => {
-                const Icon = TAB_ICONS[tab.value];
-                return (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    className="data-[state=active]:bg-background data-[state=active]:shadow-sm px-3 py-1.5"
-                  >
-                    <Icon className="size-3.5" />
-                    <span>{tab.label}</span>
-                  </TabsTrigger>
-                );
-              })}
-            </div>
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
+            >
+              <Icon />
+              <span>{tab.label}</span>
+            </TabsTrigger>
           );
         })}
       </TabsList>

@@ -7,15 +7,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { saveDiffSensitivitySettings, resetDiffSensitivitySettings } from '@/server/actions/settings';
+import { saveDiffSensitivitySettings, resetDiffSensitivitySettings, setPlaywrightDomDiff } from '@/server/actions/settings';
 import type { DiffSensitivitySettings, DiffEngineType, TextDetectionGranularity, RegionDetectionMode } from '@/lib/db/schema';
 import { DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Eye, Zap, Brain, Sparkles, Type, FileText } from 'lucide-react';
+import { Loader2, RotateCcw, Eye, Zap, Brain, Sparkles, Type, FileText, Code2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface DiffSensitivityCardProps {
   settings: DiffSensitivitySettings;
   repositoryId?: string | null;
+  domDiffEnabled?: boolean;
 }
 
 const ENGINE_INFO: Record<DiffEngineType, { label: string; description: string; icon: typeof Zap; speed: string; accuracy: string }> = {
@@ -45,8 +46,25 @@ const ENGINE_INFO: Record<DiffEngineType, { label: string; description: string; 
 export function DiffSensitivityCard({
   settings,
   repositoryId,
+  domDiffEnabled: domDiffEnabledProp = false,
 }: DiffSensitivityCardProps) {
   const [isPending, startTransition] = useTransition();
+  const [domDiffEnabled, setDomDiffEnabled] = useState(domDiffEnabledProp);
+  useEffect(() => {
+    setDomDiffEnabled(domDiffEnabledProp);
+  }, [domDiffEnabledProp]);
+  const handleDomDiffToggle = (checked: boolean) => {
+    setDomDiffEnabled(checked);
+    startTransition(async () => {
+      try {
+        await setPlaywrightDomDiff(repositoryId ?? null, checked);
+        toast.success(checked ? 'DOM Diff enabled' : 'DOM Diff disabled');
+      } catch {
+        setDomDiffEnabled(!checked);
+        toast.error('Failed to update DOM Diff');
+      }
+    });
+  };
   const [unchangedThreshold, setUnchangedThreshold] = useState(
     settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold
   );
@@ -540,6 +558,26 @@ export function DiffSensitivityCard({
             <Switch
               checked={textDiffEnabled}
               onCheckedChange={setTextDiffEnabled}
+            />
+          </div>
+        </div>
+
+        {/* DOM Diff */}
+        <div className="space-y-4 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Code2 className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">DOM Diff</Label>
+                <p className="text-xs text-muted-foreground">
+                  Compare DOM snapshots and overlay added/removed/changed elements on screenshots.
+                </p>
+              </div>
+            </div>
+            <Switch
+              checked={domDiffEnabled}
+              onCheckedChange={handleDomDiffToggle}
+              disabled={isPending}
             />
           </div>
         </div>

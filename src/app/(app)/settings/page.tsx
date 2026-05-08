@@ -13,7 +13,6 @@ function GitLabIcon({ className }: { className?: string }) {
   );
 }
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
-import { EnvironmentConfigCard } from '@/components/settings/environment-config-card';
 import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
 import { AISettingsCard } from '@/components/settings/ai-settings-card';
 import { AILogsCard } from '@/components/settings/ai-logs-card';
@@ -76,7 +75,6 @@ export default async function SettingsPage({
     listSystemEmbeddedSessions(),
   ]);
   const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
-  const environmentConfig = await queries.getEnvironmentConfig(selectedRepo?.id);
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
@@ -151,14 +149,6 @@ export default async function SettingsPage({
         </CardContent>
       </Card>
 
-      {/* Environment Config */}
-      <div id="environment">
-        <EnvironmentConfigCard
-          config={environmentConfig}
-          repositoryId={selectedRepo?.id}
-        />
-      </div>
-
       {/* Features */}
       <Card id="features">
         <CardHeader>
@@ -169,7 +159,6 @@ export default async function SettingsPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
-          <BanAiModeToggle enabled={session?.team?.banAiMode ?? false} />
           <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
         </CardContent>
       </Card>
@@ -225,6 +214,13 @@ export default async function SettingsPage({
 
   const integrationsTab = (
     <>
+      {/* Scheduled Runs */}
+      {selectedRepo && (
+        <div id="schedules">
+          <ScheduleManagerCard repositoryId={selectedRepo.id} />
+        </div>
+      )}
+
       {/* GitHub Integration */}
       <Card id="github">
         <CardHeader>
@@ -328,17 +324,6 @@ export default async function SettingsPage({
           repositoryId={selectedRepo?.id}
         />
       </div>
-    </>
-  );
-
-  const cicdTab = (
-    <>
-      {/* Scheduled Runs */}
-      {selectedRepo && (
-        <div id="schedules">
-          <ScheduleManagerCard repositoryId={selectedRepo.id} />
-        </div>
-      )}
 
       {/* GitHub Actions */}
       <div id="github-actions">
@@ -362,17 +347,15 @@ export default async function SettingsPage({
     </>
   );
 
-  const diffTab = (
-    <div id="diff-sensitivity">
-      <DiffSensitivityCard
-        settings={diffSensitivitySettings}
-        repositoryId={selectedRepo?.id}
-      />
-    </div>
-  );
-
-  const playwrightTab = (
+  const testingTab = (
     <>
+      <div id="diff-sensitivity">
+        <DiffSensitivityCard
+          settings={diffSensitivitySettings}
+          repositoryId={selectedRepo?.id}
+          domDiffEnabled={playwrightSettings.enableDomDiff ?? false}
+        />
+      </div>
       {selectedRepo && (
         <Card id="testing-template">
           <CardHeader>
@@ -399,52 +382,51 @@ export default async function SettingsPage({
     </>
   );
 
-  const aiTab = banAiMode ? (
-    <Card>
-      <CardHeader>
-        <CardTitle>AI disabled</CardTitle>
-        <CardDescription>
-          AI features are turned off for this team. Toggle Ban AI Mode in the
-          General tab to re-enable AI settings and logs.
-        </CardDescription>
-      </CardHeader>
-    </Card>
-  ) : (
+  const aiTab = (
     <>
-      <div id="ai-settings">
-        <AISettingsCard
-          settings={aiSettings}
-          repositoryId={selectedRepo?.id}
-        />
-      </div>
+      <Card id="ban-ai">
+        <CardHeader>
+          <CardTitle>AI access</CardTitle>
+          <CardDescription>
+            Disable to hide all AI and GenAI features from this team.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BanAiModeToggle enabled={banAiMode} />
+        </CardContent>
+      </Card>
 
-      <div id="ai-logs">
-        <AILogsCard
-          logs={aiLogs}
-          repositoryId={selectedRepo?.id}
-        />
-      </div>
+      {banAiMode ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>AI disabled</CardTitle>
+            <CardDescription>
+              AI features are turned off for this team. Toggle Ban AI Mode above
+              to re-enable AI settings and logs.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : (
+        <>
+          <div id="ai-settings">
+            <AISettingsCard
+              settings={aiSettings}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
+
+          <div id="ai-logs">
+            <AILogsCard
+              logs={aiLogs}
+              repositoryId={selectedRepo?.id}
+            />
+          </div>
+        </>
+      )}
     </>
   );
 
-  const notificationsTab = (
-    <>
-      <div id="email-preferences">
-        <EmailPreferencesCard />
-      </div>
-
-      <div id="notifications">
-        <NotificationSettingsCard
-          settings={notificationSettings}
-          repositoryId={selectedRepo?.id}
-          hasGithubAccount={!!githubAccount}
-          hasGitlabAccount={!!gitlabAccount}
-        />
-      </div>
-    </>
-  );
-
-  const teamTab = currentUser?.teamId ? (
+  const teamSection = currentUser?.teamId ? (
     <div id="team" className="space-y-6">
       {/* Storage Usage — visible to all team members */}
       {storageUsage && (
@@ -597,7 +579,7 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
     </div>
   ) : null;
 
-  const accountTab = currentUser ? (
+  const dangerZoneSection = currentUser ? (
     <Card id="danger-zone" className="border-destructive/40">
       <CardHeader>
         <CardTitle className="text-destructive">Danger Zone</CardTitle>
@@ -657,13 +639,30 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
             tabs={[
               { value: 'general', label: 'General', content: generalTab },
               { value: 'integrations', label: 'Integrations', content: integrationsTab },
-              { value: 'cicd', label: 'CI/CD', content: cicdTab },
-              { value: 'diff', label: 'Diff', content: diffTab },
-              { value: 'playwright', label: 'Playwright', content: playwrightTab },
+              { value: 'testing', label: 'Testing', content: testingTab },
               { value: 'ai', label: 'AI', content: aiTab },
-              { value: 'notifications', label: 'Notifications', content: notificationsTab },
-              { value: 'team', label: 'Team', hidden: !teamTab, content: teamTab },
-              { value: 'account', label: 'Account', hidden: !accountTab, content: accountTab },
+              {
+                value: 'account',
+                label: 'Account',
+                hidden: !currentUser,
+                content: (
+                  <>
+                    <div id="email-preferences">
+                      <EmailPreferencesCard />
+                    </div>
+                    <div id="notifications">
+                      <NotificationSettingsCard
+                        settings={notificationSettings}
+                        repositoryId={selectedRepo?.id}
+                        hasGithubAccount={!!githubAccount}
+                        hasGitlabAccount={!!gitlabAccount}
+                      />
+                    </div>
+                    {teamSection}
+                    {dangerZoneSection}
+                  </>
+                ),
+              },
             ]}
           />
         </div>

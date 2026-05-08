@@ -39,6 +39,22 @@ interface AreaStoriesPanelProps {
   coverageByAcId: Record<string, number>;
 }
 
+/**
+ * Compose the legacy structured fields into the freeform body shown in the editor.
+ * Lets pre-existing stories (and imports that still write the legacy triple) render
+ * losslessly in the new single-textarea UI.
+ */
+function composeBody(story: Pick<UserStory, 'asA' | 'iWant' | 'soThat' | 'description'>): string {
+  return [
+    story.asA ? `As a ${story.asA}` : null,
+    story.iWant ? `I want to ${story.iWant}` : null,
+    story.soThat ? `So that ${story.soThat}` : null,
+    story.description ?? null,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function AreaStoriesPanel({
   repositoryId,
   areaId,
@@ -49,9 +65,7 @@ export function AreaStoriesPanel({
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newAsA, setNewAsA] = useState('');
-  const [newIWant, setNewIWant] = useState('');
-  const [newSoThat, setNewSoThat] = useState('');
+  const [newBody, setNewBody] = useState('');
   const [pending, startTransition] = useTransition();
 
   const handleCreate = async () => {
@@ -65,11 +79,9 @@ export function AreaStoriesPanel({
         repositoryId,
         functionalAreaId: areaId,
         title: newTitle,
-        asA: newAsA || undefined,
-        iWant: newIWant || undefined,
-        soThat: newSoThat || undefined,
+        description: newBody || undefined,
       });
-      setNewTitle(''); setNewAsA(''); setNewIWant(''); setNewSoThat('');
+      setNewTitle(''); setNewBody('');
       toast.success('User story created');
       router.refresh();
     } catch (err) {
@@ -116,23 +128,13 @@ export function AreaStoriesPanel({
           onChange={e => setNewTitle(e.target.value)}
           placeholder="Story title (e.g. &quot;Login with email&quot;)"
         />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <Input
-            value={newAsA}
-            onChange={e => setNewAsA(e.target.value)}
-            placeholder="As a … (role)"
-          />
-          <Input
-            value={newIWant}
-            onChange={e => setNewIWant(e.target.value)}
-            placeholder="I want to … (capability)"
-          />
-          <Input
-            value={newSoThat}
-            onChange={e => setNewSoThat(e.target.value)}
-            placeholder="So that … (benefit)"
-          />
-        </div>
+        <Textarea
+          value={newBody}
+          onChange={e => setNewBody(e.target.value)}
+          placeholder={`Story body — free-form. Examples:\n\nAs a returning user\nI want to log in with email\nSo that I can access my dashboard\n\n…or paste a spec excerpt, PRD section, or notes.`}
+          rows={5}
+          className="font-mono text-sm"
+        />
         <div className="flex justify-end">
           <Button onClick={handleCreate} disabled={creating || pending} size="sm">
             {creating ? (
@@ -159,33 +161,29 @@ function StoryEditor({
   onChanged: () => void;
   areaId: string;
 }) {
+  const initialBody = composeBody(story);
   const [title, setTitle] = useState(story.title);
-  const [asA, setAsA] = useState(story.asA ?? '');
-  const [iWant, setIWant] = useState(story.iWant ?? '');
-  const [soThat, setSoThat] = useState(story.soThat ?? '');
-  const [description, setDescription] = useState(story.description ?? '');
+  const [body, setBody] = useState(initialBody);
   const [newAcText, setNewAcText] = useState('');
   const [savingFields, setSavingFields] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatingPlaceholders, setGeneratingPlaceholders] = useState(false);
 
   const acs = (story.acceptanceCriteria ?? []) as AcceptanceCriterion[];
-  const dirty =
-    title !== story.title ||
-    asA !== (story.asA ?? '') ||
-    iWant !== (story.iWant ?? '') ||
-    soThat !== (story.soThat ?? '') ||
-    description !== (story.description ?? '');
+  const dirty = title !== story.title || body !== initialBody;
 
   const saveFields = async () => {
     setSavingFields(true);
     try {
+      // Collapse the legacy as-a / i-want / so-that triple into the freeform body
+      // (description). The plan prompt and import flow already tolerate null on
+      // those fields, so this is the single source of truth going forward.
       await updateUserStoryFields(story.id, {
         title,
-        asA: asA || null,
-        iWant: iWant || null,
-        soThat: soThat || null,
-        description: description || null,
+        asA: null,
+        iWant: null,
+        soThat: null,
+        description: body || null,
       });
       toast.success('Story saved');
       onChanged();
@@ -255,28 +253,12 @@ function StoryEditor({
             onChange={e => setTitle(e.target.value)}
             className="text-base font-semibold"
           />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <Input
-              value={asA}
-              onChange={e => setAsA(e.target.value)}
-              placeholder="As a …"
-            />
-            <Input
-              value={iWant}
-              onChange={e => setIWant(e.target.value)}
-              placeholder="I want to …"
-            />
-            <Input
-              value={soThat}
-              onChange={e => setSoThat(e.target.value)}
-              placeholder="So that …"
-            />
-          </div>
           <Textarea
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="Optional product context / spec excerpt"
-            rows={2}
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            placeholder={`Story body — free-form. Examples:\n\nAs a returning user\nI want to log in with email\nSo that I can access my dashboard\n\n…or paste a spec excerpt, PRD section, or notes.`}
+            rows={6}
+            className="font-mono text-sm"
           />
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -295,10 +277,7 @@ function StoryEditor({
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => {
             setTitle(story.title);
-            setAsA(story.asA ?? '');
-            setIWant(story.iWant ?? '');
-            setSoThat(story.soThat ?? '');
-            setDescription(story.description ?? '');
+            setBody(initialBody);
           }}>Discard</Button>
           <Button size="sm" onClick={saveFields} disabled={savingFields}>
             {savingFields ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Check className="h-3.5 w-3.5 mr-1.5" />}
