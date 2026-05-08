@@ -47,9 +47,8 @@ DOM test repair
   3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
 ## marketing
-screenshot diff tool
-    - /integrations/<github|gitlab|playwright|...> pages (one per integration)
-    -     - Open dataset: common UI flake patterns from anonymized runs                 
+* gh issue for maintained repos w lastest public link
+* screenshot diff tool      
     -         - Free WCAG 2.2 AA scorecard generator (you already have a11y scoring)     
 why is software not just a play button?
 what's between agents and saas? obeservability, human in the loop
