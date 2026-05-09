@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lastest.cloud/datasets/flake-patterns/v1/schema.json",
+  "title": "Lastest Flake Patterns Dataset",
+  "description": "Three JSONL record types plus a summary.json. Each JSONL file holds one record per line. All identifiers are HMAC-SHA256-hashed with a per-export salt; raw URLs, repo names, git refs, screenshot paths, console output, and assertion text never leave the source DB.",
+  "type": "object",
+  "$defs": {
+    "flake_run": {
+      "type": "object",
+      "description": "One record per non-retry test_results row whose team passes the k-anonymity floor (≥50 runs).",
+      "required": ["run_id_hash", "test_id_hash", "team_id_hash", "status", "is_flaky", "source"],
+      "properties": {
+        "run_id_hash": { "type": "string", "description": "HMAC-SHA256 of test_results.id, truncated to 16 hex chars." },
+        "test_id_hash": { "type": ["string", "null"] },
+        "team_id_hash": { "type": "string" },
+        "status": { "enum": ["passed", "failed", "skipped", null] },
+        "is_flaky": { "type": "boolean", "description": "true when the same test passed on a subsequent retry within the same run." },
+        "retry_count": { "type": "integer", "description": "Number of retry rows that reference this row as their original." },
+        "duration_ms": { "type": ["integer", "null"] },
+        "duration_bucket": { "enum": ["<1s", "1-5s", "5-15s", "15-60s", ">60s", "unknown"] },
+        "total_steps": { "type": "integer" },
+        "last_reached_step": { "type": "integer" },
+        "step_completion_pct": { "type": ["integer", "null"], "description": "0–100. Null if total_steps is 0." },
+        "triage_class": { "enum": ["real_regression", "flaky_test", "environment_issue", "test_maintenance", "unknown", null] },
+        "triage_confidence": { "type": ["number", "null"] },
+        "error_signature": { "type": ["string", "null"], "description": "Scrubbed error message: URLs/hosts/IPs/UUIDs/emails/quoted strings/long hashes replaced with placeholders, then truncated to 500 chars." },
+        "error_category": { "enum": ["timeout", "selector_not_found", "assertion", "network", "navigation", "js_error", "browser_lifecycle", "other", null] },
+        "console_error_count": { "type": "integer" },
+        "soft_error_count": { "type": "integer" },
+        "assertion_failure_count": { "type": "integer" },
+        "browser": { "type": ["string", "null"] },
+        "execution_mode": { "enum": ["procedural", "agent"] },
+        "date_bucket": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}$" },
+        "source": { "enum": ["local", "olares"] }
+      }
+    },
+    "visual_diff": {
+      "type": "object",
+      "description": "One record per visual_diffs row whose team passes the k-anonymity floor.",
+      "required": ["diff_id_hash", "test_id_hash", "team_id_hash", "classification", "status", "source"],
+      "properties": {
+        "diff_id_hash": { "type": "string" },
+        "test_id_hash": { "type": ["string", "null"] },
+        "team_id_hash": { "type": "string" },
+        "classification": { "enum": ["unchanged", "flaky", "changed", null] },
+        "ai_classification": { "enum": ["insignificant", "meaningful", "noise", null] },
+        "ai_confidence": { "type": ["number", "null"] },
+        "ai_recommendation": { "enum": ["approve", "review", "flag", null] },
+        "pixel_difference": { "type": "integer" },
+        "percentage_difference": { "type": ["number", "null"] },
+        "changed_region_count": { "type": ["integer", "null"] },
+        "page_shift_detected": { "type": ["boolean", "null"] },
+        "text_region_diff_pct": { "type": ["number", "null"] },
+        "non_text_region_diff_pct": { "type": ["number", "null"] },
+        "dom_diff_present": { "type": "boolean" },
+        "status": { "enum": ["pending", "approved", "rejected", "auto_approved"] },
+        "browser": { "type": ["string", "null"] },
+        "date_bucket": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}$" },
+        "source": { "enum": ["local", "olares"] }
+      }
+    },
+    "selector_fragility": {
+      "type": "object",
+      "description": "One record per selector_stats row whose owning team passes the k-anonymity floor. Selector values are never exported — only the kind.",
+      "required": ["selector_kind", "success_count", "failure_count", "total_attempts", "source"],
+      "properties": {
+        "selector_kind": { "enum": ["testid", "role", "text", "css", "xpath", "visual", "other"] },
+        "success_count": { "type": "integer" },
+        "failure_count": { "type": "integer" },
+        "total_attempts": { "type": "integer" },
+        "failure_rate": { "type": "number", "description": "failures / attempts, rounded to 3 decimals." },
+        "avg_response_time_ms": { "type": ["integer", "null"] },
+        "test_id_hash": { "type": ["string", "null"] },
+        "team_id_hash": { "type": "string" },
+        "source": { "enum": ["local", "olares"] }
+      }
+    }
+  }
+}
