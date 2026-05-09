@@ -713,6 +713,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                             <Bug className="h-4 w-4 mr-2" />
                             Debug
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/tests/${test.id}/compare-runs`)}>
+                            <History className="h-4 w-4 mr-2" />
+                            Compare runs
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
