@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { VideoPlayer } from '@/components/video-player';
-import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, GitCompareArrows, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -678,12 +678,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   <>
                     <Button
                       variant="outline"
+                      size="icon"
                       onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
                       disabled={results.length < 2}
-                      title={results.length < 2 ? 'Needs at least two runs' : 'Diff two existing runs without rebuilding'}
+                      title={results.length < 2 ? 'Needs at least two runs to compare' : 'Diff two existing runs without rebuilding'}
+                      aria-label="Compare runs"
                     >
-                      <History className="h-4 w-4 mr-2" />
-                      Compare runs
+                      <GitCompareArrows className="h-4 w-4" />
                     </Button>
                     <div className="flex">
                       <Button
@@ -723,7 +724,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                             Debug
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => router.push(`/tests/${test.id}/compare-runs`)}>
-                            <History className="h-4 w-4 mr-2" />
+                            <GitCompareArrows className="h-4 w-4 mr-2" />
                             Compare runs
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -1297,23 +1298,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
-                disabled={results.length < 2}
-              >
-                <History className="h-3.5 w-3.5 mr-1.5" />
-                Compare runs
-              </Button>
-            </div>
             <ScreenshotTimeline
               testId={test.id}
               repositoryId={repositoryId ?? null}
               screenshotGroups={screenshotGroups}
               plannedScreenshots={plannedScreenshots}
               onUpdate={() => router.refresh()}
+              compareRunsHref={results.length >= 2 ? `/tests/${test.id}/compare-runs` : null}
             />
           </TabsContent>
 
@@ -1331,7 +1322,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
                   disabled={results.length < 2}
                 >
-                  <History className="h-3.5 w-3.5 mr-1.5" />
+                  <GitCompareArrows className="h-3.5 w-3.5 mr-1.5" />
                   Compare runs
                 </Button>
               </CardHeader>

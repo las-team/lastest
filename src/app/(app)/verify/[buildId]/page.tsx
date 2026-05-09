@@ -7,13 +7,12 @@ import {
   getRepository,
   getFunctionalAreasByRepo,
   getTestsByRepo,
-  countStepComparisonVerdicts,
   getLayerFeedbackByBuild,
 } from '@/lib/db/queries';
 import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
 import { computeChangeMap } from '@/server/actions/change-map';
-import { VerifyBuildClient } from './verify-build-client';
+import { BoardFocusClient } from './board-focus-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,24 +40,23 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
     changeMap = await computeChangeMap(buildId).catch(() => null);
   }
 
-  const [stepComparisons, areas, tests, verdictCounts, layerFeedback] = await Promise.all([
+  const [stepComparisons, areas, tests, layerFeedback] = await Promise.all([
     getStepComparisonsByBuild(buildId),
     repo ? getFunctionalAreasByRepo(repo.id) : Promise.resolve([]),
     repo ? getTestsByRepo(repo.id) : Promise.resolve([]),
-    countStepComparisonVerdicts(buildId),
     getLayerFeedbackByBuild(buildId),
   ]);
 
   return (
-    <VerifyBuildClient
+    <BoardFocusClient
       build={build}
       branch={testRun?.gitBranch ?? null}
       changeMap={changeMap}
       stepComparisons={stepComparisons}
-      areas={areas.map((a) => ({ id: a.id, name: a.name, parentId: a.parentId }))}
+      areas={areas.map((a) => ({ id: a.id, name: a.name }))}
       tests={tests.map((t) => ({ id: t.id, name: t.name, functionalAreaId: t.functionalAreaId }))}
-      verdictCounts={verdictCounts}
       layerFeedback={layerFeedback}
+      repositoryId={repo?.id ?? null}
     />
   );
 }

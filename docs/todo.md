@@ -4,43 +4,44 @@ Videos explaining use
     record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
+Build a skill to find startupideas and test them, provide testing feedback
+Welcome email, follow-up
+https://www.chromatic.com/start comp test?
+
 ## test
 VS Code extension
+  disconnects often
+  point to cloud by default
+  only show repos with tests
+  output should be clear
+  replace icon from lab in sidebar to lastest singlecolor
 Teardown
 triage
 Create modes
 Openrouter agent sdk parity
-demo-mode, user-stories,   
-multi-layer-comparison design-testing-framework
+demo-mode
+multi-layer-comparison
+design-testing-framework
+
 ## bugs
+Clear up inspect and test comparison
 ## features
-Demo mode - test without registration
-Build a skill to find startupideas and test them, provide testing feedback
-Welcome email, follow-up
+Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**
 Default ai, openrouter test
 mcp-oauth flow
-https://www.chromatic.com/start comp test?
 ## ideas
-Auto-feedback to resolve loop
-check tabs and enters
-Test governance /        │ AI generates tests fast → need redundancy         │ Medium — extend coverage analytics │
-  │ explosion detection      │ detection, coverage-weighted pruning                    
-  Looped execution         │ Plan → generate → run → heal cycles without       │ Low — already have all pieces,     │
-  │ (--loop)       
+check tabs and enters and ctr+enters
+Heal on loop/schedule
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
 The premium QA agent
 special prompting for ai diff analysis either by user or by branch code change 
 if a pr merge happens, update test manifest with new functions - show as new, prompt test generation
 Test coverage assessment and recreation based on existing test set  ~/.claude/plans/shimmying-conjuring-sun.md
-Content comparison - compare text in 2 setups
 Component specific testing
 Figma plugin
 Sitemap -flow
-Formal verification of code?
-Approve reject changes or create ticket -> gh issue, jira, linear
-Expand into not just visual testing
 DOM test repair
   1. During the passing run: record a full interaction trace — DOM snapshots at each step, network requests, console logs                     
   2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
@@ -48,42 +49,14 @@ DOM test repair
   role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
 ## marketing
 * gh issue for maintained repos w lastest public link
-* screenshot diff tool      
-    -         - Free WCAG 2.2 AA scorecard generator (you already have a11y scoring)     
-why is software not just a play button?
-what's between agents and saas? obeservability, human in the loop
-Do you trust ai? I dont human in the loop
-How do you make sure you are testing what's defined by BAs? Spec driven development, expected figma image upload
-How do you make sure ai testing costs are not skyrocketing? Test replay w/ ai
-How do you make AI test accurate? MCP
-Tests breaking? dynamic selectors, ai fixes, debug mode
-PW tests stuck? Run login n setup scripts, source data from sheets.
-How good is you test coverage as a PO on your latest PR? Areas, calcs
-Selectors fail? Fallback logic, efficiency calc and propsals
-Canvas drawing? Coordinate saves
-Animations? Freeze
-Variables? hide them
-Differences? pixelcompare
-Env setup - feed data
-Compare branches
-AI evaluation
-Test runs taking forever? Parallel run, smart run based on code diff 
-Screenshot comparison not reliable? page shift? text comparison?
-Auto-run tests on PRs?
-Video recording
-Run online or on your pc?
-Pont erre van szükségünk
-Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre
-
-Re-fetch search volume, CPC & competition from DataForSEO
-
-### marketing ideas
-buy a newsletter substack twitter: duuce.com newsletter investor
-AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
-Gamifying QA - Could you beat an AI tester? How to get AI testing agents to       
-  work? AI testing or Agentic testing?                           
+* test: screenshot diff tool      
+* Quote, Sanyi: "Pont erre van szükségünk. Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre"
+* Re-fetch search volume, CPC & competition from DataForSEO
+* test: AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
 ## commands
 ## ourmotto
+why is software not just a play button?
+
 Real constraints: if you dont use GH, this tool is not optimized for you - ping is with your stack and we will accommodate it.
 We hate manual testing
 Exp testing is kinda ok, at least you learn how your software works
@@ -94,6 +67,3 @@ Exp testing is kinda ok, at least you learn how your software works
 testuser1771664821751@example.com
 SecurePass123
 
-
-## Quotes:
-/home/ewyct/dev/lastest-quotes-website.md 

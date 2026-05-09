@@ -1,21 +1,15 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import {
-  getSelectedRepository,
-  getLastBuildByBranch,
-  getBuildChangeMap,
-  countStepComparisonVerdicts,
-} from '@/lib/db/queries';
-import { getBuildsByRepo } from '@/server/actions/builds';
+import { getSelectedRepository, getLastBuildByBranch } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
-import { VerifyDashboardClient } from './verify-dashboard-client';
+import './verify-design.css';
 
 export const dynamic = 'force-dynamic';
 
 export default async function VerifyPage() {
   const session = await getCurrentSession();
   if (!isVerifyPhaseEnabled(session?.team)) {
-    // Feature flag off — keep /run as the primary surface during rollout.
     redirect('/run');
   }
 
@@ -24,44 +18,42 @@ export default async function VerifyPage() {
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
-    return <VerifyDashboardClient repositoryId={null} activeBranch={null} buildLanes={null} baselineBuild={null} />;
+    return (
+      <EmptyState
+        title="Select a repository"
+        description="Pick a repo from the sidebar to start verifying changes."
+      />
+    );
   }
 
   const activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
-  const [builds, baselineBuild] = await Promise.all([
-    getBuildsByRepo(selectedRepo.id, 30),
-    getLastBuildByBranch(selectedRepo.id, activeBranch),
-  ]);
+  const latestBuild = await getLastBuildByBranch(selectedRepo.id, activeBranch);
 
-  // Pull verdict counts + change-map summaries in parallel for the cards.
-  const enriched = await Promise.all(builds.map(async (b) => {
-    const [verdictCounts, changeMap] = await Promise.all([
-      countStepComparisonVerdicts(b.id).catch(() => ({ green: 0, yellow: 0, red: 0 })),
-      getBuildChangeMap(b.id).catch(() => null),
-    ]);
-    return {
-      build: b,
-      verdictCounts,
-      changeMap,
-    };
-  }));
+  if (!latestBuild) {
+    return (
+      <EmptyState
+        title="No builds yet"
+        description={`No builds on ${activeBranch}. Run tests from the Builds page to capture a baseline.`}
+        action={
+          <Link href="/builds" className="v-btn primary" style={{ textDecoration: 'none' }}>
+            Open Builds
+          </Link>
+        }
+      />
+    );
+  }
 
-  // Three lanes: awaiting / in-progress / verified.
-  const buildLanes = {
-    awaiting: enriched.filter((e) =>
-      e.build.overallStatus === 'review_required' ||
-      e.build.overallStatus === 'has_todos'
-    ),
-    inProgress: enriched.filter((e) => e.build.overallStatus === 'blocked'),
-    verified: enriched.filter((e) => e.build.overallStatus === 'safe_to_merge').slice(0, 50),
-  };
+  redirect(`/verify/${latestBuild.id}`);
+}
 
+function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
   return (
-    <VerifyDashboardClient
-      repositoryId={selectedRepo.id}
-      activeBranch={activeBranch}
-      buildLanes={buildLanes}
-      baselineBuild={baselineBuild ?? null}
-    />
+    <div className="verify-page" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--c-soft-2)' }}>
+      <div className="v-card" style={{ padding: 32, maxWidth: 460, textAlign: 'center' }}>
+        <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: 'var(--fg-1)' }}>{title}</h1>
+        <p style={{ fontSize: 14, color: 'var(--fg-2)', marginBottom: action ? 16 : 0 }}>{description}</p>
+        {action}
+      </div>
+    </div>
   );
 }

@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import * as queries from '@/lib/db/queries';
 import { requireTestOwnership, requireTestResultOwnership } from '@/lib/auth/ownership';
-import { generateDiff } from '@/lib/diff/generator';
+import { quickPairDiff } from '@/lib/diff/quick-pair-diff';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 
 export type RunCompareCandidate = {
@@ -193,46 +193,77 @@ export async function compareTwoRuns(
     fs.mkdirSync(STORAGE_DIRS.diffs, { recursive: true });
   }
 
-  const pairs: ScreenshotPair[] = [];
-  for (const key of allKeys) {
-    const a = fromByKey.get(key) ?? null;
-    const b = toByKey.get(key) ?? null;
-    const label = a?.label ?? b?.label ?? key;
+  // Diff every pair in parallel. pixelmatch itself is sync CPU-bound so
+  // there's no true parallelism on a single Node thread, but file reads,
+  // hashing and the cache-hit path all overlap — and once results are
+  // cached on disk subsequent visits are near-instant.
+  const pairs: ScreenshotPair[] = await Promise.all(
+    Array.from(allKeys).map(async (key): Promise<ScreenshotPair> => {
+      const a = fromByKey.get(key) ?? null;
+      const b = toByKey.get(key) ?? null;
+      const label = a?.label ?? b?.label ?? key;
 
-    let diffPath: string | null = null;
-    let pixelDifference: number | null = null;
-    let percentageDifference: number | null = null;
-    let error: string | null = null;
+      if (!a || !b) {
+        return {
+          label,
+          fromPath: a?.urlPath ?? null,
+          toPath: b?.urlPath ?? null,
+          diffPath: null,
+          pixelDifference: null,
+          percentageDifference: null,
+          error: null,
+        };
+      }
 
-    if (a && b) {
       const aFs = urlToFsPath(a.urlPath);
       const bFs = urlToFsPath(b.urlPath);
       if (!aFs || !bFs) {
-        error = 'Screenshot path resolved outside storage root';
-      } else if (!fs.existsSync(aFs) || !fs.existsSync(bFs)) {
-        error = 'Screenshot file missing on disk';
-      } else {
-        try {
-          const result = await generateDiff(aFs, bFs, STORAGE_DIRS.diffs);
-          diffPath = toRelativePath(result.diffImagePath);
-          pixelDifference = result.pixelDifference;
-          percentageDifference = result.percentageDifference;
-        } catch (e) {
-          error = e instanceof Error ? e.message : String(e);
-        }
+        return {
+          label,
+          fromPath: a.urlPath,
+          toPath: b.urlPath,
+          diffPath: null,
+          pixelDifference: null,
+          percentageDifference: null,
+          error: 'Screenshot path resolved outside storage root',
+        };
       }
-    }
+      if (!fs.existsSync(aFs) || !fs.existsSync(bFs)) {
+        return {
+          label,
+          fromPath: a.urlPath,
+          toPath: b.urlPath,
+          diffPath: null,
+          pixelDifference: null,
+          percentageDifference: null,
+          error: 'Screenshot file missing on disk',
+        };
+      }
 
-    pairs.push({
-      label,
-      fromPath: a?.urlPath ?? null,
-      toPath: b?.urlPath ?? null,
-      diffPath,
-      pixelDifference,
-      percentageDifference,
-      error,
-    });
-  }
+      try {
+        const result = await quickPairDiff(aFs, bFs, STORAGE_DIRS.diffs);
+        return {
+          label,
+          fromPath: a.urlPath,
+          toPath: b.urlPath,
+          diffPath: result.diffImagePath ? toRelativePath(result.diffImagePath) : null,
+          pixelDifference: result.pixelDifference,
+          percentageDifference: result.percentageDifference,
+          error: null,
+        };
+      } catch (e) {
+        return {
+          label,
+          fromPath: a.urlPath,
+          toPath: b.urlPath,
+          diffPath: null,
+          pixelDifference: null,
+          percentageDifference: null,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }),
+  );
 
   // Stable order: shots in both runs first (largest diff %), then one-sided.
   pairs.sort((x, y) => {

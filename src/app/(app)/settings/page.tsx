@@ -36,6 +36,7 @@ import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { GamificationToggle } from '@/components/settings/gamification-toggle';
+import { VerifyPhaseToggle } from '@/components/settings/verify-phase-toggle';
 import { GamificationAdminCard } from '@/components/settings/gamification-admin-card';
 import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
 import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
@@ -160,6 +161,7 @@ export default async function SettingsPage({
         <CardContent className="space-y-4">
           <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
           <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
+          <VerifyPhaseToggle enabled={session?.team?.verifyPhaseEnabled ?? false} />
         </CardContent>
       </Card>
 

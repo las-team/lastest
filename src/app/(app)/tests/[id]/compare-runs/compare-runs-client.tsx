@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -266,6 +266,10 @@ export function CompareRunsClient({
   const [comparison, setComparison] = useState<RunComparisonResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Tracks the (from|to) pair we already kicked off so the auto-run effect
+  // doesn't double-fire — important because `useSearchParams()` returns a
+  // fresh reference each render and React Strict Mode replays effects in dev.
+  const lastComparedRef = useRef<string | null>(null);
 
   const fromCandidate = useMemo(() => candidates.find((c) => c.id === fromId) ?? null, [candidates, fromId]);
   const toCandidate = useMemo(() => candidates.find((c) => c.id === toId) ?? null, [candidates, toId]);
@@ -278,6 +282,7 @@ export function CompareRunsClient({
         setComparison(null);
         return;
       }
+      lastComparedRef.current = `${a}|${b}`;
       setError(null);
       startTransition(async () => {
         try {
@@ -287,6 +292,8 @@ export function CompareRunsClient({
           const msg = e instanceof Error ? e.message : String(e);
           setError(msg);
           setComparison(null);
+          // Force a retry on the same pair next render.
+          lastComparedRef.current = null;
           toast.error(`Compare failed: ${msg}`);
         }
       });
@@ -309,9 +316,12 @@ export function CompareRunsClient({
   // Auto-run on mount (or whenever picker values change) so the user sees
   // a result immediately if defaults are present. Deferred to a macrotask so
   // React doesn't see the transition's setState as happening inside the
-  // effect body.
+  // effect body. The ref-guard keeps us from re-firing the same pair when
+  // a sibling state change (toast, URL replace) re-renders the page.
   useEffect(() => {
     if (!fromId || !toId || fromId === toId) return;
+    const key = `${fromId}|${toId}`;
+    if (lastComparedRef.current === key) return;
     const id = setTimeout(() => runComparison(fromId, toId), 0);
     return () => clearTimeout(id);
   }, [fromId, toId, runComparison]);

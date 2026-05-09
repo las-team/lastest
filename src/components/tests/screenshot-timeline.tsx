@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, Info } from 'lucide-react';
+import Link from 'next/link';
+import { Clock, GitCompareArrows, Info } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import type { ScreenshotGroup } from '@/server/actions/tests';
@@ -18,6 +20,7 @@ interface ScreenshotTimelineProps {
   screenshotGroups: ScreenshotGroup[];
   plannedScreenshots: PlannedScreenshot[];
   onUpdate: () => void;
+  compareRunsHref?: string | null;
 }
 
 interface ViewerState {
@@ -38,6 +41,7 @@ export function ScreenshotTimeline({
   screenshotGroups,
   plannedScreenshots,
   onUpdate,
+  compareRunsHref,
 }: ScreenshotTimelineProps) {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
@@ -185,7 +189,35 @@ export function ScreenshotTimeline({
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
-          <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm">Screenshot Timeline</CardTitle>
+            {compareRunsHref !== undefined &&
+              (compareRunsHref ? (
+                <Button
+                  asChild
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Diff two existing runs without rebuilding"
+                  aria-label="Compare runs"
+                >
+                  <Link href={compareRunsHref}>
+                    <GitCompareArrows className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled
+                  title="Needs at least two runs to compare"
+                  aria-label="Compare runs"
+                >
+                  <GitCompareArrows className="h-3.5 w-3.5" />
+                </Button>
+              ))}
+          </div>
           <div className="flex items-start gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-purple-900 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-200 max-w-md">
             <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <p className="text-xs leading-snug">
