@@ -215,6 +215,7 @@ export async function updateRepoSelectedBranch(repositoryId: string, branch: str
   revalidatePath('/');
   revalidatePath('/run');
   revalidatePath('/builds');
+  revalidatePath('/verify');
 }
 
 export async function updateAutoApproveDefaultBranch(repositoryId: string, enabled: boolean) {

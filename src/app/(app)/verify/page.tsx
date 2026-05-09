@@ -1,14 +1,14 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSelectedRepository, getLastBuildByBranch } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
-import './verify-design.css';
+import { VerifyIndexClient } from './verify-index-client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function VerifyPage() {
   const session = await getCurrentSession();
+  // The flag check happens before any other awaits — when off, redirect cleanly.
   if (!isVerifyPhaseEnabled(session?.team)) {
     redirect('/run');
   }
@@ -17,43 +17,23 @@ export default async function VerifyPage() {
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
-  if (!selectedRepo) {
-    return (
-      <EmptyState
-        title="Select a repository"
-        description="Pick a repo from the sidebar to start verifying changes."
-      />
-    );
+  let latestBuildId: string | null = null;
+  let activeBranch: string | null = null;
+  if (selectedRepo) {
+    activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
+    const latestBuild = await getLastBuildByBranch(selectedRepo.id, activeBranch).catch(() => null);
+    latestBuildId = latestBuild?.id ?? null;
   }
 
-  const activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
-  const latestBuild = await getLastBuildByBranch(selectedRepo.id, activeBranch);
-
-  if (!latestBuild) {
-    return (
-      <EmptyState
-        title="No builds yet"
-        description={`No builds on ${activeBranch}. Run tests from the Builds page to capture a baseline.`}
-        action={
-          <Link href="/builds" className="v-btn primary" style={{ textDecoration: 'none' }}>
-            Open Builds
-          </Link>
-        }
-      />
-    );
-  }
-
-  redirect(`/verify/${latestBuild.id}`);
-}
-
-function EmptyState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+  // Always render the same JSX shape from this server component. The client
+  // component decides whether to navigate or show an empty state — keeping
+  // navigation off the server side avoids a Turbopack 16.1.3 perf-measure
+  // glitch with redirect()-after-await on this route.
   return (
-    <div className="verify-page" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--c-soft-2)' }}>
-      <div className="v-card" style={{ padding: 32, maxWidth: 460, textAlign: 'center' }}>
-        <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: 'var(--fg-1)' }}>{title}</h1>
-        <p style={{ fontSize: 14, color: 'var(--fg-2)', marginBottom: action ? 16 : 0 }}>{description}</p>
-        {action}
-      </div>
-    </div>
+    <VerifyIndexClient
+      hasRepo={!!selectedRepo}
+      activeBranch={activeBranch}
+      latestBuildId={latestBuildId}
+    />
   );
 }

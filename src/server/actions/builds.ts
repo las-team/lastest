@@ -1158,6 +1158,16 @@ async function runBuildAsync(
       });
     }).catch(console.error);
 
+    // Fire-and-forget auto-approval of 0-diff cases — a green-verdict step
+    // with no evidence is treated as Done on the verify board. We persist a
+    // step_layer_feedback row so the count of "verified" cases is accurate
+    // without the reviewer having to click through.
+    import('./layer-feedback-auto').then(({ autoApproveZeroDiffCases }) => {
+      autoApproveZeroDiffCases(buildId).catch((e) => {
+        console.error(`[verify] auto-approve failed for build ${buildId}:`, e);
+      });
+    }).catch(console.error);
+
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);
     if (completedBuild?.comparisonRole === 'baseline' && completedBuild.comparisonMeta) {

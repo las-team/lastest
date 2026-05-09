@@ -41,6 +41,27 @@ export interface InspectTargetsInput {
 
 const ALL_DIMENSIONS: InspectorDimension[] = ['visual', 'dom', 'text', 'network', 'variables'];
 
+// Per-dimension timeout. Real bottlenecks are the visual diff on huge
+// screenshots and the LCS in text-content-diff on huge DOM snapshots; without
+// this cap a single bad payload silently locks the whole inspection request.
+const DIMENSION_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 function buildCacheKey(input: InspectTargetsInput, engine: DiffEngineType): string {
   const payload = JSON.stringify({
     t: input.testId,
@@ -225,7 +246,11 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
   const wantVars = dimensions.includes('variables');
 
   const visualP: Promise<VisualInspectionPayload | undefined> = wantVisual
-    ? runVisual(baseline.screenshotPath, current.screenshotPath, engine, repo.id).catch(
+    ? withTimeout(
+        runVisual(baseline.screenshotPath, current.screenshotPath, engine, repo.id),
+        DIMENSION_TIMEOUT_MS,
+        'visual',
+      ).catch(
         (err): VisualInspectionPayload => ({
           classification: 'changed',
           pixelDifference: 0,
@@ -239,111 +264,123 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
       )
     : Promise.resolve(undefined);
 
-  const domP: Promise<DomInspectionPayload | undefined> = (async () => {
-    if (!wantDom) return undefined;
-    if (!baseline.domSnapshot || !current.domSnapshot) {
-      return {
-        diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
-        baselineUrl: baseline.domSnapshot?.url,
-        currentUrl: current.domSnapshot?.url,
-        error: 'DOM snapshot missing on one side',
-      };
-    }
-    try {
-      const diff = computeDomDiff(baseline.domSnapshot, current.domSnapshot);
-      return {
-        diff,
-        baselineUrl: baseline.domSnapshot.url,
-        currentUrl: current.domSnapshot.url,
-      };
-    } catch (err) {
-      return {
-        diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  })();
+  const domP: Promise<DomInspectionPayload | undefined> = wantDom
+    ? withTimeout(
+        (async (): Promise<DomInspectionPayload> => {
+          if (!baseline.domSnapshot || !current.domSnapshot) {
+            return {
+              diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
+              baselineUrl: baseline.domSnapshot?.url,
+              currentUrl: current.domSnapshot?.url,
+              error: 'DOM snapshot missing on one side',
+            };
+          }
+          const diff = computeDomDiff(baseline.domSnapshot, current.domSnapshot);
+          return {
+            diff,
+            baselineUrl: baseline.domSnapshot.url,
+            currentUrl: current.domSnapshot.url,
+          };
+        })(),
+        DIMENSION_TIMEOUT_MS,
+        'dom',
+      ).catch(
+        (err): DomInspectionPayload => ({
+          diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    : Promise.resolve(undefined);
 
-  const textP: Promise<TextInspectionPayload | undefined> = (async () => {
-    if (!wantText) return undefined;
-    try {
-      return diffVisibleText(baseline.domSnapshot, current.domSnapshot, {
-        ignorePatterns: input.options?.textIgnorePatterns,
-      });
-    } catch (err) {
-      return {
-        lines: [],
-        added: 0,
-        removed: 0,
-        baselineLength: 0,
-        currentLength: 0,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  })();
+  const textP: Promise<TextInspectionPayload | undefined> = wantText
+    ? withTimeout(
+        Promise.resolve().then(() =>
+          diffVisibleText(baseline.domSnapshot, current.domSnapshot, {
+            ignorePatterns: input.options?.textIgnorePatterns,
+          }),
+        ),
+        DIMENSION_TIMEOUT_MS,
+        'text',
+      ).catch(
+        (err): TextInspectionPayload => ({
+          lines: [],
+          added: 0,
+          removed: 0,
+          baselineLength: 0,
+          currentLength: 0,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    : Promise.resolve(undefined);
 
-  const networkP: Promise<NetworkInspectionPayload | undefined> = (async () => {
-    if (!wantNetwork) return undefined;
-    try {
-      const reqsA = (baseline.networkRequests ?? []) as NetworkRequestLike[];
-      const reqsB = (current.networkRequests ?? []) as NetworkRequestLike[];
-      const primaryHostA = hostFromDomSnapshotUrl(baseline.domSnapshot?.url);
-      const primaryHostB = hostFromDomSnapshotUrl(current.domSnapshot?.url);
-      return computeNetworkDiff(reqsA, reqsB, primaryHostA, primaryHostB);
-    } catch (err) {
-      return {
-        added: [],
-        removed: [],
-        changedStatus: [],
-        changedSize: [],
-        slowdowns: [],
-        failedA: [],
-        failedB: [],
-        summary: {
-          countA: 0,
-          countB: 0,
-          bytesA: 0,
-          bytesB: 0,
-          byTypeA: {},
-          byTypeB: {},
-          thirdPartyDomainsA: [],
-          thirdPartyDomainsB: [],
-          failedCountA: 0,
-          failedCountB: 0,
-        },
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  })();
+  const networkP: Promise<NetworkInspectionPayload | undefined> = wantNetwork
+    ? withTimeout(
+        Promise.resolve().then(() => {
+          const reqsA = (baseline.networkRequests ?? []) as NetworkRequestLike[];
+          const reqsB = (current.networkRequests ?? []) as NetworkRequestLike[];
+          const primaryHostA = hostFromDomSnapshotUrl(baseline.domSnapshot?.url);
+          const primaryHostB = hostFromDomSnapshotUrl(current.domSnapshot?.url);
+          return computeNetworkDiff(reqsA, reqsB, primaryHostA, primaryHostB);
+        }),
+        DIMENSION_TIMEOUT_MS,
+        'network',
+      ).catch(
+        (err): NetworkInspectionPayload => ({
+          added: [],
+          removed: [],
+          changedStatus: [],
+          changedSize: [],
+          slowdowns: [],
+          failedA: [],
+          failedB: [],
+          summary: {
+            countA: 0,
+            countB: 0,
+            bytesA: 0,
+            bytesB: 0,
+            byTypeA: {},
+            byTypeB: {},
+            thirdPartyDomainsA: [],
+            thirdPartyDomainsB: [],
+            failedCountA: 0,
+            failedCountB: 0,
+          },
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    : Promise.resolve(undefined);
 
-  const variablesP: Promise<VariableInspectionPayload | undefined> = (async () => {
-    if (!wantVars) return undefined;
-    try {
-      return diffVariables({
-        baseline: {
-          extracted: baseline.extractedVariables,
-          assigned: baseline.assignedVariables,
-          consoleErrors: baseline.consoleErrors,
-          logs: baseline.logs,
-        },
-        current: {
-          extracted: current.extractedVariables,
-          assigned: current.assignedVariables,
-          consoleErrors: current.consoleErrors,
-          logs: current.logs,
-        },
-        options: { ignoreKeys: input.options?.ignoreVariableKeys },
-      });
-    } catch (err) {
-      return {
-        extracted: [],
-        assigned: [],
-        consoleErrors: { added: [], removed: [], common: 0 },
-        logs: { addedCount: 0, removedCount: 0, sample: [] },
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  })();
+  const variablesP: Promise<VariableInspectionPayload | undefined> = wantVars
+    ? withTimeout(
+        Promise.resolve().then(() =>
+          diffVariables({
+            baseline: {
+              extracted: baseline.extractedVariables,
+              assigned: baseline.assignedVariables,
+              consoleErrors: baseline.consoleErrors,
+              logs: baseline.logs,
+            },
+            current: {
+              extracted: current.extractedVariables,
+              assigned: current.assignedVariables,
+              consoleErrors: current.consoleErrors,
+              logs: current.logs,
+            },
+            options: { ignoreKeys: input.options?.ignoreVariableKeys },
+          }),
+        ),
+        DIMENSION_TIMEOUT_MS,
+        'variables',
+      ).catch(
+        (err): VariableInspectionPayload => ({
+          extracted: [],
+          assigned: [],
+          consoleErrors: { added: [], removed: [], common: 0 },
+          logs: { addedCount: 0, removedCount: 0, sample: [] },
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+    : Promise.resolve(undefined);
 
   const [visual, dom, text, network, variables] = await Promise.all([
     visualP,
@@ -403,6 +440,8 @@ export async function listInspectableRuns(testId: string, limit = 50) {
     durationMs: r.durationMs,
     viewport: r.viewport,
     browser: r.browser,
+    gitBranch: r.gitBranch ?? null,
+    gitCommit: r.gitCommit ?? null,
     hasScreenshot: !!r.screenshotPath,
     hasDom: !!r.domSnapshot,
     hasNetwork: Array.isArray(r.networkRequests) && r.networkRequests.length > 0,

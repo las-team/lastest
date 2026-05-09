@@ -8,10 +8,13 @@ import {
   getFunctionalAreasByRepo,
   getTestsByRepo,
   getLayerFeedbackByBuild,
+  getVisualDiffsByBuild,
+  getTestResultsByRun,
 } from '@/lib/db/queries';
 import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
 import { computeChangeMap } from '@/server/actions/change-map';
+import { fetchRepoBranches } from '@/server/actions/repos';
 import { BoardFocusClient } from './board-focus-client';
 
 export const dynamic = 'force-dynamic';
@@ -34,18 +37,53 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
   const repo = testRun?.repositoryId ? await getRepository(testRun.repositoryId) : null;
   if (repo) await requireRepoAccess(repo.id);
 
-  // Compute change-map on demand if missing (older builds).
-  let changeMap = await getBuildChangeMap(buildId);
+  // Compute change-map on demand if missing (older builds). Best-effort.
+  let changeMap = await getBuildChangeMap(buildId).catch(() => null);
   if (!changeMap) {
     changeMap = await computeChangeMap(buildId).catch(() => null);
   }
 
-  const [stepComparisons, areas, tests, layerFeedback] = await Promise.all([
-    getStepComparisonsByBuild(buildId),
-    repo ? getFunctionalAreasByRepo(repo.id) : Promise.resolve([]),
-    repo ? getTestsByRepo(repo.id) : Promise.resolve([]),
-    getLayerFeedbackByBuild(buildId),
+  const [stepComparisons, areas, tests, layerFeedback, visualDiffs, branches, testResults] = await Promise.all([
+    getStepComparisonsByBuild(buildId).catch(() => []),
+    repo ? getFunctionalAreasByRepo(repo.id).catch(() => []) : Promise.resolve([]),
+    repo ? getTestsByRepo(repo.id).catch(() => []) : Promise.resolve([]),
+    getLayerFeedbackByBuild(buildId).catch(() => []),
+    getVisualDiffsByBuild(buildId).catch(() => []),
+    repo ? fetchRepoBranches(repo.id).catch(() => []) : Promise.resolve([]),
+    build.testRunId ? getTestResultsByRun(build.testRunId).catch(() => []) : Promise.resolve([]),
   ]);
+
+  // Slim test results down to just the per-layer capture data the verify
+  // page needs to render real data even when there's no diff. The compare
+  // panes can then show "captured, no diff" for layers whose source field
+  // is non-null on the test result, and "not captured" otherwise.
+  const slimResults = testResults.map((r) => ({
+    id: r.id,
+    testId: r.testId,
+    status: r.status,
+    consoleErrors: r.consoleErrors,
+    networkRequests: r.networkRequests,
+    a11yViolations: r.a11yViolations,
+    a11yPassesCount: r.a11yPassesCount,
+    urlTrajectory: r.urlTrajectory,
+    webVitals: r.webVitals,
+    extractedVariables: r.extractedVariables,
+    assignedVariables: r.assignedVariables,
+    domSnapshot: r.domSnapshot,
+  }));
+
+  // Slim visualDiffs to just what the client renders (image paths + diff stats).
+  const slimDiffs = visualDiffs.map((d) => ({
+    id: d.id,
+    testId: d.testId,
+    stepLabel: d.stepLabel,
+    baselineImagePath: d.baselineImagePath,
+    currentImagePath: d.currentImagePath,
+    diffImagePath: d.diffImagePath,
+    pixelDifference: d.pixelDifference,
+    percentageDifference: d.percentageDifference,
+    classification: d.classification,
+  }));
 
   return (
     <BoardFocusClient
@@ -56,7 +94,11 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
       areas={areas.map((a) => ({ id: a.id, name: a.name }))}
       tests={tests.map((t) => ({ id: t.id, name: t.name, functionalAreaId: t.functionalAreaId }))}
       layerFeedback={layerFeedback}
+      visualDiffs={slimDiffs}
+      testResults={slimResults}
       repositoryId={repo?.id ?? null}
+      branches={branches.map((b) => b.name)}
+      defaultBranch={repo?.defaultBranch ?? null}
     />
   );
 }

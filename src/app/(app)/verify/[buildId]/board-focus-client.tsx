@@ -1,11 +1,11 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Filter, GitBranch, Play } from 'lucide-react';
+import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
 import { runSmartBuild } from '@/server/actions/smart-run';
 import { decideLayer } from '@/server/actions/layer-feedback';
+import { updateRepoSelectedBranch } from '@/server/actions/repos';
 import type {
   Build,
   ChangeMap,
@@ -13,12 +13,55 @@ import type {
   StepComparison,
   StepLayerFeedback,
 } from '@/lib/db/schema';
-import { BoardView } from './board-view';
+import { deriveCaseStatus } from '@/lib/verify/case-status';
+import { BoardView, type CaseStatus } from './board-view';
 import { FocusView } from './focus-view';
 import '../verify-design.css';
 
 interface AreaLite { id: string; name: string }
 interface TestLite { id: string; name: string; functionalAreaId: string | null }
+
+export interface VisualDiffLite {
+  id: string;
+  testId: string;
+  stepLabel: string | null;
+  baselineImagePath: string | null;
+  currentImagePath: string | null;
+  diffImagePath: string | null;
+  pixelDifference: number | null;
+  percentageDifference: string | null;
+  classification: string | null;
+}
+
+export interface TestResultLite {
+  id: string;
+  testId: string | null;
+  status: string | null;
+  consoleErrors: string[] | null;
+  networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
+  a11yViolations: import('@/lib/db/schema').A11yViolation[] | null;
+  a11yPassesCount: number | null;
+  urlTrajectory: import('@/lib/db/schema').UrlTrajectoryStep[] | null;
+  webVitals: import('@/lib/db/schema').WebVitalsSample[] | null;
+  extractedVariables: Record<string, string> | null;
+  assignedVariables: Record<string, string> | null;
+  domSnapshot: import('@/lib/db/schema').DomSnapshotData | null;
+}
+
+export interface VerifyFilters {
+  /** Restrict to specific case statuses. Empty = all. */
+  statuses: Set<CaseStatus>;
+  /** Restrict to specific area ids. Empty = all. */
+  areaIds: Set<string>;
+  /** Issue state filter. 'any' = no filter. */
+  issueFilter: 'any' | 'with' | 'without';
+  /** Free-text search against test name + step label. */
+  query: string;
+}
+
+export function emptyFilters(): VerifyFilters {
+  return { statuses: new Set(), areaIds: new Set(), issueFilter: 'any', query: '' };
+}
 
 interface BoardFocusClientProps {
   build: Build;
@@ -28,17 +71,101 @@ interface BoardFocusClientProps {
   areas: AreaLite[];
   tests: TestLite[];
   layerFeedback: StepLayerFeedback[];
+  visualDiffs: VisualDiffLite[];
+  testResults: TestResultLite[];
   repositoryId: string | null;
+  branches: string[];
+  defaultBranch: string | null;
 }
 
 type Mode = 'board' | 'focus';
+
+const STATUS_TO_DECISION: Record<CaseStatus, 'approved' | 'rejected' | 'snoozed' | null> = {
+  done: 'approved',
+  regression: 'rejected',
+  missed: 'rejected',
+  unknown: 'snoozed',
+};
 
 export function BoardFocusClient(props: BoardFocusClientProps) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('board');
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [refreshing, startRefresh] = useTransition();
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
+
+  // Live polling state — initialised from props, refreshed every 2s while
+  // the build is running. Once `completedAt` is set, polling stops.
+  const [stepComparisons, setStepComparisons] = useState<StepComparison[]>(props.stepComparisons);
+  const [layerFeedback, setLayerFeedback] = useState<StepLayerFeedback[]>(props.layerFeedback);
+  const [visualDiffs, setVisualDiffs] = useState<VisualDiffLite[]>(props.visualDiffs);
+  const [completedAt, setCompletedAt] = useState<string | null>(
+    props.build.completedAt ? props.build.completedAt.toISOString() : null,
+  );
+  const [runningTests, setRunningTests] = useState<Array<{ testId: string; name: string }>>([]);
+  const [liveCounts, setLiveCounts] = useState<{ totalTests: number; passed: number; failed: number }>({
+    totalTests: props.build.totalTests ?? 0,
+    passed: props.build.passedCount ?? 0,
+    failed: props.build.failedCount ?? 0,
+  });
+
+  // Re-sync from props when the route changes to a different build.
+  const lastBuildId = useRef(props.build.id);
+  useEffect(() => {
+    if (lastBuildId.current !== props.build.id) {
+      lastBuildId.current = props.build.id;
+      setStepComparisons(props.stepComparisons);
+      setLayerFeedback(props.layerFeedback);
+      setVisualDiffs(props.visualDiffs);
+      setCompletedAt(props.build.completedAt ? props.build.completedAt.toISOString() : null);
+      setRunningTests([]);
+      setLiveCounts({
+        totalTests: props.build.totalTests ?? 0,
+        passed: props.build.passedCount ?? 0,
+        failed: props.build.failedCount ?? 0,
+      });
+    }
+  }, [props.build.id, props.build.completedAt, props.build.totalTests, props.build.passedCount, props.build.failedCount, props.stepComparisons, props.layerFeedback, props.visualDiffs]);
+
+  // Polling effect — only active while completedAt is null.
+  useEffect(() => {
+    if (completedAt) return;
+    const buildId = props.build.id;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/builds/${buildId}/verify-status`, { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json() as {
+          completedAt: string | null;
+          totalTests: number; passedCount: number; failedCount: number;
+          stepComparisons: StepComparison[];
+          layerFeedback: StepLayerFeedback[];
+          visualDiffs: VisualDiffLite[];
+          runningTests: Array<{ testId: string; name: string }>;
+        };
+        if (cancelled) return;
+        setStepComparisons(data.stepComparisons);
+        setLayerFeedback(data.layerFeedback);
+        setVisualDiffs(data.visualDiffs);
+        setRunningTests(data.runningTests);
+        setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
+        if (data.completedAt) {
+          setCompletedAt(data.completedAt);
+          // Pull a fresh server render so change-map + branches reload too.
+          router.refresh();
+        }
+      } catch {
+        // best-effort — keep polling
+      }
+    }, 2000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [props.build.id, completedAt, router]);
+
+  const isRunning = !completedAt;
 
   const testById = useMemo(() => new Map(props.tests.map((t) => [t.id, t])), [props.tests]);
   const areaById = useMemo(() => new Map(props.areas.map((a) => [a.id, a])), [props.areas]);
@@ -49,16 +176,70 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
     [props.changeMap],
   );
 
-  const totalCases = props.stepComparisons.length;
-  const verifiedCount = useMemo(() => {
-    const decided = new Set<string>();
-    for (const f of props.layerFeedback) {
-      if (f.status === 'approved' || f.status === 'auto_approved' || f.status === 'rejected') {
-        decided.add(f.stepComparisonId);
-      }
+  const visualByStepKey = useMemo(() => {
+    const m = new Map<string, VisualDiffLite>();
+    for (const d of visualDiffs) {
+      const key = `${d.testId}::${d.stepLabel ?? ''}`;
+      if (!m.has(key)) m.set(key, d);
     }
-    return decided.size;
-  }, [props.layerFeedback]);
+    return m;
+  }, [visualDiffs]);
+
+  // Map testResultId → TestResultLite for the focus view's "captured-no-diff"
+  // panes (used to show real data even when there's no scored evidence).
+  const testResultById = useMemo(() => {
+    const m = new Map<string, TestResultLite>();
+    for (const r of props.testResults) m.set(r.id, r);
+    return m;
+  }, [props.testResults]);
+
+  // Filter step comparisons before passing into views.
+  const filteredSteps = useMemo(() => {
+    return stepComparisons.filter((step) => {
+      if (filters.areaIds.size > 0) {
+        const test = testById.get(step.testId);
+        if (!test?.functionalAreaId || !filters.areaIds.has(test.functionalAreaId)) return false;
+      }
+      if (filters.issueFilter === 'with' && !step.githubIssueUrl) return false;
+      if (filters.issueFilter === 'without' && step.githubIssueUrl) return false;
+      if (filters.query.trim().length > 0) {
+        const q = filters.query.trim().toLowerCase();
+        const test = testById.get(step.testId);
+        const haystack = `${test?.name ?? ''} ${step.stepLabel ?? ''}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      // Status filter is applied AFTER status derivation in the views (since
+      // the views need the full set to compute counts). We pass the set down
+      // and let them honor it.
+      return true;
+    });
+  }, [stepComparisons, filters, testById]);
+
+  const totalCases = filteredSteps.length;
+  // A case is "verified" when its derived status is anything but `unknown`:
+  //   - done (passed cleanly OR approved by reviewer / auto-approved)
+  //   - regression (red verdict OR rejected)
+  //   - missed (yellow in changed area)
+  // All three are settled, only `unknown` is open.
+  const verifiedCount = useMemo(() => {
+    const fbByStep = new Map<string, StepLayerFeedback[]>();
+    for (const f of layerFeedback) {
+      if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
+      fbByStep.get(f.stepComparisonId)!.push(f);
+    }
+    let n = 0;
+    for (const step of filteredSteps) {
+      const test = testById.get(step.testId);
+      const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
+      const status = deriveCaseStatus({
+        step,
+        feedback: fbByStep.get(step.id) ?? [],
+        isInChangedArea,
+      });
+      if (status !== 'unknown') n++;
+    }
+    return n;
+  }, [layerFeedback, filteredSteps, testById, changedAreaIds]);
 
   const handleRefresh = () => {
     if (!props.repositoryId) return;
@@ -69,10 +250,10 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
   };
 
   const decideAllForStep = (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => {
-    const step = props.stepComparisons.find((s) => s.id === stepId);
+    const step = stepComparisons.find((s) => s.id === stepId);
     if (!step) return;
     const layers: EvidenceLayer[] = step.evidence.length > 0
-      ? step.evidence.map((e) => e.layer)
+      ? Array.from(new Set(step.evidence.map((e) => e.layer)))
       : ['visual'];
     startTransition(async () => {
       for (const layer of layers) {
@@ -87,24 +268,55 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
     setMode('focus');
   };
 
+  const handleDropCase = (stepId: string, target: CaseStatus) => {
+    const decision = STATUS_TO_DECISION[target];
+    if (!decision) return;
+    decideAllForStep(stepId, decision);
+  };
+
+  const handleBranchSelect = (branch: string) => {
+    if (!props.repositoryId || branch === props.branch) {
+      setBranchOpen(false);
+      return;
+    }
+    startTransition(async () => {
+      await updateRepoSelectedBranch(props.repositoryId!, branch);
+      // After the branch change, the dashboard route will redirect to the
+      // latest build of the new branch.
+      router.push('/verify');
+    });
+    setBranchOpen(false);
+  };
+
+  const buildLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (props.branch) parts.push(props.branch);
+    if (props.build.completedAt) parts.push(new Date(props.build.completedAt).toLocaleDateString());
+    parts.push(`${props.build.totalTests ?? 0} tests`);
+    return parts.join(' · ');
+  }, [props.branch, props.build]);
+
+  const filterBadge = filterCount(filters);
+
   return (
     <div className="verify-page" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--c-soft-2)', minHeight: 0, fontFamily: 'var(--font-sans)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <Link href="/verify" className="wm" style={{ fontSize: 16, textDecoration: 'none', color: 'var(--fg-1)' }}>
-            LASTES<span className="t">T</span>
-          </Link>
-          <span style={{ width: 1, height: 18, background: 'var(--border-strong)' }} />
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)' }}>Verify</div>
-            <div className="label" style={{ marginTop: 2 }}>
-              Build #{props.build.id.slice(0, 8)} · {branchAndCommit(props.branch, props.build)} · {mode === 'board' ? `${verifiedCount} / ${totalCases} verified` : `${totalCases} cases`}
-            </div>
+      {/* Header — no secondary logo (sidebar already shows the brand). */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)', position: 'relative' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            Verify
+            {isRunning && (
+              <span className="v-chip info" style={{ fontSize: 10 }}>
+                <Loader2 size={10} className="anim-spin" style={{ animation: 'verify-spin 1s linear infinite' }} />
+                running · {liveCounts.passed + liveCounts.failed} / {liveCounts.totalTests}
+              </span>
+            )}
+          </div>
+          <div className="label" style={{ marginTop: 2 }}>
+            Build #{props.build.id.slice(0, 8)} · {buildLabel} · {mode === 'board' ? `${verifiedCount} / ${totalCases} verified` : `${totalCases} cases`}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Board ⇄ Focus segmented tabs */}
           <div className="v-tabs">
             <button
               className={`v-tab ${mode === 'board' ? 'active' : ''}`}
@@ -119,11 +331,38 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
               Focus
             </button>
           </div>
-          <button className="v-btn"><Filter size={13} />Filter</button>
-          <button className="v-btn">
-            <GitBranch size={13} />
-            {props.branch ?? 'unknown'}
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button className="v-btn" onClick={() => setFiltersOpen((v) => !v)}>
+              <Filter size={13} />Filter
+              {filterBadge > 0 && (
+                <span className="v-chip info" style={{ fontSize: 9, padding: '0 5px' }}>{filterBadge}</span>
+              )}
+            </button>
+            {filtersOpen && (
+              <FilterPanel
+                filters={filters}
+                areas={props.areas}
+                onChange={setFilters}
+                onClose={() => setFiltersOpen(false)}
+              />
+            )}
+          </div>
+          <div style={{ position: 'relative' }}>
+            <button className="v-btn" onClick={() => setBranchOpen((v) => !v)} disabled={!props.repositoryId}>
+              <GitBranch size={13} />
+              {props.branch ?? 'unknown'}
+              <ChevronDown size={11} />
+            </button>
+            {branchOpen && props.branches.length > 0 && (
+              <BranchPicker
+                current={props.branch}
+                defaultBranch={props.defaultBranch}
+                branches={props.branches}
+                onSelect={handleBranchSelect}
+                onClose={() => setBranchOpen(false)}
+              />
+            )}
+          </div>
           <button
             className="v-btn primary"
             onClick={handleRefresh}
@@ -136,44 +375,220 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
 
       {mode === 'board' ? (
         <BoardView
-          steps={props.stepComparisons}
-          feedback={props.layerFeedback}
+          buildId={props.build.id}
+          steps={filteredSteps}
+          feedback={layerFeedback}
           testById={testById}
           areaById={areaById}
           changedAreaIds={changedAreaIds}
-          changeMap={props.changeMap}
+          visualByStepKey={visualByStepKey}
+          statusFilter={filters.statuses}
+          isRunning={isRunning}
+          runningTests={runningTests}
           onOpenCase={handleOpenCase}
-          onMarkIntended={(id) => decideAllForStep(id, 'approved')}
-          onMarkMissed={(id) => decideAllForStep(id, 'rejected')}
-          onTriage={handleOpenCase}
-          onSkip={(id) => decideAllForStep(id, 'snoozed')}
+          onDropCase={handleDropCase}
         />
       ) : (
         <FocusView
           buildId={props.build.id}
-          steps={props.stepComparisons}
-          feedback={props.layerFeedback}
+          steps={filteredSteps}
+          feedback={layerFeedback}
           testById={testById}
           areaById={areaById}
           changedAreaIds={changedAreaIds}
-          changeMap={props.changeMap}
+          visualByStepKey={visualByStepKey}
+          testResultById={testResultById}
+          statusFilter={filters.statuses}
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}
+          onMarkDecision={decideAllForStep}
         />
       )}
 
-      {/* aria-live announce for pending state, no visual */}
-      <div aria-live="polite" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden' }}>
-        {pending ? 'Saving decision' : ''}
-      </div>
+      <style jsx global>{`
+        @keyframes verify-spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes verify-shimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
     </div>
   );
 }
 
-function branchAndCommit(branch: string | null, build: Build): string {
-  const parts: string[] = [];
-  if (branch) parts.push(branch);
-  if (build.completedAt) parts.push(new Date(build.completedAt).toLocaleDateString());
-  parts.push(`${build.totalTests ?? 0} tests`);
-  return parts.join(' · ');
+function filterCount(f: VerifyFilters): number {
+  let n = 0;
+  n += f.statuses.size;
+  n += f.areaIds.size;
+  if (f.issueFilter !== 'any') n += 1;
+  if (f.query.trim().length > 0) n += 1;
+  return n;
+}
+
+interface FilterPanelProps {
+  filters: VerifyFilters;
+  areas: AreaLite[];
+  onChange: (f: VerifyFilters) => void;
+  onClose: () => void;
+}
+
+function FilterPanel({ filters, areas, onChange, onClose }: FilterPanelProps) {
+  const STATUSES: CaseStatus[] = ['unknown', 'regression', 'missed', 'done'];
+  const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
+    const next = new Set(set);
+    if (next.has(val)) next.delete(val); else next.add(val);
+    return next;
+  };
+  return (
+    <>
+      {/* outer backdrop catches off-clicks */}
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 50 }}
+      />
+      <div
+        className="v-card"
+        style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 320, padding: 14, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 10 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="label">Filter</div>
+          <button className="v-btn ghost icon" onClick={onClose}><X size={13} /></button>
+        </div>
+
+        <div>
+          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Search</div>
+          <input
+            type="text"
+            value={filters.query}
+            onChange={(e) => onChange({ ...filters, query: e.target.value })}
+            placeholder="test name or step label"
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--c-white)', color: 'var(--fg-1)' }}
+          />
+        </div>
+
+        <div>
+          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Status</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {STATUSES.map((s) => {
+              const active = filters.statuses.has(s);
+              return (
+                <button
+                  key={s}
+                  className={`v-chip ${active ? s : ''}`}
+                  style={{ cursor: 'pointer', textTransform: 'capitalize', opacity: active ? 1 : 0.55 }}
+                  onClick={() => onChange({ ...filters, statuses: toggle(filters.statuses, s) })}
+                >
+                  <span className="dot" />{s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Area</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxHeight: 100, overflowY: 'auto' }}>
+            {areas.length === 0 && <span className="label" style={{ fontSize: 9 }}>no areas</span>}
+            {areas.map((a) => {
+              const active = filters.areaIds.has(a.id);
+              return (
+                <button
+                  key={a.id}
+                  className={`v-chip ${active ? 'info' : ''}`}
+                  style={{ cursor: 'pointer', opacity: active ? 1 : 0.55 }}
+                  onClick={() => onChange({ ...filters, areaIds: toggle(filters.areaIds, a.id) })}
+                >
+                  {a.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Issue</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['any', 'with', 'without'] as const).map((opt) => (
+              <button
+                key={opt}
+                className={`v-chip ${filters.issueFilter === opt ? 'info' : ''}`}
+                style={{ cursor: 'pointer', opacity: filters.issueFilter === opt ? 1 : 0.55, textTransform: 'capitalize' }}
+                onClick={() => onChange({ ...filters, issueFilter: opt })}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button className="v-btn sm ghost" onClick={() => onChange(emptyFilters())} style={{ alignSelf: 'flex-end' }}>
+          Reset filters
+        </button>
+      </div>
+    </>
+  );
+}
+
+interface BranchPickerProps {
+  current: string | null;
+  defaultBranch: string | null;
+  branches: string[];
+  onSelect: (branch: string) => void;
+  onClose: () => void;
+}
+
+function BranchPicker({ current, defaultBranch, branches, onSelect, onClose }: BranchPickerProps) {
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return branches.filter((b) => !q || b.toLowerCase().includes(q)).slice(0, 50);
+  }, [query, branches]);
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
+      <div
+        className="v-card"
+        style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 280, padding: 8, zIndex: 51, display: 'flex', flexDirection: 'column', gap: 6 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="text"
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="search branch…"
+          style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--c-white)', color: 'var(--fg-1)' }}
+        />
+        <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {filtered.map((b) => {
+            const active = b === current;
+            return (
+              <button
+                key={b}
+                onClick={() => onSelect(b)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '6px 8px', borderRadius: 6, fontSize: 12,
+                  background: active ? 'color-mix(in oklab, var(--c-teal) 12%, white)' : 'transparent',
+                  color: active ? '#1F7B66' : 'var(--fg-1)',
+                  fontWeight: active ? 600 : 400,
+                  cursor: 'pointer', border: '0',
+                  textAlign: 'left',
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b}</span>
+                {b === defaultBranch && <span className="label" style={{ fontSize: 9 }}>default</span>}
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="label" style={{ padding: 8, fontSize: 9 }}>no matches</div>
+          )}
+        </div>
+      </div>
+    </>
+  );
 }

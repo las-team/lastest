@@ -2519,6 +2519,8 @@ export interface StepComparisonEvidence {
   variable?: VariableDiffSummary;
 }
 
+export type StepIssueState = 'open' | 'auto' | 'linked' | 'closed';
+
 export const stepComparisons = pgTable('step_comparisons', {
   id: text('id').primaryKey(),
   buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }).notNull(),
@@ -2532,6 +2534,10 @@ export const stepComparisons = pgTable('step_comparisons', {
   evidence: jsonb('evidence').$type<EvidenceItem[]>().notNull().default([]),
   /** Layer-specific structured diff summaries. */
   layers: jsonb('layers').$type<StepComparisonEvidence>().notNull().default({}),
+  // Verify phase (v1.14+) — GitHub issue link per case.
+  githubIssueUrl: text('github_issue_url'),
+  githubIssueNumber: integer('github_issue_number'),
+  githubIssueState: text('github_issue_state').$type<StepIssueState>(),
   createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_step_comparisons_build').on(table.buildId),

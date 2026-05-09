@@ -34,6 +34,8 @@ interface SidebarProps {
   baseUrl?: string;
   repositoryId?: string;
   ebSessions?: EmbeddedSession[];
+  /** Pending verification items (regressions/todos) on the active branch's latest build. */
+  verifyPendingCount?: number;
 }
 
 const dashboardNav = [
@@ -63,7 +65,7 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions, verifyPendingCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -79,12 +81,17 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
   const filteredDefinitionNav = earlyAdopter
     ? definitionNav
     : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
-  // When the verify phase is on, /run is demoted — drop it from the sidebar
-  // even if early-adopter is on. /run keeps responding for CI bots & deep links.
-  const filteredExecutionNav = (earlyAdopter
+
+  // Verify lives in the Execution section. When the flag is on it sits at
+  // the top of that group; legacy /run, /review etc remain accessible so
+  // reviewers can compare the new and old flows side-by-side.
+  const verifyEntry = { name: 'Verify', href: '/verify', icon: ShieldCheck } as const;
+  const filteredExecutionNav = earlyAdopter
     ? executionNav
-    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name))
-  ).filter((item) => !(verifyPhaseEnabled && item.name === 'Runs'));
+    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
+  const finalExecutionNav = verifyPhaseEnabled
+    ? [verifyEntry, ...filteredExecutionNav]
+    : filteredExecutionNav;
 
   return (
     <aside className="w-64 border-r bg-muted/30 flex flex-col">
@@ -151,22 +158,6 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
               </li>
             );
           })}
-          {verifyPhaseEnabled && (
-            <li>
-              <Link
-                href="/verify"
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
-                  pathname === '/verify' || pathname.startsWith('/verify')
-                    ? 'bg-primary text-primary-foreground'
-                    : 'hover:bg-muted'
-                )}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Verify
-              </Link>
-            </li>
-          )}
         </ul>
 
         <div>
@@ -197,8 +188,9 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
         <div>
           <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Execution</p>
           <ul className="space-y-1">
-            {filteredExecutionNav.map((item) => {
+            {finalExecutionNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href);
+              const isVerify = item.name === 'Verify';
               return (
                 <li key={item.name}>
                   <Link
@@ -211,7 +203,20 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                     )}
                   >
                     <item.icon className="h-4 w-4" />
-                    {item.name}
+                    <span className="flex-1">{item.name}</span>
+                    {isVerify && verifyPendingCount > 0 && (
+                      <span
+                        className={cn(
+                          'inline-flex items-center justify-center rounded-full text-[10px] font-mono font-semibold leading-none px-1.5 min-w-[18px] h-[18px]',
+                          isActive
+                            ? 'bg-primary-foreground/20 text-primary-foreground'
+                            : 'bg-destructive text-white',
+                        )}
+                        aria-label={`${verifyPendingCount} pending verification ${verifyPendingCount === 1 ? 'item' : 'items'}`}
+                      >
+                        {verifyPendingCount > 99 ? '99+' : verifyPendingCount}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );

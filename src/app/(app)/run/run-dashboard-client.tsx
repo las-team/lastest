@@ -588,7 +588,7 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
             </CardContent>
           </Card>
 
-          {repositoryId && !verifyPhaseEnabled && (
+          {repositoryId && (
             <ReviewContent
               initialTodos={initialTodos}
               initialDiffs={initialDiffs}

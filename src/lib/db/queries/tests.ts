@@ -480,6 +480,8 @@ export async function getTestResultsByTest(testId: string) {
       totalSteps: testResults.totalSteps,
       extractedVariables: testResults.extractedVariables,
       assignedVariables: testResults.assignedVariables,
+      gitBranch: testRuns.gitBranch,
+      gitCommit: testRuns.gitCommit,
     })
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
@@ -488,25 +490,6 @@ export async function getTestResultsByTest(testId: string) {
     ;
 }
 
-export async function getTestResultsForCompare(testId: string) {
-  return db
-    .select({
-      id: testResults.id,
-      testRunId: testResults.testRunId,
-      status: testResults.status,
-      durationMs: testResults.durationMs,
-      viewport: testResults.viewport,
-      browser: testResults.browser,
-      startedAt: testRuns.startedAt,
-      gitBranch: testRuns.gitBranch,
-      gitCommit: testRuns.gitCommit,
-      hasScreenshot: sql<boolean>`(${testResults.screenshotPath} is not null or jsonb_array_length(coalesce(${testResults.screenshots}, '[]'::jsonb)) > 0)`,
-    })
-    .from(testResults)
-    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
-    .where(eq(testResults.testId, testId))
-    .orderBy(desc(testRuns.startedAt));
-}
 
 export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
   const id = uuid();

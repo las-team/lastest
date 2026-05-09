@@ -49,6 +49,26 @@ function extractVisibleLines(snapshot: DomSnapshotData, masks: RegExp[]): string
   return out;
 }
 
+// LCS DP allocates an (n+1)*(m+1) Int32 grid. 2k×2k = 16M cells = ~64MB which
+// is fine; 8k×8k would be ~256MB and visibly stalls the request. Cap at 4k per
+// side and switch to a hash-based set-diff above that — coarser but bounded.
+const TEXT_DIFF_LINE_CAP = 4000;
+
+function setDiffFallback(baseLines: string[], currLines: string[]): TextDiffLine[] {
+  const baseSet = new Set(baseLines);
+  const currSet = new Set(currLines);
+  const out: TextDiffLine[] = [];
+  for (let i = 0; i < baseLines.length; i++) {
+    const line = baseLines[i];
+    if (!currSet.has(line)) out.push({ op: 'del', line, oldLineNo: i + 1 });
+  }
+  for (let j = 0; j < currLines.length; j++) {
+    const line = currLines[j];
+    if (!baseSet.has(line)) out.push({ op: 'add', line, newLineNo: j + 1 });
+  }
+  return out;
+}
+
 export function diffVisibleText(
   baseline: DomSnapshotData | null | undefined,
   current: DomSnapshotData | null | undefined,
@@ -68,6 +88,8 @@ export function diffVisibleText(
     lines = currLines.map((line, i) => ({ op: 'add' as const, line, newLineNo: i + 1 }));
   } else if (currLines.length === 0) {
     lines = baseLines.map((line, i) => ({ op: 'del' as const, line, oldLineNo: i + 1 }));
+  } else if (baseLines.length > TEXT_DIFF_LINE_CAP || currLines.length > TEXT_DIFF_LINE_CAP) {
+    lines = setDiffFallback(baseLines, currLines);
   } else {
     lines = diffLines(baseLines.join('\n'), currLines.join('\n'));
   }

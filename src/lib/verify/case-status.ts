@@ -2,12 +2,13 @@
  * Derive the 4-state case status the design uses (regression / done / missed
  * / unknown) from the existing verdict + per-layer feedback model.
  *
- * Mapping (heuristic, refined as feedback comes in):
- *   - regression: red verdict and no approving feedback, OR any layer marked rejected
- *   - done:       approved feedback present (any layer), or green verdict in changed area
- *   - missed:     yellow verdict in a changed area (intent area moved less than expected),
- *                 OR red/yellow verdict where feedback.note indicates an open issue
- *   - unknown:    everything else (yellow in unchanged area, no signal at all)
+ * Mapping:
+ *   - regression: any rejected feedback, OR red verdict without an approval
+ *   - done:       green verdict (no diff = passed = done), OR any approval, OR
+ *                 auto-approved at build completion for 0-diff cases
+ *   - missed:     yellow verdict in a changed area without an approval
+ *                 (intent area moved less than expected)
+ *   - unknown:    yellow verdict outside a changed area, no decision yet
  */
 
 import type {
@@ -41,10 +42,8 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
     return isInChangedArea ? 'missed' : 'unknown';
   }
 
-  // green
-  if (isInChangedArea && anyApproved) return 'done';
-  if (isInChangedArea) return 'done';
-  return 'unknown';
+  // green verdict — 0 diff. Treat as done (the test passed cleanly).
+  return 'done';
 }
 
 export interface CaseStatusCounts {
