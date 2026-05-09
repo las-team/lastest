@@ -25,6 +25,15 @@ design-testing-framework
 
 ## bugs
 Clear up inspect and test comparison
+Verify
+  color of notinumber
+  Action on columns
+  Unknown -> Unsorted
+  Naming of other columns
+  No primary color usage on buttons
+  Size action buttons properly
+  Dont show screenshot this size as its irrelevant
+  attach specification
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets

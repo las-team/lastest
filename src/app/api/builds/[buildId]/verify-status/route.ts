@@ -49,6 +49,21 @@ export async function GET(
     classification: d.classification,
   }));
 
+  const slimResults = runningTestRows.map((r) => ({
+    id: r.id,
+    testId: r.testId,
+    status: r.status,
+    consoleErrors: r.consoleErrors,
+    networkRequests: r.networkRequests,
+    a11yViolations: r.a11yViolations,
+    a11yPassesCount: r.a11yPassesCount,
+    urlTrajectory: r.urlTrajectory,
+    webVitals: r.webVitals,
+    extractedVariables: r.extractedVariables,
+    assignedVariables: r.assignedVariables,
+    domSnapshot: r.domSnapshot,
+  }));
+
   // "running tests" = test_results in 'running' status without an end timestamp.
   // Used to show in-flight cards on the verify board.
   const runningTests = runningTestRows
@@ -67,6 +82,7 @@ export async function GET(
       stepComparisons,
       layerFeedback,
       visualDiffs: slimDiffs,
+      testResults: slimResults,
       runningTests,
     },
     {

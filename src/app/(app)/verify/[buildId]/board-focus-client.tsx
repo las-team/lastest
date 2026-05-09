@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
 import { runSmartBuild } from '@/server/actions/smart-run';
@@ -87,7 +87,14 @@ const STATUS_TO_DECISION: Record<CaseStatus, 'approved' | 'rejected' | 'snoozed'
   unknown: 'snoozed',
 };
 
+// Outer component remounts the inner one on buildId change via the React
+// `key` prop — that resets all internal polling state cleanly without an
+// effect-driven prop-sync (which lints as `setState in effect`).
 export function BoardFocusClient(props: BoardFocusClientProps) {
+  return <BoardFocusInner key={props.build.id} {...props} />;
+}
+
+function BoardFocusInner(props: BoardFocusClientProps) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('board');
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -102,6 +109,7 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
   const [stepComparisons, setStepComparisons] = useState<StepComparison[]>(props.stepComparisons);
   const [layerFeedback, setLayerFeedback] = useState<StepLayerFeedback[]>(props.layerFeedback);
   const [visualDiffs, setVisualDiffs] = useState<VisualDiffLite[]>(props.visualDiffs);
+  const [testResults, setTestResults] = useState<TestResultLite[]>(props.testResults);
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
   );
@@ -111,24 +119,6 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
     passed: props.build.passedCount ?? 0,
     failed: props.build.failedCount ?? 0,
   });
-
-  // Re-sync from props when the route changes to a different build.
-  const lastBuildId = useRef(props.build.id);
-  useEffect(() => {
-    if (lastBuildId.current !== props.build.id) {
-      lastBuildId.current = props.build.id;
-      setStepComparisons(props.stepComparisons);
-      setLayerFeedback(props.layerFeedback);
-      setVisualDiffs(props.visualDiffs);
-      setCompletedAt(props.build.completedAt ? props.build.completedAt.toISOString() : null);
-      setRunningTests([]);
-      setLiveCounts({
-        totalTests: props.build.totalTests ?? 0,
-        passed: props.build.passedCount ?? 0,
-        failed: props.build.failedCount ?? 0,
-      });
-    }
-  }, [props.build.id, props.build.completedAt, props.build.totalTests, props.build.passedCount, props.build.failedCount, props.stepComparisons, props.layerFeedback, props.visualDiffs]);
 
   // Polling effect — only active while completedAt is null.
   useEffect(() => {
@@ -145,12 +135,14 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
           stepComparisons: StepComparison[];
           layerFeedback: StepLayerFeedback[];
           visualDiffs: VisualDiffLite[];
+          testResults: TestResultLite[];
           runningTests: Array<{ testId: string; name: string }>;
         };
         if (cancelled) return;
         setStepComparisons(data.stepComparisons);
         setLayerFeedback(data.layerFeedback);
         setVisualDiffs(data.visualDiffs);
+        setTestResults(data.testResults);
         setRunningTests(data.runningTests);
         setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
         if (data.completedAt) {
@@ -189,9 +181,9 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
   // panes (used to show real data even when there's no scored evidence).
   const testResultById = useMemo(() => {
     const m = new Map<string, TestResultLite>();
-    for (const r of props.testResults) m.set(r.id, r);
+    for (const r of testResults) m.set(r.id, r);
     return m;
-  }, [props.testResults]);
+  }, [testResults]);
 
   // Filter step comparisons before passing into views.
   const filteredSteps = useMemo(() => {
