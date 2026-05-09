@@ -7,8 +7,6 @@ import {
   getRoutesByRepo,
   getEnvironmentConfig,
   getDeletedTests,
-  listUserStoriesByRepo,
-  getTestAcIdsMap,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
@@ -47,7 +45,6 @@ export default async function DefinitionPage() {
     defaultSetupSteps,
     defaultTeardownSteps,
     storageStates,
-    userStoriesAll,
   ] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
@@ -61,18 +58,7 @@ export default async function DefinitionPage() {
     getDefaultSetupSteps(selectedRepo.id),
     getDefaultTeardownSteps(selectedRepo.id),
     listStorageStates(selectedRepo.id),
-    listUserStoriesByRepo(selectedRepo.id),
   ]);
-
-  // Coverage rollup: count tests per AC id, scoped to this repo. Rendered as
-  // per-AC test-count badges on the Story tab.
-  const testAcMap = await getTestAcIdsMap(tests.map(t => t.id));
-  const coverageByAcId: Record<string, number> = {};
-  for (const acIds of testAcMap.values()) {
-    for (const acId of acIds) {
-      coverageByAcId[acId] = (coverageByAcId[acId] ?? 0) + 1;
-    }
-  }
 
   const uncategorizedTests = tests
     .filter((t) => !t.functionalAreaId)
@@ -101,8 +87,6 @@ export default async function DefinitionPage() {
         defaultSetupSteps={defaultSetupSteps}
         defaultTeardownSteps={defaultTeardownSteps}
         storageStates={storageStates}
-        userStories={userStoriesAll}
-        coverageByAcId={coverageByAcId}
       />
     </div>
   );
