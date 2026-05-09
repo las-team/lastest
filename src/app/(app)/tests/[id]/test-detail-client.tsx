@@ -676,6 +676,15 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   </>
                 ) : (
                   <>
+                    <Button
+                      variant="outline"
+                      onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
+                      disabled={results.length < 2}
+                      title={results.length < 2 ? 'Needs at least two runs' : 'Diff two existing runs without rebuilding'}
+                    >
+                      <History className="h-4 w-4 mr-2" />
+                      Compare runs
+                    </Button>
                     <div className="flex">
                       <Button
                         onClick={() => handleRun(true)}
@@ -1288,6 +1297,17 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
           </TabsContent>
 
           <TabsContent value="screenshots" className="mt-4 space-y-6">
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
+                disabled={results.length < 2}
+              >
+                <History className="h-3.5 w-3.5 mr-1.5" />
+                Compare runs
+              </Button>
+            </div>
             <ScreenshotTimeline
               testId={test.id}
               repositoryId={repositoryId ?? null}
@@ -1303,8 +1323,17 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
 
           <TabsContent value="history" className="mt-4">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-sm">Run History</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => router.push(`/tests/${test.id}/compare-runs`)}
+                  disabled={results.length < 2}
+                >
+                  <History className="h-3.5 w-3.5 mr-1.5" />
+                  Compare runs
+                </Button>
               </CardHeader>
               <CardContent>
                 {results.length > 0 ? (

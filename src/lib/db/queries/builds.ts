@@ -90,6 +90,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       a11yTotalRulesChecked: builds.a11yTotalRulesChecked,
       executorError: builds.executorError,
       executorFailedAt: builds.executorFailedAt,
+      manuallyScopedAreaIds: builds.manuallyScopedAreaIds,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })

@@ -306,6 +306,40 @@ export async function GET(
 
     // Builds
     if (resource === 'builds' && id) {
+      // Verify-phase routes (v1.14+)
+      // GET /api/v1/builds/:id/change-map
+      if (subResource === 'change-map') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const cached = await queries.getBuildChangeMap(id);
+        if (cached) return NextResponse.json(cached);
+        // Lazy compute on first request
+        const { computeChangeMap } = await import('@/server/actions/change-map');
+        const computed = await computeChangeMap(id).catch(() => null);
+        return NextResponse.json(computed ?? { error: 'Unable to compute change map' });
+      }
+
+      // GET /api/v1/builds/:id/verify — Change Map + step comparisons + verdict counts
+      if (subResource === 'verify') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const [changeMap, stepComparisons, counts, layerFeedback] = await Promise.all([
+          queries.getBuildChangeMap(id),
+          queries.getStepComparisonsByBuild(id),
+          queries.countStepComparisonVerdicts(id),
+          queries.getLayerFeedbackByBuild(id),
+        ]);
+        return NextResponse.json({
+          buildId: id,
+          changeMap,
+          stepComparisons,
+          verdictCounts: counts,
+          layerFeedback,
+        });
+      }
+
       const build = await queries.getBuild(id);
       if (!build) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -711,6 +745,33 @@ export async function POST(
       }
       await approveAllDiffsCore(id, 'mcp-agent');
       return NextResponse.json({ success: true });
+    }
+
+    // Verify phase: POST /api/v1/verify/layer-feedback
+    if (resource === 'verify' && id === 'layer-feedback') {
+      const body = await request.json();
+      const { stepComparisonId, buildId, layer, status, note } = body as {
+        stepComparisonId: string;
+        buildId: string;
+        layer: string;
+        status: string;
+        note?: string;
+      };
+      if (!stepComparisonId || !buildId || !layer || !status) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      if (!(await verifyBuildOwnership(buildId, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { decideLayer } = await import('@/server/actions/layer-feedback');
+      const result = await decideLayer({
+        stepComparisonId,
+        buildId,
+        layer: layer as 'visual' | 'dom' | 'a11y' | 'network' | 'console' | 'url' | 'perf' | 'variable',
+        status: status as 'approved' | 'rejected' | 'snoozed',
+        note: note ?? null,
+      });
+      return NextResponse.json(result);
     }
 
     // Import tests + functional areas: POST /api/v1/repos/:id/import

@@ -235,6 +235,26 @@ export class LastestClient {
 
   // --- Activity Reporting ---
 
+  // ── Verify phase (v1.14+) ───────────────────────────────────────────────
+
+  async getChangeMap(buildId: string): Promise<unknown> {
+    return this.get(`/api/v1/builds/${buildId}/change-map`);
+  }
+
+  async verifyBuild(buildId: string): Promise<unknown> {
+    return this.get(`/api/v1/builds/${buildId}/verify`);
+  }
+
+  async approveLayer(opts: {
+    stepComparisonId: string;
+    buildId: string;
+    layer: string;
+    status: 'approved' | 'rejected' | 'snoozed';
+    note?: string;
+  }): Promise<unknown> {
+    return this.post('/api/v1/verify/layer-feedback', opts);
+  }
+
   async reportActivity(data: {
     eventType: string;
     summary: string;

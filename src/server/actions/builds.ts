@@ -1150,6 +1150,14 @@ async function runBuildAsync(
       }).catch(console.error);
     }
 
+    // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
+    // Best-effort — if it fails, the verify screen falls back to live recompute.
+    import('./change-map').then(({ computeChangeMap }) => {
+      computeChangeMap(buildId).catch((e) => {
+        console.error(`[change-map] compute failed for build ${buildId}:`, e);
+      });
+    }).catch(console.error);
+
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);
     if (completedBuild?.comparisonRole === 'baseline' && completedBuild.comparisonMeta) {

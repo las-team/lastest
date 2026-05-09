@@ -9,6 +9,9 @@ import { PublishShareDialog, type ShareRecord } from './publish-share-dialog';
 import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { buildShareUrl } from '@/lib/share/slug';
 import * as queries from '@/lib/db/queries';
+import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
+import Link from 'next/link';
+import { ShieldCheck, ArrowRight } from 'lucide-react';
 
 interface PageProps {
   params: Promise<{ buildId: string }>;
@@ -91,9 +94,21 @@ export default async function BuildPage({ params }: PageProps) {
     }
   }
 
+  const verifyPhaseEnabled = isVerifyPhaseEnabled(session?.team);
+
   return (
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-6xl mx-auto space-y-6">
+        {verifyPhaseEnabled && (
+          <Link
+            href={`/verify/${buildId}`}
+            className="flex items-center gap-2 px-3 py-2 rounded-md border bg-primary/5 hover:bg-primary/10 text-sm transition-colors"
+          >
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            <span>Verify this build — run the regression + intent gates with per-layer feedback.</span>
+            <ArrowRight className="h-3 w-3 ml-auto" />
+          </Link>
+        )}
         {/* Comparison pair banner */}
         {buildRecord?.comparisonRole && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">

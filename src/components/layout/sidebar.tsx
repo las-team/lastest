@@ -15,6 +15,7 @@ import {
   TrendingDown,
   Trophy,
   SplitSquareHorizontal,
+  ShieldCheck,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton, type RepositoryWithTestCount } from './repo-selector';
@@ -73,13 +74,17 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
   const justConnected = mounted && (searchParams.get('success') === 'github_connected' || searchParams.get('success') === 'gitlab_connected');
   const earlyAdopter = team?.earlyAdopterMode ?? false;
   const gamificationEnabled = team?.gamificationEnabled ?? false;
+  const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
 
   const filteredDefinitionNav = earlyAdopter
     ? definitionNav
     : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
-  const filteredExecutionNav = earlyAdopter
+  // When the verify phase is on, /run is demoted — drop it from the sidebar
+  // even if early-adopter is on. /run keeps responding for CI bots & deep links.
+  const filteredExecutionNav = (earlyAdopter
     ? executionNav
-    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
+    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name))
+  ).filter((item) => !(verifyPhaseEnabled && item.name === 'Runs'));
 
   return (
     <aside className="w-64 border-r bg-muted/30 flex flex-col">
@@ -146,6 +151,22 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
               </li>
             );
           })}
+          {verifyPhaseEnabled && (
+            <li>
+              <Link
+                href="/verify"
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+                  pathname === '/verify' || pathname.startsWith('/verify')
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-muted'
+                )}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Verify
+              </Link>
+            </li>
+          )}
         </ul>
 
         <div>

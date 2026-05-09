@@ -963,5 +963,71 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // ===== Verify phase (v1.14+) =====
+
+  // --- lastest_get_change_map ---
+  server.tool(
+    'lastest_get_change_map',
+    'Get the build-level Change Map (4-signal area ranking + AI intent/risk summary) for a build.',
+    {
+      buildId: z.string().describe('Build ID'),
+    },
+    withActivityReporting(client, 'lastest_get_change_map', async (params) => {
+      const result = await client.getChangeMap(params.buildId as string);
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: 'Change Map retrieved.',
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_verify_build ---
+  server.tool(
+    'lastest_verify_build',
+    'Get the full verify-build view: Change Map + step comparisons grouped by regression vs intent gate.',
+    {
+      buildId: z.string().describe('Build ID'),
+    },
+    withActivityReporting(client, 'lastest_verify_build', async (params) => {
+      const result = await client.verifyBuild(params.buildId as string);
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: 'Verify view retrieved.',
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_approve_layer ---
+  server.tool(
+    'lastest_approve_layer',
+    'Per-layer feedback on a step comparison: approve (Mark expected → write baseline), reject (Needs fix → create todo), or snooze (suppress for this build only).',
+    {
+      stepComparisonId: z.string().describe('Step comparison ID'),
+      buildId: z.string().describe('Build ID'),
+      layer: z.enum(['visual', 'dom', 'a11y', 'network', 'console', 'url', 'perf', 'variable']).describe('Layer name'),
+      status: z.enum(['approved', 'rejected', 'snoozed']).describe('approved=Mark expected; rejected=Needs fix; snoozed=Suppress for this build'),
+      note: z.string().optional().describe('Optional note attached to the decision'),
+    },
+    withActivityReporting(client, 'lastest_approve_layer', async (params) => {
+      const result = await client.approveLayer({
+        stepComparisonId: params.stepComparisonId as string,
+        buildId: params.buildId as string,
+        layer: params.layer as string,
+        status: params.status as 'approved' | 'rejected' | 'snoozed',
+        note: params.note as string | undefined,
+      });
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `Layer ${params.layer} ${params.status}.`,
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   return server;
 }

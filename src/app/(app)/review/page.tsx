@@ -6,11 +6,16 @@ import {
   getVisualDiffsWithTestStatus,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
+import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ReviewPage() {
   const session = await getCurrentSession();
+  if (isVerifyPhaseEnabled(session?.team)) {
+    redirect('/verify');
+  }
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
