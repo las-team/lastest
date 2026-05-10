@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { runSmartBuild } from '@/server/actions/smart-run';
 import { decideLayer } from '@/server/actions/layer-feedback';
 import { updateRepoSelectedBranch } from '@/server/actions/repos';
@@ -32,12 +33,34 @@ export interface VisualDiffLite {
   pixelDifference: number | null;
   percentageDifference: string | null;
   classification: string | null;
+  /** DomDiffResult written into the visual-diff metadata by the legacy DOM
+   *  diff pipeline (builds.ts). The multi-layer scorer doesn't populate
+   *  step.layers.dom yet, so the DOM pane falls back to this when present. */
+  domDiff: import('@/lib/db/schema').DomDiffResult | null;
+  /** Per-region rectangles (added/removed/changed/etc.) — drawn on the
+   *  current screenshot in the visual pane "Regions" overlay. */
+  changedRegions: import('@/lib/db/schema').DiffMetadata['changedRegions'] | null;
+  /** innerText diff status — populated when textDiffEnabled in
+   *  diffSensitivitySettings. Surfaces the Text tab on the focus view. */
+  textDiffStatus: import('@/lib/db/schema').TextDiffStatus | null;
+  baselineTextPath: string | null;
+  currentTextPath: string | null;
+  /** Line-count summary computed during the diff run; lets the Text tab
+   *  render +/− deltas without re-fetching the text files. */
+  textDiffSummary: { added: number; removed: number; sameAsBaseline: boolean } | null;
 }
 
 export interface TestResultLite {
   id: string;
   testId: string | null;
   status: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+  browser: string | null;
+  isFlaky: boolean | null;
+  retryOf: string | null;
+  lastReachedStep: number | null;
+  totalSteps: number | null;
   consoleErrors: string[] | null;
   networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
   a11yViolations: import('@/lib/db/schema').A11yViolation[] | null;
@@ -159,42 +182,63 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     failed: props.build.failedCount ?? 0,
   });
 
+  /** One-shot pull of the verify-status endpoint. Used by the polling
+   *  interval and by post-mutation hooks (issue linked / created / closed)
+   *  so client state catches up without a full page reload. Local state is
+   *  initialized from props on mount and never re-syncs from props
+   *  (intentional — see the BoardFocusClient `key` comment), so server
+   *  mutations after the build completes need this manual refresh. */
+  const refreshFromServer = useCallback(async () => {
+    const buildId = props.build.id;
+    try {
+      const res = await fetch(`/api/builds/${buildId}/verify-status`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        completedAt: string | null;
+        totalTests: number; passedCount: number; failedCount: number;
+        stepComparisons: StepComparison[];
+        layerFeedback: StepLayerFeedback[];
+        visualDiffs: VisualDiffLite[];
+        testResults: TestResultLite[];
+        runningTests: Array<{ testId: string; name: string }>;
+      };
+      setStepComparisons(data.stepComparisons);
+      setLayerFeedback(data.layerFeedback);
+      setVisualDiffs(data.visualDiffs);
+      setTestResults(data.testResults);
+      setRunningTests(data.runningTests);
+      setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
+      if (data.completedAt && !completedAt) {
+        setCompletedAt(data.completedAt);
+      }
+    } catch {
+      /* best-effort */
+    }
+  }, [props.build.id, completedAt]);
+
   // Polling effect — only active while completedAt is null.
   useEffect(() => {
     if (completedAt) return;
-    const buildId = props.build.id;
     let cancelled = false;
     const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/builds/${buildId}/verify-status`, { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const data = await res.json() as {
-          completedAt: string | null;
-          totalTests: number; passedCount: number; failedCount: number;
-          stepComparisons: StepComparison[];
-          layerFeedback: StepLayerFeedback[];
-          visualDiffs: VisualDiffLite[];
-          testResults: TestResultLite[];
-          runningTests: Array<{ testId: string; name: string }>;
-        };
-        if (cancelled) return;
-        setStepComparisons(data.stepComparisons);
-        setLayerFeedback(data.layerFeedback);
-        setVisualDiffs(data.visualDiffs);
-        setTestResults(data.testResults);
-        setRunningTests(data.runningTests);
-        setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
-        if (data.completedAt) {
-          setCompletedAt(data.completedAt);
-          // Pull a fresh server render so change-map + branches reload too.
-          router.refresh();
-        }
-      } catch {
-        // best-effort — keep polling
-      }
+      if (cancelled) return;
+      await refreshFromServer();
+      if (cancelled) return;
+      // Polling owns the "build just completed" handoff: kick a server
+      // re-render so change-map + branches refresh once the run is done.
+      // (refreshFromServer set completedAt synchronously; check via ref.)
     }, 2000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [props.build.id, completedAt, router]);
+  }, [completedAt, refreshFromServer]);
+
+  // Once the build has just completed, pull a fresh server render so
+  // change-map + branches reload. Runs once per buildId.
+  useEffect(() => {
+    if (!completedAt) return;
+    router.refresh();
+    // We deliberately ignore router in deps — refresh on completedAt edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedAt]);
 
   const isRunning = !completedAt;
 
@@ -262,20 +306,32 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     for (const step of filteredSteps) {
       const test = testById.get(step.testId);
       const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
+      const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
       const status = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
+        testFailed: result?.status === 'failed',
       });
       if (status !== 'unknown') n++;
     }
     return n;
-  }, [layerFeedback, filteredSteps, testById, changedAreaIds]);
+  }, [layerFeedback, filteredSteps, testById, changedAreaIds, testResultById]);
 
   const handleRefresh = () => {
     if (!props.repositoryId) return;
     startRefresh(async () => {
-      await runSmartBuild(props.repositoryId!);
+      const result = await runSmartBuild(props.repositoryId!);
+      if ('error' in result) {
+        // Surface why the build didn't start — e.g. "No tests to run" — so
+        // the user isn't left guessing why the Run button looked dead.
+        toast.error(result.error || 'Could not start build');
+        return;
+      }
+      // Smart-run returns the new build id; navigate straight to its
+      // verify page so the user sees the run kick off (the polling effect
+      // there picks up running tests as they land).
+      router.push(`/verify/${result.buildId}`);
       router.refresh();
     });
   };
@@ -283,13 +339,93 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const decideAllForStep = (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => {
     const step = stepComparisons.find((s) => s.id === stepId);
     if (!step) return;
-    const layers: EvidenceLayer[] = step.evidence.length > 0
+    // Persist a decision for every evidence layer + every layer that already
+    // has feedback in the DB. Without the second part, a stale `rejected`
+    // row on a layer that wasn't in step.evidence would survive the override
+    // and pin the case in regression after the next poll. Fallback to
+    // `visual` when there's nothing else to write against (typical for
+    // hard-failed tests with no diff evidence).
+    const evidenceLayers = step.evidence.length > 0
       ? Array.from(new Set(step.evidence.map((e) => e.layer)))
-      : ['visual'];
+      : [] as EvidenceLayer[];
+    const existingLayers = layerFeedback
+      .filter((f) => f.stepComparisonId === stepId)
+      .map((f) => f.layer);
+    const layerSet = new Set<EvidenceLayer>([...evidenceLayers, ...existingLayers]);
+    if (layerSet.size === 0) layerSet.add('visual');
+    const layers: EvidenceLayer[] = Array.from(layerSet);
+
+    // 1) Optimistic local feedback so the card moves to the new column
+    //    INSTANTLY — no waiting on round-trips.
+    const fakeStatus = status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'snoozed';
+    const optimisticRows: StepLayerFeedback[] = layers.map((layer) => ({
+      id: `optimistic-${stepId}-${layer}`,
+      stepComparisonId: stepId,
+      buildId: props.build.id,
+      layer,
+      status: fakeStatus,
+      baselineKind: null,
+      reviewTodoId: null,
+      note: null,
+      decidedBy: null,
+      decidedAt: new Date(),
+      aiRecommendation: null,
+      createdAt: new Date(),
+    }));
+    // Strip ALL prior feedback for this step (real OR optimistic) so a stale
+    // rejected row from an earlier decision can't leak through and pin the
+    // case in `regression` (anyRejected wins in deriveCaseStatus). The whole-
+    // case action is meant to override per-layer decisions outright. The
+    // next poll returns the new authoritative status from the server.
+    setLayerFeedback((prev) => [
+      ...prev.filter((f) => f.stepComparisonId !== stepId),
+      ...optimisticRows,
+    ]);
+
+    // 2) Persist in parallel — was sequential per layer (N roundtrips), now 1
+    //    wall-clock roundtrip total. The server is idempotent on this.
     startTransition(async () => {
-      for (const layer of layers) {
-        await decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status });
-      }
+      await Promise.all(
+        layers.map((layer) =>
+          decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
+            .catch(() => null),
+        ),
+      );
+      router.refresh();
+    });
+  };
+
+  /** Per-evidence Expected/Needs fix click. Optimistically writes the layer
+   *  feedback so the panel reflects the decision before the round-trip
+   *  finishes; persists in the background. */
+  const decideOneLayer = (
+    stepId: string,
+    layer: EvidenceLayer,
+    status: 'approved' | 'rejected' | 'snoozed',
+  ) => {
+    const optimistic: StepLayerFeedback = {
+      id: `optimistic-${stepId}-${layer}`,
+      stepComparisonId: stepId,
+      buildId: props.build.id,
+      layer,
+      status,
+      baselineKind: null,
+      reviewTodoId: null,
+      note: null,
+      decidedBy: null,
+      decidedAt: new Date(),
+      aiRecommendation: null,
+      createdAt: new Date(),
+    };
+    setLayerFeedback((prev) => [
+      // remove any prior decision (real or optimistic) on this exact step+layer
+      ...prev.filter((f) => !(f.stepComparisonId === stepId && f.layer === layer)),
+      optimistic,
+    ]);
+
+    startTransition(async () => {
+      await decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
+        .catch(() => null);
       router.refresh();
     });
   };
@@ -436,7 +572,9 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}
           onMarkDecision={decideAllForStep}
+          onDecideLayer={decideOneLayer}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
+          onRefresh={refreshFromServer}
         />
       )}
 
@@ -453,6 +591,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             caseTitle={title}
             defaultTitle={title}
             defaultBody={step?.reviewerNote ?? ''}
+            onLinked={refreshFromServer}
           />
         );
       })()}

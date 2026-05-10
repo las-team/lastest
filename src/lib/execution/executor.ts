@@ -655,6 +655,10 @@ async function executeViaRunner(
         networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
+        // Without this, the runner never invokes axe-core even when the user
+        // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
+        // stay null and the verify A11y tab shows "not captured".
+        enableA11y: options.playwrightSettings?.enableA11y ?? false,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,

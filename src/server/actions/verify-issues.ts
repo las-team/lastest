@@ -7,7 +7,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import type { StepIssueState } from '@/lib/db/schema';
-import { searchGitHubIssues, type GitHubIssueListItem } from '@/lib/integrations/github-issues';
+import { searchGitHubIssues, getGitHubIssueDetail, type GitHubIssueListItem, type GitHubIssueDetail } from '@/lib/integrations/github-issues';
 
 interface CreateIssueInput {
   stepComparisonId: string;
@@ -232,6 +232,32 @@ export async function searchIssuesForCase(
   const result = await searchGitHubIssues(account.accessToken, repo.owner, repo.name, query, state);
   if (!result.success) return { ok: false, error: result.error };
   return { ok: true, issues: result.issues };
+}
+
+/**
+ * Fetch the full title + body + state for the GitHub issue currently linked
+ * to this case. Returns null if no issue is linked. Used by the verify
+ * IntentPanel to render the issue description inline so reviewers don't have
+ * to round-trip to GitHub for context.
+ */
+export async function fetchLinkedIssueForCase(
+  stepComparisonId: string,
+): Promise<{ ok: boolean; issue?: GitHubIssueDetail | null; error?: string }> {
+  const step = await getStep(stepComparisonId);
+  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step.githubIssueNumber) return { ok: true, issue: null };
+  const build = await queries.getBuild(step.buildId);
+  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repoId = testRun?.repositoryId ?? null;
+  if (!repoId) return { ok: false, error: 'No repository on build' };
+  await requireRepoAccess(repoId);
+  const repo = await queries.getRepository(repoId);
+  if (!repo || repo.provider !== 'github') return { ok: false, error: 'Not a GitHub repository' };
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
+  const result = await getGitHubIssueDetail(account.accessToken, repo.owner, repo.name, step.githubIssueNumber);
+  if (!result.success) return { ok: false, error: result.error };
+  return { ok: true, issue: result.issue ?? null };
 }
 
 /**

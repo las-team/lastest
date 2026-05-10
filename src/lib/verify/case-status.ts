@@ -23,22 +23,45 @@ interface DeriveInput {
   feedback: StepLayerFeedback[];
   /** True when the step's test belongs to a code-changed or manually-scoped area. */
   isInChangedArea: boolean;
+  /** True when the underlying test_result.status is 'failed' (runner threw —
+   *  timeout, assertion error, navigation failure, etc.). The diff scorer
+   *  doesn't know about this, so a failed test with no captured layer
+   *  evidence would otherwise score as green = done. */
+  testFailed?: boolean;
 }
 
 export function deriveCaseStatus(input: DeriveInput): CaseStatus {
-  const { step, feedback, isInChangedArea } = input;
+  const { step, feedback, isInChangedArea, testFailed } = input;
 
-  const anyApproved = feedback.some((f) => f.status === 'approved' || f.status === 'auto_approved');
   const anyRejected = feedback.some((f) => f.status === 'rejected');
-
   if (anyRejected) return 'regression';
 
+  // "Fully approved" — every evidence layer has an approval. Step.evidence
+  // can carry multiple rows per layer, so we collapse to unique layers and
+  // require each one to be in the approved set. If a case has no evidence
+  // (e.g. hard runner failure), any single approval counts as full approval.
+  const evidenceLayers = Array.from(new Set(step.evidence.map((e) => e.layer)));
+  const approvedLayers = new Set(
+    feedback
+      .filter((f) => f.status === 'approved' || f.status === 'auto_approved')
+      .map((f) => f.layer),
+  );
+  const fullyApproved = evidenceLayers.length > 0
+    ? evidenceLayers.every((l) => approvedLayers.has(l))
+    : approvedLayers.size > 0;
+
+  // Hard test failures dominate any layer-evidence verdict — they only count
+  // as resolved if every evidence layer is explicitly approved.
+  if (testFailed) {
+    return fullyApproved ? 'done' : 'regression';
+  }
+
   if (step.verdict === 'red') {
-    return anyApproved ? 'done' : 'regression';
+    return fullyApproved ? 'done' : 'regression';
   }
 
   if (step.verdict === 'yellow') {
-    if (anyApproved) return 'done';
+    if (fullyApproved) return 'done';
     return isInChangedArea ? 'missed' : 'unknown';
   }
 

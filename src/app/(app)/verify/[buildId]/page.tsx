@@ -61,6 +61,13 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
     id: r.id,
     testId: r.testId,
     status: r.status,
+    errorMessage: r.errorMessage,
+    durationMs: r.durationMs,
+    browser: r.browser,
+    isFlaky: r.isFlaky,
+    retryOf: r.retryOf,
+    lastReachedStep: r.lastReachedStep,
+    totalSteps: r.totalSteps,
     consoleErrors: r.consoleErrors,
     networkRequests: r.networkRequests,
     a11yViolations: r.a11yViolations,
@@ -72,18 +79,28 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
     domSnapshot: r.domSnapshot,
   }));
 
-  // Slim visualDiffs to just what the client renders (image paths + diff stats).
-  const slimDiffs = visualDiffs.map((d) => ({
-    id: d.id,
-    testId: d.testId,
-    stepLabel: d.stepLabel,
-    baselineImagePath: d.baselineImagePath,
-    currentImagePath: d.currentImagePath,
-    diffImagePath: d.diffImagePath,
-    pixelDifference: d.pixelDifference,
-    percentageDifference: d.percentageDifference,
-    classification: d.classification,
-  }));
+  // Slim visualDiffs to just what the client renders (image paths + diff
+  // stats + DOM diff + region rects from metadata).
+  const slimDiffs = visualDiffs.map((d) => {
+    const meta = d.metadata as import('@/lib/db/schema').DiffMetadata | null;
+    return {
+      id: d.id,
+      testId: d.testId,
+      stepLabel: d.stepLabel,
+      baselineImagePath: d.baselineImagePath,
+      currentImagePath: d.currentImagePath,
+      diffImagePath: d.diffImagePath,
+      pixelDifference: d.pixelDifference,
+      percentageDifference: d.percentageDifference,
+      classification: d.classification,
+      domDiff: meta?.domDiff ?? null,
+      changedRegions: meta?.changedRegions ?? null,
+      textDiffStatus: d.textDiffStatus,
+      baselineTextPath: d.baselineTextPath,
+      currentTextPath: d.currentTextPath,
+      textDiffSummary: meta?.textDiffSummary ?? null,
+    };
+  });
 
   return (
     <BoardFocusClient

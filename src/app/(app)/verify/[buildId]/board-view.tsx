@@ -14,6 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { setReviewerNote } from '@/server/actions/verify-issues';
 import {
+  AlertOctagon,
   Check,
   CircleDot,
   ExternalLink,
@@ -24,6 +25,7 @@ import {
   CheckCircle as CheckCircleIcon,
 } from 'lucide-react';
 import type {
+  EvidenceLayer,
   StepComparison,
   StepLayerFeedback,
   StepIssueState,
@@ -90,10 +92,15 @@ export function BoardView(props: BoardViewProps) {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
-      const status = deriveCaseStatus({ step, feedback: stepFb, isInChangedArea });
+      const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      const status = deriveCaseStatus({
+        step,
+        feedback: stepFb,
+        isInChangedArea,
+        testFailed: result?.status === 'failed',
+      });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
-      const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
       return { step, test, area, status, feedback: stepFb, visual, result };
     });
   }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
@@ -144,8 +151,11 @@ export function BoardView(props: BoardViewProps) {
   };
   const handleDragCancel = () => setActiveDragId(null);
 
+  // Stable `id` on DndContext prevents dnd-kit's internal aria-describedby
+  // counter from drifting between server and client renders (would otherwise
+  // hydrate as `DndDescribedBy-3` server / `DndDescribedBy-0` client).
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+    <DndContext id="verify-board" sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {/* progress strip */}
         <div style={{ padding: '12px 20px', background: 'var(--c-white)', borderBottom: '1px solid var(--border)' }}>
@@ -570,7 +580,10 @@ interface CardProps {
 }
 
 function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: CardProps) {
-  const layerSummaries = useMemo(() => summarizeLayersForCard(data.step), [data.step]);
+  const layerSummaries = useMemo(
+    () => summarizeLayersForCard(data.step, data.result, data.visual),
+    [data.step, data.result, data.visual],
+  );
   return (
     <div
       className="v-card"
@@ -585,6 +598,7 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span className="label" style={{ fontSize: 9 }}>{data.area?.name ?? 'Unscoped'}</span>
         <span style={{ flex: 1 }} />
+        <ErrorChip result={data.result} />
         <IssueChipReal step={data.step} onOpenPicker={onOpenIssuePicker} />
       </div>
       <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, color: 'var(--fg-1)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
@@ -679,22 +693,72 @@ interface LayerCardSummary {
   tone: 'regression' | 'missed' | 'done' | 'unknown';
 }
 
-/** Per-layer summary chip data for a board card. One chip per evidence row,
- *  color-coded by signal strength and showing the layer's delta number. */
-function summarizeLayersForCard(step: StepComparison): LayerCardSummary[] {
-  const seen = new Set<string>();
+const ALL_LAYERS: ReadonlyArray<EvidenceLayer> = [
+  'visual', 'dom', 'network', 'console', 'a11y', 'perf', 'url', 'variable',
+];
+
+/** Per-layer summary chip data for a board card.
+ *
+ *  Includes BOTH evidence-bearing layers AND layers that were captured but
+ *  matched baseline (no evidence row) — those render as green "match" chips
+ *  so reviewers can see what was actually verified, not just what failed. */
+function summarizeLayersForCard(
+  step: StepComparison,
+  result: TestResultLite | null,
+  visual: VisualDiffLite | null,
+): LayerCardSummary[] {
+  const evidenceByLayer = new Map<EvidenceLayer, StepComparison['evidence'][number]>();
+  for (const e of step.evidence) {
+    if (!evidenceByLayer.has(e.layer)) evidenceByLayer.set(e.layer, e);
+  }
+
   const out: LayerCardSummary[] = [];
-  for (const ev of step.evidence) {
-    if (seen.has(ev.layer)) continue;
-    seen.add(ev.layer);
-    out.push({
-      layer: ev.layer,
-      delta: deltaForLayer(step, ev.layer),
-      summary: ev.summary,
-      tone: ev.signal === 'high' ? 'regression' : ev.signal === 'medium' ? 'missed' : 'done',
-    });
+  for (const layer of ALL_LAYERS) {
+    const ev = evidenceByLayer.get(layer);
+    const captured = wasLayerCaptured(layer, result, visual);
+    if (!ev && !captured) continue;
+    if (ev) {
+      out.push({
+        layer,
+        delta: deltaForLayer(step, layer),
+        summary: ev.summary,
+        tone: ev.signal === 'high' ? 'regression' : ev.signal === 'medium' ? 'missed' : 'done',
+      });
+    } else {
+      // Layer was captured + scored, no diff → "match" chip so the reviewer
+      // can confirm at a glance the layer was actually verified.
+      out.push({
+        layer,
+        delta: matchLabelForLayer(layer, visual),
+        summary: 'no diff',
+        tone: 'done',
+      });
+    }
   }
   return out;
+}
+
+function wasLayerCaptured(layer: EvidenceLayer, result: TestResultLite | null, visual: VisualDiffLite | null): boolean {
+  switch (layer) {
+    case 'visual': return !!(visual?.currentImagePath || visual?.baselineImagePath);
+    case 'dom': return !!result?.domSnapshot;
+    case 'network': return result?.networkRequests != null;
+    case 'console': return result?.consoleErrors != null;
+    case 'a11y': return result?.a11yViolations != null || result?.a11yPassesCount != null;
+    case 'perf': return result?.webVitals != null;
+    case 'url': return result?.urlTrajectory != null;
+    case 'variable': return result?.extractedVariables != null || result?.assignedVariables != null;
+  }
+}
+
+function matchLabelForLayer(layer: EvidenceLayer, visual: VisualDiffLite | null): string {
+  if (layer === 'visual') {
+    // 0 px / 0% → "100% match" reads better than "0% diff".
+    if (visual?.percentageDifference != null && parseFloat(visual.percentageDifference) === 0) return '100% match';
+    if (visual?.pixelDifference === 0) return '100% match';
+    return 'match';
+  }
+  return 'match';
 }
 
 function deltaForLayer(step: StepComparison, layer: string): string {
@@ -757,6 +821,33 @@ function deltaForLayer(step: StepComparison, layer: string): string {
     }
   }
   return '';
+}
+
+/** Red chip surfaced when the underlying test_result.status is 'failed' —
+ *  signals a hard failure (timeout, assertion throw, navigation error, etc.)
+ *  distinct from a visual/diff regression. The errorMessage is exposed via
+ *  the native title tooltip so reviewers don't have to drill into a tab. */
+function ErrorChip({ result }: { result: TestResultLite | null }) {
+  if (!result || result.status !== 'failed') return null;
+  const msg = (result.errorMessage ?? '').trim();
+  const summary = msg.length > 0 ? firstLine(msg) : 'test failed';
+  const tooltip = msg.length > 0 ? msg : 'Test failed (no error message captured)';
+  return (
+    <span
+      className="v-chip regression"
+      style={{ fontSize: 9, padding: '1px 6px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      title={tooltip}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <AlertOctagon size={10} />
+      {summary}
+    </span>
+  );
+}
+
+function firstLine(s: string): string {
+  const line = s.split(/\r?\n/, 1)[0] ?? s;
+  return line.length > 64 ? line.slice(0, 61) + '…' : line;
 }
 
 function IssueChipReal({ step, onOpenPicker }: { step: StepComparison; onOpenPicker?: () => void }) {

@@ -259,6 +259,62 @@ export interface GitHubIssueListItem {
   updatedAt: string;
 }
 
+export interface GitHubIssueDetail extends GitHubIssueListItem {
+  body: string;
+}
+
+/** Fetch full title + body + state for a single issue. Used by the verify
+ *  IntentPanel to render the linked issue description inline. */
+export async function getGitHubIssueDetail(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+): Promise<{ success: boolean; issue?: GitHubIssueDetail; error?: string }> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github.v3+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    );
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `GitHub API ${response.status}: ${text.slice(0, 200)}` };
+    }
+    const i = await response.json() as {
+      number: number;
+      title: string;
+      state: string;
+      html_url: string;
+      body: string | null;
+      labels: Array<string | { name: string }>;
+      updated_at: string;
+    };
+    return {
+      success: true,
+      issue: {
+        number: i.number,
+        title: i.title,
+        state: i.state === 'closed' ? 'closed' : 'open',
+        url: i.html_url,
+        labels: i.labels.map((l) => (typeof l === 'string' ? l : l.name)),
+        updatedAt: i.updated_at,
+        body: i.body ?? '',
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error fetching issue',
+    };
+  }
+}
+
 /**
  * List recent issues on a repo, optionally filtered by free-text. Used by the
  * Verify "Browse issues" picker. Pull-requests are filtered out since the

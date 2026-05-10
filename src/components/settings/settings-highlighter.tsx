@@ -23,7 +23,14 @@ export function SettingsHighlighter() {
       );
     }
 
+    let cancelled = false;
+    let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryRaf: number | null = null;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30; // ~500ms at 60fps — covers tab-switch render
+
     const apply = () => {
+      if (cancelled) return;
       const els: HTMLElement[] = [];
       for (const id of ids) {
         const el = document.getElementById(id);
@@ -33,14 +40,20 @@ export function SettingsHighlighter() {
         }
       }
 
-      if (firstId) {
-        const target = document.getElementById(firstId);
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+      // The tab containing the target is mounted asynchronously after we
+      // dispatch the tab-switch event, so the element may not be in the DOM
+      // on the first frame. Retry until found or we hit the cap.
+      const target = firstId ? document.getElementById(firstId) : null;
+      if (!target && attempts < MAX_ATTEMPTS) {
+        attempts++;
+        retryRaf = requestAnimationFrame(apply);
+        return;
+      }
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
 
-      const timer = setTimeout(() => {
+      cleanupTimer = setTimeout(() => {
         for (const el of els) {
           el.classList.remove('settings-highlight');
         }
@@ -48,13 +61,14 @@ export function SettingsHighlighter() {
         url.searchParams.delete('highlight');
         router.replace(url.pathname + url.search + url.hash, { scroll: false });
       }, 3000);
-
-      return () => clearTimeout(timer);
     };
 
-    // Defer one frame so the new tab's content is mounted before we look up ids.
-    const raf = requestAnimationFrame(apply);
-    return () => cancelAnimationFrame(raf);
+    retryRaf = requestAnimationFrame(apply);
+    return () => {
+      cancelled = true;
+      if (retryRaf != null) cancelAnimationFrame(retryRaf);
+      if (cleanupTimer != null) clearTimeout(cleanupTimer);
+    };
   }, [router]);
 
   return null;

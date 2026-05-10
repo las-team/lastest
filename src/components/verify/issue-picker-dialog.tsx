@@ -26,6 +26,11 @@ interface IssuePickerDialogProps {
   /** Pre-fill for the Create-tab body. Reviewer note + test/step context. */
   defaultBody?: string;
   defaultTitle?: string;
+  /** Fired after a successful link or create. Used by the verify page to
+   *  pull a fresh /verify-status snapshot — without this, the parent's
+   *  `stepComparisons` state stays stale (it only seeds from props on first
+   *  mount) so the chip won't update until a hard reload. */
+  onLinked?: () => void;
 }
 
 type Tab = 'browse' | 'create';
@@ -37,6 +42,7 @@ export function IssuePickerDialog({
   caseTitle,
   defaultBody,
   defaultTitle,
+  onLinked,
 }: IssuePickerDialogProps) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('browse');
@@ -74,6 +80,7 @@ export function IssuePickerDialog({
       const res = await linkIssueToCase({ stepComparisonId, issueUrl: issue.url });
       if (res.ok) {
         onClose();
+        onLinked?.();
         router.refresh();
       } else {
         setSearchError(res.error ?? 'Failed to link issue');
@@ -90,6 +97,7 @@ export function IssuePickerDialog({
       });
       if (res.ok) {
         onClose();
+        onLinked?.();
         router.refresh();
       } else {
         setSearchError(res.error ?? 'Failed to create issue');
