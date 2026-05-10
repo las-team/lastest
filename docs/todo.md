@@ -26,14 +26,18 @@ design-testing-framework
 ## bugs
 Clear up inspect and test comparison
 Verify
-  color of notinumber
-  Action on columns
+  color of notification number should be revised for selected unselected state
+  Card action on columns should be clear
   Unknown -> Unsorted
-  Naming of other columns
-  No primary color usage on buttons
-  Size action buttons properly
-  Dont show screenshot this size as its irrelevant
-  attach specification
+  Naming of other columns should be clear
+  No primary color usage on buttons - only 1 per page
+  Size action button width properly
+  Dont show screenshot this size as its irrelevant - show each compared element and ticker, changes
+  attach specification for intended missed column, 
+  clicking no issue should browse from gh, create new w user added text and test details as context
+  make sure all ui element has its intended function - e.g. filters, shortcuts to subpages, etc
+  make sure browser back and forth work for test selection -> back to board view
+  on the board view if all tests in an area are green, group them under area, collapse the group and just show the number of tests in it.
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets

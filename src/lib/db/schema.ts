@@ -2538,6 +2538,10 @@ export const stepComparisons = pgTable('step_comparisons', {
   githubIssueUrl: text('github_issue_url'),
   githubIssueNumber: integer('github_issue_number'),
   githubIssueState: text('github_issue_state').$type<StepIssueState>(),
+  // Free-text reviewer note (e.g. "the new banner copy should say X but
+  // didn't"). Prepended to GH issue body when the reviewer files an issue
+  // for this case. Surfaced as a textarea on Missed-column cards.
+  reviewerNote: text('reviewer_note'),
   createdAt: timestamp('created_at').$defaultFn(() => new Date()),
 }, (table) => ([
   index('idx_step_comparisons_build').on(table.buildId),

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
 import { runSmartBuild } from '@/server/actions/smart-run';
 import { decideLayer } from '@/server/actions/layer-feedback';
@@ -14,6 +14,7 @@ import type {
   StepLayerFeedback,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
+import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import { BoardView, type CaseStatus } from './board-view';
 import { FocusView } from './focus-view';
 import '../verify-design.css';
@@ -96,13 +97,51 @@ export function BoardFocusClient(props: BoardFocusClientProps) {
 
 function BoardFocusInner(props: BoardFocusClientProps) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>('board');
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  // Mode + selected-step are URL-driven so browser back/forward & shareable
+  // links work. We pushState on changes (vs replaceState) so each transition
+  // becomes its own history entry.
+  const [popVersion, setPopVersion] = useState(0);
+  useEffect(() => {
+    const handler = () => setPopVersion((v) => v + 1);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+  const mode: Mode = ((): Mode => {
+    const raw = searchParams.get('mode');
+    return raw === 'focus' ? 'focus' : 'board';
+  })();
+  const selectedStepId = searchParams.get('step');
+
+  const updateUrl = useCallback((next: { mode?: Mode; step?: string | null }, replace = false) => {
+    const url = new URL(window.location.href);
+    if (next.mode !== undefined) {
+      if (next.mode === 'board') url.searchParams.delete('mode');
+      else url.searchParams.set('mode', next.mode);
+    }
+    if (next.step !== undefined) {
+      if (next.step === null) url.searchParams.delete('step');
+      else url.searchParams.set('step', next.step);
+    }
+    const fn = replace ? 'replaceState' : 'pushState';
+    window.history[fn](null, '', url.toString());
+    setPopVersion((v) => v + 1);
+  }, []);
+  // Reference popVersion so the closure-captured re-render fires on browser nav.
+  void popVersion;
+  const setMode = useCallback((m: Mode) => {
+    updateUrl({ mode: m, step: m === 'board' ? null : undefined });
+  }, [updateUrl]);
+  const setSelectedStepId = useCallback((id: string | null) => {
+    updateUrl({ step: id });
+  }, [updateUrl]);
+
   const [refreshing, startRefresh] = useTransition();
   const [, startTransition] = useTransition();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
+  const [issuePickerStepId, setIssuePickerStepId] = useState<string | null>(null);
 
   // Live polling state — initialised from props, refreshed every 2s while
   // the build is running. Once `completedAt` is set, polling stops.
@@ -256,8 +295,9 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   };
 
   const handleOpenCase = (stepId: string) => {
-    setSelectedStepId(stepId);
-    setMode('focus');
+    // Single history entry that flips mode AND selects the step — back-button
+    // returns straight to the board view.
+    updateUrl({ mode: 'focus', step: stepId });
   };
 
   const handleDropCase = (stepId: string, target: CaseStatus) => {
@@ -374,11 +414,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           areaById={areaById}
           changedAreaIds={changedAreaIds}
           visualByStepKey={visualByStepKey}
+          testResultById={testResultById}
           statusFilter={filters.statuses}
           isRunning={isRunning}
           runningTests={runningTests}
           onOpenCase={handleOpenCase}
           onDropCase={handleDropCase}
+          onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
         />
       ) : (
         <FocusView
@@ -394,8 +436,26 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}
           onMarkDecision={decideAllForStep}
+          onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
         />
       )}
+
+      {issuePickerStepId && (() => {
+        const step = stepComparisons.find((s) => s.id === issuePickerStepId);
+        const test = step ? testById.get(step.testId) ?? null : null;
+        const title = step ? `[Verify] ${test?.name ?? 'case'} — ${step.stepLabel ?? 'step'}` : 'Verify case';
+        return (
+          <IssuePickerDialog
+            key={issuePickerStepId}
+            open
+            onClose={() => setIssuePickerStepId(null)}
+            stepComparisonId={issuePickerStepId}
+            caseTitle={title}
+            defaultTitle={title}
+            defaultBody={step?.reviewerNote ?? ''}
+          />
+        );
+      })()}
 
       <style jsx global>{`
         @keyframes verify-spin {

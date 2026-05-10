@@ -7,6 +7,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import type { StepIssueState } from '@/lib/db/schema';
+import { searchGitHubIssues, type GitHubIssueListItem } from '@/lib/integrations/github-issues';
 
 interface CreateIssueInput {
   stepComparisonId: string;
@@ -52,6 +53,7 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
   const test = await queries.getTest(step.testId);
   const title = input.title ?? `[Verify] ${test?.name ?? 'case'} — ${step.stepLabel ?? 'step'}`;
   const body = input.body ?? buildIssueBody({
+    reviewerNote: step.reviewerNote ?? null,
     branch: testRun?.gitBranch ?? null,
     commit: testRun?.gitCommit ?? null,
     buildId: build.id,
@@ -173,6 +175,7 @@ async function getStep(stepComparisonId: string) {
 }
 
 interface IssueBodyInput {
+  reviewerNote: string | null;
   branch: string | null;
   commit: string | null;
   buildId: string;
@@ -183,7 +186,12 @@ interface IssueBodyInput {
 }
 
 function buildIssueBody(input: IssueBodyInput): string {
-  const lines: string[] = [
+  const lines: string[] = [];
+  // Reviewer's note leads — that's the human framing of what's wrong.
+  if (input.reviewerNote && input.reviewerNote.trim().length > 0) {
+    lines.push(input.reviewerNote.trim(), '', '---', '');
+  }
+  lines.push(
     `**Branch:** \`${input.branch ?? 'unknown'}\`${input.commit ? ` @ \`${input.commit.slice(0, 7)}\`` : ''}`,
     `**Build:** \`${input.buildId.slice(0, 8)}\``,
     `**Test:** ${input.testName ?? 'unknown'}`,
@@ -192,10 +200,57 @@ function buildIssueBody(input: IssueBodyInput): string {
     '',
     '## Evidence',
     '',
-  ];
+  );
   for (const e of input.evidence) {
     lines.push(`- **${e.layer}** (${e.signal}): ${e.summary}`);
   }
   lines.push('', '_Filed automatically by Lastest Verify_');
   return lines.join('\n');
+}
+
+/**
+ * Search the case's repo for existing GitHub issues. Used by the Browse tab
+ * of the issue picker dialog. Returns a slim list — no body, just titles +
+ * state + labels — for fast rendering.
+ */
+export async function searchIssuesForCase(
+  stepComparisonId: string,
+  query?: string,
+  state: 'open' | 'closed' | 'all' = 'open',
+): Promise<{ ok: boolean; issues?: GitHubIssueListItem[]; error?: string }> {
+  const step = await getStep(stepComparisonId);
+  if (!step) return { ok: false, error: 'Step not found' };
+  const build = await queries.getBuild(step.buildId);
+  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repoId = testRun?.repositoryId ?? null;
+  if (!repoId) return { ok: false, error: 'No repository on build' };
+  await requireRepoAccess(repoId);
+  const repo = await queries.getRepository(repoId);
+  if (!repo || repo.provider !== 'github') return { ok: false, error: 'Not a GitHub repository' };
+  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
+  const result = await searchGitHubIssues(account.accessToken, repo.owner, repo.name, query, state);
+  if (!result.success) return { ok: false, error: result.error };
+  return { ok: true, issues: result.issues };
+}
+
+/**
+ * Save a reviewer note on a step comparison. Surfaces as the lead paragraph
+ * of any issue subsequently created from this case.
+ */
+export async function setReviewerNote(stepComparisonId: string, note: string): Promise<{ ok: boolean; error?: string }> {
+  const step = await getStep(stepComparisonId);
+  if (!step) return { ok: false, error: 'Step not found' };
+  const build = await queries.getBuild(step.buildId);
+  if (!build) return { ok: false, error: 'Build not found' };
+  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repoId = testRun?.repositoryId ?? null;
+  if (repoId) await requireRepoAccess(repoId);
+  await db
+    .update(stepComparisons)
+    .set({ reviewerNote: note.trim().length === 0 ? null : note })
+    .where(eq(stepComparisons.id, stepComparisonId));
+  // No revalidatePath — typing a note shouldn't trigger a server re-render
+  // mid-keystroke; the client owns the optimistic state.
+  return { ok: true };
 }

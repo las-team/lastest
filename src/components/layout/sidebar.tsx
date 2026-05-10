@@ -16,6 +16,7 @@ import {
   Trophy,
   SplitSquareHorizontal,
   ShieldCheck,
+  GitCommit,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton, type RepositoryWithTestCount } from './repo-selector';
@@ -34,8 +35,11 @@ interface SidebarProps {
   baseUrl?: string;
   repositoryId?: string;
   ebSessions?: EmbeddedSession[];
-  /** Pending verification items (regressions/todos) on the active branch's latest build. */
+  /** Untriaged (Unsorted) cases on the active branch's latest build. */
   verifyPendingCount?: number;
+  /** When pending=0 but the active branch has a newer commit since the last
+   *  build, surface a small icon hinting that there's something new to verify. */
+  verifyHasNewerCommit?: boolean;
 }
 
 const dashboardNav = [
@@ -65,7 +69,7 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions, verifyPendingCount = 0 }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions, verifyPendingCount = 0, verifyHasNewerCommit = false }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -207,14 +211,31 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                     {isVerify && verifyPendingCount > 0 && (
                       <span
                         className={cn(
-                          'inline-flex items-center justify-center rounded-full text-[10px] font-mono font-semibold leading-none px-1.5 min-w-[18px] h-[18px]',
+                          'inline-flex items-center justify-center rounded-full text-[10px] font-mono font-semibold leading-none px-1.5 min-w-[18px] h-[18px] ring-1',
                           isActive
-                            ? 'bg-primary-foreground/20 text-primary-foreground'
-                            : 'bg-destructive text-white',
+                            ? 'bg-white text-primary ring-white/40'
+                            // Inactive: amber ("attention" — pending verification),
+                            // not red ("destructive" — blocking error).
+                            : 'bg-[#E09836] text-white ring-[#E09836]/30',
                         )}
-                        aria-label={`${verifyPendingCount} pending verification ${verifyPendingCount === 1 ? 'item' : 'items'}`}
+                        aria-label={`${verifyPendingCount} unsorted ${verifyPendingCount === 1 ? 'case' : 'cases'}`}
+                        title={`${verifyPendingCount} unsorted ${verifyPendingCount === 1 ? 'case' : 'cases'} to triage`}
                       >
                         {verifyPendingCount > 99 ? '99+' : verifyPendingCount}
+                      </span>
+                    )}
+                    {isVerify && verifyPendingCount === 0 && verifyHasNewerCommit && (
+                      <span
+                        className={cn(
+                          'inline-flex items-center justify-center rounded-full leading-none w-[18px] h-[18px] ring-1',
+                          isActive
+                            ? 'bg-white text-primary ring-white/40'
+                            : 'bg-[#3674A8] text-white ring-[#3674A8]/30',
+                        )}
+                        aria-label="Newer commit on this branch hasn't been verified yet"
+                        title="Newer commit on this branch hasn't been verified yet"
+                      >
+                        <GitCommit className="h-3 w-3" />
                       </span>
                     )}
                   </Link>

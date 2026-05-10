@@ -97,8 +97,9 @@
 .verify-page .v-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-radius: var(--r-md);
   border: 1px solid var(--border-strong);
   background: var(--c-white);
@@ -108,15 +109,27 @@
   color: var(--fg-1);
   cursor: pointer;
   line-height: 1;
+  /* Action bars line up cleanly when every button shares a min-width. */
+  min-width: 132px;
+  white-space: nowrap;
   transition: background 120ms ease;
 }
 .verify-page .v-btn:hover { background: var(--c-soft); }
 .verify-page .v-btn.primary {
+  /* Reserved for the single page-level primary CTA (the Run button). */
   background: var(--c-teal);
   border-color: transparent;
   color: white;
 }
 .verify-page .v-btn.primary:hover { background: #2E957D; }
+.verify-page .v-btn.success {
+  /* Approve / "yes this is intended" — tinted, not solid, so it doesn't
+     compete with the page-level primary. */
+  background: color-mix(in oklab, var(--c-teal) 10%, white);
+  border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
+  color: #1F7B66;
+}
+.verify-page .v-btn.success:hover { background: color-mix(in oklab, var(--c-teal) 16%, white); }
 .verify-page .v-btn.danger {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
@@ -127,13 +140,34 @@
   border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
   color: #8C5C19;
 }
+.verify-page .v-btn.tinted {
+  /* Subtle "active" toggle state without claiming the page primary. */
+  background: color-mix(in oklab, var(--c-teal) 10%, white);
+  border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
+  color: #1F7B66;
+}
 .verify-page .v-btn.ghost {
   background: transparent;
   border-color: transparent;
   color: var(--fg-2);
+  min-width: auto;
 }
-.verify-page .v-btn.sm { padding: 5px 9px; font-size: 12px; }
-.verify-page .v-btn.icon { padding: 6px; aspect-ratio: 1; justify-content: center; }
+.verify-page .v-btn.sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  min-width: 64px;
+}
+.verify-page .v-btn.icon {
+  padding: 6px;
+  aspect-ratio: 1;
+  min-width: auto;
+  width: 32px;
+  height: 32px;
+}
+.verify-page .v-btn.sm.icon {
+  width: 26px;
+  height: 26px;
+}
 .verify-page .v-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;

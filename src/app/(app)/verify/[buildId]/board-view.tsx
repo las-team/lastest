@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -12,12 +12,12 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { setReviewerNote } from '@/server/actions/verify-issues';
 import {
   Check,
   CircleDot,
   ExternalLink,
   Loader2,
-  MoreHorizontal,
   SkipForward,
   Undo2,
   Github,
@@ -29,7 +29,7 @@ import type {
   StepIssueState,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
-import type { VisualDiffLite } from './board-focus-client';
+import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 
 export type CaseStatus = 'regression' | 'done' | 'missed' | 'unknown';
 
@@ -44,6 +44,9 @@ interface BoardViewProps {
   areaById: Map<string, AreaLite>;
   changedAreaIds: Set<string>;
   visualByStepKey: Map<string, VisualDiffLite>;
+  /** Test results keyed by id — used to detect which layers were *applied*
+   *  (captured) for each case so the card can chip them even with 0 diff. */
+  testResultById: Map<string, TestResultLite>;
   /** When non-empty, only these statuses are shown on the board. */
   statusFilter: Set<CaseStatus>;
   /** True while the build is in progress — shows a Running banner + in-flight cards. */
@@ -52,15 +55,18 @@ interface BoardViewProps {
   runningTests: Array<{ testId: string; name: string }>;
   onOpenCase: (stepId: string) => void;
   onDropCase: (stepId: string, target: CaseStatus) => void;
+  /** Open the GH issue picker dialog for a specific case. */
+  onOpenIssuePicker: (stepId: string) => void;
 }
 
-// Columns flow from "needs decision" (Unknown — leftmost) → verdict
-// (Regression / Missed) → resolved (Done — rightmost).
-const COLUMN_ORDER: { status: CaseStatus; label: string; accent: string }[] = [
-  { status: 'unknown',    label: 'Unknown',             accent: 'var(--fg-3)' },
-  { status: 'regression', label: 'Regression',          accent: 'var(--c-red)' },
-  { status: 'missed',     label: 'Intended · Missed',   accent: 'var(--c-amber)' },
-  { status: 'done',       label: 'Intended · Done',     accent: 'var(--c-teal)' },
+// Columns flow left → right: needs decision → broken → expected-but-missing → resolved.
+// NOTE: status type values stay in code (`unknown`, `regression`, `missed`, `done`)
+// to avoid a wide rename — only the user-facing labels are reworded.
+const COLUMN_ORDER: { status: CaseStatus; label: string; accent: string; dropLabel: string }[] = [
+  { status: 'unknown',    label: 'Unsorted', dropLabel: 'unsorted',  accent: 'var(--fg-3)' },
+  { status: 'regression', label: 'Broken',   dropLabel: 'broken',    accent: 'var(--c-red)' },
+  { status: 'missed',     label: 'Missed',   dropLabel: 'missed',    accent: 'var(--c-amber)' },
+  { status: 'done',       label: 'Verified', dropLabel: 'verified',  accent: 'var(--c-teal)' },
 ];
 
 interface CaseCardData {
@@ -70,6 +76,7 @@ interface CaseCardData {
   status: CaseStatus;
   feedback: StepLayerFeedback[];
   visual: VisualDiffLite | null;
+  result: TestResultLite | null;
 }
 
 export function BoardView(props: BoardViewProps) {
@@ -86,9 +93,10 @@ export function BoardView(props: BoardViewProps) {
       const status = deriveCaseStatus({ step, feedback: stepFb, isInChangedArea });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
-      return { step, test, area, status, feedback: stepFb, visual };
+      const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      return { step, test, area, status, feedback: stepFb, visual, result };
     });
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey]);
+  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
 
   const grouped = useMemo(() => {
     const map: Record<CaseStatus, CaseCardData[]> = { regression: [], missed: [], unknown: [], done: [] };
@@ -99,6 +107,17 @@ export function BoardView(props: BoardViewProps) {
     return map;
   }, [cases, props.statusFilter]);
 
+  // Per-area total case counts (independent of which column they sit in) —
+  // used as the denominator for the Verified column's "y/x verified" summary.
+  const areaTotals = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cases) {
+      const key = c.area?.id ?? '__unscoped__';
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+  }, [cases]);
+
   const total = cases.length;
   const verified = grouped.done.length + grouped.regression.length + grouped.missed.length;
   const wPct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
@@ -106,6 +125,7 @@ export function BoardView(props: BoardViewProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const activeDragCase = activeDragId ? cases.find((c) => c.step.id === activeDragId) ?? null : null;
+  const sourceStatus = activeDragCase?.status ?? null;
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveDragId(String(event.active.id));
@@ -174,13 +194,18 @@ export function BoardView(props: BoardViewProps) {
             <KCol
               key={col.status}
               label={col.label}
+              dropLabel={col.dropLabel}
               accent={col.accent}
               status={col.status}
               cases={grouped[col.status]}
+              areaTotals={areaTotals}
               onOpenCase={props.onOpenCase}
-              // Show in-flight skeletons in the Unknown column while running.
+              onOpenIssuePicker={props.onOpenIssuePicker}
+              // Show in-flight skeletons in the Unsorted column while running.
               runningTests={col.status === 'unknown' && props.isRunning ? props.runningTests : []}
               testById={props.testById}
+              isDragSource={sourceStatus === col.status}
+              isDragValid={sourceStatus !== null && sourceStatus !== col.status}
             />
           ))}
         </div>
@@ -189,16 +214,16 @@ export function BoardView(props: BoardViewProps) {
         <div style={{ padding: '10px 20px', borderTop: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 14 }}>
           <Github size={14} />
           <span className="label">Dev cycle</span>
-          {grouped.regression.length > 0 && (
+          {grouped.regression.length > 0 && countWithoutIssue(grouped.regression) > 0 && (
             <span className="v-chip regression">
               <CircleDot size={11} />
-              {countWithoutIssue(grouped.regression)} {countWithoutIssue(grouped.regression) === 1 ? 'regression' : 'regressions'} pending issue creation
+              {countWithoutIssue(grouped.regression)} broken case{countWithoutIssue(grouped.regression) === 1 ? '' : 's'} need an issue
             </span>
           )}
-          {grouped.done.length > 0 && (
+          {grouped.done.length > 0 && countWithLinkedIssue(grouped.done) > 0 && (
             <span className="v-chip done">
               <CheckCircleIcon size={11} />
-              {countWithLinkedIssue(grouped.done)} done case{countWithLinkedIssue(grouped.done) === 1 ? '' : 's'} ready to close
+              {countWithLinkedIssue(grouped.done)} verified case{countWithLinkedIssue(grouped.done) === 1 ? '' : 's'} ready to close
             </span>
           )}
           <span style={{ flex: 1 }} />
@@ -226,10 +251,10 @@ function countWithLinkedIssue(cases: CaseCardData[]): number {
 
 function Chip({ status }: { status: CaseStatus }) {
   const labels: Record<CaseStatus, string> = {
-    regression: 'Regression',
-    done: 'Done',
+    regression: 'Broken',
+    done: 'Verified',
     missed: 'Missed',
-    unknown: 'Unknown',
+    unknown: 'Unsorted',
   };
   return <span className={`v-chip ${status}`}><span className="dot" />{labels[status]}</span>;
 }
@@ -240,44 +265,84 @@ function Counter({ n }: { n: number }) {
 
 interface KColProps {
   label: string;
+  dropLabel: string;
   accent: string;
   status: CaseStatus;
   cases: CaseCardData[];
+  /** Total cases per area across the entire board — denominator for the
+   *  Verified column's "y/x verified" summary. */
+  areaTotals: Map<string, number>;
   onOpenCase: (stepId: string) => void;
+  onOpenIssuePicker: (stepId: string) => void;
   /** Live in-flight tests; rendered as non-draggable skeleton cards. */
   runningTests: Array<{ testId: string; name: string }>;
   testById: Map<string, TestLite>;
+  /** True while a card is being dragged FROM this column. */
+  isDragSource: boolean;
+  /** True while a card is being dragged AND this column is a valid drop target. */
+  isDragValid: boolean;
 }
 
-function KCol({ label, accent, status, cases, onOpenCase, runningTests, testById }: KColProps) {
+function KCol({ label, dropLabel, accent, status, cases, areaTotals, onOpenCase, onOpenIssuePicker, runningTests, testById, isDragSource, isDragValid }: KColProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const visible = cases.slice(0, 30);
-  const sideColor = isOver ? 'color-mix(in oklab, var(--c-teal) 35%, transparent)' : 'var(--border)';
+  const showDropAffordance = isDragValid;
+  const isHovered = isOver && isDragValid;
+  const sideColor = isHovered
+    ? 'color-mix(in oklab, var(--c-teal) 55%, transparent)'
+    : showDropAffordance
+      ? 'color-mix(in oklab, var(--c-teal) 25%, transparent)'
+      : 'var(--border)';
   const totalCount = cases.length + runningTests.length;
   return (
     <div
       ref={setNodeRef}
       style={{
-        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
-        background: isOver ? 'color-mix(in oklab, var(--c-teal) 6%, var(--c-soft))' : 'var(--c-soft)',
+        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative',
+        background: isHovered
+          ? 'color-mix(in oklab, var(--c-teal) 8%, var(--c-soft))'
+          : isDragSource
+            ? 'color-mix(in oklab, var(--fg-3) 6%, var(--c-soft))'
+            : 'var(--c-soft)',
         borderTop: `3px solid ${accent}`,
         borderRight: `1px solid ${sideColor}`,
         borderBottom: `1px solid ${sideColor}`,
         borderLeft: `1px solid ${sideColor}`,
         borderRadius: 8,
-        transition: 'background 120ms ease, border-color 120ms ease',
+        boxShadow: isHovered ? 'inset 0 0 0 2px color-mix(in oklab, var(--c-teal) 35%, transparent)' : undefined,
+        transition: 'background 120ms ease, border-color 120ms ease, box-shadow 120ms ease',
+        opacity: isDragSource ? 0.7 : 1,
       }}
     >
+      {/* Drop affordance — only while dragging from another column. */}
+      {showDropAffordance && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 48, left: 8, right: 8, bottom: 8,
+            border: `2px dashed ${isHovered ? 'color-mix(in oklab, var(--c-teal) 50%, transparent)' : 'color-mix(in oklab, var(--c-teal) 25%, transparent)'}`,
+            borderRadius: 6,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 1,
+            color: isHovered ? '#1F7B66' : 'var(--fg-3)',
+            fontSize: 12, fontWeight: 600,
+            background: isHovered ? 'color-mix(in oklab, var(--c-teal) 4%, white)' : 'transparent',
+            transition: 'all 120ms ease',
+          }}
+        >
+          Drop to mark <span style={{ marginLeft: 4 }}>{dropLabel}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
           <span style={{ fontWeight: 600, fontSize: 13 }}>{label}</span>
           <span className="label" style={{ fontSize: 10 }}>{totalCount}</span>
         </div>
-        <MoreHorizontal size={14} />
       </div>
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
-        {/* In-flight running tests (only in Unknown column while running). */}
+        {/* In-flight running tests (only in Unsorted column while running). */}
         {runningTests.map((rt) => {
           const test = testById.get(rt.testId);
           return (
@@ -290,20 +355,105 @@ function KCol({ label, accent, status, cases, onOpenCase, runningTests, testById
         {visible.length === 0 && runningTests.length === 0 && (
           <div className="label" style={{ textAlign: 'center', padding: '24px 0' }}>—</div>
         )}
-        {visible.map((c) => (
-          <DraggableCaseCard
-            key={c.step.id}
-            data={c}
-            onOpen={() => onOpenCase(c.step.id)}
-            colStatus={status}
-          />
-        ))}
+        {/* Verified column: collapse all-clean areas under a single details row.
+            Areas with any flagged case (linked issue, reviewer note in future)
+            still expand inline. Other columns just render flat. */}
+        {status === 'done'
+          ? renderVerifiedGrouped(visible, areaTotals, onOpenCase, onOpenIssuePicker)
+          : visible.map((c) => (
+              <DraggableCaseCard
+                key={c.step.id}
+                data={c}
+                onOpen={() => onOpenCase(c.step.id)}
+                onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
+                colStatus={status}
+              />
+            ))}
         {cases.length > visible.length && (
           <div className="label" style={{ textAlign: 'center', padding: '8px 0' }}>+{cases.length - visible.length} more</div>
         )}
       </div>
     </div>
   );
+}
+
+/** Group Verified-column cards by area; areas where every case is "clean"
+ *  (no linked issue / no rejection feedback) collapse to a single summary row.
+ *  Other areas render flat so anything that still needs eyes is visible.
+ *  `areaTotals` carries the count of *all* tests in each area across the board
+ *  (not just the ones that landed in Verified) — used as the y/x denominator. */
+function renderVerifiedGrouped(
+  cases: CaseCardData[],
+  areaTotals: Map<string, number>,
+  onOpenCase: (id: string) => void,
+  onOpenIssuePicker: (id: string) => void,
+): React.ReactNode {
+  const byArea = new Map<string, { area: CaseCardData['area']; rows: CaseCardData[] }>();
+  for (const c of cases) {
+    const key = c.area?.id ?? '__unscoped__';
+    if (!byArea.has(key)) byArea.set(key, { area: c.area, rows: [] });
+    byArea.get(key)!.rows.push(c);
+  }
+
+  const isCleanCase = (c: CaseCardData) =>
+    !c.step.githubIssueUrl &&
+    !c.feedback.some((f) => f.status === 'rejected');
+
+  const groups = Array.from(byArea.values());
+  return groups.map((g, i) => {
+    const allClean = g.rows.every(isCleanCase);
+    const areaKey = g.area?.id ?? `unscoped-${i}`;
+    if (allClean && g.rows.length > 1) {
+      const verifiedCount = g.rows.filter(isCleanCase).length;
+      // Denominator = every test in this area across ALL columns, not just
+      // the ones that happen to be in the Verified column right now.
+      const totalInArea = areaTotals.get(g.area?.id ?? '__unscoped__') ?? g.rows.length;
+      const fullyVerified = verifiedCount === totalInArea;
+      return (
+        <details key={areaKey} className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <summary
+            style={{
+              padding: '8px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              listStyle: 'none',
+              fontSize: 12,
+            }}
+          >
+            {/* Only show the green check when *all* tests in the area are verified. */}
+            {fullyVerified && <CheckCircleIcon size={12} style={{ color: 'var(--c-teal)' }} />}
+            <span style={{ fontWeight: 600 }}>{g.area?.name ?? 'Unscoped'}</span>
+            <span className="label" style={{ fontSize: 9, marginLeft: 'auto' }}>
+              {verifiedCount}/{totalInArea} verified
+            </span>
+          </summary>
+          <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)' }}>
+            {g.rows.map((c) => (
+              <DraggableCaseCard
+                key={c.step.id}
+                data={c}
+                onOpen={() => onOpenCase(c.step.id)}
+                onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
+                colStatus="done"
+              />
+            ))}
+          </div>
+        </details>
+      );
+    }
+    // Mixed area or single case — render flat.
+    return g.rows.map((c) => (
+      <DraggableCaseCard
+        key={c.step.id}
+        data={c}
+        onOpen={() => onOpenCase(c.step.id)}
+        onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
+        colStatus="done"
+      />
+    ));
+  });
 }
 
 function RunningCard({ testName }: { testName: string }) {
@@ -333,13 +483,71 @@ function RunningCard({ testName }: { testName: string }) {
   );
 }
 
+/** Inline textarea on Missed cards for reviewer's "what should have changed".
+ *  Debounced save on blur; the saved note prepends any GH issue created from
+ *  this case so the human framing leads the report.
+ */
+function ReviewerNoteEditor({ stepId, initial }: { stepId: string; initial: string }) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const lastSaved = useRef(initial);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const flush = (v: string) => {
+    if (v === lastSaved.current) return;
+    setSaving(true);
+    setReviewerNote(stepId, v).then((res) => {
+      if (res.ok) lastSaved.current = v;
+      setSaving(false);
+    }).catch(() => setSaving(false));
+  };
+
+  const handleChange = (next: string) => {
+    setValue(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => flush(next), 700);
+  };
+
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 8 }}>
+      <textarea
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onBlur={(e) => flush(e.target.value)}
+        placeholder="What was supposed to change here?"
+        rows={2}
+        style={{
+          width: '100%',
+          fontSize: 11,
+          fontFamily: 'var(--font-sans)',
+          padding: '6px 8px',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          background: 'var(--c-white)',
+          color: 'var(--fg-1)',
+          resize: 'vertical',
+          minHeight: 38,
+        }}
+      />
+      {saving && (
+        <div className="label" style={{ fontSize: 9, marginTop: 2, color: 'var(--fg-3)' }}>
+          saving…
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface DraggableProps {
   data: CaseCardData;
   colStatus: CaseStatus;
   onOpen: () => void;
+  onOpenIssuePicker: () => void;
 }
 
-function DraggableCaseCard({ data, colStatus, onOpen }: DraggableProps) {
+function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker }: DraggableProps) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id: data.step.id });
   // While dragging, the source slot fades out — DragOverlay portals the
   // visual preview above all columns so it never gets clipped.
@@ -348,7 +556,7 @@ function DraggableCaseCard({ data, colStatus, onOpen }: DraggableProps) {
   };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <CaseCard data={data} colStatus={colStatus} onOpen={onOpen} dragging={false} />
+      <CaseCard data={data} colStatus={colStatus} onOpen={onOpen} onOpenIssuePicker={onOpenIssuePicker} dragging={false} />
     </div>
   );
 }
@@ -357,11 +565,12 @@ interface CardProps {
   data: CaseCardData;
   colStatus: CaseStatus;
   onOpen: () => void;
+  onOpenIssuePicker?: () => void;
   dragging?: boolean;
 }
 
-function CaseCard({ data, colStatus, onOpen, dragging }: CardProps) {
-  const layerKinds = Array.from(new Set(data.step.evidence.slice(0, 4).map((e) => e.layer)));
+function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: CardProps) {
+  const layerSummaries = useMemo(() => summarizeLayersForCard(data.step), [data.step]);
   return (
     <div
       className="v-card"
@@ -376,35 +585,37 @@ function CaseCard({ data, colStatus, onOpen, dragging }: CardProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span className="label" style={{ fontSize: 9 }}>{data.area?.name ?? 'Unscoped'}</span>
         <span style={{ flex: 1 }} />
-        <IssueChipReal step={data.step} />
+        <IssueChipReal step={data.step} onOpenPicker={onOpenIssuePicker} />
       </div>
       <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, color: 'var(--fg-1)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
         {data.test?.name ?? 'Unknown test'}
         {data.step.stepLabel && <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}> · {data.step.stepLabel}</span>}
       </div>
       <CardThumbnail visual={data.visual} />
-      {layerKinds.length > 0 && (
+      {layerSummaries.length > 0 && (
         <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
-          {layerKinds.map((k) => (
-            <span key={k} className="v-chip" style={{ fontSize: 9, padding: '1px 6px' }}>{k}</span>
+          {layerSummaries.map((s) => (
+            <span
+              key={s.layer}
+              className={`v-chip ${s.tone}`}
+              style={{ fontSize: 9, padding: '1px 6px' }}
+              title={`${s.layer}: ${s.summary}`}
+            >
+              {s.layer.toUpperCase()}{s.delta ? ` · ${s.delta}` : ''}
+            </span>
           ))}
         </div>
       )}
-      {data.visual?.percentageDifference != null && (
-        <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginTop: 6 }}>
-          {data.visual.percentageDifference}% diff · {data.visual.pixelDifference} px
-        </div>
+      {colStatus === 'missed' && (
+        <ReviewerNoteEditor
+          stepId={data.step.id}
+          initial={data.step.reviewerNote ?? ''}
+        />
       )}
       <div style={{ display: 'flex', gap: 4, marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
-        {colStatus === 'unknown' ? (
-          <button className="v-btn sm primary" style={{ flex: 1, fontSize: 11 }} onClick={onOpen}>
-            Triage
-          </button>
-        ) : (
-          <button className="v-btn sm" style={{ flex: 1, fontSize: 11 }} onClick={onOpen}>
-            <Check size={11} />Open
-          </button>
-        )}
+        <button className="v-btn sm" style={{ flex: 1, fontSize: 11 }} onClick={onOpen}>
+          {colStatus === 'unknown' ? 'Triage' : <><Check size={11} />Open</>}
+        </button>
         {data.step.githubIssueUrl && (
           <a
             href={data.step.githubIssueUrl}
@@ -437,22 +648,129 @@ function CardThumbnail({ visual }: { visual: VisualDiffLite | null }) {
   const src = visual?.diffImagePath ?? visual?.currentImagePath ?? visual?.baselineImagePath ?? null;
   if (!src) return null;
   return (
-    <div style={{ height: 56, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)', background: 'var(--c-soft-2)' }}>
+    <div
+      style={{
+        // Screen-ratio (16:9) thumbnail keeps screenshots readable as
+        // miniature pages instead of cropped strips.
+        width: '100%',
+        aspectRatio: '16 / 9',
+        borderRadius: 6,
+        overflow: 'hidden',
+        border: '1px solid var(--border)',
+        background: 'var(--c-soft-2)',
+      }}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt=""
         loading="lazy"
-        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center', display: 'block' }}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: 'white' }}
       />
     </div>
   );
 }
 
-function IssueChipReal({ step }: { step: StepComparison }) {
+interface LayerCardSummary {
+  layer: string;
+  delta: string;
+  summary: string;
+  /** Maps to the verify-design chip tone classes. */
+  tone: 'regression' | 'missed' | 'done' | 'unknown';
+}
+
+/** Per-layer summary chip data for a board card. One chip per evidence row,
+ *  color-coded by signal strength and showing the layer's delta number. */
+function summarizeLayersForCard(step: StepComparison): LayerCardSummary[] {
+  const seen = new Set<string>();
+  const out: LayerCardSummary[] = [];
+  for (const ev of step.evidence) {
+    if (seen.has(ev.layer)) continue;
+    seen.add(ev.layer);
+    out.push({
+      layer: ev.layer,
+      delta: deltaForLayer(step, ev.layer),
+      summary: ev.summary,
+      tone: ev.signal === 'high' ? 'regression' : ev.signal === 'medium' ? 'missed' : 'done',
+    });
+  }
+  return out;
+}
+
+function deltaForLayer(step: StepComparison, layer: string): string {
+  const layers = step.layers;
+  switch (layer) {
+    case 'visual': {
+      const v = layers?.visual;
+      if (!v) return '';
+      return v.percentageDifference != null ? `${v.percentageDifference}%` : `${v.pixelDifference} px`;
+    }
+    case 'dom': {
+      const d = layers?.dom;
+      if (!d) return 'Δ';
+      const parts: string[] = [];
+      if (d.added.length) parts.push(`+${d.added.length}`);
+      if (d.removed.length) parts.push(`−${d.removed.length}`);
+      if (d.changed.length) parts.push(`~${d.changed.length}`);
+      return parts.join(' ') || 'Δ';
+    }
+    case 'network': {
+      const n = layers?.network;
+      if (!n) return '';
+      const parts: string[] = [];
+      if (n.added) parts.push(`+${n.added}`);
+      if (n.removed) parts.push(`−${n.removed}`);
+      if (n.newErrorCount) parts.push(`${n.newErrorCount} err`);
+      return parts.join(' ') || `${n.changed} chg`;
+    }
+    case 'console': {
+      const c = layers?.consoleDiff;
+      if (!c) return '';
+      return c.newFingerprints.length > 0 ? `${c.newFingerprints.length} new` : '';
+    }
+    case 'a11y': {
+      const a = layers?.a11y;
+      if (!a) return '';
+      return a.newViolations.length > 0 ? `+${a.newViolations.length}` : `−${a.disappeared.length}`;
+    }
+    case 'perf': {
+      const p = layers?.perf;
+      if (!p || p.deltas.length === 0) return '';
+      // Pick the highest-impact delta (over budget first, then largest drift).
+      const worst = [...p.deltas].sort((a, b) => {
+        if (a.budgetBreached !== b.budgetBreached) return a.budgetBreached ? -1 : 1;
+        return Math.abs(b.delta) - Math.abs(a.delta);
+      })[0];
+      const sign = worst.delta >= 0 ? '+' : '';
+      const value = worst.metric === 'cls' ? worst.delta.toFixed(2) : `${Math.round(worst.delta)}ms`;
+      return `${worst.metric.toUpperCase()} ${sign}${value}`;
+    }
+    case 'url': {
+      const u = layers?.url;
+      if (!u) return '';
+      return u.divergedSteps.length > 0 ? `${u.divergedSteps.length} div` : '';
+    }
+    case 'variable': {
+      const v = layers?.variable;
+      if (!v) return '';
+      return `Δ ${v.changes.length}`;
+    }
+  }
+  return '';
+}
+
+function IssueChipReal({ step, onOpenPicker }: { step: StepComparison; onOpenPicker?: () => void }) {
   if (!step.githubIssueUrl) {
     return (
-      <span className="v-chip" style={{ opacity: 0.55 }}>
+      <span
+        role={onOpenPicker ? 'button' : undefined}
+        tabIndex={onOpenPicker ? 0 : -1}
+        onClick={onOpenPicker ? (e) => { e.stopPropagation(); onOpenPicker(); } : undefined}
+        onKeyDown={onOpenPicker ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPicker(); } } : undefined}
+        className="v-chip"
+        style={{ opacity: 0.55, cursor: onOpenPicker ? 'pointer' : 'default' }}
+        title={onOpenPicker ? 'Browse or file an issue for this case' : 'No linked issue'}
+      >
         <CircleDot size={11} />no issue
       </span>
     );

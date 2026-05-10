@@ -249,3 +249,59 @@ export async function createGitHubIssue(
     };
   }
 }
+
+export interface GitHubIssueListItem {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  url: string;
+  labels: string[];
+  updatedAt: string;
+}
+
+/**
+ * List recent issues on a repo, optionally filtered by free-text. Used by the
+ * Verify "Browse issues" picker. Pull-requests are filtered out since the
+ * GitHub /issues endpoint mixes them in by default.
+ */
+export async function searchGitHubIssues(
+  token: string,
+  owner: string,
+  repo: string,
+  query?: string,
+  state: 'open' | 'closed' | 'all' = 'open',
+): Promise<{ success: boolean; issues?: GitHubIssueListItem[]; error?: string }> {
+  try {
+    const url = query && query.trim().length > 0
+      ? `https://api.github.com/search/issues?q=${encodeURIComponent(`repo:${owner}/${repo} is:issue ${query} state:${state === 'all' ? 'open' : state}`)}&per_page=20`
+      : `https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=20&sort=updated&direction=desc`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `GitHub API ${response.status}: ${text.slice(0, 200)}` };
+    }
+    const data = await response.json() as
+      | Array<{ number: number; title: string; state: string; html_url: string; pull_request?: unknown; labels: Array<string | { name: string }>; updated_at: string }>
+      | { items: Array<{ number: number; title: string; state: string; html_url: string; pull_request?: unknown; labels: Array<string | { name: string }>; updated_at: string }> };
+    const items = Array.isArray(data) ? data : data.items;
+    const issues: GitHubIssueListItem[] = items
+      .filter((i) => !i.pull_request)
+      .map((i) => ({
+        number: i.number,
+        title: i.title,
+        state: (i.state === 'closed' ? 'closed' : 'open'),
+        url: i.html_url,
+        labels: i.labels.map((l) => (typeof l === 'string' ? l : l.name)),
+        updatedAt: i.updated_at,
+      }));
+    return { success: true, issues };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}

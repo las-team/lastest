@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleDot,
   ExternalLink,
-  Filter,
   Github,
   Layers,
   Link as LinkIcon,
@@ -22,11 +21,8 @@ import {
   Plus,
 } from 'lucide-react';
 import { decideLayer } from '@/server/actions/layer-feedback';
-import {
-  createIssueForCase,
-  linkIssueToCase,
-  closeIssueForCase,
-} from '@/server/actions/verify-issues';
+import { closeIssueForCase } from '@/server/actions/verify-issues';
+import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import type {
   StepComparison,
   StepLayerFeedback,
@@ -52,6 +48,9 @@ interface FocusViewProps {
   selectedStepId: string | null;
   onSelect: (id: string) => void;
   onMarkDecision: (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => void;
+  /** Open the issue picker dialog for a specific case. The dialog itself is
+   *  rendered once at the BoardFocusClient level. */
+  onOpenIssuePicker: (stepId: string) => void;
 }
 
 type CompareTab = EvidenceLayer;
@@ -173,24 +172,10 @@ export function FocusView(props: FocusViewProps) {
     });
   };
 
-  // Server-side issue actions
-  const handleCreateIssue = async () => {
-    if (!activeCase) return;
-    startTransition(async () => {
-      const result = await createIssueForCase({ stepComparisonId: activeCase.step.id });
-      if (!result.ok) alert(`Failed to create issue: ${result.error}`);
-      router.refresh();
-    });
-  };
-  const handleLinkIssue = async () => {
-    if (!activeCase) return;
-    const url = prompt('Paste GitHub issue URL (e.g. https://github.com/owner/repo/issues/123):');
-    if (!url) return;
-    startTransition(async () => {
-      const result = await linkIssueToCase({ stepComparisonId: activeCase.step.id, issueUrl: url });
-      if (!result.ok) alert(`Failed to link: ${result.error}`);
-      router.refresh();
-    });
+  // Issue picker is hoisted to BoardFocusClient so the same dialog covers
+  // both the Board and Focus surfaces.
+  const handleOpenPicker = () => {
+    if (activeCase) props.onOpenIssuePicker(activeCase.step.id);
   };
   const handleCloseIssue = async () => {
     if (!activeCase?.step.githubIssueUrl) return;
@@ -229,12 +214,26 @@ export function FocusView(props: FocusViewProps) {
             Next<ChevronRight size={12} />
           </button>
           <button
-            className={'v-btn ' + (intentOpen ? 'primary' : '')}
+            className={'v-btn ' + (intentOpen ? 'tinted' : '')}
             onClick={() => setIntentOpen((v) => !v)}
+            aria-pressed={intentOpen}
           >
             <Github size={13} />{intentOpen ? 'Hide intent' : 'Show intent'}
           </button>
         </div>
+
+        {/* Signals strip — at-a-glance summary of every non-visual layer's
+            delta. Click a chip to jump to that layer's compare tab.
+        */}
+        {activeCase && (
+          <SignalsStrip
+            step={activeCase.step}
+            visual={activeCase.visual}
+            result={activeCase.result}
+            activeTab={tab}
+            onJump={(layer) => setTab(layer)}
+          />
+        )}
 
         {/* Compare-kind tabs — 3 states:
               diff   → red/amber chip with delta (real diff present)
@@ -312,15 +311,15 @@ export function FocusView(props: FocusViewProps) {
 
         {/* Bottom action bar — Wired to real decideLayer for every layer */}
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button className="v-btn primary" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'approved')}>
+          <button className="v-btn success" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'approved')}>
             <Check size={13} />Mark intended
           </button>
           <button className="v-btn warning" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'rejected')}>
             <AlertTriangle size={13} />Missed-intended
           </button>
           {!activeCase?.step.githubIssueUrl && (
-            <button className="v-btn" disabled={pending || !activeCase} onClick={handleCreateIssue}>
-              <Plus size={13} />Create issue
+            <button className="v-btn" disabled={pending || !activeCase} onClick={handleOpenPicker}>
+              <Plus size={13} />Link or file issue
             </button>
           )}
           {activeCase?.step.githubIssueUrl && activeCase.step.githubIssueState !== 'closed' && (
@@ -342,8 +341,7 @@ export function FocusView(props: FocusViewProps) {
         activeCase={activeCase}
         onApproveLayer={(layer) => decideOneLayer(layer, 'approved')}
         onRejectLayer={(layer) => decideOneLayer(layer, 'rejected')}
-        onCreateIssue={handleCreateIssue}
-        onLinkIssue={handleLinkIssue}
+        onOpenPicker={handleOpenPicker}
         onCloseIssue={handleCloseIssue}
       />
     </div>
@@ -395,7 +393,7 @@ function layerDelta(step: StepComparison, layer: EvidenceLayer): string | null {
 
 function StatusChipFor({ status }: { status: CaseStatus }) {
   const labels: Record<CaseStatus, string> = {
-    regression: 'Regression', done: 'Done', missed: 'Missed', unknown: 'Unknown',
+    regression: 'Broken', done: 'Verified', missed: 'Missed', unknown: 'Unsorted',
   };
   return <span className={`v-chip ${status}`}><span className="dot" />{labels[status]}</span>;
 }
@@ -422,6 +420,93 @@ function IssueChipReal({ step }: { step: StepComparison }) {
   );
 }
 
+const SIGNAL_LAYERS: ReadonlyArray<{ layer: EvidenceLayer; label: string }> = [
+  { layer: 'dom',      label: 'DOM' },
+  { layer: 'network',  label: 'NETWORK' },
+  { layer: 'console',  label: 'CONSOLE' },
+  { layer: 'a11y',     label: 'A11Y' },
+  { layer: 'perf',     label: 'PERF' },
+  { layer: 'url',      label: 'URL' },
+  { layer: 'variable', label: 'VARS' },
+];
+
+function SignalsStrip({
+  step,
+  visual,
+  result,
+  activeTab,
+  onJump,
+}: {
+  step: StepComparison;
+  visual: VisualDiffLite | null;
+  result: TestResultLite | null;
+  activeTab: EvidenceLayer;
+  onJump: (layer: EvidenceLayer) => void;
+}) {
+  const chips = SIGNAL_LAYERS
+    .map(({ layer, label }) => {
+      const ev = step.evidence.find((e) => e.layer === layer) ?? null;
+      const state = classifyLayer(layer, step, result, visual);
+      if (state === 'absent' && !ev) return null;
+      const delta = layerDelta(step, layer);
+      const tone = ev?.signal === 'high'
+        ? 'regression'
+        : ev?.signal === 'medium'
+          ? 'missed'
+          : 'unknown';
+      const text = state === 'diff' && delta
+        ? delta
+        : state === 'clean'
+          ? 'same'
+          : '—';
+      return { layer, label, tone, text };
+    })
+    .filter((x): x is { layer: EvidenceLayer; label: string; tone: string; text: string } => x !== null);
+
+  if (chips.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        padding: '8px 16px',
+        background: 'var(--c-white)',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        overflowX: 'auto',
+      }}
+      role="toolbar"
+      aria-label="Layer signals"
+    >
+      <span className="label" style={{ fontSize: 9, marginRight: 4, flexShrink: 0 }}>
+        Signals
+      </span>
+      {chips.map(({ layer, label, tone, text }) => {
+        const isActive = activeTab === layer;
+        return (
+          <button
+            key={layer}
+            onClick={() => onJump(layer)}
+            className={`v-chip ${tone}`}
+            style={{
+              cursor: 'pointer',
+              flexShrink: 0,
+              fontSize: 10,
+              outline: isActive ? '1px solid color-mix(in oklab, var(--c-teal) 35%, transparent)' : 'none',
+              outlineOffset: 1,
+            }}
+            title={`Jump to ${label} tab`}
+          >
+            <span className="dot" />
+            {label} · {text}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 interface CaseSidebarProps {
   groupedByArea: { area: AreaLite | null; rows: CaseRow[] }[];
   activeId: string | null;
@@ -433,10 +518,10 @@ function CaseSidebar({ groupedByArea, activeId, onPick }: CaseSidebarProps) {
   return (
     <div style={{ width: 260, background: 'var(--c-white)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Search size={13} />
-        <span className="label" style={{ fontSize: 10 }}>{total} cases · group by area</span>
-        <span style={{ flex: 1 }} />
-        <Filter size={13} style={{ opacity: 0.5 }} />
+        <Search size={13} aria-hidden />
+        <span className="label" style={{ fontSize: 10 }}>
+          {total} cases · grouped by area
+        </span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {groupedByArea.length === 0 && (
@@ -537,7 +622,7 @@ function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps
 
   // diff or clean — render the layer-specific pane and let it differentiate.
   if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} />;
-  if (tab === 'dom') return <DomPane step={step} result={result} clean={layerState === 'clean'} />;
+  if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
   if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'console') return <ConsolePane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} />;
@@ -563,7 +648,6 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
   const baselineSrc = visual?.baselineImagePath;
   const currentSrc = visual?.currentImagePath;
   const diffSrc = visual?.diffImagePath;
-
   const hasBaseline = !!baselineSrc;
   const hasCurrent = !!currentSrc;
   const visualEvidence = step.layers?.visual;
@@ -606,11 +690,7 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
         )}
         {mode === 'overlay' && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {diffSrc ? (
-              <ImagePanel label="diff" src={diffSrc} />
-            ) : (
-              <ImagePanel label="current" src={currentSrc} />
-            )}
+            {diffSrc ? <ImagePanel label="diff" src={diffSrc} /> : <ImagePanel label="current" src={currentSrc} />}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <ImagePanel label="baseline" src={baselineSrc} small />
               <ImagePanel label="current" src={currentSrc} small />
@@ -672,27 +752,186 @@ function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: strin
   );
 }
 
-function DomPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function DomPane({
+  step,
+  visual,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  visual: VisualDiffLite | null;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const dom = step.layers?.dom;
   const snapshot = result?.domSnapshot;
   const elementCount = Array.isArray(snapshot?.elements) ? snapshot.elements.length : 0;
+  const screenshotSrc = visual?.currentImagePath ?? visual?.diffImagePath ?? visual?.baselineImagePath ?? null;
+
+  // Image natural dimensions are the same coordinate space as the bboxes
+  // (both come from the same Playwright page). We measure on load and use
+  // that as the denominator for `%` overlay positioning.
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
+
+  type OverlayRect = { x: number; y: number; w: number; h: number; tone: 'added' | 'removed' | 'changed'; selector: string; tag: string };
+  const overlays: OverlayRect[] = [];
+  if (dom && imgSize) {
+    for (const el of dom.removed) overlays.push(rectFor(el, 'removed', imgSize.w, imgSize.h));
+    for (const el of dom.added) overlays.push(rectFor(el, 'added', imgSize.w, imgSize.h));
+    for (const c of dom.changed) overlays.push(rectFor(c.current, 'changed', imgSize.w, imgSize.h));
+  }
+
+  const [hovered, setHovered] = useState<number | null>(null);
+
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {clean && (
-        <CleanBanner message={`No DOM diff — ${elementCount} elements captured, identical structure`} />
-      )}
-      {dom ? (
-        <div className="v-card" style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7, color: 'var(--fg-2)' }}>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(dom, null, 2)}</pre>
+      {clean && <CleanBanner message={`No DOM diff — ${elementCount} elements captured, identical structure`} />}
+
+      {/* Visual overlay — boxes drawn on the current screenshot at each
+          changed element's bounding box. Mirrors the visual-diff Regions UI. */}
+      {dom && screenshotSrc && (dom.added.length + dom.removed.length + dom.changed.length) > 0 && (
+        <div className="v-card" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="label" style={{ fontSize: 10 }}>DOM overlay</span>
+            <span className="v-chip done" style={{ fontSize: 9 }}>+{dom.added.length} added</span>
+            <span className="v-chip regression" style={{ fontSize: 9 }}>−{dom.removed.length} removed</span>
+            <span className="v-chip missed" style={{ fontSize: 9 }}>~{dom.changed.length} changed</span>
+            <span style={{ flex: 1 }} />
+            {imgSize && <span className="label" style={{ fontSize: 9 }}>{imgSize.w}×{imgSize.h}</span>}
+          </div>
+          <div style={{ position: 'relative', background: 'white', maxHeight: 600, overflow: 'auto' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={screenshotSrc}
+              alt="current"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+              }}
+              style={{ display: 'block', width: '100%', height: 'auto' }}
+            />
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {overlays.map((r, i) => {
+                const color = r.tone === 'added' ? 'var(--c-teal)' : r.tone === 'removed' ? 'var(--c-red)' : 'var(--c-amber)';
+                const isHovered = hovered === i;
+                return (
+                  <div
+                    key={i}
+                    onMouseEnter={() => setHovered(i)}
+                    onMouseLeave={() => setHovered(null)}
+                    style={{
+                      position: 'absolute',
+                      left: `${r.x}%`,
+                      top: `${r.y}%`,
+                      width: `${r.w}%`,
+                      height: `${r.h}%`,
+                      border: `2px solid ${color}`,
+                      background: `color-mix(in oklab, ${color} 14%, transparent)`,
+                      borderRadius: 2,
+                      pointerEvents: 'auto',
+                      cursor: 'help',
+                      boxShadow: isHovered ? `0 0 0 2px color-mix(in oklab, ${color} 35%, transparent)` : 'none',
+                    }}
+                    title={`${r.tone}: <${r.tag}> ${r.selector}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
         </div>
-      ) : snapshot ? (
+      )}
+
+      {/* Element list (kept below the overlay so reviewers can correlate). */}
+      {dom && (
+        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+            <span className="label" style={{ fontSize: 10 }}>Element changes ({dom.added.length + dom.removed.length + dom.changed.length})</span>
+          </div>
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            {dom.removed.slice(0, 30).map((el, i) => (
+              <DomRow key={`r${i}`} variant="removed" tag={el.tag} selector={el.selectors[0]?.value ?? ''} />
+            ))}
+            {dom.added.slice(0, 30).map((el, i) => (
+              <DomRow key={`a${i}`} variant="added" tag={el.tag} selector={el.selectors[0]?.value ?? ''} />
+            ))}
+            {dom.changed.slice(0, 30).map((c, i) => (
+              <DomRow
+                key={`c${i}`}
+                variant="changed"
+                tag={c.current.tag}
+                selector={c.current.selectors[0]?.value ?? ''}
+                changeKinds={c.changes}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!dom && snapshot && (
         <div className="v-card" style={{ padding: 12 }}>
           <div className="label" style={{ fontSize: 10, marginBottom: 6 }}>Captured snapshot · {elementCount} elements</div>
           <pre className="mono" style={{ margin: 0, fontSize: 11, lineHeight: 1.6, maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', color: 'var(--fg-2)' }}>
 {JSON.stringify(snapshot, null, 2).slice(0, 6000)}
           </pre>
         </div>
-      ) : null}
+      )}
+    </div>
+  );
+}
+
+function rectFor(
+  el: { boundingBox?: { x: number; y: number; width: number; height: number }; tag: string; selectors: Array<{ value: string }> },
+  tone: 'added' | 'removed' | 'changed',
+  vw: number,
+  vh: number,
+): { x: number; y: number; w: number; h: number; tone: 'added' | 'removed' | 'changed'; selector: string; tag: string } {
+  const b = el.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
+  return {
+    x: vw > 0 ? (b.x / vw) * 100 : 0,
+    y: vh > 0 ? (b.y / vh) * 100 : 0,
+    w: vw > 0 ? (b.width / vw) * 100 : 0,
+    h: vh > 0 ? (b.height / vh) * 100 : 0,
+    tone,
+    selector: el.selectors[0]?.value ?? '',
+    tag: el.tag,
+  };
+}
+
+function DomRow({
+  variant,
+  tag,
+  selector,
+  changeKinds,
+}: {
+  variant: 'added' | 'removed' | 'changed';
+  tag: string;
+  selector: string;
+  changeKinds?: string[];
+}) {
+  const cls = variant === 'added' ? 'done' : variant === 'removed' ? 'regression' : 'missed';
+  const sign = variant === 'added' ? '+' : variant === 'removed' ? '−' : '~';
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '20px 1fr auto',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 12px',
+        borderBottom: '1px solid var(--border)',
+        fontSize: 11,
+      }}
+    >
+      <span className={`v-chip ${cls}`} style={{ fontSize: 9, padding: '0 5px', justifySelf: 'start' }}>{sign}</span>
+      <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selector}>
+        <span style={{ color: 'var(--fg-3)' }}>{`<${tag}>`}</span>{' '}
+        <span style={{ color: 'var(--fg-1)' }}>{selector}</span>
+      </span>
+      <span style={{ display: 'flex', gap: 3 }}>
+        {changeKinds?.map((k) => (
+          <span key={k} className="v-chip" style={{ fontSize: 9, padding: '0 5px' }}>{k}</span>
+        ))}
+      </span>
     </div>
   );
 }
@@ -1029,12 +1268,12 @@ interface IntentPanelProps {
   activeCase: CaseRow | null;
   onApproveLayer: (layer: EvidenceLayer) => void;
   onRejectLayer: (layer: EvidenceLayer) => void;
-  onCreateIssue: () => void;
-  onLinkIssue: () => void;
+  /** Open the issue picker dialog (browse + create). */
+  onOpenPicker: () => void;
   onCloseIssue: () => void;
 }
 
-function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer, onCreateIssue, onLinkIssue, onCloseIssue }: IntentPanelProps) {
+function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer, onOpenPicker, onCloseIssue }: IntentPanelProps) {
   if (!open) return null;
   const evidence = activeCase?.step.evidence ?? [];
   const issueUrl = activeCase?.step.githubIssueUrl ?? null;
@@ -1097,14 +1336,9 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
 
         <div className="label" style={{ marginTop: 6 }}>actions on case</div>
         {!issueUrl && (
-          <>
-            <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onLinkIssue}>
-              <LinkIcon size={12} />Link existing issue
-            </button>
-            <button className="v-btn primary" style={{ justifyContent: 'flex-start' }} onClick={onCreateIssue}>
-              <Plus size={12} />Create new issue
-            </button>
-          </>
+          <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
+            <LinkIcon size={12} />Browse or file issue
+          </button>
         )}
         {issueUrl && (
           <>
@@ -1116,7 +1350,7 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
                 <CheckCircleIcon size={12} />Close issue
               </button>
             )}
-            <button className="v-btn ghost" style={{ justifyContent: 'flex-start' }} onClick={onLinkIssue}>
+            <button className="v-btn ghost" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
               <GitPullRequest size={12} />Re-link to a different issue
             </button>
           </>
