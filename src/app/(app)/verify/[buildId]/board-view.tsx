@@ -561,8 +561,12 @@ function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker }: Dragg
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id: data.step.id });
   // While dragging, the source slot fades out — DragOverlay portals the
   // visual preview above all columns so it never gets clipped.
+  // Default browser cursor; dnd-kit's `attributes` set role="button"/tabIndex
+  // which some user-agent stylesheets render with an unfamiliar caret —
+  // override back to the arrow so the card behaves like a normal element.
   const style: React.CSSProperties = {
     opacity: isDragging ? 0.25 : 1,
+    cursor: isDragging ? 'grabbing' : 'default',
   };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>

@@ -25,6 +25,9 @@ design-testing-framework
 
 ## bugs
 Clear up inspect and test comparison
+Verify
+  cant run again
+  cant switch branch
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets
@@ -86,3 +89,7 @@ Using those solid foundations use AI to quickly generate edge-cases, variations,
 
 The bottleneck is probably creating those high-quality flows the first place. I had pretty good result with what u/lastesthero suggested: using PW codegen to ground the tests in something that actually works, reducing hallucinations and AI spending a shitton of tokens figuring out how to use your app.
 I've been working on a tool for this exact workflow that lets your record your user flows using PW codegen and gives you a proper page object model and test steps your agents can build on. It's quite early, but already proven useful at my day job. It's not public yet, but in case you're interested giving it a shot hit me up and we'll figure something out! 😉
+
+--------
+
+Meta descriptions on many of your pages are too short.

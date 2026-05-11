@@ -228,9 +228,28 @@ export function FocusView(props: FocusViewProps) {
         {/* Compare top bar */}
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="label" style={{ flexShrink: 0 }}>Verify · {activeCase?.area?.name ?? 'unscoped'}</span>
-          <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {activeCase?.test?.name ?? 'Pick a case from the sidebar'}
-          </span>
+          {activeCase?.test ? (
+            // Link to the test definition so reviewers can jump to the code
+            // / spec / vars tabs without losing the case context.
+            <a
+              href={`/tests/${activeCase.test.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: 14, fontWeight: 600, color: 'var(--fg-1)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}
+              title={`Open test ${activeCase.test.name}`}
+            >
+              {activeCase.test.name}
+              <ExternalLink size={11} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
+            </a>
+          ) : (
+            <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Pick a case from the sidebar
+            </span>
+          )}
           {activeCase && <StatusChipFor status={activeCase.status} />}
           {activeCase && <ErrorChip result={activeCase.result} />}
           {activeCase?.step.githubIssueUrl && <IssueChipReal step={activeCase.step} />}
@@ -620,7 +639,7 @@ function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps
   }
 
   if (layerState === 'absent') {
-    const hint = absentHint(tab);
+    const hint = absentHint(tab, step?.testId ?? null);
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="v-card" style={{ padding: 24, textAlign: 'center', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
@@ -664,7 +683,7 @@ interface AbsentHint {
   settingsLabel?: string;
 }
 
-function absentHint(layer: CompareTab): AbsentHint {
+function absentHint(layer: CompareTab, testId: string | null): AbsentHint {
   switch (layer) {
     case 'run':    return { message: 'No test result recorded for this case yet — the runner may not have started, or the test result row was deleted. Re-run the build to populate this tab.' };
     case 'visual': return { message: 'No screenshot captured for this step. Visual capture happens automatically — check the runner logs if a step run completed without a snapshot.' };
@@ -687,7 +706,13 @@ function absentHint(layer: CompareTab): AbsentHint {
     case 'console': return { message: 'No console output captured. Console capture is automatic — this step ran without any logs/warnings/errors.' };
     case 'perf':   return { message: 'No Web Vitals samples for this step. Perf capture is automatic — short-lived steps may not produce LCP/CLS/INP measurements.' };
     case 'url':    return { message: 'No URL trajectory recorded. URL capture is automatic — this usually means the step didn\'t navigate.' };
-    case 'variable': return { message: 'No test variables were extracted or assigned for this step.' };
+    case 'variable': return {
+      message: 'No test variables were extracted or assigned for this step. Add extract / assign variables on the test definition to surface them here.',
+      // Vars are configured per-test, not in global settings — link to the
+      // test detail page's Vars tab via the URL-hash deep-link.
+      settingsHref: testId ? `/tests/${testId}#vars` : undefined,
+      settingsLabel: 'Open test Vars',
+    };
   }
 }
 

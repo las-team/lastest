@@ -50,6 +50,16 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
     ? evidenceLayers.every((l) => approvedLayers.has(l))
     : approvedLayers.size > 0;
 
+  // Reviewer-flagged "missed" — produced by dragging a card onto the Missed
+  // column. We model that as a fully-snoozed step with no approvals (and no
+  // rejection, which we already short-circuited above). Distinct from
+  // "no feedback at all", which falls through to the verdict-based logic.
+  const snoozedLayers = new Set(feedback.filter((f) => f.status === 'snoozed').map((f) => f.layer));
+  const fullySnoozed = evidenceLayers.length > 0
+    ? evidenceLayers.every((l) => snoozedLayers.has(l)) && approvedLayers.size === 0
+    : snoozedLayers.size > 0 && approvedLayers.size === 0;
+  if (fullySnoozed) return 'missed';
+
   // Hard test failures dominate any layer-evidence verdict — they only count
   // as resolved if every evidence layer is explicitly approved.
   if (testFailed) {

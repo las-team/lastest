@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { runSmartBuild } from '@/server/actions/smart-run';
+import { runVerifyBuild } from '@/server/actions/smart-run';
 import { decideLayer } from '@/server/actions/layer-feedback';
 import { updateRepoSelectedBranch } from '@/server/actions/repos';
 import type {
@@ -104,11 +104,15 @@ interface BoardFocusClientProps {
 
 type Mode = 'board' | 'focus';
 
+// Drop targets map to per-layer feedback statuses. `unknown` is special-
+// cased in handleDropCase to clear feedback outright (no decision). The
+// `fullySnoozed → missed` rule in deriveCaseStatus lets the snoozed status
+// double as "reviewer flagged this as missed".
 const STATUS_TO_DECISION: Record<CaseStatus, 'approved' | 'rejected' | 'snoozed' | null> = {
   done: 'approved',
   regression: 'rejected',
-  missed: 'rejected',
-  unknown: 'snoozed',
+  missed: 'snoozed',
+  unknown: null,
 };
 
 // Outer component remounts the inner one on buildId change via the React
@@ -321,16 +325,17 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const handleRefresh = () => {
     if (!props.repositoryId) return;
     startRefresh(async () => {
-      const result = await runSmartBuild(props.repositoryId!);
+      const result = await runVerifyBuild(props.repositoryId!);
       if ('error' in result) {
-        // Surface why the build didn't start — e.g. "No tests to run" — so
-        // the user isn't left guessing why the Run button looked dead.
         toast.error(result.error || 'Could not start build');
         return;
       }
-      // Smart-run returns the new build id; navigate straight to its
-      // verify page so the user sees the run kick off (the polling effect
-      // there picks up running tests as they land).
+      // If the smart path bailed (no diff vs base, GitHub unavailable, etc.)
+      // we just ran every test instead — let the user know so they aren't
+      // confused about why the build is wider than expected.
+      if (result.fallback) {
+        toast.message('Running all tests', { description: result.reason });
+      }
       router.push(`/verify/${result.buildId}`);
       router.refresh();
     });
@@ -437,6 +442,33 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   };
 
   const handleDropCase = (stepId: string, target: CaseStatus) => {
+    // Dropping on Unsorted = clear all feedback for the step so its derived
+    // status falls back to verdict-based classification. The user's drop
+    // always wins over any prior decision: stripping local rows + writing
+    // snoozed on the layers (closest server-side "no-op") clears stale
+    // approvals/rejections that would otherwise persist.
+    if (target === 'unknown') {
+      const layers = Array.from(new Set(
+        layerFeedback.filter((f) => f.stepComparisonId === stepId).map((f) => f.layer),
+      ));
+      setLayerFeedback((prev) => prev.filter((f) => f.stepComparisonId !== stepId));
+      // Use the 'pending' status to wipe any prior decision: deriveCaseStatus
+      // ignores pending rows entirely, so the case falls back to its
+      // verdict-based natural classification — typically `unknown` for
+      // yellow-not-in-changed-area, `done` for green, etc.
+      startTransition(async () => {
+        await Promise.all(
+          layers.map((layer) =>
+            decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status: 'pending' }).catch(() => null),
+          ),
+        );
+        await refreshFromServer();
+      });
+      return;
+    }
+    // approved (Verified), rejected (Broken), snoozed (Missed) — all flow
+    // through decideAllForStep which already strips any prior feedback for
+    // the step before writing the new decision, so it cleanly overrides.
     const decision = STATUS_TO_DECISION[target];
     if (!decision) return;
     decideAllForStep(stepId, decision);
@@ -467,7 +499,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const filterBadge = filterCount(filters);
 
   return (
-    <div className="verify-page" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--c-soft-2)', minHeight: 0, fontFamily: 'var(--font-sans)' }}>
+    <div className="verify-page" style={{ display: 'flex', flexDirection: 'column', position: 'absolute', inset: 0, background: 'var(--c-soft-2)', minHeight: 0, overflow: 'hidden', fontFamily: 'var(--font-sans)' }}>
       {/* Header — no secondary logo (sidebar already shows the brand). */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)', position: 'relative' }}>
         <div>

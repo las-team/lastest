@@ -258,7 +258,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
-  const [activeTab, setActiveTab] = useState('code');
+  // URL hash drives the initial tab so cross-page deep-links work, e.g.
+  // `/tests/<id>#vars` from the verify focus page lands on the Vars tab.
+  const VALID_TABS = new Set(['code', 'spec', 'steps', 'criteria', 'vars', 'playback', 'screenshots', 'inspect', 'history', 'recordings', 'versions']);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'code';
+    const fromHash = window.location.hash.replace(/^#/, '');
+    return VALID_TABS.has(fromHash) ? fromHash : 'code';
+  });
   const [highlightLine, setHighlightLine] = useState<number | null>(null);
 
   // Run state
