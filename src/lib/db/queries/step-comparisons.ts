@@ -50,3 +50,29 @@ export async function getStepComparisonForStep(
   const [row] = await db.select().from(stepComparisons).where(and(...conds));
   return row;
 }
+
+/**
+ * Verify-phase reverse lookup: which step has this GH issue linked? Used by
+ * the issues webhook to auto-rerun + close the case when the issue closes.
+ * Multiple steps may legitimately reference the same issue if a reviewer
+ * filed it manually then linked it elsewhere — we return all of them so the
+ * webhook can rerun each affected test.
+ */
+export async function getStepComparisonsByGithubIssue(
+  issueNumber: number,
+): Promise<StepComparison[]> {
+  return await db
+    .select()
+    .from(stepComparisons)
+    .where(eq(stepComparisons.githubIssueNumber, issueNumber));
+}
+
+export async function updateStepComparisonIssueState(
+  id: string,
+  state: StepComparison['githubIssueState'],
+): Promise<void> {
+  await db
+    .update(stepComparisons)
+    .set({ githubIssueState: state })
+    .where(eq(stepComparisons.id, id));
+}

@@ -81,13 +81,16 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}`);
   }
 
-  async createRepo(name: string): Promise<{ id: string; name: string; fullName: string }> {
-    return this.post('/api/v1/repos', { name });
+  async createRepo(
+    name: string,
+    opts?: { baseUrl?: string },
+  ): Promise<{ id: string; name: string; fullName: string; baseUrl?: string | null }> {
+    return this.post('/api/v1/repos', { name, baseUrl: opts?.baseUrl });
   }
 
   async updateRepo(
     repoId: string,
-    data: { name?: string; defaultBranch?: string; selectedBranch?: string },
+    data: { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string },
   ): Promise<unknown> {
     return this.put(`/api/v1/repos/${repoId}`, data);
   }

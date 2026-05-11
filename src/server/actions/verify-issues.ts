@@ -6,8 +6,9 @@ import { stepComparisons } from '@/lib/db/schema';
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
-import type { StepIssueState } from '@/lib/db/schema';
+import type { EvidenceLayer, StepIssueKind, StepIssueState } from '@/lib/db/schema';
 import { searchGitHubIssues, getGitHubIssueDetail, type GitHubIssueListItem, type GitHubIssueDetail } from '@/lib/integrations/github-issues';
+import { decideLayer } from './layer-feedback';
 
 interface CreateIssueInput {
   stepComparisonId: string;
@@ -15,6 +16,10 @@ interface CreateIssueInput {
   body?: string;
   /** Whether the case is a regression (auto state) or manual link. */
   state?: 'auto' | 'open';
+  /** Typed-ticket kind. Persisted on stepComparisons.githubIssueKind so the
+   *  board can filter and the webhook can interpret close events correctly.
+   *  Defaults to 'verification' for the legacy manual-file path. */
+  kind?: StepIssueKind;
 }
 
 interface IssueResult {
@@ -63,7 +68,10 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
     evidence: step.evidence ?? [],
   });
 
-  const labels = ['verify', step.verdict === 'red' ? 'regression' : 'verification'];
+  // Always tag with the typed kind so the webhook can match on close. Falls
+  // back to verdict-based label so the legacy manual flow stays useful.
+  const kind: StepIssueKind = input.kind ?? (step.verdict === 'red' ? 'bugfix' : 'verification');
+  const labels = ['verify', kind, ...(kind === 'bugfix' ? ['regression'] : [])];
 
   try {
     const response = await fetch(
@@ -122,7 +130,12 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
     const state: StepIssueState = input.state ?? 'auto';
     await db
       .update(stepComparisons)
-      .set({ githubIssueUrl: issue.html_url, githubIssueNumber: issue.number, githubIssueState: state })
+      .set({
+        githubIssueUrl: issue.html_url,
+        githubIssueNumber: issue.number,
+        githubIssueState: state,
+        githubIssueKind: kind,
+      })
       .where(eq(stepComparisons.id, input.stepComparisonId));
     revalidatePath(`/verify/${step.buildId}`);
     return { ok: true, issueUrl: issue.html_url, issueNumber: issue.number, state };
@@ -293,6 +306,157 @@ export async function fetchLinkedIssueForCase(
   const result = await getGitHubIssueDetail(account.accessToken, repo.owner, repo.name, step.githubIssueNumber);
   if (!result.success) return { ok: false, error: result.error };
   return { ok: true, issue: result.issue ?? null };
+}
+
+// ---------------------------------------------------------------------------
+// Typed-ticket confirmation (v1.14+)
+// ---------------------------------------------------------------------------
+//
+// The verify board's three "settled" columns map to three reviewer verdicts:
+//   - done        → close ticket (no regression, no gap)
+//   - missed      → improvement ticket (intent gap — area's agent plan was wrong)
+//   - regression  → bugfix ticket (code shipped broke something tracked)
+//
+// confirmCase is the single entry-point invoked by the board drop handler. It
+// (1) records confirmedBy/confirmedAt on the step, (2) writes the matching
+// per-layer feedback so deriveCaseStatus produces the right column on the
+// next poll, and (3) creates/closes the GitHub issue with the typed kind.
+
+export type ConfirmKind = 'done' | 'improvement' | 'regression';
+
+export interface ConfirmCaseResult {
+  ok: boolean;
+  issueUrl?: string;
+  issueNumber?: number;
+  issueState?: StepIssueState;
+  issueKind?: StepIssueKind;
+  /** True if an issue was filed/closed as part of this confirmation. */
+  ticketChanged: boolean;
+  error?: string;
+}
+
+const KIND_TO_ISSUE: Record<ConfirmKind, StepIssueKind | null> = {
+  done: null,
+  improvement: 'improvement',
+  regression: 'bugfix',
+};
+
+const KIND_TO_DECISION: Record<ConfirmKind, 'approved' | 'rejected' | 'snoozed'> = {
+  done: 'approved',
+  improvement: 'snoozed',
+  regression: 'rejected',
+};
+
+export async function confirmCase(
+  stepComparisonId: string,
+  kind: ConfirmKind,
+): Promise<ConfirmCaseResult> {
+  const session = await getCurrentSession();
+  if (!session) return { ok: false, ticketChanged: false, error: 'Not authenticated' };
+  const userId = session.user?.id ?? null;
+
+  const step = await getStep(stepComparisonId);
+  if (!step) return { ok: false, ticketChanged: false, error: 'Step not found' };
+
+  const build = await queries.getBuild(step.buildId);
+  if (!build) return { ok: false, ticketChanged: false, error: 'Build not found' };
+  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repoId = testRun?.repositoryId ?? null;
+  if (repoId) await requireRepoAccess(repoId);
+
+  // 1. Stamp the confirmation. Always overwrites — re-confirmation with a
+  //    different kind reuses the same row (e.g. user changes mind from
+  //    improvement → regression).
+  await db
+    .update(stepComparisons)
+    .set({ confirmedBy: userId, confirmedAt: new Date() })
+    .where(eq(stepComparisons.id, stepComparisonId));
+
+  // 2. Mirror the decision into per-layer feedback so deriveCaseStatus
+  //    pins the card to the right column even before the issue round-trip
+  //    lands. Reuses the per-layer baseline / review-todo side effects
+  //    that already power the existing approve/reject flow.
+  const decision = KIND_TO_DECISION[kind];
+  const evidenceLayers: EvidenceLayer[] = step.evidence.length > 0
+    ? Array.from(new Set(step.evidence.map((e) => e.layer)))
+    : ['visual'];
+  await Promise.all(
+    evidenceLayers.map((layer) =>
+      decideLayer({
+        stepComparisonId,
+        buildId: step.buildId,
+        layer,
+        status: decision,
+      }).catch(() => null),
+    ),
+  );
+
+  // 3. Ticket lifecycle. The three kinds map to different GH actions:
+  //    - regression  → file a bugfix issue (if not already linked)
+  //    - improvement → file an improvement issue (if not already linked)
+  //    - done        → close any linked issue (no-op if none)
+  let ticketChanged = false;
+  let issueUrl: string | undefined;
+  let issueNumber: number | undefined;
+  let issueState: StepIssueState | undefined;
+  let issueKind: StepIssueKind | undefined;
+
+  const targetKind = KIND_TO_ISSUE[kind];
+
+  if (targetKind && !step.githubIssueNumber) {
+    // No issue yet → file one of the correct kind.
+    const result = await createIssueForCase({
+      stepComparisonId,
+      state: 'auto',
+      kind: targetKind,
+    });
+    if (result.ok) {
+      ticketChanged = true;
+      issueUrl = result.issueUrl;
+      issueNumber = result.issueNumber;
+      issueState = result.state;
+      issueKind = targetKind;
+    }
+    // Silent on failure — the confirmation itself still landed. The board
+    // can surface the GH error via a follow-up "File ticket" affordance.
+  } else if (targetKind && step.githubIssueNumber) {
+    // Already linked — just retag the kind so the row is queryable.
+    await db
+      .update(stepComparisons)
+      .set({ githubIssueKind: targetKind })
+      .where(eq(stepComparisons.id, stepComparisonId));
+    issueKind = targetKind;
+  } else if (kind === 'done' && step.githubIssueNumber) {
+    const result = await closeIssueForCase(stepComparisonId);
+    if (result.ok) {
+      ticketChanged = true;
+      issueState = result.state;
+    }
+  }
+
+  // 4. Activity event so the audit log + notifications fire. Best-effort.
+  const eventTypeMap: Record<ConfirmKind, 'verify:case_confirmed' | 'verify:bugfix_filed' | 'verify:improvement_filed'> = {
+    done: 'verify:case_confirmed',
+    improvement: 'verify:improvement_filed',
+    regression: 'verify:bugfix_filed',
+  };
+  const teamIdForEvent = session.team?.id;
+  if (teamIdForEvent) {
+    queries.emitAndPersistActivityEvent({
+      teamId: teamIdForEvent,
+      repositoryId: repoId,
+      sourceType: 'mcp_server',
+      eventType: eventTypeMap[kind],
+      summary: `Verify case ${kind} — ${step.stepLabel ?? 'step'}`,
+      detail: { stepComparisonId, buildId: step.buildId, kind, issueUrl, issueKind },
+      artifactType: 'build',
+      artifactId: step.buildId,
+      artifactLabel: step.buildId.slice(0, 8),
+    }).catch(() => {});
+  }
+
+  revalidatePath(`/verify/${step.buildId}`);
+  return { ok: true, ticketChanged, issueUrl, issueNumber, issueState, issueKind };
 }
 
 /**

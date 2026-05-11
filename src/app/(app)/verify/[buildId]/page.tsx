@@ -13,6 +13,7 @@ import {
 } from '@/lib/db/queries';
 import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
+import { ensureStepComparisonsForBuild } from '@/lib/verify/backfill-step-comparisons';
 import { computeChangeMap } from '@/server/actions/change-map';
 import { fetchRepoBranches } from '@/server/actions/repos';
 import { BoardFocusClient } from './board-focus-client';
@@ -41,6 +42,18 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
   let changeMap = await getBuildChangeMap(buildId).catch(() => null);
   if (!changeMap) {
     changeMap = await computeChangeMap(buildId).catch(() => null);
+  }
+
+  // Recovery path: builds that crashed mid-execution (overall_status='blocked')
+  // can land test_results without their per-result step_comparison rows. The
+  // verify board renders cases from step_comparisons, so without these the
+  // page is blank. Backfill on demand from already-persisted test_results +
+  // visual_diffs. Idempotent — no-op when step_comparisons is already
+  // populated.
+  if (build.testRunId) {
+    await ensureStepComparisonsForBuild(buildId).catch((err) => {
+      console.error('[verify] backfill step_comparisons failed:', err);
+    });
   }
 
   const [stepComparisons, areas, tests, layerFeedback, visualDiffs, branches, testResults] = await Promise.all([

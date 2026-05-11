@@ -2182,7 +2182,11 @@ export type ActivityEventType =
   | 'verify:layer_approved'
   | 'verify:layer_rejected'
   | 'verify:layer_snoozed'
-  | 'verify:build_completed';
+  | 'verify:build_completed'
+  | 'verify:case_confirmed'
+  | 'verify:bugfix_filed'
+  | 'verify:improvement_filed'
+  | 'verify:case_auto_resolved';
 
 export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
@@ -2521,6 +2525,15 @@ export interface StepComparisonEvidence {
 
 export type StepIssueState = 'open' | 'auto' | 'linked' | 'closed';
 
+/**
+ * Verify phase (v1.14+) — typed-ticket kind. Distinguishes the three reviewer
+ * verdicts that produce different GitHub issues:
+ *   - bugfix:      regression — code shipped broke something tracked.
+ *   - improvement: missed — code shipped didn't cover what the area's intent was.
+ *   - verification: ad-hoc manual filing from createIssueForCase (no confirm).
+ */
+export type StepIssueKind = 'bugfix' | 'improvement' | 'verification';
+
 export const stepComparisons = pgTable('step_comparisons', {
   id: text('id').primaryKey(),
   buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }).notNull(),
@@ -2538,6 +2551,15 @@ export const stepComparisons = pgTable('step_comparisons', {
   githubIssueUrl: text('github_issue_url'),
   githubIssueNumber: integer('github_issue_number'),
   githubIssueState: text('github_issue_state').$type<StepIssueState>(),
+  // Typed-ticket kind. Captured at confirmation time so issue close/reopen
+  // preserves intent, and so the board can filter "show me all improvements".
+  githubIssueKind: text('github_issue_kind').$type<StepIssueKind>(),
+  // Explicit reviewer confirmation — distinct from "card landed here because
+  // it had 0 diff". Set by confirmCase() when the user drops a card into a
+  // typed column. Used by the GH webhook to auto-flip cases back to done when
+  // an issue closes and a rerun shows green.
+  confirmedBy: text('confirmed_by'),
+  confirmedAt: timestamp('confirmed_at'),
   // Free-text reviewer note (e.g. "the new banner copy should say X but
   // didn't"). Prepended to GH issue body when the reviewer files an issue
   // for this case. Surfaced as a textarea on Missed-column cards.

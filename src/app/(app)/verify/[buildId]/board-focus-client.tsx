@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Filter, GitBranch, Play, ChevronDown, X, Loader2 } from 'lucide-react';
+import { Filter, GitBranch, Play, ChevronDown, X, Loader2, Sparkles, AlertTriangle, AlertOctagon } from 'lucide-react';
 import { toast } from 'sonner';
 import { runVerifyBuild } from '@/server/actions/smart-run';
 import { decideLayer } from '@/server/actions/layer-feedback';
+import { confirmCase, type ConfirmKind } from '@/server/actions/verify-issues';
+import { coverArea } from '@/server/actions/cover-area';
 import { updateRepoSelectedBranch } from '@/server/actions/repos';
 import type {
   Build,
@@ -113,6 +115,14 @@ const STATUS_TO_DECISION: Record<CaseStatus, 'approved' | 'rejected' | 'snoozed'
   regression: 'rejected',
   missed: 'snoozed',
   unknown: null,
+};
+
+// Drop targets that produce a typed ticket. `unknown` clears feedback and
+// has no ticket side-effect, so it's omitted.
+const STATUS_TO_CONFIRM_KIND: Record<Exclude<CaseStatus, 'unknown'>, ConfirmKind> = {
+  done: 'done',
+  regression: 'regression',
+  missed: 'improvement',
 };
 
 // Outer component remounts the inner one on buildId change via the React
@@ -254,6 +264,60 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       .map((a) => a.areaId) ?? []),
     [props.changeMap],
   );
+
+  // Coverage gaps: areas the Change Map flagged as risky-but-uncovered. The
+  // verify board can't show a card for an area with no test, so without this
+  // banner the user has no way to spot "this area changed but nothing tested
+  // it". An area is uncovered when the current build has 0 step_comparisons
+  // for any test in that area — even if a test exists, if it didn't run we
+  // can't claim coverage for this PR.
+  const coveredAreaIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const step of stepComparisons) {
+      const test = testById.get(step.testId);
+      if (test?.functionalAreaId) s.add(test.functionalAreaId);
+    }
+    return s;
+  }, [stepComparisons, testById]);
+
+  const coverageGaps = useMemo(() => {
+    if (!props.changeMap) return [];
+    return props.changeMap.areas.filter((a) =>
+      (a.sources.includes('code') || a.sources.includes('manual'))
+      && !coveredAreaIds.has(a.areaId),
+    );
+  }, [props.changeMap, coveredAreaIds]);
+
+  // Areas the reviewer has already dispatched coverArea for in this session —
+  // suppresses the chip so repeated clicks don't create duplicate placeholders
+  // before a refresh lands.
+  const [dispatchedAreaIds, setDispatchedAreaIds] = useState<Set<string>>(new Set());
+
+  const handleCoverArea = useCallback((areaId: string) => {
+    setDispatchedAreaIds((prev) => new Set(prev).add(areaId));
+    startTransition(async () => {
+      const result = await coverArea({ areaId, buildId: props.build.id }).catch((e) => ({
+        ok: false, error: e instanceof Error ? e.message : 'unknown',
+      } as { ok: false; error: string }));
+      if (!result.ok) {
+        toast.error('Could not draft coverage test', { description: result.error });
+        // Un-dispatch so the user can retry.
+        setDispatchedAreaIds((prev) => {
+          const next = new Set(prev);
+          next.delete(areaId);
+          return next;
+        });
+        return;
+      }
+      toast.success(`Drafted ${result.title ?? 'spec'}`, {
+        description: 'Open the spec to generate the test code.',
+        action: result.testId ? {
+          label: 'Open',
+          onClick: () => router.push(`/tests/${result.testId}`),
+        } : undefined,
+      });
+    });
+  }, [props.build.id, router]);
 
   const visualByStepKey = useMemo(() => {
     const m = new Map<string, VisualDiffLite>();
@@ -472,6 +536,32 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     const decision = STATUS_TO_DECISION[target];
     if (!decision) return;
     decideAllForStep(stepId, decision);
+
+    // Verify phase (v1.14+) — also fire the typed-ticket confirmation. This
+    // is the only path that creates GH issues from a column drop:
+    //   - Verified  → close any linked issue
+    //   - Broken    → file a `bugfix` issue
+    //   - Missed    → file an `improvement` issue
+    // We run this after decideAllForStep so the optimistic UI move happens
+    // immediately; the toast surfaces ticket success/failure separately.
+    const confirmKind = STATUS_TO_CONFIRM_KIND[target as Exclude<CaseStatus, 'unknown'>];
+    if (!confirmKind) return;
+    startTransition(async () => {
+      const result = await confirmCase(stepId, confirmKind).catch(() => null);
+      if (!result?.ok) return;
+      if (result.ticketChanged && result.issueUrl) {
+        toast.success(
+          `Filed ${result.issueKind ?? 'verify'} ticket`,
+          { description: result.issueUrl, action: {
+            label: 'Open',
+            onClick: () => window.open(result.issueUrl!, '_blank'),
+          } },
+        );
+      } else if (result.ticketChanged && confirmKind === 'done') {
+        toast.success('Closed linked ticket');
+      }
+      await refreshFromServer();
+    });
   };
 
   const handleBranchSelect = (branch: string) => {
@@ -573,6 +663,19 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         </div>
       </div>
 
+      <BuildAbortedBanner
+        build={props.build}
+        completedAt={completedAt}
+        runResultCount={testResults.length}
+        scoredCaseCount={stepComparisons.length}
+      />
+
+      <CoverageGapsBanner
+        gaps={coverageGaps}
+        dispatchedAreaIds={dispatchedAreaIds}
+        onCover={handleCoverArea}
+      />
+
       {mode === 'board' ? (
         <BoardView
           buildId={props.build.id}
@@ -648,6 +751,146 @@ function filterCount(f: VerifyFilters): number {
   if (f.issueFilter !== 'any') n += 1;
   if (f.query.trim().length > 0) n += 1;
   return n;
+}
+
+interface BuildAbortedBannerProps {
+  build: Build;
+  completedAt: string | null;
+  runResultCount: number;
+  scoredCaseCount: number;
+}
+
+// Surfaces non-success terminal states so users don't mistake a partial
+// recovery for a clean run. Shown only when the build has stopped (it's
+// terminal, not just slow) AND its status indicates the executor itself
+// failed — not a normal "diffs need review" state.
+function BuildAbortedBanner({ build, completedAt, runResultCount, scoredCaseCount }: BuildAbortedBannerProps) {
+  // Still running → the running-state chip in the header already handles it.
+  if (!completedAt) return null;
+
+  const status = build.overallStatus;
+  const isExecutorFailed = status === 'executor_failed';
+  const isBlocked = status === 'blocked';
+  if (!isExecutorFailed && !isBlocked) return null;
+
+  // 'blocked' covers two distinct meanings on builds: (a) the diff-driven
+  // "needs review" state, (b) the runBuildAsync catch fallback when results
+  // landed but the run threw. We can only distinguish by inspecting whether
+  // executorError or executorFailedAt is set, or by inferring from totals.
+  // Heuristic: if totalTests > 0 and we got fewer test_results than tests
+  // were planned, the build was aborted mid-execution.
+  const planned = build.totalTests ?? 0;
+  const isPartial = isExecutorFailed || (isBlocked && planned > 0 && runResultCount < planned);
+  if (!isPartial) return null;
+
+  const errorBody = (build.executorError ?? '').trim();
+  const errorHead = errorBody.length > 0
+    ? errorBody.split('\n')[0]?.slice(0, 240)
+    : null;
+
+  const isCleanFail = isExecutorFailed || runResultCount === 0;
+  const accent = isCleanFail ? 'var(--c-red)' : 'var(--c-amber)';
+  const bg = `color-mix(in oklab, ${accent} 10%, var(--c-white))`;
+  const heading = isCleanFail
+    ? 'Build failed — no tests ran'
+    : `Build aborted mid-run — recovered ${scoredCaseCount} of ${planned} cases`;
+  const detail = isCleanFail
+    ? 'The executor crashed before any test produced a result. Re-run to retry.'
+    : `${runResultCount} test result${runResultCount === 1 ? '' : 's'} were captured; the rest were lost when the run was interrupted.`;
+
+  return (
+    <div
+      style={{
+        padding: '10px 20px',
+        background: bg,
+        borderBottom: `1px solid color-mix(in oklab, ${accent} 30%, var(--border))`,
+        display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12,
+      }}
+    >
+      <AlertOctagon size={14} style={{ color: accent, marginTop: 1, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: 'var(--fg-1)' }}>{heading}</div>
+        <div className="label" style={{ marginTop: 2 }}>
+          {detail} The build is no longer running.
+        </div>
+        {errorHead && (
+          <div
+            className="mono"
+            style={{ marginTop: 6, padding: '4px 6px', fontSize: 11, color: 'var(--fg-2)', background: 'var(--c-soft-2)', borderRadius: 4, wordBreak: 'break-word' }}
+            title={errorBody}
+          >
+            {errorHead}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface CoverageGapsBannerProps {
+  gaps: import('@/lib/db/schema').ChangeMapArea[];
+  dispatchedAreaIds: Set<string>;
+  onCover: (areaId: string) => void;
+}
+
+// Surfaces Change-Map areas that the current build did not cover. Compact by
+// design: one row, one chip per area, AI narrative on hover so we don't eat
+// vertical real estate on a build with many gaps. The chip's CTA is the only
+// path from the verify board to a "draft a covering test" action.
+function CoverageGapsBanner({ gaps, dispatchedAreaIds, onCover }: CoverageGapsBannerProps) {
+  if (gaps.length === 0) return null;
+  return (
+    <div
+      style={{
+        padding: '8px 20px',
+        background: 'color-mix(in oklab, var(--c-amber) 8%, var(--c-white))',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 10, fontSize: 12,
+        flexWrap: 'wrap',
+      }}
+    >
+      <AlertTriangle size={13} style={{ color: 'var(--c-amber)' }} />
+      <span style={{ fontWeight: 500, color: 'var(--fg-1)' }}>
+        Coverage gaps
+      </span>
+      <span className="label">
+        {gaps.length === 1
+          ? 'changed area with no test on this build'
+          : `${gaps.length} changed areas with no test on this build`}
+      </span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginLeft: 4 }}>
+        {gaps.map((g) => {
+          const dispatched = dispatchedAreaIds.has(g.areaId);
+          const narrative = g.aiNarrative?.join(' · ') ?? '';
+          return (
+            <button
+              key={g.areaId}
+              onClick={() => !dispatched && onCover(g.areaId)}
+              disabled={dispatched}
+              title={narrative || `Draft a covering test for ${g.areaName}`}
+              className="v-chip"
+              style={{
+                cursor: dispatched ? 'default' : 'pointer',
+                opacity: dispatched ? 0.6 : 1,
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: dispatched
+                  ? 'var(--c-soft-2)'
+                  : 'color-mix(in oklab, var(--c-amber) 16%, var(--c-white))',
+                color: 'var(--fg-1)',
+                border: '1px solid color-mix(in oklab, var(--c-amber) 30%, var(--border))',
+              }}
+            >
+              <Sparkles size={11} />
+              {g.areaName}
+              <span className="label" style={{ fontSize: 9, marginLeft: 4 }}>
+                {dispatched ? 'drafting…' : 'cover this area'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 interface FilterPanelProps {
