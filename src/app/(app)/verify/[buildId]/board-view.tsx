@@ -31,6 +31,53 @@ import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 
 export type CaseStatus = 'regression' | 'done' | 'missed' | 'unknown';
 
+/**
+ * Execution-quality of a case — orthogonal to the reviewer-decision status
+ * above. Speaks to "what happened on the runner" rather than "what should
+ * the reviewer do".
+ *  - errored: the test itself threw (assertion, timeout, runner failure)
+ *  - changed: the test ran but diff signal exists (visual/step verdict)
+ *  - flaky:   the test passed but was retried, or visual classified flaky
+ *  - passed:  ran cleanly, no diff, no flake
+ *
+ * "Changed" does NOT mean broken — the diff may be expected. The Broken
+ * column is reviewer-decided; this dimension is executor-observed.
+ */
+export type ExecutionKind = 'errored' | 'changed' | 'flaky' | 'passed';
+
+function deriveExecutionKind(
+  result: TestResultLite | null,
+  step: StepComparison,
+  visual: VisualDiffLite | null,
+): ExecutionKind {
+  // Hard executor/test failures dominate — even if the diff scorer didn't
+  // populate evidence, a runner-side exception is the strongest signal.
+  if (result?.status === 'failed' || result?.status === 'setup_failed') return 'errored';
+
+  // Flake takes priority over a green-but-retried surface: retryOf set or
+  // visual classifier flagged flaky.
+  if (result?.isFlaky || result?.retryOf || visual?.classification === 'flaky') return 'flaky';
+
+  // Any non-green verdict OR a visual classified as `changed` is "changed".
+  if (step.verdict !== 'green' || visual?.classification === 'changed') return 'changed';
+
+  return 'passed';
+}
+
+const EXECUTION_KIND_LABEL: Record<ExecutionKind, string> = {
+  errored: 'Errors',
+  changed: 'Changed',
+  flaky: 'Flaky',
+  passed: 'Passed',
+};
+
+const EXECUTION_KIND_ACCENT: Record<ExecutionKind, string> = {
+  errored: 'var(--c-red)',
+  changed: 'var(--c-amber)',
+  flaky: 'var(--c-blue)',
+  passed: 'var(--c-teal)',
+};
+
 interface AreaLite { id: string; name: string }
 interface TestLite { id: string; name: string; functionalAreaId: string | null }
 
@@ -72,6 +119,7 @@ interface CaseCardData {
   test: TestLite | null;
   area: AreaLite | null;
   status: CaseStatus;
+  kind: ExecutionKind;
   feedback: StepLayerFeedback[];
   visual: VisualDiffLite | null;
   result: TestResultLite | null;
@@ -97,18 +145,40 @@ export function BoardView(props: BoardViewProps) {
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
-      return { step, test, area, status, feedback: stepFb, visual, result };
+      const kind = deriveExecutionKind(result, step, visual);
+      return { step, test, area, status, kind, feedback: stepFb, visual, result };
     });
   }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
+
+  // Local execution-quality filter — orthogonal to the reviewer-status
+  // filter in the header. Click a token to narrow the board to just those
+  // cases; second click clears it.
+  const [kindFilter, setKindFilter] = useState<Set<ExecutionKind>>(new Set());
+  const toggleKind = (k: ExecutionKind) => {
+    setKindFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+
+  // Always counted off the *unfiltered* set so toggling tokens doesn't make
+  // the other counts disappear.
+  const kindCounts = useMemo(() => {
+    const c: Record<ExecutionKind, number> = { errored: 0, changed: 0, flaky: 0, passed: 0 };
+    for (const x of cases) c[x.kind]++;
+    return c;
+  }, [cases]);
 
   const grouped = useMemo(() => {
     const map: Record<CaseStatus, CaseCardData[]> = { regression: [], missed: [], unknown: [], done: [] };
     for (const c of cases) {
       if (props.statusFilter.size > 0 && !props.statusFilter.has(c.status)) continue;
+      if (kindFilter.size > 0 && !kindFilter.has(c.kind)) continue;
       map[c.status].push(c);
     }
     return map;
-  }, [cases, props.statusFilter]);
+  }, [cases, props.statusFilter, kindFilter]);
 
   // Per-area total case counts (independent of which column they sit in) —
   // used as the denominator for the Verified column's "y/x verified" summary.
@@ -169,11 +239,25 @@ export function BoardView(props: BoardViewProps) {
               {verified} / {total} verified
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 8, fontSize: 11, alignItems: 'center' }}>
-            <Chip status="regression" /><Counter n={grouped.regression.length} />
-            <Chip status="missed" /><Counter n={grouped.missed.length} />
-            <Chip status="unknown" /><Counter n={grouped.unknown.length} />
-            <Chip status="done" /><Counter n={grouped.done.length} />
+          <div style={{ display: 'flex', gap: 6, fontSize: 11, alignItems: 'center', flexWrap: 'wrap' }}>
+            <KindToken
+              label="Cases"
+              count={total}
+              accent="var(--fg-3)"
+              active={kindFilter.size === 0}
+              onClick={() => setKindFilter(new Set())}
+            />
+            {(['errored', 'changed', 'flaky', 'passed'] as ExecutionKind[]).map((k) => (
+              <KindToken
+                key={k}
+                label={EXECUTION_KIND_LABEL[k]}
+                count={kindCounts[k]}
+                accent={EXECUTION_KIND_ACCENT[k]}
+                active={kindFilter.has(k)}
+                onClick={() => toggleKind(k)}
+                dim={kindFilter.size > 0 && !kindFilter.has(k)}
+              />
+            ))}
             <span style={{ flex: 1 }} />
             <span className="label">Group: Status · Area</span>
           </div>
@@ -255,18 +339,45 @@ function countWithLinkedIssue(cases: CaseCardData[]): number {
   return cases.filter((c) => c.step.githubIssueUrl && c.step.githubIssueState !== 'closed').length;
 }
 
-function Chip({ status }: { status: CaseStatus }) {
-  const labels: Record<CaseStatus, string> = {
-    regression: 'Broken',
-    done: 'Verified',
-    missed: 'Missed',
-    unknown: 'Unsorted',
-  };
-  return <span className={`v-chip ${status}`}><span className="dot" />{labels[status]}</span>;
+interface KindTokenProps {
+  label: string;
+  count: number;
+  accent: string;
+  active: boolean;
+  dim?: boolean;
+  onClick: () => void;
 }
 
-function Counter({ n }: { n: number }) {
-  return <span className="mono" style={{ color: 'var(--fg-3)' }}>{n}</span>;
+// Execution-quality filter token — replaces the prior reviewer-decision
+// chips on the progress strip. Behaves like the build-page filter pills:
+// clickable, multi-select (toggle), and the count is always the unfiltered
+// total so toggling doesn't make the other categories vanish.
+function KindToken({ label, count, accent, active, dim, onClick }: KindTokenProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '3px 8px', borderRadius: 99,
+        fontSize: 11,
+        cursor: 'pointer',
+        border: active
+          ? `1px solid color-mix(in oklab, ${accent} 60%, var(--border))`
+          : '1px solid var(--border)',
+        background: active
+          ? `color-mix(in oklab, ${accent} 14%, var(--c-white))`
+          : 'var(--c-white)',
+        color: 'var(--fg-1)',
+        opacity: dim ? 0.55 : 1,
+        transition: 'background 120ms ease, opacity 120ms ease, border-color 120ms ease',
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: accent }} />
+      {label}
+      <span className="mono" style={{ color: 'var(--fg-2)' }}>{count}</span>
+    </button>
+  );
 }
 
 interface KColProps {
@@ -588,10 +699,28 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
     () => summarizeLayersForCard(data.step, data.result, data.visual),
     [data.step, data.result, data.visual],
   );
+  // Thin left-border colored by execution kind — "this ran red" (errored)
+  // vs "this changed but may be intentional" (changed) at a glance, without
+  // tying the surface to the reviewer-decision column it's sitting in.
+  // Passed/flaky cards get no accent border (passed = no signal; flaky's
+  // hint surfaces via the layer chips instead, to avoid noise on the board).
+  const accentBorder = data.kind === 'errored'
+    ? `3px solid ${EXECUTION_KIND_ACCENT.errored}`
+    : data.kind === 'changed'
+      ? `3px solid ${EXECUTION_KIND_ACCENT.changed}`
+      : undefined;
   return (
     <div
       className="v-card"
-      style={{ padding: 10, userSelect: 'none', boxShadow: dragging ? '0 8px 24px rgba(31,42,51,0.18)' : undefined }}
+      style={{
+        padding: 10,
+        userSelect: 'none',
+        boxShadow: dragging ? '0 8px 24px rgba(31,42,51,0.18)' : undefined,
+        borderLeft: accentBorder,
+        // Compensate left padding when the accent border eats 3px so layout
+        // stays aligned with cards that don't have it.
+        paddingLeft: accentBorder ? 7 : undefined,
+      }}
       onClick={(e) => {
         if (dragging) return;
         // Prevent click during drag

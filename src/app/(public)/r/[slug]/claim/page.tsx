@@ -1,8 +1,8 @@
 import { redirect, notFound } from 'next/navigation';
 import { getCurrentSession } from '@/lib/auth';
 import { isValidShareSlug } from '@/lib/share/slug';
-import { claimPublicShare } from '@/server/actions/public-shares';
 import { getPublicShareBySlug } from '@/lib/db/queries/public-shares';
+import { ClaimRunner } from './claim-runner-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +22,5 @@ export default async function ClaimPage({ params }: PageProps) {
   const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== 'public') notFound();
 
-  const result = await claimPublicShare(slug);
-  redirect(result.newTestId ? `/tests/${result.newTestId}` : '/tests');
+  return <ClaimRunner slug={slug} />;
 }

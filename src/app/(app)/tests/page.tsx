@@ -1,4 +1,5 @@
 import { DefinitionPageClient } from './definition-page-client';
+import { AddRepoEmptyState } from './add-repo-empty-state';
 import {
   getSelectedRepository,
   getFunctionalAreasTree,
@@ -7,6 +8,7 @@ import {
   getRoutesByRepo,
   getEnvironmentConfig,
   getDeletedTests,
+  getRepositoriesByTeam,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
@@ -23,11 +25,10 @@ export default async function DefinitionPage() {
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
   if (!selectedRepo) {
+    const repos = teamId ? await getRepositoriesByTeam(teamId) : [];
     return (
       <div className="flex flex-col h-full">
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-muted-foreground">Select a repository first</p>
-        </div>
+        <AddRepoEmptyState hasRepos={repos.length > 0} />
       </div>
     );
   }
