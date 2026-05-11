@@ -21,6 +21,10 @@ Openrouter agent sdk parity
 demo-mode
   without link?
 ## bugs
+variables
+  text baseline missing
+  variable baseline missing
+  network compare should only count errors by default
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets

@@ -32,9 +32,13 @@ export async function ensureStepComparisonsForBuild(buildId: string): Promise<Ba
     queries.getTestResultsByRun(build.testRunId),
   ]);
 
-  // Index existing rows by testResultId so we only fill gaps.
-  const haveByResult = new Set<string>();
-  for (const s of existing) if (s.testResultId) haveByResult.add(s.testResultId);
+  // Dedupe by (testResultId, stepLabel) so a re-run only fills missing
+  // step rows, never duplicates existing ones. stepLabel=null collapses to
+  // the literal sentinel "__none__" so the null case has a stable key.
+  const stepKey = (testResultId: string | null, stepLabel: string | null) =>
+    `${testResultId ?? '__null__'}::${stepLabel ?? '__none__'}`;
+  const haveByResultStep = new Set<string>();
+  for (const s of existing) haveByResultStep.add(stepKey(s.testResultId, s.stepLabel));
 
   let created = 0;
   let skipped = 0;
@@ -42,7 +46,6 @@ export async function ensureStepComparisonsForBuild(buildId: string): Promise<Ba
 
   for (const tr of testResults) {
     if (!tr.testId) { skipped++; continue; }
-    if (haveByResult.has(tr.id)) { skipped++; continue; }
 
     try {
       const [visualDiffs, prevResult] = await Promise.all([
@@ -50,49 +53,69 @@ export async function ensureStepComparisonsForBuild(buildId: string): Promise<Ba
         queries.getPreviousTestResultForTest(tr.testId, build.testRunId),
       ]);
 
-      // Match runBuildAsync's choice: the diff with the largest pixel delta
-      // wins as the primary visual signal. Keeps verdicts consistent with
-      // builds that scored at execution time.
-      const primaryVisual = visualDiffs
-        .slice()
-        .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
+      // Group visual diffs by stepLabel. Each group becomes one
+      // step_comparison row — multi-step tests surface as one card per
+      // step. Empty visual_diffs still produces ONE null-step row so
+      // executor-failed tests with no screenshots still show up.
+      const byStep = new Map<string | null, typeof visualDiffs>();
+      for (const d of visualDiffs) {
+        const key = d.stepLabel ?? null;
+        if (!byStep.has(key)) byStep.set(key, []);
+        byStep.get(key)!.push(d);
+      }
+      if (byStep.size === 0) byStep.set(null, []);
 
-      const verdict = scoreMultiLayer({
-        baseline: prevResult ? {
-          consoleErrors: prevResult.consoleErrors ?? null,
-          networkRequests: prevResult.networkRequests ?? null,
-          a11yViolations: prevResult.a11yViolations ?? null,
-          urlTrajectory: prevResult.urlTrajectory ?? null,
-          webVitals: prevResult.webVitals ?? null,
-          extractedVariables: prevResult.extractedVariables ?? null,
-        } : null,
-        current: {
-          consoleErrors: tr.consoleErrors ?? null,
-          networkRequests: tr.networkRequests ?? null,
-          a11yViolations: tr.a11yViolations ?? null,
-          urlTrajectory: tr.urlTrajectory ?? null,
-          webVitals: tr.webVitals ?? null,
-          extractedVariables: tr.extractedVariables ?? null,
-        },
-        visualDiff: primaryVisual ? {
-          pixelDifference: primaryVisual.pixelDifference ?? 0,
-          percentageDifference: primaryVisual.percentageDifference,
-          id: primaryVisual.id,
-        } : null,
-      });
+      const baselinePayload = prevResult ? {
+        consoleErrors: prevResult.consoleErrors ?? null,
+        networkRequests: prevResult.networkRequests ?? null,
+        a11yViolations: prevResult.a11yViolations ?? null,
+        urlTrajectory: prevResult.urlTrajectory ?? null,
+        webVitals: prevResult.webVitals ?? null,
+        extractedVariables: prevResult.extractedVariables ?? null,
+      } : null;
+      const currentPayload = {
+        consoleErrors: tr.consoleErrors ?? null,
+        networkRequests: tr.networkRequests ?? null,
+        a11yViolations: tr.a11yViolations ?? null,
+        urlTrajectory: tr.urlTrajectory ?? null,
+        webVitals: tr.webVitals ?? null,
+        extractedVariables: tr.extractedVariables ?? null,
+      };
 
-      await queries.createStepComparison({
-        buildId,
-        testId: tr.testId,
-        testResultId: tr.id,
-        visualDiffId: primaryVisual?.id ?? null,
-        stepIndex: null,
-        stepLabel: primaryVisual?.stepLabel ?? null,
-        verdict: verdict.verdict,
-        evidence: verdict.evidence,
-        layers: verdict.layers,
-      });
-      created++;
+      for (const [stepLabel, groupDiffs] of byStep) {
+        if (haveByResultStep.has(stepKey(tr.id, stepLabel))) {
+          skipped++;
+          continue;
+        }
+        // Multiple diffs in one stepLabel group (rare: multi-browser,
+        // retries) — largest pixel delta wins as the canonical visual.
+        const primary = groupDiffs
+          .slice()
+          .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
+
+        const verdict = scoreMultiLayer({
+          baseline: baselinePayload,
+          current: currentPayload,
+          visualDiff: primary ? {
+            pixelDifference: primary.pixelDifference ?? 0,
+            percentageDifference: primary.percentageDifference,
+            id: primary.id,
+          } : null,
+        });
+
+        await queries.createStepComparison({
+          buildId,
+          testId: tr.testId,
+          testResultId: tr.id,
+          visualDiffId: primary?.id ?? null,
+          stepIndex: null,
+          stepLabel,
+          verdict: verdict.verdict,
+          evidence: verdict.evidence,
+          layers: verdict.layers,
+        });
+        created++;
+      }
     } catch (err) {
       console.error('[verify-backfill] failed to score', { testResultId: tr.id, err: err instanceof Error ? err.message : String(err) });
       failed++;

@@ -16,11 +16,13 @@
  *   GET  /api/v1/functional-areas/:id/tests - Get tests by functional area
  *   GET  /api/v1/tests/:id - Get single test
  *   GET  /api/v1/runs/:id - Get test run
- *   GET  /api/v1/builds/:id - Get build
+ *   GET  /api/v1/builds/:id - Get build (slim by default; pass `?full=true` to include a11y/network/AI payloads on every diff)
+ *   GET  /api/v1/builds/:id/demo-notes - Get demo-run UI/UX notes (404 if absent)
+ *   POST /api/v1/builds/:id/demo-notes - Upsert demo-run UI/UX notes
  *   GET  /api/v1/diffs/:id - Get single visual diff
  *   GET  /api/v1/jobs/active - List active background jobs
  *   GET  /api/v1/jobs/:id - Get background job status
- *   POST /api/v1/runs - Create and run tests
+ *   POST /api/v1/runs - Create and run tests (optional `forceVideoRecording: true` in body — required for demo-style shares that render a video player)
  *   POST /api/v1/snapshot - Capture a single URL (synchronous; URL Diff feature)
  *   POST /api/v1/diff - Diff two URLs (async; returns jobId for polling)
  *   POST /api/v1/diffs/approve - Batch approve visual diffs
@@ -28,6 +30,7 @@
  *   POST /api/v1/diffs/:id/approve - Approve single visual diff
  *   POST /api/v1/diffs/:id/reject - Reject single visual diff
  *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
+ *   POST /api/v1/builds/:id/share - Publish a public-share link for a build (optional `scopedTestId` in body)
  *   POST /api/v1/repos - Create a local repository (optional baseUrl seeds env config)
  *   POST /api/v1/repos/:id/import - Import tests + functional areas (migration)
  *   POST /api/v1/functional-areas - Create functional area
@@ -363,6 +366,16 @@ export async function GET(
         });
       }
 
+      // GET /api/v1/builds/:id/demo-notes — AI UI/UX summary from a demo run
+      if (subResource === 'demo-notes') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const notes = await queries.getBuildDemoNotes(id);
+        if (!notes) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json(notes);
+      }
+
       const build = await queries.getBuild(id);
       if (!build) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -376,11 +389,21 @@ export async function GET(
         }
       }
       const diffs = await queries.getVisualDiffsWithTestStatus(id);
+      // Slim payload by default. The joined fields below can easily blow past
+      // 100KB on a build with many diffs (network logs, a11y violations, AI
+      // commentary, etc.) and saturate an agent's context. Callers that need
+      // those payloads pass `?full=true`, or fetch per-diff with
+      // GET /api/v1/diffs/:id (which always returns the full row).
+      const full = request.nextUrl.searchParams.get('full') === 'true';
+      const responseDiffs = full
+        ? diffs
+        : diffs.map(({ a11yViolations: _a, consoleErrors: _c, networkRequests: _n, downloads: _d, aiAnalysis: _ai, metadata: _m, ...slim }) => slim);
       return NextResponse.json({
         ...build,
         gitBranch: testRun?.gitBranch,
         gitCommit: testRun?.gitCommit,
-        diffs,
+        diffs: responseDiffs,
+        ...(full ? {} : { diffsTrimmed: true }),
       });
     }
 
@@ -441,7 +464,7 @@ export async function POST(
     // Create test run
     if (resource === 'runs' && !id) {
       const body = await request.json();
-      const { testIds, functionalAreaId, repositoryId } = body;
+      const { testIds, functionalAreaId, repositoryId, forceVideoRecording } = body;
 
       let testIdsToRun: string[] = [];
       let scopedRepoId: string | null = null;
@@ -494,7 +517,15 @@ export async function POST(
         return NextResponse.json({ error: 'No tests to run' }, { status: 400 });
       }
 
-      const result = await createAndRunBuildCore('manual', testIdsToRun, scopedRepoId);
+      const result = await createAndRunBuildCore(
+        'manual',
+        testIdsToRun,
+        scopedRepoId,
+        undefined,
+        undefined,
+        undefined,
+        forceVideoRecording === true || undefined,
+      );
 
       return NextResponse.json(result);
     }
@@ -726,6 +757,36 @@ export async function POST(
         userPrompt: prompt,
         functionalAreaId,
       });
+      // The agent swallows provider errors and returns { success: false, error }.
+      // Map that back to a real HTTP status so MCP/REST callers can branch on it
+      // — otherwise an overloaded LLM looks identical to a happy creation.
+      if (!result.success) {
+        const message = result.error ?? 'AI test generation failed';
+        const lower = message.toLowerCase();
+        const isConfig =
+          lower.includes('no api key') ||
+          lower.includes('api key') ||
+          lower.includes('not configured') ||
+          lower.includes('missing') && lower.includes('config');
+        const isOverloaded =
+          lower.includes('overload') ||
+          lower.includes('rate limit') ||
+          lower.includes('429') ||
+          lower.includes('503') ||
+          lower.includes('502') ||
+          lower.includes('timeout') ||
+          lower.includes('upstream');
+        const status = isConfig ? 503 : isOverloaded ? 502 : 422;
+        return NextResponse.json(
+          {
+            success: false,
+            error: message,
+            retryable: !isConfig,
+            fallback: 'Try direct mode: POST /api/v1/tests with { name, code } using a Playwright snapshot you generate yourself.',
+          },
+          { status },
+        );
+      }
       return NextResponse.json(result);
     }
 
@@ -776,6 +837,49 @@ export async function POST(
       }
       await approveAllDiffsCore(id, 'mcp-agent');
       return NextResponse.json({ success: true });
+    }
+
+    // Publish a public-share link for a build: POST /api/v1/builds/:id/share
+    // Body: { scopedTestId?: string } — optional, scopes share to a single test
+    // Returns: { shareId, slug, url }
+    if (resource === 'builds' && id && subResource === 'share') {
+      if (!(await verifyBuildOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json().catch(() => ({}));
+      const scopedTestId = typeof body?.scopedTestId === 'string' ? body.scopedTestId : null;
+      const { publishBuildShare } = await import('@/server/actions/public-shares');
+      const result = await publishBuildShare(id, { scopedTestId });
+      return NextResponse.json(result, { status: 201 });
+    }
+
+    // Write build demo notes: POST /api/v1/builds/:id/demo-notes
+    // Body: DemoNotes payload — see schema.ts. Idempotent (upsert).
+    if (resource === 'builds' && id && subResource === 'demo-notes') {
+      if (!(await verifyBuildOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== 'object') {
+        return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+      }
+      // Minimal shape validation — refuse payloads that are obviously wrong
+      // so accidental misuse fails loudly instead of writing junk JSON. We
+      // accept missing arrays as empty (a summary-only note is still useful).
+      const payload = {
+        uxSummary: typeof body.uxSummary === 'string' ? body.uxSummary : '',
+        highlights: Array.isArray(body.highlights) ? body.highlights : [],
+        frictionPoints: Array.isArray(body.frictionPoints) ? body.frictionPoints : [],
+        testingStruggles: Array.isArray(body.testingStruggles) ? body.testingStruggles : [],
+        skippedRoutes: Array.isArray(body.skippedRoutes) ? body.skippedRoutes : undefined,
+        generatedAt: typeof body.generatedAt === 'string' ? body.generatedAt : new Date().toISOString(),
+        modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+      };
+      if (!payload.uxSummary && payload.highlights.length === 0 && payload.frictionPoints.length === 0 && payload.testingStruggles.length === 0) {
+        return NextResponse.json({ error: 'Payload must contain at least one of uxSummary, highlights, frictionPoints, testingStruggles' }, { status: 400 });
+      }
+      await queries.upsertBuildDemoNotes(id, payload);
+      return NextResponse.json({ ok: true }, { status: 201 });
     }
 
     // Verify phase: POST /api/v1/verify/layer-feedback

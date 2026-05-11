@@ -41,7 +41,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest',
-    version: '0.3.0',
+    version: '0.3.4',
   });
 
   // ===== Health & Status =====
@@ -494,6 +494,29 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
+  // --- lastest_publish_share ---
+  server.tool(
+    'lastest_publish_share',
+    'Publish a public-share link for a build (or a single test within it). Returns a `/r/<slug>` URL anyone can view without logging in. Use after a build completes so demos and outreach messages can link directly to the visual result. Pass `scopedTestId` to scope the share to one test instead of the whole build.',
+    {
+      buildId: z.string().describe('Build ID to publish a share for'),
+      scopedTestId: z.string().optional().describe('Optional — restrict the share to a single test within the build'),
+    },
+    withActivityReporting(client, 'lastest_publish_share', async (params) => {
+      const result = await client.publishShare(params.buildId as string, {
+        scopedTestId: params.scopedTestId as string | undefined,
+      });
+      const response: ToolResponse = {
+        status: 'share_published',
+        summary: params.scopedTestId
+          ? `Test share published: ${result.url}`
+          : `Build share published: ${result.url}`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // ===== Composite QA Workflows =====
 
   // --- lastest_review_build ---
@@ -666,8 +689,10 @@ export function createServer(client: LastestClient): McpServer {
         .describe('"slim" (default) returns only id/testId/stepLabel/status/classification/pct per diff. "full" returns every joined column (heavy — can be 100KB+ for builds with many diffs).'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const build = (await client.getBuild(params.buildId)) as Record<string, unknown>;
       const includeDiffs = (params.includeDiffs as string | undefined) ?? 'slim';
+      // Slim is the default. The API now slims server-side too so the wire
+      // payload stays small unless `full` is explicitly requested.
+      const build = (await client.getBuild(params.buildId, { full: includeDiffs === 'full' })) as Record<string, unknown>;
 
       const status = build.overallStatus as string;
       const passed = build.passedCount as number;
@@ -800,7 +825,9 @@ export function createServer(client: LastestClient): McpServer {
       buildId: z.string().describe('Build ID to get visual diffs for'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const build = (await client.getBuild(params.buildId)) as Record<string, unknown>;
+      // This tool surfaces aiAnalysis (LLM commentary on each diff) which is
+      // stripped from the slim build payload — fetch full so it's available.
+      const build = (await client.getBuild(params.buildId, { full: true })) as Record<string, unknown>;
       const diffs = (build.diffs ?? []) as Array<Record<string, unknown>>;
 
       const pending = diffs.filter(d => d.status === 'pending');
@@ -924,12 +951,44 @@ export function createServer(client: LastestClient): McpServer {
         throw new Error('Provide either { name, code } for direct creation, or { url } and/or { prompt } for AI generation.');
       }
 
-      const result = (await client.createTest({
-        repositoryId,
-        url: params.url as string | undefined,
-        prompt: params.prompt as string | undefined,
-        functionalAreaId,
-      })) as Record<string, unknown>;
+      let result: Record<string, unknown>;
+      try {
+        result = (await client.createTest({
+          repositoryId,
+          url: params.url as string | undefined,
+          prompt: params.prompt as string | undefined,
+          functionalAreaId,
+        })) as Record<string, unknown>;
+      } catch (err) {
+        // The API maps provider failures to 502/503/422 with a JSON body
+        // containing { error, retryable, fallback }. Surface that as a
+        // structured tool response rather than a raw thrown Error so the
+        // agent can see the recovery hint.
+        const message = err instanceof Error ? err.message : String(err);
+        const match = message.match(/Lastest API error (\d+): (.*)$/s);
+        const httpStatus = match ? Number(match[1]) : null;
+        let parsedBody: { error?: string; retryable?: boolean; fallback?: string } = {};
+        if (match) {
+          try { parsedBody = JSON.parse(match[2]); } catch { parsedBody = { error: match[2] }; }
+        }
+        const retryable = parsedBody.retryable ?? (httpStatus === 502 || httpStatus === 429);
+        const failResponse: ToolResponse = {
+          status: 'ai_generation_failed',
+          summary: `AI test generation failed${httpStatus ? ` (HTTP ${httpStatus})` : ''}: ${parsedBody.error ?? message}`,
+          actionRequired: [
+            retryable
+              ? 'Provider is overloaded or rate-limited — retry lastest_create_test in a few seconds.'
+              : 'AI provider is not configured or rejected the request — check Settings → AI in Lastest.',
+            parsedBody.fallback ?? 'Fallback: call lastest_create_test in direct mode with { name, code } using a Playwright snapshot you generate yourself.',
+          ],
+          details: {
+            httpStatus,
+            retryable,
+            error: parsedBody.error ?? message,
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(failResponse, null, 2) }] };
+      }
 
       const response: ToolResponse = {
         status: 'test_created',

@@ -109,8 +109,18 @@ export class LastestClient {
     });
   }
 
-  async getBuild(buildId: string): Promise<unknown> {
-    return this.get(`/api/v1/builds/${buildId}`);
+  async getBuild(buildId: string, opts?: { full?: boolean }): Promise<unknown> {
+    const qs = opts?.full ? '?full=true' : '';
+    return this.get(`/api/v1/builds/${buildId}${qs}`);
+  }
+
+  async publishShare(
+    buildId: string,
+    opts?: { scopedTestId?: string },
+  ): Promise<{ shareId: string; slug: string; url: string }> {
+    return this.post(`/api/v1/builds/${buildId}/share`, {
+      scopedTestId: opts?.scopedTestId ?? null,
+    });
   }
 
   async listBuilds(repoId: string, limit = 10): Promise<unknown[]> {

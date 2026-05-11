@@ -73,7 +73,7 @@ Restart the client.
 
 ## Tools exposed
 
-The server registers 33 MCP tools (all prefixed `lastest_`). Every tool returns a structured `{ status, summary, actionRequired?, details }` payload.
+The server registers 34 MCP tools (all prefixed `lastest_`). Every tool returns a structured `{ status, summary, actionRequired?, details }` payload.
 
 | Category | Tools |
 |----------|-------|
@@ -83,6 +83,7 @@ The server registers 33 MCP tools (all prefixed `lastest_`). Every tool returns 
 | Tests | `lastest_list_tests`, `lastest_list_failing_tests`, `lastest_get_test`, `lastest_create_test`, `lastest_update_test`, `lastest_delete_test`, `lastest_heal_test` |
 | Runs & builds | `lastest_run_tests`, `lastest_get_test_run`, `lastest_list_builds`, `lastest_get_build_status`, `lastest_review_build` |
 | Diffs & baselines | `lastest_get_diff`, `lastest_get_visual_diff`, `lastest_approve_diff`, `lastest_reject_diff`, `lastest_approve_all_diffs`, `lastest_approve_baseline`, `lastest_reject_baseline` |
+| Sharing | `lastest_publish_share` |
 | Coverage & QA | `lastest_get_coverage`, `lastest_qa_summary` |
 
 ## CLI

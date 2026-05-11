@@ -11,6 +11,12 @@ export function isValidShareSlug(slug: string): boolean {
 }
 
 export function buildShareUrl(slug: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  // On the client, NEXT_PUBLIC_APP_URL is inlined at build time — prod builds
+  // without it fall back to localhost. Use the live origin instead so the URL
+  // matches whatever host the user is actually on.
+  const base =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   return `${base.replace(/\/+$/, '')}/r/${slug}`;
 }

@@ -9,7 +9,8 @@ import {
   type ShareVisualDiff,
   type ShareTestResult,
 } from '@/lib/db/queries/public-shares';
-import type { Baseline } from '@/lib/db/schema';
+import { getBuildDemoNotes } from '@/lib/db/queries/demo-notes';
+import type { Baseline, DemoNotes } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
 import { ShareVideoPlayer } from './share-video-player';
@@ -85,6 +86,11 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
 
+  // Optional AI UI/UX summary captured at the end of a /gtm-lastest-saas-demo
+  // run. Shown above the screenshot gallery when present. Falls back to null
+  // for the much larger population of regular builds.
+  const demoNotes = await getBuildDemoNotes(build.id);
+
   // Passing tests produce zero visual_diffs rows. Fall back to the test's
   // active baselines so viewers still see a side-by-side comparison rather
   // than an empty "recording + steps" block.
@@ -109,6 +115,8 @@ export default async function PublicSharePage({ params }: PageProps) {
           branch={testRun?.gitBranch ?? null}
           commit={testRun?.gitCommit ?? null}
         />
+
+        {demoNotes && <DemoNotesPanel notes={demoNotes} />}
 
         {isTestShare ? (
           <TestShareBody
@@ -382,6 +390,92 @@ function OutcomeHeader({
         )}
       </div>
     </section>
+  );
+}
+
+// Renders the AI UI/UX summary written at the end of a demo run. Three
+// founder-facing buckets stack vertically; testingStruggles is intentionally
+// hidden from the share (it's automation gotchas, not product feedback).
+// skippedRoutes renders as a small provenance footer when present.
+function DemoNotesPanel({ notes }: { notes: DemoNotes }) {
+  const hasHighlights = notes.highlights && notes.highlights.length > 0;
+  const hasFriction = notes.frictionPoints && notes.frictionPoints.length > 0;
+  const hasSkipped = notes.skippedRoutes && notes.skippedRoutes.length > 0;
+  if (!notes.uxSummary && !hasHighlights && !hasFriction && !hasSkipped) return null;
+  return (
+    <section className="rounded-xl border bg-card p-5 sm:p-6 space-y-4">
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          Notes from the demo run
+        </h2>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          AI-generated
+        </span>
+      </header>
+      {notes.uxSummary && (
+        <p className="text-base leading-relaxed">{notes.uxSummary}</p>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {hasHighlights && (
+          <DemoNoteList
+            title="Highlights"
+            items={notes.highlights}
+            tone="ok"
+          />
+        )}
+        {hasFriction && (
+          <DemoNoteList
+            title="Friction points"
+            items={notes.frictionPoints}
+            tone="warn"
+          />
+        )}
+      </div>
+      {hasSkipped && (
+        <div className="pt-3 border-t text-xs text-muted-foreground space-y-1">
+          <div className="uppercase tracking-wide font-medium">Couldn&apos;t reach</div>
+          <ul className="space-y-0.5">
+            {notes.skippedRoutes!.map((r) => (
+              <li key={r.path} className="font-mono">
+                <span className="text-foreground">{r.path}</span>
+                <span className="mx-1">·</span>
+                <span>{r.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DemoNoteList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: { label: string; note: string }[];
+  tone: 'ok' | 'warn';
+}) {
+  const accent =
+    tone === 'ok'
+      ? 'text-emerald-700 dark:text-emerald-300'
+      : 'text-amber-800 dark:text-amber-200';
+  return (
+    <div className="space-y-2">
+      <div className={`text-xs font-semibold uppercase tracking-wide ${accent}`}>
+        {title}
+      </div>
+      <ul className="space-y-2">
+        {items.map((it, i) => (
+          <li key={`${it.label}-${i}`} className="text-sm">
+            <div className="font-medium">{it.label}</div>
+            <div className="text-muted-foreground">{it.note}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -189,6 +189,11 @@ export async function createAndRunBuildCore(
   runnerId?: string,
   versionOverrides?: Record<string, string>,
   gitBranchOverride?: string,
+  // Force the runner / EB to capture a Playwright video for every test in
+  // this build, regardless of the repo's default. Required for demo-style
+  // builds whose public /r/<slug> share renders a ShareVideoPlayer. Threaded
+  // verbatim into executor.runTests's `forceVideoRecording` option below.
+  forceVideoRecording?: boolean,
 ) {
   const targetRunner = runnerId || 'auto';
 
@@ -259,7 +264,7 @@ export async function createAndRunBuildCore(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides);
+  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides, undefined, forceVideoRecording);
 
   // Fire-and-forget: compute code-change affected test IDs
   computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(() => {});
@@ -274,10 +279,11 @@ export async function createAndRunBuild(
   runnerId?: string,
   versionOverrides?: Record<string, string>,
   gitBranchOverride?: string,
+  forceVideoRecording?: boolean,
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  return createAndRunBuildCore(triggerType, testIds, repositoryId, runnerId, versionOverrides, gitBranchOverride);
+  return createAndRunBuildCore(triggerType, testIds, repositoryId, runnerId, versionOverrides, gitBranchOverride, forceVideoRecording);
 }
 
 /**
@@ -511,6 +517,10 @@ async function runBuildAsync(
   runnerId?: string,
   versionOverrides?: Record<string, string>,
   forceAutoApprove?: boolean,
+  // Threaded down to executeTests so the runner / EB captures a Playwright
+  // video per test. Required for /gtm-lastest-saas-demo shares to render a
+  // ShareVideoPlayer on the public /r/<slug> page.
+  forceVideoRecording?: boolean,
 ) {
   const startTime = Date.now();
   const targetRunner = runnerId || 'auto';
@@ -768,51 +778,71 @@ async function runBuildAsync(
     }
 
     // ── Multi-layer step comparison (v1.13) ──────────────────────────────
-    // Run all non-visual diffs against the prior run's testResult and write
-    // a unified verdict to step_comparisons. Best-effort — failure here
-    // never blocks the build.
+    // One row per (testResult, stepLabel) so multi-step tests surface as
+    // one verify card per step. Non-visual evidence (console/network/a11y/
+    // url/perf/variables) is test-level and is therefore intentionally
+    // duplicated across each step row so each card remains a self-contained
+    // triage unit. Best-effort — failure here never blocks the build.
     try {
       const { scoreMultiLayer } = await import('@/lib/comparison/scorer');
       const prevResult = await queries.getPreviousTestResultForTest(result.testId, testRunId);
       const visualDiffs = await queries.getVisualDiffsByTestResult(testResult.id);
-      // Use the diff with the largest pixel delta as the visual signal.
-      const primaryVisual = visualDiffs
-        .slice()
-        .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
-      const verdict = scoreMultiLayer({
-        baseline: prevResult ? {
-          consoleErrors: prevResult.consoleErrors ?? null,
-          networkRequests: prevResult.networkRequests ?? null,
-          a11yViolations: prevResult.a11yViolations ?? null,
-          urlTrajectory: prevResult.urlTrajectory ?? null,
-          webVitals: prevResult.webVitals ?? null,
-          extractedVariables: prevResult.extractedVariables ?? null,
-        } : null,
-        current: {
-          consoleErrors: result.consoleErrors ?? null,
-          networkRequests: result.networkRequests ?? null,
-          a11yViolations: result.a11yViolations ?? null,
-          urlTrajectory: result.urlTrajectory ?? null,
-          webVitals: result.webVitals ?? null,
-          extractedVariables: result.extractedVariables ?? null,
-        },
-        visualDiff: primaryVisual ? {
-          pixelDifference: primaryVisual.pixelDifference ?? 0,
-          percentageDifference: primaryVisual.percentageDifference,
-          id: primaryVisual.id,
-        } : null,
-      });
-      await queries.createStepComparison({
-        buildId,
-        testId: result.testId,
-        testResultId: testResult.id,
-        visualDiffId: primaryVisual?.id ?? null,
-        stepIndex: null,
-        stepLabel: primaryVisual?.stepLabel ?? null,
-        verdict: verdict.verdict,
-        evidence: verdict.evidence,
-        layers: verdict.layers,
-      });
+
+      // Group visuals by stepLabel. When a test produced no visual_diffs
+      // (e.g. setup-failed before any screenshot), still emit ONE row with
+      // stepLabel=null so the runner failure surfaces as a verify case.
+      const byStep = new Map<string | null, typeof visualDiffs>();
+      for (const d of visualDiffs) {
+        const key = d.stepLabel ?? null;
+        if (!byStep.has(key)) byStep.set(key, []);
+        byStep.get(key)!.push(d);
+      }
+      if (byStep.size === 0) byStep.set(null, []);
+
+      const baselinePayload = prevResult ? {
+        consoleErrors: prevResult.consoleErrors ?? null,
+        networkRequests: prevResult.networkRequests ?? null,
+        a11yViolations: prevResult.a11yViolations ?? null,
+        urlTrajectory: prevResult.urlTrajectory ?? null,
+        webVitals: prevResult.webVitals ?? null,
+        extractedVariables: prevResult.extractedVariables ?? null,
+      } : null;
+      const currentPayload = {
+        consoleErrors: result.consoleErrors ?? null,
+        networkRequests: result.networkRequests ?? null,
+        a11yViolations: result.a11yViolations ?? null,
+        urlTrajectory: result.urlTrajectory ?? null,
+        webVitals: result.webVitals ?? null,
+        extractedVariables: result.extractedVariables ?? null,
+      };
+
+      for (const [stepLabel, groupDiffs] of byStep) {
+        // Multiple diffs per stepLabel are rare but legal (multi-browser,
+        // retries). Largest pixel delta wins as the canonical visual.
+        const primary = groupDiffs
+          .slice()
+          .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
+        const verdict = scoreMultiLayer({
+          baseline: baselinePayload,
+          current: currentPayload,
+          visualDiff: primary ? {
+            pixelDifference: primary.pixelDifference ?? 0,
+            percentageDifference: primary.percentageDifference,
+            id: primary.id,
+          } : null,
+        });
+        await queries.createStepComparison({
+          buildId,
+          testId: result.testId,
+          testResultId: testResult.id,
+          visualDiffId: primary?.id ?? null,
+          stepIndex: null,
+          stepLabel,
+          verdict: verdict.verdict,
+          evidence: verdict.evidence,
+          layers: verdict.layers,
+        });
+      }
     } catch (err) {
       console.error('[multi-layer] failed to score step comparison:', err);
     }
@@ -933,6 +963,7 @@ async function runBuildAsync(
           maxParallelTests,
           jobId,
           setupInfo: remoteSetupInfo,
+          forceVideoRecording,
           setupContext: {
             storageState: setupContext.storageState,
             variables: setupContext.variables,
@@ -1052,6 +1083,7 @@ async function runBuildAsync(
             playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
             maxParallelTests: 1, // Retry sequentially for stability
             jobId,
+            forceVideoRecording,
             setupContext: {
               storageState: setupContext.storageState,
               variables: setupContext.variables,

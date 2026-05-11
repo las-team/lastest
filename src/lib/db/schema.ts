@@ -2784,6 +2784,56 @@ export type BuildChangeMapRow = typeof buildChangeMaps.$inferSelect;
 export type NewBuildChangeMapRow = typeof buildChangeMaps.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// Build-level demo notes — AI-generated UI/UX summary captured at the end of
+// a /gtm-lastest-saas-demo run. Surfaced on the public /r/<slug> share page
+// above the screenshot grid so the recipient (the founder we're DM'ing) sees
+// "here's what we noticed" before scrolling into the baselines.
+//
+// Bucketed deliberately:
+//   highlights        → safe to quote in outreach DMs
+//   frictionPoints    → stays in the share, never quoted to the founder
+//   testingStruggles  → automation gotchas (captcha, hangs); feeds the next
+//                       demo run's qualification step
+//   skippedRoutes     → explicit "couldn't get here" provenance — beats a
+//                       silent omission in the screenshot list
+// ---------------------------------------------------------------------------
+
+export interface DemoNoteItem {
+  label: string;
+  note: string;
+}
+
+export interface DemoNoteSkippedRoute {
+  path: string;
+  reason: string;
+}
+
+export interface DemoNotes {
+  /** 2–3 sentence overall UI/UX impression. */
+  uxSummary: string;
+  /** Things that worked well; safe for outreach. */
+  highlights: DemoNoteItem[];
+  /** UX issues observed; founder-facing on the share, never in outreach. */
+  frictionPoints: DemoNoteItem[];
+  /** Automation pain points (captcha, hangs, OAuth-only flows). */
+  testingStruggles: DemoNoteItem[];
+  /** Routes the agent tried but couldn't capture. */
+  skippedRoutes?: DemoNoteSkippedRoute[];
+  generatedAt: string;
+  /** Provider/model id used for the AI summary, when applicable. */
+  modelId?: string;
+}
+
+export const buildDemoNotes = pgTable('build_demo_notes', {
+  buildId: text('build_id').primaryKey().references(() => builds.id, { onDelete: 'cascade' }),
+  payload: jsonb('payload').$type<DemoNotes>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+});
+
+export type BuildDemoNotesRow = typeof buildDemoNotes.$inferSelect;
+export type NewBuildDemoNotesRow = typeof buildDemoNotes.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // Verify phase — Per-layer baselines (v1.14+)
 // ---------------------------------------------------------------------------
 //

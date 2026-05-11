@@ -33,5 +33,6 @@ export * from './queries/public-shares';
 export * from './queries/step-comparisons';
 export * from './queries/inspector';
 export * from './queries/change-maps';
+export * from './queries/demo-notes';
 export * from './queries/layer-baselines';
 export * from './queries/layer-feedback';
