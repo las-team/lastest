@@ -1,6 +1,61 @@
 # Lastest Competitive Brief
 
-**Research Date:** March 3, 2026 (updated from February 5, 2026)
+**Research Date:** May 11, 2026 (updated from March 3, 2026)
+**Sources merged in this revision:** [Beatable Competitor Analysis (2F430D2E41)](https://beatable.co/analysis/2F430D2E41) — adds market sizing, CAGR, and 5 previously-uncovered competitors (Happo, Ghost Inspector, Loki, VisualRegressionTracker, Reg-Suit).
+
+---
+
+## 0. Market Context (from Beatable analysis)
+
+### Market sizing (directional)
+
+| Metric | Estimate |
+|--------|----------|
+| TAM — global automated testing + dev-tool spend applicable to visual QA | **~$6B/yr** |
+| SAM — developer-first visual QA buyers (SMB / mid-market / select enterprise) | **$600M – $1.2B** |
+| SOM — realistic 3-yr capture with focused GTM | **$6M – $40M ARR** |
+| Category CAGR (next 5 yrs) | **18–25%** |
+
+### Problem validation (Beatable scores, 1–10)
+
+| Criterion | Score | Why it matters |
+|-----------|-------|----------------|
+| Painful | 9 | Visual regressions cause failed releases, manual triage, lost dev time; flakiness amplifies pain |
+| Popular | 8 | Broad target across SaaS / ecommerce / marketplaces / consumer apps |
+| Urgent | 7 | Strongest for daily/weekly-release teams and continuous-deployment shops |
+| Growing | 9 | Component-driven dev + CI/CD uptake + AI-tool interest accelerate adoption |
+| Unavoidable | 8 | More client-side rendering, personalization, responsive UI = more visual regressions |
+
+### Beatable competitive positioning map
+
+- **X axis:** Ease of developer adoption / low-maintenance automation
+- **Y axis:** Robustness of visual intelligence / noise reduction
+
+| Group | (x, y) |
+|-------|--------|
+| Enterprise AI (Applitools) | (8, 9) |
+| Snapshot SaaS (Percy) | (5, 5) |
+| Component Review (Chromatic) | (7, 6) |
+| OSS Tools (BackstopJS, Loki, VRT, Reg-Suit) | (3, 3) |
+| Recorder Tools (Ghost Inspector) | (4, 4) |
+| **Lastest** | **(9, 8)** |
+
+Target quadrant: top-right (high adoption + high visual intelligence). Beatable explicitly places Lastest there, with Applitools as the only adjacent player and a deliberate gap on the "ease of adoption" axis.
+
+### Estimated category market share (directional, Beatable)
+
+| Vendor | Share |
+|--------|-------|
+| Applitools | 30% |
+| Percy (BrowserStack) | 25% |
+| Chromatic | 12% |
+| BackstopJS | 10% |
+| Happo | 6% |
+| Argos CI | 5% |
+| Ghost Inspector | 4% |
+| Loki | 3% |
+| VisualRegressionTracker | 2% |
+| Others | 3% |
 
 ---
 
@@ -310,6 +365,49 @@ Lastest is now the only tool that combines **AI test generation + no-code record
 - Gaining traction as a lighter-weight alternative to Percy/Chromatic
 - Published "Why Playwright visual testing doesn't scale" as competitive content
 
+#### Happo
+- **Positioning:** Cross-browser component screenshot service for UI-library / component-driven teams
+- **Pricing:** SaaS subscription based on runs/parallelism; small teams ~$30–$200+/mo, enterprise custom (Beatable estimate)
+- **Beatable est. revenue:** <$5M ARR; **CAGR:** ~15%
+- **Strengths:** Fast component visual checks, multi-browser support, PR annotations, developer-friendly CLI; strong fit for design-system teams
+- **Weaknesses:** Smaller feature set for full E2E flows; commercial dependency; no AI / noise reduction; no recording
+- **Source:** [happo.io](https://happo.io)
+
+#### Ghost Inspector
+- **Positioning:** Low-code UI recorder + visual assertions + scheduled monitoring (QA-focused, not developer-first)
+- **HQ:** Pittsburgh, USA
+- **Pricing:** Starter ~$71/mo, Team $199+/mo, Enterprise custom
+- **Beatable est. revenue:** $2M–$8M ARR; **CAGR:** ~8% (slowest among tracked vendors)
+- **Strengths:** Recorder usable by non-dev QA, combined E2E + visual assertions, scheduled cloud runs
+- **Weaknesses:** Not deterministic at scale, less developer-first, noisy diffs, pricing escalates with run volume
+- **Why it matters to Lastest:** This is the closest "recorder" competitor by name. Beatable explicitly calls out that Ghost Inspector "offers recorder but targets non-dev QA and is not deterministic at scale" — a direct opening for Lastest's developer-first deterministic replay.
+- **Source:** [ghostinspector.com](https://ghostinspector.com)
+
+#### Loki
+- **Positioning:** Lightweight OSS visual regression for Storybook / component libraries
+- **License:** MIT, community-maintained ([okonet/loki](https://github.com/okonet/loki))
+- **Pricing:** Free (CI compute only)
+- **Beatable est. CAGR:** ~18%
+- **Strengths:** Lightweight Storybook focus, easy CI integration, OSS
+- **Weaknesses:** Component-only; needs CI infra and upkeep; no review UI, no AI, no E2E flows
+
+#### VisualRegressionTracker (VRT)
+- **Positioning:** Self-hostable visual regression **dashboard + API + server** for privacy-conscious teams
+- **License:** OSS; optional hosted plans
+- **Beatable est. CAGR:** ~12%
+- **Strengths:** Self-hostable history & dashboard, privacy-friendly, language-agnostic SDKs
+- **Weaknesses:** Requires hosting/maintenance; less turnkey than cloud products; no AI; no recorder
+- **Why it matters to Lastest:** Directly overlaps the "self-hosted dashboard" value prop. Lastest beats it on: AI test generation, recording, autonomous agent, embedded browser, remote runner npm package, and zero-config onboarding.
+- **Source:** [visualregressiontracker.com](https://visualregressiontracker.com)
+
+#### Reg-Suit (reg-viz)
+- **Positioning:** CI-friendly glue layer that adds reporting / PR commenting / thresholds **on top of existing screenshot tools** — does not capture screenshots itself
+- **License:** OSS
+- **Beatable est. CAGR:** ~12%
+- **Strengths:** Composable with current screenshot generators, CI-friendly, PR workflow
+- **Weaknesses:** Not a full visual-service replacement; still requires separate capture tooling; no AI
+- **Why it matters to Lastest:** Reg-Suit's existence proves teams stitch together capture + reporting themselves. Lastest delivers both end-to-end in one product.
+
 ---
 
 ## 3. Messaging Comparison Matrix
@@ -370,6 +468,10 @@ Lastest is now the only tool that combines **AI test generation + no-code record
 8. **Embedded browser execution:** No competitor offers a self-hosted container with live browser streaming. Teams can run tests without installing Playwright locally -- unique for CI/CD and cloud deployments.
 9. **Runner npm package:** `@lastest/runner` is published and ready for distributed execution. No cloud dependency, no per-runner pricing, no vendor lock-in.
 10. **Autonomous agent gap:** Play Agent is the only fully autonomous pipeline that scans, generates, runs, fixes, and reports in one click. Applitools Autonomous is the closest but requires $969+/mo.
+11. **(Beatable) Top-right quadrant is empty for SMB:** Only Applitools occupies the high-intelligence / high-adoption zone, and it's enterprise-priced. Lastest is the only player credibly positioned at (9, 8) per Beatable's map.
+12. **(Beatable) Recorder category is weak:** Ghost Inspector — the only named recorder competitor — scores ~4 on both axes and ~8% CAGR (slowest tracked vendor). Deterministic, developer-first recording is an undefended position.
+13. **(Beatable) Self-host dashboard category is fragmented:** VRT, Reg-Suit, Loki are OSS-only with no AI, no recorder, no unified product. Lastest's self-hosted + AI + recorder combination has no direct peer.
+14. **(Beatable) Market still 18–25% CAGR with $600M–$1.2B SAM** — large enough to support a focused developer-first entrant aiming at $6M–$40M SOM in 3 years.
 
 ---
 
@@ -411,32 +513,33 @@ Lastest is now the only tool that combines **AI test generation + no-code record
 
 ## Full Competitor Comparison
 
-| Capability | Lastest | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous | Argos |
-|------------|----------|-------|-----------|------------|------------|------------|------------|-------|
-| No-code recording | Yes | No | No | Low-code | No | No | Session record | No |
-| AI test generation | Yes | No | No | Yes (NLP) | No | No | Yes (sessions) | No |
-| AI auto-fix tests | Yes | No | No | No | No | No | Auto-maintain | No |
-| Autonomous agent | Yes (Play Agent) | No | No | Autonomous | No | No | No | No |
-| AI diff analysis | Yes | AI Review Agent | No | Visual AI | No | No | Deterministic | No |
-| Multi-engine diffing | 3 engines (pixelmatch, SSIM, Butteraugli) | No | No | Visual AI | No | No | No | No |
-| Text-region-aware diffing | Yes (OCR) | Yes (Intelli-ignore) | No | No | No | No | No | No |
-| Visual diff UI | Yes | Yes | Yes | Yes | Basic HTML | Yes (Platform) | Yes | Yes |
-| Approval workflow | Yes | Yes | Yes | Yes | No | Yes (SaaS) | PR-based | Yes |
-| GitHub/GitLab integration | Yes (both + self-hosted GitLab) | Yes | Yes | Yes | No | GitHub Actions | Yes | Yes |
-| Free unlimited screenshots | Yes | No (5k) | No (5k) | No | Yes | No (7k) | No | No (5k) |
-| Self-hosted | Yes | No | No | On-prem ($$$) | Yes | Yes (OSS) | No | OSS core |
-| Remote runners | Yes (npm package) | Cloud | Cloud | Cloud | No | Cloud | Cloud | Cloud |
-| Embedded browser | Yes (container + live stream) | No | No | No | No | No | No | No |
-| Route auto-discovery | Yes | No | No | No | No | No | No | No |
-| Spec-driven test gen | Yes | No | No | No | No | No | No | No |
-| Accessibility testing | Yes (axe-core) | No | Enterprise | No | No | No | No | ARIA snaps |
-| Cross-browser | Playwright | Real browsers | 4 browsers | Ultrafast Grid | Limited | Yes | Chromium | Via SDKs |
-| Local AI (Ollama) | Yes | No | No | No | No | No | No | No |
-| Figma integration | Yes | No | No | Yes | No | No | No | No |
-| Google Sheets data | Yes | No | No | No | No | No | No | No |
-| Setup/teardown orchestration | Yes | No | No | No | No | No | No | No |
-| Branch baseline management | Yes | Yes | Yes | Yes | No | No | No | No |
-| Testing templates | 8 presets | No | No | No | No | No | No | No |
-| Debug mode | Yes | No | No | No | No | No | No | Playwright trace |
-| Smart run (diff-based) | Yes | No | TurboSnap | No | No | No | Yes | No |
-| Price | $0 | $149+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | Custom | $100+/mo |
+| Capability | Lastest | Percy | Chromatic | Applitools | BackstopJS | Lost Pixel | Meticulous | Argos | Happo | Ghost Inspector | Loki | VRT | Reg-Suit |
+|------------|---------|-------|-----------|------------|------------|------------|------------|-------|-------|----------------|------|-----|----------|
+| No-code recording | Yes | No | No | Low-code | No | No | Session record | No | No | Yes | No | No | No |
+| AI test generation | Yes | No | No | Yes (NLP) | No | No | Yes (sessions) | No | No | No | No | No | No |
+| AI auto-fix tests | Yes | No | No | No | No | No | Auto-maintain | No | No | No | No | No | No |
+| Autonomous agent | Yes (Play Agent) | No | No | Autonomous | No | No | No | No | No | No | No | No | No |
+| AI diff analysis | Yes | AI Review Agent | No | Visual AI | No | No | Deterministic | No | No | No | No | No | No |
+| Multi-engine diffing | 3 engines | No | No | Visual AI | No | No | No | No | No | No | No | No | No |
+| Text-region-aware diffing | Yes (OCR) | Yes (Intelli-ignore) | No | No | No | No | No | No | No | No | No | No | No |
+| Visual diff UI | Yes | Yes | Yes | Yes | Basic HTML | Yes (Platform) | Yes | Yes | Yes | Yes | No | Yes | Yes |
+| Approval workflow | Yes | Yes | Yes | Yes | No | Yes (SaaS) | PR-based | Yes | Yes | Yes | No | Yes | Yes |
+| GitHub/GitLab integration | Yes (+ self-host GL) | Yes | Yes | Yes | No | GitHub Actions | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Free unlimited screenshots | Yes | No (5k) | No (5k) | No | Yes | No (7k) | No | No (5k) | Trial | Trial | Yes | Yes | Yes |
+| Self-hosted | Yes | No | No | On-prem ($$$) | Yes | Yes (OSS) | No | OSS core | No | No | Yes | Yes | Yes |
+| Remote runners | Yes (npm package) | Cloud | Cloud | Cloud | No | Cloud | Cloud | Cloud | Cloud | Cloud | No | No | No |
+| Embedded browser | Yes (container + live stream) | No | No | No | No | No | No | No | No | No | No | No | No |
+| Route auto-discovery | Yes | No | No | No | No | No | No | No | No | No | No | No | No |
+| Spec-driven test gen | Yes | No | No | No | No | No | No | No | No | No | No | No | No |
+| Accessibility testing | Yes (axe-core) | No | Enterprise | No | No | No | No | ARIA snaps | No | No | No | No | No |
+| Cross-browser | Playwright | Real browsers | 4 browsers | Ultrafast Grid | Limited | Yes | Chromium | Via SDKs | Multi | Limited | Limited | Limited | Limited |
+| Local AI (Ollama) | Yes | No | No | No | No | No | No | No | No | No | No | No | No |
+| Figma integration | Yes | No | No | Yes | No | No | No | No | No | No | No | No | No |
+| Google Sheets data | Yes | No | No | No | No | No | No | No | No | No | No | No | No |
+| Setup/teardown orchestration | Yes | No | No | No | No | No | No | No | No | No | No | No | No |
+| Branch baseline management | Yes | Yes | Yes | Yes | No | No | No | No | Partial | No | No | Yes | Yes |
+| Testing templates | 8 presets | No | No | No | No | No | No | No | No | No | No | No | No |
+| Debug mode | Yes | No | No | No | No | No | No | Playwright trace | No | No | No | No | No |
+| Smart run (diff-based) | Yes | No | TurboSnap | No | No | No | Yes | No | No | No | No | No | No |
+| Price | $0 | $149+/mo | $179+/mo | $699+/mo | $0 | $100+/mo | Custom | $100+/mo | $30–$200+/mo | $71–$199+/mo | $0 | $0 (OSS) | $0 (OSS) |
+| Beatable est. share | n/a | 25% | 12% | 30% | 10% | n/a | n/a | 5% | 6% | 4% | 3% | 2% | (in "others" 3%) |

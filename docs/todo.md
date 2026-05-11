@@ -7,12 +7,11 @@ Reach out to podcasts, meetups, youtube channels, add them to crm
 Build a skill to find startupideas and test them, provide testing feedback
 Welcome email, follow-up
 https://www.chromatic.com/start comp test?
-
+Legal stuff for Mark
 ## test
 VS Code extension
   disconnects often
-  point to cloud by default
-  only show repos with tests
+   only show repos with tests
   output should be clear
   replace icon from lab in sidebar to lastest singlecolor
 Teardown
@@ -20,14 +19,8 @@ triage
 Create modes
 Openrouter agent sdk parity
 demo-mode
-multi-layer-comparison
-design-testing-framework
-
+  without link?
 ## bugs
-Clear up inspect and test comparison
-Verify
-  cant run again
-  cant switch branch
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets
@@ -45,14 +38,10 @@ Test coverage assessment and recreation based on existing test set  ~/.claude/pl
 Component specific testing
 Figma plugin
 Sitemap -flow
-DOM test repair
-  1. During the passing run: record a full interaction trace — DOM snapshots at each step, network requests, console logs                     
-  2. When it breaks: diff the last-known-good DOM snapshot against the current failing one
-  3. This gives the maintenance agent before/after context ("this button used to be <button data-testid='submit'> inside a <form>, now it's a <div           
-  role='button'> inside a <dialog>") instead of just "selector not found, figure it out" 
+Use DOM diff/verify to fix test as context
 ## marketing
 * gh issue for maintained repos w lastest public link
-* test: screenshot diff tool      
+* test: screenshot diff tool 
 * Quote, Sanyi: "Pont erre van szükségünk. Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre"
 * Re-fetch search volume, CPC & competition from DataForSEO
 * test: AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
@@ -93,3 +82,18 @@ I've been working on a tool for this exact workflow that lets your record your u
 --------
 
 Meta descriptions on many of your pages are too short.
+
+
+Suggested pricing tiers (example)
+
+Plan	Price (USD)	Included	Overage / Add-ons
+Free	$0	1 project, 50 runs/mo, 1 concurrent run, community support	$0.10 / extra run
+Starter	$29 / mo	3 projects, 500 runs/mo, 2 concurrent runs, email support	$0.08 / extra run
+Growth	$99 / mo	10 projects, 3,000 runs/mo, 5 concurrent runs, Slack support, CI integrations	$0.06 / extra run, cross-browser addon $49/mo
+Pro	$299 / mo	Unlimited projects (reasonable quotas), 12,000 runs/mo, 15 concurrent, SSO, priority support	Custom cross-browser pricing
+Self-host Standard	$3,000 / yr	Self-hosted license for up to 20 developers, CI agents, basic SLA	Paid upgrades for premium support and custom integrations
+Enterprise	Custom	Unlimited, dedicated account, on-prem agent, advanced SLAs, professional services	Custom
+
+
+Invite 50–200 teams (target: solo founders, YC startups, component teams) via outreach to clubs, Slack communities, and test automation forums.
+Offer extended free tiers and white-glove onboarding for first 20 paying customers.
