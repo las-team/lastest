@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getBuildSummary } from '@/server/actions/builds';
+import { buildBuildSummary } from '@/server/actions/builds';
 import { getCurrentSession } from '@/lib/auth';
 import { validateRunnerToken } from '@/server/actions/runners';
 import * as queries from '@/lib/db/queries';
@@ -27,15 +27,14 @@ export async function GET(
   }
 
   const { buildId } = await params;
-  const build = await getBuildSummary(buildId);
 
-  if (!build) {
+  // Verify the build's repo belongs to the authenticated team before
+  // loading the summary (buildBuildSummary skips auth, so the route owns it).
+  const buildRecord = await queries.getBuild(buildId);
+  if (!buildRecord) {
     return NextResponse.json({ error: 'Build not found' }, { status: 404 });
   }
-
-  // Verify the build's repo belongs to the authenticated team
-  const buildRecord = await queries.getBuild(buildId);
-  if (buildRecord?.testRunId) {
+  if (buildRecord.testRunId) {
     const run = await queries.getTestRun(buildRecord.testRunId);
     if (run?.repositoryId) {
       const repo = await queries.getRepository(run.repositoryId);
@@ -43,6 +42,11 @@ export async function GET(
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
     }
+  }
+
+  const build = await buildBuildSummary(buildId);
+  if (!build) {
+    return NextResponse.json({ error: 'Build not found' }, { status: 404 });
   }
 
   return NextResponse.json({

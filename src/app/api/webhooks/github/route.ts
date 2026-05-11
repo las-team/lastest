@@ -3,8 +3,9 @@ import {
   verifyWebhookSignature,
   isPullRequestEvent,
   isPushEvent,
+  isIssuesEvent,
 } from '@/lib/github/webhooks';
-import { createAndRunBuild } from '@/server/actions/builds';
+import { createAndRunBuild, createAndRunBuildCore } from '@/server/actions/builds';
 import { mergeBaselinesFromBranch, cleanupBranchBaselines, promoteTestVersionsFromBranch } from '@/server/actions/baselines';
 import * as queries from '@/lib/db/queries';
 
@@ -121,6 +122,49 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ message: 'Branch not monitored' });
+    }
+
+    // Verify phase (v1.14+) — issue-close auto-rerun.
+    // When a GH issue tagged `verify` closes, find every step comparison
+    // linked to that issue and kick a focused build for just those tests.
+    // The build's `confirm-on-green` post-processing flips cases back to
+    // done if the rerun shows green, replacing the manual "I fixed it" step.
+    if (event === 'issues' && isIssuesEvent(data)) {
+      if (data.action !== 'closed' || data.issue.state !== 'closed') {
+        return NextResponse.json({ message: 'Issue event ignored (not a close)' });
+      }
+      const labels = data.issue.labels?.map((l) => l.name) ?? [];
+      if (!labels.includes('verify')) {
+        return NextResponse.json({ message: 'Issue event ignored (not a verify ticket)' });
+      }
+
+      const steps = await queries.getStepComparisonsByGithubIssue(data.issue.number);
+      if (steps.length === 0) {
+        return NextResponse.json({ message: 'No linked step comparisons' });
+      }
+
+      // Mark each linked case as closed so the verify board reflects the
+      // close immediately, even before the rerun lands.
+      await Promise.all(
+        steps.map((s) => queries.updateStepComparisonIssueState(s.id, 'closed')),
+      );
+
+      // Kick a focused build per repo grouping. createAndRunBuildCore is the
+      // auth-less variant — webhooks can't carry a user session. The build
+      // executor + verify scoring already populate stepComparisons for the
+      // new build, and the reviewer can drop the resulting card to "done" to
+      // finalize.
+      const repositoryId = await resolveRepositoryId(data);
+      if (repositoryId) {
+        const testIds = Array.from(new Set(steps.map((s) => s.testId)));
+        try {
+          await createAndRunBuildCore('webhook', testIds, repositoryId);
+        } catch (err) {
+          console.error('[webhook] verify rerun failed:', err);
+        }
+      }
+
+      return NextResponse.json({ message: `Rerun queued for ${steps.length} verify case(s)` });
     }
 
     // Ping event (used when setting up webhook)

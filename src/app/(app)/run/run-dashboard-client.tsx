@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,6 +79,7 @@ interface RunDashboardClientProps {
   comparisonBaselineBranch?: string | null;
   branches?: string[];
   branchBaseUrls?: Record<string, string> | null;
+  verifyPhaseEnabled?: boolean;
 }
 
 const HISTORY_KEY = 'baseurl-history';
@@ -106,7 +108,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, initialTodos, initialDiffs, latestBuildId, composeConfig, banAiMode = false, comparisonRunEnabled: initialComparisonEnabled = false, comparisonBaselineBranch: initialBaselineBranch, branches = [], branchBaseUrls }: RunDashboardClientProps) {
+export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, activeBranch, currentBranch, defaultBranch, baseUrl: initialBaseUrl, branchHeads, initialTodos, initialDiffs, latestBuildId, composeConfig, banAiMode = false, comparisonRunEnabled: initialComparisonEnabled = false, comparisonBaselineBranch: initialBaselineBranch, branches = [], branchBaseUrls, verifyPhaseEnabled = false }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [isRunning, setIsRunning] = useState(false);
@@ -272,6 +274,14 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
 
   return (
     <div className="flex-1 p-6 overflow-auto">
+      {verifyPhaseEnabled && (
+        <div className="max-w-6xl mx-auto mb-4 rounded-md border bg-primary/5 p-3 text-sm flex items-center justify-between gap-3">
+          <span>
+            Run is now part of <strong>Verify</strong> — the Refresh-data button on /verify drives builds.
+          </span>
+          <Link href="/verify" className="text-primary font-medium hover:underline">Open Verify →</Link>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl mx-auto">
         {/* Right Column - Run Tests */}
         <div className="space-y-6 lg:order-2">

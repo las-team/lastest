@@ -28,13 +28,13 @@
  *   POST /api/v1/diffs/:id/approve - Approve single visual diff
  *   POST /api/v1/diffs/:id/reject - Reject single visual diff
  *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
- *   POST /api/v1/repos - Create a local repository
+ *   POST /api/v1/repos - Create a local repository (optional baseUrl seeds env config)
  *   POST /api/v1/repos/:id/import - Import tests + functional areas (migration)
  *   POST /api/v1/functional-areas - Create functional area
  *   POST /api/v1/tests - Create a test directly with raw code (no AI)
  *   POST /api/v1/tests/create - Create test via AI
  *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
- *   PUT  /api/v1/repos/:id - Update a repository (name/defaultBranch/selectedBranch)
+ *   PUT  /api/v1/repos/:id - Update a repository (name/defaultBranch/selectedBranch/baseUrl)
  *   PUT  /api/v1/tests/:id - Update a test
  *   PUT  /api/v1/functional-areas/:id - Update a functional area
  *   DELETE /api/v1/tests/:id - Soft-delete a test
@@ -78,6 +78,22 @@ function mapAuthError(error: unknown): NextResponse | null {
 function parseSlug(slug: string[]): { resource: string; id?: string; subResource?: string; action?: string } {
   const [resource, id, subResource, action] = slug;
   return { resource, id, subResource, action };
+}
+
+// Validate + normalize a repo baseUrl. Returns the trimmed URL (no trailing
+// slash) or `null` if invalid. The env_config layer trims again, but we
+// normalize here so the value persisted matches what GET returns.
+function normalizeBaseUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return trimmed.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
 }
 
 // Helper to verify a repository belongs to the session's team
@@ -129,12 +145,18 @@ export async function GET(
     // Repositories
     if (resource === 'repos') {
       if (!id) {
-        // GET /api/v1/repos - List all repos
+        // GET /api/v1/repos - List all repos (each enriched with its env baseUrl)
         if (!session.team) {
           return NextResponse.json({ error: 'No team access' }, { status: 403 });
         }
         const repos = await queries.getRepositoriesByTeam(session.team.id);
-        return NextResponse.json(repos);
+        const enriched = await Promise.all(
+          repos.map(async (r) => {
+            const env = await queries.getEnvironmentConfig(r.id);
+            return { ...r, baseUrl: env?.baseUrl ?? null };
+          }),
+        );
+        return NextResponse.json(enriched);
       }
 
       // GET /api/v1/repos/:id
@@ -211,7 +233,8 @@ export async function GET(
         return NextResponse.json({ functionalAreas: exportedAreas, tests: exportedTests });
       }
 
-      return NextResponse.json(repo);
+      const env = await queries.getEnvironmentConfig(id);
+      return NextResponse.json({ ...repo, baseUrl: env?.baseUrl ?? null });
     }
 
     // Functional areas
@@ -306,6 +329,40 @@ export async function GET(
 
     // Builds
     if (resource === 'builds' && id) {
+      // Verify-phase routes (v1.14+)
+      // GET /api/v1/builds/:id/change-map
+      if (subResource === 'change-map') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const cached = await queries.getBuildChangeMap(id);
+        if (cached) return NextResponse.json(cached);
+        // Lazy compute on first request
+        const { computeChangeMap } = await import('@/server/actions/change-map');
+        const computed = await computeChangeMap(id).catch(() => null);
+        return NextResponse.json(computed ?? { error: 'Unable to compute change map' });
+      }
+
+      // GET /api/v1/builds/:id/verify — Change Map + step comparisons + verdict counts
+      if (subResource === 'verify') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const [changeMap, stepComparisons, counts, layerFeedback] = await Promise.all([
+          queries.getBuildChangeMap(id),
+          queries.getStepComparisonsByBuild(id),
+          queries.countStepComparisonVerdicts(id),
+          queries.getLayerFeedbackByBuild(id),
+        ]);
+        return NextResponse.json({
+          buildId: id,
+          changeMap,
+          stepComparisons,
+          verdictCounts: counts,
+          layerFeedback,
+        });
+      }
+
       const build = await queries.getBuild(id);
       if (!build) {
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -359,9 +416,13 @@ export async function POST(
         return NextResponse.json({ error: 'No team access' }, { status: 403 });
       }
       const body = await request.json();
-      const { name } = body;
+      const { name, baseUrl } = body;
       if (!name || typeof name !== 'string' || !name.trim()) {
         return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+      if (baseUrl !== undefined && normalizedBaseUrl === null) {
+        return NextResponse.json({ error: 'baseUrl must be a valid http(s) URL' }, { status: 400 });
       }
       const repo = await queries.createRepository({
         teamId: session.team.id,
@@ -370,7 +431,11 @@ export async function POST(
         name: name.trim(),
         fullName: name.trim(),
       });
-      return NextResponse.json(repo, { status: 201 });
+      if (normalizedBaseUrl) {
+        await queries.upsertEnvironmentConfig(repo.id, { baseUrl: normalizedBaseUrl });
+      }
+      const env = await queries.getEnvironmentConfig(repo.id);
+      return NextResponse.json({ ...repo, baseUrl: env?.baseUrl ?? null }, { status: 201 });
     }
 
     // Create test run
@@ -713,6 +778,33 @@ export async function POST(
       return NextResponse.json({ success: true });
     }
 
+    // Verify phase: POST /api/v1/verify/layer-feedback
+    if (resource === 'verify' && id === 'layer-feedback') {
+      const body = await request.json();
+      const { stepComparisonId, buildId, layer, status, note } = body as {
+        stepComparisonId: string;
+        buildId: string;
+        layer: string;
+        status: string;
+        note?: string;
+      };
+      if (!stepComparisonId || !buildId || !layer || !status) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      if (!(await verifyBuildOwnership(buildId, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { decideLayer } = await import('@/server/actions/layer-feedback');
+      const result = await decideLayer({
+        stepComparisonId,
+        buildId,
+        layer: layer as 'visual' | 'dom' | 'a11y' | 'network' | 'console' | 'url' | 'perf' | 'variable',
+        status: status as 'approved' | 'rejected' | 'snoozed',
+        note: note ?? null,
+      });
+      return NextResponse.json(result);
+    }
+
     // Import tests + functional areas: POST /api/v1/repos/:id/import
     if (resource === 'repos' && id && subResource === 'import') {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -887,12 +979,28 @@ export async function PUT(
       if (body.name !== undefined) updates.name = body.name;
       if (body.defaultBranch !== undefined) updates.defaultBranch = body.defaultBranch;
       if (body.selectedBranch !== undefined) updates.selectedBranch = body.selectedBranch;
-      if (Object.keys(updates).length === 0) {
+
+      // baseUrl lives in environment_configs, not repositories — route it there
+      // so MCP/REST clients have a single tool to point a repo at an external app.
+      let baseUrlChanged = false;
+      if (body.baseUrl !== undefined) {
+        const normalized = normalizeBaseUrl(body.baseUrl);
+        if (normalized === null) {
+          return NextResponse.json({ error: 'baseUrl must be a valid http(s) URL' }, { status: 400 });
+        }
+        await queries.upsertEnvironmentConfig(id, { baseUrl: normalized });
+        baseUrlChanged = true;
+      }
+
+      if (Object.keys(updates).length === 0 && !baseUrlChanged) {
         return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
       }
-      await queries.updateRepository(id, updates);
+      if (Object.keys(updates).length > 0) {
+        await queries.updateRepository(id, updates);
+      }
       const updated = await queries.getRepository(id);
-      return NextResponse.json(updated);
+      const env = await queries.getEnvironmentConfig(id);
+      return NextResponse.json({ ...updated, baseUrl: env?.baseUrl ?? null });
     }
 
     // Update functional area: PUT /api/v1/functional-areas/:id

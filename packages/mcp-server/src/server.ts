@@ -140,15 +140,18 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_create_repo ---
   server.tool(
     'lastest_create_repo',
-    'Create a new local repository in the current team. Use this when you need a fresh workspace for tests without connecting to GitHub/GitLab.',
+    'Create a new local repository in the current team. Use this when you need a fresh workspace for tests without connecting to GitHub/GitLab. Pass `baseUrl` to point the repo at an external app (e.g. https://staging.example.com) so generated tests target the right origin instead of localhost:3000.',
     {
       name: z.string().describe('Repository name (e.g. "my-app")'),
+      baseUrl: z.string().url().optional().describe('Base URL passed to `test(page, baseUrl, ...)` for this repo (e.g. https://staging.example.com). Defaults to http://localhost:3000.'),
     },
     withActivityReporting(client, 'lastest_create_repo', async (params) => {
-      const repo = await client.createRepo(params.name as string);
+      const repo = await client.createRepo(params.name as string, {
+        baseUrl: params.baseUrl as string | undefined,
+      });
       const response: ToolResponse = {
         status: 'created',
-        summary: `Repository "${repo.name}" created (ID: ${repo.id})`,
+        summary: `Repository "${repo.name}" created (ID: ${repo.id}${repo.baseUrl ? `, baseUrl: ${repo.baseUrl}` : ''})`,
         actionRequired: [
           'Create functional areas with lastest_create_area',
           'Add tests with lastest_create_test',
@@ -162,18 +165,19 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_update_repo ---
   server.tool(
     'lastest_update_repo',
-    'Update a repository\'s name, default branch, or selected branch.',
+    'Update a repository\'s name, default branch, selected branch, or base URL. `baseUrl` is the value passed to `test(page, baseUrl, ...)` — set it to point a repo at an external app instead of the default http://localhost:3000.',
     {
       repositoryId: z.string().describe('Repository ID to update'),
       name: z.string().optional().describe('New repository name'),
       defaultBranch: z.string().optional().describe('New default branch name'),
       selectedBranch: z.string().optional().describe('Branch selected for test runs'),
+      baseUrl: z.string().url().optional().describe('Base URL for tests in this repo (e.g. https://staging.example.com).'),
     },
     withActivityReporting(client, 'lastest_update_repo', async (params) => {
       const { repositoryId, ...rest } = params;
       const cleanUpdates = Object.fromEntries(
         Object.entries(rest).filter(([, v]) => v !== undefined),
-      ) as { name?: string; defaultBranch?: string; selectedBranch?: string };
+      ) as { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string };
       const result = (await client.updateRepo(repositoryId as string, cleanUpdates)) as Record<string, unknown>;
       const response: ToolResponse = {
         status: 'updated',
@@ -653,12 +657,17 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_get_build_status ---
   server.tool(
     'lastest_get_build_status',
-    'Get the current status and results of a build. Use after lastest_run_tests to check progress.',
+    'Get the current status and results of a build. Use after lastest_run_tests to check progress. Returns slim build scalars + slim diff index — drill into a specific diff with lastest_get_visual_diff (or pass `includeDiffs: "full"` if you really need the joined a11y/network/AI payloads).',
     {
       buildId: z.string().describe('The build ID to check status for'),
+      includeDiffs: z
+        .enum(['slim', 'full'])
+        .optional()
+        .describe('"slim" (default) returns only id/testId/stepLabel/status/classification/pct per diff. "full" returns every joined column (heavy — can be 100KB+ for builds with many diffs).'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
       const build = (await client.getBuild(params.buildId)) as Record<string, unknown>;
+      const includeDiffs = (params.includeDiffs as string | undefined) ?? 'slim';
 
       const status = build.overallStatus as string;
       const passed = build.passedCount as number;
@@ -678,11 +687,36 @@ export function createServer(client: LastestClient): McpServer {
         actionRequired.push(`${failed} test(s) failed — use lastest_list_failing_tests to see details`);
       }
 
+      // Slim the response by default. The REST API joins a11yViolations,
+      // consoleErrors, networkRequests, aiAnalysis, and diff metadata onto
+      // every diff — for builds with N diffs that can easily clear 100KB and
+      // saturate an agent's context. Most callers only need the diff index;
+      // they fetch heavy payloads per-diff via lastest_get_visual_diff.
+      const rawDiffs = Array.isArray(build.diffs) ? (build.diffs as Array<Record<string, unknown>>) : [];
+      const slimDiffs = rawDiffs.map((d) => ({
+        id: d.id,
+        testId: d.testId,
+        testName: d.testName,
+        stepLabel: d.stepLabel,
+        status: d.status,
+        classification: d.classification,
+        percentageDifference: d.percentageDifference,
+        pixelDifference: d.pixelDifference,
+        testResultStatus: d.testResultStatus,
+        browser: d.browser,
+        aiRecommendation: d.aiRecommendation,
+      }));
+      const { diffs: _omitDiffs, ...buildScalars } = build;
+      const details =
+        includeDiffs === 'full'
+          ? { ...buildScalars, diffs: rawDiffs }
+          : { ...buildScalars, diffs: slimDiffs, diffsTrimmed: true, diffsCount: rawDiffs.length };
+
       const response: ToolResponse = {
         status,
         summary: `Build ${params.buildId}: ${passed}/${total} passed, ${failed} failed, ${changes} visual changes, ${flaky} flaky. Status: ${status}`,
         actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
-        details: build,
+        details,
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
@@ -959,6 +993,72 @@ export function createServer(client: LastestClient): McpServer {
         details: result,
       };
 
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== Verify phase (v1.14+) =====
+
+  // --- lastest_get_change_map ---
+  server.tool(
+    'lastest_get_change_map',
+    'Get the build-level Change Map (4-signal area ranking + AI intent/risk summary) for a build.',
+    {
+      buildId: z.string().describe('Build ID'),
+    },
+    withActivityReporting(client, 'lastest_get_change_map', async (params) => {
+      const result = await client.getChangeMap(params.buildId as string);
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: 'Change Map retrieved.',
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_verify_build ---
+  server.tool(
+    'lastest_verify_build',
+    'Get the full verify-build view: Change Map + step comparisons grouped by regression vs intent gate.',
+    {
+      buildId: z.string().describe('Build ID'),
+    },
+    withActivityReporting(client, 'lastest_verify_build', async (params) => {
+      const result = await client.verifyBuild(params.buildId as string);
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: 'Verify view retrieved.',
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_approve_layer ---
+  server.tool(
+    'lastest_approve_layer',
+    'Per-layer feedback on a step comparison: approve (Mark expected → write baseline), reject (Needs fix → create todo), or snooze (suppress for this build only).',
+    {
+      stepComparisonId: z.string().describe('Step comparison ID'),
+      buildId: z.string().describe('Build ID'),
+      layer: z.enum(['visual', 'dom', 'a11y', 'network', 'console', 'url', 'perf', 'variable']).describe('Layer name'),
+      status: z.enum(['approved', 'rejected', 'snoozed']).describe('approved=Mark expected; rejected=Needs fix; snoozed=Suppress for this build'),
+      note: z.string().optional().describe('Optional note attached to the decision'),
+    },
+    withActivityReporting(client, 'lastest_approve_layer', async (params) => {
+      const result = await client.approveLayer({
+        stepComparisonId: params.stepComparisonId as string,
+        buildId: params.buildId as string,
+        layer: params.layer as string,
+        status: params.status as 'approved' | 'rejected' | 'snoozed',
+        note: params.note as string | undefined,
+      });
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `Layer ${params.layer} ${params.status}.`,
+        details: result as Record<string, unknown>,
+      };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );

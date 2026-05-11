@@ -72,3 +72,35 @@ export function isPushEvent(event: unknown): event is PushEvent {
     !('pull_request' in event)
   );
 }
+
+/**
+ * Verify phase (v1.14+) — GitHub "issues" webhook event. Used to detect when
+ * a verify-filed ticket gets closed in GH, so we can rerun the linked case
+ * and auto-flip the verify board back to done on green.
+ */
+export interface IssuesEvent {
+  action: 'opened' | 'edited' | 'closed' | 'reopened' | 'deleted' | string;
+  issue: {
+    number: number;
+    state: 'open' | 'closed';
+    title: string;
+    html_url: string;
+    labels?: Array<{ name: string }>;
+  };
+  repository: {
+    id?: number;
+    name: string;
+    owner: { login: string };
+  };
+}
+
+export function isIssuesEvent(event: unknown): event is IssuesEvent {
+  if (typeof event !== 'object' || event === null) return false;
+  if (!('action' in event) || !('issue' in event)) return false;
+  // GH sends pull-request opens through the `issues` event endpoint too,
+  // tagged with `issue.pull_request`. Filter those out so we only act on
+  // actual issues.
+  const issue = (event as { issue: unknown }).issue;
+  if (typeof issue !== 'object' || issue === null) return false;
+  return !('pull_request' in issue);
+}

@@ -155,6 +155,16 @@ export const auth = betterAuth({
     user: {
       create: {
         after: async (user) => {
+          const { isDemoEmail, ensureDemoEnvironment } = await import("./demo");
+          if (isDemoEmail(user.email)) {
+            const { team } = await ensureDemoEnvironment();
+            await queries.updateUser(user.id, {
+              teamId: team.id,
+              role: "viewer",
+              onboardingCompletedAt: new Date(),
+            });
+            return;
+          }
           const invite = await queries.getInvitationByEmail(user.email);
           if (invite && !invite.acceptedAt && invite.expiresAt && invite.expiresAt > new Date()) {
             await queries.updateUser(user.id, {

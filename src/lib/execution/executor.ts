@@ -655,6 +655,10 @@ async function executeViaRunner(
         networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
+        // Without this, the runner never invokes axe-core even when the user
+        // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
+        // stay null and the verify A11y tab shows "not captured".
+        enableA11y: options.playwrightSettings?.enableA11y ?? false,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -868,6 +872,15 @@ async function executeViaRunner(
         assignedVariables: info.assignedVariables,
         logs: Array.isArray(payload.logs) && payload.logs.length > 0
           ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
+          : undefined,
+        urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
+          ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]
+          : undefined,
+        webVitals: Array.isArray(payload.webVitals) && payload.webVitals.length > 0
+          ? payload.webVitals as import('@/lib/db/schema').WebVitalsSample[]
+          : undefined,
+        storageStateSnapshot: payload.storageStateSnapshot && typeof payload.storageStateSnapshot === 'object'
+          ? payload.storageStateSnapshot as import('@/lib/db/schema').StorageStateSnapshot
           : undefined,
       };
 

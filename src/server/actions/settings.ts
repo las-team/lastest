@@ -54,6 +54,17 @@ export async function savePlaywrightSettings(data: {
   return { success: true };
 }
 
+export async function setPlaywrightDomDiff(repositoryId: string | null | undefined, enabled: boolean) {
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+
+  await queries.upsertPlaywrightSettings(repositoryId || null, { enableDomDiff: enabled });
+
+  revalidatePath('/settings');
+
+  return { success: true };
+}
+
 export async function resetPlaywrightSettings(repositoryId?: string | null) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();

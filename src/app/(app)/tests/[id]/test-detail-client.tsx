@@ -54,6 +54,7 @@ import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
 import { TestSpecEditor } from '@/components/tests/test-spec-editor';
 import { PublishShareDialog } from '@/app/(app)/builds/[buildId]/publish-share-dialog';
 import { diffLines as diffTextLines, diffStats } from '@/lib/diff/text-diff';
+import { InspectTabClient } from './inspect/inspect-tab-client';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 
@@ -257,7 +258,14 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
-  const [activeTab, setActiveTab] = useState('code');
+  // URL hash drives the initial tab so cross-page deep-links work, e.g.
+  // `/tests/<id>#vars` from the verify focus page lands on the Vars tab.
+  const VALID_TABS = new Set(['code', 'spec', 'steps', 'criteria', 'vars', 'playback', 'screenshots', 'inspect', 'history', 'recordings', 'versions']);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === 'undefined') return 'code';
+    const fromHash = window.location.hash.replace(/^#/, '');
+    return VALID_TABS.has(fromHash) ? fromHash : 'code';
+  });
   const [highlightLine, setHighlightLine] = useState<number | null>(null);
 
   // Run state
@@ -1024,6 +1032,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
             <TabsTrigger value="vars" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Vars</TabsTrigger>
             <TabsTrigger value="playback" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Overrides</TabsTrigger>
             <TabsTrigger value="screenshots" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Screenshots</TabsTrigger>
+            <TabsTrigger value="inspect" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Inspect</TabsTrigger>
             <TabsTrigger value="history" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">History</TabsTrigger>
             <TabsTrigger value="recordings" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Recordings</TabsTrigger>
             <TabsTrigger value="versions" onClick={loadVersions} className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Versions</TabsTrigger>
@@ -1289,6 +1298,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               plannedScreenshots={plannedScreenshots}
               onUpdate={() => router.refresh()}
             />
+          </TabsContent>
+
+          <TabsContent value="inspect" className="mt-4">
+            <InspectTabClient testId={test.id} />
           </TabsContent>
 
           <TabsContent value="history" className="mt-4">

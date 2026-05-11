@@ -81,13 +81,16 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}`);
   }
 
-  async createRepo(name: string): Promise<{ id: string; name: string; fullName: string }> {
-    return this.post('/api/v1/repos', { name });
+  async createRepo(
+    name: string,
+    opts?: { baseUrl?: string },
+  ): Promise<{ id: string; name: string; fullName: string; baseUrl?: string | null }> {
+    return this.post('/api/v1/repos', { name, baseUrl: opts?.baseUrl });
   }
 
   async updateRepo(
     repoId: string,
-    data: { name?: string; defaultBranch?: string; selectedBranch?: string },
+    data: { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string },
   ): Promise<unknown> {
     return this.put(`/api/v1/repos/${repoId}`, data);
   }
@@ -234,6 +237,26 @@ export class LastestClient {
   }
 
   // --- Activity Reporting ---
+
+  // ── Verify phase (v1.14+) ───────────────────────────────────────────────
+
+  async getChangeMap(buildId: string): Promise<unknown> {
+    return this.get(`/api/v1/builds/${buildId}/change-map`);
+  }
+
+  async verifyBuild(buildId: string): Promise<unknown> {
+    return this.get(`/api/v1/builds/${buildId}/verify`);
+  }
+
+  async approveLayer(opts: {
+    stepComparisonId: string;
+    buildId: string;
+    layer: string;
+    status: 'approved' | 'rejected' | 'snoozed';
+    note?: string;
+  }): Promise<unknown> {
+    return this.post('/api/v1/verify/layer-feedback', opts);
+  }
 
   async reportActivity(data: {
     eventType: string;

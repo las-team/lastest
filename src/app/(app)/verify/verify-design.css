@@ -1,0 +1,220 @@
+/* Verify page — design-bundle utility classes.
+ * Scoped under .verify-page so they don't leak into the rest of the app.
+ * Tokens (--primary, --destructive, --border, etc.) come from globals.css.
+ */
+
+.verify-page {
+  --c-red: var(--destructive);
+  --c-amber: #E09836;
+  --c-teal: var(--primary);
+  --c-blue: #3674A8;
+  --c-soft: var(--muted);
+  --c-soft-2: var(--secondary);
+  --c-white: var(--card);
+  --fg-1: var(--foreground);
+  --fg-2: var(--muted-foreground);
+  --fg-3: rgba(31, 42, 51, 0.55);
+  --border-strong: rgba(31, 42, 51, 0.16);
+  --r-md: 8px;
+  --r-pill: 999px;
+  --shadow-xs: 0px 1px 2px rgba(31, 42, 51, 0.05);
+}
+
+.verify-page .label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+  font-weight: 500;
+  text-transform: none;
+}
+
+.verify-page .mono {
+  font-family: var(--font-mono);
+}
+
+.verify-page .wm {
+  font-family: var(--font-display, 'Archivo'), system-ui, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+.verify-page .wm .t { color: var(--c-red); }
+
+.verify-page .v-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  font-family: var(--font-sans);
+  letter-spacing: 0.01em;
+  text-transform: none;
+  border: 1px solid var(--border);
+  background: var(--c-white);
+  color: var(--fg-2);
+}
+.verify-page .v-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-3);
+}
+.verify-page .v-chip.regression {
+  background: color-mix(in oklab, var(--c-red) 8%, white);
+  border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
+  color: var(--c-red);
+}
+.verify-page .v-chip.regression .dot { background: var(--c-red); }
+.verify-page .v-chip.done {
+  background: color-mix(in oklab, var(--c-teal) 10%, white);
+  border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
+  color: #1F7B66;
+}
+.verify-page .v-chip.done .dot { background: var(--c-teal); }
+.verify-page .v-chip.missed {
+  background: color-mix(in oklab, var(--c-amber) 12%, white);
+  border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
+  color: #8C5C19;
+}
+.verify-page .v-chip.missed .dot { background: var(--c-amber); }
+.verify-page .v-chip.unknown {
+  background: var(--c-soft);
+  border-color: var(--border-strong);
+  color: var(--fg-2);
+}
+.verify-page .v-chip.unknown .dot { background: var(--fg-3); }
+.verify-page .v-chip.info {
+  background: color-mix(in oklab, var(--c-blue) 8%, white);
+  border-color: color-mix(in oklab, var(--c-blue) 22%, transparent);
+  color: #2E5E8C;
+}
+.verify-page .v-chip.info .dot { background: var(--c-blue); }
+
+.verify-page .v-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-strong);
+  background: var(--c-white);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
+  cursor: pointer;
+  line-height: 1;
+  /* Action bars line up cleanly when every button shares a min-width. */
+  min-width: 132px;
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+.verify-page .v-btn:hover { background: var(--c-soft); }
+.verify-page .v-btn.primary {
+  /* Reserved for the single page-level primary CTA (the Run button). */
+  background: var(--c-teal);
+  border-color: transparent;
+  color: white;
+}
+.verify-page .v-btn.primary:hover { background: #2E957D; }
+.verify-page .v-btn.success {
+  /* Approve / "yes this is intended" — tinted, not solid, so it doesn't
+     compete with the page-level primary. */
+  background: color-mix(in oklab, var(--c-teal) 10%, white);
+  border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
+  color: #1F7B66;
+}
+.verify-page .v-btn.success:hover { background: color-mix(in oklab, var(--c-teal) 16%, white); }
+.verify-page .v-btn.danger {
+  background: color-mix(in oklab, var(--c-red) 8%, white);
+  border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
+  color: var(--c-red);
+}
+.verify-page .v-btn.warning {
+  background: color-mix(in oklab, var(--c-amber) 10%, white);
+  border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
+  color: #8C5C19;
+}
+.verify-page .v-btn.tinted {
+  /* Subtle "active" toggle state without claiming the page primary. */
+  background: color-mix(in oklab, var(--c-teal) 10%, white);
+  border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
+  color: #1F7B66;
+}
+.verify-page .v-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+  min-width: auto;
+}
+.verify-page .v-btn.sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  min-width: 64px;
+}
+.verify-page .v-btn.icon {
+  padding: 6px;
+  aspect-ratio: 1;
+  min-width: auto;
+  width: 32px;
+  height: 32px;
+}
+.verify-page .v-btn.sm.icon {
+  width: 26px;
+  height: 26px;
+}
+.verify-page .v-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.verify-page .v-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--c-soft);
+  padding: 3px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}
+.verify-page .v-tabs .v-tab {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  color: var(--fg-2);
+  cursor: pointer;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+}
+.verify-page .v-tabs .v-tab.active {
+  background: var(--c-white);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-xs);
+}
+
+.verify-page .v-card {
+  background: var(--c-white);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.verify-page .v-thumb {
+  background-image: linear-gradient(rgba(31,42,51,0.04), rgba(31,42,51,0.07));
+  background-color: var(--c-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.verify-page .v-thumb .v-region {
+  position: absolute;
+  background: rgba(31,42,51,0.06);
+  border-radius: 2px;
+}

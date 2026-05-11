@@ -181,3 +181,42 @@ export async function runSmartBuild(
     testCount: result.testCount,
   };
 }
+
+/**
+ * Verify-page Run button entry point. Tries the smart-selection path first;
+ * if it can't pick anything (same branch as base, no diff, no matched
+ * tests, GitHub not connected, etc.) it falls back to running every test
+ * on the repo. The user shouldn't be blocked just because the env changed
+ * or a URL was redeployed — they explicitly asked for a build.
+ */
+export async function runVerifyBuild(
+  repositoryId: string | null,
+  runnerId?: string,
+): Promise<{ buildId: string; testCount: number; fallback?: boolean; reason?: string } | { error: string }> {
+  if (!repositoryId) return { error: 'No repository selected' };
+
+  const smart = await runSmartBuild(repositoryId, runnerId);
+  if (!('error' in smart)) {
+    return smart;
+  }
+
+  // Fallback: run every test on the repo.
+  try {
+    const result = await createAndRunBuild(
+      'manual' as TriggerType,
+      undefined,
+      repositoryId,
+      runnerId,
+    );
+    return {
+      buildId: result.buildId!,
+      testCount: result.testCount,
+      fallback: true,
+      reason: smart.error,
+    };
+  } catch (e) {
+    // If even the run-all path fails, surface that error — it's a real
+    // blocker (no tests defined, runner pool offline, etc.).
+    return { error: e instanceof Error ? e.message : 'Failed to start build' };
+  }
+}

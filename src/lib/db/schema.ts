@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -401,6 +401,67 @@ export interface WcagScoreSummary {
   bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
+// ── Multi-layer comparison types (v1.13) ─────────────────────────────────────
+
+/** Per-step URL trajectory entry. Captured by the EB executor at each
+ *  __stepReached boundary so we can detect routing/auth divergence between
+ *  baseline and feature runs (the classic "session expired → /login" case). */
+export interface UrlTrajectoryStep {
+  stepIndex: number;
+  stepLabel?: string;
+  finalUrl: string;
+  /** Each redirect target in order. Empty for non-navigating steps. */
+  redirectChain: string[];
+  /** Wall-clock ms from test start when this step's URL was sampled. */
+  capturedAtMs?: number;
+}
+
+/** Web Vitals captured per page-state. Sampled at screenshot points and at
+ *  end-of-test. Values mirror the standard web-vitals library names. */
+export interface WebVitalsSample {
+  stepIndex?: number;
+  stepLabel?: string;
+  url: string;
+  /** Largest Contentful Paint (ms) */
+  lcp?: number;
+  /** Cumulative Layout Shift (unitless score) */
+  cls?: number;
+  /** Interaction to Next Paint (ms) */
+  inp?: number;
+  /** First Contentful Paint (ms) */
+  fcp?: number;
+  /** Total Blocking Time (ms) */
+  tbt?: number;
+  /** Time to First Byte (ms) */
+  ttfb?: number;
+}
+
+/** Storage state snapshot — minimal cookie + localStorage capture for diff.
+ *  Mirrors a subset of Playwright's storageState() output. Token-shaped
+ *  values are redacted at capture time; we keep presence + a hash for diff. */
+export interface StorageStateSnapshot {
+  cookies: Array<{
+    name: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite?: 'Strict' | 'Lax' | 'None';
+    /** SHA-256 hash of the value (truncated to 16 hex chars). Never the raw value. */
+    valueHash?: string;
+    /** True if this cookie name matched a token denylist (token/sid/csrf/etc.) */
+    redacted?: boolean;
+  }>;
+  localStorage: Array<{
+    origin: string;
+    name: string;
+    /** Either a parsed JSON value (for diff-engine consumption) or a hash for opaque values. */
+    value?: unknown;
+    valueHash?: string;
+    redacted?: boolean;
+  }>;
+}
+
 export const testResults = pgTable('test_results', {
   id: text('id').primaryKey(),
   testRunId: text('test_run_id').references(() => testRuns.id),
@@ -442,6 +503,13 @@ export const testResults = pgTable('test_results', {
   // with sourceRowMode='random'/'increment' where the user otherwise can't
   // tell which row was actually used).
   assignedVariables: jsonb('assigned_variables').$type<Record<string, string>>(),
+  // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
+  // URL trajectory: ordered list of {stepIndex, finalUrl, redirectChain}
+  urlTrajectory: jsonb('url_trajectory').$type<UrlTrajectoryStep[]>(),
+  // Web Vitals samples: per-screenshot LCP/CLS/INP/FCP/TBT
+  webVitals: jsonb('web_vitals').$type<WebVitalsSample[]>(),
+  // End-of-test cookie + localStorage snapshot (values are hashed, not stored raw)
+  storageStateSnapshot: jsonb('storage_state_snapshot').$type<StorageStateSnapshot>(),
 });
 
 // Repository provider type
@@ -571,6 +639,9 @@ export const builds = pgTable('builds', {
     testIds?: string[];
     versionOverrides?: Record<string, string>;
   }>(),
+  // Verify phase (v1.14+): areas the user explicitly flagged as in-scope
+  // before kicking off the build. Promotes those areas in the change-map.
+  manuallyScopedAreaIds: jsonb('manually_scoped_area_ids').$type<string[]>(),
   createdAt: timestamp('created_at'),
   completedAt: timestamp('completed_at'),
   // Captured when runBuildAsync's outer try/catch fires AND no per-test
@@ -623,7 +694,7 @@ export const visualDiffs = pgTable('visual_diffs', {
   // time; the count summary lives in metadata.textDiffSummary.
   baselineTextPath: text('baseline_text_path'),
   currentTextPath: text('current_text_path'),
-  textDiffStatus: text('text_diff_status'), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
+  textDiffStatus: text('text_diff_status').$type<TextDiffStatus>(), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
 });
 
 // Baselines for carry-forward logic
@@ -1251,15 +1322,28 @@ export type NewSelectorStat = typeof selectorStats.$inferInsert;
 
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+// Subscription tier the team is on. Demo teams are shared, read-only
+// sandboxes; the rest are normal billable tiers. The capability layer in
+// `src/lib/auth/capabilities.ts` derives the allowed action set from
+// (role, plan, status) — adding a new tier means one branch there, not
+// editing every server action.
+export type TeamPlan = 'demo' | 'free' | 'trial' | 'pro';
+export type TeamStatus = 'active' | 'suspended';
+
 // Teams - Multi-tenancy support
 export const teams = pgTable('teams', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  plan: text('plan').$type<TeamPlan>().notNull().default('free'),
+  status: text('status').$type<TeamStatus>().notNull().default('active'),
   selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
   banAiMode: boolean('ban_ai_mode').default(false),
   gamificationEnabled: boolean('gamification_enabled').default(false),
+  /** Verify phase (v1.14+) — when true, /verify is the primary surface and
+   *  appears as the first sidebar entry. /run and /review are demoted. */
+  verifyPhaseEnabled: boolean('verify_phase_enabled').default(false),
   storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
   storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
   storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
@@ -2092,7 +2176,17 @@ export type ActivityEventType =
   | 'season:started'
   | 'season:ended'
   | 'blitz:started'
-  | 'blitz:ended';
+  | 'blitz:ended'
+  // Verify phase (v1.14+)
+  | 'verify:opened'
+  | 'verify:layer_approved'
+  | 'verify:layer_rejected'
+  | 'verify:layer_snoozed'
+  | 'verify:build_completed'
+  | 'verify:case_confirmed'
+  | 'verify:bugfix_filed'
+  | 'verify:improvement_filed'
+  | 'verify:case_auto_resolved';
 
 export type ActivitySourceType = 'play_agent' | 'mcp_server' | 'generate_agent' | 'heal_agent';
 
@@ -2324,3 +2418,578 @@ export const remoteDebugSessions = pgTable('remote_debug_sessions', {
 
 export type RemoteDebugSessionRow = typeof remoteDebugSessions.$inferSelect;
 export type NewRemoteDebugSessionRow = typeof remoteDebugSessions.$inferInsert;
+
+// ── Multi-layer step comparisons (v1.13) ─────────────────────────────────────
+//
+// One row per (build, test, step) capturing the verdict and the per-layer
+// evidence summaries used to compute it. The visualDiffs table still owns the
+// pixel-diff record; this table is the unified roll-up across all layers.
+
+export type StepVerdict = 'green' | 'yellow' | 'red';
+
+export type EvidenceLayer =
+  | 'visual'
+  | 'dom'
+  | 'a11y'
+  | 'network'
+  | 'console'
+  | 'url'
+  | 'perf'
+  | 'variable';
+
+export interface EvidenceItem {
+  layer: EvidenceLayer;
+  /** 'high' = real-regression-by-itself (new console error, new 4xx/5xx, URL
+   *  divergence, new critical/serious a11y). 'medium' = needs corroboration
+   *  (visual change, structural DOM with non-interactive nodes, perf drift,
+   *  value-only variable change). */
+  signal: 'high' | 'medium' | 'low';
+  /** Short human-readable summary, e.g. "2 new 4xx responses". */
+  summary: string;
+  /** Optional structured payload — layer-specific details. */
+  details?: Record<string, unknown>;
+}
+
+export interface NetworkDiffSummary {
+  added: number;
+  removed: number;
+  changed: number;
+  unchanged: number;
+  newErrorCount: number;
+  newClientErrors: Array<{ url: string; method: string; status: number }>;
+  newServerErrors: Array<{ url: string; method: string; status: number }>;
+  statusFlips: Array<{ url: string; method: string; from: number; to: number }>;
+}
+
+export interface ConsoleDiffSummary {
+  newFingerprints: Array<{ fingerprint: string; sample: string; count: number }>;
+  disappeared: Array<{ fingerprint: string; sample: string; count: number }>;
+  countDelta: Record<string, number>;
+}
+
+export interface UrlTrajectoryDiffSummary {
+  divergedSteps: Array<{
+    stepIndex: number;
+    stepLabel?: string;
+    baselineUrl: string;
+    currentUrl: string;
+    /** True if redirect-chain length changed (often indicates auth/SSO regressions). */
+    redirectChainChanged: boolean;
+  }>;
+  totalStepsCompared: number;
+}
+
+export interface A11yDiffSummary {
+  newViolations: A11yViolation[];
+  disappeared: A11yViolation[];
+  /** New violations broken down by impact, for quick verdict scoring. */
+  newBySeverity: { critical: number; serious: number; moderate: number; minor: number };
+}
+
+export interface PerfDiffSummary {
+  /** Per-step deltas for each metric (current minus baseline). */
+  deltas: Array<{
+    stepIndex?: number;
+    stepLabel?: string;
+    metric: 'lcp' | 'cls' | 'inp' | 'fcp' | 'tbt' | 'ttfb';
+    baseline: number;
+    current: number;
+    delta: number;
+    /** True if `current` exceeds the absolute budget for the metric. */
+    budgetBreached: boolean;
+    /** True if `delta` exceeds the relative-drift threshold (default 20%). */
+    drifted: boolean;
+  }>;
+}
+
+export interface VariableDiffSummary {
+  /** Tier ordering: structural-break > type-change > value-change-numeric > value-change-string */
+  changes: Array<{
+    path: string;
+    tier: 'structural-break' | 'type-change' | 'value-change-numeric' | 'value-change-string';
+    baseline?: unknown;
+    current?: unknown;
+  }>;
+}
+
+export interface StepComparisonEvidence {
+  visual?: { pixelDifference: number; percentageDifference: string | null; diffId?: string };
+  dom?: DomDiffResult;
+  a11y?: A11yDiffSummary;
+  network?: NetworkDiffSummary;
+  consoleDiff?: ConsoleDiffSummary;
+  url?: UrlTrajectoryDiffSummary;
+  perf?: PerfDiffSummary;
+  variable?: VariableDiffSummary;
+}
+
+export type StepIssueState = 'open' | 'auto' | 'linked' | 'closed';
+
+/**
+ * Verify phase (v1.14+) — typed-ticket kind. Distinguishes the three reviewer
+ * verdicts that produce different GitHub issues:
+ *   - bugfix:      regression — code shipped broke something tracked.
+ *   - improvement: missed — code shipped didn't cover what the area's intent was.
+ *   - verification: ad-hoc manual filing from createIssueForCase (no confirm).
+ */
+export type StepIssueKind = 'bugfix' | 'improvement' | 'verification';
+
+export const stepComparisons = pgTable('step_comparisons', {
+  id: text('id').primaryKey(),
+  buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }).notNull(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  testResultId: text('test_result_id').references(() => testResults.id, { onDelete: 'cascade' }),
+  visualDiffId: text('visual_diff_id').references(() => visualDiffs.id, { onDelete: 'set null' }),
+  stepIndex: integer('step_index'),
+  stepLabel: text('step_label'),
+  verdict: text('verdict').$type<StepVerdict>().notNull(),
+  /** Ordered list of evidence items contributing to the verdict. */
+  evidence: jsonb('evidence').$type<EvidenceItem[]>().notNull().default([]),
+  /** Layer-specific structured diff summaries. */
+  layers: jsonb('layers').$type<StepComparisonEvidence>().notNull().default({}),
+  // Verify phase (v1.14+) — GitHub issue link per case.
+  githubIssueUrl: text('github_issue_url'),
+  githubIssueNumber: integer('github_issue_number'),
+  githubIssueState: text('github_issue_state').$type<StepIssueState>(),
+  // Typed-ticket kind. Captured at confirmation time so issue close/reopen
+  // preserves intent, and so the board can filter "show me all improvements".
+  githubIssueKind: text('github_issue_kind').$type<StepIssueKind>(),
+  // Explicit reviewer confirmation — distinct from "card landed here because
+  // it had 0 diff". Set by confirmCase() when the user drops a card into a
+  // typed column. Used by the GH webhook to auto-flip cases back to done when
+  // an issue closes and a rerun shows green.
+  confirmedBy: text('confirmed_by'),
+  confirmedAt: timestamp('confirmed_at'),
+  // Free-text reviewer note (e.g. "the new banner copy should say X but
+  // didn't"). Prepended to GH issue body when the reviewer files an issue
+  // for this case. Surfaced as a textarea on Missed-column cards.
+  reviewerNote: text('reviewer_note'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_step_comparisons_build').on(table.buildId),
+  index('idx_step_comparisons_test').on(table.testId),
+]));
+
+export type StepComparison = typeof stepComparisons.$inferSelect;
+export type NewStepComparison = typeof stepComparisons.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Test-Level Multi-Target Inspector (spec 24)
+// ---------------------------------------------------------------------------
+
+export type InspectorDimension = 'visual' | 'dom' | 'text' | 'network' | 'variables';
+export type InspectorSeverity = 'unchanged' | 'minor' | 'changed' | 'unavailable';
+
+export interface VisualInspectionPayload {
+  classification: 'unchanged' | 'flaky' | 'changed';
+  pixelDifference: number;
+  percentageDifference: number;
+  baselineImagePath: string | null;
+  currentImagePath: string | null;
+  diffImagePath: string | null;
+  engine: DiffEngineType;
+  metadata?: DiffMetadata;
+  error?: string;
+}
+
+export interface DomInspectionPayload {
+  diff: DomDiffResult;
+  baselineUrl?: string;
+  currentUrl?: string;
+  error?: string;
+}
+
+export interface TextDiffLine {
+  op: 'add' | 'del' | 'eq';
+  line: string;
+  oldLineNo?: number;
+  newLineNo?: number;
+}
+
+export interface TextInspectionPayload {
+  lines: TextDiffLine[];
+  added: number;
+  removed: number;
+  baselineLength: number;
+  currentLength: number;
+  error?: string;
+}
+
+export interface NetworkInspectionEntry {
+  url: string;
+  method: string;
+  resourceType: string;
+  baseline?: { status: number; bytes: number; durationMs: number };
+  current?: { status: number; bytes: number; durationMs: number };
+}
+
+export interface NetworkInspectionSummary {
+  countA: number;
+  countB: number;
+  bytesA: number;
+  bytesB: number;
+  byTypeA: Record<string, number>;
+  byTypeB: Record<string, number>;
+  thirdPartyDomainsA: string[];
+  thirdPartyDomainsB: string[];
+  failedCountA: number;
+  failedCountB: number;
+}
+
+export interface NetworkInspectionPayload {
+  added: NetworkInspectionEntry[];
+  removed: NetworkInspectionEntry[];
+  changedStatus: NetworkInspectionEntry[];
+  changedSize: NetworkInspectionEntry[];
+  slowdowns: NetworkInspectionEntry[];
+  failedA: NetworkInspectionEntry[];
+  failedB: NetworkInspectionEntry[];
+  summary: NetworkInspectionSummary;
+  error?: string;
+}
+
+export interface VariableMapDiffEntry {
+  key: string;
+  baseline: string | null;
+  current: string | null;
+  kind: 'added' | 'removed' | 'changed' | 'unchanged';
+}
+
+export interface VariableInspectionPayload {
+  extracted: VariableMapDiffEntry[];
+  assigned: VariableMapDiffEntry[];
+  consoleErrors: { added: string[]; removed: string[]; common: number };
+  logs: { addedCount: number; removedCount: number; sample: string[] };
+  error?: string;
+}
+
+export interface InspectorClassification {
+  visual: InspectorSeverity;
+  dom: InspectorSeverity;
+  text: InspectorSeverity;
+  network: InspectorSeverity;
+  variables: InspectorSeverity;
+}
+
+export interface InspectorOptions {
+  ignoreUrlParams?: string[];
+  ignoreHosts?: string[];
+  ignoreVariableKeys?: string[];
+  textIgnorePatterns?: string[];
+}
+
+export interface InspectionResult {
+  cacheKey: string;
+  computedAtMs: number;
+  testId: string;
+  currentResultId: string;
+  baselineResultId: string;
+  engine: DiffEngineType;
+  visual?: VisualInspectionPayload;
+  dom?: DomInspectionPayload;
+  text?: TextInspectionPayload;
+  network?: NetworkInspectionPayload;
+  variables?: VariableInspectionPayload;
+  classification: InspectorClassification;
+}
+
+// Cache table for the test-level inspector. Keyed by sha256 of the inputs so
+// repeat opens of the same target pair are instant. Cleared on baseline
+// approval and via TTL sweep.
+export const inspectorCache = pgTable('inspector_cache', {
+  cacheKey: text('cache_key').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  currentResultId: text('current_result_id').notNull(),
+  baselineResultId: text('baseline_result_id').notNull(),
+  engine: text('engine').notNull(),
+  payload: jsonb('payload').$type<InspectionResult>().notNull(),
+  computedAt: timestamp('computed_at').$defaultFn(() => new Date()).notNull(),
+}, (table) => ([
+  index('idx_inspector_cache_test').on(table.testId),
+  index('idx_inspector_cache_current').on(table.currentResultId),
+]));
+
+export type InspectorCacheRow = typeof inspectorCache.$inferSelect;
+export type NewInspectorCacheRow = typeof inspectorCache.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Verify phase — Build-level Change Map (v1.14+)
+// ---------------------------------------------------------------------------
+//
+// Computed once per build at completion time and cached. Aggregates four
+// signals into a single ranked list of areas worth verifying:
+//   - code   : git diff vs base branch → routes/areas
+//   - ai     : LLM narrative + risk per area
+//   - signals: step_comparisons verdicts (red/yellow) on this build
+//   - manual : developer-flagged areas (builds.manuallyScopedAreaIds)
+
+export type ChangeSource = 'code' | 'ai' | 'signals' | 'manual';
+export type ChangeRisk = 'low' | 'medium' | 'high';
+
+export interface ChangeMapFile {
+  path: string;
+  pkg: string;
+  status: 'A' | 'M' | 'D';
+  insertions: number;
+  deletions: number;
+}
+
+export interface ChangeMapArea {
+  areaId: string;
+  areaName: string;
+  sources: ChangeSource[];
+  risk: ChangeRisk;
+  /** 3-bullet narrative from the LLM. Empty when AI skipped/disabled. */
+  aiNarrative: string[];
+}
+
+export interface ChangeMapTest {
+  testId: string;
+  reason: string;
+  lastStatus: string | null;
+}
+
+export interface ChangeMapStep {
+  testId: string;
+  stepLabel: string;
+  reason: string;
+}
+
+export interface ChangeMap {
+  files: ChangeMapFile[];
+  areas: ChangeMapArea[];
+  tests: ChangeMapTest[];
+  steps: ChangeMapStep[];
+  /** One-sentence build intent summary (AI-generated when enabled). */
+  intentSummary: string;
+  /** One-sentence build risk summary (AI-generated when enabled). */
+  riskSummary: string;
+  /** Areas the developer pinned via the Focus-on multi-select. */
+  manuallyScopedAreaIds: string[];
+  generatedAt: string;
+  /** Provider/model id used for the AI summary, when applicable. */
+  modelId: string;
+  /** True if the AI-summary call was skipped (cap, missing key, etc). */
+  aiSkipped?: boolean;
+  aiSkippedReason?: string;
+}
+
+export const buildChangeMaps = pgTable('build_change_maps', {
+  buildId: text('build_id').primaryKey().references(() => builds.id, { onDelete: 'cascade' }),
+  payload: jsonb('payload').$type<ChangeMap>().notNull(),
+  computedAt: timestamp('computed_at').$defaultFn(() => new Date()).notNull(),
+});
+
+export type BuildChangeMapRow = typeof buildChangeMaps.$inferSelect;
+export type NewBuildChangeMapRow = typeof buildChangeMaps.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Verify phase — Per-layer baselines (v1.14+)
+// ---------------------------------------------------------------------------
+//
+// Mirror the existing `baselines` table for visual diffs but per non-visual
+// layer. When the reviewer marks a layer's evidence as "Expected" on a step,
+// the corresponding *baseline_<layer> row is upserted; subsequent builds
+// suppress identical evidence by consulting the baseline before emitting.
+
+export type LayerBaselineKind =
+  | 'network'
+  | 'console'
+  | 'a11y'
+  | 'perf'
+  | 'variable'
+  | 'url_trajectory'
+  | 'dom';
+
+export interface NetworkBaselinePayload {
+  normalizedUrl: string;
+  method: string;
+  /** Status range that's considered acceptable (e.g. [200, 299]). */
+  statusRange: [number, number];
+  p95DurationMs: number | null;
+  bodyFingerprint?: string;
+  thirdPartyDomains?: string[];
+}
+
+export interface ConsoleBaselinePayload {
+  fingerprint: string;
+  level: string;
+  expectedCount: number;
+  lastSeenBuildId: string;
+  sample: string;
+}
+
+export interface A11yBaselinePayload {
+  ruleId: string;
+  selector: string;
+  impact: string;
+  acknowledgedAt: string;
+}
+
+export interface PerfBaselinePayload {
+  /** Rolling p50/p95 for each Web Vital. */
+  metrics: Partial<Record<'lcp' | 'cls' | 'inp' | 'fcp' | 'tbt' | 'ttfb', { p50: number; p95: number }>>;
+}
+
+export interface VariableBaselinePayload {
+  key: string;
+  value: string | null;
+}
+
+export interface UrlTrajectoryBaselinePayload {
+  /** Expected URL sequence with optional wildcards (e.g. `/checkout/*`). */
+  sequence: string[];
+}
+
+export interface DomBaselinePayload {
+  selector: string;
+  acceptedAttributes: Record<string, string | null>;
+}
+
+export const networkBaselines = pgTable('network_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<NetworkBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_network_baselines_test').on(table.testId),
+]));
+
+export const consoleBaselines = pgTable('console_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<ConsoleBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_console_baselines_test').on(table.testId),
+]));
+
+export const a11yBaselines = pgTable('a11y_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<A11yBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_a11y_baselines_test').on(table.testId),
+]));
+
+export const perfBaselines = pgTable('perf_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<PerfBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_perf_baselines_test').on(table.testId),
+]));
+
+export const variableBaselines = pgTable('variable_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<VariableBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_variable_baselines_test').on(table.testId),
+]));
+
+export const urlTrajectoryBaselines = pgTable('url_trajectory_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<UrlTrajectoryBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_url_trajectory_baselines_test').on(table.testId),
+]));
+
+export const domBaselines = pgTable('dom_baselines', {
+  id: text('id').primaryKey(),
+  testId: text('test_id').notNull().references(() => tests.id, { onDelete: 'cascade' }),
+  stepLabel: text('step_label'),
+  branch: text('branch').notNull(),
+  isActive: boolean('is_active').default(true),
+  approvedFromComparisonId: text('approved_from_comparison_id'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at').$defaultFn(() => new Date()),
+  payload: jsonb('payload').$type<DomBaselinePayload>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_dom_baselines_test').on(table.testId),
+]));
+
+export type NetworkBaseline = typeof networkBaselines.$inferSelect;
+export type ConsoleBaseline = typeof consoleBaselines.$inferSelect;
+export type A11yBaseline = typeof a11yBaselines.$inferSelect;
+export type PerfBaseline = typeof perfBaselines.$inferSelect;
+export type VariableBaseline = typeof variableBaselines.$inferSelect;
+export type UrlTrajectoryBaseline = typeof urlTrajectoryBaselines.$inferSelect;
+export type DomBaseline = typeof domBaselines.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Verify phase — Per-layer feedback on step comparisons
+// ---------------------------------------------------------------------------
+//
+// One row per (stepComparisonId, layer) capturing the reviewer's verdict on
+// that layer for that step. Mirrors the visual-diff three-state lifecycle
+// (pending | approved | rejected | auto_approved) and adds 'snoozed' for
+// build-scoped suppression.
+
+export type LayerFeedbackStatus = 'pending' | 'approved' | 'rejected' | 'snoozed' | 'auto_approved';
+
+export const stepLayerFeedback = pgTable('step_layer_feedback', {
+  id: text('id').primaryKey(),
+  stepComparisonId: text('step_comparison_id').notNull().references(() => stepComparisons.id, { onDelete: 'cascade' }),
+  buildId: text('build_id').notNull().references(() => builds.id, { onDelete: 'cascade' }),
+  layer: text('layer').$type<EvidenceLayer>().notNull(),
+  status: text('status').$type<LayerFeedbackStatus>().notNull().default('pending'),
+  /** Which baseline kind, if any, was written when status='approved'. */
+  baselineKind: text('baseline_kind').$type<LayerBaselineKind | null>(),
+  /** Optional review-todo id created when status='rejected'. */
+  reviewTodoId: text('review_todo_id'),
+  note: text('note'),
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at'),
+  /** AI's per-layer recommendation captured at evidence time. */
+  aiRecommendation: text('ai_recommendation').$type<AIDiffRecommendation | null>(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+}, (table) => ([
+  index('idx_layer_feedback_step').on(table.stepComparisonId),
+  index('idx_layer_feedback_build').on(table.buildId),
+  uniqueIndex('uniq_layer_feedback_step_layer').on(table.stepComparisonId, table.layer),
+]));
+
+export type StepLayerFeedback = typeof stepLayerFeedback.$inferSelect;
+export type NewStepLayerFeedback = typeof stepLayerFeedback.$inferInsert;

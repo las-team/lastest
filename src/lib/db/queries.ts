@@ -30,3 +30,8 @@ export * from './queries/activity-events';
 export * from './queries/gamification';
 export * from './queries/storage';
 export * from './queries/public-shares';
+export * from './queries/step-comparisons';
+export * from './queries/inspector';
+export * from './queries/change-maps';
+export * from './queries/layer-baselines';
+export * from './queries/layer-feedback';

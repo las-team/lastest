@@ -1,6 +1,7 @@
 'use client';
 
 import { useOptimistic, useTransition } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { updateEarlyAdopterMode } from '@/server/actions/settings';
@@ -28,9 +29,12 @@ export function EarlyAdopterToggle({ enabled }: EarlyAdopterToggleProps) {
   return (
     <div className="flex items-center justify-between">
       <div className="space-y-0.5">
-        <span className="text-sm font-medium">Early Adopter Mode</span>
+        <span className="text-sm font-medium flex items-center gap-1.5">
+          <AlertTriangle className="size-3.5 text-amber-500" />
+          Early Adopter Mode
+        </span>
         <p className="text-xs text-muted-foreground/70">
-          Enable experimental features like Compose and Compare
+          Experimental features (Compose, Compare) — may be unstable
         </p>
       </div>
       <Switch

@@ -12,9 +12,11 @@ import { getBuildsByRepo } from '@/server/actions/builds';
 import { getEnvironmentConfig } from '@/server/actions/environment';
 import { fetchRepoBranches } from '@/server/actions/repos';
 import { getCurrentSession } from '@/lib/auth';
+import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
 
 export default async function RunPage() {
   const session = await getCurrentSession();
+  const verifyPhaseEnabled = isVerifyPhaseEnabled(session?.team);
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
@@ -68,6 +70,7 @@ export default async function RunPage() {
         comparisonBaselineBranch={selectedRepo?.comparisonBaselineBranch ?? null}
         branches={repoBranches.map(b => b.name)}
         branchBaseUrls={selectedRepo?.branchBaseUrls ?? null}
+        verifyPhaseEnabled={verifyPhaseEnabled}
       />
     </div>
   );
