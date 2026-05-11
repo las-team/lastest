@@ -2314,7 +2314,7 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
             seen.add(e.layer);
             uniqueLayers.push(e);
           }
-          const fbByLayer = new Map<EvidenceLayer, typeof activeCase['feedback'][number]>();
+          const fbByLayer = new Map<EvidenceLayer, NonNullable<typeof activeCase>['feedback'][number]>();
           for (const f of activeCase?.feedback ?? []) {
             fbByLayer.set(f.layer, f);
           }

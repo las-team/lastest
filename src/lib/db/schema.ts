@@ -694,7 +694,7 @@ export const visualDiffs = pgTable('visual_diffs', {
   // time; the count summary lives in metadata.textDiffSummary.
   baselineTextPath: text('baseline_text_path'),
   currentTextPath: text('current_text_path'),
-  textDiffStatus: text('text_diff_status'), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
+  textDiffStatus: text('text_diff_status').$type<TextDiffStatus>(), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
 });
 
 // Baselines for carry-forward logic
