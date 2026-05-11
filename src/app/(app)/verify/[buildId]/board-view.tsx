@@ -15,12 +15,8 @@ import {
 import { setReviewerNote } from '@/server/actions/verify-issues';
 import {
   AlertOctagon,
-  Check,
   CircleDot,
-  ExternalLink,
   Loader2,
-  SkipForward,
-  Undo2,
   Github,
   CheckCircle as CheckCircleIcon,
 } from 'lucide-react';
@@ -61,13 +57,13 @@ interface BoardViewProps {
   onOpenIssuePicker: (stepId: string) => void;
 }
 
-// Columns flow left → right: needs decision → broken → expected-but-missing → resolved.
+// Columns flow left → right: needs decision → expected-but-missing → broken → resolved.
 // NOTE: status type values stay in code (`unknown`, `regression`, `missed`, `done`)
 // to avoid a wide rename — only the user-facing labels are reworded.
 const COLUMN_ORDER: { status: CaseStatus; label: string; accent: string; dropLabel: string }[] = [
   { status: 'unknown',    label: 'Unsorted', dropLabel: 'unsorted',  accent: 'var(--fg-3)' },
-  { status: 'regression', label: 'Broken',   dropLabel: 'broken',    accent: 'var(--c-red)' },
   { status: 'missed',     label: 'Missed',   dropLabel: 'missed',    accent: 'var(--c-amber)' },
+  { status: 'regression', label: 'Broken',   dropLabel: 'broken',    accent: 'var(--c-red)' },
   { status: 'done',       label: 'Verified', dropLabel: 'verified',  accent: 'var(--c-teal)' },
 ];
 
@@ -420,7 +416,7 @@ function renderVerifiedGrouped(
       const totalInArea = areaTotals.get(g.area?.id ?? '__unscoped__') ?? g.rows.length;
       const fullyVerified = verifiedCount === totalInArea;
       return (
-        <details key={areaKey} className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <details key={areaKey} className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
           <summary
             style={{
               padding: '8px 10px',
@@ -567,6 +563,10 @@ function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker }: Dragg
   const style: React.CSSProperties = {
     opacity: isDragging ? 0.25 : 1,
     cursor: isDragging ? 'grabbing' : 'default',
+    // Prevent the flex parent (KCol's scrollable list) from shrinking cards
+    // when the column has more content than fits — without this, dense
+    // columns squash thumbnails into a few px each.
+    flexShrink: 0,
   };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
@@ -630,33 +630,6 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
           initial={data.step.reviewerNote ?? ''}
         />
       )}
-      <div style={{ display: 'flex', gap: 4, marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
-        <button className="v-btn sm" style={{ flex: 1, fontSize: 11 }} onClick={onOpen}>
-          {colStatus === 'unknown' ? 'Triage' : <><Check size={11} />Open</>}
-        </button>
-        {data.step.githubIssueUrl && (
-          <a
-            href={data.step.githubIssueUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="v-btn sm icon"
-            title={`#${data.step.githubIssueNumber} on GitHub`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ExternalLink size={11} />
-          </a>
-        )}
-        {colStatus !== 'unknown' && colStatus !== 'done' && (
-          <button className="v-btn sm icon" title="Skip">
-            <SkipForward size={11} />
-          </button>
-        )}
-        {colStatus === 'done' && (
-          <button className="v-btn sm icon" title="Undo">
-            <Undo2 size={11} />
-          </button>
-        )}
-      </div>
     </div>
   );
 }

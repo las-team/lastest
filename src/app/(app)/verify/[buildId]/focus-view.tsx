@@ -16,13 +16,11 @@ import {
   MoveHorizontal,
   Search,
   Settings,
-  SkipForward,
   X,
-  GitPullRequest,
   CheckCircle as CheckCircleIcon,
   Plus,
 } from 'lucide-react';
-import { closeIssueForCase, fetchLinkedIssueForCase } from '@/server/actions/verify-issues';
+import { closeIssueForCase, createIssueForCase, fetchLinkedIssueForCase } from '@/server/actions/verify-issues';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import type {
   StepComparison,
@@ -73,7 +71,7 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: 'a11y',     name: 'A11y' },
   { id: 'perf',     name: 'Perf' },
   { id: 'url',      name: 'URL' },
-  { id: 'variable', name: 'Vars' },
+  { id: 'variable', name: 'Variables' },
 ];
 
 type LayerState = 'diff' | 'clean' | 'absent';
@@ -144,7 +142,9 @@ interface CaseRow {
 
 export function FocusView(props: FocusViewProps) {
   const [tab, setTab] = useState<CompareTab>('visual');
-  const [intentOpen, setIntentOpen] = useState(true);
+  // Issue panel is hidden by default — only opens when the reviewer takes a
+  // negative action (Needs Improvement / Reject) or explicitly toggles it.
+  const [intentOpen, setIntentOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -268,7 +268,7 @@ export function FocusView(props: FocusViewProps) {
             onClick={() => setIntentOpen((v) => !v)}
             aria-pressed={intentOpen}
           >
-            <Github size={13} />{intentOpen ? 'Hide intent' : 'Show intent'}
+            <Github size={13} />{intentOpen ? 'Hide issue' : 'Show issue'}
           </button>
         </div>
 
@@ -387,29 +387,57 @@ export function FocusView(props: FocusViewProps) {
           />
         </div>
 
-        {/* Bottom action bar — Wired to real decideLayer for every layer */}
+        {/* Bottom action bar — OK / Needs Improvement / Reject. Each
+            triage button reflects the case's current derived status with
+            an active highlight, even when the user revisits a case already
+            sorted into one of the columns. The latter two auto-open the
+            Issue panel so the reviewer can compose context. */}
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button className="v-btn success" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'approved')}>
-            <Check size={13} />Mark intended
-          </button>
-          <button className="v-btn warning" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'rejected')}>
-            <AlertTriangle size={13} />Missed-intended
-          </button>
-          {!activeCase?.step.githubIssueUrl && (
-            <button className="v-btn" disabled={pending || !activeCase} onClick={handleOpenPicker}>
-              <Plus size={13} />Link or file issue
-            </button>
-          )}
+          {(() => {
+            const cur = activeCase?.status ?? null;
+            const decide = (status: 'approved' | 'snoozed' | 'rejected', revealIssue: boolean) => {
+              if (!activeCase) return;
+              props.onMarkDecision(activeCase.step.id, status);
+              if (revealIssue) setIntentOpen(true);
+            };
+            return (
+              <>
+                <TriageButton
+                  label="OK"
+                  icon={<Check size={13} />}
+                  tone="success"
+                  active={cur === 'done'}
+                  disabled={pending || !activeCase}
+                  onClick={() => decide('approved', false)}
+                />
+                <TriageButton
+                  label="Needs Improvement"
+                  icon={<AlertTriangle size={13} />}
+                  tone="warning"
+                  active={cur === 'missed'}
+                  disabled={pending || !activeCase}
+                  onClick={() => decide('snoozed', true)}
+                />
+                <TriageButton
+                  label="Reject"
+                  icon={<AlertOctagon size={13} />}
+                  tone="danger"
+                  active={cur === 'regression'}
+                  disabled={pending || !activeCase}
+                  onClick={() => decide('rejected', true)}
+                />
+              </>
+            );
+          })()}
+          <span style={{ flex: 1 }} />
           {activeCase?.step.githubIssueUrl && activeCase.step.githubIssueState !== 'closed' && (
-            <button className="v-btn" disabled={pending} onClick={handleCloseIssue}>
+            <button className="v-btn ghost" disabled={pending} onClick={handleCloseIssue} style={{ minWidth: 0 }}>
               <CheckCircleIcon size={13} />Close issue
             </button>
           )}
-          <button className="v-btn ghost" disabled={pending || !activeCase} onClick={() => activeCase && props.onMarkDecision(activeCase.step.id, 'snoozed')}>
-            <SkipForward size={13} />Skip
-          </button>
-          <span style={{ flex: 1 }} />
-          <span className="label">{activeCase?.feedback.length ?? 0} layer decision{activeCase?.feedback.length === 1 ? '' : 's'} on this case</span>
+          <span className="label">
+            {activeCase?.feedback.length ?? 0} layer decision{activeCase?.feedback.length === 1 ? '' : 's'} on this case
+          </span>
         </div>
       </div>
 
@@ -421,6 +449,7 @@ export function FocusView(props: FocusViewProps) {
         onRejectLayer={(layer) => decideOneLayer(layer, 'rejected')}
         onOpenPicker={handleOpenPicker}
         onCloseIssue={handleCloseIssue}
+        onAfterCreate={props.onRefresh}
       />
     </div>
   );
@@ -468,6 +497,85 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
     }
   }
   return null;
+}
+
+/** Triage button — visually reflects whether the case is currently in this
+ *  decision state (i.e. clicking again is a no-op of the same action). The
+ *  active treatment uses a stronger fill and a small ✓ marker so the user
+ *  can see at a glance which decision is recorded, even after navigating
+ *  away and back. */
+function TriageButton({
+  label, icon, tone, active, disabled, onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  tone: 'success' | 'warning' | 'danger';
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const baseColor =
+    tone === 'success' ? 'var(--c-teal)' :
+    tone === 'warning' ? 'var(--c-amber)' :
+    'var(--c-red)';
+  const fg =
+    tone === 'success' ? '#1F7B66' :
+    tone === 'warning' ? '#8C5C19' :
+    'var(--c-red)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      title={active ? `Currently marked ${label}` : `Mark ${label}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: '8px 14px',
+        borderRadius: 8,
+        minWidth: 132,
+        fontSize: 13,
+        fontWeight: active ? 600 : 500,
+        lineHeight: 1,
+        fontFamily: 'var(--font-sans)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        background: active
+          ? `color-mix(in oklab, ${baseColor} 22%, white)`
+          : `color-mix(in oklab, ${baseColor} 8%, white)`,
+        border: `1px solid color-mix(in oklab, ${baseColor} ${active ? 55 : 25}%, transparent)`,
+        color: fg,
+        boxShadow: active ? `inset 0 0 0 1px color-mix(in oklab, ${baseColor} 35%, transparent)` : undefined,
+        transition: 'background 120ms ease, border-color 120ms ease',
+      }}
+    >
+      {icon}
+      <span>{label}</span>
+      {active && (
+        <span
+          aria-hidden
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            background: baseColor,
+            color: 'white',
+            fontSize: 9,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          ✓
+        </span>
+      )}
+    </button>
+  );
 }
 
 function StatusChipFor({ status }: { status: CaseStatus }) {
@@ -2047,10 +2155,15 @@ interface IntentPanelProps {
   activeCase: CaseRow | null;
   onApproveLayer: (layer: EvidenceLayer) => void;
   onRejectLayer: (layer: EvidenceLayer) => void;
-  /** Open the issue picker dialog (browse + create). */
+  /** Open the issue picker dialog (browse existing issues). */
   onOpenPicker: () => void;
   onCloseIssue: () => void;
+  /** Called after a successful "Create issue" submission so the parent can
+   *  refresh case state — the chip flips to "auto" without a reload. */
+  onAfterCreate?: () => void;
 }
+
+type EvidenceItemType = StepComparison['evidence'][number];
 
 /** Linked GH issue summary — shows the title + body fetched via the
  *  fetchLinkedIssueForCase server action. Body is the most useful piece of
@@ -2150,39 +2263,48 @@ function LinkedIssueCard({
   );
 }
 
-function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer, onOpenPicker, onCloseIssue }: IntentPanelProps) {
+function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer, onOpenPicker, onCloseIssue, onAfterCreate }: IntentPanelProps) {
   if (!open) return null;
   const evidence = activeCase?.step.evidence ?? [];
   const issueUrl = activeCase?.step.githubIssueUrl ?? null;
   const issueNumber = activeCase?.step.githubIssueNumber ?? null;
   const issueState = activeCase?.step.githubIssueState ?? null;
   return (
-    <div style={{ width: 290, background: 'var(--c-white)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ width: 320, background: 'var(--c-white)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Github size={14} />
-        <span className="label">linked intent</span>
+        <span className="label">Issue</span>
         <span style={{ flex: 1 }} />
         <button className="v-btn ghost icon" onClick={onClose}><X size={13} /></button>
       </div>
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', flex: 1 }}>
         {/* Real issue card if linked */}
-        {issueUrl && activeCase ? (
+        {issueUrl && activeCase && (
           <LinkedIssueCard
             stepId={activeCase.step.id}
             issueUrl={issueUrl}
             issueNumber={issueNumber}
             issueState={issueState}
           />
-        ) : (
-          <div className="v-card" style={{ padding: 12, background: 'var(--c-soft)' }}>
-            <span className="v-chip info" style={{ fontSize: 10 }}>no issue linked</span>
-            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>
-              Link or create a GitHub issue to track this case in your dev cycle.
-            </div>
-          </div>
         )}
 
-        {/* Per-evidence approve/reject */}
+        {/* Compose new issue — always available, even when one is already
+            linked (lets reviewers file a follow-up). */}
+        {activeCase && (
+          <ComposeIssueCard
+            key={activeCase.step.id}
+            stepId={activeCase.step.id}
+            testName={activeCase.test?.name ?? null}
+            stepLabel={activeCase.step.stepLabel ?? null}
+            evidence={evidence}
+            reviewerNote={activeCase.step.reviewerNote ?? null}
+            onAfterCreate={onAfterCreate}
+            hasLinkedIssue={!!issueUrl}
+          />
+        )}
+
+        {/* Per-evidence approve/reject — kept as a secondary control for
+            granular decisions. The bottom action bar covers the bulk path. */}
         {evidence.length > 0 && (() => {
           // Collapse evidence to unique layers — one decision per layer.
           const uniqueLayers: typeof evidence = [];
@@ -2194,7 +2316,6 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
           }
           const fbByLayer = new Map<EvidenceLayer, typeof activeCase['feedback'][number]>();
           for (const f of activeCase?.feedback ?? []) {
-            // Latest wins — feedback list is small; iterate in order.
             fbByLayer.set(f.layer, f);
           }
           const decidedCount = uniqueLayers.filter((e) => {
@@ -2203,10 +2324,10 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
           }).length;
           return (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="label">Evidence ({uniqueLayers.length})</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <div className="label">Per-layer decisions</div>
                 <span className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
-                  {decidedCount} / {uniqueLayers.length} decided
+                  {decidedCount} / {uniqueLayers.length}
                 </span>
               </div>
               {uniqueLayers.map((e, i) => {
@@ -2274,12 +2395,10 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
           );
         })()}
 
-        <div className="label" style={{ marginTop: 6 }}>actions on case</div>
-        {!issueUrl && (
-          <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
-            <LinkIcon size={12} />Browse or file issue
-          </button>
-        )}
+        <div className="label" style={{ marginTop: 6 }}>more actions</div>
+        <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
+          <LinkIcon size={12} />{issueUrl ? 'Re-link to a different issue' : 'Browse existing issues'}
+        </button>
         {issueUrl && (
           <>
             <a className="v-btn" style={{ justifyContent: 'flex-start', textDecoration: 'none' }} href={issueUrl} target="_blank" rel="noopener noreferrer">
@@ -2290,12 +2409,188 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
                 <CheckCircleIcon size={12} />Close issue
               </button>
             )}
-            <button className="v-btn ghost" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
-              <GitPullRequest size={12} />Re-link to a different issue
-            </button>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Compose-new-issue card. Lets reviewers describe what's wrong in their
+ *  own words and pick which captured evidence to attach. Submits via
+ *  createIssueForCase with a body composed entirely client-side. */
+function ComposeIssueCard({
+  stepId,
+  testName,
+  stepLabel,
+  evidence,
+  reviewerNote,
+  onAfterCreate,
+  hasLinkedIssue,
+}: {
+  stepId: string;
+  testName: string | null;
+  stepLabel: string | null;
+  evidence: EvidenceItemType[];
+  reviewerNote: string | null;
+  onAfterCreate?: () => void;
+  hasLinkedIssue: boolean;
+}) {
+  const uniqueEvidence = useMemo(() => {
+    const seen = new Set<EvidenceLayer>();
+    const out: EvidenceItemType[] = [];
+    for (const e of evidence) {
+      if (seen.has(e.layer)) continue;
+      seen.add(e.layer);
+      out.push(e);
+    }
+    return out;
+  }, [evidence]);
+
+  const [text, setText] = useState(reviewerNote ?? '');
+  const [includeLayers, setIncludeLayers] = useState<Set<EvidenceLayer>>(
+    () => new Set(uniqueEvidence.map((e) => e.layer)),
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleLayer = (layer: EvidenceLayer) => {
+    setIncludeLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(layer)) next.delete(layer);
+      else next.add(layer);
+      return next;
+    });
+  };
+
+  const composeBody = (): string => {
+    const lines: string[] = [];
+    if (text.trim().length > 0) lines.push(text.trim());
+    const picked = uniqueEvidence.filter((e) => includeLayers.has(e.layer));
+    if (picked.length > 0) {
+      lines.push('', '## Evidence');
+      for (const e of picked) {
+        lines.push(`- **${e.layer}** (${e.signal}): ${e.summary}`);
+      }
+    }
+    if (testName || stepLabel) {
+      lines.push('', '## Context');
+      if (testName) lines.push(`- Test: ${testName}`);
+      if (stepLabel) lines.push(`- Step: ${stepLabel}`);
+    }
+    return lines.join('\n');
+  };
+
+  const handleCreate = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const titleBase = testName ?? 'verify case';
+    const titleStep = stepLabel ? ` — ${stepLabel}` : '';
+    const titleHint = text.trim().split(/\r?\n/, 1)[0]?.slice(0, 60) ?? '';
+    const title = titleHint
+      ? `[Verify] ${titleBase}${titleStep}: ${titleHint}`
+      : `[Verify] ${titleBase}${titleStep}`;
+    const res = await createIssueForCase({
+      stepComparisonId: stepId,
+      title,
+      body: composeBody(),
+    });
+    setSubmitting(false);
+    if (!res.ok) {
+      setError(res.error ?? 'Failed to create issue');
+      return;
+    }
+    onAfterCreate?.();
+  };
+
+  const canSubmit = !submitting && (text.trim().length > 0 || includeLayers.size > 0);
+
+  return (
+    <div className="v-card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Plus size={12} style={{ color: 'var(--fg-2)' }} />
+        <span className="label">{hasLinkedIssue ? 'File a follow-up issue' : 'File a new issue'}</span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span className="label" style={{ fontSize: 9 }}>What&apos;s wrong?</span>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          placeholder="Short description, repro steps, expected vs actual…"
+          style={{
+            width: '100%',
+            padding: '8px 10px',
+            fontSize: 12,
+            fontFamily: 'var(--font-sans)',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            background: 'var(--c-white)',
+            color: 'var(--fg-1)',
+            resize: 'vertical',
+            minHeight: 70,
+          }}
+        />
+      </div>
+
+      {uniqueEvidence.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="label" style={{ fontSize: 9 }}>Include evidence ({includeLayers.size}/{uniqueEvidence.length})</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+            {uniqueEvidence.map((e, i) => {
+              const checked = includeLayers.has(e.layer);
+              return (
+                <label
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: checked ? 'color-mix(in oklab, var(--c-teal) 4%, white)' : 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleLayer(e.layer)}
+                    style={{ marginTop: 2, accentColor: 'var(--c-teal)' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <span className={`v-chip ${e.signal === 'high' ? 'regression' : e.signal === 'medium' ? 'missed' : 'done'}`} style={{ fontSize: 9, padding: '0 5px' }}>
+                        {e.layer} · {e.signal}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: 1.45, marginTop: 2 }}>
+                      {e.summary}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <span className="v-chip regression" style={{ fontSize: 9, alignSelf: 'flex-start' }}>{error}</span>
+      )}
+
+      <button
+        type="button"
+        className="v-btn primary"
+        onClick={handleCreate}
+        disabled={!canSubmit}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        <Plus size={12} />{submitting ? 'Filing…' : 'Create issue'}
+      </button>
     </div>
   );
 }

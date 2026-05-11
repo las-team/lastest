@@ -81,6 +81,41 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
     );
     if (!response.ok) {
       const text = await response.text();
+      // A 404 from POST /repos/:o/:r/issues almost always means the token
+      // lacks `issues:write` (GitHub returns 404 instead of 403 for
+      // permission failures as a security measure). Probe a read endpoint
+      // to tell the user whether the repo is reachable at all and surface
+      // a more actionable hint than the raw GitHub body.
+      if (response.status === 404) {
+        const probe = await fetch(
+          `https://api.github.com/repos/${repo.owner}/${repo.name}`,
+          {
+            headers: {
+              Authorization: `Bearer ${account.accessToken}`,
+              Accept: 'application/vnd.github.v3+json',
+            },
+          },
+        );
+        if (probe.status === 404) {
+          return {
+            ok: false,
+            error: `GitHub couldn't find ${repo.owner}/${repo.name}. Verify the repo slug in Settings → Integrations → GitHub and that the connected account has access.`,
+          };
+        }
+        if (probe.ok) {
+          const meta = await probe.json().catch(() => null) as { has_issues?: boolean } | null;
+          if (meta?.has_issues === false) {
+            return {
+              ok: false,
+              error: `Issues are disabled on ${repo.owner}/${repo.name}. Enable Issues in the GitHub repo settings.`,
+            };
+          }
+          return {
+            ok: false,
+            error: `GitHub rejected the create-issue call with 404. The connected token can read ${repo.owner}/${repo.name} but can't write issues — re-authorize the GitHub integration with the issues:write scope (or install the app with that permission).`,
+          };
+        }
+      }
       return { ok: false, error: `GitHub API ${response.status}: ${text.slice(0, 200)}` };
     }
     const issue = (await response.json()) as { html_url: string; number: number };
