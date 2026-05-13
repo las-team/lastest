@@ -4,6 +4,39 @@ import { getTeamStorageUsage, getOldestTestRunsForTeam, deleteTestRunAndResults 
 import { recalculateTeamStorage } from './calculator';
 import { STORAGE_ROOT } from './paths';
 
+// Storage subdirectories that are partitioned by repository id. Everything
+// under `storage/<dir>/<repoId>/...` is owned by that repo and can be torn
+// down when the repo is deleted. Job-scoped dirs (bug-reports, url-diffs)
+// are intentionally excluded — those carry job ids, not repo ids.
+const REPO_SCOPED_STORAGE_DIRS = [
+  'screenshots',
+  'diffs',
+  'baselines',
+  'traces',
+  'videos',
+  'planned',
+  'fixtures',
+  'network-bodies',
+  'csv-sources',
+] as const;
+
+/**
+ * Best-effort removal of every repo-scoped storage directory for `repoId`.
+ * Missing directories are a no-op; any unexpected error is logged and
+ * swallowed so callers (typically `deleteRepository`) can finish the DB
+ * deletion even if the disk is in a weird state.
+ */
+export async function deleteRepoStorage(repoId: string): Promise<void> {
+  for (const dir of REPO_SCOPED_STORAGE_DIRS) {
+    const target = path.join(STORAGE_ROOT, dir, repoId);
+    try {
+      await fs.promises.rm(target, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`[deleteRepoStorage] failed to remove ${target}:`, err);
+    }
+  }
+}
+
 /**
  * Clean up oldest test run data for a team until storage drops below the target.
  * Deletes test runs (oldest first), their results, visual diffs, and associated files.

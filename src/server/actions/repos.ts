@@ -6,6 +6,7 @@ import { requireTeamAccess, requireRepoAccess, requireCapability, requireRepoCap
 import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
 import { getUserProjectsDetailed, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
+import { deleteRepoStorage } from '@/lib/storage/cleanup';
 
 const REPO_SYNC_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -325,4 +326,58 @@ export async function applyTestingTemplate(
 
   revalidatePath('/settings');
   return { success: true };
+}
+
+/**
+ * Permanently delete a repository and every row owned by it (tests, runs,
+ * builds, diffs, baselines, settings, screenshots, etc.) plus every
+ * repo-scoped folder under `storage/`.
+ *
+ * For GitHub / GitLab repos this only removes Lastest's local data —
+ * the remote repository on github.com / gitlab.com is never touched and
+ * can be re-imported later.
+ *
+ * If the deleted repo was the caller's selected repo, their
+ * `selectedRepositoryId` is cleared so the next page load picks a
+ * sensible default.
+ */
+export async function deleteRepo(
+  repositoryId: string,
+  confirmation: string,
+): Promise<{ success: true; fullName: string } | { error: string }> {
+  const session = await requireRepoCapability(repositoryId, 'repos:manage');
+  const repo = session.repo;
+
+  // Defence-in-depth: the dialog already enforces this client-side, but a
+  // typed confirmation is cheap to re-check on the server.
+  if (confirmation.trim() !== repo.fullName.trim()) {
+    return { error: 'Confirmation does not match the repository name.' };
+  }
+
+  await queries.deleteRepository(repositoryId);
+
+  // Best-effort disk cleanup — never block the success path on it.
+  try {
+    await deleteRepoStorage(repositoryId);
+  } catch (err) {
+    console.warn('[deleteRepo] storage cleanup failed:', err);
+  }
+
+  // Clear stale selection on the caller if the FK SET NULL cascade
+  // missed (e.g. it pointed at this repo via the team or provider
+  // accounts, which are not SET NULL). deleteRepository already
+  // nullifies team/account selections; this just keeps the user record
+  // consistent if the SET NULL fired on a different session.
+  if (session.user.selectedRepositoryId === repositoryId) {
+    await queries.updateUser(session.user.id, { selectedRepositoryId: null });
+  }
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+  revalidatePath('/tests');
+  revalidatePath('/builds');
+  revalidatePath('/run');
+  revalidatePath('/verify');
+
+  return { success: true, fullName: repo.fullName };
 }

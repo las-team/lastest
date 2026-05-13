@@ -48,6 +48,7 @@ import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
+import { DeleteRepoDialog } from '@/components/settings/delete-repo-dialog';
 
 export default async function SettingsPage({
   searchParams,
@@ -211,6 +212,36 @@ export default async function SettingsPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Danger Zone — delete the selected repository and all its Lastest data */}
+      {selectedRepo && (
+        <Card id="repo-danger-zone" className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="text-destructive">Danger Zone</CardTitle>
+            <CardDescription>
+              {selectedRepo.provider === 'local'
+                ? 'Permanently delete this repository and everything attached to it.'
+                : `Remove Lastest's data for this repository. Your ${
+                    selectedRepo.provider === 'gitlab' ? 'GitLab' : 'GitHub'
+                  } repository will not be affected.`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Delete repository</p>
+              <p className="text-xs text-muted-foreground">
+                You will need to type{' '}
+                <span className="font-mono">{selectedRepo.fullName}</span> to confirm.
+              </p>
+            </div>
+            <DeleteRepoDialog
+              repoId={selectedRepo.id}
+              fullName={selectedRepo.fullName}
+              provider={selectedRepo.provider ?? 'github'}
+            />
+          </CardContent>
+        </Card>
+      )}
     </>
   );
 

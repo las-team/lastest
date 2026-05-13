@@ -7,6 +7,32 @@ import {
   baselines,
   teams,
   users,
+  tests,
+  testRuns,
+  testResults,
+  builds,
+  visualDiffs,
+  ignoreRegions,
+  reviewTodos,
+  routes,
+  plannedScreenshots,
+  playwrightSettings,
+  scanStatus,
+  environmentConfigs,
+  diffSensitivitySettings,
+  aiSettings,
+  aiPromptLogs,
+  backgroundJobs,
+  notificationSettings,
+  specImports,
+  setupScripts,
+  setupConfigs,
+  googleSheetsDataSources,
+  csvDataSources,
+  functionalAreas,
+  activityEvents,
+  publicShares,
+  remoteDebugSessions,
 } from '../schema';
 import type {
   NewRepository,
@@ -15,7 +41,7 @@ import type {
   NewGitlabAccount,
 } from '../schema';
 import { getGithubAccountByTeam } from './auth';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // Pull Requests
@@ -123,8 +149,132 @@ export async function updateRepository(id: string, data: Partial<NewRepository>)
   await db.update(repositories).set(data).where(eq(repositories.id, id));
 }
 
+/**
+ * Hard-delete a repository and every row owned by it.
+ *
+ * The schema's cascade graph is incomplete: `tests.repositoryId`,
+ * `testRuns.repositoryId`, `baselines.repositoryId` etc. are plain text
+ * columns with no FK constraint, and several FK relationships (e.g.
+ * `visualDiffs.buildId`, `baselines.testId`, `routeTestSuggestions.matchedTestId`)
+ * default to NO ACTION. So we delete in dependency order inside one
+ * transaction; the final `DELETE FROM repositories` only handles the
+ * subset of tables that actually declare ON DELETE CASCADE.
+ *
+ * Disk storage is NOT cleaned up here — call `deleteRepoStorage(id)`
+ * from `@/lib/storage/cleanup` after this returns.
+ */
 export async function deleteRepository(id: string) {
-  await db.delete(repositories).where(eq(repositories.id, id));
+  await db.transaction(async (tx) => {
+    // 1. Collect parent IDs upfront so subsequent IN-clauses don't depend
+    //    on rows we're about to delete.
+    const testIdRows = await tx
+      .select({ id: tests.id })
+      .from(tests)
+      .where(eq(tests.repositoryId, id));
+    const testIds = testIdRows.map((r) => r.id);
+
+    const testRunIdRows = await tx
+      .select({ id: testRuns.id })
+      .from(testRuns)
+      .where(eq(testRuns.repositoryId, id));
+    const testRunIds = testRunIdRows.map((r) => r.id);
+
+    const buildIdRows = testRunIds.length
+      ? await tx
+          .select({ id: builds.id })
+          .from(builds)
+          .where(inArray(builds.testRunId, testRunIds))
+      : [];
+    const buildIds = buildIdRows.map((r) => r.id);
+
+    // 2. reviewTodos — has FKs to visualDiffs/builds/tests with no cascade.
+    //    Easiest to wipe by repo first.
+    await tx.delete(reviewTodos).where(eq(reviewTodos.repositoryId, id));
+
+    // 3. baselines — referenced by `approvedFromDiffId → visualDiffs` AND
+    //    points at `testId → tests` (both NO ACTION). Delete before its
+    //    parents so neither side blocks.
+    if (testIds.length) {
+      await tx.delete(baselines).where(inArray(baselines.testId, testIds));
+    }
+    await tx.delete(baselines).where(eq(baselines.repositoryId, id));
+
+    // 4. visualDiffs — references builds/testResults/tests, all NO ACTION.
+    if (buildIds.length) {
+      await tx.delete(visualDiffs).where(inArray(visualDiffs.buildId, buildIds));
+    }
+    if (testIds.length) {
+      await tx.delete(visualDiffs).where(inArray(visualDiffs.testId, testIds));
+    }
+
+    // 5. ignoreRegions — testId NO ACTION.
+    if (testIds.length) {
+      await tx.delete(ignoreRegions).where(inArray(ignoreRegions.testId, testIds));
+    }
+
+    // 6. testResults — referenced via testRunId/testId (NO ACTION). Wiping
+    //    these also cascades stepComparisons.testResultId.
+    if (testRunIds.length) {
+      await tx.delete(testResults).where(inArray(testResults.testRunId, testRunIds));
+    }
+    if (testIds.length) {
+      await tx.delete(testResults).where(inArray(testResults.testId, testIds));
+    }
+
+    // 7. builds — by testRunId. Cascades buildChangeMaps, buildDemoNotes,
+    //    stepLayerFeedback, and remaining stepComparisons.buildId.
+    if (testRunIds.length) {
+      await tx.delete(builds).where(inArray(builds.testRunId, testRunIds));
+    }
+
+    // 8. testRuns — plain repositoryId column, no FK.
+    await tx.delete(testRuns).where(eq(testRuns.repositoryId, id));
+
+    // 9. routes — cascades routeTestSuggestions (which has
+    //    matchedTestId → tests NO ACTION, so must clear before step 10)
+    //    and plannedScreenshots.routeId.
+    await tx.delete(routes).where(eq(routes.repositoryId, id));
+
+    // 10. tests — cascades plannedScreenshots.testId, focusRegions,
+    //     testVersions, selectorStats, defaultSetup/TeardownSteps.testId,
+    //     testFixtures.testId, stepComparisons.testId, inspectorCache, and
+    //     the per-test *Baselines (network/console/a11y/perf/variable/
+    //     urlTrajectory/dom). testSpecs.testId SET NULL is harmless since
+    //     testSpecs cascades from repositories below.
+    await tx.delete(tests).where(eq(tests.repositoryId, id));
+
+    // 11. Non-cascading direct-to-repo tables.
+    await tx.delete(playwrightSettings).where(eq(playwrightSettings.repositoryId, id));
+    await tx.delete(scanStatus).where(eq(scanStatus.repositoryId, id));
+    await tx.delete(environmentConfigs).where(eq(environmentConfigs.repositoryId, id));
+    await tx.delete(diffSensitivitySettings).where(eq(diffSensitivitySettings.repositoryId, id));
+    await tx.delete(aiSettings).where(eq(aiSettings.repositoryId, id));
+    await tx.delete(aiPromptLogs).where(eq(aiPromptLogs.repositoryId, id));
+    await tx.delete(backgroundJobs).where(eq(backgroundJobs.repositoryId, id));
+    await tx.delete(notificationSettings).where(eq(notificationSettings.repositoryId, id));
+    await tx.delete(specImports).where(eq(specImports.repositoryId, id));
+    await tx.delete(setupScripts).where(eq(setupScripts.repositoryId, id));
+    await tx.delete(setupConfigs).where(eq(setupConfigs.repositoryId, id));
+    await tx.delete(googleSheetsDataSources).where(eq(googleSheetsDataSources.repositoryId, id));
+    await tx.delete(csvDataSources).where(eq(csvDataSources.repositoryId, id));
+    await tx.delete(plannedScreenshots).where(eq(plannedScreenshots.repositoryId, id));
+    await tx.delete(activityEvents).where(eq(activityEvents.repositoryId, id));
+    await tx.delete(publicShares).where(eq(publicShares.repositoryId, id));
+    await tx.delete(remoteDebugSessions).where(eq(remoteDebugSessions.repositoryId, id));
+    await tx.delete(functionalAreas).where(eq(functionalAreas.repositoryId, id));
+
+    // 12. Nullify selectedRepositoryId references that don't have a
+    //     SET NULL cascade (users.selectedRepositoryId already does).
+    await tx.update(teams).set({ selectedRepositoryId: null }).where(eq(teams.selectedRepositoryId, id));
+    await tx.update(githubAccounts).set({ selectedRepositoryId: null }).where(eq(githubAccounts.selectedRepositoryId, id));
+    await tx.update(gitlabAccounts).set({ selectedRepositoryId: null }).where(eq(gitlabAccounts.selectedRepositoryId, id));
+
+    // 13. Finally the repo itself. Cascades: agentSessions, buildSchedules,
+    //     composeConfigs, defaultSetupSteps, defaultTeardownSteps,
+    //     githubIssues, gitlabPipelineConfigs, storageStates, testFixtures,
+    //     testSpecs.
+    await tx.delete(repositories).where(eq(repositories.id, id));
+  });
 }
 
 export async function getBaselinesByRepo(repositoryId: string) {
