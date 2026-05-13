@@ -1460,6 +1460,13 @@ async function processVisualDiff(
     if (!baselineTextPath && !currentTextPath) {
       return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
     }
+    // First-run text capture: caller passed no baseline image so there is
+    // nothing to diff against. Surface as `baseline_establishing` rather than
+    // `current_only` so the UI reads as intended behaviour, not as a missing-
+    // baseline warning. Captured text is still browsable for review.
+    if (!baselineImagePath && currentTextPath) {
+      return { baselineTextPath: null, currentTextPath, textDiffStatus: 'baseline_establishing', textDiffSummary: null };
+    }
     const { status, summary } = await computePageTextDiffSummary(baselineTextPath, currentTextPath);
     return { baselineTextPath, currentTextPath, textDiffStatus: status, textDiffSummary: summary };
   };

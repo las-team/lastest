@@ -1,0 +1,85 @@
+{
+  "buildId": "9c63705c-f525-4344-ae8b-366ff7be1cb9",
+  "testId": "a3678a7e-c74f-4fbc-ad74-e2543379d511",
+  "repositoryId": "0e2de9b8-1643-412e-af6f-490157555a78",
+  "target": {
+    "name": "Featurely",
+    "site": "https://www.featurely.no",
+    "founder": "Marius bekk",
+    "tagline": "Replace 5 tools with one dashboard for indie developers.",
+    "source": "FeedbackQueue /feed"
+  },
+  "uxSummary": "Featurely is positioned cleanly as a Vercel/Neon-hosted indie-dev admin suite — one dashboard replacing feedback, errors, uptime, flags, analytics, i18n, and a CMS-ish 'Versions / Translations / Maintenance mode' grab-bag. The visual language is restrained: a dark theme with one accent yellow used both for the F logomark and the primary CTA, with thin yellow underlines beneath badges that match the brand mark — that consistency is unusually disciplined for an indie. Pricing is unusually candid for a Hobby tier ('genuinely free with no trial expiry') and the side-by-side compare-plans table is the strongest pricing page detail. The blog has poster-style typographic covers ('STOP JUGGLING SAAS TOOLS', 'AI GENERATED SLOP'), which read as a deliberate voice — a value system, not just feature posts. The /news page is clearly the developer-facing changelog.",
+  "highlights": [
+    {
+      "label": "Pricing transparency",
+      "note": "The FAQ line 'No surprise charges — billing only activates when you turn it on' is the kind of detail that lands with indie buyers. Combined with the explicit '€15/seat/mo' line in the compare-plans table, it sets up trust before the user even tries the product."
+    },
+    {
+      "label": "Brand consistency across surfaces",
+      "note": "The F mark, accent yellow, and the thin yellow underline-stripe show up identically on the home hero, the blog covers, the pricing CTA, and the /demo Enter button. Most indies break visual consistency at the blog; Featurely holds it."
+    },
+    {
+      "label": "Blog-as-positioning",
+      "note": "Post titles ('Stop Juggling SaaS Tools', 'AI Generated Slop', 'Proactive Error Tracking', 'Public Roadmaps') are a manifesto stack. They wedge the product into a worldview rather than walking through features."
+    },
+    {
+      "label": "Compare-plans honesty",
+      "note": "Hobby gets 1 project / 1 team member / 15-min uptime check interval; Indie gets 1 project but 5-min checks at €12/mo. That granular asymmetry signals a founder who actually thinks about what an indie at each stage will use."
+    }
+  ],
+  "frictionPoints": [
+    {
+      "label": "/demo 'Enter the live demo' never lands",
+      "note": "Clicking the primary CTA on /demo flips the button to a disabled 'Signing you in…' state with a spinner. We waited 6+ seconds and the button remained stuck — no redirect, no error, no console message. See Scenario 3 screenshot. This is the loudest UX failure on the site: a paid visitor would assume the product is broken and bounce. The free-account fallback is at /sign-up but is a 7-route detour away from the headline value prop."
+    },
+    {
+      "label": "/sign-up Create account submit fires no network request",
+      "note": "Filled name/email/password on /sign-up, clicked 'Create account', the button flipped to disabled 'Please wait…' — and stayed there for 10+ seconds. Network panel showed zero fetch/XHR calls. Either the client handler is awaiting a promise that never resolves, or a server action is being invoked through a transport that's silently dropping. Either way, the registration funnel is currently 100% blocked unless the user picks 'Continue with Google'. We did not test the Google OAuth path."
+    },
+    {
+      "label": "Cookie banner covers the page on first paint",
+      "note": "The 'Cookie preferences' modal is a centered overlay (not a footer banner) and blocks the hero on first load. Dismissed via 'Accept all cookies' before each public screenshot, but a visitor who's banner-blind will scroll past it without realising the hero CTA is behind it."
+    }
+  ],
+  "testingStruggles": [
+    {
+      "label": "Detecting that the /demo button auto-disables in a re-entered session",
+      "note": "On a returning browser context, /demo's Enter button lands already-disabled (a previously-pending demo session). On a fresh runner context, the button starts enabled and only disables on click. The test had to be reshaped to fire-and-forget the click without awaiting, then wait 800ms for React to flip the disabled state, then screenshot — otherwise either (a) the click missed because the button was already disabled, or (b) a hard navigation kicked off and the screenshot caught a blank in-between frame."
+    },
+    {
+      "label": "Empty Page caught on post-click navigation",
+      "note": "An earlier version of the test waited for waitForURL after clicking Enter — Playwright's URL resolver fired before the destination page had rendered, producing a 1280×720 fully-black PNG. Switched to a fixed 800ms wait after the click and screenshot before any navigation could complete."
+    },
+    {
+      "label": "Console-error assertion flagged build as 'failed' despite all screenshots being clean",
+      "note": "The runner's default 'fail on console errors' assertion tripped on /api/projects/.../analytics/events/batch returning 401. That endpoint is Featurely's own analytics SDK, which is correctly designed to 401 for anonymous visitors — it's a known-good 401, not a real failure. Disabling the console-error assertion for demo-style runs would clean this up."
+    }
+  ],
+  "skippedRoutes": [
+    {
+      "path": "/dashboard (authenticated)",
+      "reason": "/sign-up form submit is broken (see frictionPoints) and the /demo Enter button is stuck (see frictionPoints). No path into authenticated surface from anonymous tooling."
+    },
+    {
+      "path": "/sign-in",
+      "reason": "Would only land us back at sign-up since registration never completes."
+    },
+    {
+      "path": "Continue with Google",
+      "reason": "OAuth flow redirects to accounts.google.com which Playwright cannot complete from a clean runner identity."
+    },
+    {
+      "path": "docs.featurely.no",
+      "reason": "On a separate subdomain — not in the demo baseline scope."
+    }
+  ],
+  "buildSummary": {
+    "scenariosCaptured": 7,
+    "publicRoutes": ["/", "/demo (enabled)", "/demo (signing-in stuck)", "/blog", "/news", "/#pricing", "/sign-up"],
+    "authenticatedRoutes": [],
+    "elapsedMs": "~30s",
+    "runnerStatus": "review_required → all-approved",
+    "videoRecordingEnabled": true
+  }
+}

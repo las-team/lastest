@@ -4,15 +4,37 @@
  */
 
 import { db } from '../index';
-import { buildDemoNotes } from '../schema';
+import { buildDemoNotes, builds, testRuns } from '../schema';
 import type { DemoNotes } from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 
 export async function getBuildDemoNotes(buildId: string): Promise<DemoNotes | null> {
   const [row] = await db
     .select()
     .from(buildDemoNotes)
     .where(eq(buildDemoNotes.buildId, buildId));
+  return row?.payload ?? null;
+}
+
+/**
+ * Latest demo-notes payload for any build in `repositoryId`, regardless of
+ * which build the share is pinned to. Lets a /gtm-lastest-saas-demo re-run
+ * surface its fresh UI/UX summary on every existing share for the same
+ * target site without re-creating shares. Joins via builds → test_runs so
+ * we can filter on the repo even though `build_demo_notes` itself only
+ * keys on buildId.
+ */
+export async function getLatestDemoNotesForRepo(
+  repositoryId: string,
+): Promise<DemoNotes | null> {
+  const [row] = await db
+    .select({ payload: buildDemoNotes.payload })
+    .from(buildDemoNotes)
+    .innerJoin(builds, eq(builds.id, buildDemoNotes.buildId))
+    .innerJoin(testRuns, eq(testRuns.id, builds.testRunId))
+    .where(eq(testRuns.repositoryId, repositoryId))
+    .orderBy(desc(buildDemoNotes.createdAt))
+    .limit(1);
   return row?.payload ?? null;
 }
 

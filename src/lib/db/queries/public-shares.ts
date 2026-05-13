@@ -7,12 +7,15 @@ import {
   baselines,
   visualDiffs,
   testResults,
+  stepComparisons,
 } from '../schema';
 import type {
   NewPublicShare,
   PublicShare,
   Baseline,
   CapturedScreenshot,
+  StepComparisonEvidence,
+  StepVerdict,
 } from '../schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
@@ -147,9 +150,22 @@ export type ShareTestResult = {
   screenshots: CapturedScreenshot[] | null;
 };
 
+// Slim step-comparison projection for share rendering. Drops issue/reviewer
+// metadata (GH issue link, confirmedBy, reviewerNote …) so only the verdict +
+// layer-diff summaries cross the wire.
+export type ShareStepComparison = {
+  id: string;
+  testId: string;
+  stepLabel: string | null;
+  stepIndex: number | null;
+  verdict: StepVerdict;
+  layers: StepComparisonEvidence;
+};
+
 export interface ShareData extends PublicShareContext {
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
+  stepComparisons: ShareStepComparison[];
 }
 
 export async function getShareDataBySlug(slug: string): Promise<ShareData | null> {
@@ -206,6 +222,26 @@ export async function getShareDataBySlug(slug: string): Promise<ShareData | null
         )
     : Promise.resolve([]);
 
-  const [diffs, results] = await Promise.all([diffsQuery, resultsQuery]);
-  return { ...ctx, diffs, results };
+  const stepCmpWhere = share.testId
+    ? and(eq(stepComparisons.buildId, build.id), eq(stepComparisons.testId, share.testId))
+    : eq(stepComparisons.buildId, build.id);
+
+  const stepCmpQuery = db
+    .select({
+      id: stepComparisons.id,
+      testId: stepComparisons.testId,
+      stepLabel: stepComparisons.stepLabel,
+      stepIndex: stepComparisons.stepIndex,
+      verdict: stepComparisons.verdict,
+      layers: stepComparisons.layers,
+    })
+    .from(stepComparisons)
+    .where(stepCmpWhere);
+
+  const [diffs, results, stepCmps] = await Promise.all([
+    diffsQuery,
+    resultsQuery,
+    stepCmpQuery,
+  ]);
+  return { ...ctx, diffs, results, stepComparisons: stepCmps };
 }

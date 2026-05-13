@@ -694,7 +694,7 @@ export const visualDiffs = pgTable('visual_diffs', {
   // time; the count summary lives in metadata.textDiffSummary.
   baselineTextPath: text('baseline_text_path'),
   currentTextPath: text('current_text_path'),
-  textDiffStatus: text('text_diff_status').$type<TextDiffStatus>(), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped' | null
+  textDiffStatus: text('text_diff_status').$type<TextDiffStatus>(), // 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'baseline_establishing' | 'skipped' | null
 });
 
 // Baselines for carry-forward logic
@@ -795,7 +795,7 @@ export type AIDiffRecommendation = 'approve' | 'review' | 'flag';
 export type AIDiffAnalysisStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type AIDiffingProvider = 'openrouter' | 'anthropic' | 'same-as-test-gen' | 'claude-agent-sdk' | 'ollama';
 
-export type TextDiffStatus = 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'skipped';
+export type TextDiffStatus = 'unchanged' | 'changed' | 'baseline_only' | 'current_only' | 'baseline_establishing' | 'skipped';
 
 export type VisualDiffWithTestStatus = VisualDiff & {
   testResultStatus: string | null;

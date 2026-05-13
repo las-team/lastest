@@ -8,8 +8,12 @@ import {
   type PublicShareContext,
   type ShareVisualDiff,
   type ShareTestResult,
+  type ShareStepComparison,
 } from '@/lib/db/queries/public-shares';
-import { getBuildDemoNotes } from '@/lib/db/queries/demo-notes';
+import {
+  getBuildDemoNotes,
+  getLatestDemoNotesForRepo,
+} from '@/lib/db/queries/demo-notes';
 import type { Baseline, DemoNotes } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
@@ -59,7 +63,15 @@ export default async function PublicSharePage({ params }: PageProps) {
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
 
-  const { share, build, test, testRun, diffs, results: scopedResults } = data;
+  const {
+    share,
+    build,
+    test,
+    testRun,
+    diffs,
+    results: scopedResults,
+    stepComparisons: scopedStepComparisons,
+  } = data;
 
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
@@ -87,9 +99,14 @@ export default async function PublicSharePage({ params }: PageProps) {
   const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
 
   // Optional AI UI/UX summary captured at the end of a /gtm-lastest-saas-demo
-  // run. Shown above the screenshot gallery when present. Falls back to null
-  // for the much larger population of regular builds.
-  const demoNotes = await getBuildDemoNotes(build.id);
+  // run. Prefer the latest notes for the share's repo so re-runs flow into
+  // existing shares without re-publishing; fall back to the build's own row
+  // and finally to null when neither exists.
+  const repoIdForNotes = testRun?.repositoryId ?? share.repositoryId ?? null;
+  const demoNotes = repoIdForNotes
+    ? (await getLatestDemoNotesForRepo(repoIdForNotes)) ??
+      (await getBuildDemoNotes(build.id))
+    : await getBuildDemoNotes(build.id);
 
   // Passing tests produce zero visual_diffs rows. Fall back to the test's
   // active baselines so viewers still see a side-by-side comparison rather
@@ -116,8 +133,6 @@ export default async function PublicSharePage({ params }: PageProps) {
           commit={testRun?.gitCommit ?? null}
         />
 
-        {demoNotes && <DemoNotesPanel notes={demoNotes} />}
-
         {isTestShare ? (
           <TestShareBody
             diffs={diffs}
@@ -130,9 +145,22 @@ export default async function PublicSharePage({ params }: PageProps) {
             testName={test?.name ?? displayDomain}
             pixelsChanged={totalPixelsChanged}
             baselineFallback={baselineFallback}
+            stepComparisons={scopedStepComparisons}
+            demoNotes={demoNotes}
+            claimLink={claimLink}
+            signInLink={signInLink}
           />
         ) : (
           <>
+            <LayerOutcomesGrid
+              variant="build"
+              testResult={primaryResult}
+              results={scopedResults}
+              diffs={diffs}
+              stepComparisons={scopedStepComparisons}
+              signInLink={signInLink}
+            />
+            {hasDemoContent(demoNotes) && <DemoNotesPanel notes={demoNotes} />}
             <BuildSummary
               build={build}
               targetDomain={share.targetDomain}
@@ -393,10 +421,389 @@ function OutcomeHeader({
   );
 }
 
+// --- Layer outcomes grid ----------------------------------------------------
+// Rolls per-step diff signals (visual, dom, network, console, a11y, perf, url,
+// variables) up into one chip per category and shows whether each ran clean,
+// drifted, or regressed. Pulls from step_comparisons.layers when available and
+// from the raw visual_diffs / test_results otherwise. "Run" is the test
+// result's own pass/fail; "Text" reflects screenshot-OCR coverage (captured
+// alongside text-anchor steps) and reads as "—" when the run didn't exercise
+// any text-bound assertions.
+
+type LayerTone = 'ok' | 'warn' | 'danger' | 'neutral' | 'muted';
+type LayerOutcome = {
+  key: string;
+  label: string;
+  value: string;
+  tone: LayerTone;
+  title?: string;
+};
+
+function computeLayerOutcomes({
+  variant,
+  testResult,
+  results,
+  diffs,
+  stepComparisons,
+}: {
+  variant: 'build' | 'test';
+  testResult: ShareTestResult | null;
+  results: ShareTestResult[];
+  diffs: ShareVisualDiff[];
+  stepComparisons: ShareStepComparison[];
+}): LayerOutcome[] {
+  // Run — test pass/fail or build verdict roll-up.
+  const run: LayerOutcome = (() => {
+    if (variant === 'test') {
+      const status = testResult?.status ?? null;
+      if (status === 'passed' || status === 'approved')
+        return { key: 'run', label: 'Run', value: '✓', tone: 'ok' };
+      if (status === 'failed' || status === 'regression')
+        return { key: 'run', label: 'Run', value: '✕', tone: 'danger' };
+      if (status === 'changed' || status === 'pending_review')
+        return { key: 'run', label: 'Run', value: '~', tone: 'warn' };
+      if (status === 'skipped')
+        return { key: 'run', label: 'Run', value: '⊘', tone: 'muted' };
+      return { key: 'run', label: 'Run', value: '—', tone: 'muted' };
+    }
+    const passed = results.filter(
+      (r) => r.status === 'passed' || r.status === 'approved',
+    ).length;
+    const failed = results.filter(
+      (r) => r.status === 'failed' || r.status === 'regression',
+    ).length;
+    if (failed > 0)
+      return {
+        key: 'run',
+        label: 'Run',
+        value: `${failed} failed`,
+        tone: 'danger',
+        title: `${passed} passed, ${failed} failed`,
+      };
+    if (results.length > 0)
+      return {
+        key: 'run',
+        label: 'Run',
+        value: '✓',
+        tone: 'ok',
+        title: `${passed} passed`,
+      };
+    return { key: 'run', label: 'Run', value: '—', tone: 'muted' };
+  })();
+
+  // Visual — biggest % across diffs; ✓ if everything matched baseline.
+  const visual: LayerOutcome = (() => {
+    let maxPct = 0;
+    let totalPx = 0;
+    for (const d of diffs) {
+      const pct = d.percentageDifference ? parseFloat(d.percentageDifference) : 0;
+      if (Number.isFinite(pct) && pct > maxPct) maxPct = pct;
+      totalPx += d.pixelDifference ?? 0;
+    }
+    if (totalPx <= 0)
+      return { key: 'visual', label: 'Visual', value: '✓', tone: 'ok' };
+    const valueStr = maxPct >= 0.01 ? `${maxPct.toFixed(2)}%` : `${totalPx.toLocaleString()}px`;
+    return {
+      key: 'visual',
+      label: 'Visual',
+      value: valueStr,
+      tone: maxPct >= 1 ? 'warn' : 'neutral',
+      title: `${totalPx.toLocaleString()} pixels changed across ${diffs.length} step${diffs.length === 1 ? '' : 's'}`,
+    };
+  })();
+
+  // Text — OCR / text-anchored screenshot deltas aren't part of the regular
+  // run pipeline, so this stays "—" unless we surface inspector-on-demand data.
+  // Kept as a visible chip so users see what Lastest checks; the dash tells
+  // them this run didn't exercise it.
+  const text: LayerOutcome = {
+    key: 'text',
+    label: 'Text',
+    value: '—',
+    tone: 'muted',
+    title: 'Text-diff is an on-demand inspector dimension; not captured by this run',
+  };
+
+  // DOM — verdict roll-up from step_comparisons.layers.dom. We don't have a
+  // public-share-safe DomDiffResult shape, so fall back to "✓" if any step
+  // comparison exists with no dom payload (means run captured the snapshot
+  // and the scorer didn't flag drift).
+  const dom: LayerOutcome = (() => {
+    const domSteps = stepComparisons.filter((s) => s.layers?.dom);
+    if (domSteps.length === 0) {
+      return stepComparisons.length > 0
+        ? { key: 'dom', label: 'DOM', value: '✓', tone: 'ok' }
+        : { key: 'dom', label: 'DOM', value: '—', tone: 'muted' };
+    }
+    const reds = stepComparisons.filter((s) => s.verdict === 'red' && s.layers?.dom).length;
+    if (reds > 0)
+      return { key: 'dom', label: 'DOM', value: `${reds} changed`, tone: 'warn' };
+    return { key: 'dom', label: 'DOM', value: `${domSteps.length} changed`, tone: 'neutral' };
+  })();
+
+  // Network — added/removed across all step comparisons.
+  const network: LayerOutcome = (() => {
+    let added = 0;
+    let removed = 0;
+    let newErrors = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const n = s.layers?.network;
+      if (!n) continue;
+      touched = true;
+      added += n.added ?? 0;
+      removed += n.removed ?? 0;
+      newErrors += n.newErrorCount ?? 0;
+    }
+    if (!touched) return { key: 'network', label: 'Network', value: '—', tone: 'muted' };
+    if (added === 0 && removed === 0 && newErrors === 0)
+      return { key: 'network', label: 'Network', value: '✓', tone: 'ok' };
+    return {
+      key: 'network',
+      label: 'Network',
+      value: `+${added} −${removed}`,
+      tone: newErrors > 0 ? 'danger' : 'neutral',
+      title: newErrors > 0 ? `${newErrors} new 4xx/5xx response${newErrors === 1 ? '' : 's'}` : undefined,
+    };
+  })();
+
+  // Console — new error fingerprints across steps.
+  const consoleLayer: LayerOutcome = (() => {
+    let newCount = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const c = s.layers?.consoleDiff;
+      if (!c) continue;
+      touched = true;
+      newCount += c.newFingerprints?.length ?? 0;
+    }
+    if (!touched) return { key: 'console', label: 'Console', value: '✓', tone: 'ok' };
+    if (newCount === 0)
+      return { key: 'console', label: 'Console', value: '✓', tone: 'ok' };
+    return {
+      key: 'console',
+      label: 'Console',
+      value: `${newCount} new`,
+      tone: 'danger',
+    };
+  })();
+
+  // A11y — new violations by severity.
+  const a11y: LayerOutcome = (() => {
+    let critical = 0;
+    let serious = 0;
+    let moderate = 0;
+    let minor = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const a = s.layers?.a11y;
+      if (!a) continue;
+      touched = true;
+      critical += a.newBySeverity?.critical ?? 0;
+      serious += a.newBySeverity?.serious ?? 0;
+      moderate += a.newBySeverity?.moderate ?? 0;
+      minor += a.newBySeverity?.minor ?? 0;
+    }
+    if (!touched) return { key: 'a11y', label: 'A11y', value: '—', tone: 'muted' };
+    const total = critical + serious + moderate + minor;
+    if (total === 0) return { key: 'a11y', label: 'A11y', value: '✓', tone: 'ok' };
+    return {
+      key: 'a11y',
+      label: 'A11y',
+      value: `${total} new`,
+      tone: critical + serious > 0 ? 'danger' : 'warn',
+      title: `crit ${critical} · serious ${serious} · mod ${moderate} · minor ${minor}`,
+    };
+  })();
+
+  // Perf — Web Vitals budget breaches / drift.
+  const perf: LayerOutcome = (() => {
+    let breached = 0;
+    let drifted = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const p = s.layers?.perf;
+      if (!p) continue;
+      touched = true;
+      for (const d of p.deltas ?? []) {
+        if (d.budgetBreached) breached++;
+        else if (d.drifted) drifted++;
+      }
+    }
+    if (!touched) return { key: 'perf', label: 'Perf', value: '—', tone: 'muted' };
+    if (breached === 0 && drifted === 0)
+      return { key: 'perf', label: 'Perf', value: '✓', tone: 'ok' };
+    if (breached > 0)
+      return { key: 'perf', label: 'Perf', value: `${breached} over`, tone: 'danger' };
+    return { key: 'perf', label: 'Perf', value: `${drifted} drift`, tone: 'warn' };
+  })();
+
+  // URL — trajectory divergence count.
+  const url: LayerOutcome = (() => {
+    let diverged = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const u = s.layers?.url;
+      if (!u) continue;
+      touched = true;
+      diverged += u.divergedSteps?.length ?? 0;
+    }
+    if (!touched) return { key: 'url', label: 'URL', value: '✓', tone: 'ok' };
+    if (diverged === 0) return { key: 'url', label: 'URL', value: '✓', tone: 'ok' };
+    return {
+      key: 'url',
+      label: 'URL',
+      value: `${diverged} diverged`,
+      tone: 'danger',
+    };
+  })();
+
+  // Variables — diff entries across steps (structural-break highest signal).
+  const variables: LayerOutcome = (() => {
+    let changes = 0;
+    let breaks = 0;
+    let touched = false;
+    for (const s of stepComparisons) {
+      const v = s.layers?.variable;
+      if (!v) continue;
+      touched = true;
+      for (const c of v.changes ?? []) {
+        changes++;
+        if (c.tier === 'structural-break' || c.tier === 'type-change') breaks++;
+      }
+    }
+    if (!touched) return { key: 'variables', label: 'Variables', value: '—', tone: 'muted' };
+    if (changes === 0)
+      return { key: 'variables', label: 'Variables', value: '✓', tone: 'ok' };
+    return {
+      key: 'variables',
+      label: 'Variables',
+      value: `${changes} changed`,
+      tone: breaks > 0 ? 'danger' : 'warn',
+    };
+  })();
+
+  return [run, visual, text, dom, network, consoleLayer, a11y, perf, url, variables];
+}
+
+function layerToneClasses(tone: LayerTone): { card: string; value: string } {
+  switch (tone) {
+    case 'ok':
+      return {
+        card: 'border-emerald-200 bg-white dark:bg-card dark:border-emerald-900',
+        value: 'text-emerald-700 dark:text-emerald-300',
+      };
+    case 'warn':
+      return {
+        card: 'border-amber-200 bg-white dark:bg-card dark:border-amber-900',
+        value: 'text-amber-800 dark:text-amber-200',
+      };
+    case 'danger':
+      return {
+        card: 'border-rose-200 bg-white dark:bg-card dark:border-rose-900',
+        value: 'text-rose-700 dark:text-rose-300',
+      };
+    case 'neutral':
+      return {
+        card: 'border bg-white dark:bg-card',
+        value: 'text-foreground',
+      };
+    default:
+      return {
+        card: 'border bg-white dark:bg-card',
+        value: 'text-muted-foreground',
+      };
+  }
+}
+
+function LayerOutcomesGrid({
+  variant,
+  testResult,
+  results,
+  diffs,
+  stepComparisons,
+  signInLink,
+}: {
+  variant: 'build' | 'test';
+  testResult: ShareTestResult | null;
+  results: ShareTestResult[];
+  diffs: ShareVisualDiff[];
+  stepComparisons: ShareStepComparison[];
+  signInLink?: string;
+}) {
+  const outcomes = computeLayerOutcomes({
+    variant,
+    testResult,
+    results,
+    diffs,
+    stepComparisons,
+  });
+  const loginHint = 'Log in for more details';
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Checks run
+        </h2>
+        {signInLink && (
+          <a
+            href={signInLink}
+            title={loginHint}
+            className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+          >
+            Log in for details
+          </a>
+        )}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        {outcomes.map((o) => {
+          const t = layerToneClasses(o.tone);
+          const tip = o.title ? `${o.title} — ${loginHint}` : loginHint;
+          const cardClasses = `block rounded-md px-3 py-2 text-center ${t.card}`;
+          const body = (
+            <>
+              <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+                {o.label}
+              </div>
+              <div className={`text-sm font-semibold tabular-nums truncate ${t.value}`}>
+                {o.value}
+              </div>
+            </>
+          );
+          return signInLink ? (
+            <a
+              key={o.key}
+              href={signInLink}
+              title={tip}
+              className={`${cardClasses} hover:border-foreground/40 transition-colors`}
+            >
+              {body}
+            </a>
+          ) : (
+            <div key={o.key} title={tip} className={cardClasses}>
+              {body}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // Renders the AI UI/UX summary written at the end of a demo run. Three
 // founder-facing buckets stack vertically; testingStruggles is intentionally
 // hidden from the share (it's automation gotchas, not product feedback).
 // skippedRoutes renders as a small provenance footer when present.
+function hasDemoContent(n: DemoNotes | null | undefined): n is DemoNotes {
+  if (!n) return false;
+  return Boolean(
+    n.uxSummary ||
+      (n.highlights && n.highlights.length > 0) ||
+      (n.frictionPoints && n.frictionPoints.length > 0) ||
+      (n.skippedRoutes && n.skippedRoutes.length > 0),
+  );
+}
+
 function DemoNotesPanel({ notes }: { notes: DemoNotes }) {
   const hasHighlights = notes.highlights && notes.highlights.length > 0;
   const hasFriction = notes.frictionPoints && notes.frictionPoints.length > 0;
@@ -668,6 +1075,7 @@ function BuildDiffsGallery({
               diff={d.diff}
               stepLabel={d.stepLabel}
               pixelDifference={d.pixelDifference}
+              stepNumber={d.stepNumber}
             />
           ))}
         </section>
@@ -693,6 +1101,10 @@ function TestShareBody({
   testName,
   pixelsChanged,
   baselineFallback,
+  stepComparisons,
+  demoNotes,
+  claimLink,
+  signInLink,
 }: {
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
@@ -704,6 +1116,10 @@ function TestShareBody({
   testName: string;
   pixelsChanged: number;
   baselineFallback: Baseline[];
+  stepComparisons: ShareStepComparison[];
+  demoNotes: DemoNotes | null;
+  claimLink: string;
+  signInLink: string;
 }) {
   const videos = results
     .map((r) => (r.videoPath ? toUrl(r.videoPath) : null))
@@ -746,6 +1162,17 @@ function TestShareBody({
         </section>
       )}
 
+      <PostVideoCTA claimLink={claimLink} signInLink={signInLink} />
+
+      <LayerOutcomesGrid
+        variant="test"
+        testResult={testResult}
+        results={results}
+        diffs={diffs}
+        stepComparisons={stepComparisons}
+        signInLink={signInLink}
+      />
+
       {steps.length > 0 && (
         <StepStrip steps={steps} secPerStep={approxSecPerStep} />
       )}
@@ -769,7 +1196,11 @@ function TestShareBody({
         />
       </div>
 
-      <PullQuote text={pullQuote} />
+      {hasDemoContent(demoNotes) ? (
+        <DemoNotesPanel notes={demoNotes} />
+      ) : (
+        <PullQuote text={pullQuote} />
+      )}
 
       {sliderDiffs.length > 0 && (
         <section className="space-y-4">
@@ -786,6 +1217,7 @@ function TestShareBody({
               diff={d.diff}
               stepLabel={d.stepLabel}
               pixelDifference={d.pixelDifference}
+              stepNumber={d.stepNumber}
             />
           ))}
         </section>
@@ -809,6 +1241,7 @@ function TestShareBody({
               diff={d.diff}
               stepLabel={d.stepLabel}
               pixelDifference={d.pixelDifference}
+              stepNumber={d.stepNumber}
             />
           ))}
         </section>
@@ -877,11 +1310,18 @@ function StepStrip({
         {steps.map((s, i) => {
           const seek =
             secPerStep != null ? (i * secPerStep).toFixed(2) : undefined;
+          // Prefer the number parsed out of the label ("Step 5" → 5) when
+          // present so step-strip order doesn't have to match slider order;
+          // fall back to the 1-based position in the strip for the common
+          // "Step 1, Step 2 …" case.
+          const parsedStep = stepNumberFromLabel(s.label);
+          const stepJump = Number.isFinite(parsedStep) ? parsedStep : i + 1;
           return (
             <button
               type="button"
               key={s.src + i}
               data-seek={seek}
+              data-step-jump={stepJump}
               className="group relative shrink-0 w-28 rounded-md border bg-card p-1 text-left hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
               aria-label={`Jump to step ${i + 1}: ${s.label}`}
             >
@@ -979,7 +1419,20 @@ type SliderDiff = {
   diff: string | null;
   stepLabel: string | null;
   pixelDifference: number;
+  // Parsed from stepLabel ("Step 5" → 5) so the gallery can be ordered by
+  // capture order and the step-strip thumbnails can scroll to the matching
+  // slider via [data-step-jump] / [data-step] (see SHARE_SCRIPT). Unparseable
+  // labels (null, "Final", random text) sort last with +Infinity.
+  stepNumber: number;
 };
+
+/** Extract the numeric step from a label like "Step 5". Falls back to +Infinity
+ *  so unlabelled / "Final" rows sort last but stay visible. */
+function stepNumberFromLabel(label: string | null | undefined): number {
+  if (!label) return Number.POSITIVE_INFINITY;
+  const m = label.match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+}
 
 // For passing tests — no visual_diffs rows exist, so synthesize sliders from
 // active baselines paired with captured screenshots. Match by stepLabel
@@ -1013,15 +1466,20 @@ function buildBaselineSliders(
     seen.add(key);
     const currentUrl = toUrl(currentPath);
     if (!currentUrl) continue;
+    const stepLabel = bl.stepLabel ?? (isFinal ? 'Final' : null);
     out.push({
       id: bl.id,
       baseline: baselineUrl,
       current: currentUrl,
       diff: null,
-      stepLabel: bl.stepLabel ?? (isFinal ? 'Final' : null),
+      stepLabel,
       pixelDifference: 0,
+      stepNumber: stepNumberFromLabel(stepLabel),
     });
   }
+  // Stable sort by step number so the gallery follows capture order regardless
+  // of baselines-table insertion order. Unparseable labels sink to the bottom.
+  out.sort((a, b) => a.stepNumber - b.stepNumber);
   return out;
 }
 
@@ -1029,8 +1487,8 @@ function buildSliderDiffs(
   diffs: ShareVisualDiff[],
   toUrl: (p: string | null | undefined) => string | null,
 ): SliderDiff[] {
-  return diffs
-    .map((d) => {
+  const out = diffs
+    .map((d): SliderDiff | null => {
       const baseline = toUrl(d.baselineImagePath);
       const current = toUrl(d.currentImagePath);
       if (!baseline || !current) return null;
@@ -1041,9 +1499,14 @@ function buildSliderDiffs(
         diff: toUrl(d.diffImagePath),
         stepLabel: d.stepLabel,
         pixelDifference: d.pixelDifference ?? 0,
+        stepNumber: stepNumberFromLabel(d.stepLabel),
       };
     })
     .filter((d): d is SliderDiff => !!d);
+  // visual_diffs rows can return in arbitrary order (insertion order, not
+  // capture order). Reorder so "Step 1" renders before "Step 5".
+  out.sort((a, b) => a.stepNumber - b.stepNumber);
+  return out;
 }
 
 type GalleryItem = { src: string; label: string };
@@ -1117,12 +1580,14 @@ function DiffSlider({
   diff,
   stepLabel,
   pixelDifference,
+  stepNumber,
 }: {
   baseline: string;
   current: string;
   diff: string | null;
   stepLabel: string | null;
   pixelDifference: number;
+  stepNumber: number;
 }) {
   // CSS custom property starts at 50 %. The inline <script> (emitted once at
   // page bottom) binds pointer move on .share-slider-stage to this variable
@@ -1130,12 +1595,17 @@ function DiffSlider({
   // (baseline/current slider comparison revealed). Pure DOM, zero hydration.
   const style = { '--pct': '50%' } as CSSProperties;
   const hasDiff = !!diff;
+  const isStepIndex = Number.isFinite(stepNumber);
   return (
     <figure
-      className="share-slider space-y-2"
+      className="share-slider space-y-2 scroll-mt-20"
       style={style}
       data-active={hasDiff ? 'false' : 'true'}
       data-has-diff={hasDiff ? 'true' : 'false'}
+      // Scroll target for thumbnail clicks in <StepStrip>. Only set when the
+      // label parsed to a real number — "Final" / unlabelled rows aren't
+      // jumpable from the strip.
+      {...(isStepIndex ? { 'data-step': String(stepNumber), id: `share-step-${stepNumber}` } : {})}
     >
       <header className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-foreground truncate">
@@ -1216,6 +1686,41 @@ function DiffSlider({
   );
 }
 
+function PostVideoCTA({
+  claimLink,
+  signInLink,
+}: {
+  claimLink: string;
+  signInLink: string;
+}) {
+  return (
+    <section className="rounded-xl border bg-white dark:bg-card p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+      <div className="flex-1 min-w-0 space-y-1">
+        <h2 className="text-base sm:text-lg font-semibold tracking-tight">
+          Take this test with you
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Download the test code, or claim it to re-run on demand — both are free.
+        </p>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+        <a
+          href={claimLink}
+          className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
+        >
+          Download test code
+        </a>
+        <a
+          href={signInLink}
+          className="inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+        >
+          Run on demand
+        </a>
+      </div>
+    </section>
+  );
+}
+
 function ClaimCTA({
   claimLink,
   signInLink,
@@ -1224,7 +1729,7 @@ function ClaimCTA({
   signInLink: string;
 }) {
   return (
-    <section className="rounded-xl border bg-muted/40 p-6 sm:p-8 space-y-4">
+    <section className="rounded-xl border bg-white dark:bg-card p-6 sm:p-8 space-y-4">
       <h2 className="text-xl sm:text-2xl font-semibold">Claim this test — free</h2>
       <p className="text-sm text-muted-foreground">
         We&apos;ll copy the test into your own Lastest workspace. You supply the ideas,
@@ -1251,7 +1756,17 @@ function ClaimCTA({
 function ShareFooter({ slug }: { slug: string }) {
   return (
     <footer className="pt-6 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 justify-between">
-      <span>Run by Lastest</span>
+      <span>
+        Run by{' '}
+        <a
+          href="https://lastest.cloud"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-foreground hover:underline"
+        >
+          lastest.cloud
+        </a>
+      </span>
       <div className="flex items-center gap-4">
         <a href="/terms" className="hover:text-foreground">Terms</a>
         <a href="/privacy" className="hover:text-foreground">Privacy</a>
@@ -1295,6 +1810,22 @@ const SHARE_STYLE = `
 
 const SHARE_SCRIPT = `
 (function(){
+  // Click-to-scroll: step-strip thumbnails carry data-step-jump="N"; sliders
+  // carry data-step="N". Clicking a thumbnail scrolls to the matching slider.
+  // Independent of (and additive to) the video-seek click delegate in
+  // ShareVideoPlayer — a thumbnail can both seek video AND scroll a slider.
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var jump = t.closest('[data-step-jump]');
+    if (!jump) return;
+    var n = jump.getAttribute('data-step-jump');
+    if (!n) return;
+    var target = document.querySelector('[data-step="' + n + '"]');
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, true);
+
   var figs = document.querySelectorAll('.share-slider');
   for (var i = 0; i < figs.length; i++) {
     (function(fig){

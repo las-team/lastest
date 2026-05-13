@@ -10,10 +10,6 @@ https://www.chromatic.com/start comp test?
 Legal stuff for Mark
 ## test
 VS Code extension
-  disconnects often
-   only show repos with tests
-  output should be clear
-  replace icon from lab in sidebar to lastest singlecolor
 Teardown
 triage
 Create modes
@@ -21,10 +17,6 @@ Openrouter agent sdk parity
 demo-mode
   without link?
 ## bugs
-variables
-  text baseline missing
-  variable baseline missing
-  network compare should only count errors by default
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets
@@ -44,11 +36,11 @@ Figma plugin
 Sitemap -flow
 Use DOM diff/verify to fix test as context
 ## marketing
-* gh issue for maintained repos w lastest public link
+* gh issue for mai0ntained repos w lastest public link
 * test: screenshot diff tool 
 * Re-fetch search volume, CPC & competition from DataForSEO
 * test: AI repurposing engine -> 5 tweets, 3 linkedin, remotion short form, 1 blog, graphics, email sequence
-* Invite 50–200 teams (target: solo founders, YC startups, component teams) via outreach to clubs, Slack communities, and test automation forums. Offer extended free tiers and white-glove onboarding for first 20 paying customers.
+* Invite 50–20 teams (target: solo founders, YC startups, component teams) via outreach to clubs, Slack communities, and test automation forums. Offer extended free tiers and white-glove onboarding for first 20 paying customers.
 
 ## commands
 ## ourmotto
