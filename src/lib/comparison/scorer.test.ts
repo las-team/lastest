@@ -91,4 +91,50 @@ describe('scoreMultiLayer', () => {
     });
     expect(r.verdict).toBe('green');
   });
+
+  it('first run (null baseline) silently establishes baseline — no non-visual evidence', () => {
+    const current = emptyResult({
+      consoleErrors: ['ReferenceError: foo is not defined'],
+      networkRequests: [{ url: 'https://x/a', method: 'GET', status: 500, duration: 50, resourceType: 'fetch' } as NetworkRequest],
+      urlTrajectory: [{ stepIndex: 0, finalUrl: 'https://x/dashboard', redirectChain: [] } as UrlTrajectoryStep],
+      extractedVariables: { fresh: 'value' },
+    });
+    const r = scoreMultiLayer({ baseline: null, current });
+    expect(r.verdict).toBe('green');
+    expect(r.evidence.filter(e => e.layer !== 'visual')).toHaveLength(0);
+    expect(Object.keys(r.layers)).toHaveLength(0);
+  });
+
+  it('first run with visual delta still surfaces visual yellow', () => {
+    const current = emptyResult({ consoleErrors: ['boom'] });
+    const r = scoreMultiLayer({
+      baseline: null,
+      current,
+      visualDiff: { pixelDifference: 42, percentageDifference: '0.1', id: 'd1' },
+    });
+    expect(r.verdict).toBe('yellow');
+    expect(r.evidence).toHaveLength(1);
+    expect(r.evidence[0].layer).toBe('visual');
+    expect(r.layers.visual).toBeDefined();
+    expect(r.layers.consoleDiff).toBeUndefined();
+  });
+
+  it('network non-error churn (added/removed of 200s) does not paint verdict', () => {
+    const baseline = emptyResult({
+      networkRequests: [
+        { url: 'https://x/a', method: 'GET', status: 200, duration: 50, resourceType: 'fetch' } as NetworkRequest,
+      ],
+    });
+    const current = emptyResult({
+      networkRequests: [
+        { url: 'https://x/a', method: 'GET', status: 200, duration: 50, resourceType: 'fetch' } as NetworkRequest,
+        { url: 'https://x/b', method: 'GET', status: 200, duration: 50, resourceType: 'fetch' } as NetworkRequest,
+      ],
+    });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('green');
+    expect(r.evidence.find(e => e.layer === 'network')?.signal).toBe('low');
+    expect(r.layers.network).toBeDefined();
+    expect(r.layers.network?.added).toBe(1);
+  });
 });

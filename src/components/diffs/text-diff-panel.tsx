@@ -24,6 +24,7 @@ export function TextDiffPanel({ status, summary, lines }: TextDiffPanelProps) {
     status === 'unchanged' ? 'No text changes' :
     status === 'baseline_only' ? 'Baseline text only — current run captured nothing' :
     status === 'current_only' ? 'New text — no baseline to compare against' :
+    status === 'baseline_establishing' ? "Captured for next run's baseline" :
     status === 'skipped' ? 'Text capture not enabled for this diff' :
     `${summary.added} added · ${summary.removed} removed`;
 

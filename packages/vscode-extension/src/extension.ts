@@ -4,6 +4,7 @@ import { LastestWebSocket } from './websocket';
 import { TestTreeDataProvider } from './testTree';
 import { TestRunner } from './testRunner';
 import { StatusBarManager } from './statusBar';
+import { getOutputChannel, disposeOutputChannel } from './output';
 
 let api: LastestApi;
 let ws: LastestWebSocket;
@@ -99,20 +100,26 @@ async function connect() {
   const config = vscode.workspace.getConfiguration('lastest');
   const serverUrl = config.get<string>('serverUrl', 'http://localhost:3000');
   const apiToken = config.get<string>('apiToken', '');
+  const output = getOutputChannel();
 
-  // Check connection
+  output.appendLine(`[health] GET ${serverUrl}/api/v1/health`);
   const connected = await api.checkConnection();
   if (connected) {
+    output.appendLine('[health] ok');
     ws.connect(serverUrl, apiToken);
     await treeProvider.refresh();
     vscode.window.showInformationMessage('Connected to Lastest server');
   } else {
+    output.appendLine(`[health] failed — cannot reach ${serverUrl}`);
     vscode.window.showWarningMessage(
       `Cannot connect to Lastest server at ${serverUrl}`,
-      'Configure'
+      'Configure',
+      'Show Output'
     ).then(action => {
       if (action === 'Configure') {
         vscode.commands.executeCommand('workbench.action.openSettings', 'lastest.serverUrl');
+      } else if (action === 'Show Output') {
+        output.show();
       }
     });
   }
@@ -127,4 +134,5 @@ export function deactivate() {
   ws?.dispose();
   testRunner?.dispose();
   statusBar?.dispose();
+  disposeOutputChannel();
 }

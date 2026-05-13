@@ -1,15 +1,20 @@
 import * as vscode from 'vscode';
 import type { WSMessage, TestProgressPayload, TestCompletePayload } from './types';
+import { getOutputChannel } from './output';
 
 /**
  * SSE-based real-time updates for the VSCode extension.
  * Uses Server-Sent Events since Next.js App Router doesn't support WebSocket.
+ *
+ * The server enforces a 90s lifetime cap and sends `event: reconnect` before
+ * closing the stream (see src/app/api/v1/events/route.ts). The client must
+ * treat both clean stream-end and errors as triggers to reconnect.
  */
 export class LastestWebSocket {
-  private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly reconnectInterval = 5000;
   private abortController: AbortController | null = null;
+  private intentionalClose = false;
 
   private readonly onTestStartEmitter = new vscode.EventEmitter<{ testId: number; runId: number }>();
   private readonly onTestProgressEmitter = new vscode.EventEmitter<TestProgressPayload>();
@@ -23,19 +28,28 @@ export class LastestWebSocket {
 
   private serverUrl: string = '';
   private apiToken: string = '';
+  private currentEvent: string = '';
 
   connect(serverUrl: string, apiToken?: string) {
     this.serverUrl = serverUrl;
     this.apiToken = apiToken || '';
+    this.intentionalClose = false;
     this.doConnect();
   }
 
+  private log(line: string) {
+    getOutputChannel().appendLine(`[connect] ${line}`);
+  }
+
   private async doConnect() {
-    // Close existing connection
     this.closeConnection();
+    this.intentionalClose = false;
 
     const sseUrl = `${this.serverUrl}/api/v1/events`;
     this.abortController = new AbortController();
+    this.log(`dialing ${sseUrl}`);
+
+    let streamEndedCleanly = false;
 
     try {
       const headers: Record<string, string> = {
@@ -52,14 +66,15 @@ export class LastestWebSocket {
       });
 
       if (!response.ok) {
-        throw new Error(`SSE connection failed: ${response.status}`);
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
 
       if (!response.body) {
-        throw new Error('No response body');
+        throw new Error('empty response body');
       }
 
       console.log('Lastest SSE connected');
+      this.log('connected');
       this.onConnectionChangeEmitter.fire(true);
 
       if (this.reconnectTimer) {
@@ -67,39 +82,77 @@ export class LastestWebSocket {
         this.reconnectTimer = null;
       }
 
-      // Read the stream
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          streamEndedCleanly = true;
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Process complete messages
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              this.handleMessage(data as WSMessage);
-            } catch {
-              // Ignore parse errors
-            }
-          }
+          this.parseSseLine(line);
         }
       }
     } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        return; // Intentional disconnect
+      if ((err as Error).name === 'AbortError' || this.intentionalClose) {
+        return;
       }
-      console.error('Lastest SSE error:', e);
+      const msg = (err as Error).message || String(err);
+      console.error('Lastest SSE error:', err);
+      this.log(`disconnected: ${msg}`);
       this.onConnectionChangeEmitter.fire(false);
       this.scheduleReconnect();
+      return;
+    }
+
+    if (streamEndedCleanly && !this.intentionalClose) {
+      this.log('stream closed by server');
+      this.onConnectionChangeEmitter.fire(false);
+      this.scheduleReconnect();
+    }
+  }
+
+  private parseSseLine(line: string) {
+    if (line === '') {
+      this.currentEvent = '';
+      return;
+    }
+    if (line.startsWith(':')) {
+      // comment / keepalive — ignore
+      return;
+    }
+    if (line.startsWith('event: ')) {
+      this.currentEvent = line.slice(7).trim();
+      return;
+    }
+    if (line.startsWith('data: ')) {
+      const raw = line.slice(6);
+      if (this.currentEvent === 'reconnect') {
+        let reason = 'server-initiated';
+        try {
+          const parsed = JSON.parse(raw) as { reason?: string };
+          if (parsed?.reason) reason = parsed.reason;
+        } catch {
+          // keep default reason
+        }
+        this.log(`server requested reconnect (${reason})`);
+        return;
+      }
+      try {
+        const data = JSON.parse(raw);
+        this.handleMessage(data as WSMessage);
+      } catch {
+        // ignore parse errors
+      }
     }
   }
 
@@ -112,6 +165,7 @@ export class LastestWebSocket {
 
   private scheduleReconnect() {
     if (!this.reconnectTimer && this.serverUrl) {
+      this.log(`retrying in ${Math.round(this.reconnectInterval / 1000)}s`);
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         this.doConnect();
@@ -137,6 +191,7 @@ export class LastestWebSocket {
   }
 
   disconnect() {
+    this.intentionalClose = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

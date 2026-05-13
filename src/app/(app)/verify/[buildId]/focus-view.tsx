@@ -982,8 +982,9 @@ function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boo
             status === 'unchanged' ? 'done' :
             status === 'changed' ? 'regression' :
             status === 'baseline_only' || status === 'current_only' ? 'missed' :
+            status === 'baseline_establishing' ? 'done' :
             'unknown'
-          }`} style={{ fontSize: 9 }}>{status.replace('_', ' ')}</span>
+          }`} style={{ fontSize: 9 }}>{status.replace(/_/g, ' ')}</span>
         )}
         {!loading && baselineText !== null && (
           <span className="label" style={{ fontSize: 9 }}>baseline · {baselineText.length} chars</span>

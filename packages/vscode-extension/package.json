@@ -2,7 +2,7 @@
   "name": "lastest-vscode",
   "displayName": "Lastest Visual Testing",
   "description": "Visual regression testing integration for Lastest — record, run, and review screenshot diffs without leaving VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "lastest",
   "license": "MIT",
   "icon": "icon.png",
@@ -47,7 +47,7 @@
         {
           "id": "lastest",
           "title": "Lastest",
-          "icon": "$(beaker)"
+          "icon": "media/lastest-delta.svg"
         }
       ]
     },

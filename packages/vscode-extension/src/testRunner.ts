@@ -3,6 +3,7 @@ import type { LastestApi } from './api';
 import type { LastestWebSocket } from './websocket';
 import type { TestTreeDataProvider } from './testTree';
 import type { TestCompletePayload } from './types';
+import { getOutputChannel } from './output';
 
 export class TestRunner {
   private outputChannel: vscode.OutputChannel;
@@ -13,7 +14,7 @@ export class TestRunner {
     private readonly ws: LastestWebSocket,
     private readonly treeProvider: TestTreeDataProvider
   ) {
-    this.outputChannel = vscode.window.createOutputChannel('Lastest');
+    this.outputChannel = getOutputChannel();
 
     // Listen for test completion
     this.ws.onTestStart(({ testId }) => {
@@ -137,6 +138,6 @@ export class TestRunner {
   }
 
   dispose(): void {
-    this.outputChannel.dispose();
+    // Shared output channel is owned by output.ts; nothing to dispose here.
   }
 }

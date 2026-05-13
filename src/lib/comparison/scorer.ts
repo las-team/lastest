@@ -81,6 +81,16 @@ export function scoreMultiLayer({
     });
   }
 
+  // First-run silent baseline-establish. With no prior TestResult, every
+  // non-visual diff below would falsely report all captured values as "new".
+  // Skip them; the current TestResult becomes the implicit baseline for the
+  // next build via getPreviousTestResultForTest. Visual already ran above —
+  // its baseline lifecycle is independent (getBranchBaseline / auto-approve).
+  if (baseline === null) {
+    const verdict: StepVerdict = evidence.some(e => e.signal === 'medium') ? 'yellow' : 'green';
+    return { verdict, evidence, layers };
+  }
+
   // ── Console (HIGH SIGNAL) ────────────────────────────────────────────
   const consoleDiff = computeConsoleDiff(
     baseline?.consoleErrors ?? [],
@@ -105,7 +115,11 @@ export function scoreMultiLayer({
     }
   }
 
-  // ── Network (HIGH SIGNAL on new 4xx/5xx) ─────────────────────────────
+  // ── Network (HIGH SIGNAL on new 4xx/5xx; non-error churn is info-only) ─
+  // `newErrorCount` already counts both new 4xx/5xx and error-class status
+  // flips (see network-diff.ts). Added/removed of non-error requests stays
+  // surfaced in `layers.network` for the verify UI but is demoted to 'low'
+  // so verdict mapping (high|medium → red|yellow) ignores it by default.
   const networkDiff = computeNetworkDiff(
     baseline?.networkRequests ?? [],
     current.networkRequests ?? [],
@@ -117,12 +131,6 @@ export function scoreMultiLayer({
       evidence.push({
         layer: 'network',
         signal: 'high',
-        summary: summarizeNetworkDiff(networkDiff),
-      });
-    } else if (networkDiff.added > 0 || networkDiff.removed > 0) {
-      evidence.push({
-        layer: 'network',
-        signal: 'medium',
         summary: summarizeNetworkDiff(networkDiff),
       });
     } else {

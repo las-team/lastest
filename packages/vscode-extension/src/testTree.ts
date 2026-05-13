@@ -188,9 +188,14 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
         const areas = await this.api.getFunctionalAreas(repo.id);
         const tests = await this.api.getTests(repo.id);
 
+        // Skip repos that have no tests at all — these are noise in the sidebar.
+        if (tests.length === 0) continue;
+
         for (const area of areas) {
           const areaNode = new FunctionalAreaNode(area, repo.id);
           const areaTests = tests.filter(t => t.functionalAreaId === area.id);
+
+          if (areaTests.length === 0) continue;
 
           areaNode.children = areaTests.map(t => {
             const testNode = new TestNode(t);
@@ -201,6 +206,8 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
           areaNode.updateStatus();
           repoNode.children.push(areaNode);
         }
+
+        if (repoNode.children.length === 0) continue;
 
         this.repositories.push(repoNode);
       }
