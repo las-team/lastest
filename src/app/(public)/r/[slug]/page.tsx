@@ -1618,7 +1618,7 @@ function DiffSlider({
         )}
       </header>
       <div
-        className="share-slider-stage relative rounded-md border bg-muted overflow-hidden touch-none select-none data-[active=true]:cursor-ew-resize"
+        className="share-slider-stage relative grid grid-cols-1 grid-rows-1 rounded-md border bg-muted overflow-hidden touch-none select-none data-[active=true]:cursor-ew-resize"
         tabIndex={0}
         role="slider"
         aria-label="Compare before and after"
@@ -1626,23 +1626,36 @@ function DiffSlider({
         aria-valuemax={100}
         aria-valuenow={50}
       >
-        {/* Baseline fills the frame and sets height. */}
+        {/* All three images occupy the same grid cell so the stage sizes
+            itself to the tallest natural height. Previously the baseline
+            set the frame and current/diff were `object-cover`-cropped to
+            it — when the page grew taller between baseline and current
+            (or the test step now points at a different page), the bottom
+            of the current screenshot and its diff were silently hidden.
+            Grid stacking lets each image render at natural aspect, top-
+            aligned, with the shorter one leaving frame-bg below. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={baseline}
           alt="Before"
           draggable={false}
-          className="block w-full h-auto select-none pointer-events-none"
+          className="col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none"
         />
-        {/* Current overlays baseline, revealed from the left edge to --pct.
+        {/* Current revealed on the RIGHT side of the divider via clipPath
+            — `inset(0 0 0 --pct)` clips the left --pct off, so baseline
+            ("Before") shows on the left and current ("After") on the right,
+            matching the build-page slider convention. The previous
+            `inset(0 calc(100% - --pct) 0 0)` clipped the right side and
+            revealed current on the LEFT, swapping it with the "Before"
+            label and inverting baseline/current visually.
             Hidden while the stage is idle (data-active=false). */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={current}
           alt="After"
           draggable={false}
-          className="share-slider-current absolute inset-0 w-full h-full object-cover object-top select-none pointer-events-none transition-opacity duration-150"
-          style={{ clipPath: 'inset(0 calc(100% - var(--pct, 50%)) 0 0)' }}
+          className="share-slider-current col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
+          style={{ clipPath: 'inset(0 0 0 var(--pct, 50%))' }}
         />
         {/* Diff heat-map overlay — the idle view. Hidden once the slider
             becomes active. */}
@@ -1652,7 +1665,7 @@ function DiffSlider({
             src={diff}
             alt="Diff"
             draggable={false}
-            className="share-slider-diff absolute inset-0 w-full h-full object-cover object-top select-none pointer-events-none transition-opacity duration-150"
+            className="share-slider-diff col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
           />
         )}
         {/* Divider + drag handle — only visible while active. */}
