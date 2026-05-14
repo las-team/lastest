@@ -41,7 +41,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest',
-    version: '0.3.4',
+    version: '0.3.5',
   });
 
   // ===== Health & Status =====
@@ -188,6 +188,78 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_get_playwright_settings ---
+  server.tool(
+    'lastest_get_playwright_settings',
+    'Get the repo-level Playwright settings (browser, viewport, timeouts, error modes, stabilization, parallelism caps, etc.). Falls back to the global row + built-in defaults when no per-repo row exists.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const settings = (await client.getPlaywrightSettings(params.repositoryId as string)) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `Playwright settings for repo ${params.repositoryId} (browser=${settings.browser}, viewport=${settings.viewportWidth}x${settings.viewportHeight}, parallel=${settings.maxParallelTests})`,
+        details: settings,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_update_playwright_settings ---
+  server.tool(
+    'lastest_update_playwright_settings',
+    'Upsert repo-level Playwright settings. Pass any subset of fields — unknown keys are rejected, unspecified ones stay at their current value. Use this when the demo skill needs to retarget a repo at a different browser, viewport, or error policy without touching every test individually.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+      browser: z.enum(['chromium', 'firefox', 'webkit']).optional().describe('Default browser for tests in this repo'),
+      headlessMode: z.enum(['true', 'false', 'shell']).optional().describe('Headless mode'),
+      viewportWidth: z.number().positive().optional().describe('Default viewport width'),
+      viewportHeight: z.number().positive().optional().describe('Default viewport height'),
+      lockViewportToRecording: z.boolean().optional(),
+      navigationTimeout: z.number().nonnegative().optional().describe('Default navigation timeout in ms'),
+      actionTimeout: z.number().nonnegative().optional().describe('Default action timeout in ms'),
+      selectorTimeoutMs: z.number().nonnegative().optional().describe('Per-candidate waitFor budget for locateWithFallback'),
+      screenshotDelay: z.number().nonnegative().optional(),
+      maxParallelTests: z.number().nonnegative().optional().describe('Max tests to run in parallel'),
+      autoRetryCount: z.number().nonnegative().optional().describe('0-3: how many times to retry a failing test'),
+      cursorFPS: z.number().nonnegative().optional(),
+      cursorPlaybackSpeed: z.number().nonnegative().optional(),
+      networkErrorMode: z.enum(['fail', 'warn', 'ignore']).optional(),
+      consoleErrorMode: z.enum(['fail', 'warn', 'ignore']).optional(),
+      ignoreExternalNetworkErrors: z.boolean().optional(),
+      acceptAnyCertificate: z.boolean().optional().describe('Ignore HTTPS/SSL cert errors'),
+      grantClipboardAccess: z.boolean().optional(),
+      acceptDownloads: z.boolean().optional(),
+      enableNetworkInterception: z.boolean().optional(),
+      enableDomDiff: z.boolean().optional(),
+      enableA11y: z.boolean().optional().describe('Enable WCAG accessibility checks with axe-core'),
+      enableVideoRecording: z.boolean().optional().describe('Record test runs as WebM video by default'),
+      pointerGestures: z.boolean().optional(),
+      freezeAnimations: z.boolean().optional(),
+      customAttributeName: z.string().nullable().optional().describe('App-specific test-id attribute (e.g. data-automation-id). Pass null to clear.'),
+      browsers: z.array(z.enum(['chromium', 'firefox', 'webkit'])).optional().describe('Browsers to use for build execution'),
+      enabledRecordingEngines: z.array(z.enum(['lastest', 'playwright-inspector'])).optional(),
+      defaultRecordingEngine: z.enum(['lastest', 'playwright-inspector']).optional(),
+      stabilization: z.record(z.unknown()).nullable().optional().describe('StabilizationSettings object (waitForNetworkIdle, freezeTimestamps, mask patterns, etc.). Pass null to clear.'),
+      selectorPriority: z.array(z.unknown()).optional().describe('SelectorConfig[] ordering — leave unset to use the global default.'),
+    },
+    withActivityReporting(client, 'lastest_update_playwright_settings', async (params) => {
+      const { repositoryId, ...rest } = params;
+      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+      if (Object.keys(cleanUpdates).length === 0) {
+        throw new Error('No fields to update');
+      }
+      const result = (await client.updatePlaywrightSettings(repositoryId as string, cleanUpdates)) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'updated',
+        summary: `Playwright settings for repo ${repositoryId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // ===== Functional Areas =====
 
   // --- lastest_list_areas ---
@@ -325,21 +397,53 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_update_test ---
+  const setupStepSchema = z.object({
+    stepType: z.enum(['test', 'script', 'storage_state']),
+    testId: z.string().nullable().optional(),
+    scriptId: z.string().nullable().optional(),
+    storageStateId: z.string().nullable().optional(),
+  });
+  const overridesSchema = z.object({
+    skippedDefaultStepIds: z.array(z.string()).optional(),
+    extraSteps: z.array(setupStepSchema).optional(),
+  });
+  const playwrightOverridesSchema = z.object({
+    browser: z.enum(['chromium', 'firefox', 'webkit']).optional(),
+    navigationTimeout: z.number().nonnegative().optional(),
+    actionTimeout: z.number().nonnegative().optional(),
+    screenshotDelay: z.number().nonnegative().optional(),
+    networkErrorMode: z.enum(['fail', 'warn', 'ignore']).optional(),
+    consoleErrorMode: z.enum(['fail', 'warn', 'ignore']).optional(),
+    acceptAnyCertificate: z.boolean().optional(),
+    maxParallelTests: z.number().nonnegative().optional(),
+    baseUrl: z.string().optional(),
+    cursorPlaybackSpeed: z.number().nonnegative().optional(),
+    selectorTimeoutMs: z.number().nonnegative().optional(),
+  });
   server.tool(
     'lastest_update_test',
-    'Update a test\'s name, code, URL, or functional area assignment.',
+    'Update a test\'s name, code, URL, functional area, setup wiring, or runtime overrides. Pass `setupTestId` to point this test at another test for setup (the most common pattern when two tests share a login), or `setupScriptId` to point at a saved setup script — these two are mutually exclusive. Use `setupOverrides` / `teardownOverrides` to skip specific default steps or inject extra ones (test / script / storage-state) just for this test. `playwrightOverrides` lets the test self-configure runtime knobs (browser, timeouts, error modes, baseUrl) without touching the repo-wide settings. `diffOverrides` and `stabilizationOverrides` accept partial blocks that fall through to repo defaults. Pass `null` for any override block to clear it.',
     {
       testId: z.string().describe('Test ID to update'),
       name: z.string().optional().describe('New test name'),
       code: z.string().optional().describe('New Playwright test code'),
       targetUrl: z.string().optional().describe('New target URL'),
       functionalAreaId: z.string().optional().describe('New functional area ID'),
+      quarantined: z.boolean().optional().describe('Quarantine the test so it runs but does not block builds.'),
+      executionMode: z.enum(['procedural', 'agent']).optional().describe('Execution mode'),
+      viewportOverride: z.object({ width: z.number().positive(), height: z.number().positive() }).nullable().optional().describe('Override the recording viewport for this test. Pass null to clear.'),
+      playwrightOverrides: playwrightOverridesSchema.nullable().optional().describe('Per-test Playwright runtime overrides. Unset fields fall back to the repo playwright settings, then the global defaults. Pass null to clear.'),
+      diffOverrides: z.record(z.unknown()).nullable().optional().describe('Per-test diff overrides (thresholds, anti-aliasing, diff engine, text-region tuning). Pass null to clear.'),
+      stabilizationOverrides: z.record(z.unknown()).nullable().optional().describe('Per-test stabilization overrides (wait strategies, content freezing, etc.). Pass null to clear.'),
+      setupTestId: z.string().nullable().optional().describe('Use another test as setup (takes precedence over setupScriptId). Pass null/empty to clear.'),
+      setupScriptId: z.string().nullable().optional().describe('Use a saved setup script as setup. Pass null/empty to clear. Mutually exclusive with setupTestId.'),
+      setupOverrides: overridesSchema.nullable().optional().describe('Per-test setup override block: `skippedDefaultStepIds` lists default_setup_steps to skip, `extraSteps` lists test/script/storage_state ids to inject after defaults. Pass null to clear.'),
+      teardownOverrides: overridesSchema.nullable().optional().describe('Same shape as setupOverrides, applied to teardown. Pass null to clear.'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const { testId, ...updates } = params;
-      // Filter out undefined values
-      const cleanUpdates = Object.fromEntries(Object.entries(updates).filter(([, v]) => v !== undefined));
-      const result = (await client.updateTest(testId, cleanUpdates)) as Record<string, unknown>;
+      const { testId, ...rest } = params;
+      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+      const result = (await client.updateTest(testId as string, cleanUpdates as Parameters<typeof client.updateTest>[1])) as Record<string, unknown>;
       const response: ToolResponse = {
         status: 'updated',
         summary: `Test ${testId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
@@ -517,6 +621,68 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_list_build_shares ---
+  server.tool(
+    'lastest_list_build_shares',
+    'List public shares anchored on a build (includes revoked ones — check `status`). Use to find an existing share before publishing a duplicate, or to grab a slug for revoke.',
+    {
+      buildId: z.string().describe('Build ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const shares = (await client.listBuildShares(params.buildId as string)) as Array<Record<string, unknown>>;
+      const active = shares.filter(s => s.status === 'public');
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `${shares.length} share(s) for build ${params.buildId} (${active.length} active)`,
+        details: {
+          count: shares.length,
+          shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, testId: s.testId, createdAt: s.createdAt })),
+        },
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_list_test_shares ---
+  server.tool(
+    'lastest_list_test_shares',
+    'List public shares anchored on a single test.',
+    {
+      testId: z.string().describe('Test ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const shares = (await client.listTestShares(params.testId as string)) as Array<Record<string, unknown>>;
+      const active = shares.filter(s => s.status === 'public');
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `${shares.length} share(s) for test ${params.testId} (${active.length} active)`,
+        details: {
+          count: shares.length,
+          shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, buildId: s.buildId, createdAt: s.createdAt })),
+        },
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_revoke_share ---
+  server.tool(
+    'lastest_revoke_share',
+    'Revoke a public share by its share ID. The `/r/<slug>` URL stops resolving immediately. Find share IDs via lastest_list_build_shares or lastest_list_test_shares.',
+    {
+      shareId: z.string().describe('Share ID to revoke (NOT the slug — call lastest_list_build_shares to find it)'),
+    },
+    withActivityReporting(client, 'lastest_revoke_share', async (params) => {
+      const result = await client.revokeShare(params.shareId as string);
+      const response: ToolResponse = {
+        status: 'revoked',
+        summary: `Share ${params.shareId} revoked. The /r/<slug> URL is now dead.`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // ===== Composite QA Workflows =====
 
   // --- lastest_review_build ---
@@ -650,17 +816,21 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_run_tests ---
   server.tool(
     'lastest_run_tests',
-    'Trigger a test build and return structured results. Can run all tests in a repo or specific test IDs.',
+    'Trigger a test build and return structured results. Can run all tests in a repo, all tests inside one functional area, or specific test IDs. Pass `forceVideoRecording: true` when you intend to publish a share that should include the video player (the share page renders the embedded clip only when the build has video).',
     {
       repositoryId: z.string().optional().describe('Repository ID to run tests for. If omitted, uses the default repo.'),
-      testIds: z.array(z.string()).optional().describe('Specific test IDs to run. If omitted, runs all tests.'),
+      testIds: z.array(z.string()).optional().describe('Specific test IDs to run. Takes precedence over functionalAreaId.'),
+      functionalAreaId: z.string().optional().describe('Run every test inside this functional area (ignored if testIds is set).'),
       gitBranch: z.string().optional().describe('Git branch override'),
+      forceVideoRecording: z.boolean().optional().describe('Force-enable per-test video recording for this build. Required for demo-style shares that should render the video player. Disabled by default to keep build storage small.'),
     },
     withActivityReporting(client, 'lastest_run_tests', async (params) => {
       const result = await client.createBuild({
         repositoryId: params.repositoryId as string | undefined,
         testIds: params.testIds as string[] | undefined,
+        functionalAreaId: params.functionalAreaId as string | undefined,
         gitBranch: params.gitBranch as string | undefined,
+        forceVideoRecording: params.forceVideoRecording as boolean | undefined,
         triggerType: 'manual',
       });
 
@@ -1052,6 +1222,198 @@ export function createServer(client: LastestClient): McpServer {
         details: result,
       };
 
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== Storage States (saved Playwright auth blobs) =====
+
+  // --- lastest_list_storage_states ---
+  server.tool(
+    'lastest_list_storage_states',
+    'List storage states (saved Playwright `storageState()` blobs — cookies + localStorage) for a repository. Returns metadata only; the raw JSON is omitted because it contains live auth tokens. Use these IDs when wiring `setupOverrides.extraSteps` on a test via lastest_update_test.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const states = (await client.listStorageStates(params.repositoryId as string)) as Array<Record<string, unknown>>;
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `${states.length} storage state(s)`,
+        details: {
+          count: states.length,
+          storageStates: states.map(s => ({
+            id: s.id,
+            name: s.name,
+            cookieCount: s.cookieCount,
+            originCount: s.originCount,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+          })),
+        },
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_create_storage_state ---
+  server.tool(
+    'lastest_create_storage_state',
+    'Create a new storage state for a repo from a Playwright `storageState()` JSON string. The JSON should be the output of `await context.storageState()` — an object with `cookies` and `origins` arrays. Use this to share a logged-in session across tests instead of re-logging in. Treat the raw JSON like a password: only call this with tokens you intend Lastest to use.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+      name: z.string().describe('Display name (e.g. "Admin login (staging)")'),
+      storageStateJson: z.string().describe('Playwright storageState JSON string — `{ "cookies": [...], "origins": [...] }`'),
+    },
+    withActivityReporting(client, 'lastest_create_storage_state', async (params) => {
+      const result = (await client.createStorageState(params.repositoryId as string, {
+        name: params.name as string,
+        storageStateJson: params.storageStateJson as string,
+      })) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'created',
+        summary: `Storage state "${result.name}" created (ID: ${result.id}, cookies: ${result.cookieCount ?? 0}, origins: ${result.originCount ?? 0})`,
+        actionRequired: [
+          'Wire it into a test by calling lastest_update_test with setupOverrides.extraSteps = [{ stepType: "storage_state", storageStateId: "<this id>" }]',
+        ],
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_delete_storage_state ---
+  server.tool(
+    'lastest_delete_storage_state',
+    'Delete a storage state. Tests referencing it via setupOverrides.extraSteps will lose that step — review usage before deleting.',
+    {
+      storageStateId: z.string().describe('Storage state ID to delete'),
+    },
+    withActivityReporting(client, 'lastest_delete_storage_state', async (params) => {
+      const result = await client.deleteStorageState(params.storageStateId as string);
+      const response: ToolResponse = {
+        status: 'deleted',
+        summary: `Storage state ${params.storageStateId} deleted`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== Setup Scripts (reusable Playwright/API setup blocks) =====
+
+  // --- lastest_list_setup_scripts ---
+  server.tool(
+    'lastest_list_setup_scripts',
+    'List setup scripts for a repository. Each entry includes id, name, type (`playwright` or `api`), and code so you can pick one to attach to a test via setupScriptId.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const scripts = (await client.listSetupScripts(params.repositoryId as string)) as Array<Record<string, unknown>>;
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `${scripts.length} setup script(s)`,
+        details: {
+          count: scripts.length,
+          setupScripts: scripts.map(s => ({
+            id: s.id,
+            name: s.name,
+            type: s.type,
+            description: s.description,
+          })),
+        },
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_get_setup_script ---
+  server.tool(
+    'lastest_get_setup_script',
+    'Get a setup script including its code.',
+    {
+      setupScriptId: z.string().describe('Setup script ID'),
+    },
+    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const script = (await client.getSetupScript(params.setupScriptId as string)) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: `Setup script: ${script.name}`,
+        details: script,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    },
+  );
+
+  // --- lastest_create_setup_script ---
+  server.tool(
+    'lastest_create_setup_script',
+    'Create a reusable setup script for a repository. Two types: `playwright` (async function with page+context) and `api` (HTTP seeding). Attach the returned ID to a test via lastest_update_test with `setupScriptId`.',
+    {
+      repositoryId: z.string().describe('Repository ID'),
+      name: z.string().describe('Script name'),
+      type: z.enum(['playwright', 'api']).describe('Script type'),
+      code: z.string().describe('Script source code'),
+      description: z.string().optional().describe('Optional description'),
+    },
+    withActivityReporting(client, 'lastest_create_setup_script', async (params) => {
+      const result = (await client.createSetupScript(params.repositoryId as string, {
+        name: params.name as string,
+        type: params.type as 'playwright' | 'api',
+        code: params.code as string,
+        description: params.description as string | undefined,
+      })) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'created',
+        summary: `Setup script "${result.name}" created (ID: ${result.id}, type: ${result.type})`,
+        actionRequired: [
+          'Attach to a test with lastest_update_test setting setupScriptId to this ID',
+        ],
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_update_setup_script ---
+  server.tool(
+    'lastest_update_setup_script',
+    'Update a setup script\'s name, type, code, or description.',
+    {
+      setupScriptId: z.string().describe('Setup script ID to update'),
+      name: z.string().optional().describe('New name'),
+      type: z.enum(['playwright', 'api']).optional().describe('New type'),
+      code: z.string().optional().describe('New code'),
+      description: z.string().optional().describe('New description'),
+    },
+    withActivityReporting(client, 'lastest_update_setup_script', async (params) => {
+      const { setupScriptId, ...rest } = params;
+      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+      const result = (await client.updateSetupScript(setupScriptId as string, cleanUpdates as Parameters<typeof client.updateSetupScript>[1])) as Record<string, unknown>;
+      const response: ToolResponse = {
+        status: 'updated',
+        summary: `Setup script ${setupScriptId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // --- lastest_delete_setup_script ---
+  server.tool(
+    'lastest_delete_setup_script',
+    'Delete a setup script. Refused with 409 if any test still references it via setupScriptId — the response lists the blocking tests.',
+    {
+      setupScriptId: z.string().describe('Setup script ID to delete'),
+    },
+    withActivityReporting(client, 'lastest_delete_setup_script', async (params) => {
+      const result = await client.deleteSetupScript(params.setupScriptId as string);
+      const response: ToolResponse = {
+        status: 'deleted',
+        summary: `Setup script ${params.setupScriptId} deleted`,
+        details: result,
+      };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );
