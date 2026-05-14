@@ -1191,7 +1191,7 @@ function ImagePanel({ label, src, small }: { label: string; src: string | null |
       </span>
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={label} style={{ display: 'block', width: '100%', maxHeight: small ? 240 : 600, objectFit: 'contain', background: 'white' }} />
+        <img src={src} alt={label} style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }} />
       ) : (
         <div style={{ width: '100%', height: small ? 120 : 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }} className="label">
           missing

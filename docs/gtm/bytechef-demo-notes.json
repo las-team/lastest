@@ -1,0 +1,77 @@
+{
+  "buildId": "12532749-3081-4cf8-9ff6-a21c4c21bf5e",
+  "testId": "2685bf38-8756-4a55-8ca2-ed9b57fa748a",
+  "repositoryId": "c9542463-059f-497d-93a5-95735c219658",
+  "target": {
+    "name": "ByteChef",
+    "site": "https://www.bytechef.io",
+    "tagline": "Open-source automation platform and iPaaS, indie alternative to Zapier and n8n."
+  },
+  "uxSummary": "ByteChef ships two distinct authenticated products under a shared sidebar: Automation (consumer-facing workflow runs) and Embedded (integration-as-a-service for developer customers). The two are visually identical, differentiated only by the URL prefix; that bet on shared chrome trades a small amount of orientation cost for a much smaller surface to maintain. The app uses a light theme with a single blue accent on primary CTAs and active nav items. Sidebars on /automation/* and /embedded/* both render icons-only by default (5-6 entries each), with a workspace switcher labeled DEVELOPMENT in the top-right. Empty states are tight: a single icon, one-line description, and a single primary CTA per page; no marketing copy bleeding into the product. The two-step signup form (email then password) plus the Spring/JHipster activation gate signal an enterprise-leaning architecture, but the product itself stays approachable.",
+  "highlights": [
+    {
+      "label": "Two products, one sidebar",
+      "note": "Automation and Embedded share visual chrome but cover completely different jobs: end-user workflow execution vs SaaS integration-as-a-service. Most products would split these into separate apps; ByteChef bets that a workspace switcher is enough orientation. The bet largely pays off, but the lack of a mode label in the active workspace UI means a new user can sit on /embedded/integrations and not realize they're not in Automation."
+    },
+    {
+      "label": "Empty states are single-CTA",
+      "note": "/automation/projects, /automation/deployments, /embedded/integrations, /embedded/configurations: every empty state has exactly one primary button ('Create Project', 'Create Deployment', etc). No upsell modal, no documentation card, no tutorial wizard. Confident product."
+    },
+    {
+      "label": "Workspace switcher in chrome",
+      "note": "The DEVELOPMENT badge in the top-right doubles as the environment selector for the user's workflows. Putting it inline rather than burying it in Settings means switching envs is one click from any page, including the empty states."
+    },
+    {
+      "label": "Spring/JHipster XSRF discipline",
+      "note": "The /api/register endpoint correctly requires an X-XSRF-TOKEN cookie-to-header copy. Most indie SaaS skip this on signup. Conservative, defensive backend posture."
+    }
+  ],
+  "frictionPoints": [
+    {
+      "label": "Email-activation gate blocks first-time login",
+      "note": "After signup, the user is bounced to /login and login returns 401 until they click an activation link in the verification email. The activation step is necessary but the resulting redirect dance, signup to activation email to back-to-login to finally /automation/projects, is four screens for one user action. Combining signup plus automatic activation for verified-by-domain emails would shorten it significantly."
+    },
+    {
+      "label": "Mode label missing on workspace chrome",
+      "note": "The workspace switcher in the top-right says DEVELOPMENT on both /automation/* and /embedded/* routes. The two sections render with different sidebar icons but no top-bar text saying Automation vs Embedded, so a returning user who deep-links into a page may not realize which product mode they're in until they look at the URL."
+    },
+    {
+      "label": "Console-level 401 noise on Embedded pages",
+      "note": "Every page under /embedded/* fires a background call to a project-scoped endpoint that returns 401 in the user's console even when the page itself renders fine. Most users won't notice; testers and prospective developer-customers will."
+    },
+    {
+      "label": "Aria-label drift on submit button",
+      "note": "The login submit button has aria-label='log in button' rather than the accessible name 'Log in'. Screen readers will announce 'log in button button'. The test code had to query by aria-label exactly to find it reliably."
+    }
+  ],
+  "testingStruggles": [
+    {
+      "label": "Two-step signup form",
+      "note": "Email field appears first on /register; only after submitting it does the password field render. Test needed an explicit 'wait for password input to appear' step between filling the two fields, otherwise the password fill races the React mount."
+    },
+    {
+      "label": "API-direct fallback for XSRF",
+      "note": "The UI signup form was occasionally not attaching the XSRF header on submit. Test added an API-direct register fallback that fetches /api/register with the cookie-to-header XSRF dance, after the UI form attempt. This keeps the test idempotent across UI flakes."
+    },
+    {
+      "label": "Post-login render race",
+      "note": "Post-login navigation lands on /automation/projects but the SPA's networkidle resolves before React hydrates the page header. Without an explicit 'wait for h1 plus 800ms' buffer, the first authed screenshot was a loading skeleton. Same SPA hydration pattern that the Featurely test had to solve."
+    }
+  ],
+  "skippedRoutes": [
+    {
+      "path": "/automation/workflows/new and other Create CTAs",
+      "reason": "Would trigger long-running workflow operations on the user's account. Walked the parent route only."
+    },
+    {
+      "path": "/embedded/app-events, /embedded/executions",
+      "reason": "Empty state similar to /embedded/integrations. Skipped to keep walk short."
+    }
+  ],
+  "buildSummary": {
+    "scenariosCaptured": 15,
+    "publicRoutes": ["www.bytechef.io/", "/pricing"],
+    "authenticatedRoutes": ["app.bytechef.io/register (email step)", "/register (password step)", "/login", "/automation/projects", "/automation/deployments", "/automation/executions", "/automation/connections", "/automation/chats", "/embedded/integrations", "/embedded/configurations", "/embedded/connected-users"],
+    "demoIdentity": "viktor+bytechef.202605131108@lastest.cloud (activated manually via verification email)"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "buildId": "88fa6352-8c3d-4b02-b24d-34cc5c4f147b",
+  "testId": "b06b0132-c71e-4b2c-a223-17a66d6f29af",
+  "repositoryId": "96be2d84-58d4-45a9-b493-c6a661fbf7ab",
+  "target": {
+    "name": "SchemaGen",
+    "site": "https://schemagen.io",
+    "tagline": "Schema.org structured data generator plus site audit tool for SEO."
+  },
+  "uxSummary": "SchemaGen is a schema.org / structured data generator with an audit tool layered on top, targeted at agency-adjacent SEO buyers (the sign-in placeholder is 'name@agency.com', not 'you@example.com'). The brand is teal/emerald on dark theme, with a stylized neural-network logomark. Public surface is dense: dedicated routes for Audit, Pricing, Guide, Generator/<schema-type>, Contact, and Login, plus a Saved/Dashboard area gated behind auth. The /generator route family is where the product's depth lives, with a route per schema type (HowToItem walked here); each renders a form-first UI for structured data construction. Authentication is magic-link only (Email Magic Link plus Continue with Google), which is a deliberate trust-building choice for an SEO tool but a structural blocker for programmatic baselining of any authenticated page.",
+  "highlights": [
+    {
+      "label": "Audit-as-acquisition surface",
+      "note": "The top-right CTA on the marketing site is 'Audit My Site', not 'Sign Up'. Lets unverified visitors get value before any account creation, then converts them into Sign In via the Saved navigation entry once they want to keep results. Strong product-led top-of-funnel."
+    },
+    {
+      "label": "Generator route per schema type",
+      "note": "/generator/howtoitem renders a HowToItem-specific structured data form; the route shape implies the same per-type forms exist for Article, Product, FAQPage, and others. Discoverable URL structure that doubles as long-tail SEO landing pages for the product itself."
+    },
+    {
+      "label": "Sign-in copy targets the right buyer",
+      "note": "Email placeholder reads 'name@agency.com' rather than 'you@example.com'. Small detail that signals 'we know who buys this'; SEO agencies are the obvious primary audience."
+    },
+    {
+      "label": "Free-to-start under the heading",
+      "note": "'Free to start, no credit card required' sits in the sign-in subheading, not buried on /pricing. Lowers the perceived friction of clicking the Continue-with-Google button."
+    }
+  ],
+  "frictionPoints": [
+    {
+      "label": "Magic-link-only auth blocks automation",
+      "note": "The Sign In / Sign Up flow has only two paths: Google OAuth and Email Magic Link. There is no password-based registration. Programmatic baselining of the authenticated /dashboard, /audit-results, /generator/<type> surfaces is therefore impossible without manually clicking a verification link in the inbox. For human users this is excellent (no password to forget); for partner integrations and automated tooling, it's a hard wall."
+    },
+    {
+      "label": "Single accent color works against route hierarchy",
+      "note": "Every clickable element across the site uses the same teal accent: top nav, hero CTAs, footer links, sign-in button. Without secondary/tertiary tonal variation, the eye flattens the visual hierarchy and the primary action on each page reads as less primary than it should."
+    }
+  ],
+  "testingStruggles": [
+    {
+      "label": "No password field exists on the sign-in form",
+      "note": "First version of the test was written assuming a typical email plus password registration. The actual form has only an email input plus an 'Email Magic Link' button; the test's password fill resolves to no element and submit click times out. Test was rewritten to public walkthrough only, with a probe scenario on /login as the final capture."
+    },
+    {
+      "label": "Sign-up toggle on /login is absent",
+      "note": "Some Supabase-style auth UIs offer a Sign-in to Sign-up toggle. SchemaGen does not; /login is sign-in only and there is no /register route. The test's earlier attempt to toggle to a sign-up form silently failed."
+    }
+  ],
+  "skippedRoutes": [
+    {
+      "path": "/dashboard, /app, /audit-results, /generator/howtoitem (post-fill state)",
+      "reason": "All gated by magic-link auth. Without an automated way to click the verification link, the authenticated surface cannot be captured from a clean runner identity."
+    },
+    {
+      "path": "Continue with Google",
+      "reason": "OAuth flow redirects to accounts.google.com which Playwright cannot complete from a clean runner identity."
+    }
+  ],
+  "buildSummary": {
+    "scenariosCaptured": 8,
+    "publicRoutes": ["/", "/pricing", "/audit", "/guide", "/generator/howtoitem", "/contact", "/login (sign-in form)", "/login (sign-up toggle attempt)"],
+    "authenticatedRoutes": [],
+    "demoIdentity": "viktor+schemagen.202605131108@lastest.cloud (not used, magic-link only)"
+  }
+}

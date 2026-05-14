@@ -148,9 +148,9 @@ export function PlaywrightSettingsCard({
     enableVideoRecording: settings.enableVideoRecording ?? false,
     enableA11y: settings.enableA11y ?? false,
     acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
-    networkErrorMode: settings.networkErrorMode ?? 'fail',
+    networkErrorMode: settings.networkErrorMode ?? 'warn',
     ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
-    consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+    consoleErrorMode: settings.consoleErrorMode ?? 'warn',
     grantClipboardAccess: settings.grantClipboardAccess ?? false,
     acceptDownloads: settings.acceptDownloads ?? false,
     enableNetworkInterception: settings.enableNetworkInterception ?? false,
@@ -181,9 +181,9 @@ export function PlaywrightSettingsCard({
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
     setEnableA11y(settings.enableA11y ?? false);
     setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
-    setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
+    setNetworkErrorMode(settings.networkErrorMode ?? 'warn');
     setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? false);
-    setConsoleErrorMode(settings.consoleErrorMode ?? 'fail');
+    setConsoleErrorMode(settings.consoleErrorMode ?? 'warn');
     setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
     setAcceptDownloads(settings.acceptDownloads ?? false);
     setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
@@ -211,9 +211,9 @@ export function PlaywrightSettingsCard({
       enableVideoRecording: settings.enableVideoRecording ?? false,
       enableA11y: settings.enableA11y ?? false,
       acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
-      networkErrorMode: settings.networkErrorMode ?? 'fail',
+      networkErrorMode: settings.networkErrorMode ?? 'warn',
       ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
-      consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+      consoleErrorMode: settings.consoleErrorMode ?? 'warn',
       grantClipboardAccess: settings.grantClipboardAccess ?? false,
       acceptDownloads: settings.acceptDownloads ?? false,
       enableNetworkInterception: settings.enableNetworkInterception ?? false,

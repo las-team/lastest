@@ -76,8 +76,7 @@ export function ScreenshotViewer({
     <div
       ref={dialogRef}
       tabIndex={-1}
-      className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center animate-in fade-in-0 outline-none"
-      onClick={onClose}
+      className="fixed inset-0 z-50 bg-black/85 animate-in fade-in-0 outline-none"
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -96,14 +95,22 @@ export function ScreenshotViewer({
       role="dialog"
       aria-modal="true"
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={MODE_LABEL[mode]}
-        className="max-w-[95vw] max-h-[95vh] object-contain select-none"
-        onClick={(e) => e.stopPropagation()}
-        draggable={false}
-      />
+      {/* Scrollable image layer — tall captures grow at intrinsic height and
+          scroll vertically. `items-center-safe` keeps short images centered
+          but flips to top-aligned when the image is taller than the viewport
+          so the top of the image is reachable at scrollTop:0. */}
+      <div className="absolute inset-0 overflow-auto" onClick={onClose}>
+        <div className="min-h-full p-4 flex justify-center items-center-safe">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={MODE_LABEL[mode]}
+            className="max-w-[95vw] h-auto select-none"
+            onClick={(e) => e.stopPropagation()}
+            draggable={false}
+          />
+        </div>
+      </div>
 
       {/* Mode label — clickable badge that cycles through available views.
           Disabled (non-button) when only the captured image is available. */}

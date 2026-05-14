@@ -17,7 +17,11 @@ Openrouter agent sdk parity
 demo-mode
   without link?
 ## bugs
+Verify
+  if the screenshot is tall, its not scrollable on focus screen
+  warn for network/console errors is ignored
 ## features
+Prove your app is not AI slop - Lastest badge
 Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**

@@ -1,0 +1,70 @@
+{
+  "buildId": "c29560fb-f21d-4b47-a241-bdcdd17aa6ee",
+  "testId": "b7d950ea-6ebd-4cda-9d47-507b32722ea1",
+  "repositoryId": "14b4d8fd-eedf-4798-a322-548b83521176",
+  "target": {
+    "name": "Postbox",
+    "site": "https://usepostbox.com",
+    "founder": "Variant Systems",
+    "tagline": "Agent-native data collection. AI-powered spam detection, auto-translation, and smart replies from a single API endpoint."
+  },
+  "uxSummary": "Postbox positions itself as the data-collection layer that AI agents talk to, not as another forms product. The brand is unusually disciplined for an indie: dark theme, a single red accent on CTAs and the active sidebar route, and a logomark that stays consistent between the marketing site and the authenticated dashboard. The post-signup onboarding is the strongest narrative moment: rather than a generic 'create your first thing' wizard, it forks the user into one of two named paths, 'Skill-compatible coding agent' (Codex, Claude Code, Cursor, Windsurf) or 'MCP-compatible client' (Claude, ChatGPT, Cursor, other MCP clients), with a 'Set up manually instead' escape hatch at the bottom. The authed surface itself is small and confident: Dashboard, Forms, Knowledge Base, plus three Integrations entries (API Keys, MCP, Skill). The bottom-left credits indicator (50 of 50 credits) plus the user email + plan tier signals usage-based metering without making it the lead.",
+  "highlights": [
+    {
+      "label": "Agent-first onboarding fork",
+      "note": "The 'Choose how you want to connect' modal asks one question, do you have an agent (Skill) or an MCP client, and routes setup accordingly. Most products start with 'create your first form'; Postbox starts with 'what are you using to read this data'. Strong signal that the product is designed for AI consumers first, humans second."
+    },
+    {
+      "label": "Single-line install hook on /integrations/mcp",
+      "note": "/integrations/mcp shows a Server URL field (https://usepostbox.com/mcp) plus a ready-to-paste JSON config snippet for the user's MCP client. Auth happens browser-side on first connect, zero copy-paste friction and no API token bootstrapping ceremony."
+    },
+    {
+      "label": "Credits-as-trust",
+      "note": "Bottom-left of the chrome shows '50/50 credits left' for a Free Plan user. Putting the remaining quota in the chrome (not hidden behind a Billing route) makes the metering feel transparent rather than predatory."
+    },
+    {
+      "label": "Breadcrumb chrome on every page",
+      "note": "Every authed page shows a 'Postbox / <Section> / <Subsection>' breadcrumb in the top bar plus a global search hotkey (Cmd+K). Small detail, but it means the surface scales beyond 3 levels without a UX redesign."
+    }
+  ],
+  "frictionPoints": [
+    {
+      "label": "Onboarding modal blocks all navigation",
+      "note": "After signup, the 'Choose how you want to connect' modal renders on top of every authenticated route. Visiting /forms, /knowledge_base, or /integrations directly all show the same modal, not the target page. The 'Set up manually instead' link in the modal footer is the only escape; without it, a returning user who closed the tab mid-onboarding is stuck on the modal forever. A small 'skip for now' close button in the modal chrome would prevent that."
+    },
+    {
+      "label": "Signed-in toast races the modal hydration",
+      "note": "Post-signup landing was a 'Signed in.' toast on top of an empty onboarding modal, with the modal body filling in a moment later. For a slow-connection visitor this could read as a flash of empty space before the modal hydrates."
+    }
+  ],
+  "testingStruggles": [
+    {
+      "label": "Forced onboarding modal trapped the route walk",
+      "note": "First test run produced 9 byte-identical screenshots for /forms, /knowledge_base, /integrations/*, /logs, /billing, /settings/account. The modal sits over every route until dismissed. Fixed by clicking 'Set up manually instead' before walking the surface, then re-dismissing on each subsequent navigation as a safety net."
+    },
+    {
+      "label": "Register-or-login decision on rerun",
+      "note": "Postbox returns the user straight to /users/register when the email is already taken, with no inline error visible. Test now tries /users/log-in as a fallback before declaring auth failure. This keeps re-runs idempotent without needing a fresh email each time."
+    }
+  ],
+  "skippedRoutes": [
+    {
+      "path": "/integrations/api-keys/new",
+      "reason": "Would create an API key in the user's database. Skipped to keep the run side-effect free."
+    },
+    {
+      "path": "/bug-report, /contact",
+      "reason": "Both render forms a click away from submission, would write to the founder's inbox if triggered. Skipped."
+    },
+    {
+      "path": "Github OAuth connect on /settings/account",
+      "reason": "Redirects to github.com which Playwright cannot complete from a clean runner identity."
+    }
+  ],
+  "buildSummary": {
+    "scenariosCaptured": 14,
+    "publicRoutes": ["/", "/features", "/pricing"],
+    "authenticatedRoutes": ["/users/register", "/users/register (signed-in toast over onboarding modal)", "/forms", "/knowledge_base", "/integrations/api-keys", "/integrations/mcp", "/integrations/skill", "/logs", "/billing", "/settings/account"],
+    "demoIdentity": "viktor+postbox.202605131108@lastest.cloud"
+  }
+}

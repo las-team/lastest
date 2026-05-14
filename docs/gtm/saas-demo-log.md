@@ -122,10 +122,11 @@ Awaiting confirmation from user on Lastest side that scenarios 5-10 show authent
   6. `/#pricing` — pricing tiers + compare-plans table
   7. `/sign-up` — form pre-submit (submit is broken)
 - **Baselines:** approved (`approve_all_diffs` ✓).
-- **Share URL:** **NOT YET PUBLISHED — same blocker as SchemaGen above**. Prod (`62cae0a` "build fixes") still lacks `POST /api/v1/builds/:id/share` and `POST /api/v1/builds/:id/demo-notes`, both added on HEAD `1a7598a share`.
-- **Channel:** FeedbackQueue project comment (default for FQ-sourced).
-- **Sent:** no (blocked on share URL).
-- **Reply (48h check):** —
+- **Share URL:** https://app.lastest.cloud/r/_AfDz76MgMHFgRIWk0aGrQ (published 2026-05-13 once HEAD endpoints landed on prod; refreshed demo notes attached via `getLatestDemoNotesForRepo`).
+- **Subsequent rebuilds:** build `533460c6` (15-step walk, post-onboarding + /dashboard captured) and build `aae663a0` (rerun with all baselines paired). Final run `689da954` is the canonical reference: Firebase Auth + /onboarding + /dashboard + 5x /dashboard/* routes, runtime-fresh email (Date.now base-36) to avoid Firebase "email already in use".
+- **Channel:** FeedbackQueue project comment on Marius's project `cmnzuwu6l0088rn0p1r9bklzv` (default for FQ-sourced).
+- **Sent:** yes, 2026-05-13 (per user; short variant of the draft was used).
+- **Reply (48h check on 2026-05-15):** —
 
 ### Run-time pivots
 
@@ -178,3 +179,97 @@ Both are visible on the share itself (screenshots 3 and 7) — no need to quote 
 >
 > — Viktor
 
+
+---
+
+## 2026-05-14 — ByteChef team / ByteChef
+
+- **Source:** FeedbackQueue (confirmed via founder reply path; original FQ post not recorded in this session)
+- **Site:** https://www.bytechef.io
+- **Tagline:** Open-source, AI-native, low-code platform for API orchestration, workflow automation, and AI agent integration. Apache-2.0, German-Croatian team.
+- **Lastest repo:** `c9542463-059f-497d-93a5-95735c219658` (name: `bytechef-demo`)
+- **Test:** `2685bf38-8756-4a55-8ca2-ed9b57fa748a` — "ByteChef — register + app walkthrough"
+- **Build (video):** `e042cb78-b40f-4c0f-977c-0eab00c448d5` — review_required then approved, baselines paired against prior build `12532749`.
+- **Demo notes:** `docs/gtm/bytechef-demo-notes.json` POSTed to build `12532749` and surfaced on the share via `getLatestDemoNotesForRepo`.
+- **Scenarios captured (15):**
+  1. www.bytechef.io/ Home
+  2. /pricing
+  3. app.bytechef.io/register (email step)
+  4. /register (password step)
+  5. Post-register state
+  6. /login form
+  7. Post-login (h1-waited, content rendered)
+  8. /automation/projects
+  9. /automation/deployments
+  10. /automation/executions
+  11. /automation/connections
+  12. /automation/chats
+  13. /embedded/integrations
+  14. /embedded/configurations
+  15. /embedded/connected-users
+- **Share URL:** https://app.lastest.cloud/r/eFhwrvc7VvjrC-xPrIVMmg (video-enabled, video build, baselines approved)
+- **Channel:** Discord (discord.com/invite/VKvNxHjpYx)
+- **Sent:** yes, 2026-05-14
+- **Message body (as sent):**
+
+  > hey guys,
+  > Tested your app from feedbackqueue but couldnt send it there.
+  > https://app.lastest.cloud/r/eFhwrvc7VvjrC-xPrIVMmg
+  > Mostly just Console-level 401 noise on Embedded pages - LMK if I can help with anything else.
+
+- **Reply (48h check on 2026-05-16):** —
+
+### Friction points surfaced (in demo notes)
+
+1. Email-activation gate forces a 4-screen redirect dance (signup, activation email, back to login, finally /automation/projects).
+2. Workspace switcher chrome reads "DEVELOPMENT" on both /automation/* and /embedded/* with no top-bar text distinguishing the two product modes.
+3. Console-level 401 noise on every /embedded/* page from a project-scoped endpoint (the one mentioned in the Discord DM).
+4. Login submit button aria-label is "log in button", not the accessible name "Log in".
+
+### Testing struggles solved
+
+- Two-step signup (email then password) needed an explicit wait for the password input to render between fills.
+- API-direct register fallback via XSRF cookie-to-header dance, in case the UI form drops the token.
+- Post-login SPA hydration race: networkidle resolves before React mounts the page header. Fixed with an h1 wait + 800ms buffer.
+
+---
+
+## 2026-05-14 — Variant Systems / Postbox
+
+- **Source:** predates this session, original discovery channel not recorded in repo logs. Most likely sourced from the agent/MCP ecosystem (FeedbackQueue, Reddit r/mcp, or similar).
+- **Site:** https://usepostbox.com
+- **Tagline:** Agent-native data collection. AI-powered spam detection, auto-translation, and smart replies from a single API endpoint.
+- **Founder:** Variant Systems (link in homepage footer).
+- **Lastest repo:** `14b4d8fd-eedf-4798-a322-548b83521176` (name: `postbox-demo`)
+- **Test:** `b7d950ea-6ebd-4cda-9d47-507b32722ea1` — "Postbox — register + app walkthrough"
+- **Build (video):** `745a0237-b1da-449f-89db-f14e95375323` — review_required then approved, baselines paired against prior build `c29560fb`, video player enabled.
+- **Demo notes:** `docs/gtm/postbox-demo-notes.json` POSTed to build `c29560fb` and surfaced via `getLatestDemoNotesForRepo`.
+- **Scenarios captured (14):**
+  1. `/` Home
+  2. `/features`
+  3. `/pricing`
+  4. `/users/register` (empty form)
+  5. Post-signup, "Signed in." toast over "Choose how you want to connect" onboarding modal
+  6. `/forms` (after modal dismissed via "Set up manually instead")
+  7. `/knowledge_base`
+  8. `/integrations/api-keys`
+  9. `/integrations/mcp`
+  10. `/integrations/skill`
+  11. `/logs`
+  12. `/billing`
+  13. `/settings/account`
+  14. Final bare screenshot
+- **Share URL:** https://app.lastest.cloud/r/34bwqtRzClckEIniHUapOw (video-enabled, baselines approved)
+- **Channel:** per user (not recorded in this session; mark above when known).
+- **Sent:** yes, 2026-05-14 (per user, message body not recorded here).
+- **Reply (48h check on 2026-05-16):** —
+
+### Friction points surfaced (in demo notes)
+
+1. Forced "Choose how you want to connect" onboarding modal blocks all authenticated routes until "Set up manually instead" is clicked.
+2. "Signed in." toast can race the modal hydration on first paint, producing a brief flash of empty.
+
+### Testing struggles solved
+
+- Onboarding modal trapped the first 9 authed-route screenshots into byte-identical duplicates. Fixed by clicking "Set up manually instead" then re-dismissing on each navigation.
+- Re-runs on the same email hit "email already exists" on /users/register with no visible error. Test now falls through to /users/log-in as fallback.
