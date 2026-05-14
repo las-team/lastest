@@ -1190,6 +1190,18 @@ async function runBuildAsync(
       });
     }).catch(console.error);
 
+    // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
+    // category badges based on the latest build. Tier only downgrades on a
+    // confirmed regression — see src/lib/awards/criteria.ts.
+    if (repositoryId) {
+      const repoId = repositoryId;
+      import('@/lib/awards/recompute').then(({ recomputeRepoAward }) => {
+        recomputeRepoAward(repoId).catch((e) => {
+          console.error(`[awards] recompute failed for repo ${repoId}:`, e);
+        });
+      }).catch(console.error);
+    }
+
     // Fire-and-forget auto-approval of 0-diff cases — a green-verdict step
     // with no evidence is treated as Done on the verify board. We persist a
     // step_layer_feedback row so the count of "verified" cases is accurate

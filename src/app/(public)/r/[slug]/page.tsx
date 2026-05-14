@@ -14,10 +14,12 @@ import {
   getBuildDemoNotes,
   getLatestDemoNotesForRepo,
 } from '@/lib/db/queries/demo-notes';
-import type { Baseline, DemoNotes } from '@/lib/db/schema';
+import { getRepoAward } from '@/lib/db/queries/awards';
+import type { Baseline, DemoNotes, RepoAward } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
 import { ShareVideoPlayer } from './share-video-player';
+import { AwardBadgeRow } from '@/components/awards/award-badge-row';
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -123,6 +125,13 @@ export default async function PublicSharePage({ params }: PageProps) {
       (await getBuildDemoNotes(build.id))
     : await getBuildDemoNotes(build.id);
 
+  // Lastest awards: render the earned-badges + embed block when the repo has
+  // a tier. Resolved by repositoryId — works for both build and test shares.
+  const award: RepoAward | null = repoIdForNotes
+    ? (await getRepoAward(repoIdForNotes)) ?? null
+    : null;
+  const showAwardBadges = !!award && award.currentTier !== 'none';
+
   // Passing tests produce zero visual_diffs rows. Fall back to the test's
   // active baselines so viewers still see a side-by-side comparison rather
   // than an empty "recording + steps" block.
@@ -183,6 +192,10 @@ export default async function PublicSharePage({ params }: PageProps) {
             />
             <BuildDiffsGallery diffs={diffs} results={scopedResults} toUrl={toUrl} />
           </>
+        )}
+
+        {showAwardBadges && award && (
+          <AwardBadgeRow award={award} slug={slug} />
         )}
 
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />

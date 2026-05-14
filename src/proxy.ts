@@ -5,9 +5,11 @@ const PUBLIC_PATHS = [
   '/login',
   '/register',
   '/invite',
+  '/awards',     // "Prove your app is not AI slop" campaign landing
   '/r/',         // Public share pages
   '/share/',     // Static share media (public/share/<slug>/...)
   '/api/og/', // Public OG/Twitter card images for shared builds
+  '/api/badge/', // Public embeddable badge SVGs
   '/api/auth/',
   '/api/health',
   '/api/webhooks/',

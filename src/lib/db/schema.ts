@@ -3043,3 +3043,42 @@ export const stepLayerFeedback = pgTable('step_layer_feedback', {
 
 export type StepLayerFeedback = typeof stepLayerFeedback.$inferSelect;
 export type NewStepLayerFeedback = typeof stepLayerFeedback.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Awards — "Prove your app is not AI slop" campaign
+// ---------------------------------------------------------------------------
+//
+// Per-repository tier + category badges. Tier ratchets upward and only
+// downgrades on a confirmed regression (user-rejected visual diff, or
+// non-flaky test failure across two consecutive builds). Flaky failures,
+// in-flight builds, and unresolved/open diffs do not downgrade.
+//
+// The badge SVG endpoint resolves a publicShares.slug -> repository -> award
+// row, so the embed URL stays stable while the underlying state stays live.
+
+export type AwardTier = 'none' | 'bronze' | 'silver' | 'gold';
+
+export interface AwardCategories {
+  a11y: boolean;
+  allPassing: boolean;
+  zeroDrift: boolean;
+}
+
+export const repoAwards = pgTable('repo_awards', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').notNull().references(() => repositories.id, { onDelete: 'cascade' }).unique(),
+  currentTier: text('current_tier').$type<AwardTier>().notNull().default('none'),
+  highestTier: text('highest_tier').$type<AwardTier>().notNull().default('none'),
+  categories: jsonb('categories').$type<AwardCategories>().notNull(),
+  proofShareSlug: text('proof_share_slug'),
+  lastBuildId: text('last_build_id'),
+  earnedAt: timestamp('earned_at').$defaultFn(() => new Date()).notNull(),
+  lastRecomputedAt: timestamp('last_recomputed_at').$defaultFn(() => new Date()).notNull(),
+  lastDowngradeAt: timestamp('last_downgrade_at'),
+  lastDowngradeReason: text('last_downgrade_reason'),
+}, (table) => ([
+  index('idx_repo_awards_tier').on(table.currentTier),
+]));
+
+export type RepoAward = typeof repoAwards.$inferSelect;
+export type NewRepoAward = typeof repoAwards.$inferInsert;
