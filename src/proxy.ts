@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   '/invite',
   '/r/',         // Public share pages
   '/share/',     // Static share media (public/share/<slug>/...)
+  '/api/og/', // Public OG/Twitter card images for shared builds
   '/api/auth/',
   '/api/health',
   '/api/webhooks/',

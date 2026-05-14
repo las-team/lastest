@@ -41,9 +41,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
     : `Visual regression check for ${domain} — recording, screenshots, and diff report.`;
 
+  // metadataBase lets relative image URLs resolve to absolute URLs in the
+  // emitted <meta og:image> tag (crawlers need absolute).
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const ogImageUrl = `/api/og/share/${slug}`;
+  const ogAlt = ctx.build.changesDetected
+    ? `${ctx.build.changesDetected} visual changes on ${domain}`
+    : `Visual regression report for ${domain}`;
+
   return {
     title,
     description,
+    metadataBase: new URL(appUrl),
     robots: { index: false, follow: false },
     openGraph: {
       title,
@@ -51,8 +60,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: buildShareUrl(slug),
       type: 'article',
       siteName: 'Lastest',
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: ogAlt }],
     },
-    twitter: { card: 'summary', title, description },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImageUrl],
+    },
   };
 }
 

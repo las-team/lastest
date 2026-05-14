@@ -22,6 +22,8 @@ Verify
   warn for network/console errors is ignored
 ## features
 Prove your app is not AI slop - Lastest badge
+Improve thumbnail image for share page for twitter/reddit etc sharing
+
 Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**
