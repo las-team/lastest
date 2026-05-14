@@ -194,7 +194,7 @@ Create tests (one-time)          Run tests (forever)
 - **Parallel Test Execution** — Configurable max parallel tests for the embedded-browser pool and remote runners.
 - **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
-- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 29 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
+- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 50 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
 - **Accessibility Audits** — Automated axe-core checks on every screenshot capture with WCAG 2.2 AA compliance scoring.
 - **Network & Console Tracking** — Capture network requests and browser console errors during test runs.
@@ -379,7 +379,7 @@ Distributed test execution via HTTP polling. The Lastest server queues commands;
 | **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
 | **Branch baseline management** | **Yes** | Yes | Yes | Yes | No | No | No |
 | **Scheduled test runs** | **Yes (cron)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
-| **MCP server (AI agent API)** | **Yes (29 tools)** | No | No | No | No | No | No |
+| **MCP server (AI agent API)** | **Yes (50 tools)** | No | No | No | No | No | No |
 | **WCAG compliance scoring** | **Yes (0–100)** | No | No | No | No | No | No |
 | **AI failure triage** | **Yes** | No | No | No | No | No | No |
 | **Assertion tracking** | **Yes** | No | No | No | No | No | No |
@@ -397,7 +397,7 @@ Distributed test execution via HTTP polling. The Lastest server queues commands;
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
 - **Self-hosted with unlimited screenshots** — no per-screenshot pricing, no volume limits when you run it on your own infra
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
-- **MCP server with 29 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
+- **MCP server with 50 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
 - **Scheduled test runs** — cron-based automation with smart failure handling
 - **WCAG 2.2 AA compliance scoring** — automated 0–100 accessibility score per build with trend tracking
 - **6 AI providers including OpenAI and Ollama** — run AI completely locally with zero API costs
@@ -452,7 +452,7 @@ In-depth docs for every integration live on the [Lastest Wiki](https://github.co
 | **Smart Run** | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests) |
 | **Self-Hosted Deployment** | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment) |
 | **Remote Runners** | `@lastest/runner` on npm — register in Settings → Runners, then `lastest-runner start -t <token> -s <url>`; supports run, record, parallel, daemon mode, system-info reporting | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
-| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 29 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
+| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 50 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
 | **Scheduled Runs** | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
 | **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
 | **Custom Webhooks** | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
@@ -598,7 +598,7 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Runner management UI (register, monitor, configure from dashboard)
 - [x] Play Agent (autonomous 11-step test generation pipeline with sub-agents)
 - [x] Guided onboarding (8-step setup guide with auto-detection)
-- [x] MCP server v2 (`@lastest/mcp-server` — 29 tools for AI agent integration)
+- [x] MCP server v2 (`@lastest/mcp-server` — 50 tools for AI agent integration)
 - [x] AI failure triage (auto-classify failures: regression, flaky, environment, maintenance)
 - [x] Scheduled test runs (cron-based automation with preset schedules)
 - [x] WCAG 2.2 AA compliance scoring (severity-weighted 0–100 score with trends)

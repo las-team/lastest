@@ -41,7 +41,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest',
-    version: '0.3.5',
+    version: '0.3.7',
   });
 
   // ===== Health & Status =====
