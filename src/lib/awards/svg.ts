@@ -11,7 +11,7 @@ import type { AwardTier } from '@/lib/db/schema';
 // Character widths are approximated; shields.io does the same.
 // ============================================================
 
-export type Tone = 'teal' | 'red' | 'amber' | 'blue' | 'ink';
+export type Tone = 'teal' | 'red' | 'amber' | 'blue' | 'ink' | 'slate';
 export type Size = 'sm' | 'md' | 'lg';
 
 export interface SplitShieldOptions {
@@ -32,6 +32,9 @@ const TONE_FILL: Record<Tone, string> = {
   amber: '#E09836',
   blue: '#3674A8',
   ink: '#1F2A33',
+  // Slate sits between ink and white: signals "starter" without competing
+  // with the precious-metal tiers visually.
+  slate: '#7A8691',
 };
 
 // Heights / paddings / font sizes from badges.jsx (the design source-of-truth).
@@ -160,6 +163,7 @@ export function renderSplitShield(opts: SplitShieldOptions): string {
 
 const TIER_LABEL: Record<AwardTier, { value: string; tone: Tone }> = {
   none: { value: 'not yet', tone: 'ink' },
+  starter: { value: 'starter', tone: 'slate' },
   bronze: { value: 'bronze', tone: 'amber' },
   silver: { value: 'silver', tone: 'blue' },
   gold: { value: 'gold', tone: 'teal' },

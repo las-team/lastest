@@ -4,7 +4,7 @@ import { DeltaMark } from './delta-mark';
 // SplitShield, shields.io idiom, Lastest skin
 // ============================================================
 
-type Tone = 'teal' | 'red' | 'amber' | 'blue' | 'ink';
+type Tone = 'teal' | 'red' | 'amber' | 'blue' | 'ink' | 'slate';
 type Size = 'sm' | 'md' | 'lg';
 
 export function SplitShield({
@@ -37,6 +37,7 @@ export function SplitShield({
     amber: '#E09836',
     blue: '#3674A8',
     ink: '#1F2A33',
+    slate: '#7A8691',
   };
   const labelBg = dark ? '#0E1519' : '#1F2A33';
 

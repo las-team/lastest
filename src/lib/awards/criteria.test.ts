@@ -49,8 +49,32 @@ describe('computeTier', () => {
     expect(computeTier(input({ latestBuild: null }))).toBe('none');
   });
 
-  it('returns none when fewer than 5 tests', () => {
-    expect(computeTier(input({ testCount: 4 }))).toBe('none');
+  it('returns starter when 1 passing test exists (the encourage-sharing tier)', () => {
+    const latest = snap({ totalTests: 1, passedCount: 1, failedCount: 0, a11yScore: 0 });
+    expect(computeTier(input({
+      testCount: 1,
+      latestBuild: latest,
+      recentBuilds: [latest],
+    }))).toBe('starter');
+  });
+
+  it('falls through to starter when below Bronze thresholds but has a passing test', () => {
+    // 4 tests = below Bronze (needs 5), but at least one passes → starter.
+    const latest = snap({ totalTests: 4, passedCount: 3, failedCount: 1, a11yScore: 40 });
+    expect(computeTier(input({
+      testCount: 4,
+      latestBuild: latest,
+      recentBuilds: [latest],
+    }))).toBe('starter');
+  });
+
+  it('returns none when no test passes (zero passedCount)', () => {
+    const latest = snap({ totalTests: 3, passedCount: 0, failedCount: 3, a11yScore: 0 });
+    expect(computeTier(input({
+      testCount: 3,
+      latestBuild: latest,
+      recentBuilds: [latest],
+    }))).toBe('none');
   });
 
   it('awards gold for ≥20 tests + 5 clean builds + a11y ≥90 + 0 critical', () => {
@@ -106,13 +130,13 @@ describe('computeTier', () => {
     }))).toBe('bronze');
   });
 
-  it('returns none if pass rate below 80%', () => {
+  it('falls to starter (not bronze) if pass rate below 80% but at least one passes', () => {
     const latest = snap({ totalTests: 10, passedCount: 7, failedCount: 3, a11yScore: 70 });
     expect(computeTier(input({
       testCount: 10,
       latestBuild: latest,
       recentBuilds: [latest],
-    }))).toBe('none');
+    }))).toBe('starter');
   });
 });
 

@@ -1,24 +1,47 @@
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
 import { getCurrentSession } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
+import { getTeamTrophyRoom } from '@/lib/db/queries/awards';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Trophy, Zap, Bot as BotIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TrophyRoom } from '@/components/awards/trophy-room';
 
 export const dynamic = 'force-dynamic';
+
+async function resolveOrigin(): Promise<string> {
+  const h = await headers();
+  const forwardedHost = h.get('x-forwarded-host');
+  const forwardedProto = h.get('x-forwarded-proto');
+  if (forwardedHost) return `${forwardedProto ?? 'https'}://${forwardedHost}`;
+  const host = h.get('host');
+  if (host) return `${process.env.NEXT_PUBLIC_APP_PROTO ?? 'http'}://${host}`;
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+}
 
 export default async function LeaderboardPage() {
   const session = await getCurrentSession();
   if (!session?.team) notFound();
-  if (!session.team.gamificationEnabled) notFound();
 
-  const season = await queries.getActiveSeason(session.team.id);
-  if (!season) {
+  const [trophyEntries, origin] = await Promise.all([
+    getTeamTrophyRoom(session.team.id),
+    resolveOrigin(),
+  ]);
+
+  // High Scores still gates on gamificationEnabled; Trophy Room is always shown.
+  const gamificationEnabled = !!session.team.gamificationEnabled;
+  const season = gamificationEnabled ? await queries.getActiveSeason(session.team.id) : null;
+
+  if (!gamificationEnabled || !season) {
     return (
-      <div className="p-8">
-        <EmptyState />
+      <div className="max-w-4xl mx-auto p-6 space-y-8">
+        <TrophyRoomHeader />
+        <TrophyRoom entries={trophyEntries} origin={origin} />
+        {!gamificationEnabled && <GamificationDisabledHint />}
+        {gamificationEnabled && !season && <EmptyState />}
       </div>
     );
   }
@@ -53,7 +76,7 @@ export default async function LeaderboardPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
+    <div className="max-w-4xl mx-auto p-6 space-y-8">
       <header className="text-center space-y-2">
         <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
           <Trophy className="h-3 w-3" />
@@ -117,6 +140,13 @@ export default async function LeaderboardPage() {
       <p className="text-center text-xs text-muted-foreground">
         Seasons reset. Bots never sleep.
       </p>
+
+      {trophyEntries.length > 0 && (
+        <div className="pt-4 border-t border-border/60 space-y-6">
+          <TrophyRoomHeader />
+          <TrophyRoom entries={trophyEntries} origin={origin} />
+        </div>
+      )}
     </div>
   );
 }
@@ -216,6 +246,33 @@ function EmptyState() {
         <p className="text-sm text-muted-foreground">
           Ask an admin to start a season in Settings → Gamification.
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TrophyRoomHeader() {
+  return (
+    <header className="text-center space-y-2">
+      <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
+        <Trophy className="h-3 w-3" />
+        Awards
+      </div>
+      <h1 className="text-4xl font-black tracking-tight font-[family-name:var(--font-press-start,monospace)]">
+        TROPHY ROOM
+      </h1>
+      <p className="text-sm text-muted-foreground">
+        Earned awards across your repos. Click any unlocked badge for embed instructions.
+      </p>
+    </header>
+  );
+}
+
+function GamificationDisabledHint() {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="py-4 text-center text-xs text-muted-foreground">
+        High Scores leaderboard is disabled for this team. Ask an admin to enable Gamification in Settings.
       </CardContent>
     </Card>
   );

@@ -273,3 +273,98 @@ Both are visible on the share itself (screenshots 3 and 7) — no need to quote 
 
 - Onboarding modal trapped the first 9 authed-route screenshots into byte-identical duplicates. Fixed by clicking "Set up manually instead" then re-dismissing on each navigation.
 - Re-runs on the same email hit "email already exists" on /users/register with no visible error. Test now falls through to /users/log-in as fallback.
+
+---
+
+## 2026-05-14 — 3×3 batch run
+
+Ran `/gtm-lastest-saas-demo` as 9 parallel agents across 9 discovery sources (3 batches × 3 agents). 5 builds published to `/r/<slug>`; 4 builds left unpublished because their sites have a real signin we couldn't authenticate against (don't ship a demo claiming to "review" a SaaS we never logged into).
+
+### q9 Beatable — APPROVED (strong)
+
+- **Source:** r/indiehackers, "Friday share fever" thread https://reddit.com/r/indiehackers/comments/1t73rnd/
+- **Site:** https://beatable.co — Laravel stack (CSRF, email+password+confirm+consent checkboxes, no captcha, no OAuth).
+- **Founder:** u/diodo-e (Reddit). No public X / email surfaced.
+- **Repo:** `80a0cd1e-ea51-44a3-b44c-b288fc9a55da` (`q9-beatable-demo`)
+- **Test:** `a683e71d-2128-412f-9fc1-d12f453c88b1`
+- **Build:** `d66fdca0-1553-460b-9e26-9370d796c033` — 8 screenshots, video, all diffs approved.
+- **Share URL:** https://app.lastest.cloud/r/n7WfRS1miOhexYaRdjQHZg
+- **Demo notes:**
+  - *uxSummary:* Clean Laravel SaaS with a polished marketing surface and an honest email+password signup that actually completes. The post-signup surface renders in three sequential views (Steps 5/6/7), giving a useful per-state baseline for any future onboarding tweaks.
+  - *Highlights:* (a) Signup is email+password with confirm + terms, no OAuth pressure. (b) Auth completed end-to-end with the canonical template (only target in the batch where this happened cleanly). (c) Three post-signup screenshots make the authenticated surface itself versionable, not just the marketing site.
+  - *Friction:* Cloudflare's email-decode script throws console noise on every page (executor flags it as "failed" but it's third-party — Beatable can ignore). The auth phase reaches three sequential post-signup states that look very similar; could indicate a brief redirect chain worth tightening if speed matters. *(Correction: an earlier version of this entry listed "/features 404" as friction. Beatable doesn't link to /features anywhere — that was the test template inventing a URL and then complaining when it didn't exist. Fixed in the template, removed from the report.)*
+  - *Testing struggles:* None on this run — the only target in 9 that didn't hit captcha / silent-submit / OAuth-only / target-broken.
+  - *Skipped routes:* App routes `/dashboard`, `/app`, `/projects`, `/home`, `/settings`, `/account` were tried after auth; the loop only captured the first ones that returned 200, so post-signup steps reflect Beatable's actual landing surface rather than guessed paths.
+- **Outreach channel:** Reddit DM to u/diodo-e (draft below in outreach section).
+- **Sent:** pending user approval.
+
+### q8 Trace — PUBLISHED (marginal)
+
+- **Source:** r/startups "Feedback Friday" thread https://www.reddit.com/r/startups/comments/1t6y210/feedback_friday/
+- **Site:** https://gettrace.vercel.app (vercel.app dev subdomain — very early product).
+- **Founder:** Reddit u/handle for the "Trace" comment was NOT captured by the agent — needs lookup before sending.
+- **Repo:** `11d3d3c3-103b-4cd7-bc5e-c6e88ad0d92a`
+- **Build:** `98cd0b39-e2bd-49f9-8bb6-be81b5dd8140` — 6 screenshots, video, all diffs approved.
+- **Share URL:** https://app.lastest.cloud/r/dCPlFFJMVkd8a15jxnvBTg
+- **Demo notes:**
+  - *uxSummary:* "Conversational product discovery system" pitch; signup flow has the bare-minimum email+password+name+terms. Auth completed (URL transitioned away from /signup) but only one post-signup screenshot was captured because no conventional app route (`/dashboard`, `/app`, etc.) returned a 200 status.
+  - *Highlights:* Clean three-field register form with no OAuth-only pressure and no captcha — rare in this batch.
+  - *Friction:* Post-signup landing doesn't expose a `/dashboard` (or any of the standard app routes the test probes after auth) — the authenticated baseline is therefore one screenshot rather than a full walkthrough. *(Earlier draft listed "/features 404" and "/pricing 404" — Trace doesn't link to those paths, so the test was inventing URLs to fail at. Removed.)*
+  - *Skipped routes:* `/dashboard`, `/app`, `/projects`, `/home`, `/settings`, `/account` all 404 or auth-bounce.
+- **Outreach:** pending u/handle lookup + draft.
+
+### q2 Hivemind — PUBLISHED (no-auth site)
+
+- **Source:** r/SideProject https://www.reddit.com/r/SideProject/comments/1tcqmpf/
+- **Site:** https://askhivemind.app — Reddit-powered search engine; one verdict per question; explicitly no accounts / no auth.
+- **Founder:** u/Glad_Struggle6343, email ask.hivemind.app@gmail.com (homepage footer).
+- **Repo:** `c96cfc6f-f1d6-457b-b028-79a05cd536ad`
+- **Build:** `ff75acf4-8d39-4d8d-a0ed-8addc320a4fd` — 6 screenshots, video, all diffs approved.
+- **Share URL:** https://app.lastest.cloud/r/4OnJnmfWtDL87v2H6Ub-JA
+- **Demo notes:**
+  - *uxSummary:* Single-page search UI with one question box and a single-verdict answer. The whole product is the homepage; no nav, no auth, no pricing tiers. Loading → verdict is the only state transition, which makes it a perfect (small) visual-regression target.
+  - *Highlights:* (a) Test captured the full search interaction — typed query, submitted, captured loading + verdict states — instead of stopping at the static landing. (b) Six baselines from a one-page product. (c) Zero auth friction means the founder can replay the test themselves without a demo account.
+  - *Design note (not friction):* The home page has no internal nav links besides Next.js asset bundles — Hivemind is intentionally one-page. Any 307s the test recorded were for paths we probed that the founder never linked. Not a finding. *(Earlier draft framed this as "friction"; corrected — there's nothing to fix on a deliberately single-page product.)*
+  - *Testing struggles:* Verdict render is async with no settled state marker (no aria-live, no done-flag). Used a fixed timed wait to stabilise the screenshot.
+- **Outreach channel:** Reddit DM to u/Glad_Struggle6343.
+
+### q4 LifeByLogic — PUBLISHED (no-auth site)
+
+- **Source:** r/microsaas.
+- **Site:** https://lifebylogic.com — "Think Better. Decide Better. Live Better." Flourishing Index assessment, by Abiot Y. Derbie (cognitive neuroscientist).
+- **Founder:** u/neanea12 (Reddit), hello@lifebylogic.com, [LinkedIn](https://www.linkedin.com/in/abiot-y-derbie-427622266/).
+- **Repo:** `6595bbf3-c58d-42d8-b3aa-7f83d978605c`
+- **Build:** `a335bfd5-c3c3-426f-b313-659c75ed6d0b` — 7 screenshots, video, all diffs approved.
+- **Share URL:** https://app.lastest.cloud/r/Gn7UKmZTRJ7wy6u1xbhmzA
+- **Demo notes:**
+  - *uxSummary:* Clean, calm scientific tone. Flourishing Index loads quickly; the assessment is two clicks from the homepage. Site markets "No sign-up. No paywall." so the demo crawled the public assessment flow instead of attempting auth.
+  - *Highlights:* (a) Strong credibility framing (PhD founder, Global Flourishing Study benchmark). (b) Six-domain promise is clear on the assessment landing. (c) Fast homepage with no friction.
+  - *Friction:* `/about` and `/tools` are both linked from the nav but only respond on the trailing-slash form (307 redirects from non-trailing — worth normalising so external links land in one hop). The "Start assessment" CTA copy is ambiguous; the test had to fall back to a generic role selector to advance. *(Earlier draft listed "/pricing 404" — LifeByLogic doesn't link to /pricing anywhere and isn't promising a paid tier on the home page, so that was a fabricated finding. Removed.)*
+  - *Testing struggles:* First-question control on the assessment isn't a native radio, so a generic locator may click an adjacent element instead of advancing the survey. No stable test-id attributes on CTAs.
+- **Outreach channel:** Reddit DM to u/neanea12 (or email if DM ignored).
+
+### q6 Causo — PUBLISHED (no-auth site)
+
+- **Source:** ProductHunt https://www.producthunt.com/products/causo-hub-free-tools-for-fundraising
+- **Site:** https://causo.ai — "Pitch the right VCs, skip the grind". Single-page anchor site.
+- **Founder:** X handle @dawbuildsthings.
+- **Repo:** `62adf8d3-90c7-440b-83be-618c9c200cae`
+- **Build:** `cdc8d4e8-44bd-4894-9cd7-65891f35266c` — 6 screenshots, all diffs approved. (Video flag passed; agent reported `has_video: false` but that's the slim-API gap, not actual recording state — webm should exist.)
+- **Share URL:** https://app.lastest.cloud/r/pEvE2NPohcTvJdH4bSiAYA
+- **Demo notes:**
+  - *uxSummary:* Sharp VC-matching pitch on a single-page anchor site. No app surface to log into; everything happens via inline CTAs.
+  - *Highlights:* (a) The VC-matching angle is differentiated. (b) Single-page tightness — no friction between hero and CTA. (c) Maker @dawbuildsthings is reachable on X with a public profile.
+  - *Design note (not friction):* Causo's homepage links only `/about-us`, `/privacy`, `/terms`, and homepage anchors (`#features`, `#pricing` style). That's a deliberate single-page anchor pattern — not a flaw. *(Earlier draft listed five 404s — `/features`, `/pricing`, `/signup`, etc. — but Causo never links those paths, so the test was inventing URLs and surfacing their absence as friction. Removed.)*
+- **Outreach channel:** ProductHunt comment (preferred — launch context) or X DM to @dawbuildsthings.
+
+### Not published (auth required but failed)
+
+These targets DO have a signin on their site, so per the gate they need a real authenticated capture. The test template's known confirm-password bug ([[feedback-saas-demo-test-template-confirm-password]]) prevented that on q5/q7; q1 is Clerk-modal-only (unautomatable today); q3's site itself was 502'ing during the run.
+
+| # | Product | Founder | Block reason |
+|---|---------|---------|--------------|
+| q1 | AImpact / a-impact.dev | Abbas Makasarwala (u/Low-Succotash4499) | Clerk modal-only signup; URLs use sign-in/sign-up with hyphens, our regex didn't catch them as auth pages, but no real app route exists to capture |
+| q3 | Script7 / app.script7.io | u/Big-Pepper9305 | Target site threw 502 + CSP errors during the run; test stopped at step 7/22 on /login |
+| q5 | FileReadyNow / filereadynow.com | u/shubh_aiartist | Submit clicked, URL didn't transition. Likely confirm-password unfilled. Worth rerunning after template fix |
+| q7 | HabitHeat / habitheat.com | u/Impressive-Pack9746 | Same as q5 — form has email/password/confirm-password, template didn't fill confirm. Worth rerunning after template fix |
+

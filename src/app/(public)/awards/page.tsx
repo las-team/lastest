@@ -116,6 +116,16 @@ function HowItWorks() {
 function TierCriteria() {
   const tiers = [
     {
+      tier: 'starter' as const,
+      value: 'starter',
+      tone: 'slate' as const,
+      criteria: [
+        '≥ 1 passing test',
+        'Awarded on your first green build',
+        'Encourages early sharing, no a11y bar',
+      ],
+    },
+    {
       tier: 'bronze' as const,
       value: 'bronze',
       tone: 'amber' as const,
@@ -156,7 +166,7 @@ function TierCriteria() {
         two consecutive builds with non-flaky failures. Flakes alone don&apos;t
         downgrade you.
       </p>
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {tiers.map((t) => (
           <div key={t.tier} className="rounded-sm border border-border/60 bg-card p-5 space-y-4">
             <SplitShield label="LASTEST" value={t.value} tone={t.tone} size="lg" mark />

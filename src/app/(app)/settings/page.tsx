@@ -47,6 +47,7 @@ import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
+import { RunUsageCard } from '@/components/settings/run-usage-card-client';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { DeleteRepoDialog } from '@/components/settings/delete-repo-dialog';
 
@@ -104,7 +105,9 @@ export default async function SettingsPage({
     : [null, null];
 
   const storageUsage = teamId ? await queries.getTeamStorageUsage(teamId) : null;
+  const runUsage = teamId ? await queries.getTeamRunUsage(teamId) : null;
   const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === 'true';
+  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === 'true';
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
@@ -470,6 +473,20 @@ export default async function SettingsPage({
             lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
             isAdmin={isAdmin}
             enforcementEnabled={enforcementEnabled}
+          />
+        </div>
+      )}
+
+      {/* Monthly Run Usage — visible to all team members */}
+      {runUsage && (
+        <div id="run-usage">
+          <RunUsageCard
+            runsThisMonth={runUsage.runsThisMonth}
+            monthlyRunQuota={runUsage.monthlyRunQuota}
+            runMinutesThisMonth={runUsage.runMinutesThisMonth}
+            usageMonth={runUsage.usageMonth ?? ''}
+            lastCalculatedAt={runUsage.runUsageLastCalculatedAt?.toISOString() ?? null}
+            enforcementEnabled={runEnforcementEnabled}
           />
         </div>
       )}

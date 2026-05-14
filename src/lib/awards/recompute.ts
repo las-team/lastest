@@ -146,7 +146,7 @@ export async function recomputeRepoAward(repositoryId: string): Promise<RepoAwar
   return upsertRepoAward(data);
 }
 
-const TIER_RANK: Record<AwardTier, number> = { none: 0, bronze: 1, silver: 2, gold: 3 };
+const TIER_RANK: Record<AwardTier, number> = { none: 0, starter: 1, bronze: 2, silver: 3, gold: 4 };
 function rank(t: AwardTier): number {
   return TIER_RANK[t];
 }

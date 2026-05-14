@@ -1271,12 +1271,14 @@ async function runBuildAsync(
     }
   }
 
-  // Recalculate team storage usage after build completes
+  // Recalculate team storage usage + record monthly run counters after the build completes.
   if (repositoryId) {
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
+      const teamIdForUsage = repoForStorage.teamId;
       const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
-      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+      recalculateTeamStorage(teamIdForUsage).catch(() => {});
+      queries.recordTeamRunCompletion(teamIdForUsage, Math.max(0, Date.now() - startTime)).catch(() => {});
     }
   }
 

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, uniqueIndex, doublePrecision } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -1347,6 +1347,15 @@ export const teams = pgTable('teams', {
   storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
   storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
   storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
+  // Monthly test-run usage. usageMonth is a 'YYYY-MM' UTC stamp; counters reset
+  // atomically on first run of a new month (see recordTeamRunCompletion).
+  // Minutes are tracked for measurement only; only runsThisMonth is gated by
+  // monthlyRunQuota when ENFORCE_RUN_LIMITS=true.
+  monthlyRunQuota: integer('monthly_run_quota').default(500),
+  runsThisMonth: integer('runs_this_month').default(0),
+  runMinutesThisMonth: doublePrecision('run_minutes_this_month').default(0),
+  usageMonth: text('usage_month'), // 'YYYY-MM'
+  runUsageLastCalculatedAt: timestamp('run_usage_last_calculated_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -3056,7 +3065,7 @@ export type NewStepLayerFeedback = typeof stepLayerFeedback.$inferInsert;
 // The badge SVG endpoint resolves a publicShares.slug -> repository -> award
 // row, so the embed URL stays stable while the underlying state stays live.
 
-export type AwardTier = 'none' | 'bronze' | 'silver' | 'gold';
+export type AwardTier = 'none' | 'starter' | 'bronze' | 'silver' | 'gold';
 
 export interface AwardCategories {
   a11y: boolean;

@@ -13,6 +13,7 @@ function badgeUrl(base: string, slug: string, type: string, opts?: { theme?: 'li
 
 const TIER_TONE_MAP = {
   none: { tone: 'ink' as const, value: 'not yet' },
+  starter: { tone: 'slate' as const, value: 'starter' },
   bronze: { tone: 'amber' as const, value: 'bronze' },
   silver: { tone: 'blue' as const, value: 'silver' },
   gold: { tone: 'teal' as const, value: 'gold' },

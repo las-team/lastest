@@ -1,6 +1,6 @@
 import type { AwardCategories, AwardTier } from '@/lib/db/schema';
 
-export const TIER_ORDER: AwardTier[] = ['none', 'bronze', 'silver', 'gold'];
+export const TIER_ORDER: AwardTier[] = ['none', 'starter', 'bronze', 'silver', 'gold'];
 
 export function tierRank(t: AwardTier): number {
   return TIER_ORDER.indexOf(t);
@@ -51,7 +51,7 @@ export interface RecomputeInput {
  */
 export function computeTier(input: RecomputeInput): AwardTier {
   const { testCount, latestBuild, recentBuilds } = input;
-  if (!latestBuild || testCount < 5) return 'none';
+  if (!latestBuild) return 'none';
 
   const passRate = latestBuild.totalTests > 0
     ? latestBuild.passedCount / latestBuild.totalTests
@@ -81,6 +81,13 @@ export function computeTier(input: RecomputeInput): AwardTier {
   // Bronze: ≥5 tests, pass rate ≥80%, a11yScore ≥60.
   if (testCount >= 5 && passRate >= 0.8 && latestBuild.a11yScore >= 60) {
     return 'bronze';
+  }
+
+  // Starter: at least one test passing in the latest build. Deliberately
+  // generous to encourage early sharing, this is the moment a developer can
+  // first embed a Lastest badge and feel proud about it.
+  if (testCount >= 1 && latestBuild.passedCount >= 1) {
+    return 'starter';
   }
 
   return 'none';

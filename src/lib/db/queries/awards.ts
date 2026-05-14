@@ -163,6 +163,62 @@ export async function getRejectedDiffCountForRepoSince(repositoryId: string, sin
 /**
  * Most recent public share slug for a repo. Used as the proof link on the badge.
  */
+/**
+ * Award + repo summary for every repository owned by a team.
+ * Repos with no award row yet are returned with award=null so the UI can
+ * grey them out as "not yet earned".
+ */
+export async function getTeamTrophyRoom(teamId: string): Promise<Array<{
+  repo: { id: string; fullName: string; owner: string; name: string; testCount: number };
+  award: RepoAward | null;
+  proofSlug: string | null;
+}>> {
+  // Only include repos that have at least one non-deleted test, so empty/
+  // placeholder repos don't fill the trophy room with locked rows.
+  const repos = await db
+    .select({
+      id: repositories.id,
+      fullName: repositories.fullName,
+      owner: repositories.owner,
+      name: repositories.name,
+      testCount: sql<number>`COUNT(${tests.id})::int`,
+    })
+    .from(repositories)
+    .innerJoin(tests, eq(tests.repositoryId, repositories.id))
+    .where(and(eq(repositories.teamId, teamId), isNull(tests.deletedAt)))
+    .groupBy(repositories.id, repositories.fullName, repositories.owner, repositories.name, repositories.createdAt)
+    .having(sql`COUNT(${tests.id}) > 0`)
+    .orderBy(desc(repositories.createdAt));
+
+  if (repos.length === 0) return [];
+
+  const repoIds = repos.map(r => r.id);
+  const awards = await db
+    .select()
+    .from(repoAwards)
+    .where(sql`${repoAwards.repositoryId} IN (${sql.join(repoIds.map(id => sql`${id}`), sql`, `)})`);
+  const awardByRepo = new Map(awards.map(a => [a.repositoryId, a]));
+
+  // Latest public share slug per repo, used as the proof link.
+  const shares = await db
+    .select({ repositoryId: publicShares.repositoryId, slug: publicShares.slug, createdAt: publicShares.createdAt })
+    .from(publicShares)
+    .where(sql`${publicShares.repositoryId} IN (${sql.join(repoIds.map(id => sql`${id}`), sql`, `)}) AND ${publicShares.status} = 'public'`)
+    .orderBy(desc(publicShares.createdAt));
+  const slugByRepo = new Map<string, string>();
+  for (const s of shares) {
+    if (s.repositoryId && !slugByRepo.has(s.repositoryId)) {
+      slugByRepo.set(s.repositoryId, s.slug);
+    }
+  }
+
+  return repos.map(repo => ({
+    repo,
+    award: awardByRepo.get(repo.id) ?? null,
+    proofSlug: slugByRepo.get(repo.id) ?? null,
+  }));
+}
+
 export async function getLatestProofShareSlug(repositoryId: string): Promise<string | null> {
   const [row] = await db
     .select({ slug: publicShares.slug })

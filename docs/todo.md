@@ -17,13 +17,8 @@ Openrouter agent sdk parity
 demo-mode
   without link?
 ## bugs
-Verify
-  if the screenshot is tall, its not scrollable on focus screen
-  warn for network/console errors is ignored
 ## features
-Prove your app is not AI slop - Lastest badge
-Improve thumbnail image for share page for twitter/reddit etc sharing
-
+~~calc runs and run-minutes monthly~~ (done — teams.monthly_run_quota default 500, counters on every test_run completion)
 Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**

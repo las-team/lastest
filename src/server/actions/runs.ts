@@ -258,12 +258,18 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     await failJob(activeJobId, error instanceof Error ? error.message : 'Test run failed');
   }
 
-  // Recalculate team storage usage after run completes
+  // Recalculate team storage usage + record monthly run counters after the run completes.
   if (repositoryId) {
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
+      const teamIdForUsage = repoForStorage.teamId;
       const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
-      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+      recalculateTeamStorage(teamIdForUsage).catch(() => {});
+      const completedRun = await queries.getTestRun(runId).catch(() => null);
+      const startedAt = completedRun?.startedAt ? new Date(completedRun.startedAt).getTime() : null;
+      const completedAt = completedRun?.completedAt ? new Date(completedRun.completedAt).getTime() : Date.now();
+      const durationMs = startedAt ? Math.max(0, completedAt - startedAt) : 0;
+      queries.recordTeamRunCompletion(teamIdForUsage, durationMs).catch(() => {});
     }
   }
 
