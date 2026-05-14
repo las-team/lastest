@@ -67,7 +67,9 @@ export function RunUsageCard({
   // formatRelativeTime would otherwise produce different "Xm ago" strings on
   // SSR vs CSR and trip the hydration check.
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
 
   return (
     <Card id="run-usage">
