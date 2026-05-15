@@ -353,6 +353,41 @@ export class LastestClient {
     return this.post(`/api/v1/tests/${testId}/heal`);
   }
 
+  // --- QuickStart agent ---
+
+  async startQuickstart(
+    repoId: string,
+    opts?: { emailTemplate?: string },
+  ): Promise<{ sessionId: string }> {
+    return this.post(`/api/v1/repos/${repoId}/quickstart`, {
+      emailTemplate: opts?.emailTemplate,
+    });
+  }
+
+  async getQuickstartStatus(sessionId: string): Promise<{
+    id: string;
+    kind: 'quickstart';
+    status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+    currentStepId: string | null;
+    steps: Array<{
+      id: string;
+      status: string;
+      label: string;
+      description?: string;
+      error?: string;
+      result?: Record<string, unknown>;
+      startedAt?: string;
+      completedAt?: string;
+    }>;
+    metadata: Record<string, unknown>;
+  }> {
+    return this.get(`/api/v1/quickstart/${sessionId}`);
+  }
+
+  async cancelQuickstart(sessionId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/quickstart/${sessionId}`);
+  }
+
   // --- Activity Reporting ---
 
   // ── Verify phase (v1.14+) ───────────────────────────────────────────────

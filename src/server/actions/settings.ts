@@ -217,6 +217,20 @@ export async function updateEarlyAdopterMode(enabled: boolean) {
   revalidatePath('/');
 }
 
+// QuickStart agent: per-team email template (e.g. viktor+{slug}{stamp}@lastest.cloud).
+// Both {slug} and {stamp} are required so every demo run gets a unique address.
+export async function updateQuickstartEmailTemplate(template: string) {
+  const session = await requireTeamAccess();
+  const trimmed = template.trim();
+  if (!trimmed) throw new Error('Template cannot be empty');
+  if (!trimmed.includes('{slug}') || !trimmed.includes('{stamp}')) {
+    throw new Error('Template must contain both {slug} and {stamp} tokens');
+  }
+  if (trimmed.length > 200) throw new Error('Template too long (max 200 chars)');
+  await queries.updateTeam(session.team.id, { quickstartEmailTemplate: trimmed });
+  revalidatePath('/settings');
+}
+
 // Ban AI Mode
 export async function updateBanAiMode(enabled: boolean) {
   const session = await requireTeamAccess();

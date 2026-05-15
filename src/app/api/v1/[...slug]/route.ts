@@ -701,6 +701,54 @@ export async function GET(
       });
     }
 
+    // QuickStart agent session: GET /api/v1/quickstart/:sessionId
+    if (resource === 'quickstart' && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== 'quickstart') {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        id: sessionRow.id,
+        kind: sessionRow.kind,
+        repositoryId: sessionRow.repositoryId,
+        status: sessionRow.status,
+        currentStepId: sessionRow.currentStepId,
+        steps: sessionRow.steps.map((s) => ({
+          id: s.id,
+          status: s.status,
+          label: s.label,
+          description: s.description,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+          error: s.error,
+          result: s.result,
+        })),
+        metadata: {
+          quickstartEmail: sessionRow.metadata.quickstartEmail,
+          quickstartSlug: sessionRow.metadata.quickstartSlug,
+          publicScout: sessionRow.metadata.publicScout
+            ? {
+                classification: sessionRow.metadata.publicScout.classification,
+                authAutomatable: sessionRow.metadata.publicScout.authAutomatable,
+                tagline: sessionRow.metadata.publicScout.tagline,
+                concept: sessionRow.metadata.publicScout.concept,
+              }
+            : undefined,
+          authSetup: sessionRow.metadata.authSetup,
+          walkthroughTestId: sessionRow.metadata.walkthroughTestId,
+          buildId: sessionRow.metadata.buildId,
+          demoNotesId: sessionRow.metadata.demoNotesId,
+          disabledReason: sessionRow.metadata.disabledReason,
+        },
+        createdAt: sessionRow.createdAt,
+        updatedAt: sessionRow.updatedAt,
+        completedAt: sessionRow.completedAt,
+      });
+    }
+
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
@@ -1280,6 +1328,36 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // QuickStart agent: POST /api/v1/repos/:id/quickstart
+    // Body: { emailTemplate?: string }
+    if (resource === 'repos' && id && subResource === 'quickstart') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json().catch(() => ({}));
+      const emailTemplate = typeof body?.emailTemplate === 'string' ? body.emailTemplate : undefined;
+      try {
+        const { startQuickstart } = await import('@/server/actions/quickstart-agent');
+        const result = await startQuickstart(id, emailTemplate ? { emailTemplate } : undefined);
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        const e = err as Error & { code?: string; reason?: string };
+        if (e.code === 'quickstart_disabled') {
+          const { gateReasonHint } = await import('@/lib/quickstart/gating');
+          const reason = e.reason ?? 'no_repo';
+          return NextResponse.json(
+            {
+              error: 'quickstart_disabled',
+              reason,
+              hint: gateReasonHint(reason as Parameters<typeof gateReasonHint>[0]),
+            },
+            { status: 400 },
+          );
+        }
+        throw err;
+      }
+    }
+
     // Import tests + functional areas: POST /api/v1/repos/:id/import
     if (resource === 'repos' && id && subResource === 'import') {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -1796,6 +1874,20 @@ export async function DELETE(
       }
       await queries.revokePublicShareById(id);
       return NextResponse.json({ success: true });
+    }
+
+    // Cancel QuickStart agent session: DELETE /api/v1/quickstart/:sessionId
+    if (resource === 'quickstart' && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== 'quickstart') {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { cancelQuickstart } = await import('@/server/actions/quickstart-agent');
+      const result = await cancelQuickstart(id);
+      return NextResponse.json(result);
     }
 
     // Delete storage state: DELETE /api/v1/storage-states/:id

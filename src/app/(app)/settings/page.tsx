@@ -34,6 +34,7 @@ import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-se
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
+import { QuickstartEmailTemplateInput } from '@/components/settings/quickstart-email-template-input';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { GamificationToggle } from '@/components/settings/gamification-toggle';
 import { VerifyPhaseToggle } from '@/components/settings/verify-phase-toggle';
@@ -164,6 +165,11 @@ export default async function SettingsPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
+          {earlyAdopterMode && (
+            <QuickstartEmailTemplateInput
+              initial={session?.team?.quickstartEmailTemplate ?? 'viktor+{slug}{stamp}@lastest.cloud'}
+            />
+          )}
           <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
           <VerifyPhaseToggle enabled={session?.team?.verifyPhaseEnabled ?? false} />
         </CardContent>

@@ -945,3 +945,68 @@ A two-screenshot share (hero + support page) would render as a thin brochure scr
 3. **Sign-in / Sign-up toggle on a single /login URL.** Inkett's `/login` page renders both panels — needed a `getByRole('button', { name: 'Sign up', exact: true })` toggle click and a `waitFor` on the "Create account" button to confirm the signup panel was active before filling fields.
 4. **Phase 9 (DM):** pending user review per brief (`Do NOT execute Phase 9`).
 
+---
+
+## 2026-05-15 — ZOPHOS LLC / BuyAndSell
+
+- **Source:** peerpush.net (live SaaS feed)
+- **Site:** https://buyandsell.market
+- **Tagline:** "A market with social energy." — alternative market for creators, 5% per sale, no monthly fees, files scanned before delivery.
+- **Founder/Operator:** ZOPHOS LLC (footer attribution, https://zophos.org). No individual founder name surfaced on the marketing site; contact would be via zophos.org's channels.
+- **Vertical:** Creator marketplace (digital goods, buyer protection, 5% flat-fee positioning).
+- **Lastest repo:** `4ba9f4f7-4f57-4164-9b5c-2f0fa16d72f6` (name: `buyandsell-demo`)
+- **Test layout:** 1 test — public-only walkthrough (auth flow gated by custom ZOPHOS Captcha shape-recognition challenge — not automatable).
+  - Test 2: `f0f29e07-76a1-4dcd-b487-b63be3b43647` — "BuyAndSell — public walkthrough"
+- **Build:** `7e1db54b-87a2-44da-9089-300c85d5e84b` — passed 1, failed 0, **9 new baselines**, `overallStatus: review_required` (expected for first run; approved post-run).
+- **Scenarios captured:**
+  1. `/` Home — "A market with social energy" hero + 5% fee section + protection tiers
+  2. `/protection` — full protection details (resolves to `/app/protection`)
+  3. `/blog` — blog index
+  4. `/app/feed` — public marketplace feed (anonymous-readable; one live listing)
+  5. `/app/browse` — browse view
+  6. `/app/tiers` — tier comparison
+  7. `/app/listing/<id>` — first DOM-discovered listing detail (ZOPHOS LLC test listing $1.00)
+  8. Auth captcha — Sign in click surfaces the ZOPHOS Captcha "tap the shape that doesn't belong" two-stage challenge (documented friction)
+  9. Final homepage hero (gallery thumbnail)
+- **Baselines:** approved (`approve_all_diffs` ✓).
+- **Demo notes:** posted to `/api/v1/builds/.../demo-notes` (ok:true) — covers the 5% flat-fee positioning, the no-auth-needed public marketplace surface, the custom in-house ZOPHOS Captcha v3.0.1, plus friction on the no-form-pre-captcha signin and absence of a Sign up CTA on the top nav.
+- **Share URL:** https://app.lastest.cloud/r/JAwImqFsF5uHM74ZXn0Dtw
+- **Channel:** TBD — no individual founder handle surfaced (operator is ZOPHOS LLC); zophos.org contact channels would be the route. Reddit/X/PH probe required before drafting outreach.
+- **Sent:** no — **Phase 9 pending user review** (skipped per session brief).
+- **Reply (48h check):** —
+
+### Run-time pivots
+
+1. **Auth pivot to public-only mode on first captcha probe.** The site's only auth entrypoint is a top-nav "Sign in" button (no Sign up). Clicking it overlays the ZOPHOS Captcha v3.0.1 widget *before* surfacing any email/password form, then on `I'm not a robot` click advances to a "Tap the shape that doesn't belong" two-stage visual puzzle. Not solvable by deterministic Playwright. `AUTH_AUTOMATABLE=false`, Test 1 not built, Test 2 written in public-only mode.
+2. **Captcha-screen kept as a deliberate Scenario 8.** Instead of dropping the captcha, the test surfaces it intentionally as a screenshot — the founder gets to see how their auth gate looks under review, which is itself useful product feedback.
+3. **App routes are public-readable.** Most marketplaces gate `/feed` and `/browse` behind auth; BuyAndSell renders them anonymously, which made the public walk genuinely meaningful (6 distinct app surfaces captured, not just marketing pages).
+4. **Listing detail picked via DOM discovery.** No URL guessing on `/app/listing/<id>` — the test reads the first `a[href*="/app/listing/"]` link on the feed and visits it (single live listing: ZOPHOS LLC test, $1.00).
+5. **Phase 9 (DM):** pending user review per brief (`Do NOT execute Phase 9`).
+
+
+---
+
+## 2026-05-15 — Share-page screenshot fix (isNewTest pairing trap)
+
+Founder reported all 10 recent demo shares were missing screenshots on `/r/<slug>`. Root cause: the original walkthrough builds were the test's FIRST run, so every `visualDiffs` row had `baselineImagePath = null`. The slider renderer needs both panes — null-baseline rows render as singletons or get filtered, producing the "missing" appearance the founder saw.
+
+**Fix per share:** approve original baselines (promotes currents to baselines) → re-run the walkthrough test (new diffs now pair against existing baselines) → approve new diffs → publish a new share scoped to the walkthrough test from the new build.
+
+**Results:**
+
+| Product | Old slug | New slug | OLD `/screenshots/` refs | NEW `/screenshots/` refs | Outcome |
+|---|---|---|---|---|---|
+| Face Privacy | `hCEw6UGRNiny2qG1UjdB_w` | `7eK4nVkmbEpUBBPVI9pETg` | 27 | 99 | fixed (paired) |
+| AgentKanban | `pqgTVjRe9Z7qQRt2uBVv-w` | (kept old) | 24 | n/a | re-run failed at auth (`setup_failed`: stuck on `/register`), kept original |
+| StackMemo | `DfKZpi8WOogFnyKOs_3ORQ` | (kept old) | n/a | n/a | re-run failed at auth (`setup_failed`: stuck on `/signup`), kept original |
+| InsightsFlow | `WmDmnRKDaAuzzPGSMoXlYw` | (kept old) | n/a | n/a | re-run failed at auth (`setup_failed`: signup modal still visible), kept original |
+| reframe | `aRpV-mkdLVBSWrm-ANDuRA` | `NT0ZXYKvbHBQPcYBe7tJ_w` | 18 | 66 | fixed (paired) |
+| Sanctuary | `HwLDkBBT1ES7k0mURsMR9w` | `SNtmC2UdQTDbyIgxtxuMSg` | 18 | 66 | fixed (paired) |
+| Inkett | `WTE2TekhMIU5m-KOF3JSCg` | (kept old) | n/a | n/a | re-run failed at auth (`setup_failed`: stuck on `app.inkett.com/login`), kept original |
+| CavemanDetector | `1GBOMRUIgXYRjaNdT366DA` | `9MVP7Xg2x-9YQE1bhK7Mfw` | 18 | 66 | fixed (paired) |
+| Volitude | `HwvFj0iliCtcOjUCHbZMnA` | `BlbtlRdbzkKHVqqk_AxT8Q` | 12 | 44 | fixed (paired) |
+| ECFotos | `5_2esGc5y7kxRzMAPEPi6g` | `AhdF64G-88nGz4JisP55hw` | 30 | 110 | fixed (paired) |
+
+**6 of 10 fixed. 4 blocked by auth signup failure** — the demo credentials baked into each test code (Test 1 auth setup) now hit "email already exists" or rate-limited signup endpoints, so the chained walkthrough never starts. Fixing those requires patching the test code to either re-mint the credential with a fresh UTC suffix or switch to login-mode (`CHAINED_AUTH=false` inline login path). Out of scope for this share-refresh task — flagged for follow-up.
+
+**Pattern observation:** every public-walkthrough share fixed cleanly (CavemanDetector, ECFotos, reframe, Sanctuary, Volitude, and Face Privacy after its public surface) because the test re-ran without needing fresh signup. The auth-chained ones (AgentKanban, StackMemo, InsightsFlow, Inkett) all hit the same setup-failure mode. The fix template for those: re-mint `DEMO_EMAIL`/`DEMO_PASSWORD` with a fresh date suffix in both Test 1 and Test 2 code, then run Test 1 first, then Test 2.

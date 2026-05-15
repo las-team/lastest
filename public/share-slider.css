@@ -1,0 +1,24 @@
+.share-slider .share-slider-current,
+.share-slider .share-slider-divider,
+.share-slider .share-slider-label-before,
+.share-slider .share-slider-label-after,
+.share-slider .share-slider-diff,
+.share-slider .share-slider-label-diff,
+.share-slider .share-slider-hint {
+  opacity: 1;
+}
+.share-slider[data-active="false"] .share-slider-current,
+.share-slider[data-active="false"] .share-slider-divider,
+.share-slider[data-active="false"] .share-slider-label-before,
+.share-slider[data-active="false"] .share-slider-label-after {
+  opacity: 0;
+}
+.share-slider[data-active="true"] .share-slider-diff,
+.share-slider[data-active="true"] .share-slider-label-diff,
+.share-slider[data-active="true"] .share-slider-hint {
+  opacity: 0;
+}
+.share-slider-stage:focus-visible {
+  outline: 2px solid var(--primary, #000);
+  outline-offset: 2px;
+}

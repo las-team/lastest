@@ -317,7 +317,7 @@ export async function getAgentSession(id: string) {
   return row;
 }
 
-export async function getActiveAgentSession(repositoryId: string) {
+export async function getActiveAgentSession(repositoryId: string, kind: 'play' | 'quickstart' = 'play') {
   // Opportunistic sweep so a stale "active" row doesn't keep the activity
   // feed spinning forever. Cheap when there's nothing to do.
   await sweepStuckAgentSessions().catch(() => { /* sweep is best-effort */ });
@@ -328,6 +328,7 @@ export async function getActiveAgentSession(repositoryId: string) {
     .where(
       and(
         eq(agentSessions.repositoryId, repositoryId),
+        eq(agentSessions.kind, kind),
         or(
           eq(agentSessions.status, 'active'),
           eq(agentSessions.status, 'paused'),

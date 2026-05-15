@@ -1339,6 +1339,10 @@ export const teams = pgTable('teams', {
   status: text('status').$type<TeamStatus>().notNull().default('active'),
   selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
+  /** QuickStart agent: email template for the demo user it registers.
+   *  Tokens: {slug} = kebab-case product name, {stamp} = UTC YYYYMMDDHHMM.
+   *  Default lands the verification mail in Viktor's inbox via plus-addressing. */
+  quickstartEmailTemplate: text('quickstart_email_template').default('viktor+{slug}{stamp}@lastest.cloud'),
   banAiMode: boolean('ban_ai_mode').default(false),
   gamificationEnabled: boolean('gamification_enabled').default(false),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
@@ -1772,6 +1776,8 @@ export type NewComposeConfig = typeof composeConfigs.$inferInsert;
 
 export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
+export type AgentSessionKind = 'play' | 'quickstart';
+
 export type AgentStepId =
   | 'settings_check'
   | 'select_repo'
@@ -1784,11 +1790,18 @@ export type AgentStepId =
   | 'fix_tests'
   | 'rerun_tests'
   | 'summary'
-  | 'heal';
+  | 'heal'
+  // QuickStart agent steps
+  | 'qs_preflight'
+  | 'qs_scout_public'
+  | 'qs_auth_setup'
+  | 'qs_scout_authed'
+  | 'qs_generate'
+  | 'qs_run_and_notes';
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
-export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer';
+export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer' | 'quickstart';
 
 export interface AgentSubstep {
   label: string;
@@ -1847,6 +1860,34 @@ export interface AgentStepState {
   substeps?: AgentSubstep[];
 }
 
+export interface QuickstartAuthClassification {
+  classification: 'email_password' | 'magic_link_only' | 'oauth_only' | 'captcha_gated' | 'otp' | 'no_public_register';
+  authAutomatable: boolean;
+}
+
+export interface QuickstartPublicScout extends QuickstartAuthClassification {
+  tagline?: string;
+  concept?: string;
+  navLinks: Array<{ path: string; label: string }>;
+  registerPath?: string | null;
+  cookieBannerSelectorHint?: string;
+  friction?: Array<{ kind: string; note: string }>;
+}
+
+export interface QuickstartAuthedScout {
+  inAppNavLinks: Array<{ path: string; label: string }>;
+  safeCtaCandidates: Array<{ label: string; selectorHint?: string }>;
+  observedRoutes: string[];
+  friction?: Array<{ kind: string; note: string }>;
+}
+
+export interface QuickstartAuthSetupMeta {
+  testId?: string;
+  storageStateId?: string;
+  captured: boolean;
+  failureReason?: string;
+}
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
   fixAttempts?: Record<string, number>;
@@ -1861,6 +1902,18 @@ export interface AgentSessionMetadata {
   manualMode?: boolean;
   skipGithub?: boolean;
   skipAI?: boolean;
+  // QuickStart-only fields
+  quickstartEmail?: string;
+  quickstartPassword?: string;
+  quickstartSlug?: string;
+  quickstartStamp?: string;
+  publicScout?: QuickstartPublicScout;
+  authedScout?: QuickstartAuthedScout;
+  authSetup?: QuickstartAuthSetupMeta;
+  walkthroughTestId?: string;
+  buildId?: string;
+  demoNotesId?: string;
+  disabledReason?: string;
   [key: string]: unknown;
 }
 
@@ -1868,6 +1921,7 @@ export const agentSessions = pgTable('agent_sessions', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   teamId: text('team_id'),
+  kind: text('kind').$type<AgentSessionKind>().notNull().default('play'),
   status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
   currentStepId: text('current_step_id').$type<AgentStepId>(),
   steps: jsonb('steps').$type<AgentStepState[]>().notNull(),

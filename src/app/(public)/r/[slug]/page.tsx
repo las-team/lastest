@@ -203,16 +203,17 @@ export default async function PublicSharePage({ params }: PageProps) {
         <ShareFooter slug={slug} />
       </main>
 
-      {/* Server-emitted inline style + script: idle/active slider toggling and
-          pointer-driven reveal for the diff sliders. Zero hydration cost. The
-          video player is a separate React client island (see ShareVideoPlayer)
-          which owns playback rate, scrubbing, and step-seek wiring. */}
-      <style dangerouslySetInnerHTML={{ __html: SHARE_STYLE }} />
-      <script
-        dangerouslySetInnerHTML={{
-          __html: SHARE_SCRIPT,
-        }}
-      />
+      {/* External static assets in /public: idle/active slider toggling and
+          pointer-driven reveal for the diff sliders. Same zero-hydration-cost
+          shape as the previous inline emission, but cacheable and CSP-friendly
+          (lets script-src drop 'unsafe-inline' for app code). The video player
+          is a separate React client island (see ShareVideoPlayer) which owns
+          playback rate, scrubbing, and step-seek wiring.
+          eslint-disable-next-line is for @next/next/no-css-tags — we want a
+          /public static asset, not a bundled module import. */}
+      {/* eslint-disable-next-line @next/next/no-css-tags */}
+      <link rel="stylesheet" href="/share-slider.css" precedence="default" />
+      <script src="/share-slider.js" defer />
     </div>
   );
 }
@@ -1821,111 +1822,3 @@ function ShareFooter({ slug }: { slug: string }) {
     </footer>
   );
 }
-
-const SHARE_STYLE = `
-.share-slider .share-slider-current,
-.share-slider .share-slider-divider,
-.share-slider .share-slider-label-before,
-.share-slider .share-slider-label-after,
-.share-slider .share-slider-diff,
-.share-slider .share-slider-label-diff,
-.share-slider .share-slider-hint {
-  opacity: 1;
-}
-.share-slider[data-active="false"] .share-slider-current,
-.share-slider[data-active="false"] .share-slider-divider,
-.share-slider[data-active="false"] .share-slider-label-before,
-.share-slider[data-active="false"] .share-slider-label-after {
-  opacity: 0;
-}
-.share-slider[data-active="true"] .share-slider-diff,
-.share-slider[data-active="true"] .share-slider-label-diff,
-.share-slider[data-active="true"] .share-slider-hint {
-  opacity: 0;
-}
-.share-slider-stage:focus-visible {
-  outline: 2px solid var(--primary, #000);
-  outline-offset: 2px;
-}
-`;
-
-const SHARE_SCRIPT = `
-(function(){
-  // Click-to-scroll: step-strip thumbnails carry data-step-jump="N"; sliders
-  // carry data-step="N". Clicking a thumbnail scrolls to the matching slider.
-  // Independent of (and additive to) the video-seek click delegate in
-  // ShareVideoPlayer — a thumbnail can both seek video AND scroll a slider.
-  document.addEventListener('click', function(e){
-    var t = e.target;
-    if (!(t instanceof Element)) return;
-    var jump = t.closest('[data-step-jump]');
-    if (!jump) return;
-    var n = jump.getAttribute('data-step-jump');
-    if (!n) return;
-    var target = document.querySelector('[data-step="' + n + '"]');
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, true);
-
-  var figs = document.querySelectorAll('.share-slider');
-  for (var i = 0; i < figs.length; i++) {
-    (function(fig){
-      var stage = fig.querySelector('.share-slider-stage');
-      if (!stage) return;
-      var hasDiff = fig.getAttribute('data-has-diff') === 'true';
-      // Track whether pointer is inside the stage so touchmove/leave behave.
-      function setPct(clientX) {
-        var rect = stage.getBoundingClientRect();
-        if (!rect.width) return;
-        var x = clientX - rect.left;
-        var pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
-        fig.style.setProperty('--pct', pct.toFixed(2) + '%');
-        stage.setAttribute('aria-valuenow', String(Math.round(pct)));
-      }
-      function activate() { fig.setAttribute('data-active', 'true'); }
-      function deactivate() { if (hasDiff) fig.setAttribute('data-active', 'false'); }
-      stage.addEventListener('pointerenter', function(e){
-        if (e.pointerType === 'touch') return;
-        activate();
-        setPct(e.clientX);
-      });
-      stage.addEventListener('pointerleave', function(e){
-        if (e.pointerType === 'touch') return;
-        deactivate();
-      });
-      stage.addEventListener('pointermove', function(e){
-        if (fig.getAttribute('data-active') !== 'true') return;
-        setPct(e.clientX);
-      });
-      stage.addEventListener('pointerdown', function(e){
-        activate();
-        setPct(e.clientX);
-        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
-      });
-      stage.addEventListener('pointerup', function(e){
-        try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
-      });
-      stage.addEventListener('keydown', function(e){
-        var curStr = fig.style.getPropertyValue('--pct') || '50%';
-        var cur = parseFloat(curStr) || 50;
-        var step = e.shiftKey ? 10 : 2;
-        if (e.key === 'ArrowLeft') {
-          activate();
-          var n = Math.max(0, cur - step);
-          fig.style.setProperty('--pct', n + '%');
-          stage.setAttribute('aria-valuenow', String(Math.round(n)));
-          e.preventDefault();
-        } else if (e.key === 'ArrowRight') {
-          activate();
-          var m = Math.min(100, cur + step);
-          fig.style.setProperty('--pct', m + '%');
-          stage.setAttribute('aria-valuenow', String(Math.round(m)));
-          e.preventDefault();
-        } else if (e.key === 'Escape') {
-          deactivate();
-        }
-      });
-    })(figs[i]);
-  }
-})();
-`;

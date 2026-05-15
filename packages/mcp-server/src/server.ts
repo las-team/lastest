@@ -1460,6 +1460,98 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // ===== QuickStart agent =====
+
+  // --- lastest_quickstart ---
+  server.tool(
+    'lastest_quickstart',
+    'Productized form of /gtm-lastest-saas-demo. Spins up a 2-test demo (auth setup + app walkthrough) on a repo whose baseUrl is set, runs it with video, and writes build_demo_notes. Gated by team early-adopter mode + repo baseUrl. Returns a sessionId to poll with lastest_quickstart_status.',
+    {
+      repositoryId: z.string().describe('Repository ID — must have baseUrl set and team must have early-adopter mode enabled'),
+      emailTemplate: z
+        .string()
+        .optional()
+        .describe('Optional override for the demo email template (must contain {slug} and {stamp} tokens). Persisted on the team for next time.'),
+    },
+    withActivityReporting(client, 'lastest_quickstart', async (params) => {
+      try {
+        const result = await client.startQuickstart(params.repositoryId as string, {
+          emailTemplate: params.emailTemplate as string | undefined,
+        });
+        const response: ToolResponse = {
+          status: 'started',
+          summary: `QuickStart session started: ${result.sessionId}`,
+          actionRequired: [
+            `Poll lastest_quickstart_status with sessionId: ${result.sessionId}`,
+            'Status flips to "completed" when the build finishes and demo notes are written.',
+          ],
+          details: result as unknown as Record<string, unknown>,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const match = message.match(/Lastest API error (\d+): (.*)$/s);
+        let parsedBody: Record<string, unknown> = {};
+        if (match) {
+          try { parsedBody = JSON.parse(match[2]); } catch { /* ignore */ }
+        }
+        const isDisabled = parsedBody.error === 'quickstart_disabled';
+        const failResponse: ToolResponse = {
+          status: isDisabled ? 'disabled' : 'error',
+          summary: isDisabled
+            ? `QuickStart is disabled for this repo: ${String(parsedBody.reason ?? 'unknown')}`
+            : `Failed to start QuickStart: ${message}`,
+          actionRequired: isDisabled
+            ? [String(parsedBody.hint ?? 'Check team early-adopter mode and repo baseUrl.')]
+            : ['Inspect the error and retry; check that the repo has baseUrl set and AI provider configured.'],
+          details: parsedBody,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(failResponse, null, 2) }] };
+      }
+    }),
+  );
+
+  // --- lastest_quickstart_status ---
+  server.tool(
+    'lastest_quickstart_status',
+    'Poll a QuickStart session by ID. Returns step-by-step status, the auth-setup outcome, the walkthrough test ID, the build ID, and whether demo notes were written.',
+    {
+      sessionId: z.string().describe('QuickStart session ID returned by lastest_quickstart'),
+    },
+    withActivityReporting(client, 'lastest_quickstart_status', async (params) => {
+      const result = await client.getQuickstartStatus(params.sessionId as string);
+      const completed = result.status === 'completed';
+      const failed = result.status === 'failed';
+      const cancelled = result.status === 'cancelled';
+      const summaryBits: string[] = [`status: ${result.status}`];
+      if (result.currentStepId) summaryBits.push(`current: ${result.currentStepId}`);
+      const buildId = (result.metadata?.buildId as string | undefined) ?? null;
+      const walkthroughTestId = (result.metadata?.walkthroughTestId as string | undefined) ?? null;
+      if (walkthroughTestId) summaryBits.push(`walkthroughTestId: ${walkthroughTestId}`);
+      if (buildId) summaryBits.push(`buildId: ${buildId}`);
+
+      const actionRequired: string[] = [];
+      if (!completed && !failed && !cancelled) {
+        actionRequired.push('Poll again in a few seconds.');
+      }
+      if (completed && buildId) {
+        actionRequired.push(`Open the build: /builds/${buildId}`);
+        actionRequired.push(`Publish a share via POST /api/v1/builds/${buildId}/share { scopedTestId: "${walkthroughTestId ?? '...'}" }`);
+      }
+      if (failed) {
+        actionRequired.push('Inspect the failed step in `steps[]`. The `error` and `result` fields contain the cause.');
+      }
+
+      const response: ToolResponse = {
+        status: result.status,
+        summary: summaryBits.join(' · '),
+        actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
+        details: result as unknown as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // --- lastest_approve_layer ---
   server.tool(
     'lastest_approve_layer',
