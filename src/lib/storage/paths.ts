@@ -1,4 +1,5 @@
 import path from 'path';
+import { promises as fs } from 'fs';
 
 /**
  * Centralized storage paths — all media files live under `storage/` (outside `public/`).
@@ -51,4 +52,33 @@ export function resolveStoragePath(urlPath: string): string | null {
  */
 export function toRelativePath(absPath: string): string {
   return '/' + path.relative(STORAGE_ROOT, absPath).split(path.sep).join('/');
+}
+
+/**
+ * Strict variant of `resolveStoragePath` that additionally `realpath`s the
+ * result and verifies the canonical path is still inside `STORAGE_ROOT`.
+ * Returns `null` for any path that escapes via symlink, traversal, or that
+ * targets a disallowed subdirectory.
+ *
+ * Use this on any read path served back to the client (media route,
+ * thumbnail generators) so a stray symlink under `storage/` can never be
+ * used to exfiltrate arbitrary host files.
+ */
+export async function resolveStoragePathStrict(urlPath: string): Promise<string | null> {
+  const candidate = resolveStoragePath(urlPath);
+  if (!candidate) return null;
+  let real: string;
+  try {
+    real = await fs.realpath(candidate);
+  } catch {
+    // Caller's `existsSync` will give the right 404 — we only need to
+    // guard against symlink escapes, not missing files.
+    return candidate;
+  }
+  const baseReal = await fs.realpath(STORAGE_ROOT).catch(() => STORAGE_ROOT);
+  const baseWithSep = baseReal.endsWith(path.sep) ? baseReal : baseReal + path.sep;
+  if (real !== baseReal && !real.startsWith(baseWithSep)) {
+    return null;
+  }
+  return real;
 }

@@ -5,6 +5,28 @@
  * Returns `null` if the URL is safe, or an error message string if blocked.
  */
 
+/**
+ * Lightweight scheme-only check. Use at write-time for fields that store a
+ * URL the app will later navigate to (`page.goto`, `<a href>`, redirects).
+ * Rejects `javascript:`, `data:`, `file:`, etc. so a malicious admin can't
+ * persist an XSS payload as a baseUrl. Does NOT block private networks —
+ * legitimate dev configs (`http://localhost:3000`) must keep working; use
+ * `validateUrl` / `validateUrlAsync` for outbound-fetch sites.
+ *
+ * Returns `null` if scheme is acceptable, or an error string if not.
+ */
+export function assertHttpScheme(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return 'Only HTTP(S) URLs are allowed';
+    }
+    return null;
+  } catch {
+    return 'Invalid URL';
+  }
+}
+
 function ipToNumber(ip: string): number {
   const parts = ip.split('.').map(Number);
   return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;

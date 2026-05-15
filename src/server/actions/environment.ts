@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { validateUrlAsync } from '@/lib/security/url-validation';
+import { validateUrlAsync, assertHttpScheme } from '@/lib/security/url-validation';
 import type { EnvironmentMode } from '@/lib/db/schema';
 
 export interface EnvironmentConfigInput {
@@ -31,6 +31,12 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
 export async function saveEnvironmentConfig(data: EnvironmentConfigInput) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
+  const baseUrlErr = assertHttpScheme(data.baseUrl);
+  if (baseUrlErr) throw new Error(`baseUrl rejected: ${baseUrlErr}`);
+  if (data.healthCheckUrl) {
+    const healthErr = assertHttpScheme(data.healthCheckUrl);
+    if (healthErr) throw new Error(`healthCheckUrl rejected: ${healthErr}`);
+  }
   const result = await queries.upsertEnvironmentConfig(data.repositoryId ?? null, {
     mode: data.mode,
     baseUrl: data.baseUrl.replace(/\/+$/, ''),
@@ -96,6 +102,8 @@ export async function testServerConnection(url: string): Promise<{
  */
 export async function saveBranchBaseUrl(repositoryId: string, branch: string, baseUrl: string) {
   await requireRepoAccess(repositoryId);
+  const schemeErr = assertHttpScheme(baseUrl);
+  if (schemeErr) throw new Error(`baseUrl rejected: ${schemeErr}`);
   const repo = await queries.getRepository(repositoryId);
   if (!repo) throw new Error('Repository not found');
   const urls = (repo.branchBaseUrls as Record<string, string>) ?? {};

@@ -874,3 +874,74 @@ A two-screenshot share (hero + support page) would render as a thin brochure scr
 3. **Route probe:** curled `/apply /signup /login /register /dashboard /app /api` against `cashcapy.com` — all 404. `/` and `/support` 200. Confirms iOS-only.
 4. **Did not attempt the brief's "API-direct or inbox-pull" fallback.** Those fallbacks are for *gated* signups on a real web app; here there is no web signup target to gate against. Probing a non-existent host wastes the time-box.
 5. **Phase 9 (DM):** pending user review per task instructions ("Do NOT execute Phase 9"). Even if executed later, the founder note would be "you don't have a web app — this is a Lastest demo skill that needs one" rather than a baseline share, which is not the outcome the skill is designed to deliver.
+
+---
+
+## 2026-05-15 — Volitude App
+
+- **Source:** IndieAppCircle (per user brief).
+- **Site:** https://volitude.app/
+- **Tagline:** "Master a foreign language through personalised short stories."
+- **Founder:** Volitude App (IndieAppCircle handle; no public X/Reddit surfaced during probe — outreach channel TBD on Phase 9).
+- **Stack signal from network:** Next.js (turbopack chunks), self-hosted Plausible-style analytics (`/9e9ee47.../script.js`), `/api/daily-story` and `/api/events` endpoints — no third-party auth, no third-party tracker.
+- **Auth model:** None. The app is anonymous-by-design — onboarding (language/level/topic) writes to localStorage and lands the user on a personalised library on first visit. The "no-signup tier" in the brief is in fact the only tier.
+- **Lastest repo:** `81140513-004c-4ef7-ac67-fdd483e1845d` (`volitude-demo`)
+- **Tests:**
+  - Test 1 `8c031d2a-5f77-4211-8ac4-65612b64259f` — `volitude — onboarding setup` (chained as setup)
+  - Test 2 `897e2d7b-d2eb-40f1-892b-e3efd0fb3228` — `volitude — app walkthrough` (chained via `setupTestId`)
+- **Build:** `d57ca794-7954-46e7-8765-df19aa2c17cc` — passed 1/1, 0 failed, **4 baseline screenshots**, video 387KB, `overallStatus: review_required` (first-run baselines, expected; approved via `approve_all_diffs`).
+- **Scenarios captured (Test 2, chained on pre-personalised library state):**
+  1. `/` Personalised library (French A2 + Travel pre-loaded with two stories + Daily story panel)
+  2. `/daily/French/easy` Daily story landing (Easy variant)
+  3. `/library/c5ab8167-...` Story view ("Une nuit à l hôtel", tap-a-word translation, Continue/Delete bar)
+  4. `/` Library final state
+- **Baselines:** approved.
+- **Demo notes:** posted to `/api/v1/builds/<id>/demo-notes` — uxSummary + 3 highlights + 2 frictionPoints (daily-story API ERR_ABORTED, React #418 hydration mismatch on story page) + 1 testingStruggle (no auth gate, used onboarding-setup chain instead).
+- **Share URL:** https://app.lastest.cloud/r/HwvFj0iliCtcOjUCHbZMnA (scoped to Test 2).
+- **Channel:** TBD.
+- **Sent:** no — Phase 9 explicitly deferred per user instruction ("Do NOT execute Phase 9").
+- **Reply (48h check):** —
+
+### Run-time pivots
+1. **Auth model surprise — adapted to onboarding-as-setup.** Brief said "if signup is gated, try API-direct"; in fact there is no signup at all. Pivoted Test 1 from "register a demo user" to "walk the onboarding picker and land on the personalised library", so Test 2 (chained) inherits a non-empty library through Lastest's `setupTestId` context replay. This preserves the show-the-actual-app principle without any auth.
+2. **Step 2 thin screenshot (9KB).** The Easy daily-story page captured before the story finished generating (the API call returned `ERR_ABORTED`). Kept the screenshot as-is — it documents a real Volitude friction point (no skeleton/retry on API abort) rather than masking it.
+3. **Phase 9 (DM):** pending user review. Founder handle not yet identified — would need an IndieAppCircle profile pull or a `volitude.app` footer/about probe to find a Reddit/X/email channel before drafting.
+
+---
+
+## 2026-05-15 — Inkett (founder TBD)
+
+- **Source:** peerpush.net "live" feed (top-up demo: queued by user).
+- **Site:** https://inkett.com — app at https://app.inkett.com
+- **Tagline:** "The writing stack for novelists. One workspace, the whole novel."
+- **Founder:** Not surfaced from footer or About page (site shows "Est. 2026" colophon + `mailto:hello@inkett.com`). WHOIS / X handle not probed in this session (time-boxed); follow-up can pull from `hello@inkett.com` outbound mail or peerpush listing meta.
+- **Vertical:** Writing tool for working novelists — Plan / Draft / Edit / Publish stages with chapter-anchored editorial review.
+- **Auth signal:** Better Auth (`/api/auth/sign-up/email`) — email + password, no email verification gate, no captcha, single password field (no confirm), optional "Continue with Google" OAuth. AUTH_AUTOMATABLE=true.
+- **Lastest repo:** `2aead427-b912-458a-9187-04604845af3e` (name: `inkett-demo`).
+- **Tests (2-test chained):**
+  - **Test 1 — Inkett — auth setup** (`016d6be5-2c38-42ce-80f1-281781c2b18a`) — toggles signin → signup on `app.inkett.com/login`, fills name/email/password, waits on `/api/auth/sign-up/email` response, asserts redirect away from `/login`.
+  - **Test 2 — Inkett — app walkthrough** (`9cfc98c4-b7ec-40c6-9a90-e3e51318e87f`, `setupTestId` chained) — public walk (home + library + blog + about), then authed onboarding walk ("Welcome, writer" intent picker → "Show me around" path → name entry → continue).
+- **Build:** `bc4451f5-8b98-45e5-b848-6e40458deeac` — passed 1/1, 0 failed, **8 baseline screenshots**, ~79s elapsed.
+- **Scenarios captured (Test 2):**
+  1. `/` Home (Volume I hero with library cards: Pride and Prejudice / Moby Dick / Frankenstein editorial reviews)
+  2. `/library`
+  3. `/blog` (Notebook)
+  4. `/about`
+  5. Post-auth landing on `/onboarding` — "Welcome, writer. What brings you to Inkett?" intent picker
+  6. In-app route (header nav)
+  7. In-app route (header nav)
+  8. Final homepage hero
+- **Baselines:** approved (`approve_all_diffs` ✓).
+- **Demo notes:** posted to `/api/v1/builds/.../demo-notes` (ok:true) — covers editorial-magazine framing, frictionless signup, read-only onboarding path, plus the testing struggles (sign-in/sign-up toggle on a single /login URL, alert-role node short-circuit on Promise.race).
+- **Share URL:** https://app.lastest.cloud/r/WTE2TekhMIU5m-KOF3JSCg
+- **Channel:** TBD (founder handle not surfaced this run — `hello@inkett.com` is the only public contact). Reddit/X/PH probe required before drafting outreach.
+- **Sent:** no — **Phase 9 pending user review** (skipped per session brief).
+- **Reply (48h check):** —
+
+### Run-time pivots
+
+1. **First two builds failed in <5s on "auth did not complete — still on /login".** Root cause: an empty `role=alert` node mounts on `app.inkett.com/login` by default (likely a sonner/toast container). The original `Promise.race([waitForURL, waitForSelector('[role=alert]:visible, .error:visible, [data-error]:visible')])` resolved immediately on the alert match, short-circuiting the post-submit wait before the form could even submit.
+2. **Fix:** replaced the alert-race with `page.waitForResponse(/\/api\/auth\/sign-up\/email/)` to anchor the wait on the actual Better Auth signup call. Build 3 (`bc4451f5...`) passed cleanly with the auth phase reaching the "Welcome, writer" onboarding picker.
+3. **Sign-in / Sign-up toggle on a single /login URL.** Inkett's `/login` page renders both panels — needed a `getByRole('button', { name: 'Sign up', exact: true })` toggle click and a `waitFor` on the "Create account" button to confirm the signup panel was active before filling fields.
+4. **Phase 9 (DM):** pending user review per brief (`Do NOT execute Phase 9`).
+

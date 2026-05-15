@@ -7,6 +7,7 @@ import {
 } from '@/lib/github/webhooks';
 import { createAndRunBuild, createAndRunBuildCore } from '@/server/actions/builds';
 import { mergeBaselinesFromBranch, cleanupBranchBaselines, promoteTestVersionsFromBranch } from '@/server/actions/baselines';
+import { markWebhookSeen } from '@/lib/integrations/webhook-guard';
 import * as queries from '@/lib/db/queries';
 
 /**
@@ -33,6 +34,13 @@ export async function POST(request: NextRequest) {
   }
   if (!verifyWebhookSignature(payload, signature)) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+  }
+
+  // Replay protection: GitHub guarantees a unique delivery id per webhook.
+  // A captured payload + signature can otherwise be re-sent indefinitely.
+  const deliveryId = request.headers.get('x-github-delivery');
+  if (deliveryId && !markWebhookSeen(`github:${deliveryId}`)) {
+    return NextResponse.json({ message: 'Duplicate delivery, ignored' });
   }
 
   const data = JSON.parse(payload);

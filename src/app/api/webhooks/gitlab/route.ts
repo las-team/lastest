@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAndRunBuild } from '@/server/actions/builds';
+import { markWebhookSeen } from '@/lib/integrations/webhook-guard';
 import * as queries from '@/lib/db/queries';
 import type { GitlabPipelineConfig, GitlabPipelineTriggerEvent } from '@/lib/db/schema';
 
@@ -115,6 +116,16 @@ export async function POST(request: NextRequest) {
   const expectedSecret = config?.webhookSecret || ENV_GITLAB_WEBHOOK_SECRET || null;
   if (!verifyWebhookToken(token, expectedSecret)) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  }
+
+  // Replay protection. GitLab sends `X-Gitlab-Event-UUID` per delivery
+  // (and falls back to a `request-id` header on older versions). Without
+  // this, a captured token+payload pair can be replayed indefinitely.
+  const deliveryId =
+    request.headers.get('x-gitlab-event-uuid') ??
+    request.headers.get('x-request-id');
+  if (deliveryId && !markWebhookSeen(`gitlab:${deliveryId}`)) {
+    return NextResponse.json({ message: 'Duplicate delivery, ignored' });
   }
 
   if (!repo) {

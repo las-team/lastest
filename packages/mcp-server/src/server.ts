@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { LastestClient, type ToolResponse } from './client.js';
+import { redactSecrets } from './redact.js';
 
 type ToolHandler = (params: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }> }>;
 
@@ -11,10 +12,13 @@ function withActivityReporting(
 ): ToolHandler {
   return async (params) => {
     const start = Date.now();
+    // Tool params can carry caller-side secrets (auth headers, tokens
+    // accidentally passed as a string field). Redact before they reach
+    // the activity feed where any team member can view them.
     client.reportActivity({
       eventType: 'mcp:tool_call',
       summary: `MCP: ${toolName}`,
-      detail: { params },
+      detail: { params: redactSecrets(params) },
       toolName,
     });
     try {

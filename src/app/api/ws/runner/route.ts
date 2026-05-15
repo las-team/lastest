@@ -17,6 +17,7 @@ import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-event
 import fs from 'fs/promises';
 import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { assertWithinDir, UnsafePathError } from '@/lib/security/safe-path';
 import {
   claimPendingCommands,
   completeRunnerCommand,
@@ -54,6 +55,21 @@ function sanitizeFilename(filename: string): string {
   // Validate extension and length
   if (!/\.(png|jpg|jpeg)$/i.test(safe) || safe.length > 255 || !safe) {
     throw new Error('Invalid filename');
+  }
+  return safe;
+}
+
+/**
+ * Sanitize a video filename. Same rules as `sanitizeFilename` but the only
+ * allowed extensions are `.webm` and `.mp4`.
+ */
+function sanitizeVideoFilename(filename: string): string {
+  let safe = filename.replace(/\0/g, '');
+  safe = safe.split(/[/\\]/).pop() || '';
+  safe = safe.replace(/\.\./g, '');
+  safe = safe.replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!/\.(webm|mp4)$/i.test(safe) || safe.length > 255 || !safe) {
+    throw new Error('Invalid video filename');
   }
   return safe;
 }
@@ -227,15 +243,29 @@ export async function POST(request: NextRequest) {
         const payload = { ...result.payload } as Record<string, unknown>;
         if (payload.videoData && payload.videoFilename) {
           try {
-            const repoId = (payload.repositoryId as string) || 'default';
+            // Validate runner-supplied path segments before composing the
+            // destination. Without this, a compromised runner could set
+            // `repositoryId='../../../tmp'` and `videoFilename='evil.bin'`
+            // to write bytes anywhere the app process can write.
+            const rawRepoId = typeof payload.repositoryId === 'string' ? payload.repositoryId : '';
+            const safeRepoId = rawRepoId ? validateRepositoryId(rawRepoId) : undefined;
+            const repoId = safeRepoId ?? 'default';
+            const safeFilename = sanitizeVideoFilename(payload.videoFilename as string);
             const videoDir = path.join(STORAGE_DIRS.videos, repoId);
+            const videoDest = path.join(videoDir, safeFilename);
+            assertWithinDir(videoDest, STORAGE_DIRS.videos);
             await fs.mkdir(videoDir, { recursive: true });
-            const videoDest = path.join(videoDir, payload.videoFilename as string);
             await fs.writeFile(videoDest, Buffer.from(payload.videoData as string, 'base64'));
             // Store the relative path so executor can find it
-            payload.videoPath = `/videos/${repoId}/${payload.videoFilename}`;
+            payload.videoPath = `/videos/${repoId}/${safeFilename}`;
           } catch (err) {
-            console.error(`[Runner] Failed to save video:`, err);
+            // Drop the video on validation failure instead of 500-ing the
+            // runner — a misbehaving runner shouldn't block the build.
+            if (err instanceof UnsafePathError) {
+              console.error(`[Runner] Rejected unsafe video path:`, err.message);
+            } else {
+              console.error(`[Runner] Failed to save video:`, err);
+            }
           }
         }
         delete payload.videoData;
@@ -342,8 +372,9 @@ export async function POST(request: NextRequest) {
 
           const baseDir = STORAGE_DIRS.screenshots;
           const dir = safeRepoId ? path.join(baseDir, safeRepoId) : baseDir;
-          await fs.mkdir(dir, { recursive: true });
           const filePath = path.join(dir, safeFilename);
+          assertWithinDir(filePath, baseDir);
+          await fs.mkdir(dir, { recursive: true });
           await fs.writeFile(filePath, Buffer.from(payload.data, 'base64'));
           const relativePath = safeRepoId
             ? `/screenshots/${safeRepoId}/${safeFilename}`
@@ -380,12 +411,21 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          const dir = path.join(STORAGE_DIRS['network-bodies'], repositoryId || 'default');
-          await fs.mkdir(dir, { recursive: true });
-          const filename = `${testRunId}-${testId}.json`;
+          // All path segments come from the runner — validate as UUIDs so a
+          // compromised runner can't traverse out of network-bodies/.
+          const safeRepoId = validateRepositoryId(repositoryId) ?? 'default';
+          const safeTestRunId = validateRepositoryId(testRunId);
+          const safeTestId = validateRepositoryId(testId);
+          if (!safeTestRunId || !safeTestId) {
+            return NextResponse.json({ error: 'Invalid testRunId or testId' }, { status: 400 });
+          }
+          const dir = path.join(STORAGE_DIRS['network-bodies'], safeRepoId);
+          const filename = `${safeTestRunId}-${safeTestId}.json`;
           const filePath = path.join(dir, filename);
+          assertWithinDir(filePath, STORAGE_DIRS['network-bodies']);
+          await fs.mkdir(dir, { recursive: true });
           await fs.writeFile(filePath, JSON.stringify(networkRequests));
-          const relativePath = `/network-bodies/${repositoryId || 'default'}/${filename}`;
+          const relativePath = `/network-bodies/${safeRepoId}/${filename}`;
 
           await insertCommandResult({
             commandId,
@@ -394,7 +434,11 @@ export async function POST(request: NextRequest) {
             payload: { path: relativePath },
           });
         } catch (error) {
-          console.error(`[NetworkBodies] Failed to save for test ${testId}:`, error);
+          if (error instanceof UnsafePathError) {
+            console.error(`[NetworkBodies] Rejected unsafe path for test ${testId}:`, error.message);
+          } else {
+            console.error(`[NetworkBodies] Failed to save for test ${testId}:`, error);
+          }
           // Non-blocking — test result is already stored
         }
 
@@ -641,11 +685,14 @@ export async function GET(request: NextRequest) {
 async function saveScreenshotToDisk(base64Data: string, filename: string, repositoryId?: string): Promise<string> {
   const baseDir = STORAGE_DIRS.screenshots;
   const dir = repositoryId ? path.join(baseDir, repositoryId) : baseDir;
-
-  // Ensure directory exists
-  await fs.mkdir(dir, { recursive: true });
-
   const filePath = path.join(dir, filename);
+
+  // Belt-and-braces: callers already pass through `sanitizeFilename` /
+  // `validateRepositoryId`, but reject anything that still escapes the
+  // screenshots root so this function is safe regardless of caller.
+  assertWithinDir(filePath, baseDir);
+
+  await fs.mkdir(dir, { recursive: true });
   const buffer = Buffer.from(base64Data, 'base64');
   await fs.writeFile(filePath, buffer);
 

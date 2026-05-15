@@ -10,6 +10,7 @@
 
 import { generateWithAI } from '@/lib/ai';
 import type { AIProviderConfig } from '@/lib/ai/types';
+import { parseAiJson } from '@/lib/ai/json-parse';
 import * as queries from '@/lib/db/queries';
 import type { TriageResult, TriageClassification } from '@/lib/db/schema';
 
@@ -96,19 +97,26 @@ ${historyDesc}`;
       responseFormat: 'json_object',
     });
 
-    // Parse JSON response
-    const cleaned = response.replace(/```json\n?|\n?```/g, '').trim();
-    const parsed = JSON.parse(cleaned);
+    // Parse + shape-validate the model output. Prompt-injected error
+    // messages can otherwise push attacker-controlled keys into the
+    // triage record.
+    const isTriageShape = (v: unknown): v is { classification?: unknown; confidence?: unknown; reasoning?: unknown } =>
+      typeof v === 'object' && v !== null;
+    const parsed = parseAiJson(response, isTriageShape, { source: 'triage' });
+    if (!parsed) {
+      return { classification: 'unknown', confidence: 0, reasoning: 'AI response not parseable as JSON' };
+    }
 
     const validClassifications: TriageClassification[] = ['real_regression', 'flaky_test', 'environment_issue', 'test_maintenance', 'unknown'];
-    const classification = validClassifications.includes(parsed.classification)
-      ? parsed.classification as TriageClassification
+    const rawClassification = typeof parsed.classification === 'string' ? parsed.classification : '';
+    const classification = (validClassifications as string[]).includes(rawClassification)
+      ? (rawClassification as TriageClassification)
       : 'unknown';
 
     return {
       classification,
       confidence: Math.max(0, Math.min(1, Number(parsed.confidence) || 0)),
-      reasoning: String(parsed.reasoning || 'No reasoning provided'),
+      reasoning: String(parsed.reasoning || 'No reasoning provided').slice(0, 1000),
     };
   } catch (error) {
     console.error(`[triage] Failed to triage test ${input.testName}:`, error);
