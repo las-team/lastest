@@ -1,0 +1,33 @@
+"# Lastest — Retention & Encryption posture (GDPR ROPA supporting matrix)"
+"# Generated 2026-05-14. Source: src/lib/db/schema.ts + storage paths."
+Data category,Retention rule,Auto-purge trigger,Manual deletion path,In-transit,At-rest,In-logs
+User account,Until user deletes,None,UI 'Delete account' → cascade,HTTPS,DB plaintext (DBaaS KMS if enabled),Never logged
+Hashed password,With account,On account delete,Cascade,N/A,Argon2 hash in PG,Never logged
+Session cookie,30d default,expiresAt elapsed,Logout / revoke,HTTPS HttpOnly cookie,Token in PG unique index,Never logged
+API token (PAT),Until revoked,None,UI revoke,HTTPS Bearer,Token in PG (sessions kind='api'),Never logged
+OAuth tokens (GitHub/GitLab/Google),Until disconnected or refresh fails,Refresh failure → manual reauth,UI disconnect,HTTPS,PG plaintext (no app-layer encryption detected),Redacted in app logs (provider logs API calls)
+Email verification token,1h TTL,Auto-expire,Single-use consumed,HTTPS,PG verification table,Token never logged after creation
+Password reset token,1h TTL,Auto-expire,Single-use,HTTPS,PG verification table,Never logged
+User invitation,7d TTL,Auto-expire,Owner revoke,HTTPS,PG userInvitations,Never logged
+Consent record,Forever (legal),Never,Never (revokedAt set only),HTTPS,PG userConsents,Activity feed only
+Test code & test versions,Indefinite,Soft-delete deletedAt only,UI delete (cascade testVersions),HTTPS / WSS,PG plaintext,Logged in aiPromptLogs when sent to AI
+Storage state (cookies / localStorage),Indefinite,Cascade on test/run delete,UI delete,HTTPS / WSS to runner,PG jsonb (SHA256-truncated values; token-shape redacted),Names logged; values never
+Setup auth config (Bearer / Basic),Until config removed,Cascade on setup config delete,UI delete,HTTPS / WSS to runner,PG jsonb plaintext (NO app-layer encryption),Never logged
+Setup / teardown script code,Until deleted,Cascade,UI delete,HTTPS / WSS,PG plaintext,Logged when sent to AI; secrets user-hardcoded are NOT redacted
+Test runs / results,Indefinite + storage quota LRU,Quota exceeded → oldest run purged,UI purge run,HTTPS / WSS,PG + disk artifacts,Metadata logged
+Screenshots,Indefinite (subject to quota),Quota LRU,UI delete,HTTPS via /api/media (auth-gated),Disk PNG/JPEG (unencrypted unless full-disk-crypt),Paths only
+Visual diff artifacts,With visual diff,Cascade on diff delete,UI delete,HTTPS,Disk PNG (unencrypted),Paths only
+Video recordings (.webm),With test run,Cascade,UI delete,HTTPS via /api/media,Disk VP9 (unencrypted),Paths only
+Network bodies (capture),With test run,Cascade,UI delete,HTTPS via /api/media,Disk JSON (unencrypted),Truncated bodies in PG; full bodies disk-only
+AI prompt + response logs,Indefinite (no auto-purge),None,deleteAllAIPromptLogs server action (manual),HTTPS,PG plaintext,Full prompts/responses persisted
+Agent session state,Until repo deletion,Cascade,UI / agent cleanup,HTTPS,PG jsonb,Step state retained
+Bug reports,Indefinite,None,Manual delete by admin,HTTPS,PG jsonb + screenshot disk,Context preserved
+Activity events (audit),With repo,Cascade,Cascade only,N/A,PG,Internal feed
+Background jobs,With repo,Cascade,Cascade only,Internal queue,PG jsonb,Internal
+Embedded browser session,Auto-expire,expiresAt / stale-lock,Manual release,WSS,PG status row + EB pod ephemeral disk,Pod logs (truncated)
+Remote debug session,Session end / timeout,Auto-expire,Manual close,WSS,PG remoteDebugSessions,Frame stream not persisted
+Selector statistics,With test,Cascade,Cascade only,N/A,PG counters,Not logged
+Build / PR comment content,Stays on GitHub/GitLab,Not auto-deleted from PR,User edits/deletes PR comment,HTTPS,Provider (not Lastest),Not in Lastest logs after post
+Webhook secrets (GitHub/GitLab),Until rotated,None,UI rotate / delete config,HTTPS,PG plaintext (32 hex),Never logged
+Slack / Discord / custom webhook URL,Until removed,Cascade with notif settings,UI clear,HTTPS,PG plaintext,Never logged after redaction
+AI provider API keys,Until cleared,None,UI clear,HTTPS to provider,PG plaintext (NOT logged in aiPromptLogs),Never logged in app

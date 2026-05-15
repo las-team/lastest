@@ -368,3 +368,509 @@ These targets DO have a signin on their site, so per the gate they need a real a
 | q5 | FileReadyNow / filereadynow.com | u/shubh_aiartist | Submit clicked, URL didn't transition. Likely confirm-password unfilled. Worth rerunning after template fix |
 | q7 | HabitHeat / habitheat.com | u/Impressive-Pack9746 | Same as q5 — form has email/password/confirm-password, template didn't fill confirm. Worth rerunning after template fix |
 
+
+
+## 2026-05-14 — Floorable / u/jaypeepeeee
+
+- Source: Reddit r/SideProject ("I told a client I could build indoor maps...", posted 2026-05-14T13:01Z)
+- Site: https://floorable.app
+- Lastest repo: cbbc608a-3d52-4571-80e8-af92580c36b2 (floorable-demo)
+- Build: 2b78b7a0-a1ea-4ce9-9f5d-cc6a27bd7226  passed=1 failed=1 changes=0 (fallback mode: Test 1 reds independently on bot-gated signup; Test 2 public phase clean — 5/5 steps passed after consoleErrorMode=warn applied)
+- Tests: 3cb62499 (auth setup) + e7b0d086 (app walkthrough)
+- Share: https://app.lastest.cloud/r/oIH3ZigSHBsMM7mZoE-YDA
+- Channel: Reddit DM (chat.reddit.com/user/t2_18wd5gof)
+- Sent: yes — 2026-05-14T17:29Z UTC (lastesthero → jaypeepeeee)
+- Message: "Liked the per-vertical pages, especially the Education breakdown. Ran a Lastest review on Floorable. Signup has two breakers: • /onboarding 404s (where the Supabase verify link redirects) • Verify token expires ~6min after issuance (otp_expired). Walk: https://app.lastest.cloud/r/oIH3ZigSHBsMM7mZoE-YDA"
+- Reply (48h check): —
+- Notes: First demo to exercise the v1.15 two-test architecture with setupTestId chaining (PUT /api/v1/tests/:id) + per-repo consoleErrorMode=warn (PUT /api/v1/repos/:id/playwright-settings). Both APIs landed on prod earlier in this session. Floorable's signup is bot-gated past pressSequentially in headless EB; chain was unset and skill switched to fallback mode (Test 2 in public-only). Real founder-actionable bugs surfaced: /onboarding route returns hard 404, Supabase verify token errors as otp_expired within minutes of issuance.
+
+
+
+## 2026-05-14 — Face Privacy / faceprivacy.ai
+
+- Source: peerpush.net/?view=live
+- Site: https://faceprivacy.ai
+- Tagline: "Own Your Face in an AI-Driven World" / "The Incogni of facial recognition databases"
+- Auth backend: Firebase Auth (auth.faceprivacy.ai); runtime Date.now stamp used per-run to avoid EMAIL_EXISTS collision
+- Lastest repo: e3c5be81-6f99-452e-b162-6a695d9297f8 (faceprivacy-demo)
+- Tests: ff121ad5 (auth setup, Step 1 only — NEVER uploads photo) + 13b1a465 (app walkthrough, chained via setupTestId)
+- Build: 389dff03-ea42-4d9d-9bd5-18b968b8d791  passed=1 failed=0 changes=9 (chained setup ran, walk completed clean)
+- Scenarios captured: home, /about/, /blog/, /countries/, /databases/ (or /blur/), authed-home revisit, authed /login/ revisit, authed /register/ wizard-resume state, final home — 9 baselines total
+- Baselines: approved (lastest_approve_all_diffs)
+- Share: https://app.lastest.cloud/r/hCEw6UGRNiny2qG1UjdB_w
+- Demo notes: POSTed to /api/v1/builds/:id/demo-notes (uxSummary + 3 highlights + 2 frictionPoints + 3 testingStruggles)
+- Channel: pending user review — DM not sent (Phase 9 deferred at user request)
+- Sent: no — Phase 9 deferred for user review
+- Reply (48h check): —
+- Run-time pivots:
+  1. First attempt failed — Test 1 wait-for-Step-2 used text matchers; the Face Privacy register page is a "steps-as-visibility" SPA where ALL wizard inputs (#first_name through #consent_terms + photo inputs) are present in initial DOM and just toggle visibility. URL stays /register/ across all 4 steps.
+  2. Second attempt: switched to placeholder-based selectors — failed because the form has NO placeholders (only visible labels above inputs).
+  3. Third attempt (succeeded): switched to ID selectors (#first_name, #last_name, #email, #password, #password_confirm) and advancement detection to computed-style visibility on #photo-input-face. Runtime Date.now stamp swapped in for the Firebase rerun trap.
+  4. PostHog blocked via page.route — its session-recorder rewrites HTMLInputElement.value setter and corrupts React-controlled input state in headless context.
+- Constraints honored: never uploaded a photo, never advanced past Step 2 (Photo), no destructive verbs, no paid checkout reached.
+
+
+
+## 2026-05-14 — MerryDiv / www.merrydiv.com
+
+- Source: Hacker News (Show HN)
+- Site: https://www.merrydiv.com/
+- Tagline: "Dividend Tracker with Automatic Brokerage Sync. Know Your Dividends." / "Track your dividend income and grow your passive income portfolio"
+- Founder: MerryDiv team — @merrydiv on X
+- Auth backend: api.merrydiv.com/api/v1/auth/register (custom REST, NOT Firebase / NOT Supabase)
+- Lastest repo: cc05a266-3b69-46cc-b95b-1846802fb4f6 (merrydiv-demo)
+- Test: 95dd9438-5553-49fe-9374-f4409ec3bbdc (merrydiv — public walkthrough)
+- Build: 81da42aa-4e1e-452e-90ea-d03ca9dee3e1  passed=1 failed=0 changes=7
+- Scenarios captured: home, related-resources, /pricing, /signup, plus 2 DOM-discovered nav links, final home — 7 baselines
+- Baselines: approved (lastest_approve_all_diffs)
+- Share: https://app.lastest.cloud/r/uUfDv66dVhdPcfFHaMU_jQ
+- Test layout: 1 test — public-only walkthrough (pivoted after 4 auth retries, see Run-time pivots)
+- Login outcome: n/a — public-only by design (after 4 retries on auth wall, see notes)
+- Demo notes: POSTed to /api/v1/builds/:id/demo-notes (uxSummary + 3 highlights + 2 frictionPoints + 3 testingStruggles)
+- Channel: pending user review — DM not sent (Phase 9 deferred at user request)
+- Sent: no — Phase 9 deferred for user review
+- Reply (48h check): —
+- Run-time pivots:
+  1. Auth attempt 1 (build e09e2ee0): pressSequentially with 26-char password — MerryDiv enforces a max-20-char password limit, only visible after typing. Test red on "still on /signup".
+  2. Auth attempt 2 (build a408fd4e): shortened to 15-char `MD-Demo-141810!`, same flow. Same failure, no visible page error.
+  3. Auth attempt 3 (build e23ba62d): switched to page.evaluate with React's native input setter + manual input/change/blur dispatch. Failed in 5s — submit clicked but page stayed on /signup.
+  4. Auth attempt 4 (build 58da0bf7): hybrid page.fill() + inputValue verification + isChecked verification on terms. Verification passed, submit clicked, 20s timeout still on /signup.
+  5. Manual verification via Playwright MCP eval: same email+password+terms submitted via React's native input setter from within page context DID succeed, landed on /i/dashboard. Suggests MerryDiv's signup API has a synthetic-event / Amplitude-fingerprint heuristic that rejects standard Playwright fill+click, but accepts manual JS-driven submission.
+  6. Pivoted to public-only mode (build 81da42aa): deleted auth setup test, unset setupTestId, renamed test to "merrydiv — public walkthrough", added signup page itself as a screenshot to flag the form for the founder. Build green in 37.6s.
+- Constraints honored: never uploaded brokerage credentials, never clicked Plaid/connect/bank links, no paid checkout reached, no real money path touched.
+
+---
+
+## 2026-05-14 — AgentKanban team / AgentKanban
+
+- Source: Hacker News Show HN
+- Site: https://www.agentkanban.io/
+- Tagline: "A task board with AI agent harness integration. Create and plan tasks with real-time collaboration, then hand off to GitHub Copilot."
+- Founder: AgentKanban team (contact via /contact)
+- Vertical: Dev tools — kanban for AI coding agents (VS Code + GitHub Copilot integration)
+- Auth backend: email/password (Name, Email, Password fields; GitHub + Google OAuth also offered)
+- Lastest repo: b2b2b763-5e76-4852-87a7-7b7d2b8e20cb (agentkanban-demo)
+- Test 1: 986f3a46-b76b-46e6-930f-a7b78ec70c0f (AgentKanban — auth setup)
+- Test 2: 41660715-92f4-4901-a223-7e4bbfcfd3f4 (AgentKanban — app walkthrough, chained via setupTestId)
+- Build: f4b96b49-73a2-4e58-a827-691acf85595f  passed=1 failed=0 changes=8
+- Demo identity: viktor+agentkanban202605141823@lastest.cloud / Lastest-Demo-202605141823!
+- Scenarios captured (Test 2, 8 screenshots, 29.9s, video 863KB):
+  1. /boards (Scenario 1 home — authed redirect from /)
+  2. /boards (Scenario 2 nav-discovered)
+  3. /dashboard (Scenario 3)
+  4. /settings/members (Scenario 4)
+  5. /boards (Scenario 5 post-auth landing after chained re-nav)
+  6. /boards (Scenario 6 in-app nav walker)
+  7. /dashboard (Scenario 7 in-app nav walker)
+  8. /boards (final bare screenshotPath)
+- Baselines: approved (lastest_approve_all_diffs ✓)
+- Share: https://app.lastest.cloud/r/pqgTVjRe9Z7qQRt2uBVv-w (scoped to Test 2)
+- Test layout: 2 tests — auth setup + app walkthrough (chained via setupTestId)
+- Login outcome: ✓ signed up + walked authenticated surface (org auto-provisioned as "Lastest Demo's Organisation")
+- Demo notes: POSTed to /api/v1/builds/:id/demo-notes (uxSummary + 3 highlights + 3 frictionPoints + 1 testingStruggle)
+- Channel: pending user review — DM not sent (Phase 9 deferred at user request)
+- Sent: no — Phase 9 deferred for user review
+- Reply (48h check): —
+- Run-time pivots:
+  1. setupTestId chain worked first try — no fallback needed. Test 1 ran as setup step, injected storage state (1 cookie), Test 2 started on /boards already authed.
+  2. Authed redirect collapsed public + authed phases: visiting baseUrl / when authed redirects to /boards, so the "public homepage" screenshot in Test 2 is actually the in-app boards view. Worth noting in demo notes (done) — share viewer sees one continuous authed journey, which is the more interesting surface here anyway.
+  3. Safe-CTA walker found no matching primary button on /boards (create/new/add/view/open/explore/browse/start/continue/get started regex) — captured in frictionPoints (CTAs may be link-styled or icon-only).
+  4. Cloudflare email-decode script 404s on every page (ERR_FAILED on /cdn-cgi/scripts/.../email-decode.min.js). Already blocked via page.route at test start so it didn't red the build; flagged as a real product friction point in demo notes.
+- Constraints honored: never connected a real GitHub repo, no destructive CTAs clicked, no paid checkout reached, no third-party OAuth flow attempted.
+
+---
+
+## 2026-05-14 — Johnny / ECFotos
+
+- **Source:** BetaList (https://betalist.com/startups/ecfotos)
+- **Site:** https://ecfotos.com
+- **Tagline:** "Create listing-ready product images fast with AI and bulk editing"
+- **Founder:** Johnny — @ECFotos_app on X, wx0021 on BetaList
+- **Vertical:** SMB e-commerce — AI product image editor
+- **Lastest repo:** `b51fe8cf-07c5-4fea-b3f6-b78d62e4b990` (name: `ecfotos-demo`)
+- **Test:** `e5c8c649-ae7c-4e2e-bc81-635090eb9308` — "ECFotos — public walkthrough"
+- **Build:** `04a964b8-dd0a-4874-ac66-7426c36a0b04` — passed 1/1, 0 failed, **10 baseline screenshots**, `overallStatus: review_required` (review_required is expected on first-run new baselines; all approved via `lastest_approve_all_diffs`).
+- **Scenarios captured:**
+  1. `/` Homepage hero
+  2. First marketing nav route (DOM-discovered)
+  3. Second marketing nav route (DOM-discovered)
+  4. Third marketing nav route (DOM-discovered)
+  5. `/app` Workspace (freemium, no login)
+  6. `/app/tools` AI Tools catalog
+  7. `/app/models` AI Models catalog
+  8. `/app/ai-photo-editor` AI Photo Editor entry
+  9. `/app/tools/ai-listing-images` AI Listing Images tool (safe additive entry)
+  10. Final homepage hero
+- **Share:** https://app.lastest.cloud/r/5_2esGc5y7kxRzMAPEPi6g
+- **Test layout:** 1 test — public walkthrough mode. Signin/signup are Google OAuth only, so no email+password auth phase was built. The walk still reaches deep into the real product because /app and all sub-routes are freemium-browsable without login.
+- **Login outcome:** n/a — public-only demo by design (OAuth-only auth, not automatable). Compensated by walking the genuine /app workspace surface which is freemium-accessible.
+- **Channel:** Reddit DM / X DM — pending user review of share
+- **Sent:** **PENDING USER REVIEW** — Phase 9 not executed. Awaiting explicit approval before any outreach is drafted or sent.
+- **Run-time pivots:**
+  1. Phase-3 snapshot revealed the /account/auth/signup page contains only a single "Sign Up" button (Google OAuth), no email/password form. /account/auth/signin shows only "Continue with Google". Classified `AUTH_AUTOMATABLE=false` immediately and skipped Test 1 entirely.
+  2. Surprise discovery during the snapshot: clicking "Sign Up" on the signup page redirects to `/app` instead of opening an OAuth dialog. The /app workspace itself is browsable without authentication, including the AI Tools and AI Models catalogs. Pivoted the public-only walkthrough to walk the real product surface instead of stopping at marketing pages. Made the demo substantially more valuable because the founder sees Lastest baselining their actual product UI, not just their landing page.
+  3. Cloudflare email-decoder script throws console errors on every page; pre-blocked at `page.route` test start so consoleErrorMode warnings stay clean. Did not affect any screenshot.
+- Constraints honored: no images uploaded, no credit-burning generation triggered, no destructive verbs clicked, no paid checkout reached, no OAuth flow attempted.
+
+---
+
+## 2026-05-14 — Pigeon Codeur / StackMemo
+
+- **Source:** IndieAppCircle (handle `pigeon-codeur`)
+- **Site:** https://stackmemo.app/
+- **Tagline:** "Dashboard for builders running multiple side projects — costs, KPIs, renewals"
+- **Vertical:** Indie-builder tooling (direct ICP overlap with Lastest)
+- **Lastest repo:** `ab4ea01e-5339-4ba2-9111-a0af8435cdf7` (name: `stackmemo-demo`)
+- **Tests:**
+  - `1c5cec89-dcce-41f7-b767-9eef5d0c0b69` — "StackMemo — auth setup" (3 scenarios)
+  - `1a977f84-ea0d-40a5-a3ab-f626961f7815` — "StackMemo — app walkthrough" (chained via setupTestId, 6 scenarios)
+- **Build:** `e31d0b7b-f07b-4863-94de-21ac7ca53ee7` — passed 1/1, 0 failed, **6 screenshots**, `overallStatus: review_required` (auto-approved post-run), `elapsedMs: 40581`
+- **Scenarios captured (Test 2):**
+  1. `/` Home
+  2. `/pricing`
+  3. Post-auth `/dashboard` (empty state, side nav visible)
+  4. In-app `/connectors`
+  5. In-app `/settings`
+  6. Final home (logged-in state visible in nav)
+- **Share URL:** https://app.lastest.cloud/r/DfKZpi8WOogFnyKOs_3ORQ
+- **Channel + send status:** Reddit DM (founder `pigeon-codeur` on IndieAppCircle; no Reddit handle confirmed yet) — **NOT SENT, awaiting user review per request (Phase 9 skipped)**
+- **Login outcome:** signed up + walked authenticated surface (`/dashboard`, `/connectors`, `/settings`)
+- **Run-time pivots:**
+  1. Build 1 failed: networkidle race on Server Action redirect. Switched to explicit `waitForURL(u => !/signup/)` with `domcontentloaded` waitUntil.
+  2. Build 2 failed: setup phase exceeded the 30s remote-setup budget because `page.waitForLoadState('networkidle')` after submit blocks indefinitely on Next.js streaming responses. Replaced with bounded `networkidle` (4s timeout) + explicit `main/h1` visibility wait.
+  3. Build 3 failed: button regex `/sign ?up|register/i` matched the "Sign up with GitHub" OAuth button first, redirecting test to github.com/login. Fix: scope submit button via `passField.locator('xpath=ancestor::form[1]').getByRole('button').first()` so only the password-form's button is clickable.
+  4. Filtered `/plans` out of in-app walker — link said "free" plan-badge href that would have walked the test into an upgrade flow.
+- Constraints honored: no Stripe connection, no destructive verbs, no real API connectors, no paid checkout, no OAuth flow.
+- Phase 9 status: **pending user review**.
+
+---
+
+## 2026-05-14 — Coffee Rambler AI
+
+- **Source:** IndieAppCircle (handle `coffeerambler`)
+- **Site:** https://rambler.coffee/
+- **Tagline:** "Your Personal Coffee Intelligence — AI brew/bean/gear reviews, brew diary, sensory coaching"
+- **Vertical:** Lifestyle/consumer SaaS (coffee brewing AI assistant)
+- **Lastest repo:** `9d8959d3-933d-4010-a718-0b4a3b1c9415` (name: `coffee-rambler-demo`)
+- **Test layout:** 1 test — **public walkthrough** (auth flow not automatable: verify-email gate after signup)
+  - `ea8ef9e9-e8c7-4ba6-bff5-1354a1d28495` — "Coffee Rambler AI — public walkthrough" (6 scenarios)
+  - Test 1 ("auth setup") was created, ran red on the verify-email gate, then **soft-deleted**. Demo notes describe the gate so the founder sees it as friction signal, not test infrastructure noise.
+- **Build:** `2693f255-92c1-492c-8742-22cc3515d41a` — passed 1/1, 0 failed, **6 screenshots**, `overallStatus: review_required` (auto-approved post-run), `elapsedMs: 27487`
+- **Scenarios captured:**
+  1. `/` Home (hero, palate wheel, AI coach card, community beans, stats card, palate wheel, pricing, FAQ, footer)
+  2. `/en` localized landing
+  3. `/guides` (public guides index)
+  4. `/legal/privacy`
+  5. `/legal/terms`
+  6. `/signup` (form pre-submit — Email / Password / Confirm Password / Create Account)
+- **Baselines:** approved (`approve_all_diffs` ok).
+- **Demo notes:** posted to `build_demo_notes` (uxSummary highlights the iCloud verification-delay warning, three-tier pricing including a Coming soon Pro tier with B2B signals, and the explicit 30-questions-free promise; testingStruggles documents the verify-email gate)
+- **Share URL:** https://app.lastest.cloud/r/C5Yj4YwFc0wb0HPGvQA1CA
+- **Channel + send status:** Reddit DM TBD (founder `coffeerambler` on IndieAppCircle — Reddit handle not yet confirmed) — **NOT SENT, awaiting user review per request (Phase 9 skipped)**
+- **Login outcome:** n/a — public-only demo by design (verify-email gate after signup; submit lands on "You're all set, check your inbox" with no in-app session)
+- **Run-time pivots:**
+  1. Build 1 (chained auth setup + walkthrough) failed: Test 1 threw "auth did not complete — still on /en/signup" after 5.6s. Manual probe confirmed the signup submits cleanly but lands on a "You're all set — Check your inbox" verify-email screen (still on `/en/signup` path, just with the form replaced by a confirmation heading). The verify-email regex would have caught the heading, but `Promise.race` resolved on the URL guard branch first because the URL never changed.
+  2. Pivot: deleted Test 1, unset `setupTestId` on Test 2, rewrote Test 2 in public-only mode (home + DOM-discovered nav routes + signup-form-pre-submit screenshot), re-ran. Public phase passed cleanly with 6 baselines including the signup form (a real surface worth showing the founder).
+  3. Filtered `/login`, `/signup`, `/en/login`, `/en/signup` out of the nav walker so the public phase doesn't redundantly re-visit the auth pages — signup gets a single intentional capture at the end.
+  4. Blocked third-party noise via `page.route` (Cloudflare email-decode, GTM, GA, Hotjar, Segment, Intercom, Fullstory, PostHog, Sentry, HubSpot) so `consoleErrorMode='warn'` had a clean surface to evaluate.
+- Constraints honored: no real account created in the founder's DB (signup never completed; the in-flight email at `viktor+coffeerambler202605141843@lastest.cloud` was never confirmed and will auto-expire on Coffee Rambler's side), no destructive verbs, no paid checkout, no language-switcher mutation, no FAQ accordion expansion.
+- Phase 9 status: **pending user review**.
+
+---
+
+## 2026-05-14 — Paxmiles / Tempora
+
+- **Source:** IndieAppCircle (also runs Specula.vision).
+- **Site:** https://tempora.events/
+- **Tagline:** "Visualize information with timelines — organize, correlate and retain events like never before"
+- **Founder:** Paxmiles (PAX GLOBAL S.R.L., Romania).
+- **Vertical:** Productivity / timeline tooling for students, teachers, researchers, writers, planners, journalers, worldbuilders.
+- **Lastest repo:** `92ff7e5a-1c4a-4675-9417-a875ed41568e` (name: `tempora-demo`)
+- **Test:** `4db87f51-317f-4131-92c9-ece5e75ac876` — "Tempora — public walkthrough"
+- **Build:** `1939ddcb-8bbf-4cd0-b4bb-5340e1974109` — passed 1/1, 0 failed, **8 baseline screenshots**, `overallStatus: review_required` (first run, all new baselines, then `approve_all_diffs`).
+- **Scenarios captured:**
+  1. `/` Home (hero, audience band, 12-tile feature grid, FAQ, footer with legal/registry, ANPC links)
+  2. `/login/` (linked from header)
+  3. `/cookies` (footer)
+  4. `/privacy` (footer)
+  5. `/terms` (footer)
+  6. `/register/` form (intentional capture — the "Verifying Security..." [disabled] submit is brand-positive)
+  7. `/login/` form (final pass)
+  8. Home (final thumbnail)
+- **Baselines:** approved (`approve_all_diffs` ok).
+- **Demo notes:** posted to `build_demo_notes` (uxSummary highlights the audience-as-identity hero band, the honest in-development asterisks on Presentation/Learning, and the security-gated auth as a brand-positive signal; frictionPoints flag the long fade-in animations and the unusual /signup/ behavior where the URL renders the confirmation-email preview rather than a form; testingStruggles documents the public-only pivot)
+- **Share URL:** https://app.lastest.cloud/r/M4fUH_T_oupTqnq4lirTuQ
+- **Channel + send status:** Reddit/IndieAppCircle DM TBD — **NOT SENT, awaiting user review per request (Phase 9 skipped)**
+- **Login outcome:** n/a — public-only demo by design (auth gated by Cloudflare-style JS challenge on submit button + email-verification step post-submit)
+- **Run-time pivots:**
+  1. Phase 3 snapshot revealed `/signup/` is not a form but a static preview of the confirmation email that gets sent. Real signup form lives at `/register/`.
+  2. Both `/register/` and `/login/` submit buttons render as "Verifying Security..." [disabled] while a JS challenge runs in the background. Combined with the verify-email step post-submit, classified `AUTH_AUTOMATABLE=false`.
+  3. No Test 1 built. Test 2 expanded to capture the register and login forms as intentional public-surface scenarios — Tempora's auth UI is part of what a visitor sees, and the disabled "Verifying Security..." button is a brand-positive signal worth showing the founder.
+  4. Added 1.2-1.5s post-load buffers because Tempora's hero and feature grid use long fade-in animations.
+  5. Blocked third-party noise via `page.route` (Cloudflare email-decode, GTM, GA, Hotjar, Segment, Fullstory) so `consoleErrorMode='warn'` had a clean surface.
+- Constraints honored: no account created (signup never attempted; the Verifying-Security gate made it impossible from a Playwright context anyway), no destructive verbs, no paid checkout, no FAQ accordion expansion, no academic-discount form submission.
+- Phase 9 status: **pending user review**.
+
+---
+
+## 2026-05-14 — Paxmiles / Specula
+
+- **Source:** IndieAppCircle (sister product to Tempora; same maker, PAX GLOBAL S.R.L.).
+- **Site:** https://specula.vision/
+- **Tagline:** "Observe Information with widgets — create, customize and view dashboards like never before"
+- **Founder:** Paxmiles (PAX GLOBAL S.R.L., Suceava, Romania).
+- **Vertical:** Dashboards / widgets — info-organization tool for busy persons, analysts, control-freaks, lifelong learners.
+- **Lastest repo:** `61f5a220-00de-4774-8ea1-20bdaca0fba3` (name: `specula-demo`)
+- **Test:** `87fb13f3-3847-4899-a6e4-6148d626fb81` — "Specula — public walkthrough"
+- **Build:** `bd45d195-922f-4daf-bca7-8f6c35be9510` — passed 1/1, 0 failed, **8 baseline screenshots**, `overallStatus: safe_to_merge` (after `approve_all_diffs`).
+- **Scenarios captured:**
+  1. `/` Home (hero illustration, persona-rotating headline, 11-tile feature grid with WIP asterisks, FAQ, legal footer)
+  2-5. 4 DOM-discovered nav routes (cookies / privacy / terms / footer-linked legal pages, depending on order)
+  6. `/register/` form (intentional capture — Username / Email / Password / Confirm + the disabled "Verifying Security..." submit)
+  7. `/login/` form
+  8. Home (final thumbnail)
+- **Baselines:** approved (`approve_all_diffs` ok).
+- **Demo notes:** posted to `build_demo_notes` (uxSummary highlights the persona-rotating headline, the honest WIP-asterisks on Alerting and Multiple Sources, and the EU/ECO/GDPR positioning; frictionPoints flag the anti-bot gate on /register/, the JOIN-link-routes-to-login surprise, and the single-page marketing layout with no /features or /pricing routes; testingStruggles documents the public-only pivot mirroring sister-product Tempora).
+- **Share URL:** https://app.lastest.cloud/r/Xtivbk29bKxbKLik2izhBQ
+- **Channel + send status:** Reddit/IndieAppCircle DM TBD — **NOT SENT, awaiting user review per request (Phase 9 skipped)**
+- **Login outcome:** n/a — public-only demo by design (auth gated by JS security challenge holding the submit button in a disabled "Verifying Security..." state, same gate as sister product Tempora; per the Tempora run, even past that gate there is a verify-email step).
+- **Run-time pivots:**
+  1. Phase 3 register-page snapshot showed `button "Verifying Security..." [disabled]` on first probe — identical pattern to Tempora. Per the user brief ("be ready to pivot to public-only quickly") and the SaaS-demo template policy ("if signup is bot-gated after 1 retry, pivot to public-only"), classified `AUTH_AUTOMATABLE=false` immediately without burning a retry cycle.
+  2. No Test 1 built. Test 2 expanded to capture the register and login forms as intentional public-surface scenarios — Specula's auth UI is part of what a visitor sees, and the disabled "Verifying Security..." button is a brand-positive signal worth showing the founder.
+  3. Filtered `/register/` and `/login/` out of the nav-discovery walker so the public phase doesn't redundantly re-visit them — both get a single intentional capture at the end.
+  4. Blocked third-party noise via `page.route` (Cloudflare email-decode, GTM, GA, Facebook, Hotjar) so `consoleErrorMode='warn'` had a clean surface. /register/ and /login/ still emit ~15 console errors per load from the security-challenge handshake; ran in warn mode so the build did not red.
+- Constraints honored: no account created (Verifying-Security gate made it impossible from a Playwright context anyway), no destructive verbs, no paid checkout, no FAQ accordion expansion, no academic-discount form submission.
+- Phase 9 status: **pending user review**.
+
+---
+
+## 2026-05-15 — InsightsFlowAI team / InsightsFlow AI
+
+- **Source:** IndieAppCircle (handle `support`).
+- **Site:** https://www.insightsflowai.com/
+- **Tagline:** "Best Free AI Data Analyst — upload CSV, get insights, reports, anomalies"
+- **Founder:** InsightsFlowAI team (IndieAppCircle `support`).
+- **Vertical:** AI-powered analytics dashboard SaaS.
+- **Lastest repo:** `d0819d77-0c49-44d1-83f5-e85613f1bd45` (name: `insightsflow-demo`, found-and-reused from prior 2026-05-14 attempt; no second repo created).
+- **Tests:**
+  - `1cbb4a2d-6a20-45cf-a2f1-8603262fa848` — "InsightsFlow AI - auth setup" (Test 1, re-stamped to today's UTC `202605150644`)
+  - `aab8ae92-9964-4a5e-935a-0efb1a48d24b` — "InsightsFlow AI - app walkthrough" (Test 2, chained via `setupTestId`)
+- **Build:** `26621f49-f1d8-4f07-97b9-4e8d9106e674` — passed 1/1, 0 failed, **5 baseline screenshots**, video recorded (44.6s duration), `overallStatus: review_required` pre-approval.
+- **Scenarios captured (Test 2 in chained-authed context):**
+  1. Authenticated dashboard with sidebar + "Start with confidence" onboarding modal (Interactive tour vs Demo dataset)
+  2. Same dashboard re-rendered after attempted Features nav click
+  3. Same dashboard re-rendered after attempted How-It-Works nav click
+  4. Same dashboard re-rendered after attempted Pricing nav click
+  5. "Welcome! Let's set up your account" account-type modal (Personal / Company / Client / Stakeholder cards)
+- **Baselines:** approved (`approve-all` ok, returned `{success: true}`).
+- **Demo notes:** posted to `build_demo_notes` (uxSummary highlights the industry-aware onboarding, the role-segmentation modal, and the interactive-tour-plus-demo-dataset pairing; frictionPoints flag the onboarding modal overlapping nav clicks, the missing in-app path back to the public marketing site, and the cookie banner persisting in-app; testingStruggles documents the stale-stamp signup collision from yesterday's run and the executor clipping screenshots to viewport instead of fullPage).
+- **Share URL:** https://app.lastest.cloud/r/WmDmnRKDaAuzzPGSMoXlYw
+- **Channel + send status:** IndieAppCircle DM / founder email TBD — **NOT SENT, awaiting user review per request (Phase 9 skipped)**.
+- **Login outcome:** signed up + walked authenticated dashboard (chained `setupTestId` worked on second attempt; first run reds because the email had been registered the prior day).
+- **Run-time pivots:**
+  1. Reused existing `insightsflow-demo` repo and existing test rows (memory rule: one repo per customer). Both repo + tests were created on 2026-05-14 but Test 1 had `lastRunStatus: null`.
+  2. Set `consoleErrorMode='warn'` and `networkErrorMode='warn'` on the repo's playwright settings via the PUT endpoint before triggering the first run (memory rule: standard Phase 4b setup).
+  3. Chained Test 2 onto Test 1 via `PUT /api/v1/tests/<id> {setupTestId}` (confirmed live on prod per memory).
+  4. First chained run failed in 7.7s: `setup_failed: auth did not complete — signup modal still visible`. Diagnosed as stamp collision (yesterday's stamp `202605141905` had registered the email; today the modal stays open with a silent error). Re-stamped both tests to today's UTC `202605150644` and reran.
+  5. Second run completed cleanly: Test 2 passed, 5 screenshots, video recorded, 44.6s duration. The "public phase" of Test 2 captured the authed dashboard 3x because the chained auth meant the browser landed authenticated and the public-only Features / How-It-Works / Pricing buttons no longer exist in the nav. The founder gets a baseline of the dashboard chrome and the persistent Start-with-confidence onboarding modal.
+- Constraints honored: no real CSV uploaded, no destructive verbs, no paid checkout, used `viktor+insightsflow202605150644@lastest.cloud` plus-addressed test account, blocked Cloudflare email-decode noise via `page.route`.
+- Phase 9 status: **pending user review**.
+
+---
+
+## 2026-05-15 — reframe team / reframe
+
+- **Source:** IndieAppCircle (top app by credits — 679).
+- **Site:** https://re-frame.lovable.app/
+- **Tagline:** "A quiet companion. Not a tracker — a mirror. Not discipline-first — awareness-first." (Calm awareness system for resilience and overcoming compulsive behavior.)
+- **Founder:** `reframe.` (IndieAppCircle handle); team name not disclosed on site.
+- **Stack signal:** Lovable (lovable.app subdomain) + Supabase auth (email-confirmation gate is the Supabase default pattern).
+- **Lastest repo:** `1877aab4-5c5f-494c-a4a0-48dc02647cfd` (name: `reframe-demo`).
+- **Test:** `2615965f-920c-44ae-bfdd-9cbde37e7f6e` — "reframe — public walkthrough" (renamed after pivot from "reframe — app walkthrough").
+- **Build:** `90b5a487-047b-46a1-b05a-9d605c1d034b` — passed 1/0 failed, 6 baseline screenshots, 26.8s, video recorded, `overallStatus: review_required` then approved.
+- **Scenarios captured (6):**
+  1. `/` Home (full hero, soft tools, "Different by design" three-pillar block)
+  2. `/help` (DOM-discovered footer link)
+  3. `/pricing` (DOM-discovered nav link via /auth footer)
+  4. `/auth` sign-in default state
+  5. `/auth` create-account toggle state
+  6. `/` home (final gallery thumbnail)
+- **Baselines:** approved (`approve_all_diffs` ok).
+- **Share URL:** https://app.lastest.cloud/r/aRpV-mkdLVBSWrm-ANDuRA
+- **Channel:** TBD — IndieAppCircle DM / Reddit (no public X handle surfaced from IAC profile).
+- **Sent:** no.
+- **Reply (48h check):** —
+
+### Run-time pivots
+- Built Test 1 (auth setup) + Test 2 (app walkthrough chained via setupTestId) as the primary plan. Probed /auth via Playwright MCP first; surface looked like a clean email+password create-account.
+- First chained run (build `30738963-de91-46e7-b97e-60ab6a9ac97d`) failed in 7.7s: `setup_failed: auth did not complete — still on /auth`.
+- Re-probed manually: clicking "Create account" returns a paragraph "Check your email to confirm." with no URL change. Supabase default email-confirmation gate — not visible pre-submit.
+- Pivot: deleted Test 1, unset `setupTestId` on Test 2, rewrote Test 2 as **public-only** (`AUTH_AUTOMATABLE=false`) renamed "reframe — public walkthrough". Second run passed in 26.8s with 6 screenshots covering both the home page and the full pre-auth funnel (signin + create-account states), so the founder still gets a useful baseline of the surface a new visitor sees.
+- Constraints honored: no journal entries / no triggers submitted, no destructive verbs, sensitive-feature browsing avoided, blocked Cloudflare email-decode noise via `page.route`.
+
+### Phase 9 status
+**pending user review** — share published, demo notes written, log entry recorded. No DM sent; awaiting user approval on outreach.
+
+---
+
+## 2026-05-15 — Chaitnaya Bhagat / Sanctuary
+
+- **Source:** IndieAppCircle
+- **Site:** https://sanctuary-mocha.vercel.app/
+- **Tagline:** "Pause. Attune. Be well." — Awareness app for emotional eating; reframes food as a messenger, not a problem.
+- **Founder:** Chaitnaya Bhagat (IndieAppCircle)
+- **Stack signal:** Vercel-hosted Next.js + Firebase Auth (Firestore ai-studio backend; identitytoolkit.googleapis.com signup endpoint observed in network).
+- **Lastest repo:** `228243b6-390b-4302-a108-aa155d83a73b` (name: `sanctuary-demo`)
+- **Tests:**
+  - Test 1 — `e6635cbf-9a19-4c9d-9546-a08d0346bd9c` — "sanctuary — auth setup" (passed standalone, 2 screenshots, 104s)
+  - Test 2 — `170533d1-c0ae-4f11-bf88-c63b62c6ed55` — "sanctuary — app walkthrough" (fallback mode after setup-chain wallclock timeout)
+- **Build:** `d8aaf6da-8c14-4a00-aef5-501acca12aa7` — Test 2 passed 1/1, 6 baseline screenshots, `overallStatus: review_required` (then approved).
+- **Scenarios captured (Test 2):**
+  1. `/` Home (anonymous)
+  2. Post-auth landing (homepage as signed-in user)
+  3. `/insights`
+  4. `/progress`
+  5. `/settings`
+  6. Final `/` (signed-in)
+- **Baselines:** approved (`approve_all_diffs` for build d8aaf6da).
+- **Demo identity:** viktor+sanctuary202605150702@lastest.cloud / Lastest-Demo-202605150702!
+- **Share URL:** **https://app.lastest.cloud/r/HwLDkBBT1ES7k0mURsMR9w** (scoped to Test 2 with video)
+- **Demo notes:** POSTed (uxSummary + 3 highlights + 2 frictionPoints + 2 testingStruggles)
+- **Channel:** TBD — pending user review (Phase 9 deferred per request)
+- **Sent:** no — Phase 9 pending user review
+- **Reply (48h check):** —
+
+### Run-time pivots
+1. **Setup-chain wallclock too short for Sanctuary.** Test 1 takes ~104s end-to-end against a cold Vercel instance — well past the 30s `Setup timed out after 30000ms` ceiling on chained setupTestId. Switched Test 2 to fallback mode (`CHAINED_AUTH=false`, `setupTestId: null`); Test 2 logs in inline with the credentials Test 1 minted earlier.
+2. **Post-signup redirect is back to `/`, not a `/dashboard` route.** Updated the URL-match regex on both tests to broaden the "auth completed" signal (added `practice|journal|library|exercises|today|insights|progress`) — the URL-still-on-login check is what enforces success now, since `/` doesn't match any positive-success URL.
+3. **Considered API-direct register fallback and inbox-pull** — neither needed: the signup form accepted Playwright keypresses on the first attempt (no captcha, no verify-email gate, no anti-bot). Documented for completeness only.
+
+---
+
+## 2026-05-15 — Vashon Gonzales / Launch Map
+
+- **Source:** IndieAppCircle
+- **Site:** https://launch.tavalabs.app/
+- **Tagline:** "Launch once. Be seen everywhere." — Track 30+ startup directory listings and showcase badges from one place.
+- **Founder:** Vashon Gonzales (Tava Labs; also runs Cash Capy)
+- **Stack signal:** Vercel-hosted SPA (Vite + React), Firebase / Firestore backend (noir-53b43 ai-studio project visible in network), JetBrains Mono + Bricolage Grotesque type stack.
+- **Lastest repo:** `11a5a87b-9f06-4c7e-b48e-b9120e2da696` (name: `launchmap-demo`)
+- **Test:** `902f29d2-4d38-4cdd-973b-43e9ccc352c8` — "Launch Map — public walkthrough"
+- **Build:** `aa72630b-22f2-49b9-82d4-5f621adffd10` — passed 1/1, 0 failed, 5 baseline screenshots, 94s elapsed, `overallStatus: review_required` (then approved).
+- **Scenarios captured:**
+  1. `/` Home (hero + feature grid)
+  2. `/about` (Vercel 404)
+  3. `/pricing` (Vercel 404)
+  4. `/login` (Vercel 404 on direct nav)
+  5. Hero CTA destination — clicked "Start Your Launch", SPA client-side routing renders the actual `/login` form (EMAIL / PASSWORD / SIGN IN / "Need an account? Sign up")
+- **Baselines:** approved (`approve_all_diffs` for build aa72630b).
+- **Share URL:** **https://app.lastest.cloud/r/4RCuUKSgASfN5ZGkFKfi-w** (scoped to walkthrough test, video included)
+- **Demo notes:** POSTed (uxSummary + 3 highlights + 3 frictionPoints + 2 testingStruggles + 1 skippedRoute)
+- **Channel:** TBD — pending user review (Phase 9 not executed per request)
+- **Sent:** no — Phase 9 pending user review
+- **Reply (48h check):** —
+
+### Run-time pivots
+1. **Auth not automatable end-to-end — pivoted to public-only.** Every advertised route (/about, /pricing, /login, /signup) returns a Vercel 404 on direct navigation. The `/login` form only ever renders via client-side click navigation. No public register page is reachable for automated signup, so Test 1 was not built; only the walkthrough test was created.
+2. **First two runs failed on signature drift.** `stepLogger is not a function` then `screenshotPath is not a function` — corrected by reading the canonical test-template.md signature (`screenshotPath` is a string, derive scenario filenames via `screenshotPath.replace('.png', '-N-slug.png')`). Third run passed cleanly.
+3. **CTA destination scenario IS the demo's punch line.** Direct nav to `/login` is a 404, but clicking "Start Your Launch" from the homepage renders a working login form via SPA routing. The fifth screenshot captures this exact split — strong evidence the founder is missing a Vercel rewrite rule (catch-all to index.html) and shipping a refresh-breaks-everything experience to every deep-linked visitor.
+
+---
+
+## 2026-05-15 — Daniel Notthoff / FamWake
+
+- **Source:** IndieAppCircle (queued replacement target).
+- **Site advertised:** https://famwake.de/ (NXDOMAIN — does not resolve on 8.8.8.8 / 1.1.1.1; system resolver also fails).
+- **Site actual:** https://familienwecker.de/ (one-page marketing site for the Android app, EN/DE).
+- **Tagline:** "Smart family alarm clock — Relaxed mornings for the whole family."
+- **Founder:** Daniel Notthoff (German-language presence; CTA is Google Play install + iOS waitlist button).
+- **Outcome:** **DISQUALIFIED at Phase 2 — mobile-native product, no web app to demo.**
+- **Lastest repo:** not created.
+- **Build:** none.
+- **Share URL:** n/a.
+- **Channel:** n/a.
+- **Sent:** no.
+
+### Why disqualified
+
+The skill's Phase-2 qualification rules require the target to be a web app (strict). FamWake is an Android/iOS native product. Its only public web surface is `familienwecker.de`, which is a single-page marketing site whose primary CTA is a Google Play store link and whose secondary CTA is an "iOS Waitlist" button (no actual web signup, no `/signup` path, no in-app surface).
+
+The signup URL in the brief (`https://famwake.de/signup`) cannot work because `famwake.de` itself does not exist as a registered domain — the founder's real domain is `familienwecker.de` (German: "Family alarm clock") and that domain has no signup page at all. Public surface is: hero, feature grid, "Look into the app" image gallery, FAQ, founder bio. That's 4-5 screenshots of marketing copy with no interaction surface — the exact "you have a register form" anti-pattern the skill warns against (worse here: there's no form at all).
+
+A public-only share would render purely as a brochure scrape with no founder-relevant signal — the founder already knows what their landing page looks like, and Lastest cannot demonstrate visual-regression value on a single static page he hand-built.
+
+### Run-time pivots
+
+1. **Stopped at Phase 2 before creating any repo.** Per skill rules ("Drop disqualifiers"), refused to create a `famwake-demo` repo only to populate it with marketing screenshots. No artefacts left in the team.
+2. **DNS confirmation:** verified famwake.de NXDOMAIN via `dig +short @8.8.8.8` and `@1.1.1.1`. Google search located the real domain (`familienwecker.de`) and a Google Play listing (`de.familienwecker.famwake`). Skipped further probing because the qualification verdict doesn't depend on it.
+3. **Phase 9 (DM):** pending user review — no message drafted because there is no share URL to send.
+
+---
+
+## 2026-05-15 — Efe Eşme / CavemanDetector
+
+- **Source:** IndieAppCircle.
+- **Site:** https://cavemandetector.dev/
+- **Tagline:** "Finds local businesses with no website and generates personalized cold outreach pitches."
+- **Founder:** Efe Eşme (IndieAppCircle).
+- **Lastest repo:** `a5579404-72ed-446a-b005-4e854a4e2d19` (name: `cavemandetector-demo`)
+- **Test:** `c5d1aaeb-fcfa-4be5-8101-9b259440cf3e` — "CavemanDetector — public walkthrough"
+- **Build:** `053b30fe-b1b2-4e3d-bb53-461e3879e751` — passed 1/1, 0 failed, **6 baseline screenshots**, `overallStatus: review_required` (now approved).
+- **Scenarios captured:**
+  1. Homepage hero ("Detect. Discover. Dominate the market.")
+  2. Category picker (step 01 of 03)
+  3. Location picker (Near Me / Browse Region toggle)
+  4. Region grid (country selector with Area type sub-controls)
+  5. Results list (4 of 20 businesses without websites in Lisbon Belém, restaurants)
+  6. AI pitch generator panel (per-result chat that drafts a personalized cold-outreach message)
+- **Baselines:** approved (`approve_all_diffs` ✓).
+- **Demo notes:** posted to `build_demo_notes` (uxSummary + 3 highlights + 2 frictionPoints + 2 testingStruggles).
+- **Share URL:** https://app.lastest.cloud/r/1GBOMRUIgXYRjaNdT366DA
+- **Channel:** Reddit DM (handle TBD by user — IndieAppCircle source so no public Reddit handle yet) or X DM if a handle surfaces.
+- **Sent:** no — Phase 9 (DM) **pending user review** per skill run instructions.
+- **Reply (48h check):** —
+
+### Login outcome
+
+n/a — public-only demo by design. CavemanDetector is genuinely no-signup (per its IAC tagline "60 seconds, no signup, free"). The primary founder-intended interaction IS the public flow (category → region → results → click result → AI pitch panel), and the test walks it end-to-end including the per-result AI generator. There is no gated saved-searches / paid tier exposed on the live site, so no auth phase was applicable.
+
+### Run-time pivots
+
+1. **No-signup confirmed via Playwright snapshot.** Probed `cavemandetector.dev/` with Playwright MCP; the entire app is one route with React-state-driven steps. No `<a href>` nav links, no Sign Up / Login button anywhere in the snapshot. Documented this as a frictionPoint (no skim path before clicking Start Searching).
+2. **Picked Browse Region over Near Me.** Near Me depends on EB pod geolocation (non-deterministic in CI); Browse Region with Portugal -> Lisbon -> Belém gives a stable baseline.
+3. **Generic test inputs only.** Category = `restaurant`, area = Belém (Lisbon district). No real business / person targeting per skill constraints.
+4. **Third-party noise blocked via `page.route`.** Cloudflare email-decoder pattern aborted at the network layer; `consoleErrorMode="warn"` set on repo before first run.
+5. **Phase 9 (DM):** pending user review per task instructions ("Do NOT execute Phase 9").
+
+---
+
+## 2026-05-15 — Vashon Gonzales / Cash Capy
+
+- **Source:** IndieAppCircle (queued replacement target).
+- **Site advertised:** https://cashcapy.vibecode.run/apply (NXDOMAIN — does not resolve on 8.8.8.8 / 1.1.1.1 / system resolver; brief described it as a "Vibecode SaaS, likely Supabase auth, /apply email+password signup").
+- **Site actual:** https://cashcapy.com/ (one-page marketing site for the iOS app; only sibling route is `/support`).
+- **Tagline (brief):** "Earn $250/mo representing European startups (referral platform)."
+- **Tagline (actual landing page):** "MAKE BANK — Secure the Bag — Daily Loot Drops — The free app designed to make you rich! Developed by an ex-fintech CEO."
+- **Founder:** Vashon Gonzales (Tava Labs; also runs Launch Map).
+- **Outcome:** **DISQUALIFIED at Phase 2 — mobile-native iOS product, no web app to demo.**
+- **Lastest repo:** not created.
+- **Build:** none.
+- **Share URL:** n/a.
+- **Channel:** n/a.
+- **Sent:** no.
+
+### Why disqualified
+
+The skill's "Do NOT use" list explicitly excludes "Mobile-only / native apps — Playwright can't reach them." Cash Capy's only real public surface is `cashcapy.com`, and that page's single conversion CTA is an App Store badge (`apps.apple.com/us/app/cash-capy/id6751837009`). The page advertises a daily-rewards / casual-earning iOS app with no web companion, no signup form, no dashboard, no `/apply`, no `/login`, no `/dashboard` (all probed, all 404). Only `/` and `/support` exist as real routes.
+
+The brief's framing ("Earn $250/mo representing European startups, referral platform, /apply signup") does not match the live product at all. Either the IndieAppCircle entry was for a different unshipped product Vashon was building under the same name, or the founder pivoted and replaced the web app with an iOS app under the same brand. In both cases the public surface today is brochure-only with a store badge — nothing for Lastest to baseline beyond two static screenshots.
+
+A two-screenshot share (hero + support page) would render as a thin brochure scrape with no founder-relevant signal — the founder hand-built both pages and knows what they look like, and visual-regression has zero demonstrable value on a static marketing site that almost never changes.
+
+### Run-time pivots
+
+1. **Stopped at Phase 2 before creating any repo.** Per skill rules ("Drop disqualifiers" and "Mobile-only — Playwright can't reach them"), refused to create a `cashcapy-demo` repo only to populate it with marketing screenshots and an App Store badge. No artefacts left in the team. Mirrors the FamWake disqualification from earlier today.
+2. **DNS confirmation:** `cashcapy.vibecode.run` NXDOMAIN on 8.8.8.8 and 1.1.1.1; `vibecode.run` itself 307-redirects (alive, but the per-customer subdomain was either never provisioned or torn down). `cashcapy.com` is the only live property — served by Vercel, Next.js, Fizzi-branded footer ("Love your wallet. Love your life.").
+3. **Route probe:** curled `/apply /signup /login /register /dashboard /app /api` against `cashcapy.com` — all 404. `/` and `/support` 200. Confirms iOS-only.
+4. **Did not attempt the brief's "API-direct or inbox-pull" fallback.** Those fallbacks are for *gated* signups on a real web app; here there is no web signup target to gate against. Probing a non-existent host wastes the time-box.
+5. **Phase 9 (DM):** pending user review per task instructions ("Do NOT execute Phase 9"). Even if executed later, the founder note would be "you don't have a web app — this is a Lastest demo skill that needs one" rather than a baseline share, which is not the outcome the skill is designed to deliver.

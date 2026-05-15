@@ -5,9 +5,9 @@ Videos explaining use
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
 Build a skill to find startupideas and test them, provide testing feedback
-Welcome email, follow-up
+**Welcome email, follow-up**
 https://www.chromatic.com/start comp test?
-Legal stuff for Mark
+**Legal stuff for Mark**
 ## test
 VS Code extension
 Teardown
@@ -18,7 +18,6 @@ demo-mode
   without link?
 ## bugs
 ## features
-~~calc runs and run-minutes monthly~~ (done — teams.monthly_run_quota default 500, counters on every test_run completion)
 Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**
