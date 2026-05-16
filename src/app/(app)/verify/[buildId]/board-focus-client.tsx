@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Filter, GitBranch, Play, ChevronDown, X, Loader2, Sparkles, AlertTriangle, AlertOctagon } from 'lucide-react';
+import { Filter, GitBranch, Play, ChevronDown, X, Loader2, Sparkles, AlertTriangle, AlertOctagon, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { runVerifyBuild } from '@/server/actions/smart-run';
-import { decideLayer } from '@/server/actions/layer-feedback';
+import { approveAllVerifyCases, decideLayer } from '@/server/actions/layer-feedback';
 import { confirmCase, type ConfirmKind } from '@/server/actions/verify-issues';
 import { coverArea } from '@/server/actions/cover-area';
 import { updateRepoSelectedBranch } from '@/server/actions/repos';
@@ -179,6 +179,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [branchOpen, setBranchOpen] = useState(false);
   const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
   const [issuePickerStepId, setIssuePickerStepId] = useState<string | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
 
   // Live polling state — initialised from props, refreshed every 2s while
   // the build is running. Once `completedAt` is set, polling stops.
@@ -217,7 +218,17 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         runningTests: Array<{ testId: string; name: string }>;
       };
       setStepComparisons(data.stepComparisons);
-      setLayerFeedback(data.layerFeedback);
+      // Merge-not-replace: keep any local `optimistic-*` rows whose step has
+      // no server row yet, so a poll that lands between an optimistic apply
+      // and the matching DB write doesn't snap the card back to its source
+      // column. Once any real row arrives for a step, we trust the server.
+      setLayerFeedback((prev) => {
+        const serverStepsWithRows = new Set(data.layerFeedback.map((f) => f.stepComparisonId));
+        const survivingOptimistic = prev.filter(
+          (f) => f.id.startsWith('optimistic-') && !serverStepsWithRows.has(f.stepComparisonId),
+        );
+        return [...data.layerFeedback, ...survivingOptimistic];
+      });
       setVisualDiffs(data.visualDiffs);
       setTestResults(data.testResults);
       setRunningTests(data.runningTests);
@@ -405,9 +416,52 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     });
   };
 
-  const decideAllForStep = (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => {
+  const handleMarkAllVerified = () => {
+    if (markingAll) return;
+    setMarkingAll(true);
+    startTransition(async () => {
+      try {
+        // 1) Optimistic — promotes every currently-`unknown` filtered case
+        //    to `approved` so the board moves before the round-trip.
+        const local = await approveAllUnknownFilteredCases();
+        if (local.approved === 0) {
+          toast.message('Nothing left to verify');
+          return;
+        }
+        // 2) Server bulk write — authoritative, also writes per-layer
+        //    baselines. Runs after the optimistic apply so the UI is
+        //    already settled visually.
+        const result = await approveAllVerifyCases(props.build.id).catch((e) =>
+          e instanceof Error ? { error: e.message } : { error: 'unknown' },
+        );
+        // 3) Refresh after the server write — refreshFromServer will keep
+        //    optimistic rows for any step that doesn't yet have a real row.
+        await refreshFromServer();
+        if (result && 'error' in result) {
+          toast.error('Could not mark all verified', { description: result.error });
+        } else {
+          toast.success(`${local.approved} case${local.approved === 1 ? '' : 's'} marked verified`);
+        }
+      } finally {
+        setMarkingAll(false);
+      }
+    });
+  };
+
+  // Returns a promise that resolves once every per-layer decideLayer write
+  // for this step has hit the DB. The optimistic local row write is done
+  // SYNCHRONOUSLY before the promise is created so the card moves the moment
+  // the user lets go of the mouse. Callers should `await` the returned
+  // promise before triggering `refreshFromServer` — otherwise a poll that
+  // lands between the optimistic apply and the DB commit would replace the
+  // local rows with stale server data and snap the case back to its prior
+  // column. (This was the "drag, thing get undone, page no refresh" bug.)
+  const decideAllForStep = (
+    stepId: string,
+    status: 'approved' | 'rejected' | 'snoozed',
+  ): Promise<void> => {
     const step = stepComparisons.find((s) => s.id === stepId);
-    if (!step) return;
+    if (!step) return Promise.resolve();
     // Persist a decision for every evidence layer + every layer that already
     // has feedback in the DB. Without the second part, a stale `rejected`
     // row on a layer that wasn't in step.evidence would survive the override
@@ -424,8 +478,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     if (layerSet.size === 0) layerSet.add('visual');
     const layers: EvidenceLayer[] = Array.from(layerSet);
 
-    // 1) Optimistic local feedback so the card moves to the new column
-    //    INSTANTLY — no waiting on round-trips.
+    // Optimistic local feedback so the card moves to the new column INSTANTLY
+    // — no waiting on round-trips.
     const fakeStatus = status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'snoozed';
     const optimisticRows: StepLayerFeedback[] = layers.map((layer) => ({
       id: `optimistic-${stepId}-${layer}`,
@@ -444,24 +498,51 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // Strip ALL prior feedback for this step (real OR optimistic) so a stale
     // rejected row from an earlier decision can't leak through and pin the
     // case in `regression` (anyRejected wins in deriveCaseStatus). The whole-
-    // case action is meant to override per-layer decisions outright. The
-    // next poll returns the new authoritative status from the server.
+    // case action is meant to override per-layer decisions outright.
     setLayerFeedback((prev) => [
       ...prev.filter((f) => f.stepComparisonId !== stepId),
       ...optimisticRows,
     ]);
 
-    // 2) Persist in parallel — was sequential per layer (N roundtrips), now 1
-    //    wall-clock roundtrip total. The server is idempotent on this.
-    startTransition(async () => {
-      await Promise.all(
-        layers.map((layer) =>
-          decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
-            .catch(() => null),
-        ),
-      );
-      router.refresh();
-    });
+    // Persist in parallel — N decideLayer writes, 1 wall-clock roundtrip.
+    // Returned to the caller so they can sequence refreshFromServer after
+    // the writes have committed.
+    return Promise.all(
+      layers.map((layer) =>
+        decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
+          .catch(() => null),
+      ),
+    ).then(() => undefined);
+  };
+
+  // Top-level "Mark all verified" target: approves every filtered case
+  // currently shown in the `unknown` column. Same optimistic-then-persist
+  // pattern as decideAllForStep, but ranged over many steps in one go.
+  const approveAllUnknownFilteredCases = (): Promise<{ approved: number }> => {
+    // Build a feedback map keyed by step so we can derive each case's status.
+    const fbByStep = new Map<string, StepLayerFeedback[]>();
+    for (const f of layerFeedback) {
+      if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
+      fbByStep.get(f.stepComparisonId)!.push(f);
+    }
+    const targets: string[] = [];
+    for (const step of filteredSteps) {
+      const test = testById.get(step.testId);
+      const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
+      const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
+      const status = deriveCaseStatus({
+        step,
+        feedback: fbByStep.get(step.id) ?? [],
+        isInChangedArea,
+        testFailed: result?.status === 'failed',
+      });
+      if (status === 'unknown') targets.push(step.id);
+    }
+    if (targets.length === 0) return Promise.resolve({ approved: 0 });
+    // Kick optimistic rows for every target synchronously; the server-side
+    // bulk action then catches up via approveAllVerifyCases.
+    const promises = targets.map((id) => decideAllForStep(id, 'approved'));
+    return Promise.all(promises).then(() => ({ approved: targets.length }));
   };
 
   /** Per-evidence Expected/Needs fix click. Optimistically writes the layer
@@ -509,17 +590,14 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // Dropping on Unsorted = clear all feedback for the step so its derived
     // status falls back to verdict-based classification. The user's drop
     // always wins over any prior decision: stripping local rows + writing
-    // snoozed on the layers (closest server-side "no-op") clears stale
-    // approvals/rejections that would otherwise persist.
+    // `pending` on the layers (deriveCaseStatus ignores pending rows
+    // entirely) clears stale approvals/rejections that would otherwise
+    // persist.
     if (target === 'unknown') {
       const layers = Array.from(new Set(
         layerFeedback.filter((f) => f.stepComparisonId === stepId).map((f) => f.layer),
       ));
       setLayerFeedback((prev) => prev.filter((f) => f.stepComparisonId !== stepId));
-      // Use the 'pending' status to wipe any prior decision: deriveCaseStatus
-      // ignores pending rows entirely, so the case falls back to its
-      // verdict-based natural classification — typically `unknown` for
-      // yellow-not-in-changed-area, `done` for green, etc.
       startTransition(async () => {
         await Promise.all(
           layers.map((layer) =>
@@ -535,31 +613,46 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // the step before writing the new decision, so it cleanly overrides.
     const decision = STATUS_TO_DECISION[target];
     if (!decision) return;
-    decideAllForStep(stepId, decision);
 
     // Verify phase (v1.14+) — also fire the typed-ticket confirmation. This
     // is the only path that creates GH issues from a column drop:
     //   - Verified  → close any linked issue
     //   - Broken    → file a `bugfix` issue
     //   - Missed    → file an `improvement` issue
-    // We run this after decideAllForStep so the optimistic UI move happens
-    // immediately; the toast surfaces ticket success/failure separately.
     const confirmKind = STATUS_TO_CONFIRM_KIND[target as Exclude<CaseStatus, 'unknown'>];
-    if (!confirmKind) return;
+
+    // CRITICAL — sequence everything in ONE transition so refreshFromServer
+    // never reads server state before the decideLayer writes have committed.
+    // Two parallel transitions caused the "card snaps back" bug: confirmCase
+    // would finish + call refreshFromServer, which replaced the optimistic
+    // rows with stale (pre-decideLayer) server data → card returned to its
+    // original column.
     startTransition(async () => {
-      const result = await confirmCase(stepId, confirmKind).catch(() => null);
-      if (!result?.ok) return;
-      if (result.ticketChanged && result.issueUrl) {
-        toast.success(
-          `Filed ${result.issueKind ?? 'verify'} ticket`,
-          { description: result.issueUrl, action: {
-            label: 'Open',
-            onClick: () => window.open(result.issueUrl!, '_blank'),
-          } },
-        );
-      } else if (result.ticketChanged && confirmKind === 'done') {
-        toast.success('Closed linked ticket');
+      // 1) Persist the per-layer decision. The optimistic UI move already
+      //    happened synchronously inside decideAllForStep before the await.
+      await decideAllForStep(stepId, decision);
+
+      // 2) File / close the linked issue, if applicable.
+      if (confirmKind) {
+        const result = await confirmCase(stepId, confirmKind).catch(() => null);
+        if (result?.ok) {
+          if (result.ticketChanged && result.issueUrl) {
+            toast.success(
+              `Filed ${result.issueKind ?? 'verify'} ticket`,
+              { description: result.issueUrl, action: {
+                label: 'Open',
+                onClick: () => window.open(result.issueUrl!, '_blank'),
+              } },
+            );
+          } else if (result.ticketChanged && confirmKind === 'done') {
+            toast.success('Closed linked ticket');
+          }
+        }
       }
+
+      // 3) Now and only now refresh from the server — every decideLayer +
+      //    confirmCase write is committed, so the merged poll won't pull
+      //    stale rows over our optimistic ones.
       await refreshFromServer();
     });
   };
@@ -653,6 +746,23 @@ function BoardFocusInner(props: BoardFocusClientProps) {
               />
             )}
           </div>
+          <button
+            className="v-btn"
+            onClick={handleMarkAllVerified}
+            disabled={markingAll || isRunning || totalCases === 0 || verifiedCount === totalCases}
+            title={
+              totalCases === 0
+                ? 'No cases on this build'
+                : verifiedCount === totalCases
+                  ? 'Every case is already verified'
+                  : isRunning
+                    ? 'Wait for the build to finish before bulk-verifying'
+                    : `Approve every unsorted case visible under the current filters (${totalCases - verifiedCount})`
+            }
+          >
+            <CheckCircle size={13} />
+            {markingAll ? 'Marking…' : 'Mark all verified'}
+          </button>
           <button
             className="v-btn primary"
             onClick={handleRefresh}

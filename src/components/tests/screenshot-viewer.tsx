@@ -96,11 +96,13 @@ export function ScreenshotViewer({
       aria-modal="true"
     >
       {/* Scrollable image layer — tall captures grow at intrinsic height and
-          scroll vertically. `items-center-safe` keeps short images centered
-          but flips to top-aligned when the image is taller than the viewport
-          so the top of the image is reachable at scrollTop:0. */}
+          scroll vertically. `align-items: safe center` keeps short images
+          centered but flips to top-aligned when the image is taller than the
+          viewport so the top is reachable at scrollTop:0. Written as a
+          Tailwind arbitrary value because the named utility was renamed
+          between Tailwind v4 minors. */}
       <div className="absolute inset-0 overflow-auto" onClick={onClose}>
-        <div className="min-h-full p-4 flex justify-center items-center-safe">
+        <div className="min-h-full p-4 flex justify-center [align-items:safe_center]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}

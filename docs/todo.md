@@ -20,6 +20,8 @@ demo-mode
 CSP nonce migration — `next.config.ts:50` allows `script-src 'unsafe-inline' 'unsafe-eval'` because the public share page `/r/[slug]` ships `SHARE_SCRIPT` + `SHARE_STYLE` via `dangerouslySetInnerHTML`. Move SHARE_SCRIPT to a static asset (or a per-request `<script nonce>`), drop `unsafe-inline` + `unsafe-eval`. See plan `/home/ewyct/.claude/plans/streamed-crafting-tide.md`.
 
 ## bugs
+Verify
+  
 ## features
 Auto-feedback to resolve loop
 Google verification for gsheets
@@ -63,3 +65,10 @@ SecurePass123
 --------
 
 
+L
+@lisalacythompsonaca
+May 15, 2026
+@wyctor wow that's pretty cool, thanks! Definitely a helpful tool for us vibe coders who kinda just cross our fingers and hope for the best 🫣 Are you launching on PeerPush? Once I get a chance to implement I'm happy to review!
+
++1 PeerPush earned
+1

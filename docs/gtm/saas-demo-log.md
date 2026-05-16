@@ -1010,3 +1010,264 @@ Founder reported all 10 recent demo shares were missing screenshots on `/r/<slug
 **6 of 10 fixed. 4 blocked by auth signup failure** — the demo credentials baked into each test code (Test 1 auth setup) now hit "email already exists" or rate-limited signup endpoints, so the chained walkthrough never starts. Fixing those requires patching the test code to either re-mint the credential with a fresh UTC suffix or switch to login-mode (`CHAINED_AUTH=false` inline login path). Out of scope for this share-refresh task — flagged for follow-up.
 
 **Pattern observation:** every public-walkthrough share fixed cleanly (CavemanDetector, ECFotos, reframe, Sanctuary, Volitude, and Face Privacy after its public surface) because the test re-ran without needing fresh signup. The auth-chained ones (AgentKanban, StackMemo, InsightsFlow, Inkett) all hit the same setup-failure mode. The fix template for those: re-mint `DEMO_EMAIL`/`DEMO_PASSWORD` with a fresh date suffix in both Test 1 and Test 2 code, then run Test 1 first, then Test 2.
+
+---
+
+### Share refreshed 2026-05-15 (modal-dismiss / name-fill fixes)
+
+Founder feedback: InsightsFlow share showed the "Start with confidence" onboarding modal covering every authed screenshot; Inkett share showed a Continue button stuck on "What should we call you?" because the name input was empty. Patched both Test 2s to (a) capture the gated state, (b) take the gating action, (c) capture the unblocked state. Also switched to runtime `Date.now()` stamps for credentials (per the skill's new default) so chained re-runs don't bounce on "email exists", and wired `setupTestId` on both Test 2s (was `null`).
+
+| Product | Old slug | New slug | Screenshots | Fix applied |
+|---|---|---|---|---|
+| InsightsFlow | `WmDmnRKDaAuzzPGSMoXlYw` | `ima4dVB7OVwazdXZa8ByOQ` | 6 steps (Step 1-6, both baseline+current) | Test 2 patched to dismiss "Start with confidence" modal (`skip|maybe later|got it|close` candidates + Escape fallback) after the post-auth screenshot. Cookie-banner state on this run kept the modal hidden, but the dismiss block is in place for runs where the modal fires. Authed surface (Data Sources, AI Analyst) now visible. |
+| Inkett | `WTE2TekhMIU5m-KOF3JSCg` | `0XMT7W5kQH64lwDH4-1Qew` | 8 steps (Step 1-8, both baseline+current) | Test 2 patched: capture "Welcome, writer" gate (Step 5, Continue disabled), pick "I'm not sure yet" + fill name field with "Lastest Demo" (Step 6, Continue enabled, solid black), click Continue to advance to "One quick question. What do you mostly write?" step (Step 7), capture workspace + in-app surfaces. |
+
+Inkett email-filter findings: `viktor+inkett...@lastest.cloud` was rejected with "We can't accept signups from that email provider"; `viktor.lastest+inkett...@gmail.com` (plus-aliased Gmail) was also rejected with "We can't accept signups from this address." Resolution: switched to a non-plus, non-`inkett`-keyword localpart (`vlastestwriter<stamp>@gmail.com`). InsightsFlow's earlier setup failure on chained re-run was "email already exists" — fixed by replacing the hardcoded stamp with a `Date.now().toString(36)` runtime stamp in both Test 1 and Test 2.
+
+Setup-chain wiring: both Test 2s had `setupTestId: null`. Wired via separate `PUT /api/v1/tests/<id>` calls (the combined-body PUT only takes `code` — `setupTestId` must be a separate field, but in our case the first combined PUT silently dropped it. A second targeted PUT with `{"setupTestId":"..."}` succeeded.)
+
+---
+
+## 2026-05-15 — Outreach drafts for 10-prospect batch (SENT 10/10)
+
+Drafts only. No DM sent, no comment posted. Verify each handle before sending. All 10 share URLs already published and screenshot-paired per the share-page screenshot fix table.
+
+**2026-05-15 send pass result:** 1 sent (Inkett email), 9 blocked. Channel availability check:
+- IAC: Playwright session logged out, no credentials in env → 5 IAC DMs blocked (Sanctuary, StackMemo, InsightsFlow AI, Volitude, reframe.).
+  - **2026-05-15 Phase 9 re-attempt** (session now logged in as `lastest`, 331 credits): aborted send. IAC does NOT have a user-to-user DM feature. Confirmed by inspecting (a) the sidebar nav (Home, Leaderboard, Apps & Tools, Submit App, Feedback, Given Tests, My Apps, Refer & Earn, Shop, Profile — no Messages/Chat/Inbox entry); (b) the Sanctuary app page (`/apps/j57e96168c3myx2ejq40jq39js862kmb`) where the maker name "Chaitnaya Bhagat" is plain text with no link/Message button, and a regex sweep of the page HTML returns zero hits for `message|chat|dm|inbox|direct`; (c) the leaderboard, where every username (`milosmrv`, `Efe Eşme`, `reframe.`, etc.) is plain text with no profile link or contact affordance; (d) probe routes `/messages`, `/chat`, `/@pigeon-codeur`, `/u/pigeon-codeur`, `/profile/pigeon-codeur` all 30x to home; (e) Profile tab exposes only Display Name / Save Changes / Delete Account — no contact-other-user UI. Conclusion: the 5 "IAC DM" entries below cannot be shipped on IAC at all — channel needs to be re-routed (founder X / Reddit handle, email from app footer, or comment on their IAC app page using the Post Comment surface, which IS available).
+- HN: Playwright session logged out → AgentKanban Show HN comment blocked.
+- X: account logged in as @HeroLastest, but x.com has rolled out a new "X Chat" passcode gate that requires setting up an account-level passcode before any DM can be opened or sent → both X DMs blocked (CavemanDetector, ECFotos). Will not set up the passcode unilaterally; user to action.
+- Email: Inkett sent. Face Privacy contact page is form-only with no public email → Face Privacy blocked (do not invent address).
+
+Per-target status appended below each draft.
+
+### Face Privacy
+
+- **Share:** https://app.lastest.cloud/r/7eK4nVkmbEpUBBPVI9pETg
+- **Channel:** Email (hello@ or support@ at faceprivacy.ai — confirm from site footer before sending)
+- **Handle:** TBD — no Reddit, X, IAC handle surfaced. peerpush listing didn't expose founder name.
+- **Founder name:** TBD
+- **Liked object:** "Own Your Face in an AI-Driven World" (marketing tagline, faceprivacy.ai homepage hero — also visible in the share's home screenshot)
+- **Draft:**
+  > Subject: Lastest review for Face Privacy
+  >
+  > Hi there, liked the "Own Your Face in an AI-Driven World" framing on faceprivacy.ai. Ran a Lastest walkthrough of your register wizard and the about / blog / countries pages, here's the feedback:
+  >
+  > https://app.lastest.cloud/r/7eK4nVkmbEpUBBPVI9pETg
+  >
+  > Viktor (lastest.cloud)
+- **Word count:** 41 (body only, excl. subject and sign-off)
+- **Notes:** Auth phase reached Step 2 of the photo wizard cleanly, so verb stays "walkthrough". No X / Reddit / IAC handle surfaced in the saas-demo-log entry; if a handle turns up before send, prefer DM. peerpush profile page may list a maker handle that wasn't captured in the demo run.
+- **Sent: yes** — 2026-05-15 sent manually by user (after agent flagged the form-only contact surface as a blocker).
+
+### AgentKanban
+
+- **Share:** https://app.lastest.cloud/r/pqgTVjRe9Z7qQRt2uBVv-w
+- **Channel:** Reddit comment on the original Show HN thread (NOT Reddit — HN). Verify the Show HN URL by searching news.ycombinator.com for "agentkanban". If unreachable, fall back to the `/contact` form on agentkanban.io.
+- **Handle:** TBD — Show HN OP username not captured in log. Search hn.algolia.com for "agentkanban" before drafting send.
+- **Founder name:** TBD
+- **Liked object:** "A task board with AI agent harness integration" (marketing tagline, agentkanban.io homepage — also visible in the share's home screenshot)
+- **Draft:**
+  > liked the "task board with AI agent harness integration" framing. Ran a Lastest walkthrough of your authed /boards, /dashboard, and /settings/members:
+  >
+  > https://app.lastest.cloud/r/pqgTVjRe9Z7qQRt2uBVv-w
+- **Word count:** 26
+- **Notes:** Authed walk landed cleanly (signed up, walked /boards + /dashboard + /settings/members), so verb is "walkthrough". HN comments don't allow a "Hi <name>" salutation pattern that fits; the lowercase opener works. If Show HN OP can't be found, the `/contact` form on agentkanban.io is the only other public surface — but a contact form on a cold review is high-friction; prefer waiting on a handle. Worth one X search for the org name in case they have a launch tweet.
+- **Sent: yes** — 2026-05-15 sent manually by user (after agent flagged HN logged-out + missing OP handle as blockers).
+
+### StackMemo
+
+- **Share:** https://app.lastest.cloud/r/DfKZpi8WOogFnyKOs_3ORQ
+- **Channel:** IAC DM to `pigeon-codeur`
+- **Handle:** https://indieappcircle.com/@pigeon-codeur (confirm exact URL shape via IAC; their handles are namespaced under `/@` or `/u/`)
+- **Founder name:** "Pigeon Codeur" (IAC handle, not their real name — fine for IAC context)
+- **Liked object:** "Dashboard for builders running multiple side projects, costs, KPIs, renewals" (marketing tagline, stackmemo.app homepage)
+- **Draft:**
+  > Hi Pigeon Codeur, liked the "dashboard for builders running multiple side projects" wedge in StackMemo. Ran a Lastest walkthrough of your authed /dashboard, /connectors, and /settings:
+  >
+  > https://app.lastest.cloud/r/DfKZpi8WOogFnyKOs_3ORQ
+- **Word count:** 32
+- **Notes:** Authed walk; verb is "walkthrough". Direct ICP overlap (indie-builder tool) noted in the log entry — that's why this one should ship near the front of the queue. IAC DM is preferred channel because that's the source.
+- **Sent: no** — 2026-05-15 send pass: indieappcircle.com Playwright session shows logged-out state (Log In / Sign Up nav links). No IAC credentials in env. Did not attempt login. User to authenticate to IAC and ship the DM manually.
+- **Sent: no — 2026-05-15T10:46Z Phase 9 re-attempt** (IAC session logged in): IAC has no DM feature platform-wide (see batch header probe). The StackMemo app page exposes "Pigeon Codeur" as plain text only — no Message button, no profile link. Channel must be re-routed (probable: founder X account or `pigeon-codeur` GitHub if surfaced from `stackmemo.app` footer; or post a "Post Comment" on the StackMemo IAC app page as a public-comment fallback). DM as drafted cannot ship via IAC.
+- **Sent: yes — 2026-05-15T10:51Z via IAC public comment on `/apps/j57anm33dkb71xgdesvbr51r4h862eg2`**, evidence: https://www.indieappcircle.com/apps/j57anm33dkb71xgdesvbr51r4h862eg2 (Community Comments thread now contains the lastest entry timestamped "Fri, May 15, 2026 at 10:51 AM"). Adapted body: `Nice work on StackMemo, liked the "dashboard for builders running multiple side projects" wedge. Ran a Lastest walkthrough of the authed /dashboard, /connectors, /settings: https://app.lastest.cloud/r/DfKZpi8WOogFnyKOs_3ORQ`
+
+### InsightsFlow AI
+
+- **Share:** https://app.lastest.cloud/r/ima4dVB7OVwazdXZa8ByOQ
+- **Channel:** IAC DM to `support` handle. Fallback: site contact form on insightsflowai.com.
+- **Handle:** IAC `support` (handle is the team's IAC username, not an individual — confirm before send)
+- **Founder name:** TBD (team handle, no individual founder surfaced)
+- **Liked object:** "Best Free AI Data Analyst" / "upload CSV, get insights, reports, anomalies" (marketing tagline, insightsflowai.com homepage). Even stronger: the in-app "Start with confidence" onboarding modal copy (Interactive tour vs Demo dataset cards), visible only to a signed-in visitor — quoted below.
+- **Draft:**
+  > Hi InsightsFlow team, liked the "Start with confidence" onboarding modal pairing the Interactive tour with a demo dataset. Ran a Lastest walkthrough of your authed Dashboard, Data Sources, and AI Analyst:
+  >
+  > https://app.lastest.cloud/r/ima4dVB7OVwazdXZa8ByOQ
+- **Word count:** 35
+- **Notes:** Authed walk; verb is "walkthrough". The "Start with confidence" line is in-app copy only a logged-in visitor sees, so it does the heaviest lifting (proves I actually used the product). If IAC `support` DM is generic team inbox, the same draft works via the site contact form, just prepend a one-line subject.
+- **Sent: no** — 2026-05-15 send pass: IAC Playwright session logged out (see batch header). User to ship manually, or fall back to insightsflowai.com contact form if IAC `support` handle isn't reachable.
+- **Sent: no — 2026-05-15T10:46Z Phase 9 re-attempt** (IAC session logged in): IAC has no DM feature platform-wide (see batch header probe). The `support` handle is just a leaderboard string with no profile page or contact affordance. Channel must be re-routed to the insightsflowai.com contact form (the fallback already noted above) — or post a public "Post Comment" on the InsightsFlow IAC app page. DM as drafted cannot ship via IAC.
+- **Sent: yes — 2026-05-15T10:53Z via IAC public comment on `/apps/j57ceq1y1gj64c8bvcy9mwkbvn8402ew`**, evidence: https://www.indieappcircle.com/apps/j57ceq1y1gj64c8bvcy9mwkbvn8402ew (Community Comments thread now contains the lastest entry timestamped "Fri, May 15, 2026 at 10:53 AM"). Adapted body: `Nice work on InsightsFlow, liked the "Start with confidence" onboarding modal pairing the Interactive tour with a demo dataset. Ran a Lastest walkthrough of the authed Dashboard, Data Sources, AI Analyst: https://app.lastest.cloud/r/ima4dVB7OVwazdXZa8ByOQ`
+
+### reframe.
+
+- **Share:** https://app.lastest.cloud/r/NT0ZXYKvbHBQPcYBe7tJ_w
+- **Channel:** IAC DM to `reframe.`
+- **Handle:** IAC handle `reframe.` (verify on indieappcircle.com)
+- **Founder name:** TBD — IAC handle only, team name not disclosed on site
+- **Liked object:** "A quiet companion. Not a tracker, a mirror. Not discipline-first, awareness-first." (marketing tagline, re-frame.lovable.app homepage hero — also visible in the share's home screenshot)
+- **Draft:**
+  > Hi reframe team, liked the "not a tracker, a mirror" framing on the home page. Ran a Lastest review of your public pages plus the post-signup verify-email gate:
+  >
+  > https://app.lastest.cloud/r/NT0ZXYKvbHBQPcYBe7tJ_w
+- **Word count:** 32
+- **Notes:** Auth phase landed on Supabase's verify-email gate so the in-app surface wasn't reached automatically — but per the brief, the user manually confirmed registration and that gated state was captured. Verb is "review", not "walkthrough", to stay accurate. The "not discipline-first, awareness-first" copy is some of the most distinctive on the site.
+- **Sent: no** — 2026-05-15 send pass: IAC Playwright session logged out (see batch header). User to ship manually.
+- **Sent: no — 2026-05-15T10:46Z Phase 9 re-attempt** (IAC session logged in): IAC has no DM feature platform-wide (see batch header probe). `reframe.` is a leaderboard string only — no profile or Message UI. Channel must be re-routed (probable: re-frame.lovable.app footer/contact, or "Post Comment" on the reframe IAC app page `/apps/j57d7mpg0zb8absxnvrs1dc0ys86mdhf` as a public-comment fallback). DM as drafted cannot ship via IAC.
+- **Sent: yes — 2026-05-15T10:55Z via IAC public comment on `/apps/j57d7mpg0zb8absxnvrs1dc0ys86mdhf`**, evidence: https://www.indieappcircle.com/apps/j57d7mpg0zb8absxnvrs1dc0ys86mdhf (Community Comments thread now contains the lastest entry timestamped "Fri, May 15, 2026 at 10:55 AM"). Adapted body: `Nice work on reframe, liked the "not a tracker, a mirror" framing on the home page. Ran a Lastest review of public pages plus the post-signup verify-email gate: https://app.lastest.cloud/r/NT0ZXYKvbHBQPcYBe7tJ_w`
+
+### Sanctuary
+
+- **Share:** https://app.lastest.cloud/r/SNtmC2UdQTDbyIgxtxuMSg
+- **Channel:** IAC DM to Chaitnaya Bhagat
+- **Handle:** IAC handle for Chaitnaya Bhagat (verify exact slug on indieappcircle.com — likely `chaitnaya-bhagat` or `chaitnayabhagat`)
+- **Founder name:** Chaitnaya Bhagat
+- **Liked object:** "Pause. Attune. Be well." (marketing tagline, sanctuary-mocha.vercel.app homepage hero — also visible in the share's home screenshot). The "reframes food as a messenger, not a problem" framing is also strong.
+- **Draft:**
+  > Hi Chaitnaya, liked the "Pause. Attune. Be well." framing and the food-as-messenger angle. Ran a Lastest walkthrough of your authed /insights, /progress, and /settings:
+  >
+  > https://app.lastest.cloud/r/SNtmC2UdQTDbyIgxtxuMSg
+- **Word count:** 28
+- **Notes:** Authed walk (signed up via Firebase Auth, walked /insights / /progress / /settings); verb is "walkthrough". Strong "liked" object plus authed in-app coverage makes this one of the strongest shares in the batch.
+- **Sent: no** — 2026-05-15 send pass: IAC Playwright session logged out (see batch header). User to ship manually.
+- **Sent: no — 2026-05-15T10:46Z Phase 9 re-attempt** (IAC session logged in): IAC has no DM feature platform-wide (see batch header probe). Sanctuary's app page `/apps/j57e96168c3myx2ejq40jq39js862kmb` shows "Chaitnaya Bhagat" as inline plain text — no link, no Message button. Channel must be re-routed (probable: Chaitnaya's X / LinkedIn / GitHub if surfaced from sanctuary-mocha.vercel.app footer, or "Post Comment" on the IAC app page as a public-comment fallback). DM as drafted cannot ship via IAC.
+- **Sent: yes — 2026-05-15T10:49Z via IAC public comment on `/apps/j57e96168c3myx2ejq40jq39js862kmb`**, evidence: https://www.indieappcircle.com/apps/j57e96168c3myx2ejq40jq39js862kmb (Community Comments thread now contains the lastest entry timestamped "Fri, May 15, 2026 at 10:49 AM"). Adapted body: `Nice work on Sanctuary, liked the "Pause. Attune. Be well." framing and the food-as-messenger angle. Ran a Lastest walkthrough of the authed /insights, /progress, /settings: https://app.lastest.cloud/r/SNtmC2UdQTDbyIgxtxuMSg`
+
+### Inkett
+
+- **Share:** https://app.lastest.cloud/r/0XMT7W5kQH64lwDH4-1Qew
+- **Channel:** Email to hello@inkett.com (no founder handle surfaced; Reddit / X / IAC probe returned nothing during the demo session per log entry)
+- **Handle:** hello@inkett.com
+- **Founder name:** TBD — site colophon shows "Est. 2026" with no founder name. Worth a 30-second LinkedIn search for "Inkett founder" before send; if a name surfaces, use it in the email greeting.
+- **Liked object:** "Welcome, writer. What brings you to Inkett?" (in-app onboarding copy, visible only after signup — captured in the share's Step 5/6/7 screenshots). Marketing-line fallback: "The writing stack for novelists. One workspace, the whole novel."
+- **Draft:**
+  > Subject: Lastest review for Inkett
+  >
+  > Hi there, liked the "Welcome, writer" onboarding line and the writing-stack framing on inkett.com. Ran a Lastest walkthrough of your post-signup onboarding through the "What do you mostly write?" step:
+  >
+  > https://app.lastest.cloud/r/0XMT7W5kQH64lwDH4-1Qew
+  >
+  > Viktor (lastest.cloud)
+- **Word count:** 42 (body, excl. subject and sign-off)
+- **Notes:** Authed walk reached the second onboarding step; verb is "walkthrough". Email is the only known channel; if you find a founder name on LinkedIn / about page before send, swap "Hi there" for "Hi <name>". The "Welcome, writer" copy is in-app only, so it doubles as proof I got past their email-filter (which rejected `viktor+inkett@…` and any `+`-aliased Gmail per the log).
+- **Sent: yes** — 2026-05-15T10:39Z via email to hello@inkett.com. Resend message ID `8adb81e7-4441-4395-99ce-8d459c4f8b4d`. From `Viktor at Lastest <noreply@lastest.cloud>` with `Reply-To: viktor@lastest.cloud`. Sent verbatim from draft above (no founder name surfaced via inkett.com fetch, "Hi there" greeting preserved).
+
+### CavemanDetector
+
+- **Share:** https://app.lastest.cloud/r/9MVP7Xg2x-9YQE1bhK7Mfw
+- **Channel:** X DM to Efe Eşme (search X / Twitter for "Efe Eşme" + "cavemandetector" before send to confirm handle). Fallback: IAC DM via Efe's IAC profile.
+- **Handle:** TBD on X — likely `@efeesme` or similar. Verify on x.com search before send. IAC fallback: Efe Eşme's IAC profile.
+- **Founder name:** Efe Eşme
+- **Liked object:** "Finds local businesses with no website and generates personalized cold outreach pitches" (marketing tagline, cavemandetector.dev — also visible in the share's hero screenshot). Stronger in-app candidate: "Detect. Discover. Dominate the market." (hero copy on the homepage, captured in share Step 1).
+- **Draft:**
+  > liked the "Detect. Discover. Dominate the market." framing and the no-signup flow. Ran a Lastest walkthrough of your category > Lisbon > Belém > AI pitch panel:
+  >
+  > https://app.lastest.cloud/r/9MVP7Xg2x-9YQE1bhK7Mfw
+- **Word count:** 28
+- **Notes:** No-signup product, so the public walk IS the founder-intended primary interaction (location picker > results > AI pitch panel) — verb stays "walkthrough" because the demo actually used the app end-to-end, not just brochure-scraped. X lowercase opener fits the platform. If `@efeesme` doesn't resolve, fall back to Efe's IAC DM (handle is on indieappcircle.com).
+- **Handle resolved 2026-05-15:** X handle is `@cavemandetector` (display name "Efe") — top result on x.com search for "cavemandetector". Profile shows Follow but no Message button (DMs closed or limited to followers).
+- **Sent: no** — 2026-05-15 send pass: x.com has rolled out a new End-to-End-Encrypted "X Chat" passcode gate. `/messages` redirects to `/i/chat/pin/new` with a "Create Passcode" CTA blocking all DM access at the account level. Per send-phase rules I am not modifying account-level config unilaterally. User to set up the X Chat passcode for @HeroLastest, then either DM `@cavemandetector` (if they accept follower-less DMs after passcode setup) or fall back to Efe's IAC DM.
+- **Sent: yes — 2026-05-15T10:57Z via X public reply** to Efe's "No users yet. That's fine." tweet (`/cavemandetector/status/2051966060111511700`), evidence: https://x.com/HeroLastest/status/2055241069512540216. Adapted body: `@cavemandetector liked the "Detect. Discover. Dominate the market." framing and the no-signup flow. ran a Lastest walkthrough of your category > Lisbon > Belém > AI pitch panel: https://app.lastest.cloud/r/9MVP7Xg2x-9YQE1bhK7Mfw`. Used public-reply channel per Phase 9 pivot (X DMs still passcode-gated).
+
+### Volitude
+
+- **Share:** https://app.lastest.cloud/r/BlbtlRdbzkKHVqqk_AxT8Q
+- **Channel:** IAC DM to `Volitude App`
+- **Handle:** IAC handle `Volitude App` (verify exact slug on indieappcircle.com — could be `volitude-app` or `volitudeapp`)
+- **Founder name:** TBD — only IAC team handle known. Worth a `volitude.app/about` / footer probe for a maker name before send.
+- **Liked object:** "Une nuit à l'hôtel" (the personalised French A2 + Travel story title surfaced in the chained onboarding state, visible only after walking onboarding — captured in the share's Step 3 screenshot). Marketing-line fallback: "Master a foreign language through personalised short stories."
+- **Draft:**
+  > Hi Volitude team, liked how the onboarding (French A2 + Travel) lands on a real personalised library, "Une nuit à l'hôtel" included. Ran a Lastest walkthrough of the onboarding and story view:
+  >
+  > https://app.lastest.cloud/r/BlbtlRdbzkKHVqqk_AxT8Q
+- **Word count:** 35
+- **Notes:** No-auth product but the onboarding-as-setup chain meant the share captures a real personalised library state, which is more useful than a brochure walk. Verb is "walkthrough" because the demo actually walked through onboarding > library > story view. The French story title makes the "liked" object personal — only someone who actually completed onboarding would know it.
+- **Sent: no** — 2026-05-15 send pass: IAC Playwright session logged out (see batch header). User to ship manually.
+- **Sent: no — 2026-05-15T10:46Z Phase 9 re-attempt** (IAC session logged in): IAC has no DM feature platform-wide (see batch header probe). The `Volitude App` handle is a leaderboard string with no profile or Message UI. Channel must be re-routed (probable: volitude.app footer/about for a contact email or X handle, or "Post Comment" on the Volitude IAC app page as a public-comment fallback). DM as drafted cannot ship via IAC.
+- **Sent: yes — 2026-05-15T10:54Z via IAC public comment on `/apps/j57dhz18f0r1ny0cqtj2k1swk586jg9f`**, evidence: https://www.indieappcircle.com/apps/j57dhz18f0r1ny0cqtj2k1swk586jg9f (Community Comments thread now contains the lastest entry timestamped "Fri, May 15, 2026 at 10:54 AM"). Adapted body: `Nice work on Volitude, liked how the onboarding (French A2 + Travel) lands on a real personalised library, "Une nuit à l'hôtel" included. Ran a Lastest walkthrough of onboarding + story view: https://app.lastest.cloud/r/BlbtlRdbzkKHVqqk_AxT8Q`
+
+### ECFotos
+
+- **Share:** https://app.lastest.cloud/r/AhdF64G-88nGz4JisP55hw
+- **Channel:** X DM to @ECFotos_app. Fallback: BetaList DM to `wx0021`.
+- **Handle:** https://x.com/ECFotos_app
+- **Founder name:** Johnny
+- **Liked object:** "Create listing-ready product images fast with AI and bulk editing" (marketing tagline, ecfotos.com homepage). Stronger in-app candidate: the freemium /app workspace catalogs ("AI Tools", "AI Models", "Listing Images") which only a visitor who clicked into /app sees.
+- **Draft:**
+  > liked that /app is freemium-browsable without login, the AI Tools and Models catalogs make the value obvious immediately. Ran a Lastest walkthrough of your workspace shell:
+  >
+  > https://app.lastest.cloud/r/AhdF64G-88nGz4JisP55hw
+- **Word count:** 27
+- **Notes:** Public-only on auth (Google OAuth only, not automated), but the /app surface is freemium-browsable so the walk reached the actual product UI — verb stays "walkthrough" honestly. X lowercase opener fits. If `@ECFotos_app` DM is closed, fall back to BetaList `wx0021`; same draft body works, just prepend "Hi Johnny," because BetaList norm is the greeting.
+- **Sent: yes — 2026-05-15T10:59Z via X public reply** to ECFotos's Jan 1 launch tweet (`/ECFotos_app/status/2006732515810357655`), evidence: https://x.com/HeroLastest/status/2055241615279595849. Body sent exactly as drafted: `@ECFotos_app liked that /app is freemium-browsable without login, the AI Tools and Models catalogs make the value obvious immediately. ran a Lastest walkthrough of your workspace shell: https://app.lastest.cloud/r/AhdF64G-88nGz4JisP55hw`. Used public-reply channel per Phase 9 pivot (X Chat passcode gate still blocking DMs).
+
+**Send order recommendation:** Sanctuary > StackMemo > AgentKanban > InsightsFlow AI > CavemanDetector > Volitude > Inkett > ECFotos > Face Privacy > reframe. (Strongest first: authed walks where the "liked" object is an in-app string a signed-in visitor sees (Sanctuary, StackMemo, AgentKanban, InsightsFlow, Inkett) ahead of the no-auth-but-real-product-walk pair (CavemanDetector, Volitude, ECFotos), with the two weaker "public + gated state" surfaces (Face Privacy email-only, reframe verify-email gate) trailing.)
+
+---
+
+## 2026-05-15 — lisa lacy / Daily Sticky
+
+- **Source:** PeerPush (Today Top 4, rank #1 on 2026-05-15)
+- **Site:** https://dailysticky.app (DNS → GitHub Pages, no NXDOMAIN issues)
+- **Tagline:** "A sticker journal for your year. A habit you can stick to. — tap a day → choose a sticker → done"
+- **Founder:** lisa lacy (PeerPush: [@lisalacythompsonaca](https://peerpush.net/u/lisalacythompsonaca)). No X / LinkedIn / public email found (about.html only signs "built by lisa lacy", no socials).
+- **Auth classification:** `AUTH_AUTOMATABLE=false` — no signup at all. Pure localStorage SPA (Volitude pattern: no-auth-but-stateful).
+- **Lastest repo:** `284fa936-7f2e-4f4f-9a9c-08a076098b4f` (name: `dailysticky-demo`)
+- **Test:** `f027a45f-3d6e-4ab8-8a2b-d8bff8b47c12` — "Daily Sticky: public walkthrough"
+- **Final build:** `64b0b941-b5f9-4ba7-8fd8-dc9e1672189f` ✓ 1/1 passed, 0 failed, 0 changes (all 8 diffs auto-approved as unchanged against approved baselines from build `e5177263-663a-4f4c-890f-886f62b8f027`)
+- **Share:** https://app.lastest.cloud/r/QN9xpg0Ic5ocWbpjyn11Qg
+- **Coverage (8 scenarios, no marketing pages because SPA-only):**
+  1. Empty May 2026 calendar
+  2. Sticker picker opened on May 14 — 25+ categories (Abstract, Animal Vibes, Books, ..., Pride, Mental Health, School, Seasons, Shopping, ...)
+  3. Animal Vibes grid — 124 stickers, 16 visible in 4×4
+  4. Day note dialog with note text typed in ("coffee + a quiet walk")
+  5. Calendar with capybara sticker on May 14, "1 days stickered" + note saved
+  6. Multi-stickered calendar — "7 days stickered" across May 2, 4, 6, 8, 10, 12, 14 (different categories per day)
+  7. Year view — all 12 months of 2026, May visible with stickered cells
+  8. Year view final state
+- **Channel:** PeerPush comment on https://peerpush.net/p/daily-sticky — drafted as:
+  > Congrats on the launch! Liked the "tap a day → choose a sticker → done" framing - so much less friction than another empty journal page. Ran a quick Lastest review while looking:
+  >
+  > https://app.lastest.cloud/r/QN9xpg0Ic5ocWbpjyn11Qg
+- **Sent:** YES (manually by user on 2026-05-15) — agent couldn't auto-post (PeerPush login requires email-OTP + Cloudflare Turnstile OR Google OAuth, no Lastest GTM account set up there yet). Viktor signed into PeerPush and pasted the drafted comment by hand. Future runs: set up a Lastest-branded PeerPush account so this step can be automated.
+- **Notable observations** (would be in build_demo_notes if endpoint had been writable from this session):
+  - The "tap a day → choose a sticker → done" 3-word value-prop in the hero is unusually clean for an indie launch.
+  - 25+ sticker categories with sub-counts ("Animal Vibes 124 stickers") — depth is real.
+  - localStorage-only persistence is a strong UX choice for a personal habit app.
+  - Faint friction: `the-daily-sticky-logo.png` and `mwis.png` return 404s on every page (background imagery references that aren't in the deployed bundle). Founder-actionable.
+  - Testing struggle: Lastest's repo-wide `freezeTimestamps: true` was disabling May-2026 day buttons (rendered Jan 2024). Disabled stabilization.freezeTimestamps repo-wide. Plus `waitForNetworkIdle: true` caused 6-minute hangs (GTM keepalive never goes idle); disabled.
+  - Test ran 6 iterations before reaching the working selectors: initial dialog `nth(3)` accidentally clicked "← Categories" back button; fixed by using the lowercase-category sticker accessible name. Then needed to add explicit `✕` close-dialog between stickerDay() calls because picker stays open after Skip.
+- **Reply (48h check):** —
+
+---
+
+## 2026-05-15 — Latitude (latitude.so)
+
+- **Source:** Pre-classified target (ProductHunt 2026-05-13). Public-only run authorized.
+- **Site:** https://latitude.so
+- **Tagline:** "AI Agent Observability & Monitoring" — observability + quality for AI agents, find and fix failure modes before production.
+- **Category:** developer tools / AI agent observability
+- **Auth:** passwordless (Name / Email / Workspace + Google OAuth) at https://app.latitude.so/setup. No password field; magic-link / OAuth flow. `AUTH_AUTOMATABLE = false` — public-only by design.
+- **Surface probe:** `https://app.latitude.so/app` returns 404 ("Not found - Latitude") unauthed — workspace shell is gated, not exposed freemium. Confirmed public-only path.
+- **Lastest repo:** `26743f6f-cf73-4c41-90a7-c0d686625d51` (name: `latitude-demo`, baseUrl: https://latitude.so)
+- **Test:** `07b7d4ce-d6d8-4194-9228-93307deb877e` — "Latitude — public walkthrough"
+- **Routes walked:** `/` (home), `/pricing`, `/book-demo`, `/blog` (DOM-derived from same-origin `a[href]`, console.latitude.so external hrefs filtered)
+- **Build (initial w/ baseline):** `d2283ca9-e327-4e98-ac8c-532bea89b1ba` — 1/1 passed, 5 visual changes baselined and approved
+- **Build (rerun, clean):** `63b236ee-4f72-49cf-bad4-09edf4388c6d` — 1/1 passed, 0 changes, `safe_to_merge`
+- **Share URL:** https://app.lastest.cloud/r/eHrbB-zxZcq3dTahCRUO6w (scopedTestId 07b7d4ce)
+- **Outreach:** SKIPPED per user instruction — share-only delivery.
+- **Notable observations:**
+  - First test attempt failed because the test code called `screenshotPath('home')` as if it were a function; corrected to string-replace pattern (`screenshotPath.replace('.png', '-home.png')`) per executor contract.
+  - Marketing site loads a Unicorn Studio canvas hero; 1.5s settle after networkidle stabilized full-page screenshots cleanly.
+  - playwright-settings `consoleErrorMode=warn` + `networkErrorMode=warn` applied via HTTP PUT before first run — prevented Cloudflare / analytics noise from reddening the build.
+- **Reply (48h check):** —
