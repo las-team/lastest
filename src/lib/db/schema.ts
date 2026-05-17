@@ -1861,7 +1861,13 @@ export interface AgentStepState {
 }
 
 export interface QuickstartAuthClassification {
-  classification: 'email_password' | 'magic_link_only' | 'oauth_only' | 'captcha_gated' | 'otp' | 'no_public_register';
+  /**
+   * Auth-flow classification. `unknown` is a distinct failure sentinel meaning
+   * "the scout could not determine the flow" (browser MCP failure, empty page,
+   * etc.) — never confuse with `no_public_register` which means "the scout
+   * confirmed there is no public sign-up".
+   */
+  classification: 'email_password' | 'magic_link_only' | 'oauth_only' | 'captcha_gated' | 'otp' | 'no_public_register' | 'unknown';
   authAutomatable: boolean;
 }
 

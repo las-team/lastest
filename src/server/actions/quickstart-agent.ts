@@ -29,6 +29,8 @@ import {
 import { captureStorageState } from '@/lib/quickstart/storage-capture';
 import { generateDemoNotes, type QuickstartRunFacts } from '@/lib/quickstart/quickstart-notes';
 import { createAndRunBuildCore, getBuildSummary } from './builds';
+import { claimEmbeddedBrowserForAgent } from './ai';
+import { releasePoolEB } from './embedded-sessions';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
 
 // ---------------------------------------------------------------------------
@@ -262,14 +264,31 @@ async function runQsScoutPublic(
     return false;
   }
 
+  // Claim a containerized browser from the EB pool so the scout's MCP attaches
+  // to a dedicated chromium instead of fighting for the user-data-dir held by
+  // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(() => undefined);
   try {
-    const { data, promptLogId } = await runQuickstartScoutPublic(repositoryId, gate.baseUrl);
+    const { data, promptLogId } = await runQuickstartScoutPublic(repositoryId, gate.baseUrl, {
+      cdpEndpoint: eb?.cdpUrl,
+    });
     await mergeMetadata(sessionId, { publicScout: data });
+
+    // 'unknown' is the scout's "I could not classify" sentinel. Treat as a hard
+    // failure rather than silently running a doomed public-only walk on a
+    // target whose auth flow was never actually determined.
+    if (data.classification === 'unknown') {
+      await setFailed(sessionId, 'qs_scout_public',
+        'Scout could not classify the sign-up flow. The browser may have failed or the landing page returned no actionable content. Retry by starting a new QuickStart session.');
+      return false;
+    }
+
     await setCompleted(sessionId, 'qs_scout_public', {
       classification: data.classification,
       authAutomatable: data.authAutomatable,
       navLinkCount: data.navLinks.length,
       promptLogId,
+      ebClaimed: !!eb,
     });
     emitActivity(teamId, repositoryId, sessionId, 'step:complete',
       `Public scout: ${data.classification} (${data.authAutomatable ? 'automatable' : 'manual'})`,
@@ -280,6 +299,8 @@ async function runQsScoutPublic(
     const msg = err instanceof Error ? err.message : String(err);
     await setFailed(sessionId, 'qs_scout_public', `Public scout failed: ${msg}`);
     return false;
+  } finally {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
   }
 }
 
@@ -383,17 +404,20 @@ async function runQsScoutAuthed(
     return true;
   }
 
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(() => undefined);
   try {
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
       gate.baseUrl,
       authTest.code,
+      { cdpEndpoint: eb?.cdpUrl },
     );
     await mergeMetadata(sessionId, { authedScout: data });
     await setCompleted(sessionId, 'qs_scout_authed', {
       navLinkCount: data.inAppNavLinks.length,
       ctaCount: data.safeCtaCandidates.length,
       promptLogId,
+      ebClaimed: !!eb,
     });
     emitActivity(teamId, repositoryId, sessionId, 'step:complete',
       `Authed scout: ${data.inAppNavLinks.length} in-app nav links`,
@@ -405,6 +429,8 @@ async function runQsScoutAuthed(
     const msg = err instanceof Error ? err.message : String(err);
     await setSkipped(sessionId, 'qs_scout_authed', `authed scout error: ${msg}`);
     return true;
+  } finally {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
   }
 }
 

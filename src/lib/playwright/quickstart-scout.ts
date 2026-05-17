@@ -13,12 +13,50 @@
  */
 
 import * as queries from '@/lib/db/queries';
-import { generateWithAI } from '@/lib/ai';
+import { generateWithAI, type GenerateWithAIOptions } from '@/lib/ai';
+import type { AIProviderConfig } from '@/lib/ai/types';
+import type { MCPServerConfig } from '@/lib/ai/mcp-bridge';
 import { getAIConfig } from './agent-context';
 import type {
   QuickstartPublicScout,
   QuickstartAuthedScout,
 } from '@/lib/db/schema';
+
+/**
+ * Apply the EB-aware MCP wiring used by healer/generator. When a CDP endpoint
+ * is provided, both the SDK-native MCP path and the bridge path get pointed at
+ * a dedicated containerized browser instead of spawning a local Chromium that
+ * fights for the user-data-dir held by any ambient Playwright MCP process
+ * (e.g. the user's terminal Claude session). Strict mode + an explicit
+ * disallowedTools list also stops the SDK from trying to fall back to WebFetch
+ * (which it can't get permission for in this headless context).
+ */
+function applyScoutMcpWiring(
+  config: AIProviderConfig,
+  cdpEndpoint: string | undefined,
+): Pick<GenerateWithAIOptions, 'useMCP' | 'mcpConfig'> {
+  const mcpArgs = cdpEndpoint
+    ? ['@playwright/mcp@latest', '--cdp-endpoint', cdpEndpoint, '--headless']
+    : ['@playwright/mcp@latest', '--headless'];
+  const playwrightServer: MCPServerConfig = { command: 'npx', args: mcpArgs };
+
+  if (config.provider === 'claude-agent-sdk') {
+    config.agentSdkStrictMcpConfig = true;
+    config.agentSdkMcpServers = { playwright: playwrightServer };
+    config.agentSdkAllowedTools = ['mcp__playwright__*'];
+    config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch'];
+    // SDK path consumes the mcpServers above; bridge path is unused.
+    return { useMCP: false };
+  }
+
+  return {
+    useMCP: true,
+    mcpConfig: {
+      servers: { playwright: playwrightServer },
+      cdpEndpoint,
+    },
+  };
+}
 
 const PUBLIC_SCOUT_SYSTEM_PROMPT = `You are a web app reconnaissance agent. Your job is to (1) describe what a SaaS does and (2) classify whether its sign-up flow is automatable.
 
@@ -26,13 +64,14 @@ Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_cl
 1. Visit the base URL.
 2. Capture the tagline and concept from the hero (one to two sentences, in your own words — do NOT invent features that aren't on the page).
 3. Read \`<a href>\` paths from the navigation; collect the public ones.
-4. Try /register, /signup, or /users/register; record which path actually loaded the register page (or null if none did).
+4. Find the registration page by examining the landing page DOM. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i AND whose href starts with /. Click the first match and snapshot the destination. If no in-DOM CTA exists, then probe common paths in this order: /sign-up, /signup, /register, /join, /create-account, /auth/signup, /users/register, /accounts/signup. Record the FINAL URL after redirects as registerPath, or null if no register page loads.
 5. Snapshot the register page and classify the sign-up flow.
 
 CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick the first match):
 
 | Signal in snapshot | classification | authAutomatable |
 |---|---|---|
+| Browser failed to load / page returned no content | unknown | false |
 | Register page is behind login / 404 / not reachable | no_public_register | false |
 | iframe from google.com/recaptcha, hcaptcha.com, cloudflare.com challenge | captcha_gated | false |
 | textbox "Phone" or visible OTP step | otp | false |
@@ -40,13 +79,15 @@ CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick th
 | textbox "Email" only + button "Send magic link" / "Continue" | magic_link_only | false |
 | textbox "Email" + textbox "Password" + submit button | email_password | true |
 
-Return STRICT JSON (no markdown), shape:
+You MUST have actually loaded a register page (or confirmed no such page exists by following step 4) before classifying as anything other than "no_public_register" or "unknown". If the browser failed, you could not snapshot the landing page, or you have no concrete observations, return "classification": "unknown".
+
+Return STRICT JSON (no markdown, no prose), shape:
 {
   "tagline": "string or null",
   "concept": "1-2 sentence description, no marketing fluff",
   "navLinks": [{ "path": "/features", "label": "Features" }, ...],
-  "registerPath": "/register | /signup | ... | null",
-  "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register",
+  "registerPath": "/sign-up | /signup | ... | null",
+  "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
   "authAutomatable": true | false,
   "cookieBannerSelectorHint": "optional — if you saw a cookie banner, the button label that dismisses it",
   "friction": [{ "kind": "cookie_overlap | slow_route | console_error | ...", "note": "string" }]
@@ -112,10 +153,18 @@ function asCta(item: unknown): { label: string; selectorHint?: string } | null {
 }
 
 function classify(value: unknown): QuickstartPublicScout['classification'] {
-  const allowed = ['email_password', 'magic_link_only', 'oauth_only', 'captcha_gated', 'otp', 'no_public_register'] as const;
+  const allowed = [
+    'email_password',
+    'magic_link_only',
+    'oauth_only',
+    'captcha_gated',
+    'otp',
+    'no_public_register',
+    'unknown',
+  ] as const;
   return (allowed as readonly string[]).includes(value as string)
     ? (value as QuickstartPublicScout['classification'])
-    : 'no_public_register';
+    : 'unknown';
 }
 
 export interface QuickstartScoutPublicResult {
@@ -131,39 +180,83 @@ export interface QuickstartScoutAuthedResult {
 export async function runQuickstartScoutPublic(
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void },
+  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
 ): Promise<QuickstartScoutPublicResult> {
   const settings = await queries.getAISettings(repositoryId);
   const config = getAIConfig(settings);
+  const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
 
   const prompt = `Reconnoiter ${baseUrl}. Follow the workflow in the system prompt and return strict JSON.`;
 
   let promptLogId: string | undefined;
   const response = await generateWithAI(config, prompt, PUBLIC_SCOUT_SYSTEM_PROMPT, {
-    useMCP: true,
+    ...mcpOpts,
     repositoryId,
     actionType: 'agent_discover',
     onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
     responseFormat: 'json_object',
   });
 
-  let parsed: Record<string, unknown> = {};
+  let parsed: Record<string, unknown> | null = null;
+  let parseError: string | undefined;
   try {
     const json = extractJson(response);
     if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
-  } catch {
-    // fall through with empty parsed; downstream defaults handle it
+  } catch (err) {
+    parseError = err instanceof Error ? err.message : String(err);
+    console.warn('[QuickStartScout] non-JSON response on first try:', response.slice(0, 400));
   }
 
-  const classification = classify(parsed.classification);
+  // One retry with an explicit "JSON only" reminder when the first response wasn't JSON.
+  // Catches the "Playwright MCP browser locked → LLM returned prose" failure mode.
+  if (!parsed) {
+    const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON. Browse the site with MCP tools and return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
+    const retryResponse = await generateWithAI(config, retryPrompt, PUBLIC_SCOUT_SYSTEM_PROMPT, {
+      ...mcpOpts,
+      repositoryId,
+      actionType: 'agent_discover',
+      onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
+      responseFormat: 'json_object',
+    });
+    try {
+      const json = extractJson(retryResponse);
+      if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
+    } catch (err) {
+      parseError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  if (!parsed) {
+    throw new Error(
+      `Public scout returned non-JSON on both attempts: ${parseError ?? 'unknown error'}. Likely a browser MCP failure, see prompt log ${promptLogId ?? '(none)'}.`,
+    );
+  }
+
+  const rawClassification = classify(parsed.classification);
+  const tagline = typeof parsed.tagline === 'string' ? parsed.tagline : undefined;
+  const concept = typeof parsed.concept === 'string' ? parsed.concept : undefined;
+  const navLinks = safeArray(parsed.navLinks, asNavLink);
+
+  // Validation gate: if the model claimed "no_public_register" but produced no
+  // tagline, no concept, and no navLinks, it almost certainly didn't browse.
+  // Downgrade to 'unknown' so the agent treats it as a scout failure rather
+  // than confidently mislabelling the app.
+  const wroteAnything =
+    (tagline !== undefined && tagline.length > 0)
+    || (concept !== undefined && concept.length > 0)
+    || navLinks.length > 0;
+  const classification: QuickstartPublicScout['classification'] =
+    rawClassification === 'no_public_register' && !wroteAnything
+      ? 'unknown'
+      : rawClassification;
   const automatable = parsed.authAutomatable === true && classification === 'email_password';
 
   const data: QuickstartPublicScout = {
     classification,
     authAutomatable: automatable,
-    tagline: typeof parsed.tagline === 'string' ? parsed.tagline : undefined,
-    concept: typeof parsed.concept === 'string' ? parsed.concept : undefined,
-    navLinks: safeArray(parsed.navLinks, asNavLink),
+    tagline,
+    concept,
+    navLinks,
     registerPath: typeof parsed.registerPath === 'string' ? parsed.registerPath : null,
     cookieBannerSelectorHint:
       typeof parsed.cookieBannerSelectorHint === 'string' ? parsed.cookieBannerSelectorHint : undefined,
@@ -177,10 +270,11 @@ export async function runQuickstartScoutAuthed(
   repositoryId: string,
   baseUrl: string,
   authSetupCode: string,
-  options?: { onLogCreated?: (logId: string) => void },
+  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
 ): Promise<QuickstartScoutAuthedResult> {
   const settings = await queries.getAISettings(repositoryId);
   const config = getAIConfig(settings);
+  const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
 
   const prompt = `Walk the authenticated app at ${baseUrl}.
 
@@ -193,7 +287,7 @@ After the seed completes successfully, navigate to ${baseUrl} and proceed with t
 
   let promptLogId: string | undefined;
   const response = await generateWithAI(config, prompt, AUTHED_SCOUT_SYSTEM_PROMPT, {
-    useMCP: true,
+    ...mcpOpts,
     repositoryId,
     actionType: 'agent_discover',
     onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },

@@ -15,11 +15,30 @@ export interface QuickstartGateResult {
   baseUrl?: string;
 }
 
+function isLocalUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pick a usable baseUrl from the repo's branchBaseUrls. Localhost variants are
+ * skipped: the QuickStart agent runs in the EB pod (or a transient browser on
+ * the host) and "http://localhost:3000" almost never resolves to the target a
+ * QuickStart demo wants to baseline.
+ */
 export function pickRepoBaseUrl(repo: Repository): string | undefined {
   const map = repo.branchBaseUrls ?? {};
-  if (map.default && typeof map.default === 'string') return map.default;
-  for (const value of Object.values(map)) {
-    if (typeof value === 'string' && value.length > 0) return value;
+  const candidates: string[] = [];
+  if (typeof map.default === 'string') candidates.push(map.default);
+  for (const [branch, value] of Object.entries(map)) {
+    if (branch !== 'default' && typeof value === 'string') candidates.push(value);
+  }
+  for (const url of candidates) {
+    if (url.length > 0 && !isLocalUrl(url)) return url;
   }
   return undefined;
 }
@@ -51,6 +70,6 @@ export function gateReasonHint(reason: QuickstartGateReason): string {
     case 'not_early_adopter':
       return 'Enable Early Adopter mode in team settings to unlock the QuickStart agent.';
     case 'no_base_url':
-      return 'Set the repo baseUrl first via PUT /api/v1/repos/:id { baseUrl } or lastest_update_repo.';
+      return 'Set a non-local baseUrl in the sidebar (or PUT /api/v1/repos/:id { baseUrl }). localhost URLs do not count.';
   }
 }

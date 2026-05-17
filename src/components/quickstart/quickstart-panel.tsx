@@ -46,7 +46,7 @@ export function QuickstartPanel({ repositoryId, enabled, reason }: QuickstartPan
             <Badge variant="outline" className="text-[10px]">early adopter</Badge>
           </CardTitle>
           <CardDescription>
-            Set the repo&rsquo;s base URL on the <Link href="/run" className="underline underline-offset-2">Run page</Link> to enable the QuickStart agent.
+            Set a non-local base URL for this repo in the sidebar to enable the QuickStart agent. localhost URLs are skipped.
           </CardDescription>
         </CardHeader>
       </Card>
