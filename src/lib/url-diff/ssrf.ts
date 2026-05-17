@@ -23,14 +23,6 @@ import {
 export { SsrfBlockedError, extractSourceIp, isBlockedIp };
 
 export interface ValidateOptions {
-  /**
-   * @deprecated Cookie session is no longer a bypass for the SSRF guard.
-   * This field is accepted for backwards compatibility and ignored. Use
-   * `LASTEST_ALLOW_PRIVATE_OUTBOUND=true` or
-   * `LASTEST_OUTBOUND_PRIVATE_HOST_IP_ALLOWLIST` for genuinely-internal
-   * deployments.
-   */
-  isCookieSession?: boolean;
   sourceIp?: string;
 }
 

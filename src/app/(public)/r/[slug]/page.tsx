@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
 import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import {
@@ -79,6 +80,10 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
+
+  // CSP nonce — required under strict-dynamic for the plain <script src> tag
+  // below. See src/proxy.ts for the generation site.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   const {
     share,
@@ -213,7 +218,7 @@ export default async function PublicSharePage({ params }: PageProps) {
           /public static asset, not a bundled module import. */}
       {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link rel="stylesheet" href="/share-slider.css" precedence="default" />
-      <script src="/share-slider.js" defer />
+      <script src="/share-slider.js" defer nonce={nonce} />
     </div>
   );
 }

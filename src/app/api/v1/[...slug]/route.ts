@@ -967,7 +967,7 @@ export async function POST(
         return NextResponse.json({ error: 'url required' }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { isCookieSession: !isBearer, sourceIp });
+        await validateTargetUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
@@ -1049,8 +1049,8 @@ export async function POST(
       }
       try {
         await Promise.all([
-          validateTargetUrl(body.urlA, { isCookieSession: !isBearer, sourceIp }),
-          validateTargetUrl(body.urlB, { isCookieSession: !isBearer, sourceIp }),
+          validateTargetUrl(body.urlA, { sourceIp }),
+          validateTargetUrl(body.urlB, { sourceIp }),
         ]);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
@@ -1064,7 +1064,6 @@ export async function POST(
         urlB: body.urlB,
         viewport: body.viewport,
         poolTier: isBearer ? 'build' : 'interactive',
-        isCookieSession: !isBearer,
         sourceIp,
         repositoryId: null,
       });

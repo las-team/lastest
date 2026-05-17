@@ -41,10 +41,17 @@ function jsString(value: string): string {
   return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 }
 
-function registerPathChain(override?: string): string {
-  if (override) {
-    return `await page.goto(\`\${baseUrl}${override}\`, { waitUntil: 'domcontentloaded' });`;
+function gotoExpr(override: string): string {
+  // Support absolute URLs (e.g. auth subdomain) and relative paths interchangeably.
+  if (/^https?:\/\//i.test(override)) {
+    return `await page.goto(${jsString(override)}, { waitUntil: 'domcontentloaded' });`;
   }
+  const path = override.startsWith('/') ? override : `/${override}`;
+  return `await page.goto(\`\${baseUrl}${path}\`, { waitUntil: 'domcontentloaded' });`;
+}
+
+function registerPathChain(override?: string): string {
+  if (override) return gotoExpr(override);
   return [
     "await page.goto(`${baseUrl}/register`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
     "    await page.goto(`${baseUrl}/signup`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
@@ -55,9 +62,7 @@ function registerPathChain(override?: string): string {
 }
 
 function loginPathChain(override?: string): string {
-  if (override) {
-    return `await page.goto(\`\${baseUrl}${override}\`, { waitUntil: 'domcontentloaded' });`;
-  }
+  if (override) return gotoExpr(override);
   return [
     "await page.goto(`${baseUrl}/login`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
     "    await page.goto(`${baseUrl}/signin`, { waitUntil: 'domcontentloaded' }).catch(async () => {",

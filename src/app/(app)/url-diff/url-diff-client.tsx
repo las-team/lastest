@@ -118,7 +118,6 @@ export function UrlDiffClient() {
         urlA,
         urlB,
         viewport: PRESETS[viewport],
-        isCookieSession: true,
       });
       setJobId(newJobId);
     } catch (err) {

@@ -64,7 +64,7 @@ Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_cl
 1. Visit the base URL.
 2. Capture the tagline and concept from the hero (one to two sentences, in your own words — do NOT invent features that aren't on the page).
 3. Read \`<a href>\` paths from the navigation; collect the public ones.
-4. Find the registration page by examining the landing page DOM. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i AND whose href starts with /. Click the first match and snapshot the destination. If no in-DOM CTA exists, then probe common paths in this order: /sign-up, /signup, /register, /join, /create-account, /auth/signup, /users/register, /accounts/signup. Record the FINAL URL after redirects as registerPath, or null if no register page loads.
+4. Find the registration page by examining the landing page DOM. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. If no in-DOM CTA exists, then probe common paths under the base URL in this order: /sign-up, /signup, /register, /join, /create-account, /auth/signup, /users/register, /accounts/signup. Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"), or null if no register page loads. NEVER mix the two formats (do not prefix a path with a partial URL).
 5. Snapshot the register page and classify the sign-up flow.
 
 CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick the first match):
@@ -86,7 +86,7 @@ Return STRICT JSON (no markdown, no prose), shape:
   "tagline": "string or null",
   "concept": "1-2 sentence description, no marketing fluff",
   "navLinks": [{ "path": "/features", "label": "Features" }, ...],
-  "registerPath": "/sign-up | /signup | ... | null",
+  "registerPath": "/sign-up | https://auth.example.com/register | null",
   "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
   "authAutomatable": true | false,
   "cookieBannerSelectorHint": "optional — if you saw a cookie banner, the button label that dismisses it",

@@ -21,6 +21,18 @@ describe('renderAuthSetupCode', () => {
     expect(code).toMatch(/export async function test\(page, baseUrl, screenshotPath, stepLogger\)/);
   });
 
+  it('handles relative registerPath by prefixing baseUrl', () => {
+    const rel = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerPath: '/sign-up' });
+    expect(rel).toMatch(/await page\.goto\(`\$\{baseUrl\}\/sign-up`/);
+    expect(rel).not.toMatch(/baseUrl}https/);
+  });
+
+  it('handles absolute registerPath (cross-subdomain auth) without prefixing baseUrl', () => {
+    const abs = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerPath: 'https://auth.example.com/register' });
+    expect(abs).toMatch(/await page\.goto\('https:\/\/auth\.example\.com\/register'/);
+    expect(abs).not.toMatch(/baseUrl\}https/);
+  });
+
   it('does not redeclare expect (provided as runner param)', () => {
     expect(code).not.toMatch(/\bconst\s+expect\s*=/);
     expect(code).not.toMatch(/\bimport[^;]*expect/);

@@ -15,7 +15,7 @@ Openrouter agent sdk parity
 demo-mode
   without link?
 ## security
-CSP nonce migration — `next.config.ts:50` allows `script-src 'unsafe-inline' 'unsafe-eval'` because the public share page `/r/[slug]` ships `SHARE_SCRIPT` + `SHARE_STYLE` via `dangerouslySetInnerHTML`. Move SHARE_SCRIPT to a static asset (or a per-request `<script nonce>`), drop `unsafe-inline` + `unsafe-eval`. See plan `/home/ewyct/.claude/plans/streamed-crafting-tide.md`.
+
 
 ## bugs
 Site
