@@ -4,10 +4,8 @@ Videos explaining use
     record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
-Build a skill to find startupideas and test them, provide testing feedback
 **Welcome email, follow-up**
 https://www.chromatic.com/start comp test?
-**Legal stuff for Mark**
 ## test
 VS Code extension
 Teardown

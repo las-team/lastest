@@ -147,7 +147,83 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
   const url = page.url();
   if (/register|signup|signin|log[\\-]?in|sign-in|sign-up/i.test(url)) {
     await page.screenshot({ path: screenshotPath, fullPage: true });
-    throw new Error(\`auth did not complete — still on \${url}\`);
+    // Scrape visible error text verbatim from the site so the user sees the
+    // actual rejection (e.g. "Sign-ups from disposable email addresses are not
+    // allowed", "business email required", "Password must be at least 12
+    // characters"). Look inside the <form> first for tight relevance, then
+    // page-wide as a fallback.
+    const errSelectors = [
+      '[role="alert"]',
+      '[aria-live="polite"]',
+      '[aria-live="assertive"]',
+      '[data-error]',
+      '[aria-invalid="true"] ~ *',
+      '.error',
+      '.field-error',
+      '.form-error',
+      '[class*="text-red"]',
+      '[class*="text-rose"]',
+      '[class*="text-destructive"]',
+      '[class*="text-error"]',
+      '[class*="error-message"]',
+    ];
+    const ERROR_HINTS = /(not allowed|not supported|invalid|required|must|cannot|disposable|business|already|exists|taken|incorrect|wrong|weak|too (short|long|weak|common)|please|try again|failed|error|denied|blocked|use a different|use another|forbidden|temporarily)/i;
+    const NOISE_HINTS = /(privacy policy|terms (and|of)|cookie|all rights reserved|copyright|^\\s*\\d{1,4}\\s*$|^\\W*$)/i;
+    async function collectErrorTexts(scope) {
+      const seen = new Set();
+      const out = [];
+      for (const sel of errSelectors) {
+        const locs = scope.locator(sel);
+        const count = Math.min(await locs.count().catch(() => 0), 6);
+        for (let i = 0; i < count; i++) {
+          const loc = locs.nth(i);
+          if (!(await loc.isVisible().catch(() => false))) continue;
+          const t = ((await loc.textContent().catch(() => '')) || '')
+            .replace(/\\s+/g, ' ').trim();
+          if (t.length < 4 || t.length > 240) continue;
+          if (NOISE_HINTS.test(t)) continue;
+          if (!ERROR_HINTS.test(t)) continue;
+          const key = t.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(t);
+          if (out.length >= 3) return out;
+        }
+      }
+      return out;
+    }
+    let errors = [];
+    const form = page.locator('form').first();
+    if (await form.isVisible().catch(() => false)) {
+      errors = await collectErrorTexts(form);
+    }
+    if (errors.length === 0) errors = await collectErrorTexts(page);
+    // Fallback for sites whose error text uses inline styles or CSS variables
+    // (e.g. text-[rgb(var(--destructive))]) that don't match any selector class.
+    // Scrape all visible text inside the form, filter for error-shaped lines.
+    if (errors.length === 0) {
+      const haystack = await form.allInnerTexts().catch(() => []);
+      const seen = new Set();
+      for (const block of haystack) {
+        const lines = (block || '').split(/\\r?\\n+|(?<=[.!?])\\s+/);
+        for (const raw of lines) {
+          const t = raw.replace(/\\s+/g, ' ').trim();
+          if (t.length < 6 || t.length > 240) continue;
+          if (NOISE_HINTS.test(t)) continue;
+          if (!ERROR_HINTS.test(t)) continue;
+          const key = t.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          errors.push(t);
+          if (errors.length >= 3) break;
+        }
+        if (errors.length >= 3) break;
+      }
+    }
+    const joined = errors.join(' | ');
+    throw new Error(joined
+      ? joined
+      : \`auth did not complete — still on \${url}\`);
   }
 
   await page.screenshot({ path: screenshotPath, fullPage: true });

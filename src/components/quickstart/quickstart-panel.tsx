@@ -114,11 +114,16 @@ export function QuickstartPanel({ repositoryId, enabled, reason }: QuickstartPan
                         <span className="text-[11px] text-muted-foreground/70">not automatable</span>
                       )}
                       {step.id === 'qs_auth_setup' && authSetup?.captured === false && step.status === 'completed' && (
-                        <span className="text-[11px] text-warning">storage state not captured</span>
+                        <span className="text-[11px] text-warning">auth rejected</span>
                       )}
                     </div>
                     {step.status === 'failed' && step.error && (
-                      <p className="text-[11px] text-destructive mt-0.5 line-clamp-2">{step.error}</p>
+                      <p className="text-[11px] text-destructive mt-0.5 line-clamp-3">{step.error}</p>
+                    )}
+                    {step.id === 'qs_auth_setup' && authSetup?.captured === false && authSetup?.failureReason && (
+                      <p className="text-[11px] text-warning/90 mt-0.5 line-clamp-3 break-words">
+                        {authSetup.failureReason}
+                      </p>
                     )}
                   </div>
                 </li>

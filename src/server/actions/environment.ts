@@ -7,7 +7,7 @@ import { validateUrlAsync, assertHttpScheme } from '@/lib/security/url-validatio
 import type { EnvironmentMode } from '@/lib/db/schema';
 
 export interface EnvironmentConfigInput {
-  repositoryId?: string | null;
+  repositoryId: string;
   mode: EnvironmentMode;
   baseUrl: string;
   startCommand?: string | null;
@@ -29,15 +29,14 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
  * Save environment config
  */
 export async function saveEnvironmentConfig(data: EnvironmentConfigInput) {
-  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
-  else await requireTeamAccess();
+  await requireRepoAccess(data.repositoryId);
   const baseUrlErr = assertHttpScheme(data.baseUrl);
   if (baseUrlErr) throw new Error(`baseUrl rejected: ${baseUrlErr}`);
   if (data.healthCheckUrl) {
     const healthErr = assertHttpScheme(data.healthCheckUrl);
     if (healthErr) throw new Error(`healthCheckUrl rejected: ${healthErr}`);
   }
-  const result = await queries.upsertEnvironmentConfig(data.repositoryId ?? null, {
+  const result = await queries.upsertEnvironmentConfig(data.repositoryId, {
     mode: data.mode,
     baseUrl: data.baseUrl.replace(/\/+$/, ''),
     startCommand: data.startCommand,

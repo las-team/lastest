@@ -480,12 +480,13 @@ export async function saveRecordedTest(data: {
     }
   }
 
-  // Update environment config baseUrl from the recording target URL
-  if (data.targetUrl) {
+  // Update environment config baseUrl from the recording target URL.
+  // Skip when there's no repo: env config is repository-scoped only.
+  if (data.targetUrl && data.repositoryId) {
     try {
       const origin = new URL(data.targetUrl).origin;
       const { upsertEnvironmentConfig } = await import('@/lib/db/queries');
-      await upsertEnvironmentConfig(data.repositoryId ?? null, { baseUrl: origin });
+      await upsertEnvironmentConfig(data.repositoryId, { baseUrl: origin });
     } catch {
       // Invalid URL — skip baseUrl update
     }

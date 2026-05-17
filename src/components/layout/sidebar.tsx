@@ -34,6 +34,7 @@ interface SidebarProps {
   team?: Team | null;
   baseUrl?: string;
   repositoryId?: string;
+  activeBranch?: string;
   ebSessions?: EmbeddedSession[];
   /** Untriaged (Unsorted) cases on the active branch's latest build. */
   verifyPendingCount?: number;
@@ -69,7 +70,7 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, ebSessions, verifyPendingCount = 0, verifyHasNewerCommit = false }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, activeBranch, ebSessions, verifyPendingCount = 0, verifyHasNewerCommit = false }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -291,7 +292,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
       </div>
 
       <div className="border-t pt-3">
-        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} ebSessions={ebSessions} />
+        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} activeBranch={activeBranch} ebSessions={ebSessions} />
       </div>
 
       <div className="p-4 border-t space-y-3">

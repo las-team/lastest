@@ -41,6 +41,11 @@ export async function SidebarServer() {
 
   const envConfig = await getEnvironmentConfig(selectedRepo?.id).catch(() => null);
 
+  // Mirror the Run page: prefer the branch-pinned URL, fall back to env config.
+  const activeBranch = selectedRepo?.selectedBranch ?? selectedRepo?.defaultBranch ?? 'main';
+  const branchBaseUrls = (selectedRepo?.branchBaseUrls as Record<string, string> | null) ?? null;
+  const baseUrlForBranch = branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? '';
+
   // Verify badge: count of unsorted (untriaged) cases on the active branch's
   // latest build. When zero, surface a "newer commit" hint instead so the
   // reviewer knows the code has moved past their last verified build.
@@ -58,8 +63,9 @@ export async function SidebarServer() {
         selectedRepo={selectedRepo ?? null}
         currentUser={session.user}
         team={session.team}
-        baseUrl={envConfig?.baseUrl ?? ''}
+        baseUrl={baseUrlForBranch}
         repositoryId={selectedRepo?.id}
+        activeBranch={activeBranch}
         ebSessions={ebSessions}
         verifyPendingCount={verifyBadge.unsortedCount}
         verifyHasNewerCommit={verifyBadge.hasNewerCommit}
