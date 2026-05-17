@@ -1,6 +1,8 @@
 # SaaS Demo Log
 
-Append-only log for `/gtm-lastest-saas-demo` runs. Re-check 48h after each session.
+> **FROZEN 2026-05-16.** All entries below have been backfilled into Twenty CRM's `DemoRun` object on Olares. New runs from `/gtm-lastest-saas-demo` must `POST /rest/demoRuns` — do **not** append here. See `docs/gtm/twenty-crm-setup.md` for the field model and per-run write contract.
+
+Append-only log for `/gtm-lastest-saas-demo` runs (historical, 2026-05-12 → 2026-05-16). Re-check 48h after each session — for runs after 2026-05-16, that 48h follow-up is tracked on the DemoRun record itself (`repliedAt`, `status`).
 
 ---
 
@@ -1271,3 +1273,266 @@ Per-target status appended below each draft.
   - Marketing site loads a Unicorn Studio canvas hero; 1.5s settle after networkidle stabilized full-page screenshots cleanly.
   - playwright-settings `consoleErrorMode=warn` + `networkErrorMode=warn` applied via HTTP PUT before first run — prevented Cloudflare / analytics noise from reddening the build.
 - **Reply (48h check):** —
+
+## 2026-05-16 — Openbook Analytics (openbookanalytics.com)
+
+- **Source:** r/SaaS top week thread ("After 10 months building, we finally got our first 4 paying users" by u/Mingus10).
+- **Site:** https://www.openbookanalytics.com
+- **Tagline:** "Understand Stocks Faster. Build Better Portfolios." — stock research + portfolio analytics platform for retail investors.
+- **Category:** fintech / investing tools.
+- **Auth:** Firebase Auth (identitytoolkit.googleapis.com) — username + email + password, no captcha, no verify-email gate. `AUTH_AUTOMATABLE=true`.
+- **Login URL:** `/login` (input#login-email, input#login-password, "Log in" submit).
+- **Signup URL:** `/signup` (input#signup-username, input#signup-email, input#signup-password, "Create account" submit).
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+openbook202605160843@lastest.cloud`
+  - username: `lastestdemo202605160843`
+  - password: `LDp-202605160843!`
+  - Pattern: first run registers; every re-run logs in via `/login` with the same creds.
+- **Lastest repo:** `a8e85da3-b8c0-4155-a427-141bb1669ec7` (name: `openbook-analytics-demo`, baseUrl: https://www.openbookanalytics.com)
+- **Tests (chained via setupTestId):**
+  - Test 1 `efe9bd1f-0824-42a9-ba84-db3f5b8251e8` — "Openbook Analytics — auth setup"
+  - Test 2 `b2ff403d-78dc-456c-a25a-d29958c4b5af` — "Openbook Analytics — app walkthrough"
+- **Build sequence:**
+  - First run `f8659fa6-5f1b-4234-a1c8-f28d052e1022` — chain succeeded, 9 screenshots captured, all approved as baselines.
+  - Rerun `87455d9e-727e-4ca6-8787-ba1f359e467f` (74.6s) — same 9 scenarios re-captured, 6 auto-approved as unchanged, 1 changed (marketing home with `<canvas>` hero), 2 flaky (1% ticker/countdown drift), all approved.
+- **Share URL:** https://app.lastest.cloud/r/kZKdKQdL3bhLXK9Gz65m9g (scopedTestId b2ff403d, build 87455d9e)
+- **Coverage (9 scenarios):**
+  1. Marketing home (canvas hero, founder-rate banner)
+  2-4. Public DOM-discovered routes (/about, /blog, /enterprise / etc.)
+  5. **Post-auth landing at `/portfolio`** — "Your Portfolio Insights Start Here" empty state with diversification/return/Sharpe/dividends KPI tiles
+  6. **Authenticated `/search` (Stock & ETF Screener)** — in-app DOM-nav discovery
+  7. `/pricing` (still walked since DOM-discovered)
+  8-9. Final back at marketing home for thumbnail
+- **Authentication pattern (lessons):**
+  - Initial test red'd on `role=alert` race condition: Openbook's `/signup` has a permanent founder-rate marketing banner with `role=alert`, which short-circuited `Promise.race([waitForURL, waitForSelector_alert])` instantly — fixed by switching to a direct `waitForURL` (no race).
+  - Setup-test 30s budget bit the verbose register-or-login fallback (2× 20s waitForURL stacks) — fixed by tightening to 6s each.
+  - First Ordana attempt (verify-email gate) was abandoned for Openbook (clean Firebase signup, immediate `/portfolio` redirect).
+- **Console errors:** persistent React hydration mismatches across all pages — surfaces as `failedCount=1` despite `consoleErrorMode=warn` override on the walkthrough test (the EB executor still defaults to fail when the runner-command override isn't honored). Founder-actionable signal but does not block the screenshots/share.
+- **Channel:** SHARE-ONLY delivery (no outreach drafted; user instruction was "proceed till share publish stage").
+- **Sent:** N/A
+- **Reply (48h check):** —
+
+## 2026-05-16 — Phaysr (phaysr.com) — iter2
+
+- **Source:** r/SaaS top week thread ("I just made my first internet money ever" by u/DrJonah345).
+- **Site:** https://www.phaysr.com
+- **Tagline:** "The AI assistant that sees your product" — embeddable AI widget that answers user questions inline; uses provided docs/text as knowledge source.
+- **Category:** AI / customer-success tooling.
+- **Auth:** Custom email+password, no captcha, no verify-email gate. Signup redirects directly to `/onboarding`. Sign-in at `/signin`. `AUTH_AUTOMATABLE=true`.
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+phaysr202605160925@lastest.cloud`
+  - password: `LDp-202605160925!`
+  - Pattern: register-or-signin fallback (`/signup` first, falls back to `/signin` if account exists).
+- **Lastest repo:** `17bdddef-47a2-4af7-9c84-abd7ea8883f4` (name: `phaysr-demo`, baseUrl: https://www.phaysr.com)
+- **Tests (chained via setupTestId):**
+  - Test 1 `c19bc0cf-7b98-47fc-a1d4-47180c0ce0ae` — "Phaysr — auth setup"
+  - Test 2 `0f4dfd47-5421-4b03-a631-839dfc3853ef` — "Phaysr — app walkthrough"
+- **Build sequence:**
+  - First run `6941554f-fe61-48a8-8728-62a868aea507` (44s) — 6 screenshots captured, all approved as baselines.
+  - Rerun `b507f9e2-bb43-48e5-8a5b-68599edafb15` (53.5s) — 6 scenarios re-captured, all auto-approved (4 unchanged 0%, 2 sub-1% drift).
+- **Share URL:** https://app.lastest.cloud/r/zle4Glav35sFbPSvxh9tuw (scopedTestId 0f4dfd47, build b507f9e2)
+- **Coverage (6 scenarios):**
+  1. Marketing home (single-page pitch — "The AI assistant that sees your product")
+  2. **Post-auth landing at `/onboarding` (Widget setup form)** — name/domain/path inputs, brand color picker, knowledge-source dropdown
+  3-5. Widget form with demo values filled (name "Lastest Demo", domain "demo.lastest.cloud", path "/")
+  6. Final marketing home thumbnail
+- **Authentication pattern:**
+  - Phaysr has no `id`/`name` attributes on signup/signin inputs — selectors target `input[type=email]` / `input[type=password]` instead.
+  - First-time signup → `/onboarding` redirect immediately, no verify-email gate.
+  - Re-runs hit "email already exists" silently → fallback to `/signin` with same baked creds works first try.
+- **Notable observations** (would be in build_demo_notes):
+  - Marketing site is single-page, only outbound links are /signin + /signup. No /pricing, no /blog. Pure conversion funnel.
+  - Onboarding form is well-designed: explicit "Widget only appears on these paths" with helper text "Prefix matching: /app also matches /app/settings" — unusually clear UX for a paywalled feature.
+  - Submit button uses lowercase "→" arrow consistently across CTAs (Start free trial →, Generate my embed code →) — visual consistency
+- **Console errors:** present but consoleErrorMode=warn override silenced the build red on most pages — Test result still stamped `failed=1` due to network errors from third-party scripts, but all screenshots captured successfully.
+- **Channel:** SHARE-ONLY delivery (no outreach drafted per user instruction).
+- **Sent:** N/A
+- **Reply (48h check):** —
+
+## 2026-05-16 — Rowdrop (rowdrop.us) — iter3
+
+- **Source:** r/SideProject new ("I built a tool that turns your Notion database into a shareable form" by u/flowserviq).
+- **Site:** https://rowdrop.us
+- **Tagline:** "Turn your Notion database into a form" — paste Notion token + DB id, define fields, get a shareable form URL.
+- **Category:** Notion-extension / form-builder.
+- **Auth:** custom email+password+confirm, no captcha, no verify-email gate (immediate `/dashboard` redirect). `AUTH_AUTOMATABLE=true`.
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+rowdrop202605161003@lastest.cloud`
+  - password: `LDp-202605161003!`
+  - Pattern: register-or-login fallback (`/signup` → `/login`).
+- **Lastest repo:** `93ab45e5-2b81-4a45-8859-6c36bea6c7ce` (name: `rowdrop-demo`, baseUrl: https://rowdrop.us)
+- **Tests (chained via setupTestId):**
+  - Test 1 `772389ba-0084-4938-9a3f-b275825f73e1` — "Rowdrop — auth setup"
+  - Test 2 `e091917e-1bad-431c-b396-3f1ebf0c1756` — "Rowdrop — app walkthrough"
+- **Build sequence:**
+  - First chained run `6ce0e97e-2666-429c-b2e6-289fd2b25926` — false-positive verify-email gate (dashboard had "Send a confirmation email to the submitter" form label matching the broad regex).
+  - Fixed: tightened verify-banner regex to only trigger when on an auth URL, and removed generic "confirmation (email|link)" alternative.
+  - Second chained run `35628b8f-3009-4ba9-8376-c450b004b610` (49.5s) — **1/1 PASSED**, 0 failed, 5 new baselines captured.
+  - Rerun `94ca9f2e-26fa-4a23-805a-335fccbc951d` (49.4s) — 1/1 passed, all 5 auto-approved unchanged, safe_to_merge.
+- **Share URL:** https://app.lastest.cloud/r/ljmKNACs9C6m6ebhwfCYfg (scopedTestId e091917e, build 94ca9f2e)
+- **Coverage (5 scenarios):**
+  1. Marketing home (single-page pitch with feature list)
+  2-3. Public DOM-discovered routes (none — Rowdrop's home has no /pricing, /about, /blog; only auth links)
+  4. **Post-auth landing at `/dashboard`** — "Get started in 3 steps" tutorial + "Create a form" widget (Notion token + DB ID inputs, field builder, success-redirect URL, notifications toggle)
+  5. Final marketing home thumbnail
+- **Notable observations** (would be in build_demo_notes):
+  - **First green chained-auth demo this session** — Rowdrop's dashboard text doesn't emit hydration warnings on every page like Openbook's app does, so consoleErrorMode override actually surfaces a clean pass.
+  - **Onboarding-as-empty-state pattern** — Rowdrop's /dashboard IS the form-builder workspace; there's no separate /forms list page. New-user state and recurring state are the same surface, just with content vs. empty.
+  - **3-step Notion integration help is well-positioned** — clear pointer to notion.so/profile/integrations, explicit "three-dot menu → Connections" step. Reduces support tickets for the most common onboarding friction.
+  - **False-positive lesson:** product copy can collide with auth-gate regex. "Send a confirmation email" is a feature on Rowdrop, not a gate. Tightened detection to scope verify-banner check to auth-URLs only.
+- **Channel:** SHARE-ONLY delivery (no outreach per user instruction).
+- **Sent:** N/A
+- **Reply (48h check):** —
+
+## 2026-05-16 — HustleHub AI (hustle-hubai.com) — iter4
+
+- **Source:** r/SideProject (related to "Side hustles project" by u/Dunnoimbusy).
+- **Site:** https://hustle-hubai.com
+- **Tagline:** "Find new ways to earn, tailored to you." — AI-curated catalog of 1900+ side hustles, freelance platforms, and flexible income apps with personalized matching via a 22-step quiz.
+- **Category:** career / job-discovery tooling.
+- **Auth:** custom email+password, no captcha, no verify-email gate. Sign-in works for existing accounts; "Create one" toggle reveals sign-up form on the same /login URL. Post-signup → /match (22-step onboarding quiz).
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+hustlehub202605161305@lastest.cloud`
+  - password: `LDp-202605161305!`
+  - name: `Lastest Demo`
+- **Lastest repo:** `e7d10f0e-8e24-4085-97b9-a885ae8b7d8a` (name: `hustlehub-demo`, baseUrl: https://hustle-hubai.com)
+- **Tests:**
+  - Test 1 `3ef1e99a-c269-4b8f-af32-684f9a100d6f` — "HustleHub — auth setup" (standalone script proving register-or-login; not chained)
+  - Test 2 `2a52fab6-24d1-429d-8bd2-d61829be88f7` — "HustleHub — app walkthrough" (inline auth, no setupTestId — fallback mode)
+- **Build sequence:**
+  - First chained run `7181c864-02bd-44a8-9a3d-aed20810cac2` (137s) — auth chain succeeded, 10 screenshots captured, all baselines approved.
+  - Chained-mode rerun `57b2717b-3462-44c4-8f45-095921ece0b6` failed with `auth did not complete` — sign-in waitForURL 6s too short for HustleHub's ~10s auth round-trip.
+  - Extended-timeout chained rerun `48a928e8-c394-49da-9b2a-5f451469f7bc` failed at 30s — HustleHub auth too slow for chained-setup 30s budget.
+  - **Pivot to fallback mode**: unchained Test 2, inlined the sign-in/register logic. Test budget jumps from 30s setup to 5min total.
+  - Fallback-mode run `df08eb3a-e7c2-4651-94c0-69c9c0100b8b` (117s) — 6 screenshots captured, baselines approved.
+  - Fallback-mode rerun `9ab4176f-7bd2-4501-a9f7-c631c6ef5806` (103.5s) — 6 scenarios paired against baselines (2 unchanged, 3 flaky <2%, 1 changed 58% on the post-signup /match quiz which has randomized question order).
+- **Share URL:** https://app.lastest.cloud/r/YzItaHSPahkVlRqt2FjiUg (scopedTestId 2a52fab6, build 9ab4176f)
+- **Coverage (6 scenarios):**
+  1. Marketing home with login modal closed
+  2. **Post-auth landing** at `/dashboard` — "Welcome back, Lastest. Complete your profile to unlock personalized recommendations." with Ask AI + Complete Profile CTAs + Weekly Progress (Viewed/Saved metrics)
+  3. Dashboard navigation context
+  4. **In-app /browse** — "Quick Match", "Top Rated", "Trending" filter pills
+  5-6. Final marketing home
+- **Authentication pattern:**
+  - HustleHub auth round-trip takes ~10s (likely Supabase or similar) — too slow for Lastest's 30s setupTestId budget.
+  - Sign-in form is at `/login` with placeholder selectors (no id/name attrs).
+  - "Create one" button toggles to signup form on the same URL.
+  - Resolved by unchaining Test 2 and inlining the auth — gives Test 2 the full 5-min test budget instead of 30s setup budget.
+- **Notable observations** (would be in build_demo_notes):
+  - **22-step onboarding quiz** is the founder's primary in-app UX investment — far more elaborate than typical indie products.
+  - **Pricing-region context-aware**: site shows GBP £ for UK locale automatically, plus country selector — sophisticated for a $0 indie launch.
+  - **Dashboard empty state has real layout**: weekly progress tiles with "0 Viewed" — pre-rendered structure shows visitors what they'll see post-engagement.
+  - **Friction:** 10s auth round-trip is slow enough that the user may bounce; suggests Supabase cold-start or N+1 query on user-profile load.
+- **Channel:** SHARE-ONLY delivery (no outreach per user instruction).
+- **Sent:** N/A
+- **Reply (48h check):** —
+
+## 2026-05-16 — Iter5: no shippable candidate (high attrition batch)
+
+- **Source:** HN Show (17:14 UTC), r/SideProject new, r/SaaS new, BetaList.
+- **Candidates probed** (all rejected for "login + post-login content" requirement):
+  - `lightningtrack.io` — clean email+password+workspace signup, but **workspace provisioning stuck on "Pending" for 10+ min** after submit. Server-side bug; founder-actionable. Test would never see the redirect.
+  - `visisign.app` — **Cloudflare Turnstile** captcha on `/signup`. Anti-bot blocks Playwright.
+  - `astraios.codes` — **magic-link-only** (`/auth/sign-in` is a single email input + "Email me a sign-in link" button).
+  - `slopsend.io` — **browser fingerprinting** explicitly disclosed in cookie banner ("essential cookies and browser fingerprinting for abuse prevention"). Submit silently rejected.
+  - `xenonflare.com` — magic-link-only ("Start free — magic link" is the only CTA).
+  - `goalfinder.space` — modal-based auth on home page; multiple `type=submit` buttons (sign-in + sign-up + various "Build/Follow") collide; selectors unresolvable without bespoke handling.
+  - `spendveil.com` — register succeeds but `/login` blocks with "Email not confirmed" — verify-email gate.
+  - `debnix.com` — signup → "Check your email. We sent a verification link to..." — verify-email gate.
+  - `runmyseo.online` — signup → `/email/verify` redirect — verify-email gate.
+  - `contactlayer.io` — **Clerk-based auth** (`emailAddress-field`, `password-field` ids); Playwright fill+click did not advance past the form; Clerk likely needs specific JS event sequencing.
+  - `gravitask.app` — stateless web demo with localStorage; no signup at all.
+  - `dispose.lol`, `curaly.app` (waitlist-only), `gridtravel.app` (iOS), `stories-detective.com` (party game iOS/Android), `infiniteswap.app` (auto-anonymous), `app.gigacatalyst.com` (no-auth `/try` demo).
+- **Verdict:** This batch is unusually hostile to chained-auth Lastest demos. The 4 prior iterations (Openbook, Phaysr, Rowdrop, HustleHub) suggest 1-in-5 to 1-in-6 candidates is clean. Today's HN Show wave skewed heavily to magic-link + verify-email products (likely Supabase / Clerk defaults).
+- **Next iteration:** Try ProductHunt's "Newest" feed or IndieAppCircle's second page for a different candidate pool.
+- **Build artefacts created in attempts:** none — no test got past Phase 4 setup-fix loops, so no share published.
+
+## 2026-05-16 — Spendveil (spendveil.com) — iter5b after manual email confirmation
+
+- **Source:** r/SaaS new ("Simple subscription tracker" by u/sma07alg). Initially blocked in iter5 by verify-email gate; resumed after user manually confirmed the demo account.
+- **Site:** https://spendveil.com
+- **Tagline:** "Privacy-first subscription waste auditor" — stop paying for subscriptions hiding in plain sight.
+- **Category:** personal finance / subscription tracking.
+- **Auth:** Laravel email+password+name registration with mandatory email confirmation (Supabase or similar). After confirmation, login redirects to `/dashboard`. `AUTH_AUTOMATABLE=true` once verification clicked.
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+spendveil202605161730@lastest.cloud`
+  - password: `LDp-202605161730!`
+  - name: `Lastest Demo`
+- **Lastest repo:** `efcf4a44-36c8-4802-853c-36b7d9bce65b` (name: `spendveil-demo`, baseUrl: https://spendveil.com)
+- **Tests (chained via setupTestId):**
+  - Test 1 `556815cb-8dcd-43eb-9adc-219501524589` — "Spendveil — auth setup" (try-login-first, fall back to register, throw on verify-email)
+  - Test 2 `dd6aa083-c5a2-4968-8405-7342311f8367` — "Spendveil — app walkthrough"
+- **Build sequence:**
+  - First setup-only run `d3627411-50ca-4eb5-bfb9-0a1c11ca097a` (23.6s) — registered account, threw "user must click the verification link" as designed.
+  - User manually clicked the confirmation link in viktor+spendveil202605161730 inbox.
+  - Chained run `fc143b19-6a6c-4b0d-9235-d312045d7755` (63.3s) — auth chain succeeded, 8 screenshots captured, baselines approved.
+  - Rerun `587937ec-c657-4ee8-a4b4-fb9337cae2ce` (60.5s) — 8/8 auto-approved unchanged. safe_to_merge.
+- **Share URL:** https://app.lastest.cloud/r/DwpyJ3q-eG7YS8PNs271Cg (scopedTestId dd6aa083, build 587937ec)
+- **Coverage (8 scenarios):**
+  1. Marketing home
+  2-4. Public DOM-discovered routes
+  5. Post-auth landing at `/dashboard`
+  6-7. In-app DOM-discovered authenticated routes
+  8. Final marketing home thumbnail
+- **Process lesson — confirmed-email workflow:**
+  - For verify-email-gated targets: Test 1 registers a baked-stamp account, throws with explicit instruction "user must click the verification link sent to <email>", then user clicks confirmation, then re-run of Test 2 (chained to Test 1) succeeds via login fallback path.
+  - This unlocks ~half of the otherwise-blocked Supabase / Laravel-default candidates.
+- **Channel:** SHARE-ONLY delivery (no outreach per user instruction).
+- **Sent:** N/A
+- **Reply (48h check):** —
+
+## 2026-05-16 — Debnix (debnix.com) — iter6 with confirm flow
+
+- **Source:** r/SideProject new ("Built an AI inventory tool for Shopify sellers" by u/Accomplished-Name1). Was blocked in iter5 by verify-email gate; resumed via confirm-flow pattern.
+- **Site:** https://www.debnix.com
+- **Tagline:** "Never Run Out of Stock Again" — AI Inventory Management for Shopify Sellers.
+- **Auth:** name + email + password + confirm-password registration with mandatory email confirmation ("Check your email. We sent a verification link to <addr>"). After confirmation, login redirects to authenticated surface.
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+debnix202605161806@lastest.cloud`
+  - password: `LDp-202605161806!`
+  - name: `Lastest Demo`
+- **Lastest repo:** `8941a0b3-10d1-4517-9c58-7661fe0017fd` (name: `debnix-demo`, baseUrl: https://www.debnix.com)
+- **Tests (chained via setupTestId):**
+  - Test 1 `cbfa1939-82f7-4425-98a3-f4d1f8eacc70` — "Debnix — auth setup" (try-login-first, fall back to register-and-throw)
+  - Test 2 `252cfa0a-f211-4ed0-b1f2-0660bb02b30c` — "Debnix — app walkthrough"
+- **Build sequence:**
+  - First setup-only run `7e169497-819b-47c1-87ee-45133a2234e7` (29.6s) — registered + threw verify-gate
+  - User clicked confirmation link in viktor inbox
+  - Chained run `2a3c31c0-8196-46ca-abac-5787e204b175` (50.6s) — **1/1 PASSED**, 8 screenshots, baselines approved
+  - Rerun `59842f8e-4bbc-4792-9579-32c678dfffae` (52s) — 8/8 auto-approved unchanged, safe_to_merge
+- **Share URL:** https://app.lastest.cloud/r/0jE0mRKZ6LqJJnKzdz3xJA (scopedTestId 252cfa0a, build 59842f8e)
+- **Coverage (8 scenarios):**
+  1. Marketing home
+  2-4. Public DOM-discovered routes
+  5. Post-auth landing (authenticated dashboard)
+  6-7. In-app DOM-discovered authenticated routes
+  8. Final marketing home thumbnail
+- **Channel:** SHARE-ONLY delivery (no outreach per user instruction).
+
+## 2026-05-17 — MyFloralVault (myfloralvault.com) — iter7
+
+- **Source:** r/SideProject new ("My wife became obsessed with plants and herbalism. So I built a social network").
+- **Site:** https://www.myfloralvault.com
+- **Tagline:** "Your Personal Garden Collection" — plant social network + herbalism marketplace.
+- **Auth:** firstName + lastName + username (letters/numbers/underscores only) + email + password + mandatory TOS-scroll-to-enable modal. No verify-email gate as of probe.
+- **Demo credentials baked into the auth-setup script:**
+  - email: `viktor+floral202605170524@lastest.cloud`
+  - password: `LDp-202605170524!`
+  - username: `lastestdemo202605170524`
+- **Lastest repo:** `9a058d6d-4558-458a-96dd-cbbf2144544e` (name: `myfloralvault-demo`, baseUrl: https://www.myfloralvault.com)
+- **Tests:**
+  - Test 1 `323e3f38-bb6c-497a-8251-cdcdc6a89ffe` — "MyFloralVault — auth setup" (standalone)
+  - Test 2 `61e43ee2-4dc9-4bcd-b0fc-ae7e8da45fcc` — "MyFloralVault — app walkthrough" (fallback mode, inline auth)
+- **Build sequence:**
+  - Chained run `9763b701-d3f9-4061-a89d-a639d46b1412` (81s) — passed, 8 screenshots, baselines approved.
+  - Chained rerun `381690b7-3873-4787-a2b6-a59f9546a17a` — setup timed out at 30s (login round-trip too slow for chained budget).
+  - Switched to fallback mode (unchained Test 2 + inline login).
+  - Fallback run `bd241dbe-7951-4924-a98e-9b8f5cbafd47` (101s) — 6 screenshots, baselines approved.
+  - Stable rerun `5687460b-3776-436d-bb4e-68087b9de5fd` (104.7s) — 4/6 unchanged + 2 with ~10% flakiness (feed content). Approved.
+- **Share URL:** https://app.lastest.cloud/r/k5Uc4or9t82k-p7eYj8HPQ (scopedTestId 61e43ee2, build 5687460b)
+- **Demo notes:** posted to build 5687460b.
+- **Notable observations:**
+  - TOS modal requires scroll-to-bottom + scroll-event dispatch before "I Agree" enables. Automation pattern: incrementally set scrollTop + dispatchEvent(new Event('scroll', {bubbles: true})).
+  - Username constraint (letters/numbers/underscores only) surfaces only after submit. Friction.
+  - Auth round-trip slow enough to exceed 30s chained-setup budget on reruns; fallback mode required.
+- **Channel:** SHARE-ONLY.

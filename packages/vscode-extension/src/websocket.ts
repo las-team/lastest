@@ -15,6 +15,7 @@ export class LastestWebSocket {
   private readonly reconnectInterval = 5000;
   private abortController: AbortController | null = null;
   private intentionalClose = false;
+  private serverRequestedReconnect = false;
 
   private readonly onTestStartEmitter = new vscode.EventEmitter<{ testId: number; runId: number }>();
   private readonly onTestProgressEmitter = new vscode.EventEmitter<TestProgressPayload>();
@@ -44,6 +45,7 @@ export class LastestWebSocket {
   private async doConnect() {
     this.closeConnection();
     this.intentionalClose = false;
+    this.serverRequestedReconnect = false;
 
     const sseUrl = `${this.serverUrl}/api/v1/events`;
     this.abortController = new AbortController();
@@ -115,6 +117,14 @@ export class LastestWebSocket {
     }
 
     if (streamEndedCleanly && !this.intentionalClose) {
+      if (this.serverRequestedReconnect) {
+        // Planned 90s lifetime-cap recycle — re-dial without flipping the
+        // status bar to "Disconnected". Otherwise users see the indicator
+        // flicker every 90s during normal operation.
+        this.log('reconnecting (planned)');
+        this.doConnect();
+        return;
+      }
       this.log('stream closed by server');
       this.onConnectionChangeEmitter.fire(false);
       this.scheduleReconnect();
@@ -144,6 +154,7 @@ export class LastestWebSocket {
         } catch {
           // keep default reason
         }
+        this.serverRequestedReconnect = true;
         this.log(`server requested reconnect (${reason})`);
         return;
       }

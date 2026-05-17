@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertOctagon,
@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  Crosshair,
   ExternalLink,
+  EyeOff,
   Github,
   Layers,
   Link as LinkIcon,
@@ -20,7 +22,24 @@ import {
   CheckCircle as CheckCircleIcon,
   Plus,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { closeIssueForCase, createIssueForCase, fetchLinkedIssueForCase } from '@/server/actions/verify-issues';
+import {
+  addFocusRegion,
+  removeFocusRegion,
+  addIgnoreRegionForDiff,
+  removeIgnoreRegionForDiff,
+  getFocusRegionsForDiff,
+  getIgnoreRegionsForDiff,
+} from '@/server/actions/diffs';
+import {
+  DrawLayer,
+  FocusRegionOverlay,
+  IgnoreRegionOverlay,
+  RegionOverlay,
+  type FocusRegionRect,
+  type IgnoreRegionRect,
+} from '@/components/diff/slider-comparison';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import type {
   StepComparison,
@@ -189,12 +208,12 @@ export function FocusView(props: FocusViewProps) {
   const activeCase = visibleCases.find((c) => c.step.id === props.selectedStepId) ?? visibleCases[0] ?? null;
   const activeIdx = activeCase ? visibleCases.findIndex((c) => c.step.id === activeCase.step.id) : -1;
 
-  const goPrev = () => {
+  const goPrev = useCallback(() => {
     if (activeIdx > 0) props.onSelect(visibleCases[activeIdx - 1].step.id);
-  };
-  const goNext = () => {
+  }, [activeIdx, visibleCases, props]);
+  const goNext = useCallback(() => {
     if (activeIdx >= 0 && activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
-  };
+  }, [activeIdx, visibleCases, props]);
 
   const decideOneLayer = (layer: EvidenceLayer, status: 'approved' | 'rejected' | 'snoozed') => {
     if (!activeCase) return;
@@ -203,9 +222,9 @@ export function FocusView(props: FocusViewProps) {
 
   // Issue picker is hoisted to BoardFocusClient so the same dialog covers
   // both the Board and Focus surfaces.
-  const handleOpenPicker = () => {
+  const handleOpenPicker = useCallback(() => {
     if (activeCase) props.onOpenIssuePicker(activeCase.step.id);
-  };
+  }, [activeCase, props]);
   const handleCloseIssue = async () => {
     if (!activeCase?.step.githubIssueUrl) return;
     if (!confirm(`Close issue #${activeCase.step.githubIssueNumber} on GitHub?`)) return;
@@ -216,6 +235,168 @@ export function FocusView(props: FocusViewProps) {
       router.refresh();
     });
   };
+
+  // ---- Hotkeys (mirrors the build diff page: e=OK, t=open issue picker,
+  // s=skip to next, ArrowLeft/Right=prev/next, Esc=close issue panel). Skip
+  // when the user is typing in an input or textarea so it doesn't hijack
+  // keys inside the issue title/body or the filter search box.
+  const handleOK = useCallback(() => {
+    if (!activeCase) return;
+    props.onMarkDecision(activeCase.step.id, 'approved');
+  }, [activeCase, props]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case 'e':
+        case 'E':
+          e.preventDefault();
+          handleOK();
+          break;
+        case 't':
+        case 'T':
+          e.preventDefault();
+          handleOpenPicker();
+          break;
+        case 's':
+        case 'S':
+          e.preventDefault();
+          goNext();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          goPrev();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          goNext();
+          break;
+        case 'Escape':
+          if (intentOpen) setIntentOpen(false);
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleOK, handleOpenPicker, goNext, goPrev, intentOpen]);
+
+  // ---- Visual focus/ignore regions (same UX as the build diff page).
+  // Keyed off the active visual diff id so switching cases reloads the
+  // correct masks. We hold local state instead of relying on the parent
+  // because the region writes recalc the diff and we want optimistic UI.
+  const activeVisualId = activeCase?.visual?.id ?? null;
+  const [showRegions, setShowRegions] = useState(false);
+  const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>([]);
+  const [ignoreRegions, setIgnoreRegions] = useState<IgnoreRegionRect[]>([]);
+  const [drawFocusMode, setDrawFocusMode] = useState(false);
+  const [drawIgnoreMode, setDrawIgnoreMode] = useState(false);
+  const [regionPending, setRegionPending] = useState(false);
+  const lastLoadedVisualId = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Reset draw modes whenever the active case changes — leftover draw mode
+    // from a different case would be confusing and the buttons themselves
+    // reset on each pane render.
+    setDrawFocusMode(false);
+    setDrawIgnoreMode(false);
+    if (!activeVisualId) {
+      setFocusRegions([]);
+      setIgnoreRegions([]);
+      lastLoadedVisualId.current = null;
+      return;
+    }
+    if (lastLoadedVisualId.current === activeVisualId) return;
+    lastLoadedVisualId.current = activeVisualId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [fr, ir] = await Promise.all([
+          getFocusRegionsForDiff(activeVisualId),
+          getIgnoreRegionsForDiff(activeVisualId),
+        ]);
+        if (cancelled) return;
+        setFocusRegions(fr.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
+        setIgnoreRegions(ir.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
+      } catch {
+        if (!cancelled) {
+          setFocusRegions([]);
+          setIgnoreRegions([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeVisualId]);
+
+  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (!activeVisualId || regionPending) return;
+    setRegionPending(true);
+    try {
+      const created = await addFocusRegion(activeVisualId, rect);
+      setFocusRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawFocusMode(false);
+      toast.success('Focus region added');
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add focus region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleFocusDelete = useCallback(async (regionId: string) => {
+    if (regionPending) return;
+    setRegionPending(true);
+    setFocusRegions((prev) => prev.filter((r) => r.id !== regionId));
+    try {
+      await removeFocusRegion(regionId, activeVisualId ?? undefined);
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove focus region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleIgnoreDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (!activeVisualId || regionPending) return;
+    setRegionPending(true);
+    try {
+      const created = await addIgnoreRegionForDiff(activeVisualId, rect);
+      setIgnoreRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawIgnoreMode(false);
+      toast.success('Ignore region added — applies to every screenshot of this test');
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add ignore region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleIgnoreDelete = useCallback(async (regionId: string) => {
+    if (regionPending) return;
+    setRegionPending(true);
+    setIgnoreRegions((prev) => prev.filter((r) => r.id !== regionId));
+    try {
+      await removeIgnoreRegionForDiff(regionId, activeVisualId ?? undefined);
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove ignore region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const toggleDrawFocus = useCallback(() => {
+    setDrawFocusMode((v) => !v);
+    setDrawIgnoreMode(false);
+  }, []);
+  const toggleDrawIgnore = useCallback(() => {
+    setDrawIgnoreMode((v) => !v);
+    setDrawFocusMode(false);
+  }, []);
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -384,6 +565,22 @@ export function FocusView(props: FocusViewProps) {
                 ? classifyLayer(tab, activeCase.step, activeCase.result, activeCase.visual)
                 : 'absent'
             }
+            regionsCtx={{
+              showRegions,
+              setShowRegions,
+              focusRegions,
+              ignoreRegions,
+              drawFocusMode,
+              drawIgnoreMode,
+              toggleDrawFocus,
+              toggleDrawIgnore,
+              onFocusDrawn: handleFocusDrawn,
+              onFocusDelete: handleFocusDelete,
+              onIgnoreDrawn: handleIgnoreDrawn,
+              onIgnoreDelete: handleIgnoreDelete,
+              regionPending,
+              hasVisual: !!activeVisualId,
+            }}
           />
         </div>
 
@@ -729,15 +926,33 @@ function CaseSidebar({ groupedByArea, activeId, onPick }: CaseSidebarProps) {
   );
 }
 
+interface VisualRegionsCtx {
+  showRegions: boolean;
+  setShowRegions: (v: boolean) => void;
+  focusRegions: FocusRegionRect[];
+  ignoreRegions: IgnoreRegionRect[];
+  drawFocusMode: boolean;
+  drawIgnoreMode: boolean;
+  toggleDrawFocus: () => void;
+  toggleDrawIgnore: () => void;
+  onFocusDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onFocusDelete: (regionId: string) => void;
+  onIgnoreDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onIgnoreDelete: (regionId: string) => void;
+  regionPending: boolean;
+  hasVisual: boolean;
+}
+
 interface ComparePaneProps {
   tab: CompareTab;
   step: StepComparison | null;
   visual: VisualDiffLite | null;
   result: TestResultLite | null;
   layerState: LayerState;
+  regionsCtx: VisualRegionsCtx;
 }
 
-function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps) {
+function ComparePane({ tab, step, visual, result, layerState, regionsCtx }: ComparePaneProps) {
   if (!step) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
@@ -771,7 +986,7 @@ function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps
 
   // diff or clean — render the layer-specific pane and let it differentiate.
   if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} />;
-  if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} />;
+  if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} regions={regionsCtx} />;
   if (tab === 'text') return <TextPane visual={visual} clean={layerState === 'clean'} />;
   if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
   if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
@@ -1071,7 +1286,7 @@ function simpleLineDiff(baseline: string, current: string): { op: 'add' | 'del' 
   return out;
 }
 
-function VisualPane({ step, visual, clean }: { step: StepComparison; visual: VisualDiffLite | null; clean: boolean }) {
+function VisualPane({ step, visual, clean, regions }: { step: StepComparison; visual: VisualDiffLite | null; clean: boolean; regions: VisualRegionsCtx }) {
   const [mode, setMode] = useState<'slider' | 'side' | 'overlay'>('slider');
   const [sliderPct, setSliderPct] = useState(50);
 
@@ -1081,6 +1296,9 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
   const hasBaseline = !!baselineSrc;
   const hasCurrent = !!currentSrc;
   const visualEvidence = step.layers?.visual;
+  const changedRegions = visual?.changedRegions ?? [];
+  const hasChangedRegions = changedRegions.length > 0;
+  const drawDisabled = !regions.hasVisual || regions.regionPending;
 
   // Overlay metric chip (rendered on top of the screenshot itself).
   // Even with 0% diff we surface "100% match" rather than nothing.
@@ -1106,7 +1324,7 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
           <button className={`v-tab ${mode === 'overlay' ? 'active' : ''}`} onClick={() => setMode('overlay')}>Overlay</button>
         </div>
         <span style={{ flex: 1 }} />
-        {/* Right-side cluster: status chips + Regions button. Inline so the
+        {/* Right-side cluster: status chips + Regions buttons. Inline so the
             chips stay on one line each (whiteSpace nowrap), and so the group
             wraps as a unit instead of items breaking into a vertical stack. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -1120,7 +1338,48 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
           {visual?.classification && (
             <span className="v-chip" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>{visual.classification}</span>
           )}
-          <button className="v-btn sm" style={{ flexShrink: 0 }}><Layers size={11} />Regions</button>
+          {hasChangedRegions && (
+            <button
+              className={`v-btn sm ${regions.showRegions ? 'tinted' : ''}`}
+              style={{ flexShrink: 0 }}
+              onClick={() => regions.setShowRegions(!regions.showRegions)}
+              title={`${changedRegions.length} changed region(s) detected`}
+            >
+              <Layers size={11} />{regions.showRegions ? 'Hide regions' : 'Show regions'}
+            </button>
+          )}
+          <button
+            className={`v-btn sm ${regions.drawFocusMode ? 'tinted' : ''}`}
+            style={{ flexShrink: 0 }}
+            onClick={regions.toggleDrawFocus}
+            disabled={drawDisabled}
+            title={regions.hasVisual
+              ? 'Click + drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions.'
+              : 'Focus regions require a visual diff for this step.'}
+          >
+            <Crosshair size={11} />
+            {regions.drawFocusMode
+              ? 'Drawing — click + drag'
+              : regions.focusRegions.length > 0
+                ? `Focus (${regions.focusRegions.length})`
+                : 'Draw Focus'}
+          </button>
+          <button
+            className={`v-btn sm ${regions.drawIgnoreMode ? 'tinted' : ''}`}
+            style={{ flexShrink: 0 }}
+            onClick={regions.toggleDrawIgnore}
+            disabled={drawDisabled}
+            title={regions.hasVisual
+              ? 'Click + drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test.'
+              : 'Ignore regions require a visual diff for this step.'}
+          >
+            <EyeOff size={11} />
+            {regions.drawIgnoreMode
+              ? 'Drawing — click + drag'
+              : regions.ignoreRegions.length > 0
+                ? `Ignore (${regions.ignoreRegions.length})`
+                : 'Draw Ignore'}
+          </button>
         </div>
       </div>
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'stretch', justifyContent: 'center', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
@@ -1130,7 +1389,15 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
           </div>
         )}
         {mode === 'slider' && hasBaseline && hasCurrent && (
-          <SliderViewer baseline={baselineSrc} current={currentSrc} pct={sliderPct} onPctChange={setSliderPct} />
+          <SliderViewer
+            baseline={baselineSrc}
+            current={currentSrc}
+            pct={sliderPct}
+            onPctChange={setSliderPct}
+            regions={regions}
+            changedRegions={changedRegions}
+            showChangedRegions={regions.showRegions}
+          />
         )}
         {/* Slider needs both images. Fall back to whichever exists when the
             other is missing (first-run cases have no baseline; aborted runs
@@ -1141,21 +1408,65 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
             <ImagePanel
               label={hasCurrent ? 'current (no baseline yet)' : 'baseline (no current capture)'}
               src={hasCurrent ? currentSrc : baselineSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              drawEnabled={hasCurrent}
             />
           </div>
         )}
         {mode === 'side' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' }}>
-            <ImagePanel label="baseline" src={baselineSrc} />
-            <ImagePanel label="current" src={currentSrc} />
+            <ImagePanel
+              label="baseline"
+              src={baselineSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              showOverlaysOnly
+            />
+            <ImagePanel
+              label="current"
+              src={currentSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              drawEnabled
+            />
           </div>
         )}
         {mode === 'overlay' && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {diffSrc ? <ImagePanel label="diff" src={diffSrc} /> : <ImagePanel label="current" src={currentSrc} />}
+            {diffSrc ? (
+              <ImagePanel
+                label="diff"
+                src={diffSrc}
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                showOverlaysOnly
+              />
+            ) : (
+              <ImagePanel
+                label="current"
+                src={currentSrc}
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                drawEnabled
+              />
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <ImagePanel label="baseline" src={baselineSrc} small />
-              <ImagePanel label="current" src={currentSrc} small />
+              <ImagePanel
+                label="current"
+                src={currentSrc}
+                small
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                drawEnabled
+              />
             </div>
           </div>
         )}
@@ -1183,15 +1494,72 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
   );
 }
 
-function ImagePanel({ label, src, small }: { label: string; src: string | null | undefined; small?: boolean }) {
+interface ImagePanelExtra {
+  regions?: VisualRegionsCtx;
+  changedRegions?: { x: number; y: number; width: number; height: number }[];
+  showChangedRegions?: boolean;
+  /** Show focus/ignore overlays but suppress the draw layer + delete handles
+   *  (used on baseline/diff thumbnails where editing wouldn't make sense). */
+  showOverlaysOnly?: boolean;
+  /** Allow draw-mode + delete handles on this panel. Default false. */
+  drawEnabled?: boolean;
+}
+
+function ImagePanel({
+  label,
+  src,
+  small,
+  regions,
+  changedRegions = [],
+  showChangedRegions = false,
+  showOverlaysOnly = false,
+  drawEnabled = false,
+}: { label: string; src: string | null | undefined; small?: boolean } & ImagePanelExtra) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const canEdit = !!regions && !showOverlaysOnly && drawEnabled;
+  const drawMode = regions?.drawFocusMode
+    ? 'focus'
+    : regions?.drawIgnoreMode
+      ? 'ignore'
+      : null;
   return (
     <div className="v-card" style={{ position: 'relative', overflow: 'hidden', minHeight: small ? 120 : 240 }}>
-      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 1, fontSize: 9 }}>
+      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 6, fontSize: 9 }}>
         {label}
       </span>
       {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={label} style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }} />
+        <div style={{ position: 'relative', width: '100%' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={label}
+            style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }}
+            onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+          />
+          {regions && showChangedRegions && (
+            <RegionOverlay dims={dims} regions={changedRegions} />
+          )}
+          {regions && (
+            <FocusRegionOverlay
+              dims={dims}
+              regions={regions.focusRegions}
+              onDelete={canEdit ? regions.onFocusDelete : undefined}
+            />
+          )}
+          {regions && (
+            <IgnoreRegionOverlay
+              dims={dims}
+              regions={regions.ignoreRegions}
+              onDelete={canEdit ? regions.onIgnoreDelete : undefined}
+            />
+          )}
+          {canEdit && drawMode === 'focus' && (
+            <DrawLayer dims={dims} onDrawn={regions!.onFocusDrawn} variant="focus" />
+          )}
+          {canEdit && drawMode === 'ignore' && (
+            <DrawLayer dims={dims} onDrawn={regions!.onIgnoreDrawn} variant="ignore" />
+          )}
+        </div>
       ) : (
         <div style={{ width: '100%', height: small ? 120 : 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }} className="label">
           missing
@@ -1201,7 +1569,30 @@ function ImagePanel({ label, src, small }: { label: string; src: string | null |
   );
 }
 
-function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: string; current: string; pct: number; onPctChange: (n: number) => void }) {
+function SliderViewer({
+  baseline,
+  current,
+  pct,
+  onPctChange,
+  regions,
+  changedRegions = [],
+  showChangedRegions = false,
+}: {
+  baseline: string;
+  current: string;
+  pct: number;
+  onPctChange: (n: number) => void;
+  regions?: VisualRegionsCtx;
+  changedRegions?: { x: number; y: number; width: number; height: number }[];
+  showChangedRegions?: boolean;
+}) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const drawMode = regions?.drawFocusMode
+    ? 'focus'
+    : regions?.drawIgnoreMode
+      ? 'ignore'
+      : null;
+  const drawing = !!drawMode;
   // Both images render at width:100% with natural-aspect height. The current
   // image lives in an `inset: 0` overlay so its layout box matches the
   // baseline exactly — clipPath then reveals it on the right of the slider.
@@ -1210,15 +1601,49 @@ function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: strin
   return (
     <div className="v-card" style={{ width: '100%', padding: 0, position: 'relative', overflow: 'hidden', minHeight: 320, background: 'white' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={baseline} alt="baseline" draggable={false} style={{ display: 'block', width: '100%', height: 'auto' }} />
+      <img
+        src={baseline}
+        alt="baseline"
+        draggable={false}
+        style={{ display: 'block', width: '100%', height: 'auto' }}
+        onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+      />
       {/* current clipped — revealed on the right of the slider line */}
       <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${pct}%)`, overflow: 'hidden' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={current} alt="current" draggable={false} style={{ display: 'block', width: '100%', height: 'auto' }} />
       </div>
+      {/* Region overlays sit ABOVE the clipped current image so they're
+          visible on either side of the slider line. */}
+      {regions && showChangedRegions && (
+        <RegionOverlay dims={dims} regions={changedRegions} />
+      )}
+      {regions && (
+        <FocusRegionOverlay
+          dims={dims}
+          regions={regions.focusRegions}
+          onDelete={!drawing ? regions.onFocusDelete : undefined}
+        />
+      )}
+      {regions && (
+        <IgnoreRegionOverlay
+          dims={dims}
+          regions={regions.ignoreRegions}
+          onDelete={!drawing ? regions.onIgnoreDelete : undefined}
+        />
+      )}
+      {/* Drag-to-draw layer takes over pointer events while drawing so the
+          slider input below it doesn't intercept the mouse. */}
+      {drawMode === 'focus' && regions && (
+        <DrawLayer dims={dims} onDrawn={regions.onFocusDrawn} variant="focus" />
+      )}
+      {drawMode === 'ignore' && regions && (
+        <DrawLayer dims={dims} onDrawn={regions.onIgnoreDrawn} variant="ignore" />
+      )}
       {/* slider input — invisible but pointer-events:auto so dragging the
           handle works. Layered above images via z-index, but cannot block
-          their visibility (opacity:0). */}
+          their visibility (opacity:0). Disabled while drawing so the draw
+          layer above receives the drag. */}
       <input
         type="range"
         min={0}
@@ -1226,7 +1651,7 @@ function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: strin
         value={pct}
         onChange={(e) => onPctChange(parseInt(e.target.value, 10))}
         aria-label="Compare slider"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'ew-resize', zIndex: 3 }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'ew-resize', zIndex: drawing ? 0 : 3, pointerEvents: drawing ? 'none' : 'auto' }}
       />
       <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct}%`, width: 2, background: 'var(--c-teal)', pointerEvents: 'none', zIndex: 4 }}>
         <div style={{ position: 'absolute', top: '50%', left: -12, width: 26, height: 26, borderRadius: '50%', background: 'var(--c-white)', border: '2px solid var(--c-teal)', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -20,15 +20,19 @@ demo-mode
 CSP nonce migration — `next.config.ts:50` allows `script-src 'unsafe-inline' 'unsafe-eval'` because the public share page `/r/[slug]` ships `SHARE_SCRIPT` + `SHARE_STYLE` via `dangerouslySetInnerHTML`. Move SHARE_SCRIPT to a static asset (or a per-request `<script nonce>`), drop `unsafe-inline` + `unsafe-eval`. See plan `/home/ewyct/.claude/plans/streamed-crafting-tide.md`.
 
 ## bugs
+Site
+  URL diffing
 Verify
-  
+VScode
+  repos show up multiple times
+  more disconnects in new version than previous
 ## features
-Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas
+Auto-feedback to resolve loop
 check tabs and enters and ctr+enters
 Heal on loop/schedule
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
