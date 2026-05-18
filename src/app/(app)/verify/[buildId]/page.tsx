@@ -112,6 +112,14 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
       baselineTextPath: d.baselineTextPath,
       currentTextPath: d.currentTextPath,
       textDiffSummary: meta?.textDiffSummary ?? null,
+      // Cross-branch baseline signals. When the build's branch had no
+      // baseline but the repo's default branch did, baselineSourceBranch
+      // tells the UI to label the comparison "baseline from <branch>".
+      // When NEITHER branch had a baseline but one exists elsewhere,
+      // baselineExistsOn tells the UI where to point the user instead of
+      // showing a bare "no baseline" empty state.
+      baselineSourceBranch: meta?.baselineSourceBranch ?? null,
+      baselineExistsOn: meta?.baselineExistsOn ?? null,
     };
   });
 

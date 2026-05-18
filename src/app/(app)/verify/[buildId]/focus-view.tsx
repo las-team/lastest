@@ -962,12 +962,12 @@ function ComparePane({ tab, step, visual, result, layerState, regionsCtx }: Comp
   }
 
   if (layerState === 'absent') {
-    const hint = absentHint(tab, step?.testId ?? null);
+    const hint = absentHint(tab, step?.testId ?? null, result);
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="v-card" style={{ padding: 24, textAlign: 'center', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
           <span className="label">{tab} not captured</span>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
             {hint.message}
           </p>
           {hint.settingsHref && (
@@ -1006,10 +1006,42 @@ interface AbsentHint {
   settingsLabel?: string;
 }
 
-function absentHint(layer: CompareTab, testId: string | null): AbsentHint {
+/**
+ * Build a context-aware "no screenshot" message using whatever we know about
+ * the run. Three cases, in order of specificity:
+ *   1. Test failed → say so + last-reached step + first line of errorMessage
+ *   2. Test passed but produced 0 screenshots → likely the test code didn't
+ *      call screenshot for this step, or a step-level capture failed silently.
+ *      Show how far the test got so operators can correlate with the test code.
+ *   3. No result at all → the runner never reported back; suggest re-running.
+ */
+function visualAbsentMessage(result?: TestResultLite | null): string {
+  if (!result) {
+    return 'No screenshot captured for this step. No test result was reported — re-run the build to populate this tab.';
+  }
+  const stepInfo = result.lastReachedStep != null && result.totalSteps != null
+    ? `Reached step ${result.lastReachedStep} of ${result.totalSteps}.`
+    : '';
+  const durMs = result.durationMs ?? 0;
+  const durStr = durMs > 0 ? `Ran for ${(durMs / 1000).toFixed(1)}s.` : '';
+  if (result.status === 'failed' || result.status === 'setup_failed') {
+    const errSummary = (result.errorMessage ?? '').split('\n')[0]?.slice(0, 240) || 'no error message';
+    return `Test ${result.status === 'setup_failed' ? 'setup failed' : 'failed'} before this step captured. ${stepInfo} ${durStr}\n\n${errSummary}`.trim();
+  }
+  // Passed but no screenshot — most common path. Differentiate "explicit no-shot
+  // step" (test code never called screenshot) from "capture failed" (test
+  // walked all steps but the artifact never made it back).
+  const reachedAll = result.lastReachedStep != null && result.totalSteps != null && result.lastReachedStep >= result.totalSteps - 1;
+  if (reachedAll) {
+    return `Test passed but produced no screenshot for this step. ${stepInfo} ${durStr}\n\nLikely the test code didn't call screenshot here, or the capture failed silently on the EB. Check the Run tab logs.`.trim();
+  }
+  return `Test passed but stopped capturing before this step. ${stepInfo} ${durStr}\n\nThe step ran without producing a snapshot — re-run the test, or open the test definition to confirm a screenshot is requested at this step.`.trim();
+}
+
+function absentHint(layer: CompareTab, testId: string | null, result?: TestResultLite | null): AbsentHint {
   switch (layer) {
     case 'run':    return { message: 'No test result recorded for this case yet — the runner may not have started, or the test result row was deleted. Re-run the build to populate this tab.' };
-    case 'visual': return { message: 'No screenshot captured for this step. Visual capture happens automatically — check the runner logs if a step run completed without a snapshot.' };
+    case 'visual': return { message: visualAbsentMessage(result), settingsHref: testId ? `/tests/${testId}` : undefined, settingsLabel: testId ? 'Open test' : undefined };
     case 'text':   return {
       message: 'Page text capture is off. Enable "Text diff" in Diff Sensitivity settings to capture innerText and surface line-level page-text diffs here.',
       settingsHref: '/settings?highlight=diff-sensitivity',
@@ -1335,6 +1367,15 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
               {metricChip.label}
             </span>
           )}
+          {visual?.baselineSourceBranch && (
+            <span
+              className="v-chip"
+              style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}
+              title={`No baseline on this build's branch yet; comparing against ${visual.baselineSourceBranch} (the repo's default branch). Approve here to establish a same-branch baseline.`}
+            >
+              baseline from {visual.baselineSourceBranch}
+            </span>
+          )}
           {visual?.classification && (
             <span className="v-chip" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>{visual.classification}</span>
           )}
@@ -1406,7 +1447,13 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
         {mode === 'slider' && !(hasBaseline && hasCurrent) && (hasBaseline || hasCurrent) && (
           <div style={{ width: '100%' }}>
             <ImagePanel
-              label={hasCurrent ? 'current (no baseline yet)' : 'baseline (no current capture)'}
+              label={
+                hasCurrent
+                  ? (visual?.baselineExistsOn
+                    ? `current — no baseline on this branch yet (approved baseline exists on ${visual.baselineExistsOn.branch})`
+                    : 'current (no baseline yet)')
+                  : 'baseline (no current capture)'
+              }
               src={hasCurrent ? currentSrc : baselineSrc}
               regions={regions}
               changedRegions={changedRegions}

@@ -50,6 +50,17 @@ export interface VisualDiffLite {
   /** Line-count summary computed during the diff run; lets the Text tab
    *  render +/− deltas without re-fetching the text files. */
   textDiffSummary: { added: number; removed: number; sameAsBaseline: boolean } | null;
+  /** When the diff used a baseline from a different branch than the build's
+   *  (current branch had none → fell back to repo default), this is the
+   *  source branch. UI labels the comparison so the user knows it's a
+   *  cross-branch baseline. */
+  baselineSourceBranch: string | null;
+  /** When NO baseline existed on the current branch and no default-branch
+   *  fallback was available, points the user at where an approved baseline
+   *  does exist (or null when there is none anywhere). Prevents the
+   *  "baseline is gone" panic — the data hasn't been lost, it just hasn't
+   *  been promoted to this branch yet. */
+  baselineExistsOn: { branch: string; createdAt: string } | null;
 }
 
 export interface TestResultLite {

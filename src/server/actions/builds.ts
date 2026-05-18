@@ -1488,8 +1488,35 @@ async function processVisualDiff(
     }
   };
 
-  // Resolve primary baseline — branch-specific only, no fallback to main
-  const baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
+  // Resolve primary baseline. Prefer the build's branch; if there's no
+  // baseline there, fall back to the repo's default branch so feature-branch
+  // builds have something to compare against before they've approved their
+  // own. When the fallback fires we tag the diff metadata with
+  // `baselineSourceBranch` so the verify board can label the cross-branch
+  // comparison explicitly. If neither branch has a baseline, surface where
+  // ANY approved baseline exists (`baselineExistsOn`) so the user knows the
+  // baseline isn't lost — it just hasn't been promoted to this branch yet.
+  let baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
+  let baselineSourceBranch: string | undefined;
+  let baselineExistsOn: { branch: string; createdAt: string } | undefined;
+  if (!baseline && defaultBranch && defaultBranch !== branch) {
+    const fallback = await queries.getBranchBaseline(testId, stepLabel, defaultBranch, browser);
+    if (fallback) {
+      baseline = fallback;
+      baselineSourceBranch = defaultBranch;
+    }
+  }
+  if (!baseline) {
+    const anyBaseline = await queries.getAnyActiveBaseline(testId, stepLabel, browser);
+    if (anyBaseline) {
+      baselineExistsOn = {
+        branch: anyBaseline.branch,
+        createdAt: anyBaseline.createdAt instanceof Date
+          ? anyBaseline.createdAt.toISOString()
+          : String(anyBaseline.createdAt),
+      };
+    }
+  }
 
   // Check for carry-forward (previously approved identical image)
   // Try dimension-aware hash first, fall back to legacy hash for old baselines
@@ -1662,7 +1689,12 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
-      metadata: { changedRegions: [], isNewTest: true, ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
+      metadata: {
+        changedRegions: [],
+        isNewTest: true,
+        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(baselineExistsOn ? { baselineExistsOn } : {}),
+      },
       browser,
       baselineTextPath: textDiff.baselineTextPath,
       currentTextPath: textDiff.currentTextPath,
@@ -1752,6 +1784,9 @@ async function processVisualDiff(
     if (textDiff.textDiffSummary) {
       metadata.textDiffSummary = textDiff.textDiffSummary;
     }
+    if (baselineSourceBranch) {
+      metadata.baselineSourceBranch = baselineSourceBranch;
+    }
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1808,7 +1843,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: -1,
       percentageDifference: '-1',
-      metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
+      metadata: {
+        changedRegions: [],
+        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(baselineSourceBranch ? { baselineSourceBranch } : {}),
+      },
       browser,
       baselineTextPath: textDiff.baselineTextPath,
       currentTextPath: textDiff.currentTextPath,

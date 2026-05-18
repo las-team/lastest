@@ -123,6 +123,16 @@ export interface DiffMetadata {
   ocrDurationMs?: number;
   domDiff?: DomDiffResult;
   textDiffSummary?: { added: number; removed: number; sameAsBaseline: boolean };
+  // Branch the baseline was sourced from when it differs from the build's
+  // branch. Set by `processVisualDiff` when the current-branch baseline lookup
+  // misses and we fall back to the repo's default branch. UI uses this to
+  // label the diff "baseline from <branch>" so users know they're not
+  // comparing apples-to-apples within-branch.
+  baselineSourceBranch?: string;
+  // When no baseline exists on either the current branch or the default
+  // branch, surface where the user DOES have an approved baseline so they
+  // know it's not lost. Empty when there's no approved baseline anywhere.
+  baselineExistsOn?: { branch: string; createdAt: string };
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -2021,7 +2031,17 @@ export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
 
 export const runnerCommandResults = pgTable('runner_command_results', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  commandId: text('command_id').notNull().references(() => runnerCommands.id),
+  // `command_id` is intentionally NOT an FK: the parent runner_commands row
+  // can be reaped (`reapIdleEBJobs`, `cleanupOldCommands`) before an EB
+  // finishes draining late `response:*` POSTs after Job termination. With a
+  // hard FK we got `runner_command_results_command_id_runner_commands_id_fk`
+  // violations on those late inserts, while the on-disk artifact (screenshot,
+  // network-bodies file, etc.) was already written. Keeping the column as a
+  // logical reference lets the insert succeed; cleanup still happens — orphan
+  // result rows are deleted by `reapIdleEBJobs` via `runnerId`, and
+  // `cleanupOldCommands` deletes by `commandId` while the parent still
+  // exists.
+  commandId: text('command_id').notNull(),
   runnerId: text('runner_id').notNull().references(() => runners.id),
   type: text('type').notNull(), // 'response:test_result', 'response:screenshot', 'response:error'
   payload: jsonb('payload').$type<Record<string, unknown>>(),

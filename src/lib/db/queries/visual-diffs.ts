@@ -239,6 +239,35 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
 }
 
 /**
+ * Find the most recent active baseline for a test+step+browser across ANY
+ * branch. Used by the UX hint when the current branch (and default branch
+ * fallback) have nothing to diff against — lets the verify board tell the
+ * user "approved baseline exists on <branch>" instead of looking like the
+ * baseline was wiped.
+ */
+export async function getAnyActiveBaseline(
+  testId: string,
+  stepLabel: string | null | undefined,
+  browser: string = 'chromium',
+) {
+  const stepConditions = stepLabel
+    ? [eq(baselines.stepLabel, stepLabel)]
+    : [isNull(baselines.stepLabel)];
+  const [row] = await db
+    .select()
+    .from(baselines)
+    .where(and(
+      eq(baselines.testId, testId),
+      eq(baselines.isActive, true),
+      eq(baselines.browser, browser),
+      ...stepConditions,
+    ))
+    .orderBy(desc(baselines.createdAt))
+    .limit(1);
+  return row;
+}
+
+/**
  * Get all active baselines for a branch in a repository
  */
 export async function getBaselinesByBranch(repositoryId: string, branch: string) {
