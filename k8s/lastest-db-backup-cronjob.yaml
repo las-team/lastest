@@ -1,0 +1,70 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lastest-db-backup
+  namespace: lastest-dev-ewyctorlab
+  labels:
+    app: lastest-db-backup
+spec:
+  schedule: "0 3 * * 0"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: lastest-db-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+            - name: pgdump
+              image: postgres:17-alpine
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: lastest-db-backup-config
+                      key: database-url
+                - name: RETENTION_DAYS
+                  value: "84"
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%d-%H%M)
+                  OUT="/backup/lastest-${TS}.sql.gz"
+                  echo "[$(date -u +%H:%M:%S)] pg_dump → ${OUT}"
+                  pg_dump --no-owner --no-acl --format=plain "$DATABASE_URL" | gzip > "$OUT"
+                  echo "[$(date -u +%H:%M:%S)] gunzip -t"
+                  gunzip -t "$OUT"
+                  SIZE=$(stat -c%s "$OUT")
+                  echo "[$(date -u +%H:%M:%S)] OK size=${SIZE}B"
+                  echo "[$(date -u +%H:%M:%S)] pruning files older than ${RETENTION_DAYS} days"
+                  find /backup -maxdepth 1 -name 'lastest-*.sql.gz' -mtime +${RETENTION_DAYS} -print -delete || true
+                  echo "[$(date -u +%H:%M:%S)] remaining:"
+                  ls -lh /backup/ | tail -20
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 1000m
+                  memory: 512Mi
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              hostPath:
+                path: /olares/share/V_5TB_USB/backup_lastest
+                type: Directory

@@ -9,7 +9,7 @@ import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
 import type { TestRunResult } from '@/lib/playwright/types';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
-import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
+import { resolveBuildSetup } from '@/lib/setup/resolve-build-setup';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
@@ -876,53 +876,30 @@ async function runBuildAsync(
       repositoryId: repositoryId || null,
     };
 
-    // Pre-load storage states from default setup steps for remote runners
-    if (repositoryId) {
-      const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
-      for (const step of defaultSteps) {
-        if (step.stepType === 'storage_state' && step.storageStateId) {
-          const ss = await queries.getStorageState(step.storageStateId);
-          if (ss) {
-            setupContext.storageState = ss.storageStateJson;
-            console.log(`[build] Pre-loaded storage state "${ss.name}" for setup context`);
-            break; // Use first matching storage state
+    // Single-pass resolution: storage_state pre-load + build-level override
+    // (buildSetupTestId/ScriptId) + per-test setup fallback. Replaces three
+    // inline blocks that previously did the same default_setup_steps walk.
+    const resolved = await resolveBuildSetup({
+      tests,
+      repositoryId: repositoryId ?? null,
+      build: build
+        ? {
+            buildSetupTestId: build.buildSetupTestId ?? null,
+            buildSetupScriptId: build.buildSetupScriptId ?? null,
           }
-        }
-      }
-    }
+        : null,
+      logTag: '[build]',
+    });
+    const remoteSetupInfo = resolved.setupInfo;
+    setupContext.storageState = resolved.setupContext.storageState;
 
-    // Resolve setup info for remote runner
-    let remoteSetupInfo: { code: string; setupId: string } | undefined;
-
-    // Run build-level setup if configured
-    if (build?.buildSetupTestId || build?.buildSetupScriptId) {
-      // Resolve setup code locally, but execute it on the runner
-      await queries.updateBuild(buildId, { setupStatus: 'running' });
-
-      if (build.buildSetupTestId) {
-        const setupTest = await queries.getTest(build.buildSetupTestId);
-        if (setupTest) {
-          remoteSetupInfo = { code: setupTest.code, setupId: setupTest.id };
-        } else {
-          console.warn(`[build-setup] Setup test not found: ${build.buildSetupTestId} - skipping`);
-        }
-      } else if (build.buildSetupScriptId) {
-        const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
-        if (setupScript && setupScript.type === 'playwright') {
-          remoteSetupInfo = { code: setupScript.code, setupId: setupScript.id };
-        } else {
-          console.warn(`[build-setup] Setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
-        }
-      }
-
-      if (!remoteSetupInfo) {
-        // No valid setup code found, mark as skipped
-        await queries.updateBuild(buildId, { setupStatus: 'skipped' });
-      }
-      // setupStatus will be updated after executor runs setup on the runner
-    } else {
-      await queries.updateBuild(buildId, { setupStatus: 'skipped' });
-    }
+    // setupStatus accounting: 'running' once we know setup code will execute on
+    // the runner (flipped to 'completed' after executor returns, line ~975);
+    // 'skipped' otherwise (no setup configured, or build-level config didn't
+    // resolve — in which case resolveBuildSetup already logged a warning).
+    await queries.updateBuild(buildId, {
+      setupStatus: remoteSetupInfo ? 'running' : 'skipped',
+    });
 
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
@@ -941,16 +918,6 @@ async function runBuildAsync(
       if (runnerId && runnerId !== 'auto') {
         const remoteRunner = await queries.getRunnerById(runnerId);
         maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
-      }
-
-      // If no build-level setup, resolve per-test setup code to run on the runner
-      if (!remoteSetupInfo) {
-        const resolved = await resolveSetupCodeForRunner(tests);
-        if (resolved) {
-          remoteSetupInfo = resolved;
-          await queries.updateBuild(buildId, { setupStatus: 'running' });
-          console.log(`[build] Resolved per-test setup for runner: setupId=${resolved.setupId}`);
-        }
       }
 
       try {
