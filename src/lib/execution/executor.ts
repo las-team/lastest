@@ -945,6 +945,83 @@ async function executeViaRunner(
  * Returns the collected results, or `null` if no EB could be claimed at all
  * (so the caller can fall through to the queue path).
  */
+/**
+ * GET the EB pod's /health endpoint (port 9224, exposed by
+ * `packages/embedded-browser/src/index.ts`'s health server). Used to
+ * disambiguate "Target has been closed" style Playwright errors:
+ *   - probe 200 → EB is alive, error is test-code → don't burn another EB
+ *   - probe fails / non-200 → EB is dead → retry on a fresh EB
+ *
+ * Looks up `embedded_sessions.containerUrl` (set at register time to
+ * http://<host>:<streamPort>) and swaps the port to 9224. 2s timeout so the
+ * probe can't stall dispatch when the pod is actually offline. See
+ * docs/eb-and-setup-plan.md B5.
+ */
+async function probeEBHealth(runnerId: string): Promise<boolean> {
+  try {
+    const { db } = await import('@/lib/db');
+    const { embeddedSessions } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db
+      .select({ containerUrl: embeddedSessions.containerUrl })
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.runnerId, runnerId))
+      .limit(1);
+    if (!row?.containerUrl) return false;
+    const healthUrl = row.containerUrl.replace(/:(\d+)(?=$|\/)/, ':9224') + '/health';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const res = await fetch(healthUrl, { signal: controller.signal });
+      return res.ok;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    // Treat any probe error (DNS, timeout, abort) as "dead" so we err toward
+    // retrying. The cost of a false dead-EB classification is one EB; the cost
+    // of a false alive classification is a confusing test failure.
+    return false;
+  }
+}
+
+/**
+ * Persist a dead-EB attempt as a `test_results` marker row so operators can
+ * see how often the executor is silently retrying due to EB infrastructure
+ * failures (CNI churn, Chromium crash, runner-client disconnect, etc.).
+ *
+ * Marked `isFlaky=true` so the post-build retry loop (`builds.ts:980+`) does
+ * NOT re-run the test — the executor's own MAX_EB_ATTEMPTS retry already
+ * happened. The errorMessage carries a `[EB-dead attempt N]` prefix that
+ * surfaces in the verify board and flake views as a distinct cause.
+ *
+ * Direct DB write (not via onResult) so we don't accidentally trigger visual
+ * diff generation / AI analysis on a row that has no screenshots. Fire-and-
+ * forget — never throws to the executor; a missed marker row is better than
+ * a build that fails because of a logging hiccup. See docs/eb-and-setup-plan.md B4.
+ */
+async function persistDeadEBAttempt(
+  testRunId: string,
+  testId: string,
+  attempt: number,
+  errorMessage: string,
+): Promise<void> {
+  try {
+    const { createTestResult } = await import('@/lib/db/queries');
+    await createTestResult({
+      testRunId,
+      testId,
+      status: 'failed',
+      screenshots: [],
+      errorMessage: `[EB-dead attempt ${attempt}] ${errorMessage}`.slice(0, 4000),
+      durationMs: 0,
+      isFlaky: true,
+    });
+  } catch (err) {
+    console.warn('[Dispatch] persistDeadEBAttempt failed (non-fatal):', err);
+  }
+}
+
 async function executeViaPoolWorkers(
   tests: Test[],
   runId: string,
@@ -956,6 +1033,27 @@ async function executeViaPoolWorkers(
 ): Promise<TestRunResult[] | null> {
   if (tests.length === 0) return [];
   const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+  const { incBuildDispatch, decBuildDispatch, prewarmForBuild, ensureWarmPool, isKubernetesMode } =
+    await import('@/lib/eb/provisioner');
+
+  // Suppress per-release warm-pool refill while this build is dispatching.
+  // ensureWarmPool no-ops; the build's claimOrProvisionPoolEB handles
+  // provisioning on demand. Without this, every test release spawns up to
+  // `warmPoolMin` replacement EBs that the build doesn't need and that get
+  // reaped idle after TTL. See docs/eb-and-setup-plan.md B1.
+  incBuildDispatch();
+
+  // Pre-launch one EB per concurrent worker (plus one for the broadcast
+  // setup, when configured) so the first batch of tests doesn't pay the
+  // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
+  // See docs/eb-and-setup-plan.md B3.
+  if (isKubernetesMode()) {
+    const prewarmTarget = Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
+    prewarmForBuild(prewarmTarget).catch((err) => {
+      console.warn('[Dispatch] prewarmForBuild failed (non-fatal):', err);
+    });
+  }
+  try {
 
   const claimMaxWaitMs = parseInt(process.env.EB_CLAIM_MAX_WAIT_MS || '120000', 10);
   const claimWithRetry = async () => {
@@ -983,7 +1081,23 @@ async function executeViaPoolWorkers(
   // "Target has been closed" style error). Anything beyond that is almost
   // certainly the test itself, not infra — surface the failure.
   const MAX_EB_ATTEMPTS = 2;
-  const EB_DEAD_ERR_RX = /Target .*has been closed|offline|crash|runner went|ECONNREFUSED|EB network unhealthy|page\.screenshot.*Target page.*closed/i;
+  // Split the dead-EB classifier (B5):
+  //   - INFRA_RX matches things only the EB infra produces (refused conn,
+  //     crash, runner registration loss) — retry immediately, no probe.
+  //   - MAYBE_INFRA_RX matches Playwright-side messages that often coincide
+  //     with EB failure but also occur in legitimate test cleanup
+  //     ("Target has been closed", "page.screenshot ... Target page closed").
+  //     We probe the EB's /health before deciding to burn another EB.
+  const EB_INFRA_ERR_RX = /offline|crash|runner went|ECONNREFUSED|EB network unhealthy/i;
+  const EB_MAYBE_INFRA_ERR_RX = /Target .*has been closed|page\.screenshot.*Target page.*closed/i;
+  const isDeadEBError = async (msg: string, runnerId: string): Promise<boolean> => {
+    if (EB_INFRA_ERR_RX.test(msg)) return true;
+    if (!EB_MAYBE_INFRA_ERR_RX.test(msg)) return false;
+    // Ambiguous — probe the EB's /health. If reachable + 200, the EB is alive
+    // and this is a test-code issue; don't waste another EB. If probe fails,
+    // treat as dead.
+    return !(await probeEBHealth(runnerId));
+  };
 
   const resultMap = new Map<string, TestRunResult>();
   let completedCount = 0;
@@ -1056,7 +1170,7 @@ async function executeViaPoolWorkers(
         setupErr = msg;
         // Only retry on infra-looking failures — a real setup bug (script
         // error, bad selector, wrong URL) shouldn't consume EBs.
-        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+        if (attempt < MAX_EB_ATTEMPTS && await isDeadEBError(msg, eb.runnerId)) {
           console.warn(`[Dispatch] Broadcast setup hit dead-EB on attempt ${attempt}, retrying: ${msg}`);
           continue;
         }
@@ -1131,18 +1245,21 @@ async function executeViaPoolWorkers(
 
         const deadResult = result.status === 'failed'
           && !!result.errorMessage
-          && EB_DEAD_ERR_RX.test(result.errorMessage);
-        if (deadResult && attempt < MAX_EB_ATTEMPTS) {
-          lastError = result.errorMessage;
+          && attempt < MAX_EB_ATTEMPTS
+          && await isDeadEBError(result.errorMessage, eb.runnerId);
+        if (deadResult) {
+          lastError = result.errorMessage!;
           console.warn(`[Dispatch] Dead-EB result on attempt ${attempt} for "${test.name}", retrying: ${lastError}`);
+          await persistDeadEBAttempt(runId, test.id, attempt, lastError);
           continue;
         }
         return result;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         lastError = msg;
-        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+        if (attempt < MAX_EB_ATTEMPTS && await isDeadEBError(msg, eb.runnerId)) {
           console.warn(`[Dispatch] Dead-EB exception on attempt ${attempt} for "${test.name}", retrying: ${msg}`);
+          await persistDeadEBAttempt(runId, test.id, attempt, msg);
           continue;
         }
         return fireResult({
@@ -1221,6 +1338,14 @@ async function executeViaPoolWorkers(
   }
 
   return everClaimed ? results : null;
+  } finally {
+    decBuildDispatch();
+    // Let the warm pool catch up exactly once after the build finishes.
+    // Fire-and-forget so the build response isn't blocked on a pool refill.
+    ensureWarmPool().catch((err) => {
+      console.warn('[Dispatch] post-build ensureWarmPool failed:', err);
+    });
+  }
 }
 
 /**

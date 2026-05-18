@@ -450,6 +450,19 @@ export async function listEBJobNames(): Promise<Set<string>> {
   return new Set(items.map((j) => j.metadata?.name).filter((n): n is string => !!n));
 }
 
+// Build-dispatch in-flight counter. Incremented by `executeViaPoolWorkers`
+// before claiming the first EB and decremented after the last test releases.
+// While > 0, `ensureWarmPool()` no-ops: the build's `claimOrProvisionPoolEB`
+// provisions on demand, so the warm-pool refill that fires after every release
+// is pure waste (the spawned warm EB never gets claimed before TTL). Saves
+// ~10 EB launches on a 16-test build (`docs/eb-and-setup-plan.md` B1).
+let _buildDispatchInFlight = 0;
+export function incBuildDispatch(): void { _buildDispatchInFlight++; }
+export function decBuildDispatch(): void {
+  _buildDispatchInFlight = Math.max(0, _buildDispatchInFlight - 1);
+}
+export function inBuildDispatch(): number { return _buildDispatchInFlight; }
+
 /**
  * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
  * Counts `online` system EB runners; if the count is below the warm minimum,
@@ -457,9 +470,13 @@ export async function listEBJobNames(): Promise<Set<string>> {
  *
  * Safe to call repeatedly — subsequent calls no-op once the pool is warm.
  * Call on app startup and from the periodic cleanup loop.
+ *
+ * No-op while a build is dispatching (see `_buildDispatchInFlight`): warm-pool
+ * refill that races with on-demand provisioning just wastes pods.
  */
 export async function ensureWarmPool(): Promise<number> {
   if (!isKubernetesMode()) return 0;
+  if (_buildDispatchInFlight > 0) return 0;
   const want = warmPoolMin();
   if (want <= 0) return 0;
 
@@ -505,5 +522,46 @@ export async function ensureWarmPool(): Promise<number> {
     }
   }
   if (launched > 0) console.log(`[EB Provisioner] Warm pool topped up (+${launched}, target ${want})`);
+  return launched;
+}
+
+/**
+ * Pre-launch `targetCount` EB Jobs up front for a build, capped by the global
+ * `ebPoolMax` minus what's already in flight. Each launch goes through the
+ * shared `awaitLaunchSlot()` throttle so CNI doesn't burst.
+ *
+ * Different from `ensureWarmPool`: the caller picks the target, and we don't
+ * gate on the idle-count deficit — builds know their concurrency, warm pool
+ * doesn't. Pair with `incBuildDispatch()` so the per-release warm refill stays
+ * suppressed; otherwise we'd double-spawn.
+ *
+ * Returns the number actually launched (may be less than requested if pool is
+ * near cap or any launch throws).
+ */
+export async function prewarmForBuild(targetCount: number): Promise<number> {
+  if (!isKubernetesMode()) return 0;
+  if (targetCount <= 0) return 0;
+
+  const cap = await poolMax();
+  const size = await currentPoolSize();
+  const canLaunch = Math.min(targetCount, Math.max(0, cap - size));
+  if (canLaunch <= 0) return 0;
+
+  let launched = 0;
+  for (let i = 0; i < canLaunch; i++) {
+    incInFlightProvisions();
+    try {
+      await launchEBJob();
+      launched++;
+      setTimeout(() => decInFlightProvisions(), 120_000);
+    } catch (err) {
+      decInFlightProvisions();
+      console.warn('[EB Provisioner] prewarmForBuild launch failed:', err);
+      break;
+    }
+  }
+  if (launched > 0) {
+    console.log(`[EB Provisioner] Prewarmed ${launched} EB(s) for build (target ${targetCount})`);
+  }
   return launched;
 }
