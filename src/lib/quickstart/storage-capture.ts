@@ -46,21 +46,16 @@ function buildExpectStub() {
   });
 }
 
-export async function captureStorageState(
+// Transient infrastructure failures that warrant an automatic retry.
+// Content failures (form validation, disposable email, captcha) are NOT
+// retried — the user needs to see those verbatim and adjust the email template.
+const TRANSIENT_ERROR_RE = /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|net::ERR_(?:CONNECTION|NETWORK|TIMED_OUT|SOCKET|EMPTY|TUNNEL)|Target page, context or browser has been closed|Protocol error/i;
+
+async function attemptCapture(
   input: CaptureStorageStateInput,
-): Promise<CaptureStorageStateResult> {
-  const start = Date.now();
+  body: string,
+): Promise<{ ok: true; storageStateJson: string } | { ok: false; reason: string }> {
   const timeoutMs = input.timeoutMs ?? 90_000;
-
-  const body = extractTestBody(input.testCode);
-  if (!body) {
-    return {
-      captured: false,
-      failureReason: 'could not extract test() body from rendered code',
-      durationMs: Date.now() - start,
-    };
-  }
-
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
     browser = await chromium.launch({ headless: true });
@@ -76,14 +71,7 @@ export async function captureStorageState(
 
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const fn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', body);
-
-    const exec = fn(
-      page,
-      input.baseUrl,
-      '/tmp/quickstart-auth.png',
-      stepLogger,
-      buildExpectStub(),
-    );
+    const exec = fn(page, input.baseUrl, '/tmp/quickstart-auth.png', stepLogger, buildExpectStub());
 
     await Promise.race([
       exec,
@@ -93,27 +81,68 @@ export async function captureStorageState(
     ]);
 
     const storageStateJson = JSON.stringify(await context.storageState());
-    const persisted = await queries.createStorageState({
-      repositoryId: input.repositoryId,
-      name: input.name,
-      storageStateJson,
-    });
-
-    return {
-      captured: true,
-      storageStateId: persisted.id,
-      durationMs: Date.now() - start,
-    };
+    return { ok: true, storageStateJson };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+export async function captureStorageState(
+  input: CaptureStorageStateInput,
+): Promise<CaptureStorageStateResult> {
+  const start = Date.now();
+  const body = extractTestBody(input.testCode);
+  if (!body) {
     return {
       captured: false,
-      failureReason: reason,
+      failureReason: 'could not extract test() body from rendered code',
       durationMs: Date.now() - start,
     };
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
   }
+
+  // First attempt; one retry on transient network/browser errors.
+  let attempt = await attemptCapture(input, body);
+  if (!attempt.ok && TRANSIENT_ERROR_RE.test(attempt.reason)) {
+    console.warn(`[QuickStart auth-setup] transient error, retrying once: ${attempt.reason}`);
+    attempt = await attemptCapture(input, body);
+  }
+
+  if (!attempt.ok) {
+    return {
+      captured: false,
+      failureReason: attempt.reason,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  // Validate the captured state contains at least one cookie. A passing
+  // auth-setup script that left an empty cookie jar means the test technically
+  // navigated to a non-auth URL but the chain won't actually authenticate the
+  // walkthrough. Better to fail loudly here than to ship a useless storage state.
+  let cookieCount = 0;
+  try {
+    const parsed = JSON.parse(attempt.storageStateJson);
+    cookieCount = Array.isArray(parsed.cookies) ? parsed.cookies.length : 0;
+  } catch { /* parse failure handled below */ }
+  if (cookieCount === 0) {
+    return {
+      captured: false,
+      failureReason: 'auth-setup completed but captured 0 cookies — storage state would not authenticate the walkthrough. Likely the script navigated off the auth URL without actually signing in.',
+      durationMs: Date.now() - start,
+    };
+  }
+
+  const persisted = await queries.createStorageState({
+    repositoryId: input.repositoryId,
+    name: input.name,
+    storageStateJson: attempt.storageStateJson,
+  });
+
+  return {
+    captured: true,
+    storageStateId: persisted.id,
+    durationMs: Date.now() - start,
+  };
 }

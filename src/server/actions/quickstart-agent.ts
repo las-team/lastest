@@ -330,10 +330,16 @@ async function runQsAuthSetup(
   const stamp = meta.quickstartStamp!;
   const slug = meta.quickstartSlug!;
 
+  if (!publicScout.registerPath) {
+    await setFailed(sessionId, 'qs_auth_setup',
+      'Scout did not observe a register URL in the page DOM. Auth setup cannot proceed without one — no path guessing.');
+    return false;
+  }
+
   const code = renderAuthSetupCode({
     email,
     password,
-    registerPath: publicScout.registerPath ?? undefined,
+    registerUrl: publicScout.registerPath,
   });
 
   // Persist the auth setup test so the founder-facing share carries it too.
@@ -455,18 +461,21 @@ async function runQsGenerate(
   }
 
   const slug = meta.quickstartSlug!;
-  const authAutomatable = publicScout.authAutomatable && (meta.authSetup?.captured ?? false);
-  const chainedAuth = authAutomatable && !!meta.authSetup?.storageStateId;
+  // Authed walkthrough requires both: scout said automatable AND storage state
+  // was actually captured AND we have a storageStateId to chain. No fallback to
+  // inline-login (we don't guess login URLs).
+  const authAutomatable =
+    publicScout.authAutomatable
+    && (meta.authSetup?.captured ?? false)
+    && !!meta.authSetup?.storageStateId;
 
   const code = renderWalkthroughCode({
     authAutomatable,
-    chainedAuth,
-    email: meta.quickstartEmail,
-    password: meta.quickstartPassword,
+    chainedAuth: authAutomatable,
   });
 
   const setupOverrides: TestSetupOverrides | undefined =
-    chainedAuth && meta.authSetup?.storageStateId
+    authAutomatable && meta.authSetup?.storageStateId
       ? {
           skippedDefaultStepIds: [],
           extraSteps: [{
@@ -487,8 +496,7 @@ async function runQsGenerate(
   await setCompleted(sessionId, 'qs_generate', {
     walkthroughTestId: created.id,
     authAutomatable,
-    chainedAuth,
-    mode: authAutomatable ? (chainedAuth ? 'chained' : 'fallback') : 'public_only',
+    mode: authAutomatable ? 'chained' : 'public_only',
   });
   emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
     `Walkthrough test generated (${authAutomatable ? 'authed' : 'public-only'})`,

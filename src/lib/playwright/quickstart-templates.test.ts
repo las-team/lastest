@@ -15,32 +15,37 @@ const sampleEmail = 'viktor+postbox202604030915@lastest.cloud';
 const samplePassword = 'Lastest-Demo-202604030915!';
 
 describe('renderAuthSetupCode', () => {
-  const code = renderAuthSetupCode({ email: sampleEmail, password: samplePassword });
+  const code = renderAuthSetupCode({
+    email: sampleEmail,
+    password: samplePassword,
+    registerUrl: '/sign-up',
+  });
 
   it('exports the canonical 4-arg test function', () => {
     expect(code).toMatch(/export async function test\(page, baseUrl, screenshotPath, stepLogger\)/);
   });
 
-  it('handles relative registerPath by prefixing baseUrl', () => {
-    const rel = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerPath: '/sign-up' });
+  it('handles relative registerUrl by prefixing baseUrl', () => {
+    const rel = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerUrl: '/sign-up' });
     expect(rel).toMatch(/await page\.goto\(`\$\{baseUrl\}\/sign-up`/);
     expect(rel).not.toMatch(/baseUrl}https/);
   });
 
-  it('handles absolute registerPath (cross-subdomain auth) without prefixing baseUrl', () => {
-    const abs = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerPath: 'https://auth.example.com/register' });
+  it('handles absolute registerUrl (cross-subdomain auth) without prefixing baseUrl', () => {
+    const abs = renderAuthSetupCode({ email: sampleEmail, password: samplePassword, registerUrl: 'https://auth.example.com/register' });
     expect(abs).toMatch(/await page\.goto\('https:\/\/auth\.example\.com\/register'/);
     expect(abs).not.toMatch(/baseUrl\}https/);
+  });
+
+  it('does not URL-guess fallback paths (no /register, /signup, /users/register chain)', () => {
+    // Only the observed registerUrl should appear, never the old fallback chain.
+    expect(code).not.toMatch(/baseUrl\}\/register`.*\.catch/);
+    expect(code).not.toMatch(/baseUrl\}\/users\/register/);
   });
 
   it('does not redeclare expect (provided as runner param)', () => {
     expect(code).not.toMatch(/\bconst\s+expect\s*=/);
     expect(code).not.toMatch(/\bimport[^;]*expect/);
-  });
-
-  it('uses baseUrl rather than hardcoding the target URL', () => {
-    expect(code).not.toMatch(/https?:\/\//);
-    expect(code).toMatch(/baseUrl/);
   });
 
   it('inlines email + password literals as strings', () => {
@@ -70,17 +75,26 @@ describe('renderAuthSetupCode', () => {
   });
 });
 
-describe('renderWalkthroughCode — chained authed mode', () => {
+describe('renderWalkthroughCode — authed (chained storage state) mode', () => {
   const code = renderWalkthroughCode({
     authAutomatable: true,
     chainedAuth: true,
-    email: sampleEmail,
-    password: samplePassword,
   });
 
-  it('declares both AUTH_AUTOMATABLE=true and CHAINED_AUTH=true', () => {
+  it('declares AUTH_AUTOMATABLE=true', () => {
     expect(code).toContain('const AUTH_AUTOMATABLE = true;');
-    expect(code).toContain('const CHAINED_AUTH = true;');
+  });
+
+  it('does not contain an inline-login fallback block (no login-URL guessing)', () => {
+    expect(code).not.toMatch(/Fallback: inline login/);
+    expect(code).not.toMatch(/baseUrl\}\/login/);
+    expect(code).not.toMatch(/baseUrl\}\/signin/);
+    expect(code).not.toMatch(/baseUrl\}\/users\/sign_in/);
+    expect(code).not.toMatch(/CHAINED_AUTH/);
+  });
+
+  it('verifies storage-state auth via Sign-in CTA absence after navigation', () => {
+    expect(code).toMatch(/Storage state did not authenticate the browser/);
   });
 
   it('takes every screenshot at fullPage: true', () => {
@@ -120,9 +134,8 @@ describe('renderWalkthroughCode — public-only mode', () => {
     chainedAuth: false,
   });
 
-  it('disables both AUTH_AUTOMATABLE and CHAINED_AUTH', () => {
+  it('disables AUTH_AUTOMATABLE', () => {
     expect(code).toContain('const AUTH_AUTOMATABLE = false;');
-    expect(code).toContain('const CHAINED_AUTH = false;');
   });
 
   it('still walks the public phase', () => {

@@ -218,7 +218,11 @@ export default async function PublicSharePage({ params }: PageProps) {
           /public static asset, not a bundled module import. */}
       {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link rel="stylesheet" href="/share-slider.css" precedence="default" />
-      <script src="/share-slider.js" defer nonce={nonce} />
+      {/* Browsers strip the `nonce` attribute from the DOM after CSP
+          evaluation as a side-channel mitigation, so the client sees
+          nonce="" during hydration. The script has already loaded
+          correctly under the original nonce; suppress the cosmetic mismatch. */}
+      <script src="/share-slider.js" defer nonce={nonce} suppressHydrationWarning />
     </div>
   );
 }
@@ -1179,7 +1183,15 @@ function TestShareBody({
     sliderDiffs.length === 0
       ? buildBaselineSliders(baselineFallback, testResult, toUrl)
       : [];
-  const gallery = buildGallery(diffs, results, toUrl, stepPaths);
+  // When there's nothing to compare against (no diffs AND no baselines), the
+  // step strip is the only place screenshots show up — at tiny thumbnail size.
+  // Drop the dedupe-against-strip filter in that case so the gallery renders
+  // the same screenshots large below the strip.
+  const galleryDedupeSet =
+    sliderDiffs.length === 0 && passedSliders.length === 0
+      ? new Set<string>()
+      : stepPaths;
+  const gallery = buildGallery(diffs, results, toUrl, galleryDedupeSet);
 
   const pullQuote =
     pixelsChanged > 0
@@ -1581,29 +1593,32 @@ function buildGallery(
 
 function GallerySection({ items }: { items: GalleryItem[] }) {
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
       <h2 className="text-sm font-medium text-muted-foreground">
         {items.length === 1 ? 'Screenshot' : `${items.length} screenshots`}
       </h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {items.map((g, i) => (
-          <figure key={i} className="space-y-1.5">
-            <div className="relative aspect-[4/3] rounded-md border bg-muted overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={g.src}
-                alt={g.label}
-                loading="lazy"
-                decoding="async"
-                className="absolute inset-0 w-full h-full object-cover object-top"
-              />
-            </div>
-            <figcaption className="text-xs text-muted-foreground truncate">
+      {/* Stacked full-width frames mirror the DiffSlider stage so a passing /
+          no-diff share shows screenshots at the same scale as a comparison
+          view — natural aspect, top-aligned, no cropping. */}
+      {items.map((g, i) => (
+        <figure key={i} className="space-y-2">
+          <header className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-medium text-foreground truncate">
               {g.label}
-            </figcaption>
-          </figure>
-        ))}
-      </div>
+            </span>
+          </header>
+          <div className="relative rounded-md border bg-muted overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={g.src}
+              alt={g.label}
+              loading="lazy"
+              decoding="async"
+              className="block w-full h-auto select-none"
+            />
+          </div>
+        </figure>
+      ))}
     </section>
   );
 }

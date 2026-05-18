@@ -21,8 +21,10 @@ export interface RenderAuthSetupOptions {
   email: string;
   password: string;
   name?: string;
-  /** Optional override register path (e.g. '/auth/signup'). Default chain probes /register, /signup, /users/register. */
-  registerPath?: string;
+  /** Register URL observed by the scout in the page DOM. Relative path (starting with /)
+   *  for same-origin signup pages; full https:// URL for cross-subdomain auth (e.g.
+   *  auth.example.com). REQUIRED — no path-guessing fallback. */
+  registerUrl: string;
 }
 
 export interface RenderWalkthroughOptions {
@@ -32,8 +34,9 @@ export interface RenderWalkthroughOptions {
   /** Same literals as Test 1 — required when chainedAuth=false so inline login can re-auth. */
   email?: string;
   password?: string;
-  /** Optional explicit login path probe order. Default: /login, /signin, /users/sign_in. */
-  loginPath?: string;
+  /** Login URL observed by the scout. Required when chainedAuth=false (fallback mode).
+   *  Same format rules as registerUrl: relative path or full https URL. */
+  loginUrl?: string;
 }
 
 function jsString(value: string): string {
@@ -41,35 +44,14 @@ function jsString(value: string): string {
   return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 }
 
-function gotoExpr(override: string): string {
+function gotoExpr(target: string): string {
   // Support absolute URLs (e.g. auth subdomain) and relative paths interchangeably.
-  if (/^https?:\/\//i.test(override)) {
-    return `await page.goto(${jsString(override)}, { waitUntil: 'domcontentloaded' });`;
+  // No path-guessing — we only navigate to what the scout actually observed in the DOM.
+  if (/^https?:\/\//i.test(target)) {
+    return `await page.goto(${jsString(target)}, { waitUntil: 'domcontentloaded' });`;
   }
-  const path = override.startsWith('/') ? override : `/${override}`;
+  const path = target.startsWith('/') ? target : `/${target}`;
   return `await page.goto(\`\${baseUrl}${path}\`, { waitUntil: 'domcontentloaded' });`;
-}
-
-function registerPathChain(override?: string): string {
-  if (override) return gotoExpr(override);
-  return [
-    "await page.goto(`${baseUrl}/register`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
-    "    await page.goto(`${baseUrl}/signup`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
-    "      await page.goto(`${baseUrl}/users/register`, { waitUntil: 'domcontentloaded' });",
-    "    });",
-    "  });",
-  ].join('\n  ');
-}
-
-function loginPathChain(override?: string): string {
-  if (override) return gotoExpr(override);
-  return [
-    "await page.goto(`${baseUrl}/login`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
-    "    await page.goto(`${baseUrl}/signin`, { waitUntil: 'domcontentloaded' }).catch(async () => {",
-    "      await page.goto(`${baseUrl}/users/sign_in`, { waitUntil: 'domcontentloaded' });",
-    "    });",
-    "  });",
-  ].join('\n  ');
 }
 
 export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
@@ -90,7 +72,7 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
   await settle();
 
   stepLogger.log('Scenario 1: Register form');
-  ${registerPathChain(opts.registerPath)}
+  ${gotoExpr(opts.registerUrl)}
   await settle();
   await page.screenshot({ path: shot(1, 'register-form'), fullPage: true });
 
@@ -238,15 +220,9 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
 
 export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const authAutomatable = opts.authAutomatable;
-  const chainedAuth = opts.chainedAuth;
-  const email = opts.email ?? '';
-  const password = opts.password ?? '';
 
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const AUTH_AUTOMATABLE = ${authAutomatable};
-  const CHAINED_AUTH = ${chainedAuth};
-  const DEMO_EMAIL = ${jsString(email)};
-  const DEMO_PASSWORD = ${jsString(password)};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   const settle = () => page.waitForLoadState('networkidle').catch(() => {});
@@ -287,39 +263,16 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   let authed = false;
   if (AUTH_AUTOMATABLE) {
     try {
-      if (CHAINED_AUTH) {
-        await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-        await settle();
-        const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
-          .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
-        if (await signInCta.isVisible().catch(() => false)) {
-          throw new Error('Chained auth did not yield an authenticated context');
-        }
-        authed = true;
-      } else {
-        stepLogger.log('Fallback: inline login');
-        ${loginPathChain(opts.loginPath)}
-        await settle();
-        const emailField = page.getByLabel(/email/i).first()
-          .or(page.getByPlaceholder(/email/i).first())
-          .or(page.locator('input[type="email"]').first());
-        const passField = page.getByLabel(/password/i).first()
-          .or(page.getByPlaceholder(/password/i).first())
-          .or(page.locator('input[type="password"]').first());
-        await emailField.click();
-        await emailField.pressSequentially(DEMO_EMAIL, { delay: 20 });
-        await passField.click();
-        await passField.pressSequentially(DEMO_PASSWORD, { delay: 20 });
-        const submit = page.getByRole('button', { name: /sign ?in|log ?in|continue/i }).first();
-        await submit.click();
-        await Promise.race([
-          page.waitForURL(/dashboard|onboarding|welcome|home|app|projects/i, { timeout: 15000 }),
-          page.waitForLoadState('networkidle', { timeout: 15000 }),
-        ]).catch(() => {});
-        await settle();
-        if (/login|signin|sign-in/i.test(page.url())) throw new Error('inline login did not authenticate');
-        authed = true;
+      // Storage state (cookies + localStorage) was attached by the runner via
+      // setupOverrides.extraSteps. Just verify the chain actually authenticated.
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+      await settle();
+      const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
+        .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
+      if (await signInCta.isVisible().catch(() => false)) {
+        throw new Error('Storage state did not authenticate the browser (sign-in CTA still visible)');
       }
+      authed = true;
 
       stepLogger.log(\`Scenario \${publicScenario}: Post-auth landing\`);
       await page.screenshot({ path: shot(publicScenario, 'post-auth'), fullPage: true });
