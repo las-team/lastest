@@ -267,7 +267,13 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   const memLimit = process.env.EB_MEM_LIMIT || '4Gi';
   const shmSize = process.env.EB_SHM_SIZE || '512Mi';
   const activeDeadline = parseInt(process.env.EB_ACTIVE_DEADLINE_SECONDS || '1800', 10);
-  const ttlSeconds = parseInt(process.env.EB_TTL_SECONDS_AFTER_FINISHED || '60', 10);
+  // `ttlSecondsAfterFinished` controls how long k8s keeps the Pod (and its
+  // logs) around after the Job completes / fails. Was 60s — too short for
+  // forensic investigation when the executor's dead-EB path tags a test as
+  // `[EB-dead]`: by the time anyone looks, the pod is GC'd and logs are gone.
+  // 600s (10 min) is long enough to grab logs from a recent failure
+  // (`getEBPodInfo`) and short enough that Completed pods don't accumulate.
+  const ttlSeconds = parseInt(process.env.EB_TTL_SECONDS_AFTER_FINISHED || '600', 10);
 
   return {
     apiVersion: 'batch/v1',
@@ -416,6 +422,85 @@ export async function terminateEBJob(jobName: string): Promise<void> {
     return;
   }
   console.log(`[EB Provisioner] Deleted Job ${jobName}`);
+}
+
+/**
+ * Forensic helper: fetch the EB pod's status + last N lines of logs after the
+ * executor flags it as `[EB-dead]`. Best-effort — every call has a hard 2s
+ * timeout per k8s round-trip so it can't stall the dispatcher when the pod is
+ * unreachable. Returns `null` if anything goes wrong; the caller already has a
+ * generic timeout error to fall back on.
+ *
+ * Used from `executor.ts`'s per-test timeout to disambiguate OOMKilled vs
+ * CNI-flake vs Chromium-crash without forcing users to `kubectl` after the
+ * fact. Requires `pods` + `pods/log` RBAC, which the app SA already has
+ * (`k8s/embedded-browser-rbac.yaml:24-29`).
+ */
+export interface EBPodInfo {
+  podName: string;
+  phase: string;                   // Pending | Running | Succeeded | Failed | Unknown
+  reason?: string;                 // OOMKilled / Error / Completed / Evicted / ...
+  exitCode?: number;
+  message?: string;                // kubelet-reported reason (e.g. "DeadlineExceeded")
+  logs: string;                    // tail of the container's stdout/stderr
+}
+
+export async function getEBPodInfo(jobName: string, tailLines = 80): Promise<EBPodInfo | null> {
+  if (!isKubernetesMode()) return null;
+  try {
+    const creds = loadClusterCreds();
+    // 1. Resolve the Pod for this Job. Job templates carry the `job-name`
+    //    label by default; we add `app=lastest-eb` for filtering and a
+    //    per-instance label, but `job-name` is the surest match.
+    const listResp = await k8sRequest(
+      'GET',
+      `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods?labelSelector=${encodeURIComponent(`job-name=${jobName}`)}&limit=1`,
+    );
+    if (listResp.status < 200 || listResp.status >= 300) return null;
+    const items = (listResp.data as {
+      items?: Array<{
+        metadata?: { name?: string };
+        status?: {
+          phase?: string;
+          message?: string;
+          containerStatuses?: Array<{
+            state?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
+            lastState?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
+          }>;
+        };
+      }>;
+    } | null)?.items ?? [];
+    if (items.length === 0) return null;
+    const pod = items[0]!;
+    const podName = pod.metadata?.name;
+    if (!podName) return null;
+
+    const cstat = pod.status?.containerStatuses?.[0];
+    const terminated = cstat?.state?.terminated ?? cstat?.lastState?.terminated;
+
+    // 2. Fetch tail of pod logs. `previous=false` reads the current container
+    //    instance (k8s only retains `previous=true` for restarted containers,
+    //    and our EBs have backoffLimit=0 so they don't restart).
+    const logsResp = await k8sRequest(
+      'GET',
+      `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods/${encodeURIComponent(podName)}/log?tailLines=${tailLines}&previous=false`,
+    );
+    const logsRaw = typeof logsResp.data === 'string'
+      ? logsResp.data
+      : (logsResp.status >= 200 && logsResp.status < 300 ? '' : `<log fetch failed status=${logsResp.status}>`);
+
+    return {
+      podName,
+      phase: pod.status?.phase ?? 'Unknown',
+      reason: terminated?.reason,
+      exitCode: terminated?.exitCode,
+      message: terminated?.message ?? pod.status?.message,
+      logs: logsRaw,
+    };
+  } catch (err) {
+    console.warn('[EB Provisioner] getEBPodInfo failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /**

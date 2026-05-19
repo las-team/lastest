@@ -907,9 +907,73 @@ async function executeViaRunner(
     // Check for timeouts
     for (const [commandId, info] of inFlight) {
       if (Date.now() - info.startTime > testTimeout) {
-        console.error(`[Executor] Test ${info.testId} timed out after ${testTimeout}ms`);
-        // Cancel the stale test on the runner so it frees resources
-        await queueCancelCommandToDB(runnerId, runId, `Server-side timeout after ${testTimeout}ms`);
+        // Probe the runner row to disambiguate "EB died" vs "test code hung".
+        // Hard-failures inside a test (page.goto stuck, await never resolves)
+        // produce the same surface symptom as the EB itself dying (pod OOM,
+        // CNI yank, kubelet eviction): no results post for testTimeout. The
+        // recovery is different though — a dead EB warrants retry on a fresh
+        // pod, while a hung test should surface as-is and not burn a second
+        // EB. Tagging the dead-EB case with `[EB-dead]` makes the pool path's
+        // EB_INFRA_ERR_RX match and triggers `runOneTest`'s retry.
+        const runnerRow = await db
+          .select({ status: runners.status, lastSeen: runners.lastSeen, name: runners.name })
+          .from(runners)
+          .where(eq(runners.id, runnerId))
+          .limit(1)
+          .then((rows) => rows[0])
+          .catch(() => undefined);
+        const lastSeenMs = runnerRow?.lastSeen
+          ? Date.now() - new Date(runnerRow.lastSeen).getTime()
+          : -1;
+        // 90s matches the runner-side heartbeat reaper grace (cleanup-loop's
+        // SESSION_TIMEOUT_MS=60s + headroom). If lastSeen is older than that,
+        // the EB has effectively gone away even if the row hasn't flipped to
+        // 'offline' yet.
+        const runnerDead = !runnerRow
+          || runnerRow.status === 'offline'
+          || (lastSeenMs >= 0 && lastSeenMs > 90_000);
+
+        const lastSeenStr = lastSeenMs >= 0 ? `${Math.round(lastSeenMs / 1000)}s ago` : 'never';
+
+        // When the runner is dead, snapshot the EB pod's status + last 80 log
+        // lines from k8s so the cause is captured in the test_result instead
+        // of being lost when the pod TTLs out. Best-effort: no-op if not in
+        // k8s mode or the API call fails. EB_TTL_SECONDS_AFTER_FINISHED (600s
+        // default, see provisioner.ts) keeps the pod alive long enough to
+        // grab logs even on a build that took 5 min to time out.
+        let podDiagnostics = '';
+        if (runnerDead && runnerRow?.name) {
+          try {
+            const { getEBPodInfo, jobNameForRunnerName } = await import('@/lib/eb/provisioner');
+            const jobName = jobNameForRunnerName(runnerRow.name);
+            if (jobName) {
+              const info = await getEBPodInfo(jobName, 80);
+              if (info) {
+                const headerBits = [
+                  `pod=${info.podName}`,
+                  `phase=${info.phase}`,
+                  info.reason ? `reason=${info.reason}` : '',
+                  info.exitCode !== undefined ? `exitCode=${info.exitCode}` : '',
+                  info.message ? `message=${info.message.slice(0, 200)}` : '',
+                ].filter(Boolean).join(' ');
+                const trimmedLogs = (info.logs || '').slice(-2000); // last 2KB of stdout
+                podDiagnostics = `\n[EB-pod ${headerBits}]\n${trimmedLogs}`;
+              }
+            }
+          } catch (err) {
+            console.warn('[Executor] getEBPodInfo threw:', err instanceof Error ? err.message : err);
+          }
+        }
+
+        const errorMessage = runnerDead
+          ? `[EB-dead] runner went offline mid-test (status=${runnerRow?.status ?? 'missing'}, lastSeen=${lastSeenStr}, testTimeout=${testTimeout}ms)${podDiagnostics}`
+          : `Test execution timed out after ${testTimeout}ms (runner alive — test code hung; last reported activity ${lastSeenStr})`;
+
+        console.error(`[Executor] Test ${info.testId} timed out: ${errorMessage}`);
+        // Cancel the stale test on the runner so it frees resources (no-op if
+        // the runner is already dead — the cancel command just gets reaped
+        // alongside the dead runner's other commands).
+        await queueCancelCommandToDB(runnerId, runId, errorMessage);
         inFlight.delete(commandId);
         completedCount++;
         const timeoutResult: TestRunResult = {
@@ -917,7 +981,7 @@ async function executeViaRunner(
           status: 'failed',
           durationMs: testTimeout,
           screenshots: [],
-          errorMessage: `Test execution timed out after ${testTimeout}ms`,
+          errorMessage,
         };
         results.push(timeoutResult);
         await onResult?.(timeoutResult);

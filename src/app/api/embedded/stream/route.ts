@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { requireAuth } from '@/lib/auth';
 import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
-import { toProxyStreamUrl } from '@/lib/eb/stream-url';
+import { toProxyStreamUrl, probeStreamUrlAlive } from '@/lib/eb/stream-url';
 
 /**
  * GET /api/embedded/stream
@@ -42,16 +42,33 @@ export async function GET() {
 
     const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
 
-    return NextResponse.json({
-      sessions: allSessions.map((s) => {
-        // Drop the streamUrl for sessions whose EB is gone — keeps the recording
-        // poll loop from latching onto a dead pod IP after the Job was torn down.
+    // TCP-probe every live streamUrl in parallel. Catches the race where the
+    // DB still shows a session as ready/busy but the backing pod was reaped
+    // (1-job-1-EB) or crashed before status was flipped to stopping — handing
+    // that URL back leads the BrowserViewer through 5 reconnect attempts and a
+    // silent flip to Disconnected.
+    const aliveByIndex = await Promise.all(
+      allSessions.map((s) => {
         const isLive = s.status !== 'stopped' && s.status !== 'stopping';
+        if (!isLive || !s.streamUrl) return Promise.resolve(false);
+        return probeStreamUrlAlive(s.streamUrl);
+      }),
+    );
+
+    return NextResponse.json({
+      sessions: allSessions.map((s, i) => {
+        const isLive = s.status !== 'stopped' && s.status !== 'stopping';
+        const probedAlive = aliveByIndex[i];
+        if (isLive && !probedAlive && s.streamUrl) {
+          console.warn(
+            `[stream] EB unreachable, hiding streamUrl runner=${s.runnerId?.slice(0, 8) ?? 'none'} session=${s.id.slice(0, 8)} status=${s.status} url=${s.streamUrl}`,
+          );
+        }
         return {
           id: s.id,
           runnerId: s.runnerId,
           status: s.status,
-          streamUrl: isLive ? toProxyStreamUrl(s.streamUrl) : null,
+          streamUrl: isLive && probedAlive ? toProxyStreamUrl(s.streamUrl) : null,
           viewport: s.viewport,
           currentUrl: s.currentUrl,
           userId: s.userId,
