@@ -935,14 +935,17 @@ async function executeViaRunner(
 
         const lastSeenStr = lastSeenMs >= 0 ? `${Math.round(lastSeenMs / 1000)}s ago` : 'never';
 
-        // When the runner is dead, snapshot the EB pod's status + last 80 log
-        // lines from k8s so the cause is captured in the test_result instead
-        // of being lost when the pod TTLs out. Best-effort: no-op if not in
-        // k8s mode or the API call fails. EB_TTL_SECONDS_AFTER_FINISHED (600s
-        // default, see provisioner.ts) keeps the pod alive long enough to
-        // grab logs even on a build that took 5 min to time out.
+        // Snapshot the EB pod's status + last 80 log lines from k8s on EVERY
+        // timeout (not just runnerDead). When the runner is alive but the
+        // test code hung, the pod logs are the only window into what the
+        // test-executor was doing — often this is an early Chromium init
+        // stall (`browser.newContext` / `testContext.newPage` hanging on a
+        // CPU-starved or memory-pressured node) where the runner-client is
+        // happily heartbeating while the test-executor never reached
+        // `instrumentStepTracking` (so `lastReachedStep` / `totalSteps`
+        // stay null in the result). Best-effort, no-op if not in k8s mode.
         let podDiagnostics = '';
-        if (runnerDead && runnerRow?.name) {
+        if (runnerRow?.name) {
           try {
             const { getEBPodInfo, jobNameForRunnerName } = await import('@/lib/eb/provisioner');
             const jobName = jobNameForRunnerName(runnerRow.name);
@@ -965,9 +968,39 @@ async function executeViaRunner(
           }
         }
 
+        // Distinguish three timeout flavours for triage:
+        //   - EB-dead:    runner row gone / offline / heartbeat stale → pod
+        //                 death (OOMKilled, CNI yank, eviction) → retry on a
+        //                 fresh EB via `runOneTest`'s `EB_INFRA_ERR_RX` match.
+        //   - EB-stalled: runner alive AND the EB never POSTed ANY response
+        //                 for this command. The EB picked up the command
+        //                 (claimedAt is set on `runner_commands`) but never
+        //                 produced even a screenshot, step_event, or partial
+        //                 test_result → test-executor is hung in early init
+        //                 (browser.newContext / page.addInitScript / first
+        //                 page.goto, often CPU-starved on the node). Tag as
+        //                 EB-stalled so it matches `EB_INFRA_ERR_RX` and
+        //                 retries on a fresh EB — the user's test never ran.
+        //   - test-hung:  runner alive AND the EB POSTed at least one
+        //                 response → test code is itself stuck (await never
+        //                 resolves, deep selector retry, infinite
+        //                 waitForFunction). Surface as-is; retry won't help.
+        // One probe row is enough to know "EB sent something"; we don't need
+        // a full count.
+        const { runnerCommandResults } = await import('@/lib/db/schema');
+        const probe = await db
+          .select({ id: runnerCommandResults.id })
+          .from(runnerCommandResults)
+          .where(eq(runnerCommandResults.commandId, commandId))
+          .limit(1)
+          .catch(() => [] as Array<{ id: string }>);
+        const responseCount = probe.length;
+        const ebStalledNoStart = !runnerDead && responseCount === 0;
         const errorMessage = runnerDead
           ? `[EB-dead] runner went offline mid-test (status=${runnerRow?.status ?? 'missing'}, lastSeen=${lastSeenStr}, testTimeout=${testTimeout}ms)${podDiagnostics}`
-          : `Test execution timed out after ${testTimeout}ms (runner alive — test code hung; last reported activity ${lastSeenStr})`;
+          : ebStalledNoStart
+            ? `[EB-stalled] EB picked up the command but never POSTed a response within ${testTimeout}ms (runner alive ${lastSeenStr}; Chromium/CDP init likely stuck on the EB pod before the test body ran)${podDiagnostics}`
+            : `Test execution timed out after ${testTimeout}ms (runner alive — test code hung; last reported activity ${lastSeenStr}; ${responseCount} partial response(s) received)${podDiagnostics}`;
 
         console.error(`[Executor] Test ${info.testId} timed out: ${errorMessage}`);
         // Cancel the stale test on the runner so it frees resources (no-op if
@@ -1060,19 +1093,21 @@ async function probeEBHealth(runnerId: string): Promise<boolean> {
 }
 
 /**
- * Persist a dead-EB attempt as a `test_results` marker row so operators can
- * see how often the executor is silently retrying due to EB infrastructure
+ * Mark the just-completed test_result row as a dead-EB attempt so operators
+ * can see how often the executor is silently retrying due to EB infrastructure
  * failures (CNI churn, Chromium crash, runner-client disconnect, etc.).
  *
- * Marked `isFlaky=true` so the post-build retry loop (`builds.ts:980+`) does
- * NOT re-run the test — the executor's own MAX_EB_ATTEMPTS retry already
- * happened. The errorMessage carries a `[EB-dead attempt N]` prefix that
- * surfaces in the verify board and flake views as a distinct cause.
+ * `executeViaRunner`'s polling loop ALREADY persisted the failed result via
+ * `onResult` before `runOneTest` got to inspect it, so we don't insert a new
+ * row — we update the most recent failed row for this (testRunId, testId)
+ * that bears one of our infra tags. Setting `isFlaky=true` excludes it from
+ * the post-build retry loop in `builds.ts:980+` (the executor's own
+ * MAX_EB_ATTEMPTS retry already handles infra). Prefixing the errorMessage
+ * with `[EB-dead attempt N]` makes the cause grep-able in the verify board.
  *
- * Direct DB write (not via onResult) so we don't accidentally trigger visual
- * diff generation / AI analysis on a row that has no screenshots. Fire-and-
- * forget — never throws to the executor; a missed marker row is better than
- * a build that fails because of a logging hiccup. See docs/eb-and-setup-plan.md B4.
+ * Falls back to INSERT only if no recent row matches — that path is fire-and-
+ * forget and never throws: a missed marker is better than a build failing on
+ * a logging hiccup. See docs/eb-and-setup-plan.md B4.
  */
 async function persistDeadEBAttempt(
   testRunId: string,
@@ -1080,17 +1115,47 @@ async function persistDeadEBAttempt(
   attempt: number,
   errorMessage: string,
 ): Promise<void> {
+  const tagged = `[EB-dead attempt ${attempt}] ${errorMessage}`.slice(0, 4000);
   try {
+    const { db: dbRw } = await import('@/lib/db');
+    const { testResults: trTable } = await import('@/lib/db/schema');
+    const { eq: eqOp, and: andOp } = await import('drizzle-orm');
+    // Find the failed row for this (testRunId, testId) that's NOT already
+    // marked flaky — that's the one `executeViaRunner` just persisted via
+    // its onResult call. test_results has no createdAt column, so we rely
+    // on `isFlaky=false` to exclude rows from prior dead-EB attempts in the
+    // same run (those get flipped to isFlaky=true by this same code).
+    const [row] = await dbRw
+      .select({ id: trTable.id })
+      .from(trTable)
+      .where(andOp(
+        eqOp(trTable.testRunId, testRunId),
+        eqOp(trTable.testId, testId),
+        eqOp(trTable.status, 'failed'),
+        eqOp(trTable.isFlaky, false),
+      ))
+      .limit(1);
+    if (row) {
+      await dbRw.update(trTable)
+        .set({
+          isFlaky: true,
+          errorMessage: tagged, // tagged already contains the original errorMessage
+        })
+        .where(eqOp(trTable.id, row.id));
+      return;
+    }
+    // Fallback: no recent row to update — insert a marker row instead.
     const { createTestResult } = await import('@/lib/db/queries');
     await createTestResult({
       testRunId,
       testId,
       status: 'failed',
       screenshots: [],
-      errorMessage: `[EB-dead attempt ${attempt}] ${errorMessage}`.slice(0, 4000),
+      errorMessage: tagged,
       durationMs: 0,
       isFlaky: true,
     });
+    return;
   } catch (err) {
     console.warn('[Dispatch] persistDeadEBAttempt failed (non-fatal):', err);
   }
@@ -1162,14 +1227,28 @@ async function executeViaPoolWorkers(
   //     with EB failure but also occur in legitimate test cleanup
   //     ("Target has been closed", "page.screenshot ... Target page closed").
   //     We probe the EB's /health before deciding to burn another EB.
-  const EB_INFRA_ERR_RX = /offline|crash|runner went|ECONNREFUSED|EB network unhealthy/i;
+  const EB_INFRA_ERR_RX = /offline|crash|runner went|ECONNREFUSED|EB network unhealthy|EB-stalled/i;
   const EB_MAYBE_INFRA_ERR_RX = /Target .*has been closed|page\.screenshot.*Target page.*closed/i;
+  // Explicit tag the executor emits for test-code-hung timeouts (runner alive,
+  // ≥1 partial response received). Must NOT be treated as infra; the test was
+  // actually running and the user's code is to blame.
+  const TEST_HUNG_RX = /\(runner alive — test code hung;/;
   const isDeadEBError = async (msg: string, runnerId: string): Promise<boolean> => {
-    if (EB_INFRA_ERR_RX.test(msg)) return true;
-    if (!EB_MAYBE_INFRA_ERR_RX.test(msg)) return false;
-    // Ambiguous — probe the EB's /health. If reachable + 200, the EB is alive
-    // and this is a test-code issue; don't waste another EB. If probe fails,
-    // treat as dead.
+    // Only inspect the first line of the error. The executor appends a pod-
+    // log tail (`[EB-pod …]\n<last 80 stdout lines>`) for diagnostics, and
+    // that tail routinely contains "Target page, context or browser has been
+    // closed" warnings emitted by Playwright AFTER the executor cancelled
+    // the test on timeout — a substring match against the full message would
+    // misclassify legit test-code hangs as dead-EB and burn a second pod.
+    const firstLine = msg.split('\n')[0] ?? msg;
+    // Explicit test-hung tag always wins — never retry.
+    if (TEST_HUNG_RX.test(firstLine)) return false;
+    // Explicit infra tags trigger retry without probing.
+    if (EB_INFRA_ERR_RX.test(firstLine)) return true;
+    if (!EB_MAYBE_INFRA_ERR_RX.test(firstLine)) return false;
+    // Ambiguous Playwright "Target has been closed" — probe /health. If
+    // reachable + 200, the EB is alive and this is a test-code issue; don't
+    // waste another EB. If probe fails, treat as dead.
     return !(await probeEBHealth(runnerId));
   };
 

@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import {
   getSelectedRepository,
   getRepositoriesByTeamWithTestCounts,
@@ -18,11 +17,7 @@ export async function SidebarServer() {
   const session = await getCurrentSession();
 
   if (!session) {
-    return (
-      <Suspense>
-        <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />
-      </Suspense>
-    );
+    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />;
   }
 
   const teamId = session.team?.id;
@@ -57,20 +52,18 @@ export async function SidebarServer() {
     : { unsortedCount: 0, hasNewerCommit: false };
 
   return (
-    <Suspense>
-      <Sidebar
-        repos={repos}
-        selectedRepo={selectedRepo ?? null}
-        currentUser={session.user}
-        team={session.team}
-        baseUrl={baseUrlForBranch}
-        repositoryId={selectedRepo?.id}
-        activeBranch={activeBranch}
-        ebSessions={ebSessions}
-        verifyPendingCount={verifyBadge.unsortedCount}
-        verifyHasNewerCommit={verifyBadge.hasNewerCommit}
-      />
-    </Suspense>
+    <Sidebar
+      repos={repos}
+      selectedRepo={selectedRepo ?? null}
+      currentUser={session.user}
+      team={session.team}
+      baseUrl={baseUrlForBranch}
+      repositoryId={selectedRepo?.id}
+      activeBranch={activeBranch}
+      ebSessions={ebSessions}
+      verifyPendingCount={verifyBadge.unsortedCount}
+      verifyHasNewerCommit={verifyBadge.hasNewerCommit}
+    />
   );
 }
 
