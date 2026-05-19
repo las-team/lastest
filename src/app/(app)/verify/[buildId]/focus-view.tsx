@@ -2767,8 +2767,6 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
           <ComposeIssueCard
             key={activeCase.step.id}
             stepId={activeCase.step.id}
-            testName={activeCase.test?.name ?? null}
-            stepLabel={activeCase.step.stepLabel ?? null}
             evidence={evidence}
             reviewerNote={activeCase.step.reviewerNote ?? null}
             onAfterCreate={onAfterCreate}
@@ -2890,20 +2888,17 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
 }
 
 /** Compose-new-issue card. Lets reviewers describe what's wrong in their
- *  own words and pick which captured evidence to attach. Submits via
- *  createIssueForCase with a body composed entirely client-side. */
+ *  own words and pick which captured evidence to attach. The actual issue
+ *  body (with full network/console/dom drill-downs) is rendered server-side
+ *  by buildVerifyCaseBody — the client only sends note + layer selection. */
 function ComposeIssueCard({
   stepId,
-  testName,
-  stepLabel,
   evidence,
   reviewerNote,
   onAfterCreate,
   hasLinkedIssue,
 }: {
   stepId: string;
-  testName: string | null;
-  stepLabel: string | null;
   evidence: EvidenceItemType[];
   reviewerNote: string | null;
   onAfterCreate?: () => void;
@@ -2936,38 +2931,18 @@ function ComposeIssueCard({
     });
   };
 
-  const composeBody = (): string => {
-    const lines: string[] = [];
-    if (text.trim().length > 0) lines.push(text.trim());
-    const picked = uniqueEvidence.filter((e) => includeLayers.has(e.layer));
-    if (picked.length > 0) {
-      lines.push('', '## Evidence');
-      for (const e of picked) {
-        lines.push(`- **${e.layer}** (${e.signal}): ${e.summary}`);
-      }
-    }
-    if (testName || stepLabel) {
-      lines.push('', '## Context');
-      if (testName) lines.push(`- Test: ${testName}`);
-      if (stepLabel) lines.push(`- Step: ${stepLabel}`);
-    }
-    return lines.join('\n');
-  };
-
   const handleCreate = async () => {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const titleBase = testName ?? 'verify case';
-    const titleStep = stepLabel ? ` — ${stepLabel}` : '';
-    const titleHint = text.trim().split(/\r?\n/, 1)[0]?.slice(0, 60) ?? '';
-    const title = titleHint
-      ? `[Verify] ${titleBase}${titleStep}: ${titleHint}`
-      : `[Verify] ${titleBase}${titleStep}`;
+    // Compose nothing client-side. The server pulls full step + layers
+    // (network/console/dom/a11y/url/perf) plus build context and renders the
+    // rich body; we just tell it which evidence sections the reviewer ticked
+    // and pass through the free-text note.
     const res = await createIssueForCase({
       stepComparisonId: stepId,
-      title,
-      body: composeBody(),
+      reviewerNote: text.trim() || undefined,
+      includedLayers: Array.from(includeLayers),
     });
     setSubmitting(false);
     if (!res.ok) {

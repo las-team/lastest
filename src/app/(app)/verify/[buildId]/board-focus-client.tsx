@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Filter, GitBranch, Play, ChevronDown, X, Loader2, Sparkles, AlertTriangle, AlertOctagon, CheckCircle } from 'lucide-react';
+import { Filter, GitBranch, Play, ChevronDown, X, Loader2, Sparkles, AlertTriangle, AlertOctagon } from 'lucide-react';
 import { toast } from 'sonner';
 import { runVerifyBuild } from '@/server/actions/smart-run';
-import { approveAllVerifyCases, decideLayer } from '@/server/actions/layer-feedback';
+import { decideLayer } from '@/server/actions/layer-feedback';
 import { confirmCase, type ConfirmKind } from '@/server/actions/verify-issues';
 import { coverArea } from '@/server/actions/cover-area';
 import { updateRepoSelectedBranch } from '@/server/actions/repos';
@@ -190,14 +190,16 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [branchOpen, setBranchOpen] = useState(false);
   const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
   const [issuePickerStepId, setIssuePickerStepId] = useState<string | null>(null);
-  const [markingAll, setMarkingAll] = useState(false);
 
-  // Live polling state — initialised from props, refreshed every 2s while
-  // the build is running. Once `completedAt` is set, polling stops.
+  // Live polling state — server passes empty initial arrays so the frame
+  // renders instantly; the first refreshFromServer on mount hydrates real
+  // data. Polling every 2s while the build is running; once `completedAt`
+  // is set, polling stops.
   const [stepComparisons, setStepComparisons] = useState<StepComparison[]>(props.stepComparisons);
   const [layerFeedback, setLayerFeedback] = useState<StepLayerFeedback[]>(props.layerFeedback);
   const [visualDiffs, setVisualDiffs] = useState<VisualDiffLite[]>(props.visualDiffs);
   const [testResults, setTestResults] = useState<TestResultLite[]>(props.testResults);
+  const [changeMap, setChangeMap] = useState<ChangeMap | null>(props.changeMap);
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
   );
@@ -207,6 +209,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     passed: props.build.passedCount ?? 0,
     failed: props.build.failedCount ?? 0,
   });
+  // Tracks whether the first cards-hydration pass has come back from the
+  // server. The frame still renders with `--` counters while we wait, but
+  // the column lists know to show a skeleton instead of "no cases".
+  const [cardsLoaded, setCardsLoaded] = useState(props.stepComparisons.length > 0);
 
   /** One-shot pull of the verify-status endpoint. Used by the polling
    *  interval and by post-mutation hooks (issue linked / created / closed)
@@ -227,6 +233,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         visualDiffs: VisualDiffLite[];
         testResults: TestResultLite[];
         runningTests: Array<{ testId: string; name: string }>;
+        changeMap: ChangeMap | null;
       };
       setStepComparisons(data.stepComparisons);
       // Merge-not-replace: keep any local `optimistic-*` rows whose step has
@@ -244,13 +251,24 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       setTestResults(data.testResults);
       setRunningTests(data.runningTests);
       setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
+      if (data.changeMap) setChangeMap(data.changeMap);
       if (data.completedAt && !completedAt) {
         setCompletedAt(data.completedAt);
       }
+      setCardsLoaded(true);
     } catch {
       /* best-effort */
     }
   }, [props.build.id, completedAt]);
+
+  // Initial hydration on mount — the server passes empty arrays so the page
+  // chrome renders instantly. This pull fills the cards.
+  useEffect(() => {
+    if (!cardsLoaded) {
+      refreshFromServer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Polling effect — only active while completedAt is null.
   useEffect(() => {
@@ -281,10 +299,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const testById = useMemo(() => new Map(props.tests.map((t) => [t.id, t])), [props.tests]);
   const areaById = useMemo(() => new Map(props.areas.map((a) => [a.id, a])), [props.areas]);
   const changedAreaIds = useMemo(
-    () => new Set(props.changeMap?.areas
+    () => new Set(changeMap?.areas
       .filter((a) => a.sources.includes('code') || a.sources.includes('manual'))
       .map((a) => a.areaId) ?? []),
-    [props.changeMap],
+    [changeMap],
   );
 
   // Coverage gaps: areas the Change Map flagged as risky-but-uncovered. The
@@ -303,12 +321,12 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   }, [stepComparisons, testById]);
 
   const coverageGaps = useMemo(() => {
-    if (!props.changeMap) return [];
-    return props.changeMap.areas.filter((a) =>
+    if (!changeMap) return [];
+    return changeMap.areas.filter((a) =>
       (a.sources.includes('code') || a.sources.includes('manual'))
       && !coveredAreaIds.has(a.areaId),
     );
-  }, [props.changeMap, coveredAreaIds]);
+  }, [changeMap, coveredAreaIds]);
 
   // Areas the reviewer has already dispatched coverArea for in this session —
   // suppresses the chip so repeated clicks don't create duplicate placeholders
@@ -427,38 +445,6 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     });
   };
 
-  const handleMarkAllVerified = () => {
-    if (markingAll) return;
-    setMarkingAll(true);
-    startTransition(async () => {
-      try {
-        // 1) Optimistic — promotes every currently-`unknown` filtered case
-        //    to `approved` so the board moves before the round-trip.
-        const local = await approveAllUnknownFilteredCases();
-        if (local.approved === 0) {
-          toast.message('Nothing left to verify');
-          return;
-        }
-        // 2) Server bulk write — authoritative, also writes per-layer
-        //    baselines. Runs after the optimistic apply so the UI is
-        //    already settled visually.
-        const result = await approveAllVerifyCases(props.build.id).catch((e) =>
-          e instanceof Error ? { error: e.message } : { error: 'unknown' },
-        );
-        // 3) Refresh after the server write — refreshFromServer will keep
-        //    optimistic rows for any step that doesn't yet have a real row.
-        await refreshFromServer();
-        if (result && 'error' in result) {
-          toast.error('Could not mark all verified', { description: result.error });
-        } else {
-          toast.success(`${local.approved} case${local.approved === 1 ? '' : 's'} marked verified`);
-        }
-      } finally {
-        setMarkingAll(false);
-      }
-    });
-  };
-
   // Returns a promise that resolves once every per-layer decideLayer write
   // for this step has hit the DB. The optimistic local row write is done
   // SYNCHRONOUSLY before the promise is created so the card moves the moment
@@ -526,11 +512,15 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     ).then(() => undefined);
   };
 
-  // Top-level "Mark all verified" target: approves every filtered case
-  // currently shown in the `unknown` column. Same optimistic-then-persist
-  // pattern as decideAllForStep, but ranged over many steps in one go.
-  const approveAllUnknownFilteredCases = (): Promise<{ approved: number }> => {
-    // Build a feedback map keyed by step so we can derive each case's status.
+  /** Bulk-action over every filtered case currently sitting in a given
+   *  column. The header-level "Mark all verified" button is gone in v1.15B —
+   *  columns expose their own actions instead so reviewers can sweep an
+   *  entire bucket (Verify all on Unsorted/Broken/Missed; Report all on
+   *  Broken/Missed) without dragging each card individually. */
+  const handleColumnAction = (
+    column: CaseStatus,
+    action: 'verify' | 'report',
+  ) => {
     const fbByStep = new Map<string, StepLayerFeedback[]>();
     for (const f of layerFeedback) {
       if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
@@ -541,19 +531,67 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       const test = testById.get(step.testId);
       const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
-      const status = deriveCaseStatus({
+      const derived = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
-      if (status === 'unknown') targets.push(step.id);
+      if (derived === column) targets.push(step.id);
     }
-    if (targets.length === 0) return Promise.resolve({ approved: 0 });
-    // Kick optimistic rows for every target synchronously; the server-side
-    // bulk action then catches up via approveAllVerifyCases.
-    const promises = targets.map((id) => decideAllForStep(id, 'approved'));
-    return Promise.all(promises).then(() => ({ approved: targets.length }));
+    if (targets.length === 0) {
+      toast.message('No cases in this column to act on');
+      return;
+    }
+
+    // "Verify all" always lands cases in the Verified column. "Report all"
+    // is only valid on Broken (→ regression bug) and Missed (→ improvement)
+    // — the underlying decideAllForStep keeps the case in its current
+    // column while confirmCase files the typed GH ticket.
+    let confirmKind: ConfirmKind | null = null;
+    if (action === 'verify') {
+      confirmKind = 'done';
+    } else if (column === 'regression') {
+      confirmKind = 'regression';
+    } else if (column === 'missed') {
+      confirmKind = 'improvement';
+    } else {
+      return;
+    }
+
+    const decision = action === 'verify'
+      ? 'approved'
+      : column === 'regression'
+        ? 'rejected'
+        : 'snoozed';
+
+    startTransition(async () => {
+      // 1) Optimistic + per-layer writes for every target.
+      await Promise.all(targets.map((id) => decideAllForStep(id, decision)));
+
+      // 2) File / close GH tickets in parallel.
+      const results = await Promise.all(
+        targets.map((id) => confirmCase(id, confirmKind!).catch(() => null)),
+      );
+      const filed = results.filter((r) => r?.ticketChanged && r.issueUrl).length;
+      const closed = results.filter(
+        (r) => r?.ticketChanged && confirmKind === 'done',
+      ).length;
+
+      // 3) Settle the UI against the authoritative server state.
+      await refreshFromServer();
+
+      if (action === 'verify') {
+        toast.success(
+          `${targets.length} case${targets.length === 1 ? '' : 's'} verified`,
+          closed > 0 ? { description: `Closed ${closed} ticket${closed === 1 ? '' : 's'}` } : undefined,
+        );
+      } else if (filed > 0) {
+        toast.success(`Filed ${filed} ticket${filed === 1 ? '' : 's'}`);
+      } else {
+        toast.message(`${targets.length} case${targets.length === 1 ? '' : 's'} updated`);
+      }
+    });
   };
 
   /** Per-evidence Expected/Needs fix click. Optimistically writes the layer
@@ -707,7 +745,11 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             )}
           </div>
           <div className="label" style={{ marginTop: 2 }}>
-            Build #{props.build.id.slice(0, 8)} · {buildLabel} · {mode === 'board' ? `${verifiedCount} / ${totalCases} verified` : `${totalCases} cases`}
+            Build #{props.build.id.slice(0, 8)} · {buildLabel} · {!cardsLoaded
+              ? 'loading cases…'
+              : mode === 'board'
+                ? `${verifiedCount} / ${totalCases} verified`
+                : `${totalCases} cases`}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -758,23 +800,6 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             )}
           </div>
           <button
-            className="v-btn"
-            onClick={handleMarkAllVerified}
-            disabled={markingAll || isRunning || totalCases === 0 || verifiedCount === totalCases}
-            title={
-              totalCases === 0
-                ? 'No cases on this build'
-                : verifiedCount === totalCases
-                  ? 'Every case is already verified'
-                  : isRunning
-                    ? 'Wait for the build to finish before bulk-verifying'
-                    : `Approve every unsorted case visible under the current filters (${totalCases - verifiedCount})`
-            }
-          >
-            <CheckCircle size={13} />
-            {markingAll ? 'Marking…' : 'Mark all verified'}
-          </button>
-          <button
             className="v-btn primary"
             onClick={handleRefresh}
             disabled={refreshing || !props.repositoryId}
@@ -810,8 +835,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           statusFilter={filters.statuses}
           isRunning={isRunning}
           runningTests={runningTests}
+          cardsLoaded={cardsLoaded}
           onOpenCase={handleOpenCase}
           onDropCase={handleDropCase}
+          onColumnAction={handleColumnAction}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
         />
       ) : (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronDown, GitBranch, Play } from 'lucide-react';
@@ -15,7 +15,6 @@ interface VerifyIndexClientProps {
   activeBranch: string | null;
   defaultBranch: string | null;
   branches: string[];
-  latestBuildId: string | null;
 }
 
 export function VerifyIndexClient({
@@ -24,27 +23,7 @@ export function VerifyIndexClient({
   activeBranch,
   defaultBranch,
   branches,
-  latestBuildId,
 }: VerifyIndexClientProps) {
-  const router = useRouter();
-
-  // Auto-navigate to the latest build via the client router — keeps the
-  // parent server component's render lifecycle clean.
-  useEffect(() => {
-    if (latestBuildId) {
-      router.replace(`/verify/${latestBuildId}`);
-    }
-  }, [latestBuildId, router]);
-
-  if (latestBuildId) {
-    // Brief flash before the client navigation kicks in.
-    return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--secondary)' }}>
-        <p style={{ fontSize: 14, color: 'var(--muted-foreground)' }}>Opening latest build…</p>
-      </div>
-    );
-  }
-
   if (!hasRepo) {
     return (
       <EmptyState

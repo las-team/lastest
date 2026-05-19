@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
+import { ensureStepComparisonsForBuild } from '@/lib/verify/backfill-step-comparisons';
+import { computeChangeMap } from '@/server/actions/change-map';
 
 export async function GET(
   request: Request,
@@ -27,15 +29,42 @@ export async function GET(
     }
   }
 
-  const [stepComparisons, layerFeedback, visualDiffs, runningTestRows] = await Promise.all([
+  // Run recovery + change-map compute lazily on the first call that needs
+  // them. Both are idempotent: backfill is a no-op once step_comparisons
+  // exist, and getBuildChangeMap returns the cached row on subsequent polls
+  // so computeChangeMap doesn't re-fire. Page chrome still rendered while
+  // we were on the way here.
+  const [
+    initialStepComparisons,
+    layerFeedback,
+    visualDiffs,
+    runningTestRows,
+    cachedChangeMap,
+  ] = await Promise.all([
     queries.getStepComparisonsByBuild(buildId).catch(() => []),
     queries.getLayerFeedbackByBuild(buildId).catch(() => []),
     queries.getVisualDiffsByBuild(buildId).catch(() => []),
-    // Use the same running-tests source as the existing build summary.
     build.testRunId
       ? queries.getTestResultsByRun(build.testRunId).catch(() => [])
       : Promise.resolve([]),
+    queries.getBuildChangeMap(buildId).catch(() => null),
   ]);
+
+  let stepComparisons = initialStepComparisons;
+  if (
+    build.testRunId
+    && build.completedAt
+    && stepComparisons.length === 0
+    && runningTestRows.length > 0
+  ) {
+    await ensureStepComparisonsForBuild(buildId).catch((err) => {
+      console.error('[verify-status] backfill failed:', err);
+    });
+    stepComparisons = await queries.getStepComparisonsByBuild(buildId).catch(() => []);
+  }
+
+  const changeMap = cachedChangeMap
+    ?? (await computeChangeMap(buildId).catch(() => null));
 
   const slimDiffs = visualDiffs.map((d) => {
     const meta = d.metadata as import('@/lib/db/schema').DiffMetadata | null;
@@ -55,6 +84,8 @@ export async function GET(
       baselineTextPath: d.baselineTextPath,
       currentTextPath: d.currentTextPath,
       textDiffSummary: meta?.textDiffSummary ?? null,
+      baselineSourceBranch: meta?.baselineSourceBranch ?? null,
+      baselineExistsOn: meta?.baselineExistsOn ?? null,
     };
   });
 
@@ -100,6 +131,7 @@ export async function GET(
       visualDiffs: slimDiffs,
       testResults: slimResults,
       runningTests,
+      changeMap,
     },
     {
       headers: {
