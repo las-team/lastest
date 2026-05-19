@@ -10,7 +10,18 @@ import path from 'path';
 import os from 'os';
 import type { RunTestCommandPayload, RunSetupCommandPayload, LogEntry, StabilizationPayload, DomSnapshotPayload, SelectorOutcome } from './protocol.js';
 import { CROSS_OS_CHROMIUM_ARGS, setupFreezeScripts, applyPreScreenshotStabilization } from './stabilization.js';
-import { instrumentAssertionTracking, instrumentStepTracking, stripTypeAnnotations, watermarkVideo, hashSelectors, sortSelectorsByStats, selectorTimeoutFor, type SelectorRef } from '@lastest/shared';
+import {
+  instrumentAssertionTracking,
+  instrumentStepTracking,
+  stripTypeAnnotations,
+  watermarkVideo,
+  hashSelectors,
+  sortSelectorsByStats,
+  selectorTimeoutFor,
+  extractTestBody,
+  createExpect,
+  type SelectorRef,
+} from '@lastest/shared';
 
 /**
  * Verify code integrity by comparing SHA256 hash.
@@ -888,24 +899,28 @@ export class TestRunner {
     stepTracker?: { lastReachedStep: number; totalSteps: number },
   ): Promise<void> {
     const log = logFn ?? this.log.bind(this);
-    // Extract function body from: export async function test/setup(page, ...) { ... }
-    const setupMatch = code.match(
-      /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
-    );
-    const testMatch = code.match(
-      /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
-    );
-    const funcMatch = setupMatch || testMatch;
-
-    let body: string;
-    if (funcMatch) {
-      body = stripTypeAnnotations(funcMatch[1]);
-    } else {
-      // Fallback: treat entire code as the function body (unwrapped test code)
+    // Tiered extractor:
+    //   1) legacy `export async function test/setup(page, ...) { ... }` (byte-identical to prior behaviour)
+    //   2) framework `test('name', async ({ page }) => { ... })` (new, additive)
+    //   3) whole-code fallback (matches prior fallback)
+    const extracted = extractTestBody(code, { allowSetup: true });
+    let body: string = stripTypeAnnotations(extracted.body);
+    if (extracted.shape === 'whole-code') {
       log('info', 'No export async function test(...) wrapper found — using code as body');
-      body = stripTypeAnnotations(code);
+    } else if (extracted.shape === 'framework-test') {
+      log('info', 'Extracted body from framework-style test(\"name\", async ({ page }) => { ... })');
     }
     log('info', `Extracted test body: ${body.length} chars`);
+
+    // Strip top-of-body `import { ... } from '...'` lines and re-declarations
+    // of runner-injected names (matches the EB executor — AI-generated code
+    // sometimes leaves these in despite the prompt). Non-regressive: regex
+    // only matches lines that would otherwise crash with SyntaxError inside
+    // `new AsyncFunction(...)`.
+    body = body.replace(/^\s*(?:const|let|var)\s+\{[^}]*\bexpect\b[^}]*\}\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+    body = body.replace(/^\s*(?:const|let|var)\s+expect\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
+    body = body.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
+    body = body.replace(/^\s*import\s+\w+\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
 
     // Remove the test's local locateWithFallback function if present
     if (body.includes('async function locateWithFallback(')) {
@@ -1192,7 +1207,7 @@ export class TestRunner {
     };
 
     // Create simple expect implementation
-    const expect = this.createExpect();
+    const expect = createExpect();
 
     // Create screenshotPath generator (start from 1 to match local runner)
     let screenshotStep = 1;
@@ -1404,168 +1419,4 @@ export class TestRunner {
     }
   }
 
-  private createExpect(timeout = 5000) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (target: any, message?: string) => {
-      const isPage = typeof target?.goto === 'function';
-      const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
-
-      // Generic value matchers (arrays, primitives, objects)
-      if (!isPage && !isLocator) {
-        const msgPrefix = message ? `${message}: ` : '';
-        return {
-          toHaveLength(expected: number) {
-            const actual = target?.length;
-            if (actual !== expected) {
-              const details = Array.isArray(target) ? `\nReceived: ${JSON.stringify(target.slice(0, 10))}` : '';
-              throw new Error(`${msgPrefix}Expected length ${expected} but got ${actual}${details}`);
-            }
-          },
-          toBe(expected: unknown) {
-            if (target !== expected) {
-              throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
-            }
-          },
-          toEqual(expected: unknown) {
-            if (JSON.stringify(target) !== JSON.stringify(expected)) {
-              throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`);
-            }
-          },
-          toBeTruthy() {
-            if (!target) {
-              throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`);
-            }
-          },
-          toBeFalsy() {
-            if (target) {
-              throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`);
-            }
-          },
-          toContain(expected: unknown) {
-            if (Array.isArray(target)) {
-              if (!target.includes(expected)) {
-                throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`);
-              }
-            } else if (typeof target === 'string') {
-              if (!target.includes(expected as string)) {
-                throw new Error(`${msgPrefix}Expected string to contain "${expected}"`);
-              }
-            } else {
-              throw new Error(`${msgPrefix}toContain only works on arrays and strings`);
-            }
-          },
-          toBeGreaterThan(expected: number) {
-            if (typeof target !== 'number' || target <= expected) {
-              throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`);
-            }
-          },
-          toBeLessThan(expected: number) {
-            if (typeof target !== 'number' || target >= expected) {
-              throw new Error(`${msgPrefix}Expected ${target} to be less than ${expected}`);
-            }
-          },
-          toMatch(expected: string | RegExp) {
-            const str = typeof target === 'string' ? target : String(target);
-            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-            if (!regex.test(str)) {
-              throw new Error(`${msgPrefix}Expected "${str}" to match ${regex}`);
-            }
-          },
-          not: {
-            toHaveLength(expected: number) {
-              if (target?.length === expected) {
-                throw new Error(`${msgPrefix}Expected length not to be ${expected}`);
-              }
-            },
-            toBe(expected: unknown) {
-              if (target === expected) {
-                throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`);
-              }
-            },
-            toEqual(expected: unknown) {
-              if (JSON.stringify(target) === JSON.stringify(expected)) {
-                throw new Error(`${msgPrefix}Expected not to equal ${JSON.stringify(expected)}`);
-              }
-            },
-            toBeTruthy() {
-              if (target) {
-                throw new Error(`${msgPrefix}Expected value not to be truthy`);
-              }
-            },
-            toBeFalsy() {
-              if (!target) {
-                throw new Error(`${msgPrefix}Expected value not to be falsy`);
-              }
-            },
-            toContain(expected: unknown) {
-              if (Array.isArray(target) && target.includes(expected)) {
-                throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
-              } else if (typeof target === 'string' && target.includes(expected as string)) {
-                throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
-              }
-            },
-          },
-        };
-      }
-
-      if (isPage) {
-        return {
-          async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
-            const t = options?.timeout ?? timeout;
-            const start = Date.now();
-            while (Date.now() - start < t) {
-              const url = target.url();
-              if (typeof expected === 'string' && url === expected) return;
-              if (expected instanceof RegExp && expected.test(url)) return;
-              await new Promise((r) => setTimeout(r, 100));
-            }
-            throw new Error(`Expected URL "${expected}" but got "${target.url()}"`);
-          },
-          async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
-            const t = options?.timeout ?? timeout;
-            const start = Date.now();
-            while (Date.now() - start < t) {
-              const title = await target.title();
-              if (typeof expected === 'string' && title === expected) return;
-              if (expected instanceof RegExp && expected.test(title)) return;
-              await new Promise((r) => setTimeout(r, 100));
-            }
-            throw new Error(`Expected title "${expected}" but got "${await target.title()}"`);
-          },
-        };
-      }
-
-      // Locator assertions
-      return {
-        async toBeVisible(options?: { timeout?: number }) {
-          await target.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
-        },
-        async toBeHidden(options?: { timeout?: number }) {
-          await target.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
-        },
-        async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
-          const t = options?.timeout ?? timeout;
-          const start = Date.now();
-          while (Date.now() - start < t) {
-            const text = await target.textContent();
-            if (typeof expected === 'string' && text === expected) return;
-            if (expected instanceof RegExp && text && expected.test(text)) return;
-            await new Promise((r) => setTimeout(r, 100));
-          }
-          throw new Error(`Expected text "${expected}" but got "${await target.textContent()}"`);
-        },
-        async toContainText(expected: string | RegExp, options?: { timeout?: number }) {
-          const t = options?.timeout ?? timeout;
-          const start = Date.now();
-          while (Date.now() - start < t) {
-            const text = await target.textContent();
-            if (typeof expected === 'string' && text?.includes(expected)) return;
-            if (expected instanceof RegExp && text && expected.test(text)) return;
-            await new Promise((r) => setTimeout(r, 100));
-          }
-          throw new Error(`Expected text to contain "${expected}"`);
-        },
-      };
-    };
-  }
 }

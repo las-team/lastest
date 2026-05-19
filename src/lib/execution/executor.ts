@@ -482,10 +482,20 @@ async function executeViaRunner(
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources.
-  // Floor of 10 min: under heavy pool concurrency (e.g. 30 EBs on one node),
-  // Chromium gets CPU-starved and page.goto can take several minutes. A lower
-  // floor caused healthy tests to be cancelled mid-run with `command:cancel_test`.
-  const testTimeout = Math.max(baseTimeout * maxParallel, 600000);
+  // Floor was 10 min, but the build watchdog `markStaleJobsAsCrashed`
+  // (`background-jobs.ts:182`) flips a job to `failed` after 5 min of no
+  // `lastActivityAt` tick. With a 10-min per-test floor, a silently-dying
+  // EB would freeze the polling loop for 5 min, watchdog would kill the
+  // build as `blocked` with no per-test attribution, and the user would
+  // see "Build aborted mid-run — recovered 12 of 25 cases" instead of the
+  // real signal (the 13th test's EB hung). Floor of 4 min stays under the
+  // watchdog so the timeout path fires first: per-test `failed` row with
+  // `Test execution timed out after 240000ms`, build continues with the
+  // remaining tests. Trade-off: legitimately slow tests under heavy pool
+  // concurrency now cancel where they wouldn't before — bump the
+  // watchdog threshold (or add claim-wait heartbeats) before raising
+  // pool concurrency past current levels.
+  const testTimeout = Math.max(baseTimeout * maxParallel, 240000);
   let pollInterval = 250;
   const maxPollInterval = 500;
 
