@@ -817,6 +817,13 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   consoleErrors?: string[] | null;
   networkRequests?: NetworkRequest[] | null;
   browser?: string | null;
+  // Per-step execution progress (joined from test_results). Used by the build
+  // detail page to render per-step pass/fail strips, including synthesizing
+  // "skipped/not run" rows for steps past `lastReachedStep`.
+  lastReachedStep?: number | null;
+  totalSteps?: number | null;
+  evaluationOutcome?: EvaluationOutcome | null;
+  softErrors?: string[] | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;

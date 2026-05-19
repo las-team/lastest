@@ -19,9 +19,24 @@ export function ActivityFeedIndicator() {
   if (!ctx) return null;
   const { setIsOpen, activeSessionCount, events, isConnected } = ctx;
 
-  const hasActive = mounted && activeSessionCount > 0;
-  const hasEvents = mounted && events.length > 0;
-  const connected = mounted && isConnected;
+  // Reserve identical layout on server + first client render to keep
+  // hydration deterministic; fill in state-derived attrs after mount.
+  if (!mounted) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="relative gap-1.5 h-8"
+        onClick={() => setIsOpen(true)}
+        suppressHydrationWarning
+      >
+        <Radio className="h-4 w-4 text-muted-foreground" />
+      </Button>
+    );
+  }
+
+  const hasActive = activeSessionCount > 0;
+  const hasEvents = events.length > 0;
 
   return (
     <Button
@@ -29,7 +44,7 @@ export function ActivityFeedIndicator() {
       size="sm"
       className="relative gap-1.5 h-8"
       onClick={() => setIsOpen(true)}
-      title={connected ? 'Activity Feed (connected)' : 'Activity Feed (disconnected)'}
+      title={isConnected ? 'Activity Feed (connected)' : 'Activity Feed (disconnected)'}
     >
       <Radio
         className={cn(

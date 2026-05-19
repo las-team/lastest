@@ -821,13 +821,15 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
   // Thin left-border colored by execution kind — "this ran red" (errored)
   // vs "this changed but may be intentional" (changed) at a glance, without
   // tying the surface to the reviewer-decision column it's sitting in.
-  // Passed/flaky cards get no accent border (passed = no signal; flaky's
-  // hint surfaces via the layer chips instead, to avoid noise on the board).
-  const accentBorder = data.kind === 'errored'
-    ? `3px solid ${EXECUTION_KIND_ACCENT.errored}`
+  // Passed/flaky cards reserve the same 3px stripe but render it transparent
+  // (passed = no signal; flaky's hint surfaces via the layer chips instead)
+  // so content x-position stays identical across all cards and non-accent
+  // cards keep the same visible left padding.
+  const accentColor = data.kind === 'errored'
+    ? EXECUTION_KIND_ACCENT.errored
     : data.kind === 'changed'
-      ? `3px solid ${EXECUTION_KIND_ACCENT.changed}`
-      : undefined;
+      ? EXECUTION_KIND_ACCENT.changed
+      : 'transparent';
   return (
     <div
       className="v-card"
@@ -835,10 +837,10 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
         padding: 10,
         userSelect: 'none',
         boxShadow: dragging ? '0 8px 24px rgba(31,42,51,0.18)' : undefined,
-        borderLeft: accentBorder,
-        // Compensate left padding when the accent border eats 3px so layout
-        // stays aligned with cards that don't have it.
-        paddingLeft: accentBorder ? 7 : undefined,
+        borderLeft: `3px solid ${accentColor}`,
+        // Compensate left padding for the 3px stripe so content lands at the
+        // same x position on every card, accented or not.
+        paddingLeft: 7,
       }}
       onClick={(e) => {
         if (dragging) return;

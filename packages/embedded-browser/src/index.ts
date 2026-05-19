@@ -554,6 +554,15 @@ async function startup(): Promise<void> {
                 accessibilityTree: result.accessibilityTree,
                 extractedVariables: result.extractedVariables,
                 selectorOutcomes: result.selectorOutcomes,
+                // Per-step multi-layer comparison capture: these populate
+                // testResults.urlTrajectory / .webVitals on the host and are
+                // the only source of `layers.url` / `layers.perf` evidence in
+                // the verify focus view. Omitting them leaves URL and Perf
+                // panes empty even when the EB collected samples.
+                urlTrajectory: result.urlTrajectory,
+                webVitals: result.webVitals,
+                assertionResults: result.assertionResults,
+                storageStateSnapshot: result.storageStateSnapshot,
               },
             });
 

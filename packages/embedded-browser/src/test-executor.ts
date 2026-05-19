@@ -1297,10 +1297,18 @@ export class EmbeddedTestExecutor {
       // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
       await captureFinalDomSnapshot();
 
-      // Harvest axe-core results + accessibility tree written by the synthetic
-      // URL-Diff test body to `window.__urlDiffResult`. Gated by `enableA11y`
-      // so normal tests don't pay the harvest cost. Truncate the a11y tree at
-      // 512 KB to keep `runner_command_results.payload` JSON sane.
+      // Harvest axe-core results. Two paths share the same `enableA11y`
+      // toggle:
+      //   1. URL-Diff tests: a synthetic body in `src/lib/url-diff/capture.ts`
+      //      has already run axe-core and stamped `window.__urlDiffResult`.
+      //      We just read it.
+      //   2. Regular recorded tests: the body does nothing a11y-related, so
+      //      the EB itself drives `@axe-core/playwright` against the final
+      //      page state when the toggle is on. Without this branch, the
+      //      Playwright setting "Accessibility Checks" silently no-ops for
+      //      everything except URL-Diff captures.
+      // Truncate the a11y tree at 512 KB to keep `runner_command_results.payload`
+      // JSON sane.
       let a11yViolations: EmbeddedTestResult['a11yViolations'];
       let a11yPassesCount: number | undefined;
       let accessibilityTree: unknown;
@@ -1325,6 +1333,34 @@ export class EmbeddedTestExecutor {
               } else {
                 accessibilityTree = treeRaw;
               }
+            }
+          } else {
+            // No URL-Diff harvest available. Run axe-core directly against the
+            // page so non-URL-Diff tests also get a11y data with the toggle on.
+            // Tags match `src/lib/url-diff/capture.ts` (wcag2a + wcag2aa) so
+            // baseline vs current comparisons stay apples-to-apples.
+            try {
+              const mod = await import('@axe-core/playwright');
+              const AxeBuilder = (mod as unknown as { default?: unknown; AxeBuilder?: unknown }).default
+                ?? (mod as unknown as { AxeBuilder?: unknown }).AxeBuilder
+                ?? mod;
+              type AxeBuilderCtor = new (opts: { page: Page }) => {
+                withTags(tags: string[]): { analyze(): Promise<{ violations: unknown[]; passes: unknown[] }> };
+              };
+              const builder = new (AxeBuilder as unknown as AxeBuilderCtor)({ page });
+              const axeResults = await builder.withTags(['wcag2a', 'wcag2aa']).analyze();
+              const violations = Array.isArray(axeResults.violations)
+                ? axeResults.violations as NonNullable<EmbeddedTestResult['a11yViolations']>
+                : [];
+              a11yViolations = violations;
+              a11yPassesCount = Array.isArray(axeResults.passes) ? axeResults.passes.length : 0;
+            } catch (axeErr) {
+              logFn('warn', `axe-core run failed: ${axeErr instanceof Error ? axeErr.message : String(axeErr)}`);
+              // Leave a11yViolations undefined; verify focus view will show
+              // the "not captured" hint with the settings link. This is the
+              // correct signal: the toggle is on but the harvest failed, so
+              // operators should investigate (network blocked, page closed,
+              // axe-core missing from EB image).
             }
           }
         } catch (err) {

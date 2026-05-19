@@ -19,6 +19,7 @@ import {
   Search,
   Settings,
   X,
+  XCircle,
   CheckCircle as CheckCircleIcon,
   Plus,
 } from 'lucide-react';
@@ -173,7 +174,7 @@ export function FocusView(props: FocusViewProps) {
       if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
       fbByStep.get(f.stepComparisonId)!.push(f);
     }
-    return props.steps.map((step) => {
+    const rows = props.steps.map((step) => {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
@@ -188,6 +189,24 @@ export function FocusView(props: FocusViewProps) {
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
       return { step, test, area, status, feedback: stepFb, visual, result };
     });
+    // Keep all steps of a single test contiguous: sort by (testName ASC,
+    // stepIndex ASC, stepLabel natural ASC). `stepIndex` is the source of
+    // truth when present; stepLabel falls back to natural-collation (so
+    // "step 2" sorts before "step 10").
+    const collator = new Intl.Collator('en', { numeric: true });
+    rows.sort((a, b) => {
+      const an = a.test?.name ?? '';
+      const bn = b.test?.name ?? '';
+      const byName = collator.compare(an, bn);
+      if (byName !== 0) return byName;
+      const ai = a.step.stepIndex;
+      const bi = b.step.stepIndex;
+      if (ai != null && bi != null && ai !== bi) return ai - bi;
+      if (ai != null && bi == null) return -1;
+      if (ai == null && bi != null) return 1;
+      return collator.compare(a.step.stepLabel ?? '', b.step.stepLabel ?? '');
+    });
+    return rows;
   }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
 
   const visibleCases = useMemo(() => {
@@ -436,13 +455,13 @@ export function FocusView(props: FocusViewProps) {
           {activeCase?.step.githubIssueUrl && <IssueChipReal step={activeCase.step} />}
           <span style={{ flex: 1 }} />
           <button className="v-btn sm" onClick={goPrev} disabled={activeIdx <= 0}>
-            <ChevronLeft size={12} />Prev
+            <ChevronLeft size={12} />Prev<HotkeyHint keys="←" />
           </button>
           <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
             {activeIdx >= 0 ? activeIdx + 1 : 0} / {visibleCases.length}
           </span>
           <button className="v-btn sm" onClick={goNext} disabled={activeIdx < 0 || activeIdx >= visibleCases.length - 1}>
-            Next<ChevronRight size={12} />
+            Next<ChevronRight size={12} /><HotkeyHint keys="→ · s" />
           </button>
           <button
             className={'v-btn ' + (intentOpen ? 'tinted' : '')}
@@ -450,6 +469,7 @@ export function FocusView(props: FocusViewProps) {
             aria-pressed={intentOpen}
           >
             <Github size={13} />{intentOpen ? 'Hide issue' : 'Show issue'}
+            <HotkeyHint keys={intentOpen ? 'esc' : 't'} />
           </button>
         </div>
 
@@ -606,6 +626,7 @@ export function FocusView(props: FocusViewProps) {
                   active={cur === 'done'}
                   disabled={pending || !activeCase}
                   onClick={() => decide('approved', false)}
+                  hotkey="e"
                 />
                 <TriageButton
                   label="Needs Improvement"
@@ -636,6 +657,7 @@ export function FocusView(props: FocusViewProps) {
             {activeCase?.feedback.length ?? 0} layer decision{activeCase?.feedback.length === 1 ? '' : 's'} on this case
           </span>
         </div>
+
       </div>
 
       <IntentPanel
@@ -701,8 +723,33 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
  *  active treatment uses a stronger fill and a small ✓ marker so the user
  *  can see at a glance which decision is recorded, even after navigating
  *  away and back. */
+/** Tiny dimmed key glyph rendered inline next to a button so reviewers see
+ *  the keyboard shortcut without burning a full tips strip on it. Pass one
+ *  or more comma-separated label tokens (e.g. "e", "←", "s · →", "esc"). */
+function HotkeyHint({ keys, className }: { keys: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={className}
+      style={{
+        marginLeft: 4,
+        padding: '0 4px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 9,
+        lineHeight: '14px',
+        color: 'var(--fg-3)',
+        background: 'color-mix(in oklab, var(--fg-3) 8%, transparent)',
+        borderRadius: 3,
+        opacity: 0.85,
+      }}
+    >
+      {keys}
+    </span>
+  );
+}
+
 function TriageButton({
-  label, icon, tone, active, disabled, onClick,
+  label, icon, tone, active, disabled, onClick, hotkey,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -710,6 +757,8 @@ function TriageButton({
   active: boolean;
   disabled: boolean;
   onClick: () => void;
+  /** Optional hotkey glyph rendered after the label (e.g. "e"). */
+  hotkey?: string;
 }) {
   const baseColor =
     tone === 'success' ? 'var(--c-teal)' :
@@ -751,6 +800,7 @@ function TriageButton({
     >
       {icon}
       <span>{label}</span>
+      {hotkey && <HotkeyHint keys={hotkey} />}
       {active && (
         <span
           aria-hidden
@@ -1347,6 +1397,16 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
     return null;
   })();
 
+  // 100% diff means the current screenshot has nothing in common with the
+  // baseline (step rendered an unrelated screen, or rendered nothing at all).
+  // Surface that explicitly so reviewers don't read the % as just "very high".
+  const isFullDiff = (() => {
+    const raw = visual?.percentageDifference ?? visualEvidence?.percentageDifference;
+    if (raw == null) return false;
+    const n = parseFloat(String(raw));
+    return Number.isFinite(n) && n >= 100;
+  })();
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--c-white)', flexWrap: 'wrap' }}>
@@ -1365,6 +1425,15 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
             <span className={`v-chip ${metricChip.tone}`} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
               <span className="dot" />
               {metricChip.label}
+            </span>
+          )}
+          {isFullDiff && (
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--c-red)' }}
+              title="100% diff: step rendered nothing or rendered an unrelated screen"
+              aria-label="100% diff: step rendered nothing or rendered an unrelated screen"
+            >
+              <XCircle size={14} />
             </span>
           )}
           {visual?.baselineSourceBranch && (
@@ -1483,7 +1552,13 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
           </div>
         )}
         {mode === 'overlay' && (
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          // alignSelf: flex-start prevents the parent's `alignItems: stretch`
+          // from squeezing this column to a fixed cross-axis height, which was
+          // making the diff ImagePanel collapse to its `minHeight: 240` (~200px
+          // after header padding) instead of the image's natural height. The
+          // slider mode renders directly into the parent (no extra wrapper)
+          // and grows naturally, so this matches that behavior.
+          <div style={{ width: '100%', alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {diffSrc ? (
               <ImagePanel
                 label="diff"
@@ -2021,10 +2096,17 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
   const net = step.layers?.network;
   const requests = useMemo(() => result?.networkRequests ?? [], [result]);
 
+  // When the test failed because of the network layer, auto-focus the table on
+  // error rows so reviewers don't have to filter manually. Derived once via
+  // the useState initializer (no per-render side effects).
+  const failedByNetwork = step.evidence.some((e) => e.layer === 'network' && e.signal === 'high');
+
   // Filters
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState<Set<string>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(
+    () => (failedByNetwork ? new Set<StatusGroup>(['4xx', '5xx', 'err']) : new Set<StatusGroup>()),
+  );
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
@@ -2072,6 +2154,22 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
 
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {failedByNetwork && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: 'var(--c-red)', color: 'var(--c-white)',
+              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              lineHeight: 1.6,
+            }}
+            title="Test failed because of a high-signal network regression"
+          >
+            <XCircle size={10} />
+            failed test
+          </span>
+        </div>
+      )}
       {clean && <CleanBanner message={`No network diff — ${requests.length} request${requests.length === 1 ? '' : 's'} captured, all match baseline`} />}
       {net && (
         <>
@@ -2091,8 +2189,13 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
               <NetworkRow key={`f${i}`} kind="Δ" url={`${e.method} ${e.url}`} status={`${e.from}→${e.to}`} cls="missed" />
             ))}
           </div>
-          <div className="label" style={{ padding: '0 4px' }}>
-            +{net.added} new · {net.removed} removed · {net.changed} changed · {net.newErrorCount} new errors
+          {/* Slim Δ-vs-baseline pills. Compact symbols (+, −, ~, err) keep the
+              row scannable next to the Captured-requests filter strip below. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '0 4px', alignItems: 'center' }}>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Added vs baseline">+ {net.added}</span>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Removed vs baseline">− {net.removed}</span>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Changed vs baseline">~ {net.changed}</span>
+            <span className="v-chip regression" style={{ fontSize: 9, padding: '2px 6px' }} title="New errors vs baseline">err {net.newErrorCount}</span>
           </div>
         </>
       )}
@@ -2380,8 +2483,25 @@ function NetworkRow({ kind, url, status, cls }: { kind: string; url: string; sta
 function ConsolePane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
   const con = step.layers?.consoleDiff;
   const messages = result?.consoleErrors ?? [];
+  const failedByConsole = step.evidence.some((e) => e.layer === 'console' && e.signal === 'high');
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {failedByConsole && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: 'var(--c-red)', color: 'var(--c-white)',
+              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              lineHeight: 1.6,
+            }}
+            title="Test failed because of a high-signal console regression"
+          >
+            <XCircle size={10} />
+            failed test
+          </span>
+        </div>
+      )}
       {clean && <CleanBanner message={messages.length === 0 ? 'No console messages captured' : `${messages.length} console message${messages.length === 1 ? '' : 's'} — all match baseline`} />}
       {con && (con.newFingerprints.length > 0 || con.disappeared.length > 0) && (
         <div className="v-card" style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.85 }}>

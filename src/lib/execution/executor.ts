@@ -883,6 +883,17 @@ async function executeViaRunner(
         logs: Array.isArray(payload.logs) && payload.logs.length > 0
           ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
           : undefined,
+        // EB ships a11yViolations / a11yPassesCount on the response payload
+        // when `enableA11y` was set on the command. Forward them onto the
+        // TestRunResult so `createTestResult` persists them; otherwise the
+        // verify A11y tab classifies the layer as `absent` even when axe-core
+        // ran and the EB captured violations.
+        a11yViolations: Array.isArray(payload.a11yViolations)
+          ? payload.a11yViolations as import('@/lib/db/schema').A11yViolation[]
+          : undefined,
+        a11yPassesCount: typeof payload.a11yPassesCount === 'number'
+          ? payload.a11yPassesCount
+          : undefined,
         urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
           ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]
           : undefined,
