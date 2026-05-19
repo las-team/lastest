@@ -293,16 +293,20 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions:
     });
   };
 
-  // Legacy "fail if any assertion fails" rule — an assertion_failed entry
-  // without a scoped assertionId. We expose it as a single switch so users
-  // who already enabled it can find/disable it after the per-assertion redesign.
+  // "Fail if any assertion fails" — an assertion_failed entry without a
+  // scoped assertionId. Default-ON via server-side synthesis (mirrors the
+  // `all_steps_executed` pattern): no persisted entry → treated as enabled;
+  // toggling off persists severity:'warn' so the synthesizer knows to skip.
   const hasGlobalAssertionRule = () => {
     const c = criteria.find(c => c.stepLabel === ASSERTION_STEP_LABEL);
-    return !!c?.rules.some(r => {
+    if (!c) return true;
+    const r = c.rules.find(r => {
       if (r.kind !== 'assertion_failed') return false;
       const id = (r.params as { assertionId?: string } | undefined)?.assertionId;
       return !id;
     });
+    if (!r) return true;
+    return r.severity === 'fail';
   };
 
   const setGlobalAssertionRule = (on: boolean) => {
@@ -310,11 +314,12 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions:
     const isGlobal = (r: StepRule) =>
       r.kind === 'assertion_failed'
       && !(r.params as { assertionId?: string } | undefined)?.assertionId;
+    // ON: drop any global entry → fall back to synthesized default-ON.
+    // OFF: persist severity:'warn' as an opt-out sentinel.
+    const withoutGlobal = current.filter(r => !isGlobal(r));
     const next: StepRule[] = on
-      ? current.some(isGlobal)
-        ? current
-        : [...current, { kind: 'assertion_failed', severity: 'fail' }]
-      : current.filter(r => !isGlobal(r));
+      ? withoutGlobal
+      : [...withoutGlobal, { kind: 'assertion_failed', severity: 'warn' }];
 
     setCriteria(prev => {
       const others = prev.filter(c => c.stepLabel !== ASSERTION_STEP_LABEL);
@@ -450,23 +455,23 @@ export function StepCriteriaTab({ testId, screenshots, stepCriteria, assertions:
               })}
             </div>
           )}
-          {hasGlobalAssertionRule() && (
-            <div className="flex items-start gap-2 pt-2 border-t">
-              <Checkbox
-                id="assertion-failed-any"
-                className="mt-0.5"
-                checked
-                disabled={pending}
-                onCheckedChange={checked => setGlobalAssertionRule(!!checked)}
-              />
-              <Label htmlFor="assertion-failed-any" className="text-sm font-normal leading-snug">
-                Fail the test if <em>any</em> assertion fails
-                <span className="block text-xs text-muted-foreground">
-                  Legacy rule — superseded by per-assertion toggles above. Uncheck to remove.
-                </span>
-              </Label>
-            </div>
-          )}
+          <div className="flex items-start gap-2 pt-2 border-t">
+            <Checkbox
+              id="assertion-failed-any"
+              className="mt-0.5"
+              checked={hasGlobalAssertionRule()}
+              disabled={pending}
+              onCheckedChange={checked => setGlobalAssertionRule(!!checked)}
+            />
+            <Label htmlFor="assertion-failed-any" className="text-sm font-normal leading-snug">
+              Fail the test if <em>any</em> assertion fails
+              <span className="block text-xs text-muted-foreground">
+                Recommended. A failing <code>expect(...)</code> fails the test.
+                Turn off to control failure per-assertion above, or to let
+                assertions report without affecting pass/fail.
+              </span>
+            </Label>
+          </div>
         </div>
 
         {/* End-of-test variable assertions — duplicate of the Vars tab inputs.

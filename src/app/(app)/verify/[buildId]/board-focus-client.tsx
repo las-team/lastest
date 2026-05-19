@@ -401,7 +401,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       if (status !== 'unknown') n++;
     }
@@ -545,7 +545,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       if (status === 'unknown') targets.push(step.id);
     }

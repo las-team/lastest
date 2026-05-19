@@ -182,7 +182,7 @@ export function FocusView(props: FocusViewProps) {
         step,
         feedback: stepFb,
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
