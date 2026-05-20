@@ -26,6 +26,7 @@ import {
   createRunnerCommand,
   cancelPendingCommandsByTestRun,
   recordSelectorOutcomes,
+  upsertStepEventBeacon,
 } from '@/lib/db/queries';
 // activeRunnerSessions + the cleanup interval moved to `@/lib/eb/cleanup-loop`
 // so `instrumentation.ts` can boot the loop without depending on /api/ws/runner
@@ -478,6 +479,20 @@ export async function POST(request: NextRequest) {
         const stepMsg = message as StepEventResponse;
         try { recordStepEvent(stepMsg.payload); } catch (err) {
           console.warn('[step_event] recordStepEvent failed:', err);
+        }
+        // Persist a per-command beacon so executor.ts stalled-detection +
+        // runners.ts orphan-reclaim see that the EB is actually executing test
+        // code. Without this they query runner_command_results directly and
+        // mistake step-event progress for an EB that never started. See
+        // upsertStepEventBeacon for the why.
+        const correlationId = stepMsg.payload.correlationId;
+        if (correlationId) {
+          upsertStepEventBeacon(correlationId, runner.id, {
+            testRunId: stepMsg.payload.testRunId,
+            stepIndex: stepMsg.payload.stepIndex,
+            totalSteps: stepMsg.payload.totalSteps,
+            status: stepMsg.payload.status,
+          }).catch((err) => console.warn('[step_event] beacon upsert failed:', err));
         }
         return NextResponse.json({ ok: true });
       }

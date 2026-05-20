@@ -476,10 +476,22 @@ async function executeViaRunner(
     console.warn('[executor] Failed to build AI var runtime:', err);
   }
 
-  // Track in-flight tests: commandId → { testId, testName, startTime }
-  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
+  // Track in-flight tests: commandId → { testId, testName, startTime, effectiveTimeout }
+  // `effectiveTimeout` is the budget we handed to the EB (`command.timeout`).
+  // The per-row stalled-check uses `effectiveTimeout + EB_DRAIN_GRACE_MS` as the
+  // host's deadline so the EB always loses the race and POSTs its `Test
+  // execution timed out` test_result + screenshots before we give up. Without
+  // the grace, both sides fire at the same instant — host marks [EB-stalled],
+  // EB closes context, late test_result is dropped, screenshots fail with
+  // "Target page, context or browser has been closed".
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; effectiveTimeout: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
   let completedCount = 0;
   let cancelled = false;
+  // Extra wall-clock the host waits AFTER the EB's own command.timeout fires,
+  // so the EB has time to close its context, capture a final screenshot, and
+  // POST `response:test_result` before the host gives up and marks the
+  // command timed out itself.
+  const EB_DRAIN_GRACE_MS = 30_000;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources.
   // Floor was 10 min, but the build watchdog `markStaleJobsAsCrashed`
@@ -709,6 +721,7 @@ async function executeViaRunner(
         testId: test.id,
         testName: test.name,
         startTime: Date.now(),
+        effectiveTimeout,
         assignedVariables: Object.keys(assignedVariables).length > 0 ? assignedVariables : undefined,
       });
     }
@@ -917,7 +930,14 @@ async function executeViaRunner(
 
     // Check for timeouts
     for (const [commandId, info] of inFlight) {
-      if (Date.now() - info.startTime > testTimeout) {
+      // Per-row deadline = EB's own budget + drain grace. Without the grace
+      // the host and EB fire simultaneously and race for who marks the test
+      // failed first; the host always wins (poll loop is faster than a
+      // forced context.close) and the EB's real test_result + screenshots
+      // get orphaned. Grace lets the EB POST first, normal completion path
+      // runs.
+      const hostDeadlineMs = info.effectiveTimeout + EB_DRAIN_GRACE_MS;
+      if (Date.now() - info.startTime > hostDeadlineMs) {
         // Probe the runner row to disambiguate "EB died" vs "test code hung".
         // Hard-failures inside a test (page.goto stuck, await never resolves)
         // produce the same surface symptom as the EB itself dying (pod OOM,
@@ -997,21 +1017,32 @@ async function executeViaRunner(
         //                 resolves, deep selector retry, infinite
         //                 waitForFunction). Surface as-is; retry won't help.
         // One probe row is enough to know "EB sent something"; we don't need
-        // a full count.
+        // a full count. We also pull the step_event beacon payload so the
+        // diagnostic message can quote "stopped at step N of M" instead of a
+        // bare "test code hung".
         const { runnerCommandResults } = await import('@/lib/db/schema');
         const probe = await db
-          .select({ id: runnerCommandResults.id })
+          .select({ id: runnerCommandResults.id, type: runnerCommandResults.type, payload: runnerCommandResults.payload })
           .from(runnerCommandResults)
           .where(eq(runnerCommandResults.commandId, commandId))
-          .limit(1)
-          .catch(() => [] as Array<{ id: string }>);
+          .catch(() => [] as Array<{ id: string; type: string; payload: Record<string, unknown> | null }>);
         const responseCount = probe.length;
+        const stepBeacon = probe.find((r) => r.type === 'response:step_event');
+        const beaconPayload = (stepBeacon?.payload ?? null) as { stepIndex?: number; totalSteps?: number; status?: string } | null;
+        // `EB-stalled` means the EB never produced any signal at all (no step
+        // events, no screenshots, no partial results). The presence of a
+        // step_event beacon proves the test code is running, so `EB-stalled`
+        // would misroute the failure through EB_INFRA_ERR_RX → wasted retry
+        // on a fresh EB. Demote to test-hung in that case.
         const ebStalledNoStart = !runnerDead && responseCount === 0;
+        const stepProgress = beaconPayload && typeof beaconPayload.stepIndex === 'number' && typeof beaconPayload.totalSteps === 'number'
+          ? ` (stopped at step ${beaconPayload.stepIndex} of ${beaconPayload.totalSteps}${beaconPayload.status ? `, last status: ${beaconPayload.status}` : ''})`
+          : '';
         const errorMessage = runnerDead
-          ? `[EB-dead] runner went offline mid-test (status=${runnerRow?.status ?? 'missing'}, lastSeen=${lastSeenStr}, testTimeout=${testTimeout}ms)${podDiagnostics}`
+          ? `[EB-dead] runner went offline mid-test (status=${runnerRow?.status ?? 'missing'}, lastSeen=${lastSeenStr}, hostDeadline=${hostDeadlineMs}ms, ebBudget=${info.effectiveTimeout}ms)${podDiagnostics}`
           : ebStalledNoStart
-            ? `[EB-stalled] EB picked up the command but never POSTed a response within ${testTimeout}ms (runner alive ${lastSeenStr}; Chromium/CDP init likely stuck on the EB pod before the test body ran)${podDiagnostics}`
-            : `Test execution timed out after ${testTimeout}ms (runner alive — test code hung; last reported activity ${lastSeenStr}; ${responseCount} partial response(s) received)${podDiagnostics}`;
+            ? `[EB-stalled] EB picked up the command but never POSTed a response within ${hostDeadlineMs}ms (runner alive ${lastSeenStr}; Chromium/CDP init likely stuck on the EB pod before the test body ran)${podDiagnostics}`
+            : `Test execution timed out after ${hostDeadlineMs}ms (runner alive, test code hung; last reported activity ${lastSeenStr}; ${responseCount} partial response(s) received)${stepProgress}${podDiagnostics}`;
 
         console.error(`[Executor] Test ${info.testId} timed out: ${errorMessage}`);
         // Cancel the stale test on the runner so it frees resources (no-op if

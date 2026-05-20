@@ -453,6 +453,12 @@ export function RecordingClient({
   const [playbackJobId, setPlaybackJobId] = useState<string | null>(null);
   const [playbackFrameSize, setPlaybackFrameSize] = useState<{ width: number; height: number } | null>(null);
   const autoTriggeredRef = useRef(false);
+  // Set when the user clicks Discard during the saving step. The auto-save
+  // useEffect (below) checks this after persistRecording resolves so a click
+  // that lands before savedTestId is set still cleans up the just-saved row.
+  // Without this, the in-flight save races past Discard and the test is left
+  // persisted in the DB.
+  const discardRequestedRef = useRef(false);
   const isMobile = useIsMobile();
   const [timelineOpen, setTimelineOpen] = useState(true);
   // On mobile, close the timeline by default once we know we're on a small screen.
@@ -927,6 +933,7 @@ export function RecordingClient({
     if (autoTriggeredRef.current) return;
     if (!generatedCode) return;
     autoTriggeredRef.current = true;
+    discardRequestedRef.current = false;
 
     (async () => {
       setAutoPlayStatus('saving');
@@ -943,6 +950,19 @@ export function RecordingClient({
       if (!id) {
         setAutoPlayStatus('error');
         autoTriggeredRef.current = false;
+        return;
+      }
+      // User clicked Discard while we were saving — drop the persisted row
+      // (fresh recording only; re-records keep the prior version snapshot)
+      // and skip the auto-replay entirely.
+      if (discardRequestedRef.current) {
+        if (!isRerecording) {
+          try {
+            await deleteTest(id);
+          } catch (err) {
+            console.error('Failed to delete discarded recording:', err);
+          }
+        }
         return;
       }
       setSavedTestId(id);
@@ -1721,6 +1741,12 @@ export function RecordingClient({
                   // the persisted test so the user actually walks away clean.
                   // For re-records, the prior version is preserved by
                   // updateTestWithVersion — Discard just navigates back.
+                  //
+                  // Set the discard flag first: the auto-save useEffect may
+                  // still be in flight (savedTestId not yet set) and will read
+                  // this flag after persistRecording resolves to delete the
+                  // just-saved row instead of finishing the auto-replay.
+                  discardRequestedRef.current = true;
                   if (savedTestId && !isRerecording) {
                     setIsLoading(true);
                     try {

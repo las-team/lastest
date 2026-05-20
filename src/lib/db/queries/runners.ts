@@ -163,6 +163,45 @@ export async function insertCommandResult(result: NewRunnerCommandResult) {
   return { id };
 }
 
+/**
+ * Persist a single "EB is making progress" beacon row per command. Step
+ * events flow over WebSocket → in-memory `recordStepEvent`, which is invisible
+ * to the executor's stalled-probe and the orphan-reclaim sweep (both query
+ * `runner_command_results` directly). Without a DB signal, a test that has
+ * cleanly executed N of M steps still looks like "EB picked up command but
+ * never POSTed anything" → wrongly tagged [EB-stalled] + retried on a fresh
+ * EB + the orphan sweep redispatches the same command.
+ *
+ * One row per command with a deterministic id `${commandId}:step-beacon` and
+ * type='response:step_event' (acknowledged=true so it stays out of the main
+ * result-processing pipe). On conflict the payload is updated in place, so
+ * the row always carries the latest `{ stepIndex, totalSteps, status }` for
+ * triage-time forensics.
+ */
+export async function upsertStepEventBeacon(
+  commandId: string,
+  runnerId: string,
+  payload: { testRunId?: string; stepIndex: number; totalSteps: number; status: string },
+): Promise<void> {
+  const id = `${commandId}:step-beacon`;
+  await db
+    .insert(runnerCommandResults)
+    .values({
+      id,
+      commandId,
+      runnerId,
+      type: 'response:step_event',
+      acknowledged: true,
+      payload: payload as unknown as Record<string, unknown>,
+    })
+    .onConflictDoUpdate({
+      target: runnerCommandResults.id,
+      set: {
+        payload: payload as unknown as Record<string, unknown>,
+      },
+    });
+}
+
 export async function getUnacknowledgedResults(commandIds: string[]) {
   if (commandIds.length === 0) return [];
   return db
