@@ -335,6 +335,19 @@ async function startup(): Promise<void> {
   runnerClient.onCommand = async (command) => {
     console.log(`[Command] Received: ${command.type}`);
 
+    // Ack receipt FIRST, before any work. Server flips the runner_commands
+    // row from status='pending' (dispatched) → 'claimed' on this ack. Without
+    // it, the server's stale-claim reaper would redispatch the same command
+    // every REDISPATCH_TTL window. Fire-and-forget — even if it fails the
+    // worst case is one harmless redispatch which `activeTestIds` dedup
+    // (below) drops.
+    runnerClient?.sendMessage({
+      id: crypto.randomUUID(),
+      type: 'response:command_ack',
+      timestamp: Date.now(),
+      payload: { commandId: command.id },
+    }, { timeoutMs: 5_000 }).catch(() => { /* swallow — redispatch covers loss */ });
+
     switch (command.type) {
       case 'command:run_test': {
         if (!browser || !testExecutor || !runnerClient) break;

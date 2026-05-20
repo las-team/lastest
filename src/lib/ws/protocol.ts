@@ -40,6 +40,7 @@ export type MessageType =
   | 'response:network_bodies'
   | 'response:error'
   | 'response:pong'
+  | 'response:command_ack'
   // Status
   | 'status:heartbeat'
   | 'connection:established'
@@ -621,6 +622,20 @@ export interface PongResponse extends BaseMessage {
   payload: PongPayload;
 }
 
+// Sent by the runner as the FIRST action inside its onCommand handler, before
+// any actual work. Confirms receipt of a dispatched command so the server can
+// flip the runner_commands row from status='pending' (dispatched) to 'claimed'.
+// Without this ack the server's stale-claim reaper would redispatch the row
+// every REDISPATCH_TTL window.
+export interface CommandAckPayload {
+  commandId: string;
+}
+
+export interface CommandAckResponse extends BaseMessage {
+  type: 'response:command_ack';
+  payload: CommandAckPayload;
+}
+
 // ============================================
 // Status Messages
 // ============================================
@@ -691,6 +706,7 @@ export type AgentResponse =
   | DebugStateResponse
   | ErrorResponse
   | PongResponse
+  | CommandAckResponse
   | HeartbeatMessage;
 
 export type Message =

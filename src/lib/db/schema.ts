@@ -2026,6 +2026,11 @@ export const runnerCommands = pgTable('runner_commands', {
   testId: text('test_id'), // Denormalized for dedup lookups
   testRunId: text('test_run_id'), // Denormalized for grouping
   createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  // Stamped when the server returns this command in a heartbeat response.
+  // The row stays at status='pending' until the runner POSTs `response:command_ack`,
+  // at which point status flips to 'claimed'. If no ack within REDISPATCH_TTL the
+  // next heartbeat re-delivers; EB-side `activeTestIds` dedup keeps it safe.
+  dispatchedAt: timestamp('dispatched_at'),
   claimedAt: timestamp('claimed_at'),
   completedAt: timestamp('completed_at'),
 }, (table) => ([
