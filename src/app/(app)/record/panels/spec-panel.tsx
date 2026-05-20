@@ -115,7 +115,7 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
       const response = await extractUserStoriesFromUpload(encoded, repositoryId, defaultBranch);
       if (response.success) {
         toast.success('Spec import started — extraction runs in the background');
-        router.push('/home');
+        router.push('/');
       } else {
         toast.error(response.error || 'Failed to start spec import');
       }

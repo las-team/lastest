@@ -41,7 +41,7 @@ export function AutoExplorePanel({ repositoryId, defaultBaseUrl }: AutoExplorePa
       const result = await startAutoExploreFromUrl({ repositoryId, baseUrl });
       if (result.success) {
         toast.success('Auto-explore started — Planner is mapping the app');
-        router.push('/home');
+        router.push('/');
       } else {
         toast.error(result.error || 'Failed to start auto-explore');
       }
