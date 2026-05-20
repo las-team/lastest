@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SliderComparison, type FocusRegionRect, type IgnoreRegionRect } from '@/components/diff/slider-comparison';
@@ -911,9 +911,49 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
 // DOM Changes Panel — shows added/removed/changed elements from DOM diff
 // ---------------------------------------------------------------------------
 
+// Drop entries whose bbox is fully contained by another entry in the same
+// list AND whose text/selector value is a substring of the container — those
+// are nested duplicates (e.g. an <a> sitting inside an added <li>).
+function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(items: T[]): { items: T[]; dropped: number } {
+  if (items.length <= 1) return { items, dropped: 0 };
+  // Largest area first so containers come before their children.
+  const sorted = [...items].sort((a, b) => {
+    const aa = a.boundingBox.width * a.boundingBox.height;
+    const bb = b.boundingBox.width * b.boundingBox.height;
+    return bb - aa;
+  });
+  const kept: T[] = [];
+  let dropped = 0;
+  const textOf = (el: T) => (el.textContent ?? el.selectors[0]?.value ?? '').trim().toLowerCase();
+  const contains = (outer: T, inner: T) => {
+    const o = outer.boundingBox, i = inner.boundingBox;
+    return (
+      i.x >= o.x - 1 &&
+      i.y >= o.y - 1 &&
+      i.x + i.width <= o.x + o.width + 1 &&
+      i.y + i.height <= o.y + o.height + 1
+    );
+  };
+  for (const el of sorted) {
+    const elText = textOf(el);
+    const isNested = kept.some(parent => {
+      if (!contains(parent, el)) return false;
+      const parentText = textOf(parent);
+      // Drop when the child text is empty (pure structural wrapper) or fully
+      // contained in the parent's text — these are not independent changes.
+      return elText === '' || parentText.includes(elText);
+    });
+    if (isNested) dropped++;
+    else kept.push(el);
+  }
+  return { items: kept, dropped };
+}
+
 function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
   const [expanded, setExpanded] = useState(false);
-  const totalChanges = domDiff.added.length + domDiff.removed.length + domDiff.changed.length;
+  const dedupedAdded = useMemo(() => dedupeNested(domDiff.added), [domDiff.added]);
+  const dedupedRemoved = useMemo(() => dedupeNested(domDiff.removed), [domDiff.removed]);
+  const totalChanges = dedupedAdded.items.length + dedupedRemoved.items.length + domDiff.changed.length;
 
   return (
     <details
@@ -927,8 +967,8 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
           DOM Changes
         </span>
         <span className="text-xs text-cyan-600 dark:text-cyan-400">
-          {domDiff.removed.length > 0 && <span className="text-red-600 dark:text-red-400 mr-2">-{domDiff.removed.length} removed</span>}
-          {domDiff.added.length > 0 && <span className="text-green-600 dark:text-green-400 mr-2">+{domDiff.added.length} added</span>}
+          {dedupedRemoved.items.length > 0 && <span className="text-red-600 dark:text-red-400 mr-2">-{dedupedRemoved.items.length} removed</span>}
+          {dedupedAdded.items.length > 0 && <span className="text-green-600 dark:text-green-400 mr-2">+{dedupedAdded.items.length} added</span>}
           {domDiff.changed.length > 0 && <span className="text-yellow-600 dark:text-yellow-400">~{domDiff.changed.length} changed</span>}
         </span>
         <span className="text-xs text-muted-foreground ml-auto mr-2">
@@ -938,29 +978,39 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
       </summary>
       <div className="px-4 pb-4 space-y-3 max-h-80 overflow-y-auto">
         {/* Removed elements */}
-        {domDiff.removed.length > 0 && (
+        {dedupedRemoved.items.length > 0 && (
           <div>
-            <div className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">Removed ({domDiff.removed.length})</div>
+            <div className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">
+              Removed ({dedupedRemoved.items.length})
+              {dedupedRemoved.dropped > 0 && (
+                <span className="ml-1 text-muted-foreground font-normal">· {dedupedRemoved.dropped} nested hidden</span>
+              )}
+            </div>
             <div className="space-y-1">
-              {domDiff.removed.slice(0, 20).map((el, i) => (
+              {dedupedRemoved.items.slice(0, 20).map((el, i) => (
                 <DomElementRow key={`r-${i}`} element={el} variant="removed" />
               ))}
-              {domDiff.removed.length > 20 && (
-                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.removed.length - 20} more</div>
+              {dedupedRemoved.items.length > 20 && (
+                <div className="text-xs text-muted-foreground pl-2">... and {dedupedRemoved.items.length - 20} more</div>
               )}
             </div>
           </div>
         )}
         {/* Added elements */}
-        {domDiff.added.length > 0 && (
+        {dedupedAdded.items.length > 0 && (
           <div>
-            <div className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Added ({domDiff.added.length})</div>
+            <div className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">
+              Added ({dedupedAdded.items.length})
+              {dedupedAdded.dropped > 0 && (
+                <span className="ml-1 text-muted-foreground font-normal">· {dedupedAdded.dropped} nested hidden</span>
+              )}
+            </div>
             <div className="space-y-1">
-              {domDiff.added.slice(0, 20).map((el, i) => (
+              {dedupedAdded.items.slice(0, 20).map((el, i) => (
                 <DomElementRow key={`a-${i}`} element={el} variant="added" />
               ))}
-              {domDiff.added.length > 20 && (
-                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.added.length - 20} more</div>
+              {dedupedAdded.items.length > 20 && (
+                <div className="text-xs text-muted-foreground pl-2">... and {dedupedAdded.items.length - 20} more</div>
               )}
             </div>
           </div>

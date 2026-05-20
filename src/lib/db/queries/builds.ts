@@ -134,8 +134,10 @@ export async function getLastBuildByBranch(repositoryId: string, branch: string)
 }
 
 export async function getBuildTestSummaries(buildId: string) {
-  const rows = await db
+  const rawRows = await db
     .select({
+      id: testResults.id,
+      retryOf: testResults.retryOf,
       testId: testResults.testId,
       testName: tests.name,
       functionalAreaName: functionalAreas.name,
@@ -151,6 +153,25 @@ export async function getBuildTestSummaries(buildId: string) {
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(eq(builds.id, buildId))
     ;
+
+  // Dedupe by testId: a build can have multiple test_results rows per test
+  // (retries, re-runs). Drop superseded originals (rows whose id appears in
+  // another row's retryOf), then keep one row per testId. Without this the
+  // /compose page produces duplicate React keys.
+  const supersededIds = new Set<string>();
+  for (const r of rawRows) {
+    if (r.retryOf) supersededIds.add(r.retryOf);
+  }
+  const seenTestIds = new Set<string>();
+  const rows: typeof rawRows = [];
+  for (const r of rawRows) {
+    if (r.id && supersededIds.has(r.id)) continue;
+    if (r.testId) {
+      if (seenTestIds.has(r.testId)) continue;
+      seenTestIds.add(r.testId);
+    }
+    rows.push(r);
+  }
 
   // Get avg diff % per test from visualDiffs
   const diffs = await db

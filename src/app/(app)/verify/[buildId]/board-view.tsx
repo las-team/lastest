@@ -19,6 +19,7 @@ import {
   Loader2,
   Github,
   CheckCircle as CheckCircleIcon,
+  AlertCircle,
 } from 'lucide-react';
 import type {
   EvidenceLayer,
@@ -98,8 +99,13 @@ interface BoardViewProps {
   isRunning: boolean;
   /** Tests currently executing on the runner (for in-flight skeleton cards). */
   runningTests: Array<{ testId: string; name: string }>;
+  /** False until the first /verify-status fetch lands — columns show
+   *  placeholder skeletons instead of "no cases" while we wait. */
+  cardsLoaded: boolean;
   onOpenCase: (stepId: string) => void;
   onDropCase: (stepId: string, target: CaseStatus) => void;
+  /** Column-level bulk action (Verify all / Report all). */
+  onColumnAction: (column: CaseStatus, action: 'verify' | 'report') => void;
   /** Open the GH issue picker dialog for a specific case. */
   onOpenIssuePicker: (stepId: string) => void;
 }
@@ -141,7 +147,7 @@ export function BoardView(props: BoardViewProps) {
         step,
         feedback: stepFb,
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
@@ -191,8 +197,31 @@ export function BoardView(props: BoardViewProps) {
     return m;
   }, [cases]);
 
+  // Per-area "settled" count — cases in the area whose derived status is
+  // anything but `unknown`. Used as the numerator alongside areaTotals so
+  // both sides of the "y/x verified" ratio are in the same unit (cases in
+  // the area), not "cards visible in the Verified column" vs "total cases".
+  const areaSettled = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cases) {
+      if (c.status === 'unknown') continue;
+      const key = c.area?.id ?? '__unscoped__';
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+  }, [cases]);
+
+  // Progress strip counts — both numerator and denominator computed off the
+  // same unfiltered case set so toggling kind/status filters can't make the
+  // ratio look like it's mixing units. ("22/52" used to read as
+  // cards-in-columns / total-steps; both sides now count cases.)
   const total = cases.length;
-  const verified = grouped.done.length + grouped.regression.length + grouped.missed.length;
+  const statusTotals = useMemo(() => {
+    const m: Record<CaseStatus, number> = { regression: 0, missed: 0, unknown: 0, done: 0 };
+    for (const c of cases) m[c.status]++;
+    return m;
+  }, [cases]);
+  const verified = statusTotals.done + statusTotals.regression + statusTotals.missed;
   const wPct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -229,10 +258,10 @@ export function BoardView(props: BoardViewProps) {
             <div className="label">Verification progress</div>
             <div style={{ flex: 1, height: 6, background: 'var(--c-soft-2)', borderRadius: 99, position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
-                <div style={{ width: `${wPct(grouped.done.length)}%`, background: 'var(--c-teal)' }} />
-                <div style={{ width: `${wPct(grouped.missed.length)}%`, background: 'var(--c-amber)' }} />
-                <div style={{ width: `${wPct(grouped.regression.length)}%`, background: 'var(--c-red)' }} />
-                <div style={{ width: `${wPct(grouped.unknown.length)}%`, background: 'var(--fg-3)' }} />
+                <div style={{ width: `${wPct(statusTotals.done)}%`, background: 'var(--c-teal)' }} />
+                <div style={{ width: `${wPct(statusTotals.missed)}%`, background: 'var(--c-amber)' }} />
+                <div style={{ width: `${wPct(statusTotals.regression)}%`, background: 'var(--c-red)' }} />
+                <div style={{ width: `${wPct(statusTotals.unknown)}%`, background: 'var(--fg-3)' }} />
               </div>
             </div>
             <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
@@ -289,8 +318,11 @@ export function BoardView(props: BoardViewProps) {
               status={col.status}
               cases={grouped[col.status]}
               areaTotals={areaTotals}
+              areaSettled={areaSettled}
               onOpenCase={props.onOpenCase}
               onOpenIssuePicker={props.onOpenIssuePicker}
+              onColumnAction={props.onColumnAction}
+              cardsLoaded={props.cardsLoaded}
               // Show in-flight skeletons in the Unsorted column while running.
               runningTests={col.status === 'unknown' && props.isRunning ? props.runningTests : []}
               testById={props.testById}
@@ -389,8 +421,18 @@ interface KColProps {
   /** Total cases per area across the entire board — denominator for the
    *  Verified column's "y/x verified" summary. */
   areaTotals: Map<string, number>;
+  /** Per-area count of cases whose derived status is not `unknown`. Used as
+   *  the numerator for the Verified column's per-area "y/x verified" pill so
+   *  both sides count cases in the same scope (area), not cards visible in
+   *  the Done column vs total area cases. */
+  areaSettled: Map<string, number>;
   onOpenCase: (stepId: string) => void;
   onOpenIssuePicker: (stepId: string) => void;
+  /** Column-level bulk action — Verify all on Unsorted/Broken/Missed,
+   *  Report all on Broken/Missed. Verified column has none (already done). */
+  onColumnAction: (column: CaseStatus, action: 'verify' | 'report') => void;
+  /** False until the first /verify-status fetch lands. */
+  cardsLoaded: boolean;
   /** Live in-flight tests; rendered as non-draggable skeleton cards. */
   runningTests: Array<{ testId: string; name: string }>;
   testById: Map<string, TestLite>;
@@ -400,7 +442,7 @@ interface KColProps {
   isDragValid: boolean;
 }
 
-function KCol({ label, dropLabel, accent, status, cases, areaTotals, onOpenCase, onOpenIssuePicker, runningTests, testById, isDragSource, isDragValid }: KColProps) {
+function KCol({ label, dropLabel, accent, status, cases, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker, onColumnAction, cardsLoaded, runningTests, testById, isDragSource, isDragValid }: KColProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const visible = cases.slice(0, 30);
   const showDropAffordance = isDragValid;
@@ -451,12 +493,17 @@ function KCol({ label, dropLabel, accent, status, cases, areaTotals, onOpenCase,
           Drop to mark <span style={{ marginLeft: 4 }}>{dropLabel}</span>
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
           <span className="label" style={{ fontSize: 10 }}>{totalCount}</span>
         </div>
+        <ColumnActions
+          status={status}
+          caseCount={cases.length}
+          onAction={onColumnAction}
+        />
       </div>
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1 }}>
         {/* In-flight running tests (only in Unsorted column while running). */}
@@ -470,13 +517,15 @@ function KCol({ label, dropLabel, accent, status, cases, areaTotals, onOpenCase,
           );
         })}
         {visible.length === 0 && runningTests.length === 0 && (
-          <div className="label" style={{ textAlign: 'center', padding: '24px 0' }}>—</div>
+          !cardsLoaded
+            ? <ColumnSkeleton />
+            : <div className="label" style={{ textAlign: 'center', padding: '24px 0' }}>—</div>
         )}
         {/* Verified column: collapse all-clean areas under a single details row.
             Areas with any flagged case (linked issue, reviewer note in future)
             still expand inline. Other columns just render flat. */}
         {status === 'done'
-          ? renderVerifiedGrouped(visible, areaTotals, onOpenCase, onOpenIssuePicker)
+          ? renderVerifiedGrouped(visible, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker)
           : visible.map((c) => (
               <DraggableCaseCard
                 key={c.step.id}
@@ -494,14 +543,81 @@ function KCol({ label, dropLabel, accent, status, cases, areaTotals, onOpenCase,
   );
 }
 
+interface ColumnActionsProps {
+  status: CaseStatus;
+  caseCount: number;
+  onAction: (column: CaseStatus, action: 'verify' | 'report') => void;
+}
+
+// Per-column bulk-action buttons. The Verified column has none (those are
+// already settled). Verify all: approve every case in the column. Report
+// all (Broken/Missed only): file the typed ticket — regression for Broken,
+// improvement for Missed.
+function ColumnActions({ status, caseCount, onAction }: ColumnActionsProps) {
+  if (status === 'done') return null;
+  if (caseCount === 0) return null;
+  const showReport = status === 'regression' || status === 'missed';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <button
+        type="button"
+        className="v-btn sm success"
+        onClick={() => onAction(status, 'verify')}
+        title={`Mark all ${caseCount} case${caseCount === 1 ? '' : 's'} in this column as Verified`}
+      >
+        <CheckCircleIcon size={11} />
+        Verify all
+      </button>
+      {showReport && (
+        <button
+          type="button"
+          className="v-btn sm danger"
+          onClick={() => onAction(status, 'report')}
+          title={status === 'regression'
+            ? `File regression tickets for all ${caseCount} broken case${caseCount === 1 ? '' : 's'}`
+            : `File improvement tickets for all ${caseCount} missed case${caseCount === 1 ? '' : 's'}`}
+        >
+          <AlertCircle size={11} />
+          Report all
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ColumnSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="v-card"
+          style={{
+            padding: 10,
+            height: 132,
+            background: 'linear-gradient(90deg, var(--c-soft) 0%, var(--c-soft-2) 50%, var(--c-soft) 100%)',
+            backgroundSize: '200% 100%',
+            animation: 'verify-shimmer 1.4s linear infinite',
+            opacity: 1 - i * 0.25,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Group Verified-column cards by area; areas where every case is "clean"
  *  (no linked issue / no rejection feedback) collapse to a single summary row.
  *  Other areas render flat so anything that still needs eyes is visible.
  *  `areaTotals` carries the count of *all* tests in each area across the board
- *  (not just the ones that landed in Verified) — used as the y/x denominator. */
+ *  (denominator); `areaSettled` carries the count of cases in the area whose
+ *  derived status is anything but `unknown` (numerator). Both are measured in
+ *  the same unit — cases per area — so the displayed ratio stops mixing
+ *  "cards in this column" with "steps across the build". */
 function renderVerifiedGrouped(
   cases: CaseCardData[],
   areaTotals: Map<string, number>,
+  areaSettled: Map<string, number>,
   onOpenCase: (id: string) => void,
   onOpenIssuePicker: (id: string) => void,
 ): React.ReactNode {
@@ -521,10 +637,13 @@ function renderVerifiedGrouped(
     const allClean = g.rows.every(isCleanCase);
     const areaKey = g.area?.id ?? `unscoped-${i}`;
     if (allClean && g.rows.length > 1) {
-      const verifiedCount = g.rows.filter(isCleanCase).length;
-      // Denominator = every test in this area across ALL columns, not just
-      // the ones that happen to be in the Verified column right now.
-      const totalInArea = areaTotals.get(g.area?.id ?? '__unscoped__') ?? g.rows.length;
+      const areaId = g.area?.id ?? '__unscoped__';
+      const totalInArea = areaTotals.get(areaId) ?? g.rows.length;
+      // Numerator: cases in this area that are settled (anywhere on the
+      // board), not just the ones sitting in the Done column. Keeps the
+      // ratio meaningful when some cases in the same area are still in
+      // Broken/Missed/Unsorted.
+      const verifiedCount = areaSettled.get(areaId) ?? g.rows.length;
       const fullyVerified = verifiedCount === totalInArea;
       return (
         <details key={areaKey} className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
@@ -702,13 +821,15 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
   // Thin left-border colored by execution kind — "this ran red" (errored)
   // vs "this changed but may be intentional" (changed) at a glance, without
   // tying the surface to the reviewer-decision column it's sitting in.
-  // Passed/flaky cards get no accent border (passed = no signal; flaky's
-  // hint surfaces via the layer chips instead, to avoid noise on the board).
-  const accentBorder = data.kind === 'errored'
-    ? `3px solid ${EXECUTION_KIND_ACCENT.errored}`
+  // Passed/flaky cards reserve the same 3px stripe but render it transparent
+  // (passed = no signal; flaky's hint surfaces via the layer chips instead)
+  // so content x-position stays identical across all cards and non-accent
+  // cards keep the same visible left padding.
+  const accentColor = data.kind === 'errored'
+    ? EXECUTION_KIND_ACCENT.errored
     : data.kind === 'changed'
-      ? `3px solid ${EXECUTION_KIND_ACCENT.changed}`
-      : undefined;
+      ? EXECUTION_KIND_ACCENT.changed
+      : 'transparent';
   return (
     <div
       className="v-card"
@@ -716,10 +837,10 @@ function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: Card
         padding: 10,
         userSelect: 'none',
         boxShadow: dragging ? '0 8px 24px rgba(31,42,51,0.18)' : undefined,
-        borderLeft: accentBorder,
-        // Compensate left padding when the accent border eats 3px so layout
-        // stays aligned with cards that don't have it.
-        paddingLeft: accentBorder ? 7 : undefined,
+        borderLeft: `3px solid ${accentColor}`,
+        // Compensate left padding for the 3px stripe so content lands at the
+        // same x position on every card, accented or not.
+        paddingLeft: 7,
       }}
       onClick={(e) => {
         if (dragging) return;

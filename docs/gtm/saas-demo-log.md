@@ -1536,3 +1536,40 @@ Per-target status appended below each draft.
   - Username constraint (letters/numbers/underscores only) surfaces only after submit. Friction.
   - Auth round-trip slow enough to exceed 30s chained-setup budget on reruns; fallback mode required.
 - **Channel:** SHARE-ONLY.
+
+## 2026-05-19 — Peter Duffy / Parsley
+
+- Source: IndieAppCircle
+- Site: https://www.parsley.id
+- Lastest repo: c3b331fc-dcc5-4451-a5d7-ae9a5d56cdee (parsley-demo)
+- Build: 7e6dba25-94fc-4f0d-a7cb-11c34bb5f7af  ✓ P:1 F:0 C:6 (public-only)
+- Share: https://app.lastest.cloud/r/dDDwiTVntv4cDf-YACR-5A
+- Test layout: 1 test, public-only walkthrough (chained-auth path attempted, fell back)
+- Channel: publish-only, user to DM Peter manually
+- Sent: no (user-managed)
+- Reply (48h check): —
+- Skill patch shipped: 10 findings → SKILL.md + test-template.md (see /tmp/skill-run-notes/friction.md)
+
+### Re-run with self-contained Test 2 (post-login walk)
+
+- Build: 7bab9738-71f2-432f-bd79-5ac07e1467e2  ✓ P:1 F:0 C:3 (7 scenarios; 3 NEW authed)
+- New share: https://app.lastest.cloud/r/W2I3V8CBpoxmyIUv5Bcc_A
+- Authed coverage: signup form → "Signed in as viktor+parsleympcpfnm0@lastest.cloud" Complete-Profile wizard
+- Wizard walker hit the "Get Started" click but ended on baseUrl instead of /get-started's URL-crawl page — next iteration would tighten the post-click navigation check
+- Demo notes v2 posted (highlights + frictionPoints + testingStruggles updated to reflect the SPA-keeps-URL + verify-email-banner false-positive findings)
+
+## 2026-05-19 — Safaraj / stokr (loop iter 1)
+
+- Source: IndieAppCircle (X login was unavailable in MCP this iter — see footnote)
+- Site: https://stokr.live
+- Founder personal site: https://safaraj.com
+- Lastest repo: ada97553-c33d-493d-a9a7-701b26f914ad (stokr-demo)
+- Build: b5418b24-ff15-4398-ac67-fffb5c9ef1fd  ✓ P:1 F:0 C:9
+- Share: https://app.lastest.cloud/r/qTrZG798WGl0gYF03PDO8w
+- Test layout: 1 self-contained test (public walk → inline signup → ticker entry → in-app /compare + /pricing → home)
+- Auth: AUTH_MODE=password (Username + Email + Password + Terms checkbox)
+- Authed coverage: signup form, /compare with NVDA+AMD pre-filled side-by-side, /pricing tiers ($0 / $9.99 with line-items)
+- Channel: pending user approval
+- Sent: not yet
+
+> Footnote: X / Twitter sourcing requires login state this MCP session doesn't have. Iteration 1 pivoted to IAC. If the loop is to keep sourcing from X specifically, log @HeroLastest into x.com once in this MCP browser context so storage persists across iterations.

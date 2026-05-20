@@ -9,6 +9,7 @@ import {
   createFixPrompt,
   extractCodeFromResponse,
 } from '@/lib/ai';
+import { runValidation } from '@/lib/ai/validation-retry';
 import type { AIProviderConfig, TestGenerationContext, CodebaseIntelligenceContext } from '@/lib/ai/types';
 import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
@@ -118,6 +119,17 @@ export async function aiFixTest(
     });
     const code = extractCodeFromResponse(response);
 
+    if (!code) {
+      return { success: false, error: 'AI fix produced no code' };
+    }
+
+    // Validate against runner API surface; aiFixTest has no MCP loop so we
+    // surface validation errors directly rather than retrying.
+    const validated = await runValidation(code, test.targetUrl);
+    if (!validated.valid) {
+      return { success: false, code, error: `Generated code failed validation: ${validated.feedback}` };
+    }
+
     return { success: true, code };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fix test';
@@ -146,6 +158,18 @@ export async function saveGeneratedTest(data: {
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   await requireRepoAccess(data.repositoryId);
   try {
+    // Static-only validation here — UI save action runs synchronously so we
+    // skip the 2-5s headless-chromium pass. The page-snapshot check belongs
+    // upstream on the agentic generator that produced this code.
+    const parseCheck = validateTestCode(data.code);
+    if (!parseCheck.valid) {
+      return { success: false, error: `Test code failed parse check: ${parseCheck.error}` };
+    }
+    const validated = await runValidation(data.code, null, { skipPageCheck: true });
+    if (!validated.valid) {
+      return { success: false, error: `Test code failed API validation: ${validated.feedback}` };
+    }
+
     const test = await queries.createTest({
       repositoryId: data.repositoryId,
       functionalAreaId: data.functionalAreaId || null,

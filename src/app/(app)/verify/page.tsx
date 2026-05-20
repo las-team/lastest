@@ -9,7 +9,6 @@ export const dynamic = 'force-dynamic';
 
 export default async function VerifyPage() {
   const session = await getCurrentSession();
-  // The flag check happens before any other awaits — when off, redirect cleanly.
   if (!isVerifyPhaseEnabled(session?.team)) {
     redirect('/run');
   }
@@ -18,31 +17,36 @@ export default async function VerifyPage() {
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
 
-  let latestBuildId: string | null = null;
-  let activeBranch: string | null = null;
-  let branches: string[] = [];
-  if (selectedRepo) {
-    activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
-    const [latestBuild, branchList] = await Promise.all([
-      getLastBuildByBranch(selectedRepo.id, activeBranch).catch(() => null),
-      fetchRepoBranches(selectedRepo.id).catch(() => []),
-    ]);
-    latestBuildId = latestBuild?.id ?? null;
-    branches = branchList.map((b) => b.name);
+  if (!selectedRepo) {
+    return (
+      <VerifyIndexClient
+        hasRepo={false}
+        repositoryId={null}
+        activeBranch={null}
+        defaultBranch={null}
+        branches={[]}
+      />
+    );
   }
 
-  // Always render the same JSX shape from this server component. The client
-  // component decides whether to navigate or show an empty state — keeping
-  // navigation off the server side avoids a Turbopack 16.1.3 perf-measure
-  // glitch with redirect()-after-await on this route.
+  const activeBranch = selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main';
+  const latestBuild = await getLastBuildByBranch(selectedRepo.id, activeBranch).catch(() => null);
+  if (latestBuild) {
+    // Skip the client-side "Opening latest build…" flash — server-redirect
+    // straight into the build view so users see the page chrome instantly.
+    redirect(`/verify/${latestBuild.id}`);
+  }
+
+  // No builds on this branch yet — render the empty shell so the user can
+  // switch branches or kick off a build.
+  const branchList = await fetchRepoBranches(selectedRepo.id).catch(() => []);
   return (
     <VerifyIndexClient
-      hasRepo={!!selectedRepo}
-      repositoryId={selectedRepo?.id ?? null}
+      hasRepo
+      repositoryId={selectedRepo.id}
       activeBranch={activeBranch}
-      defaultBranch={selectedRepo?.defaultBranch ?? null}
-      branches={branches}
-      latestBuildId={latestBuildId}
+      defaultBranch={selectedRepo.defaultBranch ?? null}
+      branches={branchList.map((b) => b.name)}
     />
   );
 }

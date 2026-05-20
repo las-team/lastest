@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
+import { ensureStepComparisonsForBuild } from '@/lib/verify/backfill-step-comparisons';
+import { computeChangeMap } from '@/server/actions/change-map';
 
 export async function GET(
   request: Request,
@@ -16,7 +18,9 @@ export async function GET(
   const build = await queries.getBuild(buildId);
   if (!build) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // Authorize via the build's repo.
+  // Authorize via the build's repo and remember repoId for downstream
+  // lookups (playwright settings).
+  let repoId: string | null = null;
   if (build.testRunId) {
     const run = await queries.getTestRun(build.testRunId);
     if (run?.repositoryId) {
@@ -24,18 +28,51 @@ export async function GET(
       if (!repo || repo.teamId !== teamId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
+      repoId = run.repositoryId;
     }
   }
 
-  const [stepComparisons, layerFeedback, visualDiffs, runningTestRows] = await Promise.all([
+  // Run recovery + change-map compute lazily on the first call that needs
+  // them. Both are idempotent: backfill is a no-op once step_comparisons
+  // exist, and getBuildChangeMap returns the cached row on subsequent polls
+  // so computeChangeMap doesn't re-fire. Page chrome still rendered while
+  // we were on the way here.
+  const [
+    initialStepComparisons,
+    layerFeedback,
+    visualDiffs,
+    runningTestRows,
+    cachedChangeMap,
+    pwSettings,
+  ] = await Promise.all([
     queries.getStepComparisonsByBuild(buildId).catch(() => []),
     queries.getLayerFeedbackByBuild(buildId).catch(() => []),
     queries.getVisualDiffsByBuild(buildId).catch(() => []),
-    // Use the same running-tests source as the existing build summary.
     build.testRunId
       ? queries.getTestResultsByRun(build.testRunId).catch(() => [])
       : Promise.resolve([]),
+    queries.getBuildChangeMap(buildId).catch(() => null),
+    // Repo-level playwright settings drive the network / console error mode
+    // hint pills in the focus view. Per-test overrides exist but are rare;
+    // the focus view is OK with the repo-level value here.
+    queries.getPlaywrightSettings(repoId).catch(() => null),
   ]);
+
+  let stepComparisons = initialStepComparisons;
+  if (
+    build.testRunId
+    && build.completedAt
+    && stepComparisons.length === 0
+    && runningTestRows.length > 0
+  ) {
+    await ensureStepComparisonsForBuild(buildId).catch((err) => {
+      console.error('[verify-status] backfill failed:', err);
+    });
+    stepComparisons = await queries.getStepComparisonsByBuild(buildId).catch(() => []);
+  }
+
+  const changeMap = cachedChangeMap
+    ?? (await computeChangeMap(buildId).catch(() => null));
 
   const slimDiffs = visualDiffs.map((d) => {
     const meta = d.metadata as import('@/lib/db/schema').DiffMetadata | null;
@@ -55,6 +92,8 @@ export async function GET(
       baselineTextPath: d.baselineTextPath,
       currentTextPath: d.currentTextPath,
       textDiffSummary: meta?.textDiffSummary ?? null,
+      baselineSourceBranch: meta?.baselineSourceBranch ?? null,
+      baselineExistsOn: meta?.baselineExistsOn ?? null,
     };
   });
 
@@ -86,6 +125,14 @@ export async function GET(
     .filter((r) => r.status === 'running')
     .map((r) => ({ testId: r.testId, name: r.testId }));
 
+  // Repo-level error-mode toggles. Drives the focus view's network/console
+  // tab "broken vs warn vs ignore" treatment so the red X pill matches what
+  // the runner actually does when it sees a network 4xx / console error.
+  const errorModes = {
+    network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+    console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+  };
+
   return NextResponse.json(
     {
       buildId,
@@ -100,6 +147,8 @@ export async function GET(
       visualDiffs: slimDiffs,
       testResults: slimResults,
       runningTests,
+      changeMap,
+      errorModes,
     },
     {
       headers: {

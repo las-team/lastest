@@ -69,6 +69,13 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       networkRequests: testResults.networkRequests,
       downloads: testResults.downloads,
       browser: visualDiffs.browser,
+      // Per-step progress fields (consumed by build-detail-client to render
+      // a per-step pass/fail strip and synthesize "not run" rows for steps
+      // beyond lastReachedStep).
+      lastReachedStep: testResults.lastReachedStep,
+      totalSteps: testResults.totalSteps,
+      evaluationOutcome: testResults.evaluationOutcome,
+      softErrors: testResults.softErrors,
       issueUrl: visualDiffs.issueUrl,
       issueProvider: visualDiffs.issueProvider,
       baselineTextPath: visualDiffs.baselineTextPath,
@@ -235,6 +242,35 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
       ...stepConditions,
     ))
     .orderBy(desc(baselines.createdAt));
+  return row;
+}
+
+/**
+ * Find the most recent active baseline for a test+step+browser across ANY
+ * branch. Used by the UX hint when the current branch (and default branch
+ * fallback) have nothing to diff against — lets the verify board tell the
+ * user "approved baseline exists on <branch>" instead of looking like the
+ * baseline was wiped.
+ */
+export async function getAnyActiveBaseline(
+  testId: string,
+  stepLabel: string | null | undefined,
+  browser: string = 'chromium',
+) {
+  const stepConditions = stepLabel
+    ? [eq(baselines.stepLabel, stepLabel)]
+    : [isNull(baselines.stepLabel)];
+  const [row] = await db
+    .select()
+    .from(baselines)
+    .where(and(
+      eq(baselines.testId, testId),
+      eq(baselines.isActive, true),
+      eq(baselines.browser, browser),
+      ...stepConditions,
+    ))
+    .orderBy(desc(baselines.createdAt))
+    .limit(1);
   return row;
 }
 

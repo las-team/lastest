@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRunnerToken, updateRunnerStatus } from '@/server/actions/runners';
-import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, ScreenshotTextUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse } from '@/lib/ws/protocol';
+import type { Message, HeartbeatMessage, TestResultResponse, SetupResultResponse, ScreenshotUploadResponse, ScreenshotTextUploadResponse, RecordingEventResponse, RecordingStoppedResponse, ErrorResponse, StepEventResponse, CommandAckResponse } from '@/lib/ws/protocol';
 import { recordStepEvent } from '@/lib/ws/step-state';
 import { waitForCommandQueued, notifyCommandQueued } from '@/lib/ws/runner-events';
 import fs from 'fs/promises';
@@ -19,7 +19,8 @@ import path from 'path';
 import { STORAGE_DIRS } from '@/lib/storage/paths';
 import { assertWithinDir, UnsafePathError } from '@/lib/security/safe-path';
 import {
-  claimPendingCommands,
+  dispatchPendingCommands,
+  ackDispatchedCommand,
   completeRunnerCommand,
   insertCommandResult,
   createRunnerCommand,
@@ -207,19 +208,22 @@ export async function POST(request: NextRequest) {
 
         await updateRunnerStatus(runner.id, status);
 
-        // Claim pending commands from DB (limit to maxParallelTests to prevent bulk execution)
-        let claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+        // Dispatch pending commands from DB. Rows stay at status='pending'
+        // with dispatchedAt stamped; the runner must POST `response:command_ack`
+        // to flip them to 'claimed'. If no ack arrives within REDISPATCH_TTL
+        // the next heartbeat redispatches the same row (EB dedup keeps it safe).
+        let dispatched = await dispatchPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
 
         // Long-poll: if no commands, wait up to 25s for a command to be queued
-        if (claimed.length === 0) {
+        if (dispatched.length === 0) {
           const notified = await waitForCommandQueued(runner.id, 25_000);
           if (notified) {
-            claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+            dispatched = await dispatchPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
           }
         }
 
         // Reconstruct Message objects from stored commands
-        const commands: Message[] = claimed.map(cmd => ({
+        const commands: Message[] = dispatched.map(cmd => ({
           id: cmd.id,
           type: cmd.type,
           timestamp: cmd.createdAt ? cmd.createdAt.getTime() : Date.now(),
@@ -445,6 +449,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case 'response:command_ack': {
+        // Runner confirms receipt of a dispatched command — flip the row
+        // from status='pending' (dispatched) to status='claimed' so the
+        // sweeper doesn't redispatch it. Idempotent.
+        const ackMsg = message as CommandAckResponse;
+        const cmdId = ackMsg.payload?.commandId;
+        if (typeof cmdId === 'string' && cmdId.length > 0) {
+          await ackDispatchedCommand(cmdId).catch((err) => {
+            console.warn('[command_ack] ackDispatchedCommand failed:', err);
+          });
+        }
+        return NextResponse.json({ ok: true });
+      }
+
       case 'response:pong': {
         return NextResponse.json({ ok: true });
       }
@@ -655,9 +673,11 @@ export async function GET(request: NextRequest) {
       await updateRunnerStatus(runner.id, 'online');
     }
 
-    // Claim any pending commands from DB (limit to maxParallelTests)
-    const claimed = await claimPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
-    const commands: Message[] = claimed.map(cmd => ({
+    // Dispatch any pending commands from DB (limit to maxParallelTests). The
+    // runner is responsible for POSTing `response:command_ack` for each one
+    // — see the long-poll path for the redispatch story if the ack is lost.
+    const dispatched = await dispatchPendingCommands(runner.id, runner.maxParallelTests ?? undefined);
+    const commands: Message[] = dispatched.map(cmd => ({
       id: cmd.id,
       type: cmd.type,
       timestamp: cmd.createdAt ? cmd.createdAt.getTime() : Date.now(),

@@ -39,6 +39,12 @@ import {
   hashSelectors,
   sortSelectorsByStats,
   selectorTimeoutFor,
+  extractTestBody,
+  createExpect,
+  createFileUploadHelper,
+  createClipboardHelper,
+  createNetworkHelper,
+  decodeFixturesToTmp,
   type SelectorOutcome,
   type SelectorRef,
   type SelectorStatRow,
@@ -821,17 +827,16 @@ export class EmbeddedTestExecutor {
         return response;
       };
 
-      // Extract function body
-      const funcMatch = command.code.match(
-        /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
-      );
-
-      let body: string;
-      if (funcMatch) {
-        body = stripTypeAnnotations(funcMatch[1]);
-      } else {
+      // Tiered extractor (shared with remote runner):
+      //   1) legacy `export async function test(page, ...) { ... }` (byte-identical)
+      //   2) framework `test('name', async ({ page }) => { ... })` (new, additive)
+      //   3) whole-code fallback (matches prior fallback)
+      const extracted = extractTestBody(command.code);
+      let body: string = stripTypeAnnotations(extracted.body);
+      if (extracted.shape === 'whole-code') {
         logFn('info', 'No export async function test(...) wrapper found — using code as body');
-        body = stripTypeAnnotations(command.code);
+      } else if (extracted.shape === 'framework-test') {
+        logFn('info', 'Extracted body from framework-style test("name", async ({ page }) => { ... })');
       }
 
       // Strip re-declarations of runner-injected variables (expect, test) from import/require
@@ -839,6 +844,7 @@ export class EmbeddedTestExecutor {
       body = body.replace(/^\s*(?:const|let|var)\s+\{[^}]*\bexpect\b[^}]*\}\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
       body = body.replace(/^\s*(?:const|let|var)\s+expect\s*=\s*(?:await\s+)?(?:import|require)\s*\([^)]*\);?\s*$/gm, '');
       body = body.replace(/^\s*import\s+\{[^}]*\}\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
+      body = body.replace(/^\s*import\s+\w+\s+from\s+['"][^'"]*['"];?\s*$/gm, '');
       logFn('info', `Extracted test body: ${body.length} chars`);
 
       // Remove test-local locateWithFallback (using runner-provided version)
@@ -1023,76 +1029,11 @@ export class EmbeddedTestExecutor {
         },
       };
 
-      // Basic expect implementation (mirrors runner.ts createExpect)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const expect = (target: any, message?: string) => {
-        const msgPrefix = message ? `${message}: ` : '';
-        const isPage = typeof target?.goto === 'function';
-        const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
-        if (isPage) {
-          return {
-            async toHaveTitle(expected: string | RegExp) {
-              const title = await target.title();
-              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-              if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`);
-            },
-            async toHaveURL(expected: string | RegExp) {
-              const url = target.url();
-              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-              if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`);
-            },
-          };
-        }
-        if (isLocator) {
-          return {
-            async toBeVisible() {
-              if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`);
-            },
-            async toBeHidden() {
-              if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`);
-            },
-            async toHaveText(expected: string | RegExp) {
-              const text = await target.textContent() || '';
-              const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-              if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`);
-            },
-            async toContainText(expected: string) {
-              const text = await target.textContent() || '';
-              if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`);
-            },
-            not: {
-              async toBeVisible() {
-                if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`);
-              },
-            },
-          };
-        }
-        return {
-          toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
-          toEqual(expected: unknown) { if (JSON.stringify(target) !== JSON.stringify(expected)) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
-          toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
-          toBeFalsy() { if (target) throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`); },
-          toContain(expected: unknown) {
-            if (Array.isArray(target)) { if (!target.includes(expected)) throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`); }
-            else if (typeof target === 'string') { if (!target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string to contain "${expected}"`); }
-          },
-          toHaveLength(expected: number) { if (target?.length !== expected) throw new Error(`${msgPrefix}Expected length ${expected} but got ${target?.length}`); },
-          toBeGreaterThan(expected: number) { if (!(target > expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than ${expected}`); },
-          toBeGreaterThanOrEqual(expected: number) { if (!(target >= expected)) throw new Error(`${msgPrefix}Expected ${target} to be greater than or equal to ${expected}`); },
-          toMatch(expected: string | RegExp) {
-            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-            if (!regex.test(String(target))) throw new Error(`${msgPrefix}Expected "${target}" to match ${regex}`);
-          },
-          not: {
-            toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); },
-            toBeTruthy() { if (target) throw new Error(`${msgPrefix}Expected value not to be truthy`); },
-            toContain(expected: unknown) {
-              if (Array.isArray(target) && target.includes(expected)) throw new Error(`${msgPrefix}Expected array not to contain ${JSON.stringify(expected)}`);
-              if (typeof target === 'string' && target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string not to contain "${expected}"`);
-            },
-          },
-        };
-      };
+      // Shared expect shim — superset of the previous inline implementation.
+      // Strictly additive: matchers the inline shim shipped behave the same;
+      // new matchers (toBeAttached, toHaveValue, toHaveAttribute, full .not
+      // chains, …) become available. See packages/shared/src/playwright-expect.ts
+      const expect = createExpect();
 
       // locateWithFallback — supports { type, value } format, ocr-text, role-name, coordinate fallback
       const lwfStats = command.selectorStats ?? [];
@@ -1242,6 +1183,17 @@ export class EmbeddedTestExecutor {
         logFn('info', `Test still running... (${elapsed}s elapsed)`);
       }, 15000);
 
+      // Helpers — parity with the remote runner. fileUpload and network are
+      // page-only, so they're always real. clipboard requires a permissions
+      // grant the EB command type doesn't yet expose (continue passing null
+      // until that field is plumbed). fixtures are passed as an empty map
+      // because the EB command type doesn't yet carry a fixtures payload;
+      // tests that don't use fixtures are unaffected.
+      const fileUploadHelper = createFileUploadHelper(page);
+      const clipboardHelper = createClipboardHelper(page, { granted: false });
+      const networkHelper = createNetworkHelper(page);
+      const { fixturesMap } = decodeFixturesToTmp(undefined, command.testRunId);
+
       // Execute with timeout — close context to kill in-flight Playwright ops on timeout
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -1252,7 +1204,7 @@ export class EmbeddedTestExecutor {
               'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', 'appState', 'locateWithFallback', 'fileUpload', 'clipboard', 'downloads', 'network', 'replayCursorPath', 'fixtures', '__stepReached', '__assertion',
               body
             );
-            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, null, null, downloadsHelper, null, replayCursorPathFn, {}, __stepReached, __assertion);
+            await testFn(page, command.targetUrl.replace(/\/+$/, ''), 'screenshot.png', stepLogger, expect, null, locateWithFallback, fileUploadHelper, clipboardHelper, downloadsHelper, networkHelper, replayCursorPathFn, fixturesMap, __stepReached, __assertion);
           })().then(r => { clearTimeout(timeoutTimer); return r; }),
           new Promise<never>((_, reject) => {
             timeoutTimer = setTimeout(() => {
@@ -1345,10 +1297,18 @@ export class EmbeddedTestExecutor {
       // Capture DOM snapshot after test body ran so it aligns with the final screenshot.
       await captureFinalDomSnapshot();
 
-      // Harvest axe-core results + accessibility tree written by the synthetic
-      // URL-Diff test body to `window.__urlDiffResult`. Gated by `enableA11y`
-      // so normal tests don't pay the harvest cost. Truncate the a11y tree at
-      // 512 KB to keep `runner_command_results.payload` JSON sane.
+      // Harvest axe-core results. Two paths share the same `enableA11y`
+      // toggle:
+      //   1. URL-Diff tests: a synthetic body in `src/lib/url-diff/capture.ts`
+      //      has already run axe-core and stamped `window.__urlDiffResult`.
+      //      We just read it.
+      //   2. Regular recorded tests: the body does nothing a11y-related, so
+      //      the EB itself drives `@axe-core/playwright` against the final
+      //      page state when the toggle is on. Without this branch, the
+      //      Playwright setting "Accessibility Checks" silently no-ops for
+      //      everything except URL-Diff captures.
+      // Truncate the a11y tree at 512 KB to keep `runner_command_results.payload`
+      // JSON sane.
       let a11yViolations: EmbeddedTestResult['a11yViolations'];
       let a11yPassesCount: number | undefined;
       let accessibilityTree: unknown;
@@ -1373,6 +1333,56 @@ export class EmbeddedTestExecutor {
               } else {
                 accessibilityTree = treeRaw;
               }
+            }
+          } else {
+            // No URL-Diff harvest available. Run axe-core directly against the
+            // page so non-URL-Diff tests also get a11y data with the toggle on.
+            // Tags match `src/lib/url-diff/capture.ts` (wcag2a + wcag2aa) so
+            // baseline vs current comparisons stay apples-to-apples.
+            try {
+              const mod = await import('@axe-core/playwright');
+              const AxeBuilder = (mod as unknown as { default?: unknown; AxeBuilder?: unknown }).default
+                ?? (mod as unknown as { AxeBuilder?: unknown }).AxeBuilder
+                ?? mod;
+              type AxeRawViolation = {
+                id: string;
+                impact: 'critical' | 'serious' | 'moderate' | 'minor';
+                description: string;
+                help: string;
+                helpUrl: string;
+                nodes: unknown[];
+                tags?: string[];
+              };
+              type AxeBuilderCtor = new (opts: { page: Page }) => {
+                withTags(tags: string[]): { analyze(): Promise<{ violations: AxeRawViolation[]; passes: unknown[] }> };
+              };
+              const builder = new (AxeBuilder as unknown as AxeBuilderCtor)({ page });
+              const axeResults = await builder.withTags(['wcag2a', 'wcag2aa']).analyze();
+              // axe-core returns `nodes` as an Array<NodeResult>, but our
+              // schema (and wcag-score) expect a count. Without this remap
+              // `Math.min(array, 3)` coerces to NaN, poisoning the build
+              // a11y_score and rejecting the update at the Postgres layer.
+              // Mirrors src/lib/url-diff/capture.ts:102.
+              const violations: NonNullable<EmbeddedTestResult['a11yViolations']> = Array.isArray(axeResults.violations)
+                ? axeResults.violations.map((v) => ({
+                    id: v.id,
+                    impact: v.impact,
+                    description: v.description,
+                    help: v.help,
+                    helpUrl: v.helpUrl,
+                    nodes: Array.isArray(v.nodes) ? v.nodes.length : 0,
+                    tags: v.tags,
+                  }))
+                : [];
+              a11yViolations = violations;
+              a11yPassesCount = Array.isArray(axeResults.passes) ? axeResults.passes.length : 0;
+            } catch (axeErr) {
+              logFn('warn', `axe-core run failed: ${axeErr instanceof Error ? axeErr.message : String(axeErr)}`);
+              // Leave a11yViolations undefined; verify focus view will show
+              // the "not captured" hint with the settings link. This is the
+              // correct signal: the toggle is on but the harvest failed, so
+              // operators should investigate (network blocked, page closed,
+              // axe-core missing from EB image).
             }
           }
         } catch (err) {
@@ -1612,21 +1622,9 @@ export class EmbeddedTestExecutor {
         logFn('info', `Stabilization applied`);
       }
 
-      // Extract function body (same pattern as runTest, also match setup functions)
-      const setupMatch = command.code.match(
-        /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
-      );
-      const testMatch = command.code.match(
-        /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
-      );
-      const funcMatch = setupMatch || testMatch;
-
-      let body: string;
-      if (funcMatch) {
-        body = stripTypeAnnotations(funcMatch[1]);
-      } else {
-        body = stripTypeAnnotations(command.code);
-      }
+      // Extract function body (same tiered extractor as runTest)
+      const extracted = extractTestBody(command.code, { allowSetup: true });
+      let body: string = stripTypeAnnotations(extracted.body);
 
       // Remove test-local function definitions
       const lwfResult = removeFunctionDefinition(body, 'locateWithFallback');
@@ -1647,33 +1645,10 @@ export class EmbeddedTestExecutor {
         softAction: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
       };
 
-      // Create helpers matching the test execution path so setup code can use them
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const expect = (target: any, message?: string) => {
-        const msgPrefix = message ? `${message}: ` : '';
-        const isPage = typeof target?.goto === 'function';
-        const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
-        if (isPage) {
-          return {
-            async toHaveTitle(expected: string | RegExp) { const title = await target.title(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`); },
-            async toHaveURL(expected: string | RegExp) { const url = target.url(); const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`); },
-          };
-        }
-        if (isLocator) {
-          return {
-            async toBeVisible() { if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`); },
-            async toBeHidden() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`); },
-            async toHaveText(expected: string | RegExp) { const text = await target.textContent() || ''; const regex = typeof expected === 'string' ? new RegExp(expected) : expected; if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`); },
-            async toContainText(expected: string) { const text = await target.textContent() || ''; if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`); },
-            not: { async toBeVisible() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`); } },
-          };
-        }
-        return {
-          toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
-          toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
-          not: { toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); } },
-        };
-      };
+      // Setup-script expect — same shared shim the test path uses. Per the
+      // approved plan, setup-script *arg list* parity (#5 in the parity
+      // report) is out of scope; only the matcher surface is upgraded here.
+      const expect = createExpect();
 
       const locateWithFallback = async (
         pg: Page,
