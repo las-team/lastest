@@ -312,6 +312,18 @@ export class EmbeddedTestExecutor {
     await entry.context.close().catch(() => {});
   }
 
+  /**
+   * Look up a retained setup context by id. Used by the recording path to
+   * reuse the live post-setup context (preserves cookies + localStorage +
+   * sessionStorage + IndexedDB + in-memory auth — `storageState()` JSON only
+   * preserves the first two). Returns `null` when the entry has aged out.
+   */
+  getRetainedSetupContext(setupId: string): { context: BrowserContext; storageState?: unknown; viewport?: { width: number; height: number } } | null {
+    const entry = this.setupContexts.get(setupId);
+    if (!entry) return null;
+    return { context: entry.context, storageState: entry.storageState, viewport: entry.viewport };
+  }
+
   async runTest(
     browser: Browser,
     command: RunTestPayload,

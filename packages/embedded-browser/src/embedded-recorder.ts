@@ -11,6 +11,16 @@
  */
 
 import type { Browser, Page, BrowserContext } from 'playwright';
+
+/**
+ * Callback for looking up a retained setup BrowserContext by setupId.
+ * Wired by the caller (index.ts) to TestExecutor.getRetainedSetupContext —
+ * avoids EmbeddedRecorder importing TestExecutor and keeps test surfaces
+ * separate.
+ */
+export type RetainedSetupContextLookup = (
+  setupId: string,
+) => { context: BrowserContext; storageState?: unknown; viewport?: { width: number; height: number } } | null;
 import { browserRecordingScript } from './browser-script.js';
 import path from 'path';
 import fs from 'fs';
@@ -25,9 +35,17 @@ interface StartRecordingPayload {
   pointerGestures?: boolean;
   cursorFPS?: number;
   setupSteps?: Array<{ code: string; codeHash: string }>;
-  // Captured storageState from running setupSteps via testExecutor.runSetup
-  // (the same path test runs use). Seeded into the recording context so
-  // cookies/localStorage from auth setup are present from the first frame.
+  // setupContextId identifies a LIVE BrowserContext retained by TestExecutor
+  // after a successful setup run. The recorder reuses it (creates a fresh
+  // page in it) so the recording inherits cookies + localStorage +
+  // sessionStorage + IndexedDB + in-memory auth. Test-runs use the same
+  // pattern (line 401 in test-executor.ts).
+  setupContextId?: string;
+  // storageStateJson is the fallback when the retained context lookup fails
+  // (e.g. context aged out via the sweeper). Only preserves cookies +
+  // localStorage — modern SPAs storing auth in sessionStorage will end up
+  // un-authed on this path. Setup must succeed and not age out for the
+  // happy path.
   storageStateJson?: string;
 }
 
@@ -56,6 +74,9 @@ interface RecordingEventData {
 export class EmbeddedRecorder {
   private page: Page | null = null;
   private context: BrowserContext | null = null;
+  // false when context is a borrowed setup-context (TestExecutor owns it);
+  // true when EmbeddedRecorder built a fresh context and must clean it up.
+  private ownsContext = true;
   private events: RecordingEventData[] = [];
   private sequenceCounter = 0;
   private baseOrigin = '';
@@ -68,11 +89,18 @@ export class EmbeddedRecorder {
   /**
    * Start recording on a fresh context/page.
    * Returns the new page so the caller can attach screencast/input to it.
+   *
+   * `lookupRetainedSetupContext` is wired by index.ts to
+   * TestExecutor.getRetainedSetupContext. When `payload.setupContextId` and
+   * a matching retained context are available, the recording REUSES that
+   * context instead of building a fresh one — preserving sessionStorage,
+   * IndexedDB, and in-memory auth state that the storageState JSON drops.
    */
   async start(
     browser: Browser,
     payload: StartRecordingPayload,
     onEvent: (events: RecordingEventData[]) => void,
+    lookupRetainedSetupContext?: RetainedSetupContextLookup,
   ): Promise<Page> {
     this.onEvent = onEvent;
     this.baseOrigin = new URL(payload.targetUrl).origin;
@@ -82,25 +110,43 @@ export class EmbeddedRecorder {
 
     const viewport = payload.viewport ?? { width: 1280, height: 720 };
 
-    // Parse storageState from setup chain (test runs use the same parser).
-    // Bad JSON falls back to a fresh context with a warning rather than
-    // failing the whole recording — the user can re-run setup separately.
-    let parsedStorageState: NonNullable<Parameters<Browser['newContext']>[0]>['storageState'] | undefined;
-    if (payload.storageStateJson) {
-      try {
-        parsedStorageState = JSON.parse(payload.storageStateJson);
-      } catch (err) {
-        console.warn(`  [EmbeddedRecorder] Bad storageStateJson, recording starts un-authed: ${err instanceof Error ? err.message : String(err)}`);
+    // Try to REUSE a retained setup context first — preserves full auth state
+    // (sessionStorage / IndexedDB / in-memory) the JSON snapshot drops.
+    let retainedContext: BrowserContext | null = null;
+    if (payload.setupContextId && lookupRetainedSetupContext) {
+      const entry = lookupRetainedSetupContext(payload.setupContextId);
+      if (entry) {
+        retainedContext = entry.context;
+        console.log(`  [EmbeddedRecorder] Reusing live setup context (setupId=${payload.setupContextId})`);
+      } else {
+        console.warn(`  [EmbeddedRecorder] Retained setup context ${payload.setupContextId} aged out — falling back to storageState JSON`);
       }
     }
 
-    // Create isolated context + page (seeded with setup-captured auth if any)
-    this.context = await browser.newContext({
-      viewport,
-      ignoreHTTPSErrors: true,
-      acceptDownloads: true,
-      ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-    });
+    if (retainedContext) {
+      this.context = retainedContext;
+      // Don't close the context on stop — it belongs to TestExecutor's
+      // setupContexts map and is shared with the sweeper / future runs.
+      this.ownsContext = false;
+    } else {
+      // Fallback: build a fresh context, seeded with storageState JSON if any.
+      // Auth missing sessionStorage / IndexedDB ends up here.
+      let parsedStorageState: NonNullable<Parameters<Browser['newContext']>[0]>['storageState'] | undefined;
+      if (payload.storageStateJson) {
+        try {
+          parsedStorageState = JSON.parse(payload.storageStateJson);
+        } catch (err) {
+          console.warn(`  [EmbeddedRecorder] Bad storageStateJson, recording starts un-authed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      this.context = await browser.newContext({
+        viewport,
+        ignoreHTTPSErrors: true,
+        acceptDownloads: true,
+        ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
+      });
+      this.ownsContext = true;
+    }
     this.page = await this.context.newPage();
     await this.page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -473,11 +519,14 @@ export class EmbeddedRecorder {
     this.addEvent('complete', {});
     this.flushPendingEvents();
 
-    // Close recording context+page (browser stays alive)
+    // Close the recording page. Only close the context if we own it —
+    // borrowed setup-contexts belong to TestExecutor's setupContexts map
+    // and stay alive for the sweeper / future test runs.
     if (this.page) await this.page.close().catch(() => {});
-    if (this.context) await this.context.close().catch(() => {});
+    if (this.context && this.ownsContext) await this.context.close().catch(() => {});
     this.page = null;
     this.context = null;
+    this.ownsContext = true;
 
     console.log(`  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`);
     return this.events;
@@ -564,9 +613,11 @@ export class EmbeddedRecorder {
     this.pendingEvents = [];
     this.onEvent = null;
     if (this.page) await this.page.close().catch(() => {});
-    if (this.context) await this.context.close().catch(() => {});
+    // Only close borrowed contexts; setup-contexts are owned by TestExecutor.
+    if (this.context && this.ownsContext) await this.context.close().catch(() => {});
     this.page = null;
     this.context = null;
+    this.ownsContext = true;
   }
 
   isActive(): boolean {

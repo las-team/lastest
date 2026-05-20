@@ -670,19 +670,30 @@ async function startup(): Promise<void> {
 
         try {
           // Run setup chain via the SAME path test runs use (testExecutor.runSetup).
-          // The recorder previously ran setup inline via setup-executor.ts, which is
-          // a stripped-down implementation missing features (extractTestBody,
+          // The recorder previously ran setup inline via setup-executor.ts, which
+          // (a) is a stripped-down implementation missing features (extractTestBody,
           // stripTypeAnnotations, removeFunctionDefinition, full expect/locator
-          // helpers, soft-action stepLogger) — setup that worked in test runs
-          // would silently no-op in recordings. Now each step runs in a real
-          // setup context, returns storageStateJson, and we hand the LAST
-          // step's storageState to the recording context.
-          let setupStorageStateJson: string | undefined;
+          // helpers, soft-action stepLogger), and (b) was running in the same
+          // context as the recording, so timing/sequencing didn't match test
+          // runs. Setup that worked in test runs would silently no-op in
+          // recordings.
+          //
+          // We now: (1) run each step through testExecutor.runSetup — same
+          // path as test runs, with setup-context retention. (2) Hand the LAST
+          // step's setupId to the recorder so it can REUSE the live setup
+          // BrowserContext for recording. Reusing the live context (vs.
+          // serializing storageState) preserves sessionStorage / IndexedDB /
+          // in-memory auth that `context.storageState()` JSON drops — many
+          // modern SPAs store auth tokens in sessionStorage, which would
+          // otherwise be lost on the JSON round-trip.
+          let setupContextIdToReuse: string | undefined;
+          let setupStorageStateJsonFallback: string | undefined;
           if (testExecutor && payload.setupSteps?.length) {
             for (let i = 0; i < payload.setupSteps.length; i++) {
               const step = payload.setupSteps[i]!;
+              const stepSetupId = `rec-${payload.sessionId.slice(0, 8)}-${i}`;
               const result = await testExecutor.runSetup(browser, {
-                setupId: `rec-${payload.sessionId.slice(0, 8)}-${i}`,
+                setupId: stepSetupId,
                 code: step.code,
                 codeHash: step.codeHash,
                 targetUrl: payload.targetUrl,
@@ -692,23 +703,38 @@ async function startup(): Promise<void> {
               if (result.status !== 'passed') {
                 throw new Error(`Setup step ${i + 1}/${payload.setupSteps.length} failed: ${result.error ?? 'unknown'}`);
               }
+              // Last step wins — recording reuses this context
+              setupContextIdToReuse = stepSetupId;
               if (result.storageStateJson) {
-                setupStorageStateJson = result.storageStateJson;
+                setupStorageStateJsonFallback = result.storageStateJson;
               }
             }
           }
 
-          // Start recording on a fresh context+page, seeded with the captured
-          // setup storageState if any step produced one.
-          const recordingPage = await recorder.start(browser, { ...payload, storageStateJson: setupStorageStateJson }, (events) => {
-            lastRecordingEventTime = Date.now();
-            runnerClient!.sendMessage({
-              id: crypto.randomUUID(),
-              type: 'response:recording_event',
-              timestamp: Date.now(),
-              payload: { sessionId: payload.sessionId, events },
-            });
-          });
+          // Start recording. If a retained setup context exists, the recorder
+          // reuses it (preserves full auth state); otherwise falls back to a
+          // fresh context with the storageState JSON applied; otherwise empty.
+          const recordingPage = await recorder.start(
+            browser,
+            {
+              ...payload,
+              setupContextId: setupContextIdToReuse,
+              storageStateJson: setupStorageStateJsonFallback,
+            },
+            (events) => {
+              lastRecordingEventTime = Date.now();
+              runnerClient!.sendMessage({
+                id: crypto.randomUUID(),
+                type: 'response:recording_event',
+                timestamp: Date.now(),
+                payload: { sessionId: payload.sessionId, events },
+              });
+            },
+            // Lookup wired to TestExecutor so recorder can reuse the live
+            // post-setup BrowserContext (preserves sessionStorage / IndexedDB
+            // / in-memory auth that the storageState JSON snapshot drops).
+            (setupId) => (testExecutor ? testExecutor.getRetainedSetupContext(setupId) : null),
+          );
 
           // Attach screencast + input to the recording page
           await screencast?.start(recordingPage, (frame) => {
