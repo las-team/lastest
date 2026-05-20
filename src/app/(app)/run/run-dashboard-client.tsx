@@ -206,13 +206,15 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
       pushUrlHistory(baseUrl);
       setUrlHistory(getUrlHistory());
       initialBaseUrlRef.current = baseUrl;
-      await saveEnvironmentConfig({
-        repositoryId,
-        mode: 'manual',
-        baseUrl,
-      });
-      if (repositoryId && activeBranch) {
-        await saveBranchBaseUrl(repositoryId, activeBranch, baseUrl);
+      if (repositoryId) {
+        await saveEnvironmentConfig({
+          repositoryId,
+          mode: 'manual',
+          baseUrl,
+        });
+        if (activeBranch) {
+          await saveBranchBaseUrl(repositoryId, activeBranch, baseUrl);
+        }
       }
     }
     // Always test on blur

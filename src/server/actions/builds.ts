@@ -9,7 +9,7 @@ import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
 import type { TestRunResult } from '@/lib/playwright/types';
 import type { SetupContext } from '@/lib/setup/types';
 import { executeTests } from '@/lib/execution/executor';
-import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
+import { resolveBuildSetup } from '@/lib/setup/resolve-build-setup';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { requireBuildOwnership } from '@/lib/auth/ownership';
 import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
@@ -876,53 +876,30 @@ async function runBuildAsync(
       repositoryId: repositoryId || null,
     };
 
-    // Pre-load storage states from default setup steps for remote runners
-    if (repositoryId) {
-      const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
-      for (const step of defaultSteps) {
-        if (step.stepType === 'storage_state' && step.storageStateId) {
-          const ss = await queries.getStorageState(step.storageStateId);
-          if (ss) {
-            setupContext.storageState = ss.storageStateJson;
-            console.log(`[build] Pre-loaded storage state "${ss.name}" for setup context`);
-            break; // Use first matching storage state
+    // Single-pass resolution: storage_state pre-load + build-level override
+    // (buildSetupTestId/ScriptId) + per-test setup fallback. Replaces three
+    // inline blocks that previously did the same default_setup_steps walk.
+    const resolved = await resolveBuildSetup({
+      tests,
+      repositoryId: repositoryId ?? null,
+      build: build
+        ? {
+            buildSetupTestId: build.buildSetupTestId ?? null,
+            buildSetupScriptId: build.buildSetupScriptId ?? null,
           }
-        }
-      }
-    }
+        : null,
+      logTag: '[build]',
+    });
+    const remoteSetupInfo = resolved.setupInfo;
+    setupContext.storageState = resolved.setupContext.storageState;
 
-    // Resolve setup info for remote runner
-    let remoteSetupInfo: { code: string; setupId: string } | undefined;
-
-    // Run build-level setup if configured
-    if (build?.buildSetupTestId || build?.buildSetupScriptId) {
-      // Resolve setup code locally, but execute it on the runner
-      await queries.updateBuild(buildId, { setupStatus: 'running' });
-
-      if (build.buildSetupTestId) {
-        const setupTest = await queries.getTest(build.buildSetupTestId);
-        if (setupTest) {
-          remoteSetupInfo = { code: setupTest.code, setupId: setupTest.id };
-        } else {
-          console.warn(`[build-setup] Setup test not found: ${build.buildSetupTestId} - skipping`);
-        }
-      } else if (build.buildSetupScriptId) {
-        const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
-        if (setupScript && setupScript.type === 'playwright') {
-          remoteSetupInfo = { code: setupScript.code, setupId: setupScript.id };
-        } else {
-          console.warn(`[build-setup] Setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
-        }
-      }
-
-      if (!remoteSetupInfo) {
-        // No valid setup code found, mark as skipped
-        await queries.updateBuild(buildId, { setupStatus: 'skipped' });
-      }
-      // setupStatus will be updated after executor runs setup on the runner
-    } else {
-      await queries.updateBuild(buildId, { setupStatus: 'skipped' });
-    }
+    // setupStatus accounting: 'running' once we know setup code will execute on
+    // the runner (flipped to 'completed' after executor returns, line ~975);
+    // 'skipped' otherwise (no setup configured, or build-level config didn't
+    // resolve — in which case resolveBuildSetup already logged a warning).
+    await queries.updateBuild(buildId, {
+      setupStatus: remoteSetupInfo ? 'running' : 'skipped',
+    });
 
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
@@ -941,16 +918,6 @@ async function runBuildAsync(
       if (runnerId && runnerId !== 'auto') {
         const remoteRunner = await queries.getRunnerById(runnerId);
         maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
-      }
-
-      // If no build-level setup, resolve per-test setup code to run on the runner
-      if (!remoteSetupInfo) {
-        const resolved = await resolveSetupCodeForRunner(tests);
-        if (resolved) {
-          remoteSetupInfo = resolved;
-          await queries.updateBuild(buildId, { setupStatus: 'running' });
-          console.log(`[build] Resolved per-test setup for runner: setupId=${resolved.setupId}`);
-        }
       }
 
       try {
@@ -1190,6 +1157,18 @@ async function runBuildAsync(
       });
     }).catch(console.error);
 
+    // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
+    // category badges based on the latest build. Tier only downgrades on a
+    // confirmed regression — see src/lib/awards/criteria.ts.
+    if (repositoryId) {
+      const repoId = repositoryId;
+      import('@/lib/awards/recompute').then(({ recomputeRepoAward }) => {
+        recomputeRepoAward(repoId).catch((e) => {
+          console.error(`[awards] recompute failed for repo ${repoId}:`, e);
+        });
+      }).catch(console.error);
+    }
+
     // Fire-and-forget auto-approval of 0-diff cases — a green-verdict step
     // with no evidence is treated as Done on the verify board. We persist a
     // step_layer_feedback row so the count of "verified" cases is accurate
@@ -1259,12 +1238,14 @@ async function runBuildAsync(
     }
   }
 
-  // Recalculate team storage usage after build completes
+  // Recalculate team storage usage + record monthly run counters after the build completes.
   if (repositoryId) {
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
+      const teamIdForUsage = repoForStorage.teamId;
       const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
-      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+      recalculateTeamStorage(teamIdForUsage).catch(() => {});
+      queries.recordTeamRunCompletion(teamIdForUsage, Math.max(0, Date.now() - startTime)).catch(() => {});
     }
   }
 
@@ -1507,8 +1488,35 @@ async function processVisualDiff(
     }
   };
 
-  // Resolve primary baseline — branch-specific only, no fallback to main
-  const baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
+  // Resolve primary baseline. Prefer the build's branch; if there's no
+  // baseline there, fall back to the repo's default branch so feature-branch
+  // builds have something to compare against before they've approved their
+  // own. When the fallback fires we tag the diff metadata with
+  // `baselineSourceBranch` so the verify board can label the cross-branch
+  // comparison explicitly. If neither branch has a baseline, surface where
+  // ANY approved baseline exists (`baselineExistsOn`) so the user knows the
+  // baseline isn't lost — it just hasn't been promoted to this branch yet.
+  let baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
+  let baselineSourceBranch: string | undefined;
+  let baselineExistsOn: { branch: string; createdAt: string } | undefined;
+  if (!baseline && defaultBranch && defaultBranch !== branch) {
+    const fallback = await queries.getBranchBaseline(testId, stepLabel, defaultBranch, browser);
+    if (fallback) {
+      baseline = fallback;
+      baselineSourceBranch = defaultBranch;
+    }
+  }
+  if (!baseline) {
+    const anyBaseline = await queries.getAnyActiveBaseline(testId, stepLabel, browser);
+    if (anyBaseline) {
+      baselineExistsOn = {
+        branch: anyBaseline.branch,
+        createdAt: anyBaseline.createdAt instanceof Date
+          ? anyBaseline.createdAt.toISOString()
+          : String(anyBaseline.createdAt),
+      };
+    }
+  }
 
   // Check for carry-forward (previously approved identical image)
   // Try dimension-aware hash first, fall back to legacy hash for old baselines
@@ -1681,7 +1689,12 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: 0,
       percentageDifference: '0',
-      metadata: { changedRegions: [], isNewTest: true, ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
+      metadata: {
+        changedRegions: [],
+        isNewTest: true,
+        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(baselineExistsOn ? { baselineExistsOn } : {}),
+      },
       browser,
       baselineTextPath: textDiff.baselineTextPath,
       currentTextPath: textDiff.currentTextPath,
@@ -1771,6 +1784,9 @@ async function processVisualDiff(
     if (textDiff.textDiffSummary) {
       metadata.textDiffSummary = textDiff.textDiffSummary;
     }
+    if (baselineSourceBranch) {
+      metadata.baselineSourceBranch = baselineSourceBranch;
+    }
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -1827,7 +1843,11 @@ async function processVisualDiff(
       classification: 'changed',
       pixelDifference: -1,
       percentageDifference: '-1',
-      metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
+      metadata: {
+        changedRegions: [],
+        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(baselineSourceBranch ? { baselineSourceBranch } : {}),
+      },
       browser,
       baselineTextPath: textDiff.baselineTextPath,
       currentTextPath: textDiff.currentTextPath,

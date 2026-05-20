@@ -13,8 +13,6 @@ export interface StartUrlDiffInput {
   viewport?: { width: number; height: number };
   /** Pool tier for capture. Server-set: 'interactive' for in-app calls. */
   poolTier?: PoolTier;
-  /** SSRF policy bypass — true for cookie-session in-app users. */
-  isCookieSession?: boolean;
   /** Source IP (for SSRF allowlist), pass through from request. */
   sourceIp?: string;
   /** Optional repo association for the job row (purely cosmetic in v1). */
@@ -25,10 +23,7 @@ export async function startUrlDiff(input: StartUrlDiffInput): Promise<{ jobId: s
   const session = await requireTeamAccess();
 
   // SSRF pre-flight — throws SsrfBlockedError on disallowed targets.
-  const ssrfOpts = {
-    isCookieSession: input.isCookieSession ?? true, // server-action default = in-app
-    sourceIp: input.sourceIp ?? '',
-  };
+  const ssrfOpts = { sourceIp: input.sourceIp ?? '' };
   await validateTargetUrl(input.urlA, ssrfOpts);
   await validateTargetUrl(input.urlB, ssrfOpts);
 

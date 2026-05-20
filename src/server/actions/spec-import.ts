@@ -508,12 +508,19 @@ async function extractStoriesFromContent(
       repositoryId,
     });
 
-    // Parse response — try JSON first, then markdown
+    // Parse response — try JSON first, then markdown. The shape check
+    // narrows attacker-controlled JSON before downstream code trusts
+    // story fields. `validateAndFilterStories` runs after this as a
+    // second filter.
     let stories: ExtractedUserStory[];
     const jsonStr = extractJsonArray(response);
     if (jsonStr) {
       try {
-        stories = JSON.parse(jsonStr);
+        const raw = JSON.parse(jsonStr);
+        if (!Array.isArray(raw)) throw new Error('Expected array');
+        stories = raw.filter((s): s is ExtractedUserStory =>
+          s && typeof s === 'object' && typeof (s as { title?: unknown }).title === 'string',
+        );
         for (const story of stories) {
           if (!story.acceptanceCriteria) continue;
           for (const ac of story.acceptanceCriteria) {

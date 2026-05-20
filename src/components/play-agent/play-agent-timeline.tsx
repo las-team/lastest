@@ -48,6 +48,7 @@ const AGENT_LABELS: Record<string, string> = {
   diver: 'Diver',
   generator: 'Generator',
   healer: 'Healer',
+  quickstart: 'QuickStart',
 };
 
 const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
@@ -57,6 +58,7 @@ const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
   diver: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400' },
   generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400' },
   healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
+  quickstart: { bg: 'bg-pink-500/15', text: 'text-pink-600 dark:text-pink-400' },
 };
 
 // ============================================

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertOctagon,
@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  Crosshair,
   ExternalLink,
+  EyeOff,
   Github,
   Layers,
   Link as LinkIcon,
@@ -17,11 +19,30 @@ import {
   Search,
   Settings,
   X,
+  XCircle,
   CheckCircle as CheckCircleIcon,
   Plus,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { closeIssueForCase, createIssueForCase, fetchLinkedIssueForCase } from '@/server/actions/verify-issues';
+import {
+  addFocusRegion,
+  removeFocusRegion,
+  addIgnoreRegionForDiff,
+  removeIgnoreRegionForDiff,
+  getFocusRegionsForDiff,
+  getIgnoreRegionsForDiff,
+} from '@/server/actions/diffs';
+import {
+  DrawLayer,
+  FocusRegionOverlay,
+  IgnoreRegionOverlay,
+  RegionOverlay,
+  type FocusRegionRect,
+  type IgnoreRegionRect,
+} from '@/components/diff/slider-comparison';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
+import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import type {
   StepComparison,
   StepLayerFeedback,
@@ -34,6 +55,8 @@ import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 interface AreaLite { id: string; name: string }
 interface TestLite { id: string; name: string; functionalAreaId: string | null }
 
+type ErrorMode = 'fail' | 'warn' | 'ignore';
+
 interface FocusViewProps {
   buildId: string;
   steps: StepComparison[];
@@ -43,6 +66,10 @@ interface FocusViewProps {
   changedAreaIds: Set<string>;
   visualByStepKey: Map<string, VisualDiffLite>;
   testResultById: Map<string, TestResultLite>;
+  /** Repo-level error mode toggles. Drive how the Network and Console layer
+   *  tabs render their high-signal evidence: `fail` → red X (test-failing),
+   *  `warn` → amber ⚠ (logged, not failing), `ignore` → nothing. */
+  errorModes: { network: ErrorMode; console: ErrorMode };
   statusFilter: Set<CaseStatus>;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
@@ -57,6 +84,16 @@ interface FocusViewProps {
   /** Pull a fresh /verify-status snapshot. Used after Close-issue so the
    *  chip flips to `closed` without a hard reload. */
   onRefresh?: () => void;
+  /** Build-level WCAG 2.2 AA roll-up + repo trend, rendered at the top of
+   *  the A11y pane so reviewers see the same compliance card they get on
+   *  the build detail page without leaving Verify. */
+  buildA11y?: {
+    score: number | null;
+    violationCount: number | null;
+    criticalCount: number | null;
+    totalRulesChecked: number | null;
+    trend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  };
 }
 
 type CompareTab = EvidenceLayer | 'text' | 'run';
@@ -140,6 +177,25 @@ interface CaseRow {
   result: TestResultLite | null;
 }
 
+type RunStepStatus = 'passed' | 'changed' | 'flaky' | 'failed' | 'notrun';
+
+interface RunStepCell {
+  stepId: string;
+  stepIndex: number;
+  stepLabel: string | null;
+  status: RunStepStatus;
+}
+
+// Visual treatment per step status. `notrun` is intentionally muted: it means
+// the runner died before reaching the step, not "passed".
+const RUN_STEP_STYLE: Record<RunStepStatus, { dot: string; label: string }> = {
+  passed:  { dot: 'var(--c-teal)',  label: 'passed' },
+  changed: { dot: 'var(--c-amber)', label: 'changed' },
+  flaky:   { dot: 'var(--c-amber)', label: 'flaky' },
+  failed:  { dot: 'var(--c-red)',   label: 'failed' },
+  notrun:  { dot: 'var(--fg-3)',    label: 'not run' },
+};
+
 export function FocusView(props: FocusViewProps) {
   const [tab, setTab] = useState<CompareTab>('visual');
   // Issue panel is hidden by default — only opens when the reviewer takes a
@@ -154,7 +210,7 @@ export function FocusView(props: FocusViewProps) {
       if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
       fbByStep.get(f.stepComparisonId)!.push(f);
     }
-    return props.steps.map((step) => {
+    const rows = props.steps.map((step) => {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
@@ -163,12 +219,30 @@ export function FocusView(props: FocusViewProps) {
         step,
         feedback: stepFb,
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
       return { step, test, area, status, feedback: stepFb, visual, result };
     });
+    // Keep all steps of a single test contiguous: sort by (testName ASC,
+    // stepIndex ASC, stepLabel natural ASC). `stepIndex` is the source of
+    // truth when present; stepLabel falls back to natural-collation (so
+    // "step 2" sorts before "step 10").
+    const collator = new Intl.Collator('en', { numeric: true });
+    rows.sort((a, b) => {
+      const an = a.test?.name ?? '';
+      const bn = b.test?.name ?? '';
+      const byName = collator.compare(an, bn);
+      if (byName !== 0) return byName;
+      const ai = a.step.stepIndex;
+      const bi = b.step.stepIndex;
+      if (ai != null && bi != null && ai !== bi) return ai - bi;
+      if (ai != null && bi == null) return -1;
+      if (ai == null && bi != null) return 1;
+      return collator.compare(a.step.stepLabel ?? '', b.step.stepLabel ?? '');
+    });
+    return rows;
   }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
 
   const visibleCases = useMemo(() => {
@@ -189,12 +263,51 @@ export function FocusView(props: FocusViewProps) {
   const activeCase = visibleCases.find((c) => c.step.id === props.selectedStepId) ?? visibleCases[0] ?? null;
   const activeIdx = activeCase ? visibleCases.findIndex((c) => c.step.id === activeCase.step.id) : -1;
 
-  const goPrev = () => {
+  // Per-test step strip for the Run tab. Derives one cell per step of the
+  // active test from `cases` (the full, unfiltered list — filter state on
+  // the rail shouldn't hide steps from the test's own Run view), in the same
+  // (testName, stepIndex, stepLabel) order as the sorted cases. Status per
+  // step combines step.verdict + visual classification + lastReachedStep so
+  // a runner that died mid-test surfaces the dying step in red and trailing
+  // steps as "not run" instead of "passed".
+  const runStepCells = useMemo<RunStepCell[]>(() => {
+    const tid = activeCase?.test?.id;
+    if (!tid) return [];
+    const rows = cases.filter((c) => c.test?.id === tid);
+    if (rows.length === 0) return [];
+    const cells: RunStepCell[] = rows.map((c, i) => {
+      const stepIdx = c.step.stepIndex ?? i;
+      const cls = c.visual?.classification;
+      let status: RunStepStatus = 'passed';
+      if (c.step.verdict === 'red') status = 'failed';
+      else if (cls === 'changed') status = 'changed';
+      else if (cls === 'flaky') status = 'flaky';
+      else if (c.step.verdict === 'yellow') status = 'changed';
+      return { stepId: c.step.id, stepIndex: stepIdx, stepLabel: c.step.stepLabel, status };
+    });
+
+    const result = rows[0]?.result ?? null;
+    const lastReached = result?.lastReachedStep ?? null;
+    const isFailed = result?.status === 'failed';
+    if (lastReached != null && isFailed) {
+      for (const cell of cells) {
+        if (cell.stepIndex > lastReached + 1) {
+          cell.status = 'notrun';
+        } else if (cell.stepIndex === lastReached + 1 && cell.status === 'passed') {
+          // Dying step: runner died before any verdict could be computed for it.
+          cell.status = 'failed';
+        }
+      }
+    }
+    return cells;
+  }, [cases, activeCase?.test?.id]);
+
+  const goPrev = useCallback(() => {
     if (activeIdx > 0) props.onSelect(visibleCases[activeIdx - 1].step.id);
-  };
-  const goNext = () => {
+  }, [activeIdx, visibleCases, props]);
+  const goNext = useCallback(() => {
     if (activeIdx >= 0 && activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
-  };
+  }, [activeIdx, visibleCases, props]);
 
   const decideOneLayer = (layer: EvidenceLayer, status: 'approved' | 'rejected' | 'snoozed') => {
     if (!activeCase) return;
@@ -203,9 +316,9 @@ export function FocusView(props: FocusViewProps) {
 
   // Issue picker is hoisted to BoardFocusClient so the same dialog covers
   // both the Board and Focus surfaces.
-  const handleOpenPicker = () => {
+  const handleOpenPicker = useCallback(() => {
     if (activeCase) props.onOpenIssuePicker(activeCase.step.id);
-  };
+  }, [activeCase, props]);
   const handleCloseIssue = async () => {
     if (!activeCase?.step.githubIssueUrl) return;
     if (!confirm(`Close issue #${activeCase.step.githubIssueNumber} on GitHub?`)) return;
@@ -216,6 +329,168 @@ export function FocusView(props: FocusViewProps) {
       router.refresh();
     });
   };
+
+  // ---- Hotkeys (mirrors the build diff page: e=OK, t=open issue picker,
+  // s=skip to next, ArrowLeft/Right=prev/next, Esc=close issue panel). Skip
+  // when the user is typing in an input or textarea so it doesn't hijack
+  // keys inside the issue title/body or the filter search box.
+  const handleOK = useCallback(() => {
+    if (!activeCase) return;
+    props.onMarkDecision(activeCase.step.id, 'approved');
+  }, [activeCase, props]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case 'e':
+        case 'E':
+          e.preventDefault();
+          handleOK();
+          break;
+        case 't':
+        case 'T':
+          e.preventDefault();
+          handleOpenPicker();
+          break;
+        case 's':
+        case 'S':
+          e.preventDefault();
+          goNext();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          goPrev();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          goNext();
+          break;
+        case 'Escape':
+          if (intentOpen) setIntentOpen(false);
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleOK, handleOpenPicker, goNext, goPrev, intentOpen]);
+
+  // ---- Visual focus/ignore regions (same UX as the build diff page).
+  // Keyed off the active visual diff id so switching cases reloads the
+  // correct masks. We hold local state instead of relying on the parent
+  // because the region writes recalc the diff and we want optimistic UI.
+  const activeVisualId = activeCase?.visual?.id ?? null;
+  const [showRegions, setShowRegions] = useState(false);
+  const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>([]);
+  const [ignoreRegions, setIgnoreRegions] = useState<IgnoreRegionRect[]>([]);
+  const [drawFocusMode, setDrawFocusMode] = useState(false);
+  const [drawIgnoreMode, setDrawIgnoreMode] = useState(false);
+  const [regionPending, setRegionPending] = useState(false);
+  const lastLoadedVisualId = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Reset draw modes whenever the active case changes — leftover draw mode
+    // from a different case would be confusing and the buttons themselves
+    // reset on each pane render.
+    setDrawFocusMode(false);
+    setDrawIgnoreMode(false);
+    if (!activeVisualId) {
+      setFocusRegions([]);
+      setIgnoreRegions([]);
+      lastLoadedVisualId.current = null;
+      return;
+    }
+    if (lastLoadedVisualId.current === activeVisualId) return;
+    lastLoadedVisualId.current = activeVisualId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [fr, ir] = await Promise.all([
+          getFocusRegionsForDiff(activeVisualId),
+          getIgnoreRegionsForDiff(activeVisualId),
+        ]);
+        if (cancelled) return;
+        setFocusRegions(fr.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
+        setIgnoreRegions(ir.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
+      } catch {
+        if (!cancelled) {
+          setFocusRegions([]);
+          setIgnoreRegions([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeVisualId]);
+
+  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (!activeVisualId || regionPending) return;
+    setRegionPending(true);
+    try {
+      const created = await addFocusRegion(activeVisualId, rect);
+      setFocusRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawFocusMode(false);
+      toast.success('Focus region added');
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add focus region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleFocusDelete = useCallback(async (regionId: string) => {
+    if (regionPending) return;
+    setRegionPending(true);
+    setFocusRegions((prev) => prev.filter((r) => r.id !== regionId));
+    try {
+      await removeFocusRegion(regionId, activeVisualId ?? undefined);
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove focus region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleIgnoreDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
+    if (!activeVisualId || regionPending) return;
+    setRegionPending(true);
+    try {
+      const created = await addIgnoreRegionForDiff(activeVisualId, rect);
+      setIgnoreRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
+      setDrawIgnoreMode(false);
+      toast.success('Ignore region added — applies to every screenshot of this test');
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add ignore region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const handleIgnoreDelete = useCallback(async (regionId: string) => {
+    if (regionPending) return;
+    setRegionPending(true);
+    setIgnoreRegions((prev) => prev.filter((r) => r.id !== regionId));
+    try {
+      await removeIgnoreRegionForDiff(regionId, activeVisualId ?? undefined);
+      props.onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove ignore region');
+    } finally {
+      setRegionPending(false);
+    }
+  }, [activeVisualId, regionPending, props]);
+
+  const toggleDrawFocus = useCallback(() => {
+    setDrawFocusMode((v) => !v);
+    setDrawIgnoreMode(false);
+  }, []);
+  const toggleDrawIgnore = useCallback(() => {
+    setDrawIgnoreMode((v) => !v);
+    setDrawFocusMode(false);
+  }, []);
 
   return (
     <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -255,13 +530,13 @@ export function FocusView(props: FocusViewProps) {
           {activeCase?.step.githubIssueUrl && <IssueChipReal step={activeCase.step} />}
           <span style={{ flex: 1 }} />
           <button className="v-btn sm" onClick={goPrev} disabled={activeIdx <= 0}>
-            <ChevronLeft size={12} />Prev
+            <ChevronLeft size={12} />Prev<HotkeyHint keys="←" />
           </button>
           <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
             {activeIdx >= 0 ? activeIdx + 1 : 0} / {visibleCases.length}
           </span>
           <button className="v-btn sm" onClick={goNext} disabled={activeIdx < 0 || activeIdx >= visibleCases.length - 1}>
-            Next<ChevronRight size={12} />
+            Next<ChevronRight size={12} /><HotkeyHint keys="→ · s" />
           </button>
           <button
             className={'v-btn ' + (intentOpen ? 'tinted' : '')}
@@ -269,6 +544,7 @@ export function FocusView(props: FocusViewProps) {
             aria-pressed={intentOpen}
           >
             <Github size={13} />{intentOpen ? 'Hide issue' : 'Show issue'}
+            <HotkeyHint keys={intentOpen ? 'esc' : 't'} />
           </button>
         </div>
 
@@ -285,6 +561,14 @@ export function FocusView(props: FocusViewProps) {
             const layerState: LayerState = activeCase
               ? classifyLayer(k.id, activeCase.step, activeCase.result, activeCase.visual)
               : 'absent';
+            // Matching evidence item (if any) carries the human-readable
+            // reason + signal that drives the red-X "broken" treatment. Run
+            // and Text aren't EvidenceLayer ids so they skip this lookup;
+            // Run derives "broken" from result.status, Text from the visual
+            // diff summary.
+            const evidenceItem = (k.id !== 'run' && k.id !== 'text' && activeCase?.step)
+              ? activeCase.step.evidence.find((e) => e.layer === k.id) ?? null
+              : null;
             // Run tab surfaces the failure message as its delta directly
             // from the test_result; other tabs use the step's layer deltas.
             const delta = k.id === 'run'
@@ -300,60 +584,162 @@ export function FocusView(props: FocusViewProps) {
                 : activeCase?.step
                   ? layerDelta(activeCase.step, k.id)
                   : null;
+            // "Broken" vs "warned" depends on (1) the evidence signal, and
+            // (2) the repo's error-mode toggle for network/console (those two
+            // layers are configurable to "warn only" or "ignore", in which
+            // case high-signal evidence shouldn't read as test-failing).
+            // Other layers use the legacy `signal === 'high'` rule.
+            //
+            //   fail  → red X  (broken: a real regression that failed the test)
+            //   warn  → amber ⚠ (logged, but the runner didn't fail on it)
+            //   ignore → no pill (deliberately suppressed at runner level)
+            //
+            // Run is special: the test_result.status === 'failed' is the
+            // source of truth, regardless of layer toggles.
+            const layerMode: ErrorMode | null =
+              k.id === 'network' ? props.errorModes.network
+              : k.id === 'console' ? props.errorModes.console
+              : null;
+            let broken = false;
+            let warned = false;
+            if (k.id === 'run') {
+              broken = activeCase?.result?.status === 'failed';
+            } else if (evidenceItem?.signal === 'high') {
+              if (layerMode === 'ignore') { /* suppressed */ }
+              else if (layerMode === 'warn') warned = true;
+              else broken = true; // layerMode === 'fail' OR non-configurable layer
+            }
+            // Reason text rendered as the title attribute on the broken pill
+            // (and on the whole button as a fallback). Falls back to the
+            // delta text when no structured summary exists.
+            const modeNote = layerMode && (broken || warned)
+              ? (broken
+                  ? ` · ${k.name} Error Mode is "Fail" (configured in Playwright settings)`
+                  : ` · ${k.name} Error Mode is "Warn only" so the runner logged this without failing the test (configured in Playwright settings)`)
+              : '';
+            const reason = k.id === 'run'
+              ? ((activeCase?.result?.errorMessage ?? '').trim() || 'Test failed')
+              : evidenceItem?.summary
+                ? `${evidenceItem.summary}${modeNote}`
+                : (delta ? `${k.name}: ${delta}${modeNote}` : null);
             // All tabs clickable — `absent` panes explain *why* the layer
             // isn't captured + how to enable it, which is more useful than
             // a disabled button.
             const tabBorder = isActive
               ? 'color-mix(in oklab, var(--c-teal) 22%, transparent)'
-              : 'var(--border)';
+              : broken
+                ? 'color-mix(in oklab, var(--c-red) 30%, transparent)'
+                : warned
+                  ? 'color-mix(in oklab, var(--c-amber) 30%, transparent)'
+                  : 'var(--border)';
             const tabColor = isActive
               ? '#1F7B66'
               : layerState === 'absent' ? 'var(--fg-4)' : 'var(--fg-2)';
+            // Settings link target: Network and Console both live under the
+            // Playwright settings card's Errors & Network section. Other
+            // layers don't have a per-layer toggle, so we don't surface a
+            // link for them.
+            const settingsTarget = (k.id === 'network' || k.id === 'console')
+              ? '/settings?highlight=playwright'
+              : null;
             return (
               <button
                 key={k.id}
                 onClick={() => setTab(k.id)}
+                title={reason ?? `${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
                 style={{
                   padding: '6px 10px', borderRadius: 6, fontSize: 12,
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6,
-                  background: isActive ? 'color-mix(in oklab, var(--c-teal) 12%, white)' : 'transparent',
+                  background: isActive
+                    ? 'color-mix(in oklab, var(--c-teal) 12%, white)'
+                    : broken
+                      ? 'color-mix(in oklab, var(--c-red) 6%, white)'
+                      : warned
+                        ? 'color-mix(in oklab, var(--c-amber) 6%, white)'
+                        : 'transparent',
                   border: `1px solid ${tabBorder}`,
                   color: tabColor,
                   fontWeight: isActive ? 600 : 400,
                   opacity: layerState === 'absent' ? 0.55 : 1,
                 }}
-                aria-label={`${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
+                aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ''}` : warned ? `warning: ${reason ?? ''}` : layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
               >
                 <span>{k.name}</span>
-                {/* Run tab uses a fail icon (no delta text) so the row stays
-                    compact — full error lives inside the pane. Other tabs
-                    keep their numeric delta. */}
-                {k.id === 'run' && layerState === 'diff' && (
+                {/* Broken pill: red X with the evidence summary as the
+                    mouseover reason. Used when the layer evidence is high
+                    signal AND the error mode is "fail" (or non-configurable
+                    layers default to broken). */}
+                {broken && (
                   <span
-                    aria-hidden
-                    title={delta ?? 'Test failed'}
+                    title={reason ?? 'Test failed'}
+                    aria-label={reason ?? 'Test failed'}
                     style={{
                       width: 14, height: 14, borderRadius: '50%',
                       background: 'color-mix(in oklab, var(--c-red) 16%, white)',
                       color: 'var(--c-red)',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, lineHeight: 1, fontWeight: 700,
+                      flexShrink: 0,
                     }}
                   >
                     ✕
                   </span>
                 )}
+                {/* Warned pill: amber ⚠ when the layer evidence is high
+                    signal but the error mode is "warn only" — the runner
+                    logged it without failing the test, so the reviewer sees
+                    it as a soft signal, not a regression. */}
+                {warned && (
+                  <span
+                    title={reason ?? 'Warning'}
+                    aria-label={reason ?? 'Warning'}
+                    style={{
+                      width: 14, height: 14, borderRadius: '50%',
+                      background: 'color-mix(in oklab, var(--c-amber) 18%, white)',
+                      color: '#8C5C19',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, lineHeight: 1, fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ⚠
+                  </span>
+                )}
+                {/* Numeric/structured delta — kept alongside the broken/warn
+                    pill so reviewers see both the signal and the magnitude
+                    (e.g. "Network ✕ +2 −1"). Skipped on Run since the X
+                    already encodes the failure. */}
                 {k.id !== 'run' && layerState === 'diff' && delta !== null && (
                   <span
                     className="mono"
-                    style={{ fontSize: 10, color: 'var(--fg-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={delta}
+                    style={{ fontSize: 10, color: broken ? 'var(--c-red)' : warned ? '#8C5C19' : 'var(--fg-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={reason ?? delta}
                   >
                     {delta}
                   </span>
                 )}
-                {layerState === 'clean' && (
+                {/* Inline settings link: opens the Playwright settings card
+                    so reviewers can flip the error mode without leaving the
+                    flow. Only attached to Network/Console pills since those
+                    are the configurable layers. */}
+                {settingsTarget && (broken || warned) && (
+                  <span
+                    role="link"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); window.location.href = settingsTarget; }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); window.location.href = settingsTarget; } }}
+                    title={`Open Playwright settings to change ${k.name} Error Mode`}
+                    aria-label={`Open Playwright settings to change ${k.name} Error Mode`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--fg-3)', cursor: 'pointer', padding: 2,
+                    }}
+                  >
+                    <Settings size={11} />
+                  </span>
+                )}
+                {layerState === 'clean' && !broken && !warned && (
                   <span
                     aria-hidden
                     style={{
@@ -384,6 +770,26 @@ export function FocusView(props: FocusViewProps) {
                 ? classifyLayer(tab, activeCase.step, activeCase.result, activeCase.visual)
                 : 'absent'
             }
+            runStepCells={runStepCells}
+            activeStepId={activeCase?.step.id ?? null}
+            onSelectStep={props.onSelect}
+            buildA11y={props.buildA11y}
+            regionsCtx={{
+              showRegions,
+              setShowRegions,
+              focusRegions,
+              ignoreRegions,
+              drawFocusMode,
+              drawIgnoreMode,
+              toggleDrawFocus,
+              toggleDrawIgnore,
+              onFocusDrawn: handleFocusDrawn,
+              onFocusDelete: handleFocusDelete,
+              onIgnoreDrawn: handleIgnoreDrawn,
+              onIgnoreDelete: handleIgnoreDelete,
+              regionPending,
+              hasVisual: !!activeVisualId,
+            }}
           />
         </div>
 
@@ -409,6 +815,7 @@ export function FocusView(props: FocusViewProps) {
                   active={cur === 'done'}
                   disabled={pending || !activeCase}
                   onClick={() => decide('approved', false)}
+                  hotkey="e"
                 />
                 <TriageButton
                   label="Needs Improvement"
@@ -439,6 +846,7 @@ export function FocusView(props: FocusViewProps) {
             {activeCase?.feedback.length ?? 0} layer decision{activeCase?.feedback.length === 1 ? '' : 's'} on this case
           </span>
         </div>
+
       </div>
 
       <IntentPanel
@@ -504,8 +912,33 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
  *  active treatment uses a stronger fill and a small ✓ marker so the user
  *  can see at a glance which decision is recorded, even after navigating
  *  away and back. */
+/** Tiny dimmed key glyph rendered inline next to a button so reviewers see
+ *  the keyboard shortcut without burning a full tips strip on it. Pass one
+ *  or more comma-separated label tokens (e.g. "e", "←", "s · →", "esc"). */
+function HotkeyHint({ keys, className }: { keys: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={className}
+      style={{
+        marginLeft: 4,
+        padding: '0 4px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 9,
+        lineHeight: '14px',
+        color: 'var(--fg-3)',
+        background: 'color-mix(in oklab, var(--fg-3) 8%, transparent)',
+        borderRadius: 3,
+        opacity: 0.85,
+      }}
+    >
+      {keys}
+    </span>
+  );
+}
+
 function TriageButton({
-  label, icon, tone, active, disabled, onClick,
+  label, icon, tone, active, disabled, onClick, hotkey,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -513,6 +946,8 @@ function TriageButton({
   active: boolean;
   disabled: boolean;
   onClick: () => void;
+  /** Optional hotkey glyph rendered after the label (e.g. "e"). */
+  hotkey?: string;
 }) {
   const baseColor =
     tone === 'success' ? 'var(--c-teal)' :
@@ -554,6 +989,7 @@ function TriageButton({
     >
       {icon}
       <span>{label}</span>
+      {hotkey && <HotkeyHint keys={hotkey} />}
       {active && (
         <span
           aria-hidden
@@ -729,15 +1165,40 @@ function CaseSidebar({ groupedByArea, activeId, onPick }: CaseSidebarProps) {
   );
 }
 
+interface VisualRegionsCtx {
+  showRegions: boolean;
+  setShowRegions: (v: boolean) => void;
+  focusRegions: FocusRegionRect[];
+  ignoreRegions: IgnoreRegionRect[];
+  drawFocusMode: boolean;
+  drawIgnoreMode: boolean;
+  toggleDrawFocus: () => void;
+  toggleDrawIgnore: () => void;
+  onFocusDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onFocusDelete: (regionId: string) => void;
+  onIgnoreDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onIgnoreDelete: (regionId: string) => void;
+  regionPending: boolean;
+  hasVisual: boolean;
+}
+
 interface ComparePaneProps {
   tab: CompareTab;
   step: StepComparison | null;
   visual: VisualDiffLite | null;
   result: TestResultLite | null;
   layerState: LayerState;
+  regionsCtx: VisualRegionsCtx;
+  /** Per-step strip data for the Run tab. Pre-derived at the parent so the
+   *  Run pane stays presentational. Empty when there's no active test. */
+  runStepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
+  /** Build-level a11y roll-up + repo trend forwarded to <A11yPane>. */
+  buildA11y?: FocusViewProps['buildA11y'];
 }
 
-function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps) {
+function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep, buildA11y }: ComparePaneProps) {
   if (!step) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
@@ -747,12 +1208,12 @@ function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps
   }
 
   if (layerState === 'absent') {
-    const hint = absentHint(tab, step?.testId ?? null);
+    const hint = absentHint(tab, step?.testId ?? null, result);
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="v-card" style={{ padding: 24, textAlign: 'center', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
           <span className="label">{tab} not captured</span>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
             {hint.message}
           </p>
           {hint.settingsHref && (
@@ -770,13 +1231,13 @@ function ComparePane({ tab, step, visual, result, layerState }: ComparePaneProps
   }
 
   // diff or clean — render the layer-specific pane and let it differentiate.
-  if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} />;
-  if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} />;
+  if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} stepCells={runStepCells} activeStepId={activeStepId} onSelectStep={onSelectStep} />;
+  if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} regions={regionsCtx} />;
   if (tab === 'text') return <TextPane visual={visual} clean={layerState === 'clean'} />;
   if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
   if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'console') return <ConsolePane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} />;
+  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} buildA11y={buildA11y} />;
   if (tab === 'perf') return <PerfPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'url') return <UrlPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'variable') return <VariablePane step={step} result={result} clean={layerState === 'clean'} />;
@@ -791,10 +1252,42 @@ interface AbsentHint {
   settingsLabel?: string;
 }
 
-function absentHint(layer: CompareTab, testId: string | null): AbsentHint {
+/**
+ * Build a context-aware "no screenshot" message using whatever we know about
+ * the run. Three cases, in order of specificity:
+ *   1. Test failed → say so + last-reached step + first line of errorMessage
+ *   2. Test passed but produced 0 screenshots → likely the test code didn't
+ *      call screenshot for this step, or a step-level capture failed silently.
+ *      Show how far the test got so operators can correlate with the test code.
+ *   3. No result at all → the runner never reported back; suggest re-running.
+ */
+function visualAbsentMessage(result?: TestResultLite | null): string {
+  if (!result) {
+    return 'No screenshot captured for this step. No test result was reported — re-run the build to populate this tab.';
+  }
+  const stepInfo = result.lastReachedStep != null && result.totalSteps != null
+    ? `Reached step ${result.lastReachedStep} of ${result.totalSteps}.`
+    : '';
+  const durMs = result.durationMs ?? 0;
+  const durStr = durMs > 0 ? `Ran for ${(durMs / 1000).toFixed(1)}s.` : '';
+  if (result.status === 'failed' || result.status === 'setup_failed') {
+    const errSummary = (result.errorMessage ?? '').split('\n')[0]?.slice(0, 240) || 'no error message';
+    return `Test ${result.status === 'setup_failed' ? 'setup failed' : 'failed'} before this step captured. ${stepInfo} ${durStr}\n\n${errSummary}`.trim();
+  }
+  // Passed but no screenshot — most common path. Differentiate "explicit no-shot
+  // step" (test code never called screenshot) from "capture failed" (test
+  // walked all steps but the artifact never made it back).
+  const reachedAll = result.lastReachedStep != null && result.totalSteps != null && result.lastReachedStep >= result.totalSteps - 1;
+  if (reachedAll) {
+    return `Test passed but produced no screenshot for this step. ${stepInfo} ${durStr}\n\nLikely the test code didn't call screenshot here, or the capture failed silently on the EB. Check the Run tab logs.`.trim();
+  }
+  return `Test passed but stopped capturing before this step. ${stepInfo} ${durStr}\n\nThe step ran without producing a snapshot — re-run the test, or open the test definition to confirm a screenshot is requested at this step.`.trim();
+}
+
+function absentHint(layer: CompareTab, testId: string | null, result?: TestResultLite | null): AbsentHint {
   switch (layer) {
     case 'run':    return { message: 'No test result recorded for this case yet — the runner may not have started, or the test result row was deleted. Re-run the build to populate this tab.' };
-    case 'visual': return { message: 'No screenshot captured for this step. Visual capture happens automatically — check the runner logs if a step run completed without a snapshot.' };
+    case 'visual': return { message: visualAbsentMessage(result), settingsHref: testId ? `/tests/${testId}` : undefined, settingsLabel: testId ? 'Open test' : undefined };
     case 'text':   return {
       message: 'Page text capture is off. Enable "Text diff" in Diff Sensitivity settings to capture innerText and surface line-level page-text diffs here.',
       settingsHref: '/settings?highlight=diff-sensitivity',
@@ -833,7 +1326,19 @@ function CleanBanner({ message }: { message: string }) {
   );
 }
 
-function RunPane({ result, failed }: { result: TestResultLite | null; failed: boolean }) {
+function RunPane({
+  result,
+  failed,
+  stepCells,
+  activeStepId,
+  onSelectStep,
+}: {
+  result: TestResultLite | null;
+  failed: boolean;
+  stepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
+}) {
   if (!result) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -889,6 +1394,64 @@ function RunPane({ result, failed }: { result: TestResultLite | null; failed: bo
           </div>
         )}
       </div>
+
+      {/* All steps of the test with per-step passage. Cells are buttons so
+          reviewers can jump to any step's other layers (visual/network/...)
+          without leaving the focus view. The active step gets a teal ring;
+          status colors mirror the build's at-a-glance palette. */}
+      {stepCells.length > 0 && (
+        <div className="v-card" style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="label" style={{ fontSize: 10 }}>Test steps</span>
+            <span style={{ flex: 1 }} />
+            <span className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
+              {stepCells.length} step{stepCells.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {stepCells.map((cell) => {
+              const style = RUN_STEP_STYLE[cell.status];
+              const isActive = cell.stepId === activeStepId;
+              return (
+                <button
+                  type="button"
+                  key={cell.stepId}
+                  onClick={() => onSelectStep(cell.stepId)}
+                  title={`Step ${cell.stepIndex + 1}${cell.stepLabel ? ` (${cell.stepLabel})` : ''}: ${style.label}`}
+                  aria-current={isActive ? 'step' : undefined}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 8px', fontSize: 11, lineHeight: 1.2,
+                    background: isActive
+                      ? 'color-mix(in oklab, var(--c-teal) 10%, white)'
+                      : 'var(--c-white)',
+                    border: `1px solid ${isActive ? 'var(--c-teal)' : 'var(--border)'}`,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    color: 'var(--fg-1)',
+                    fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: style.dot,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-2)' }}>{cell.stepIndex + 1}</span>
+                  {cell.stepLabel && (
+                    <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {cell.stepLabel}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Failed: show the error inline. Passed: show a green confirmation. */}
       {failed ? (
@@ -1071,7 +1634,7 @@ function simpleLineDiff(baseline: string, current: string): { op: 'add' | 'del' 
   return out;
 }
 
-function VisualPane({ step, visual, clean }: { step: StepComparison; visual: VisualDiffLite | null; clean: boolean }) {
+function VisualPane({ step, visual, clean, regions }: { step: StepComparison; visual: VisualDiffLite | null; clean: boolean; regions: VisualRegionsCtx }) {
   const [mode, setMode] = useState<'slider' | 'side' | 'overlay'>('slider');
   const [sliderPct, setSliderPct] = useState(50);
 
@@ -1081,6 +1644,9 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
   const hasBaseline = !!baselineSrc;
   const hasCurrent = !!currentSrc;
   const visualEvidence = step.layers?.visual;
+  const changedRegions = visual?.changedRegions ?? [];
+  const hasChangedRegions = changedRegions.length > 0;
+  const drawDisabled = !regions.hasVisual || regions.regionPending;
 
   // Overlay metric chip (rendered on top of the screenshot itself).
   // Even with 0% diff we surface "100% match" rather than nothing.
@@ -1097,6 +1663,16 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
     return null;
   })();
 
+  // 100% diff means the current screenshot has nothing in common with the
+  // baseline (step rendered an unrelated screen, or rendered nothing at all).
+  // Surface that explicitly so reviewers don't read the % as just "very high".
+  const isFullDiff = (() => {
+    const raw = visual?.percentageDifference ?? visualEvidence?.percentageDifference;
+    if (raw == null) return false;
+    const n = parseFloat(String(raw));
+    return Number.isFinite(n) && n >= 100;
+  })();
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--c-white)', flexWrap: 'wrap' }}>
@@ -1106,7 +1682,7 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
           <button className={`v-tab ${mode === 'overlay' ? 'active' : ''}`} onClick={() => setMode('overlay')}>Overlay</button>
         </div>
         <span style={{ flex: 1 }} />
-        {/* Right-side cluster: status chips + Regions button. Inline so the
+        {/* Right-side cluster: status chips + Regions buttons. Inline so the
             chips stay on one line each (whiteSpace nowrap), and so the group
             wraps as a unit instead of items breaking into a vertical stack. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -1117,10 +1693,69 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
               {metricChip.label}
             </span>
           )}
+          {isFullDiff && (
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--c-red)' }}
+              title="100% diff: step rendered nothing or rendered an unrelated screen"
+              aria-label="100% diff: step rendered nothing or rendered an unrelated screen"
+            >
+              <XCircle size={14} />
+            </span>
+          )}
+          {visual?.baselineSourceBranch && (
+            <span
+              className="v-chip"
+              style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}
+              title={`No baseline on this build's branch yet; comparing against ${visual.baselineSourceBranch} (the repo's default branch). Approve here to establish a same-branch baseline.`}
+            >
+              baseline from {visual.baselineSourceBranch}
+            </span>
+          )}
           {visual?.classification && (
             <span className="v-chip" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>{visual.classification}</span>
           )}
-          <button className="v-btn sm" style={{ flexShrink: 0 }}><Layers size={11} />Regions</button>
+          {hasChangedRegions && (
+            <button
+              className={`v-btn sm ${regions.showRegions ? 'tinted' : ''}`}
+              style={{ flexShrink: 0 }}
+              onClick={() => regions.setShowRegions(!regions.showRegions)}
+              title={`${changedRegions.length} changed region(s) detected`}
+            >
+              <Layers size={11} />{regions.showRegions ? 'Hide regions' : 'Show regions'}
+            </button>
+          )}
+          <button
+            className={`v-btn sm ${regions.drawFocusMode ? 'tinted' : ''}`}
+            style={{ flexShrink: 0 }}
+            onClick={regions.toggleDrawFocus}
+            disabled={drawDisabled}
+            title={regions.hasVisual
+              ? 'Click + drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions.'
+              : 'Focus regions require a visual diff for this step.'}
+          >
+            <Crosshair size={11} />
+            {regions.drawFocusMode
+              ? 'Drawing — click + drag'
+              : regions.focusRegions.length > 0
+                ? `Focus (${regions.focusRegions.length})`
+                : 'Draw Focus'}
+          </button>
+          <button
+            className={`v-btn sm ${regions.drawIgnoreMode ? 'tinted' : ''}`}
+            style={{ flexShrink: 0 }}
+            onClick={regions.toggleDrawIgnore}
+            disabled={drawDisabled}
+            title={regions.hasVisual
+              ? 'Click + drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test.'
+              : 'Ignore regions require a visual diff for this step.'}
+          >
+            <EyeOff size={11} />
+            {regions.drawIgnoreMode
+              ? 'Drawing — click + drag'
+              : regions.ignoreRegions.length > 0
+                ? `Ignore (${regions.ignoreRegions.length})`
+                : 'Draw Ignore'}
+          </button>
         </div>
       </div>
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'stretch', justifyContent: 'center', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
@@ -1130,7 +1765,15 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
           </div>
         )}
         {mode === 'slider' && hasBaseline && hasCurrent && (
-          <SliderViewer baseline={baselineSrc} current={currentSrc} pct={sliderPct} onPctChange={setSliderPct} />
+          <SliderViewer
+            baseline={baselineSrc}
+            current={currentSrc}
+            pct={sliderPct}
+            onPctChange={setSliderPct}
+            regions={regions}
+            changedRegions={changedRegions}
+            showChangedRegions={regions.showRegions}
+          />
         )}
         {/* Slider needs both images. Fall back to whichever exists when the
             other is missing (first-run cases have no baseline; aborted runs
@@ -1139,23 +1782,79 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
         {mode === 'slider' && !(hasBaseline && hasCurrent) && (hasBaseline || hasCurrent) && (
           <div style={{ width: '100%' }}>
             <ImagePanel
-              label={hasCurrent ? 'current (no baseline yet)' : 'baseline (no current capture)'}
+              label={
+                hasCurrent
+                  ? (visual?.baselineExistsOn
+                    ? `current — no baseline on this branch yet (approved baseline exists on ${visual.baselineExistsOn.branch})`
+                    : 'current (no baseline yet)')
+                  : 'baseline (no current capture)'
+              }
               src={hasCurrent ? currentSrc : baselineSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              drawEnabled={hasCurrent}
             />
           </div>
         )}
         {mode === 'side' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' }}>
-            <ImagePanel label="baseline" src={baselineSrc} />
-            <ImagePanel label="current" src={currentSrc} />
+            <ImagePanel
+              label="baseline"
+              src={baselineSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              showOverlaysOnly
+            />
+            <ImagePanel
+              label="current"
+              src={currentSrc}
+              regions={regions}
+              changedRegions={changedRegions}
+              showChangedRegions={regions.showRegions}
+              drawEnabled
+            />
           </div>
         )}
         {mode === 'overlay' && (
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {diffSrc ? <ImagePanel label="diff" src={diffSrc} /> : <ImagePanel label="current" src={currentSrc} />}
+          // alignSelf: flex-start prevents the parent's `alignItems: stretch`
+          // from squeezing this column to a fixed cross-axis height, which was
+          // making the diff ImagePanel collapse to its `minHeight: 240` (~200px
+          // after header padding) instead of the image's natural height. The
+          // slider mode renders directly into the parent (no extra wrapper)
+          // and grows naturally, so this matches that behavior.
+          <div style={{ width: '100%', alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {diffSrc ? (
+              <ImagePanel
+                label="diff"
+                src={diffSrc}
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                showOverlaysOnly
+              />
+            ) : (
+              <ImagePanel
+                label="current"
+                src={currentSrc}
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                drawEnabled
+              />
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <ImagePanel label="baseline" src={baselineSrc} small />
-              <ImagePanel label="current" src={currentSrc} small />
+              <ImagePanel
+                label="current"
+                src={currentSrc}
+                small
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                drawEnabled
+              />
             </div>
           </div>
         )}
@@ -1183,15 +1882,72 @@ function VisualPane({ step, visual, clean }: { step: StepComparison; visual: Vis
   );
 }
 
-function ImagePanel({ label, src, small }: { label: string; src: string | null | undefined; small?: boolean }) {
+interface ImagePanelExtra {
+  regions?: VisualRegionsCtx;
+  changedRegions?: { x: number; y: number; width: number; height: number }[];
+  showChangedRegions?: boolean;
+  /** Show focus/ignore overlays but suppress the draw layer + delete handles
+   *  (used on baseline/diff thumbnails where editing wouldn't make sense). */
+  showOverlaysOnly?: boolean;
+  /** Allow draw-mode + delete handles on this panel. Default false. */
+  drawEnabled?: boolean;
+}
+
+function ImagePanel({
+  label,
+  src,
+  small,
+  regions,
+  changedRegions = [],
+  showChangedRegions = false,
+  showOverlaysOnly = false,
+  drawEnabled = false,
+}: { label: string; src: string | null | undefined; small?: boolean } & ImagePanelExtra) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const canEdit = !!regions && !showOverlaysOnly && drawEnabled;
+  const drawMode = regions?.drawFocusMode
+    ? 'focus'
+    : regions?.drawIgnoreMode
+      ? 'ignore'
+      : null;
   return (
     <div className="v-card" style={{ position: 'relative', overflow: 'hidden', minHeight: small ? 120 : 240 }}>
-      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 1, fontSize: 9 }}>
+      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 6, fontSize: 9 }}>
         {label}
       </span>
       {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={label} style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }} />
+        <div style={{ position: 'relative', width: '100%' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={label}
+            style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }}
+            onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+          />
+          {regions && showChangedRegions && (
+            <RegionOverlay dims={dims} regions={changedRegions} />
+          )}
+          {regions && (
+            <FocusRegionOverlay
+              dims={dims}
+              regions={regions.focusRegions}
+              onDelete={canEdit ? regions.onFocusDelete : undefined}
+            />
+          )}
+          {regions && (
+            <IgnoreRegionOverlay
+              dims={dims}
+              regions={regions.ignoreRegions}
+              onDelete={canEdit ? regions.onIgnoreDelete : undefined}
+            />
+          )}
+          {canEdit && drawMode === 'focus' && (
+            <DrawLayer dims={dims} onDrawn={regions!.onFocusDrawn} variant="focus" />
+          )}
+          {canEdit && drawMode === 'ignore' && (
+            <DrawLayer dims={dims} onDrawn={regions!.onIgnoreDrawn} variant="ignore" />
+          )}
+        </div>
       ) : (
         <div style={{ width: '100%', height: small ? 120 : 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }} className="label">
           missing
@@ -1201,7 +1957,30 @@ function ImagePanel({ label, src, small }: { label: string; src: string | null |
   );
 }
 
-function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: string; current: string; pct: number; onPctChange: (n: number) => void }) {
+function SliderViewer({
+  baseline,
+  current,
+  pct,
+  onPctChange,
+  regions,
+  changedRegions = [],
+  showChangedRegions = false,
+}: {
+  baseline: string;
+  current: string;
+  pct: number;
+  onPctChange: (n: number) => void;
+  regions?: VisualRegionsCtx;
+  changedRegions?: { x: number; y: number; width: number; height: number }[];
+  showChangedRegions?: boolean;
+}) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const drawMode = regions?.drawFocusMode
+    ? 'focus'
+    : regions?.drawIgnoreMode
+      ? 'ignore'
+      : null;
+  const drawing = !!drawMode;
   // Both images render at width:100% with natural-aspect height. The current
   // image lives in an `inset: 0` overlay so its layout box matches the
   // baseline exactly — clipPath then reveals it on the right of the slider.
@@ -1210,15 +1989,49 @@ function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: strin
   return (
     <div className="v-card" style={{ width: '100%', padding: 0, position: 'relative', overflow: 'hidden', minHeight: 320, background: 'white' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={baseline} alt="baseline" draggable={false} style={{ display: 'block', width: '100%', height: 'auto' }} />
+      <img
+        src={baseline}
+        alt="baseline"
+        draggable={false}
+        style={{ display: 'block', width: '100%', height: 'auto' }}
+        onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+      />
       {/* current clipped — revealed on the right of the slider line */}
       <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${pct}%)`, overflow: 'hidden' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={current} alt="current" draggable={false} style={{ display: 'block', width: '100%', height: 'auto' }} />
       </div>
+      {/* Region overlays sit ABOVE the clipped current image so they're
+          visible on either side of the slider line. */}
+      {regions && showChangedRegions && (
+        <RegionOverlay dims={dims} regions={changedRegions} />
+      )}
+      {regions && (
+        <FocusRegionOverlay
+          dims={dims}
+          regions={regions.focusRegions}
+          onDelete={!drawing ? regions.onFocusDelete : undefined}
+        />
+      )}
+      {regions && (
+        <IgnoreRegionOverlay
+          dims={dims}
+          regions={regions.ignoreRegions}
+          onDelete={!drawing ? regions.onIgnoreDelete : undefined}
+        />
+      )}
+      {/* Drag-to-draw layer takes over pointer events while drawing so the
+          slider input below it doesn't intercept the mouse. */}
+      {drawMode === 'focus' && regions && (
+        <DrawLayer dims={dims} onDrawn={regions.onFocusDrawn} variant="focus" />
+      )}
+      {drawMode === 'ignore' && regions && (
+        <DrawLayer dims={dims} onDrawn={regions.onIgnoreDrawn} variant="ignore" />
+      )}
       {/* slider input — invisible but pointer-events:auto so dragging the
           handle works. Layered above images via z-index, but cannot block
-          their visibility (opacity:0). */}
+          their visibility (opacity:0). Disabled while drawing so the draw
+          layer above receives the drag. */}
       <input
         type="range"
         min={0}
@@ -1226,7 +2039,7 @@ function SliderViewer({ baseline, current, pct, onPctChange }: { baseline: strin
         value={pct}
         onChange={(e) => onPctChange(parseInt(e.target.value, 10))}
         aria-label="Compare slider"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'ew-resize', zIndex: 3 }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'ew-resize', zIndex: drawing ? 0 : 3, pointerEvents: drawing ? 'none' : 'auto' }}
       />
       <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct}%`, width: 2, background: 'var(--c-teal)', pointerEvents: 'none', zIndex: 4 }}>
         <div style={{ position: 'absolute', top: '50%', left: -12, width: 26, height: 26, borderRadius: '50%', background: 'var(--c-white)', border: '2px solid var(--c-teal)', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1549,10 +2362,17 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
   const net = step.layers?.network;
   const requests = useMemo(() => result?.networkRequests ?? [], [result]);
 
+  // When the test failed because of the network layer, auto-focus the table on
+  // error rows so reviewers don't have to filter manually. Derived once via
+  // the useState initializer (no per-render side effects).
+  const failedByNetwork = step.evidence.some((e) => e.layer === 'network' && e.signal === 'high');
+
   // Filters
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState<Set<string>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(
+    () => (failedByNetwork ? new Set<StatusGroup>(['4xx', '5xx', 'err']) : new Set<StatusGroup>()),
+  );
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
@@ -1600,12 +2420,28 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
 
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {failedByNetwork && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: 'var(--c-red)', color: 'var(--c-white)',
+              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              lineHeight: 1.6,
+            }}
+            title="Test failed because of a high-signal network regression"
+          >
+            <XCircle size={10} />
+            failed test
+          </span>
+        </div>
+      )}
       {clean && <CleanBanner message={`No network diff — ${requests.length} request${requests.length === 1 ? '' : 's'} captured, all match baseline`} />}
       {net && (
         <>
           <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '54px 1fr 100px', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-              <span className="label" style={{ fontSize: 9 }}>Δ vs baseline</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+              <span className="label" style={{ fontSize: 9 }} title="Δ vs baseline">Δ</span>
               <span className="label" style={{ fontSize: 9 }}>Request</span>
               <span className="label" style={{ fontSize: 9 }}>Status</span>
             </div>
@@ -1619,8 +2455,13 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
               <NetworkRow key={`f${i}`} kind="Δ" url={`${e.method} ${e.url}`} status={`${e.from}→${e.to}`} cls="missed" />
             ))}
           </div>
-          <div className="label" style={{ padding: '0 4px' }}>
-            +{net.added} new · {net.removed} removed · {net.changed} changed · {net.newErrorCount} new errors
+          {/* Slim Δ-vs-baseline pills. Compact symbols (+, −, ~, err) keep the
+              row scannable next to the Captured-requests filter strip below. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '0 4px', alignItems: 'center' }}>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Added vs baseline">+ {net.added}</span>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Removed vs baseline">− {net.removed}</span>
+            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Changed vs baseline">~ {net.changed}</span>
+            <span className="v-chip regression" style={{ fontSize: 9, padding: '2px 6px' }} title="New errors vs baseline">err {net.newErrorCount}</span>
           </div>
         </>
       )}
@@ -1722,6 +2563,7 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
           {/* Column header */}
           <div style={{
             display: 'grid', gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
+            columnGap: 10,
             padding: '6px 12px', borderBottom: '1px solid var(--border)',
             background: 'var(--c-soft)',
           }}>
@@ -1777,6 +2619,7 @@ function NetworkRequestRow({
         style={{
           display: 'grid',
           gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
+          columnGap: 10,
           padding: '6px 12px', borderBottom: '1px solid var(--border)',
           alignItems: 'center', fontSize: 11,
           width: '100%', textAlign: 'left',
@@ -1896,9 +2739,36 @@ function formatBytes(b: number): string {
 }
 
 function NetworkRow({ kind, url, status, cls }: { kind: string; url: string; status: string; cls: string }) {
+  // Δ column is a tight 32px slot, so the chip is a minimal badge rather
+  // than a full `.v-chip` pill (the default pill's 2x8 padding + pill radius
+  // + 6px gap made the marker visually overweight in the narrow column).
+  const isRegression = cls === 'regression';
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '54px 1fr 100px', padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 12 }}>
-      <span className={`v-chip ${cls}`} style={{ fontSize: 9, padding: '1px 6px' }}>{kind}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 12 }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 4px',
+          minWidth: 22,
+          fontSize: 9,
+          lineHeight: '14px',
+          fontWeight: 600,
+          fontFamily: 'var(--font-sans)',
+          borderRadius: 3,
+          background: isRegression
+            ? 'color-mix(in oklab, var(--c-red) 14%, white)'
+            : 'color-mix(in oklab, var(--c-amber) 16%, white)',
+          color: isRegression ? 'var(--c-red)' : '#8C5C19',
+          border: `1px solid color-mix(in oklab, ${isRegression ? 'var(--c-red)' : 'var(--c-amber)'} 30%, transparent)`,
+          whiteSpace: 'nowrap',
+          letterSpacing: 0,
+        }}
+        title={isRegression ? 'New since baseline' : 'Changed since baseline'}
+      >
+        {kind}
+      </span>
       <span className="mono" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{url}</span>
       <span className="mono" style={{ fontSize: 11 }}>{status}</span>
     </div>
@@ -1908,8 +2778,25 @@ function NetworkRow({ kind, url, status, cls }: { kind: string; url: string; sta
 function ConsolePane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
   const con = step.layers?.consoleDiff;
   const messages = result?.consoleErrors ?? [];
+  const failedByConsole = step.evidence.some((e) => e.layer === 'console' && e.signal === 'high');
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {failedByConsole && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: 'var(--c-red)', color: 'var(--c-white)',
+              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              lineHeight: 1.6,
+            }}
+            title="Test failed because of a high-signal console regression"
+          >
+            <XCircle size={10} />
+            failed test
+          </span>
+        </div>
+      )}
       {clean && <CleanBanner message={messages.length === 0 ? 'No console messages captured' : `${messages.length} console message${messages.length === 1 ? '' : 's'} — all match baseline`} />}
       {con && (con.newFingerprints.length > 0 || con.disappeared.length > 0) && (
         <div className="v-card" style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.85 }}>
@@ -1944,12 +2831,21 @@ function ConsolePane({ step, result, clean }: { step: StepComparison; result: Te
   );
 }
 
-function A11yPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function A11yPane({ step, result, clean, buildA11y }: { step: StepComparison; result: TestResultLite | null; clean: boolean; buildA11y?: FocusViewProps['buildA11y'] }) {
   const a = step.layers?.a11y;
   const violations = result?.a11yViolations ?? [];
   const passes = result?.a11yPassesCount ?? null;
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {buildA11y && buildA11y.score != null && (
+        <A11yComplianceCard
+          score={buildA11y.score}
+          violationCount={buildA11y.violationCount}
+          criticalCount={buildA11y.criticalCount}
+          totalRulesChecked={buildA11y.totalRulesChecked}
+          trend={buildA11y.trend}
+        />
+      )}
       {clean && <CleanBanner message={`No new a11y issues — ${violations.length} violation${violations.length === 1 ? '' : 's'} captured${passes != null ? `, ${passes} rules passed` : ''}`} />}
       {a && (
         <>
@@ -2295,8 +3191,6 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
           <ComposeIssueCard
             key={activeCase.step.id}
             stepId={activeCase.step.id}
-            testName={activeCase.test?.name ?? null}
-            stepLabel={activeCase.step.stepLabel ?? null}
             evidence={evidence}
             reviewerNote={activeCase.step.reviewerNote ?? null}
             onAfterCreate={onAfterCreate}
@@ -2418,20 +3312,17 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
 }
 
 /** Compose-new-issue card. Lets reviewers describe what's wrong in their
- *  own words and pick which captured evidence to attach. Submits via
- *  createIssueForCase with a body composed entirely client-side. */
+ *  own words and pick which captured evidence to attach. The actual issue
+ *  body (with full network/console/dom drill-downs) is rendered server-side
+ *  by buildVerifyCaseBody — the client only sends note + layer selection. */
 function ComposeIssueCard({
   stepId,
-  testName,
-  stepLabel,
   evidence,
   reviewerNote,
   onAfterCreate,
   hasLinkedIssue,
 }: {
   stepId: string;
-  testName: string | null;
-  stepLabel: string | null;
   evidence: EvidenceItemType[];
   reviewerNote: string | null;
   onAfterCreate?: () => void;
@@ -2464,38 +3355,18 @@ function ComposeIssueCard({
     });
   };
 
-  const composeBody = (): string => {
-    const lines: string[] = [];
-    if (text.trim().length > 0) lines.push(text.trim());
-    const picked = uniqueEvidence.filter((e) => includeLayers.has(e.layer));
-    if (picked.length > 0) {
-      lines.push('', '## Evidence');
-      for (const e of picked) {
-        lines.push(`- **${e.layer}** (${e.signal}): ${e.summary}`);
-      }
-    }
-    if (testName || stepLabel) {
-      lines.push('', '## Context');
-      if (testName) lines.push(`- Test: ${testName}`);
-      if (stepLabel) lines.push(`- Step: ${stepLabel}`);
-    }
-    return lines.join('\n');
-  };
-
   const handleCreate = async () => {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const titleBase = testName ?? 'verify case';
-    const titleStep = stepLabel ? ` — ${stepLabel}` : '';
-    const titleHint = text.trim().split(/\r?\n/, 1)[0]?.slice(0, 60) ?? '';
-    const title = titleHint
-      ? `[Verify] ${titleBase}${titleStep}: ${titleHint}`
-      : `[Verify] ${titleBase}${titleStep}`;
+    // Compose nothing client-side. The server pulls full step + layers
+    // (network/console/dom/a11y/url/perf) plus build context and renders the
+    // rich body; we just tell it which evidence sections the reviewer ticked
+    // and pass through the free-text note.
     const res = await createIssueForCase({
       stepComparisonId: stepId,
-      title,
-      body: composeBody(),
+      reviewerNote: text.trim() || undefined,
+      includedLayers: Array.from(includeLayers),
     });
     setSubmitting(false);
     if (!res.ok) {

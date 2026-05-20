@@ -267,7 +267,13 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   const memLimit = process.env.EB_MEM_LIMIT || '4Gi';
   const shmSize = process.env.EB_SHM_SIZE || '512Mi';
   const activeDeadline = parseInt(process.env.EB_ACTIVE_DEADLINE_SECONDS || '1800', 10);
-  const ttlSeconds = parseInt(process.env.EB_TTL_SECONDS_AFTER_FINISHED || '60', 10);
+  // `ttlSecondsAfterFinished` controls how long k8s keeps the Pod (and its
+  // logs) around after the Job completes / fails. Was 60s — too short for
+  // forensic investigation when the executor's dead-EB path tags a test as
+  // `[EB-dead]`: by the time anyone looks, the pod is GC'd and logs are gone.
+  // 600s (10 min) is long enough to grab logs from a recent failure
+  // (`getEBPodInfo`) and short enough that Completed pods don't accumulate.
+  const ttlSeconds = parseInt(process.env.EB_TTL_SECONDS_AFTER_FINISHED || '600', 10);
 
   return {
     apiVersion: 'batch/v1',
@@ -419,6 +425,85 @@ export async function terminateEBJob(jobName: string): Promise<void> {
 }
 
 /**
+ * Forensic helper: fetch the EB pod's status + last N lines of logs after the
+ * executor flags it as `[EB-dead]`. Best-effort — every call has a hard 2s
+ * timeout per k8s round-trip so it can't stall the dispatcher when the pod is
+ * unreachable. Returns `null` if anything goes wrong; the caller already has a
+ * generic timeout error to fall back on.
+ *
+ * Used from `executor.ts`'s per-test timeout to disambiguate OOMKilled vs
+ * CNI-flake vs Chromium-crash without forcing users to `kubectl` after the
+ * fact. Requires `pods` + `pods/log` RBAC, which the app SA already has
+ * (`k8s/embedded-browser-rbac.yaml:24-29`).
+ */
+export interface EBPodInfo {
+  podName: string;
+  phase: string;                   // Pending | Running | Succeeded | Failed | Unknown
+  reason?: string;                 // OOMKilled / Error / Completed / Evicted / ...
+  exitCode?: number;
+  message?: string;                // kubelet-reported reason (e.g. "DeadlineExceeded")
+  logs: string;                    // tail of the container's stdout/stderr
+}
+
+export async function getEBPodInfo(jobName: string, tailLines = 80): Promise<EBPodInfo | null> {
+  if (!isKubernetesMode()) return null;
+  try {
+    const creds = loadClusterCreds();
+    // 1. Resolve the Pod for this Job. Job templates carry the `job-name`
+    //    label by default; we add `app=lastest-eb` for filtering and a
+    //    per-instance label, but `job-name` is the surest match.
+    const listResp = await k8sRequest(
+      'GET',
+      `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods?labelSelector=${encodeURIComponent(`job-name=${jobName}`)}&limit=1`,
+    );
+    if (listResp.status < 200 || listResp.status >= 300) return null;
+    const items = (listResp.data as {
+      items?: Array<{
+        metadata?: { name?: string };
+        status?: {
+          phase?: string;
+          message?: string;
+          containerStatuses?: Array<{
+            state?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
+            lastState?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
+          }>;
+        };
+      }>;
+    } | null)?.items ?? [];
+    if (items.length === 0) return null;
+    const pod = items[0]!;
+    const podName = pod.metadata?.name;
+    if (!podName) return null;
+
+    const cstat = pod.status?.containerStatuses?.[0];
+    const terminated = cstat?.state?.terminated ?? cstat?.lastState?.terminated;
+
+    // 2. Fetch tail of pod logs. `previous=false` reads the current container
+    //    instance (k8s only retains `previous=true` for restarted containers,
+    //    and our EBs have backoffLimit=0 so they don't restart).
+    const logsResp = await k8sRequest(
+      'GET',
+      `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods/${encodeURIComponent(podName)}/log?tailLines=${tailLines}&previous=false`,
+    );
+    const logsRaw = typeof logsResp.data === 'string'
+      ? logsResp.data
+      : (logsResp.status >= 200 && logsResp.status < 300 ? '' : `<log fetch failed status=${logsResp.status}>`);
+
+    return {
+      podName,
+      phase: pod.status?.phase ?? 'Unknown',
+      reason: terminated?.reason,
+      exitCode: terminated?.exitCode,
+      message: terminated?.message ?? pod.status?.message,
+      logs: logsRaw,
+    };
+  } catch (err) {
+    console.warn('[EB Provisioner] getEBPodInfo failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
  * Derive the Job name for a runner row. Only matches runners created by
  * `generateInstanceId()` — `eb-<base36-ts>-<6-char-rand>` — so static
  * sidecar EBs (`eb1`, `eb2`, ...) are NOT misidentified as dynamic Jobs
@@ -450,6 +535,19 @@ export async function listEBJobNames(): Promise<Set<string>> {
   return new Set(items.map((j) => j.metadata?.name).filter((n): n is string => !!n));
 }
 
+// Build-dispatch in-flight counter. Incremented by `executeViaPoolWorkers`
+// before claiming the first EB and decremented after the last test releases.
+// While > 0, `ensureWarmPool()` no-ops: the build's `claimOrProvisionPoolEB`
+// provisions on demand, so the warm-pool refill that fires after every release
+// is pure waste (the spawned warm EB never gets claimed before TTL). Saves
+// ~10 EB launches on a 16-test build (`docs/eb-and-setup-plan.md` B1).
+let _buildDispatchInFlight = 0;
+export function incBuildDispatch(): void { _buildDispatchInFlight++; }
+export function decBuildDispatch(): void {
+  _buildDispatchInFlight = Math.max(0, _buildDispatchInFlight - 1);
+}
+export function inBuildDispatch(): number { return _buildDispatchInFlight; }
+
 /**
  * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
  * Counts `online` system EB runners; if the count is below the warm minimum,
@@ -457,9 +555,13 @@ export async function listEBJobNames(): Promise<Set<string>> {
  *
  * Safe to call repeatedly — subsequent calls no-op once the pool is warm.
  * Call on app startup and from the periodic cleanup loop.
+ *
+ * No-op while a build is dispatching (see `_buildDispatchInFlight`): warm-pool
+ * refill that races with on-demand provisioning just wastes pods.
  */
 export async function ensureWarmPool(): Promise<number> {
   if (!isKubernetesMode()) return 0;
+  if (_buildDispatchInFlight > 0) return 0;
   const want = warmPoolMin();
   if (want <= 0) return 0;
 
@@ -505,5 +607,46 @@ export async function ensureWarmPool(): Promise<number> {
     }
   }
   if (launched > 0) console.log(`[EB Provisioner] Warm pool topped up (+${launched}, target ${want})`);
+  return launched;
+}
+
+/**
+ * Pre-launch `targetCount` EB Jobs up front for a build, capped by the global
+ * `ebPoolMax` minus what's already in flight. Each launch goes through the
+ * shared `awaitLaunchSlot()` throttle so CNI doesn't burst.
+ *
+ * Different from `ensureWarmPool`: the caller picks the target, and we don't
+ * gate on the idle-count deficit — builds know their concurrency, warm pool
+ * doesn't. Pair with `incBuildDispatch()` so the per-release warm refill stays
+ * suppressed; otherwise we'd double-spawn.
+ *
+ * Returns the number actually launched (may be less than requested if pool is
+ * near cap or any launch throws).
+ */
+export async function prewarmForBuild(targetCount: number): Promise<number> {
+  if (!isKubernetesMode()) return 0;
+  if (targetCount <= 0) return 0;
+
+  const cap = await poolMax();
+  const size = await currentPoolSize();
+  const canLaunch = Math.min(targetCount, Math.max(0, cap - size));
+  if (canLaunch <= 0) return 0;
+
+  let launched = 0;
+  for (let i = 0; i < canLaunch; i++) {
+    incInFlightProvisions();
+    try {
+      await launchEBJob();
+      launched++;
+      setTimeout(() => decInFlightProvisions(), 120_000);
+    } catch (err) {
+      decInFlightProvisions();
+      console.warn('[EB Provisioner] prewarmForBuild launch failed:', err);
+      break;
+    }
+  }
+  if (launched > 0) {
+    console.log(`[EB Provisioner] Prewarmed ${launched} EB(s) for build (target ${targetCount})`);
+  }
   return launched;
 }

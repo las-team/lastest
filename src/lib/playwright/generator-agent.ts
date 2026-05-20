@@ -11,6 +11,7 @@ import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
 import { extractCodeFromResponse } from '@/lib/ai/prompts';
 import type { TestGenerationContext } from '@/lib/ai/types';
+import { runValidationWithRetry } from '@/lib/ai/validation-retry';
 import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
@@ -159,25 +160,38 @@ export async function agentCreateTest(
 
     const useMCP = config.provider !== 'claude-agent-sdk';
 
-    const response = await generateWithAI(config, prompt, GENERATOR_SYSTEM_PROMPT, {
-      repositoryId,
-      actionType: 'agent_generate',
-      signal: options?.signal,
-      useMCP,
-      ...(useMCP && {
-        mcpConfig: {
-          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-          cdpEndpoint: options?.cdpEndpoint,
-        },
-      }),
-    });
+    const callLLM = async (userPrompt: string): Promise<string> => {
+      const response = await generateWithAI(config, userPrompt, GENERATOR_SYSTEM_PROMPT, {
+        repositoryId,
+        actionType: 'agent_generate',
+        signal: options?.signal,
+        useMCP,
+        ...(useMCP && {
+          mcpConfig: {
+            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+            cdpEndpoint: options?.cdpEndpoint,
+          },
+        }),
+      });
+      return extractCodeFromResponse(response) ?? '';
+    };
 
-    const code = extractCodeFromResponse(response);
-    if (!code) {
+    const initial = await callLLM(prompt);
+    if (!initial) {
       return { success: false, error: 'Generator agent produced no test code' };
     }
 
-    return { success: true, code };
+    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
+      console.log(`[GeneratorAgent] Validation failed, retry ${attempt}/2 with feedback`);
+      const retryPrompt = `${prompt}\n\n---\n\nPrevious attempt failed validation. ${feedback}\n\nRegenerate the test code addressing the validation errors. Output ONLY the corrected code block.`;
+      return callLLM(retryPrompt);
+    });
+
+    if (!validated.valid) {
+      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+    }
+
+    return { success: true, code: validated.code };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Generator agent failed';
     return { success: false, error: message };

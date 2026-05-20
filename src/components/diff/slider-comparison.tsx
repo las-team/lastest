@@ -5,7 +5,7 @@ import type { AlignmentSegment } from '@/lib/db/schema';
 
 type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare';
 
-function RegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: ChangedRegion[] }) {
+export function RegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: ChangedRegion[] }) {
   if (!dims || regions.length === 0) return null;
   return (
     <svg
@@ -47,7 +47,7 @@ export interface IgnoreRegionRect {
   height: number;
 }
 
-function FocusRegionOverlay({
+export function FocusRegionOverlay({
   dims,
   regions,
   onDelete,
@@ -100,7 +100,7 @@ function FocusRegionOverlay({
   );
 }
 
-function IgnoreRegionOverlay({
+export function IgnoreRegionOverlay({
   dims,
   regions,
   onDelete,
@@ -162,7 +162,7 @@ interface DrawLayerProps {
   variant?: 'focus' | 'ignore';
 }
 
-function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) {
+export function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const [start, setStart] = useState<{ x: number; y: number } | null>(null);
   const [current, setCurrent] = useState<{ x: number; y: number } | null>(null);
@@ -269,7 +269,7 @@ function DomRegionOverlay({ dims, regions }: { dims: { width: number; height: nu
   );
 }
 
-interface ChangedRegion {
+export interface ChangedRegion {
   x: number;
   y: number;
   width: number;

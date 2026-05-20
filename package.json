@@ -20,6 +20,7 @@
     "db:generate": "drizzle-kit generate",
     "db:reset": "node scripts/db-reset.js",
     "db:seed": "tsx scripts/seed-excalidraw-tests.ts",
+    "audit:playwright-parity": "tsx scripts/audit-playwright-parity.ts",
     "test:visual": "tsx scripts/run-tests.ts",
     "test": "vitest run",
     "test:watch": "vitest",

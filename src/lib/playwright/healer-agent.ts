@@ -13,6 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { getCurrentBranchForRepo } from '@/lib/git-utils';
 import { generateWithAI } from '@/lib/ai';
 import { extractCodeFromResponse } from '@/lib/ai/prompts';
+import { runValidationWithRetry } from '@/lib/ai/validation-retry';
 import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
@@ -137,25 +138,38 @@ ${seed.seedPrompt}`;
 
     const useMCP = config.provider !== 'claude-agent-sdk';
 
-    const response = await generateWithAI(config, prompt, HEALER_SYSTEM_PROMPT, {
-      repositoryId,
-      actionType: 'agent_heal',
-      signal: options?.signal,
-      useMCP,
-      ...(useMCP && {
-        mcpConfig: {
-          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-          cdpEndpoint: options?.cdpEndpoint,
-        },
-      }),
-    });
+    const callLLM = async (userPrompt: string): Promise<string> => {
+      const response = await generateWithAI(config, userPrompt, HEALER_SYSTEM_PROMPT, {
+        repositoryId,
+        actionType: 'agent_heal',
+        signal: options?.signal,
+        useMCP,
+        ...(useMCP && {
+          mcpConfig: {
+            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+            cdpEndpoint: options?.cdpEndpoint,
+          },
+        }),
+      });
+      return extractCodeFromResponse(response) ?? '';
+    };
 
-    const code = extractCodeFromResponse(response);
-    if (!code) {
+    const initial = await callLLM(prompt);
+    if (!initial) {
       return { success: false, error: 'Healer agent produced no fixed code' };
     }
 
-    return { success: true, code };
+    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
+      console.log(`[HealerAgent] Validation failed, retry ${attempt}/2 with feedback`);
+      const retryPrompt = `${prompt}\n\n---\n\nPrevious fix attempt failed validation. ${feedback}\n\nRegenerate the fixed test code addressing the validation errors. Output ONLY the corrected code block.`;
+      return callLLM(retryPrompt);
+    });
+
+    if (!validated.valid) {
+      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+    }
+
+    return { success: true, code: validated.code };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Healer agent failed';
     return { success: false, error: message };

@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
 import type { Metadata } from 'next';
 import type { CSSProperties } from 'react';
 import {
@@ -14,10 +15,12 @@ import {
   getBuildDemoNotes,
   getLatestDemoNotesForRepo,
 } from '@/lib/db/queries/demo-notes';
-import type { Baseline, DemoNotes } from '@/lib/db/schema';
+import { getRepoAward } from '@/lib/db/queries/awards';
+import type { Baseline, DemoNotes, RepoAward } from '@/lib/db/schema';
 import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
 import { ShareVideoPlayer } from './share-video-player';
+import { AwardBadgeRow } from '@/components/awards/award-badge-row';
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -41,9 +44,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
     : `Visual regression check for ${domain} — recording, screenshots, and diff report.`;
 
+  // metadataBase lets relative image URLs resolve to absolute URLs in the
+  // emitted <meta og:image> tag (crawlers need absolute).
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const ogImageUrl = `/api/og/share/${slug}`;
+  const ogAlt = ctx.build.changesDetected
+    ? `${ctx.build.changesDetected} visual changes on ${domain}`
+    : `Visual regression report for ${domain}`;
+
   return {
     title,
     description,
+    metadataBase: new URL(appUrl),
     robots: { index: false, follow: false },
     openGraph: {
       title,
@@ -51,8 +63,14 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: buildShareUrl(slug),
       type: 'article',
       siteName: 'Lastest',
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: ogAlt }],
     },
-    twitter: { card: 'summary', title, description },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImageUrl],
+    },
   };
 }
 
@@ -62,6 +80,10 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const data = await getShareDataBySlug(slug);
   if (!data) notFound();
+
+  // CSP nonce — required under strict-dynamic for the plain <script src> tag
+  // below. See src/proxy.ts for the generation site.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
 
   const {
     share,
@@ -107,6 +129,13 @@ export default async function PublicSharePage({ params }: PageProps) {
     ? (await getLatestDemoNotesForRepo(repoIdForNotes)) ??
       (await getBuildDemoNotes(build.id))
     : await getBuildDemoNotes(build.id);
+
+  // Lastest awards: render the earned-badges + embed block when the repo has
+  // a tier. Resolved by repositoryId — works for both build and test shares.
+  const award: RepoAward | null = repoIdForNotes
+    ? (await getRepoAward(repoIdForNotes)) ?? null
+    : null;
+  const showAwardBadges = !!award && award.currentTier !== 'none';
 
   // Passing tests produce zero visual_diffs rows. Fall back to the test's
   // active baselines so viewers still see a side-by-side comparison rather
@@ -170,21 +199,30 @@ export default async function PublicSharePage({ params }: PageProps) {
           </>
         )}
 
+        {showAwardBadges && award && (
+          <AwardBadgeRow award={award} slug={slug} />
+        )}
+
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
 
         <ShareFooter slug={slug} />
       </main>
 
-      {/* Server-emitted inline style + script: idle/active slider toggling and
-          pointer-driven reveal for the diff sliders. Zero hydration cost. The
-          video player is a separate React client island (see ShareVideoPlayer)
-          which owns playback rate, scrubbing, and step-seek wiring. */}
-      <style dangerouslySetInnerHTML={{ __html: SHARE_STYLE }} />
-      <script
-        dangerouslySetInnerHTML={{
-          __html: SHARE_SCRIPT,
-        }}
-      />
+      {/* External static assets in /public: idle/active slider toggling and
+          pointer-driven reveal for the diff sliders. Same zero-hydration-cost
+          shape as the previous inline emission, but cacheable and CSP-friendly
+          (lets script-src drop 'unsafe-inline' for app code). The video player
+          is a separate React client island (see ShareVideoPlayer) which owns
+          playback rate, scrubbing, and step-seek wiring.
+          eslint-disable-next-line is for @next/next/no-css-tags — we want a
+          /public static asset, not a bundled module import. */}
+      {/* eslint-disable-next-line @next/next/no-css-tags */}
+      <link rel="stylesheet" href="/share-slider.css" precedence="default" />
+      {/* Browsers strip the `nonce` attribute from the DOM after CSP
+          evaluation as a side-channel mitigation, so the client sees
+          nonce="" during hydration. The script has already loaded
+          correctly under the original nonce; suppress the cosmetic mismatch. */}
+      <script src="/share-slider.js" defer nonce={nonce} suppressHydrationWarning />
     </div>
   );
 }
@@ -1145,7 +1183,15 @@ function TestShareBody({
     sliderDiffs.length === 0
       ? buildBaselineSliders(baselineFallback, testResult, toUrl)
       : [];
-  const gallery = buildGallery(diffs, results, toUrl, stepPaths);
+  // When there's nothing to compare against (no diffs AND no baselines), the
+  // step strip is the only place screenshots show up — at tiny thumbnail size.
+  // Drop the dedupe-against-strip filter in that case so the gallery renders
+  // the same screenshots large below the strip.
+  const galleryDedupeSet =
+    sliderDiffs.length === 0 && passedSliders.length === 0
+      ? new Set<string>()
+      : stepPaths;
+  const gallery = buildGallery(diffs, results, toUrl, galleryDedupeSet);
 
   const pullQuote =
     pixelsChanged > 0
@@ -1547,29 +1593,32 @@ function buildGallery(
 
 function GallerySection({ items }: { items: GalleryItem[] }) {
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
       <h2 className="text-sm font-medium text-muted-foreground">
         {items.length === 1 ? 'Screenshot' : `${items.length} screenshots`}
       </h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {items.map((g, i) => (
-          <figure key={i} className="space-y-1.5">
-            <div className="relative aspect-[4/3] rounded-md border bg-muted overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={g.src}
-                alt={g.label}
-                loading="lazy"
-                decoding="async"
-                className="absolute inset-0 w-full h-full object-cover object-top"
-              />
-            </div>
-            <figcaption className="text-xs text-muted-foreground truncate">
+      {/* Stacked full-width frames mirror the DiffSlider stage so a passing /
+          no-diff share shows screenshots at the same scale as a comparison
+          view — natural aspect, top-aligned, no cropping. */}
+      {items.map((g, i) => (
+        <figure key={i} className="space-y-2">
+          <header className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-medium text-foreground truncate">
               {g.label}
-            </figcaption>
-          </figure>
-        ))}
-      </div>
+            </span>
+          </header>
+          <div className="relative rounded-md border bg-muted overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={g.src}
+              alt={g.label}
+              loading="lazy"
+              decoding="async"
+              className="block w-full h-auto select-none"
+            />
+          </div>
+        </figure>
+      ))}
     </section>
   );
 }
@@ -1793,111 +1842,3 @@ function ShareFooter({ slug }: { slug: string }) {
     </footer>
   );
 }
-
-const SHARE_STYLE = `
-.share-slider .share-slider-current,
-.share-slider .share-slider-divider,
-.share-slider .share-slider-label-before,
-.share-slider .share-slider-label-after,
-.share-slider .share-slider-diff,
-.share-slider .share-slider-label-diff,
-.share-slider .share-slider-hint {
-  opacity: 1;
-}
-.share-slider[data-active="false"] .share-slider-current,
-.share-slider[data-active="false"] .share-slider-divider,
-.share-slider[data-active="false"] .share-slider-label-before,
-.share-slider[data-active="false"] .share-slider-label-after {
-  opacity: 0;
-}
-.share-slider[data-active="true"] .share-slider-diff,
-.share-slider[data-active="true"] .share-slider-label-diff,
-.share-slider[data-active="true"] .share-slider-hint {
-  opacity: 0;
-}
-.share-slider-stage:focus-visible {
-  outline: 2px solid var(--primary, #000);
-  outline-offset: 2px;
-}
-`;
-
-const SHARE_SCRIPT = `
-(function(){
-  // Click-to-scroll: step-strip thumbnails carry data-step-jump="N"; sliders
-  // carry data-step="N". Clicking a thumbnail scrolls to the matching slider.
-  // Independent of (and additive to) the video-seek click delegate in
-  // ShareVideoPlayer — a thumbnail can both seek video AND scroll a slider.
-  document.addEventListener('click', function(e){
-    var t = e.target;
-    if (!(t instanceof Element)) return;
-    var jump = t.closest('[data-step-jump]');
-    if (!jump) return;
-    var n = jump.getAttribute('data-step-jump');
-    if (!n) return;
-    var target = document.querySelector('[data-step="' + n + '"]');
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, true);
-
-  var figs = document.querySelectorAll('.share-slider');
-  for (var i = 0; i < figs.length; i++) {
-    (function(fig){
-      var stage = fig.querySelector('.share-slider-stage');
-      if (!stage) return;
-      var hasDiff = fig.getAttribute('data-has-diff') === 'true';
-      // Track whether pointer is inside the stage so touchmove/leave behave.
-      function setPct(clientX) {
-        var rect = stage.getBoundingClientRect();
-        if (!rect.width) return;
-        var x = clientX - rect.left;
-        var pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
-        fig.style.setProperty('--pct', pct.toFixed(2) + '%');
-        stage.setAttribute('aria-valuenow', String(Math.round(pct)));
-      }
-      function activate() { fig.setAttribute('data-active', 'true'); }
-      function deactivate() { if (hasDiff) fig.setAttribute('data-active', 'false'); }
-      stage.addEventListener('pointerenter', function(e){
-        if (e.pointerType === 'touch') return;
-        activate();
-        setPct(e.clientX);
-      });
-      stage.addEventListener('pointerleave', function(e){
-        if (e.pointerType === 'touch') return;
-        deactivate();
-      });
-      stage.addEventListener('pointermove', function(e){
-        if (fig.getAttribute('data-active') !== 'true') return;
-        setPct(e.clientX);
-      });
-      stage.addEventListener('pointerdown', function(e){
-        activate();
-        setPct(e.clientX);
-        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
-      });
-      stage.addEventListener('pointerup', function(e){
-        try { stage.releasePointerCapture(e.pointerId); } catch (err) {}
-      });
-      stage.addEventListener('keydown', function(e){
-        var curStr = fig.style.getPropertyValue('--pct') || '50%';
-        var cur = parseFloat(curStr) || 50;
-        var step = e.shiftKey ? 10 : 2;
-        if (e.key === 'ArrowLeft') {
-          activate();
-          var n = Math.max(0, cur - step);
-          fig.style.setProperty('--pct', n + '%');
-          stage.setAttribute('aria-valuenow', String(Math.round(n)));
-          e.preventDefault();
-        } else if (e.key === 'ArrowRight') {
-          activate();
-          var m = Math.min(100, cur + step);
-          fig.style.setProperty('--pct', m + '%');
-          stage.setAttribute('aria-valuenow', String(Math.round(m)));
-          e.preventDefault();
-        } else if (e.key === 'Escape') {
-          deactivate();
-        }
-      });
-    })(figs[i]);
-  }
-})();
-`;

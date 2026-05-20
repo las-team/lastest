@@ -17,7 +17,7 @@ import {
   Globe,
   Tv2,
 } from 'lucide-react';
-import { saveEnvironmentConfig, testServerConnection } from '@/server/actions/environment';
+import { saveEnvironmentConfig, saveBranchBaseUrl, testServerConnection } from '@/server/actions/environment';
 import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { createAndRunBuild } from '@/server/actions/builds';
 import { useNotifyJobStarted } from '@/components/queue/job-polling-context';
@@ -26,6 +26,7 @@ import type { EmbeddedSession } from '@/lib/db/schema';
 interface SidebarQuickActionsProps {
   baseUrl?: string;
   repositoryId?: string | null;
+  activeBranch?: string;
   ebSessions?: EmbeddedSession[];
 }
 
@@ -55,7 +56,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
+export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, activeBranch, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
@@ -135,11 +136,16 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
       pushUrlHistory(baseUrl);
       setUrlHistory(getUrlHistory());
       initialBaseUrlRef.current = baseUrl;
-      await saveEnvironmentConfig({
-        repositoryId,
-        mode: 'manual',
-        baseUrl,
-      });
+      if (repositoryId) {
+        await saveEnvironmentConfig({
+          repositoryId,
+          mode: 'manual',
+          baseUrl,
+        });
+        if (activeBranch) {
+          await saveBranchBaseUrl(repositoryId, activeBranch, baseUrl);
+        }
+      }
     }
     setIsTesting(true);
     setTestResult(null);

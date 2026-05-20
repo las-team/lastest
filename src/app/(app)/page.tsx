@@ -15,6 +15,8 @@ import {
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { PlayAgentTimeline } from '@/components/play-agent/play-agent-timeline';
+import { QuickstartPanel } from '@/components/quickstart/quickstart-panel';
+import { isQuickstartEnabled } from '@/lib/quickstart/gating';
 import { SelectorStatsChartClient } from '@/components/dashboard/selector-stats-chart-client';
 import { SetupGuide } from '@/components/setup-guide/setup-guide';
 import { ActivityAutoFocus } from '@/components/activity-feed/activity-auto-focus-client';
@@ -58,7 +60,7 @@ export default async function DashboardPage({
   const userId = session?.user?.id;
   const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
   // Fetch data filtered by selected repo — no global fallbacks
-  const [tests, areas, recentBuilds, selectorStats, trends, routeCoverage, githubAccount, baselines] = await Promise.all([
+  const [tests, areas, recentBuilds, selectorStats, trends, routeCoverage, githubAccount, baselines, quickstartGate] = await Promise.all([
     selectedRepo ? getTestsByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getFunctionalAreasByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo ? getBuildsByRepo(selectedRepo.id, 10) : Promise.resolve([]),
@@ -67,6 +69,7 @@ export default async function DashboardPage({
     selectedRepo ? getRouteCoverageStats(selectedRepo.id) : Promise.resolve({ total: 0, withTests: 0, percentage: 0 }),
     teamId ? getGithubAccountByTeam(teamId) : Promise.resolve(null),
     selectedRepo ? getBaselinesByRepo(selectedRepo.id) : Promise.resolve([]),
+    selectedRepo ? isQuickstartEnabled(selectedRepo.id) : Promise.resolve({ enabled: false, reason: undefined as undefined }),
   ]);
 
   const setupStatus = {
@@ -265,6 +268,15 @@ export default async function DashboardPage({
         {/* Auto Setup Agent */}
         {!(session?.team?.banAiMode) && (
           <PlayAgentTimeline repositoryId={selectedRepo?.id} />
+        )}
+
+        {/* QuickStart Agent (early-adopter, baseUrl required) */}
+        {!(session?.team?.banAiMode) && session?.team?.earlyAdopterMode && selectedRepo && (
+          <QuickstartPanel
+            repositoryId={selectedRepo.id}
+            enabled={quickstartGate.enabled}
+            reason={quickstartGate.enabled ? undefined : (quickstartGate.reason as 'no_team' | 'not_early_adopter' | 'no_base_url' | undefined)}
+          />
         )}
 
         {/* Selector Stats */}

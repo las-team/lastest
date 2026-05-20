@@ -101,12 +101,28 @@ export class LastestClient {
     repositoryId?: string;
     triggerType?: string;
     testIds?: string[];
+    functionalAreaId?: string;
     gitBranch?: string;
+    forceVideoRecording?: boolean;
   }): Promise<{ buildId: string; testRunId: string; testCount: number }> {
     return this.post('/api/v1/runs', {
       repositoryId: opts.repositoryId,
       testIds: opts.testIds,
+      functionalAreaId: opts.functionalAreaId,
+      forceVideoRecording: opts.forceVideoRecording,
     });
+  }
+
+  async revokeShare(shareId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/shares/${shareId}`);
+  }
+
+  async listBuildShares(buildId: string): Promise<unknown[]> {
+    return this.get(`/api/v1/builds/${buildId}/shares`);
+  }
+
+  async listTestShares(testId: string): Promise<unknown[]> {
+    return this.get(`/api/v1/tests/${testId}/shares`);
   }
 
   async getBuild(buildId: string, opts?: { full?: boolean }): Promise<unknown> {
@@ -164,8 +180,99 @@ export class LastestClient {
 
   // --- Tests (mutations) ---
 
-  async updateTest(testId: string, data: { name?: string; code?: string; targetUrl?: string; functionalAreaId?: string }): Promise<unknown> {
+  async updateTest(
+    testId: string,
+    data: {
+      name?: string;
+      code?: string;
+      targetUrl?: string;
+      functionalAreaId?: string;
+      quarantined?: boolean;
+      executionMode?: 'procedural' | 'agent';
+      viewportOverride?: { width: number; height: number } | null;
+      playwrightOverrides?: Record<string, unknown> | null;
+      diffOverrides?: Record<string, unknown> | null;
+      stabilizationOverrides?: Record<string, unknown> | null;
+      setupTestId?: string | null;
+      setupScriptId?: string | null;
+      setupOverrides?: {
+        skippedDefaultStepIds?: string[];
+        extraSteps?: Array<{
+          stepType: 'test' | 'script' | 'storage_state';
+          testId?: string | null;
+          scriptId?: string | null;
+          storageStateId?: string | null;
+        }>;
+      } | null;
+      teardownOverrides?: {
+        skippedDefaultStepIds?: string[];
+        extraSteps?: Array<{
+          stepType: 'test' | 'script' | 'storage_state';
+          testId?: string | null;
+          scriptId?: string | null;
+          storageStateId?: string | null;
+        }>;
+      } | null;
+    },
+  ): Promise<unknown> {
     return this.put(`/api/v1/tests/${testId}`, data);
+  }
+
+  // --- Playwright Settings (repo-level) ---
+
+  async getPlaywrightSettings(repoId: string): Promise<unknown> {
+    return this.get(`/api/v1/repos/${repoId}/playwright-settings`);
+  }
+
+  async updatePlaywrightSettings(repoId: string, data: Record<string, unknown>): Promise<unknown> {
+    return this.put(`/api/v1/repos/${repoId}/playwright-settings`, data);
+  }
+
+  // --- Storage States ---
+
+  async listStorageStates(repoId: string): Promise<unknown[]> {
+    return this.get(`/api/v1/repos/${repoId}/storage-states`);
+  }
+
+  async getStorageState(stateId: string, opts?: { includeJson?: boolean }): Promise<unknown> {
+    const qs = opts?.includeJson ? '?includeJson=true' : '';
+    return this.get(`/api/v1/storage-states/${stateId}${qs}`);
+  }
+
+  async createStorageState(repoId: string, data: { name: string; storageStateJson: string }): Promise<unknown> {
+    return this.post(`/api/v1/repos/${repoId}/storage-states`, data);
+  }
+
+  async deleteStorageState(stateId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/storage-states/${stateId}`);
+  }
+
+  // --- Setup Scripts ---
+
+  async listSetupScripts(repoId: string): Promise<unknown[]> {
+    return this.get(`/api/v1/repos/${repoId}/setup-scripts`);
+  }
+
+  async getSetupScript(scriptId: string): Promise<unknown> {
+    return this.get(`/api/v1/setup-scripts/${scriptId}`);
+  }
+
+  async createSetupScript(
+    repoId: string,
+    data: { name: string; type: 'playwright' | 'api'; code: string; description?: string },
+  ): Promise<unknown> {
+    return this.post(`/api/v1/repos/${repoId}/setup-scripts`, data);
+  }
+
+  async updateSetupScript(
+    scriptId: string,
+    data: { name?: string; type?: 'playwright' | 'api'; code?: string; description?: string | null },
+  ): Promise<unknown> {
+    return this.put(`/api/v1/setup-scripts/${scriptId}`, data);
+  }
+
+  async deleteSetupScript(scriptId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/setup-scripts/${scriptId}`);
   }
 
   async deleteTest(testId: string): Promise<{ success: boolean }> {
@@ -244,6 +351,41 @@ export class LastestClient {
 
   async healTest(testId: string): Promise<unknown> {
     return this.post(`/api/v1/tests/${testId}/heal`);
+  }
+
+  // --- QuickStart agent ---
+
+  async startQuickstart(
+    repoId: string,
+    opts?: { emailTemplate?: string },
+  ): Promise<{ sessionId: string }> {
+    return this.post(`/api/v1/repos/${repoId}/quickstart`, {
+      emailTemplate: opts?.emailTemplate,
+    });
+  }
+
+  async getQuickstartStatus(sessionId: string): Promise<{
+    id: string;
+    kind: 'quickstart';
+    status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+    currentStepId: string | null;
+    steps: Array<{
+      id: string;
+      status: string;
+      label: string;
+      description?: string;
+      error?: string;
+      result?: Record<string, unknown>;
+      startedAt?: string;
+      completedAt?: string;
+    }>;
+    metadata: Record<string, unknown>;
+  }> {
+    return this.get(`/api/v1/quickstart/${sessionId}`);
+  }
+
+  async cancelQuickstart(sessionId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/quickstart/${sessionId}`);
   }
 
   // --- Activity Reporting ---

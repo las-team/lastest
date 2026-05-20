@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, timestamp, jsonb, index, real, uniqueIndex, doublePrecision } from 'drizzle-orm/pg-core';
 
 // Type definitions for JSON columns
 
@@ -123,6 +123,16 @@ export interface DiffMetadata {
   ocrDurationMs?: number;
   domDiff?: DomDiffResult;
   textDiffSummary?: { added: number; removed: number; sameAsBaseline: boolean };
+  // Branch the baseline was sourced from when it differs from the build's
+  // branch. Set by `processVisualDiff` when the current-branch baseline lookup
+  // misses and we fall back to the repo's default branch. UI uses this to
+  // label the diff "baseline from <branch>" so users know they're not
+  // comparing apples-to-apples within-branch.
+  baselineSourceBranch?: string;
+  // When no baseline exists on either the current branch or the default
+  // branch, surface where the user DOES have an approved baseline so they
+  // know it's not lost. Empty when there's no approved baseline anywhere.
+  baselineExistsOn?: { branch: string; createdAt: string };
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -807,6 +817,13 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   consoleErrors?: string[] | null;
   networkRequests?: NetworkRequest[] | null;
   browser?: string | null;
+  // Per-step execution progress (joined from test_results). Used by the build
+  // detail page to render per-step pass/fail strips, including synthesizing
+  // "skipped/not run" rows for steps past `lastReachedStep`.
+  lastReachedStep?: number | null;
+  totalSteps?: number | null;
+  evaluationOutcome?: EvaluationOutcome | null;
+  softErrors?: string[] | null;
 };
 export type NewVisualDiff = typeof visualDiffs.$inferInsert;
 export type Baseline = typeof baselines.$inferSelect;
@@ -1339,6 +1356,10 @@ export const teams = pgTable('teams', {
   status: text('status').$type<TeamStatus>().notNull().default('active'),
   selectedRepositoryId: text('selected_repository_id'),
   earlyAdopterMode: boolean('early_adopter_mode').default(false),
+  /** QuickStart agent: email template for the demo user it registers.
+   *  Tokens: {slug} = kebab-case product name, {stamp} = UTC YYYYMMDDHHMM.
+   *  Default lands the verification mail in Viktor's inbox via plus-addressing. */
+  quickstartEmailTemplate: text('quickstart_email_template').default('viktor+{slug}{stamp}@lastest.cloud'),
   banAiMode: boolean('ban_ai_mode').default(false),
   gamificationEnabled: boolean('gamification_enabled').default(false),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
@@ -1347,6 +1368,15 @@ export const teams = pgTable('teams', {
   storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
   storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
   storageLastCalculatedAt: timestamp('storage_last_calculated_at'),
+  // Monthly test-run usage. usageMonth is a 'YYYY-MM' UTC stamp; counters reset
+  // atomically on first run of a new month (see recordTeamRunCompletion).
+  // Minutes are tracked for measurement only; only runsThisMonth is gated by
+  // monthlyRunQuota when ENFORCE_RUN_LIMITS=true.
+  monthlyRunQuota: integer('monthly_run_quota').default(500),
+  runsThisMonth: integer('runs_this_month').default(0),
+  runMinutesThisMonth: doublePrecision('run_minutes_this_month').default(0),
+  usageMonth: text('usage_month'), // 'YYYY-MM'
+  runUsageLastCalculatedAt: timestamp('run_usage_last_calculated_at'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1763,6 +1793,8 @@ export type NewComposeConfig = typeof composeConfigs.$inferInsert;
 
 export type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
+export type AgentSessionKind = 'play' | 'quickstart';
+
 export type AgentStepId =
   | 'settings_check'
   | 'select_repo'
@@ -1775,11 +1807,18 @@ export type AgentStepId =
   | 'fix_tests'
   | 'rerun_tests'
   | 'summary'
-  | 'heal';
+  | 'heal'
+  // QuickStart agent steps
+  | 'qs_preflight'
+  | 'qs_scout_public'
+  | 'qs_auth_setup'
+  | 'qs_scout_authed'
+  | 'qs_generate'
+  | 'qs_run_and_notes';
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
-export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer';
+export type PwAgentType = 'orchestrator' | 'planner' | 'scout' | 'diver' | 'generator' | 'healer' | 'quickstart';
 
 export interface AgentSubstep {
   label: string;
@@ -1838,6 +1877,40 @@ export interface AgentStepState {
   substeps?: AgentSubstep[];
 }
 
+export interface QuickstartAuthClassification {
+  /**
+   * Auth-flow classification. `unknown` is a distinct failure sentinel meaning
+   * "the scout could not determine the flow" (browser MCP failure, empty page,
+   * etc.) — never confuse with `no_public_register` which means "the scout
+   * confirmed there is no public sign-up".
+   */
+  classification: 'email_password' | 'magic_link_only' | 'oauth_only' | 'captcha_gated' | 'otp' | 'no_public_register' | 'unknown';
+  authAutomatable: boolean;
+}
+
+export interface QuickstartPublicScout extends QuickstartAuthClassification {
+  tagline?: string;
+  concept?: string;
+  navLinks: Array<{ path: string; label: string }>;
+  registerPath?: string | null;
+  cookieBannerSelectorHint?: string;
+  friction?: Array<{ kind: string; note: string }>;
+}
+
+export interface QuickstartAuthedScout {
+  inAppNavLinks: Array<{ path: string; label: string }>;
+  safeCtaCandidates: Array<{ label: string; selectorHint?: string }>;
+  observedRoutes: string[];
+  friction?: Array<{ kind: string; note: string }>;
+}
+
+export interface QuickstartAuthSetupMeta {
+  testId?: string;
+  storageStateId?: string;
+  captured: boolean;
+  failureReason?: string;
+}
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
   fixAttempts?: Record<string, number>;
@@ -1852,6 +1925,18 @@ export interface AgentSessionMetadata {
   manualMode?: boolean;
   skipGithub?: boolean;
   skipAI?: boolean;
+  // QuickStart-only fields
+  quickstartEmail?: string;
+  quickstartPassword?: string;
+  quickstartSlug?: string;
+  quickstartStamp?: string;
+  publicScout?: QuickstartPublicScout;
+  authedScout?: QuickstartAuthedScout;
+  authSetup?: QuickstartAuthSetupMeta;
+  walkthroughTestId?: string;
+  buildId?: string;
+  demoNotesId?: string;
+  disabledReason?: string;
   [key: string]: unknown;
 }
 
@@ -1859,6 +1944,7 @@ export const agentSessions = pgTable('agent_sessions', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id').references(() => repositories.id, { onDelete: 'cascade' }).notNull(),
   teamId: text('team_id'),
+  kind: text('kind').$type<AgentSessionKind>().notNull().default('play'),
   status: text('status').$type<AgentSessionStatus>().notNull().default('active'),
   currentStepId: text('current_step_id').$type<AgentStepId>(),
   steps: jsonb('steps').$type<AgentStepState[]>().notNull(),
@@ -1940,6 +2026,11 @@ export const runnerCommands = pgTable('runner_commands', {
   testId: text('test_id'), // Denormalized for dedup lookups
   testRunId: text('test_run_id'), // Denormalized for grouping
   createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  // Stamped when the server returns this command in a heartbeat response.
+  // The row stays at status='pending' until the runner POSTs `response:command_ack`,
+  // at which point status flips to 'claimed'. If no ack within REDISPATCH_TTL the
+  // next heartbeat re-delivers; EB-side `activeTestIds` dedup keeps it safe.
+  dispatchedAt: timestamp('dispatched_at'),
   claimedAt: timestamp('claimed_at'),
   completedAt: timestamp('completed_at'),
 }, (table) => ([
@@ -1952,7 +2043,17 @@ export type NewRunnerCommand = typeof runnerCommands.$inferInsert;
 
 export const runnerCommandResults = pgTable('runner_command_results', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-  commandId: text('command_id').notNull().references(() => runnerCommands.id),
+  // `command_id` is intentionally NOT an FK: the parent runner_commands row
+  // can be reaped (`reapIdleEBJobs`, `cleanupOldCommands`) before an EB
+  // finishes draining late `response:*` POSTs after Job termination. With a
+  // hard FK we got `runner_command_results_command_id_runner_commands_id_fk`
+  // violations on those late inserts, while the on-disk artifact (screenshot,
+  // network-bodies file, etc.) was already written. Keeping the column as a
+  // logical reference lets the insert succeed; cleanup still happens — orphan
+  // result rows are deleted by `reapIdleEBJobs` via `runnerId`, and
+  // `cleanupOldCommands` deletes by `commandId` while the parent still
+  // exists.
+  commandId: text('command_id').notNull(),
   runnerId: text('runner_id').notNull().references(() => runners.id),
   type: text('type').notNull(), // 'response:test_result', 'response:screenshot', 'response:error'
   payload: jsonb('payload').$type<Record<string, unknown>>(),
@@ -3043,3 +3144,42 @@ export const stepLayerFeedback = pgTable('step_layer_feedback', {
 
 export type StepLayerFeedback = typeof stepLayerFeedback.$inferSelect;
 export type NewStepLayerFeedback = typeof stepLayerFeedback.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Awards — "Prove your app is not AI slop" campaign
+// ---------------------------------------------------------------------------
+//
+// Per-repository tier + category badges. Tier ratchets upward and only
+// downgrades on a confirmed regression (user-rejected visual diff, or
+// non-flaky test failure across two consecutive builds). Flaky failures,
+// in-flight builds, and unresolved/open diffs do not downgrade.
+//
+// The badge SVG endpoint resolves a publicShares.slug -> repository -> award
+// row, so the embed URL stays stable while the underlying state stays live.
+
+export type AwardTier = 'none' | 'starter' | 'bronze' | 'silver' | 'gold';
+
+export interface AwardCategories {
+  a11y: boolean;
+  allPassing: boolean;
+  zeroDrift: boolean;
+}
+
+export const repoAwards = pgTable('repo_awards', {
+  id: text('id').primaryKey(),
+  repositoryId: text('repository_id').notNull().references(() => repositories.id, { onDelete: 'cascade' }).unique(),
+  currentTier: text('current_tier').$type<AwardTier>().notNull().default('none'),
+  highestTier: text('highest_tier').$type<AwardTier>().notNull().default('none'),
+  categories: jsonb('categories').$type<AwardCategories>().notNull(),
+  proofShareSlug: text('proof_share_slug'),
+  lastBuildId: text('last_build_id'),
+  earnedAt: timestamp('earned_at').$defaultFn(() => new Date()).notNull(),
+  lastRecomputedAt: timestamp('last_recomputed_at').$defaultFn(() => new Date()).notNull(),
+  lastDowngradeAt: timestamp('last_downgrade_at'),
+  lastDowngradeReason: text('last_downgrade_reason'),
+}, (table) => ([
+  index('idx_repo_awards_tier').on(table.currentTier),
+]));
+
+export type RepoAward = typeof repoAwards.$inferSelect;
+export type NewRepoAward = typeof repoAwards.$inferInsert;

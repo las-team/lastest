@@ -87,10 +87,21 @@ function isTabKey(value: string): value is SettingsTabKey {
 export function SettingsTabs({ tabs, defaultValue = 'general' }: SettingsTabsProps) {
   const router = useRouter();
   const visible = tabs.filter((t) => !t.hidden);
-  const [active, setActive] = useState<SettingsTabKey>(() => {
-    const initial = readInitialTab(defaultValue);
-    return visible.some((t) => t.value === initial) ? initial : (visible[0]?.value ?? defaultValue);
-  });
+  // Start with defaultValue on both server and client so SSR matches CSR.
+  // The URL-derived tab (?tab=, #hash, ?highlight=) is applied after mount.
+  const initialDefault: SettingsTabKey = visible.some((t) => t.value === defaultValue)
+    ? defaultValue
+    : (visible[0]?.value ?? defaultValue);
+  const [active, setActive] = useState<SettingsTabKey>(initialDefault);
+
+  // Pick up URL-derived tab after hydration to avoid SSR/CSR mismatch.
+  useEffect(() => {
+    const fromUrl = readInitialTab(initialDefault);
+    if (fromUrl !== active && visible.some((t) => t.value === fromUrl)) {
+      setActive(fromUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync the URL hash so the active tab survives reloads and is shareable.
   useEffect(() => {

@@ -22,6 +22,7 @@ const AGENT_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string; label:
   diver: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400', label: 'Diver' },
   generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400', label: 'Generator' },
   healer: { bg: 'bg-warning/15', text: 'text-warning', label: 'Healer' },
+  quickstart: { bg: 'bg-pink-500/15', text: 'text-pink-600 dark:text-pink-400', label: 'QuickStart' },
 };
 
 export function AgentBadge({ agent }: { agent: PwAgentType }) {

@@ -50,6 +50,17 @@ export interface VisualDiffLite {
   /** Line-count summary computed during the diff run; lets the Text tab
    *  render +/− deltas without re-fetching the text files. */
   textDiffSummary: { added: number; removed: number; sameAsBaseline: boolean } | null;
+  /** When the diff used a baseline from a different branch than the build's
+   *  (current branch had none → fell back to repo default), this is the
+   *  source branch. UI labels the comparison so the user knows it's a
+   *  cross-branch baseline. */
+  baselineSourceBranch: string | null;
+  /** When NO baseline existed on the current branch and no default-branch
+   *  fallback was available, points the user at where an approved baseline
+   *  does exist (or null when there is none anywhere). Prevents the
+   *  "baseline is gone" panic — the data hasn't been lost, it just hasn't
+   *  been promoted to this branch yet. */
+  baselineExistsOn: { branch: string; createdAt: string } | null;
 }
 
 export interface TestResultLite {
@@ -102,6 +113,10 @@ interface BoardFocusClientProps {
   repositoryId: string | null;
   branches: string[];
   defaultBranch: string | null;
+  /** Per-repo a11y score history (most recent N builds) used to render the
+   *  Recent-trend sparkline inside the focus view's A11y pane. Mirrors the
+   *  data shape consumed by `<A11yComplianceCard>` on the build detail page. */
+  a11yTrend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
 }
 
 type Mode = 'board' | 'focus';
@@ -180,14 +195,24 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
   const [issuePickerStepId, setIssuePickerStepId] = useState<string | null>(null);
 
-  // Live polling state — initialised from props, refreshed every 2s while
-  // the build is running. Once `completedAt` is set, polling stops.
+  // Live polling state — server passes empty initial arrays so the frame
+  // renders instantly; the first refreshFromServer on mount hydrates real
+  // data. Polling every 2s while the build is running; once `completedAt`
+  // is set, polling stops.
   const [stepComparisons, setStepComparisons] = useState<StepComparison[]>(props.stepComparisons);
   const [layerFeedback, setLayerFeedback] = useState<StepLayerFeedback[]>(props.layerFeedback);
   const [visualDiffs, setVisualDiffs] = useState<VisualDiffLite[]>(props.visualDiffs);
   const [testResults, setTestResults] = useState<TestResultLite[]>(props.testResults);
+  const [changeMap, setChangeMap] = useState<ChangeMap | null>(props.changeMap);
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
+  );
+  // Repo-level error-mode toggles, hydrated from verify-status on first poll.
+  // Default 'warn' matches the server-side default in the playwright settings
+  // schema, so the focus view shows the same "warn only" treatment until the
+  // first poll lands.
+  const [errorModes, setErrorModes] = useState<{ network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' }>(
+    { network: 'warn', console: 'warn' },
   );
   const [runningTests, setRunningTests] = useState<Array<{ testId: string; name: string }>>([]);
   const [liveCounts, setLiveCounts] = useState<{ totalTests: number; passed: number; failed: number }>({
@@ -195,6 +220,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     passed: props.build.passedCount ?? 0,
     failed: props.build.failedCount ?? 0,
   });
+  // Tracks whether the first cards-hydration pass has come back from the
+  // server. The frame still renders with `--` counters while we wait, but
+  // the column lists know to show a skeleton instead of "no cases".
+  const [cardsLoaded, setCardsLoaded] = useState(props.stepComparisons.length > 0);
 
   /** One-shot pull of the verify-status endpoint. Used by the polling
    *  interval and by post-mutation hooks (issue linked / created / closed)
@@ -215,20 +244,44 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         visualDiffs: VisualDiffLite[];
         testResults: TestResultLite[];
         runningTests: Array<{ testId: string; name: string }>;
+        changeMap: ChangeMap | null;
+        errorModes?: { network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' };
       };
       setStepComparisons(data.stepComparisons);
-      setLayerFeedback(data.layerFeedback);
+      // Merge-not-replace: keep any local `optimistic-*` rows whose step has
+      // no server row yet, so a poll that lands between an optimistic apply
+      // and the matching DB write doesn't snap the card back to its source
+      // column. Once any real row arrives for a step, we trust the server.
+      setLayerFeedback((prev) => {
+        const serverStepsWithRows = new Set(data.layerFeedback.map((f) => f.stepComparisonId));
+        const survivingOptimistic = prev.filter(
+          (f) => f.id.startsWith('optimistic-') && !serverStepsWithRows.has(f.stepComparisonId),
+        );
+        return [...data.layerFeedback, ...survivingOptimistic];
+      });
       setVisualDiffs(data.visualDiffs);
       setTestResults(data.testResults);
       setRunningTests(data.runningTests);
       setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
+      if (data.changeMap) setChangeMap(data.changeMap);
+      if (data.errorModes) setErrorModes(data.errorModes);
       if (data.completedAt && !completedAt) {
         setCompletedAt(data.completedAt);
       }
+      setCardsLoaded(true);
     } catch {
       /* best-effort */
     }
   }, [props.build.id, completedAt]);
+
+  // Initial hydration on mount — the server passes empty arrays so the page
+  // chrome renders instantly. This pull fills the cards.
+  useEffect(() => {
+    if (!cardsLoaded) {
+      refreshFromServer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Polling effect — only active while completedAt is null.
   useEffect(() => {
@@ -259,10 +312,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const testById = useMemo(() => new Map(props.tests.map((t) => [t.id, t])), [props.tests]);
   const areaById = useMemo(() => new Map(props.areas.map((a) => [a.id, a])), [props.areas]);
   const changedAreaIds = useMemo(
-    () => new Set(props.changeMap?.areas
+    () => new Set(changeMap?.areas
       .filter((a) => a.sources.includes('code') || a.sources.includes('manual'))
       .map((a) => a.areaId) ?? []),
-    [props.changeMap],
+    [changeMap],
   );
 
   // Coverage gaps: areas the Change Map flagged as risky-but-uncovered. The
@@ -281,12 +334,12 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   }, [stepComparisons, testById]);
 
   const coverageGaps = useMemo(() => {
-    if (!props.changeMap) return [];
-    return props.changeMap.areas.filter((a) =>
+    if (!changeMap) return [];
+    return changeMap.areas.filter((a) =>
       (a.sources.includes('code') || a.sources.includes('manual'))
       && !coveredAreaIds.has(a.areaId),
     );
-  }, [props.changeMap, coveredAreaIds]);
+  }, [changeMap, coveredAreaIds]);
 
   // Areas the reviewer has already dispatched coverArea for in this session —
   // suppresses the chip so repeated clicks don't create duplicate placeholders
@@ -379,7 +432,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
-        testFailed: result?.status === 'failed',
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
       });
       if (status !== 'unknown') n++;
     }
@@ -405,9 +458,20 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     });
   };
 
-  const decideAllForStep = (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => {
+  // Returns a promise that resolves once every per-layer decideLayer write
+  // for this step has hit the DB. The optimistic local row write is done
+  // SYNCHRONOUSLY before the promise is created so the card moves the moment
+  // the user lets go of the mouse. Callers should `await` the returned
+  // promise before triggering `refreshFromServer` — otherwise a poll that
+  // lands between the optimistic apply and the DB commit would replace the
+  // local rows with stale server data and snap the case back to its prior
+  // column. (This was the "drag, thing get undone, page no refresh" bug.)
+  const decideAllForStep = (
+    stepId: string,
+    status: 'approved' | 'rejected' | 'snoozed',
+  ): Promise<void> => {
     const step = stepComparisons.find((s) => s.id === stepId);
-    if (!step) return;
+    if (!step) return Promise.resolve();
     // Persist a decision for every evidence layer + every layer that already
     // has feedback in the DB. Without the second part, a stale `rejected`
     // row on a layer that wasn't in step.evidence would survive the override
@@ -424,8 +488,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     if (layerSet.size === 0) layerSet.add('visual');
     const layers: EvidenceLayer[] = Array.from(layerSet);
 
-    // 1) Optimistic local feedback so the card moves to the new column
-    //    INSTANTLY — no waiting on round-trips.
+    // Optimistic local feedback so the card moves to the new column INSTANTLY
+    // — no waiting on round-trips.
     const fakeStatus = status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'snoozed';
     const optimisticRows: StepLayerFeedback[] = layers.map((layer) => ({
       id: `optimistic-${stepId}-${layer}`,
@@ -444,23 +508,102 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // Strip ALL prior feedback for this step (real OR optimistic) so a stale
     // rejected row from an earlier decision can't leak through and pin the
     // case in `regression` (anyRejected wins in deriveCaseStatus). The whole-
-    // case action is meant to override per-layer decisions outright. The
-    // next poll returns the new authoritative status from the server.
+    // case action is meant to override per-layer decisions outright.
     setLayerFeedback((prev) => [
       ...prev.filter((f) => f.stepComparisonId !== stepId),
       ...optimisticRows,
     ]);
 
-    // 2) Persist in parallel — was sequential per layer (N roundtrips), now 1
-    //    wall-clock roundtrip total. The server is idempotent on this.
+    // Persist in parallel — N decideLayer writes, 1 wall-clock roundtrip.
+    // Returned to the caller so they can sequence refreshFromServer after
+    // the writes have committed.
+    return Promise.all(
+      layers.map((layer) =>
+        decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
+          .catch(() => null),
+      ),
+    ).then(() => undefined);
+  };
+
+  /** Bulk-action over every filtered case currently sitting in a given
+   *  column. The header-level "Mark all verified" button is gone in v1.15B —
+   *  columns expose their own actions instead so reviewers can sweep an
+   *  entire bucket (Verify all on Unsorted/Broken/Missed; Report all on
+   *  Broken/Missed) without dragging each card individually. */
+  const handleColumnAction = (
+    column: CaseStatus,
+    action: 'verify' | 'report',
+  ) => {
+    const fbByStep = new Map<string, StepLayerFeedback[]>();
+    for (const f of layerFeedback) {
+      if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
+      fbByStep.get(f.stepComparisonId)!.push(f);
+    }
+    const targets: string[] = [];
+    for (const step of filteredSteps) {
+      const test = testById.get(step.testId);
+      const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
+      const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
+      const derived = deriveCaseStatus({
+        step,
+        feedback: fbByStep.get(step.id) ?? [],
+        isInChangedArea,
+        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+      });
+      if (derived === column) targets.push(step.id);
+    }
+    if (targets.length === 0) {
+      toast.message('No cases in this column to act on');
+      return;
+    }
+
+    // "Verify all" always lands cases in the Verified column. "Report all"
+    // is only valid on Broken (→ regression bug) and Missed (→ improvement)
+    // — the underlying decideAllForStep keeps the case in its current
+    // column while confirmCase files the typed GH ticket.
+    let confirmKind: ConfirmKind | null = null;
+    if (action === 'verify') {
+      confirmKind = 'done';
+    } else if (column === 'regression') {
+      confirmKind = 'regression';
+    } else if (column === 'missed') {
+      confirmKind = 'improvement';
+    } else {
+      return;
+    }
+
+    const decision = action === 'verify'
+      ? 'approved'
+      : column === 'regression'
+        ? 'rejected'
+        : 'snoozed';
+
     startTransition(async () => {
-      await Promise.all(
-        layers.map((layer) =>
-          decideLayer({ stepComparisonId: stepId, buildId: props.build.id, layer, status })
-            .catch(() => null),
-        ),
+      // 1) Optimistic + per-layer writes for every target.
+      await Promise.all(targets.map((id) => decideAllForStep(id, decision)));
+
+      // 2) File / close GH tickets in parallel.
+      const results = await Promise.all(
+        targets.map((id) => confirmCase(id, confirmKind!).catch(() => null)),
       );
-      router.refresh();
+      const filed = results.filter((r) => r?.ticketChanged && r.issueUrl).length;
+      const closed = results.filter(
+        (r) => r?.ticketChanged && confirmKind === 'done',
+      ).length;
+
+      // 3) Settle the UI against the authoritative server state.
+      await refreshFromServer();
+
+      if (action === 'verify') {
+        toast.success(
+          `${targets.length} case${targets.length === 1 ? '' : 's'} verified`,
+          closed > 0 ? { description: `Closed ${closed} ticket${closed === 1 ? '' : 's'}` } : undefined,
+        );
+      } else if (filed > 0) {
+        toast.success(`Filed ${filed} ticket${filed === 1 ? '' : 's'}`);
+      } else {
+        toast.message(`${targets.length} case${targets.length === 1 ? '' : 's'} updated`);
+      }
     });
   };
 
@@ -509,17 +652,14 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // Dropping on Unsorted = clear all feedback for the step so its derived
     // status falls back to verdict-based classification. The user's drop
     // always wins over any prior decision: stripping local rows + writing
-    // snoozed on the layers (closest server-side "no-op") clears stale
-    // approvals/rejections that would otherwise persist.
+    // `pending` on the layers (deriveCaseStatus ignores pending rows
+    // entirely) clears stale approvals/rejections that would otherwise
+    // persist.
     if (target === 'unknown') {
       const layers = Array.from(new Set(
         layerFeedback.filter((f) => f.stepComparisonId === stepId).map((f) => f.layer),
       ));
       setLayerFeedback((prev) => prev.filter((f) => f.stepComparisonId !== stepId));
-      // Use the 'pending' status to wipe any prior decision: deriveCaseStatus
-      // ignores pending rows entirely, so the case falls back to its
-      // verdict-based natural classification — typically `unknown` for
-      // yellow-not-in-changed-area, `done` for green, etc.
       startTransition(async () => {
         await Promise.all(
           layers.map((layer) =>
@@ -535,31 +675,46 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // the step before writing the new decision, so it cleanly overrides.
     const decision = STATUS_TO_DECISION[target];
     if (!decision) return;
-    decideAllForStep(stepId, decision);
 
     // Verify phase (v1.14+) — also fire the typed-ticket confirmation. This
     // is the only path that creates GH issues from a column drop:
     //   - Verified  → close any linked issue
     //   - Broken    → file a `bugfix` issue
     //   - Missed    → file an `improvement` issue
-    // We run this after decideAllForStep so the optimistic UI move happens
-    // immediately; the toast surfaces ticket success/failure separately.
     const confirmKind = STATUS_TO_CONFIRM_KIND[target as Exclude<CaseStatus, 'unknown'>];
-    if (!confirmKind) return;
+
+    // CRITICAL — sequence everything in ONE transition so refreshFromServer
+    // never reads server state before the decideLayer writes have committed.
+    // Two parallel transitions caused the "card snaps back" bug: confirmCase
+    // would finish + call refreshFromServer, which replaced the optimistic
+    // rows with stale (pre-decideLayer) server data → card returned to its
+    // original column.
     startTransition(async () => {
-      const result = await confirmCase(stepId, confirmKind).catch(() => null);
-      if (!result?.ok) return;
-      if (result.ticketChanged && result.issueUrl) {
-        toast.success(
-          `Filed ${result.issueKind ?? 'verify'} ticket`,
-          { description: result.issueUrl, action: {
-            label: 'Open',
-            onClick: () => window.open(result.issueUrl!, '_blank'),
-          } },
-        );
-      } else if (result.ticketChanged && confirmKind === 'done') {
-        toast.success('Closed linked ticket');
+      // 1) Persist the per-layer decision. The optimistic UI move already
+      //    happened synchronously inside decideAllForStep before the await.
+      await decideAllForStep(stepId, decision);
+
+      // 2) File / close the linked issue, if applicable.
+      if (confirmKind) {
+        const result = await confirmCase(stepId, confirmKind).catch(() => null);
+        if (result?.ok) {
+          if (result.ticketChanged && result.issueUrl) {
+            toast.success(
+              `Filed ${result.issueKind ?? 'verify'} ticket`,
+              { description: result.issueUrl, action: {
+                label: 'Open',
+                onClick: () => window.open(result.issueUrl!, '_blank'),
+              } },
+            );
+          } else if (result.ticketChanged && confirmKind === 'done') {
+            toast.success('Closed linked ticket');
+          }
+        }
       }
+
+      // 3) Now and only now refresh from the server — every decideLayer +
+      //    confirmCase write is committed, so the merged poll won't pull
+      //    stale rows over our optimistic ones.
       await refreshFromServer();
     });
   };
@@ -603,7 +758,11 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             )}
           </div>
           <div className="label" style={{ marginTop: 2 }}>
-            Build #{props.build.id.slice(0, 8)} · {buildLabel} · {mode === 'board' ? `${verifiedCount} / ${totalCases} verified` : `${totalCases} cases`}
+            Build #{props.build.id.slice(0, 8)} · {buildLabel} · {!cardsLoaded
+              ? 'loading cases…'
+              : mode === 'board'
+                ? `${verifiedCount} / ${totalCases} verified`
+                : `${totalCases} cases`}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -689,8 +848,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           statusFilter={filters.statuses}
           isRunning={isRunning}
           runningTests={runningTests}
+          cardsLoaded={cardsLoaded}
           onOpenCase={handleOpenCase}
           onDropCase={handleDropCase}
+          onColumnAction={handleColumnAction}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
         />
       ) : (
@@ -703,6 +864,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           changedAreaIds={changedAreaIds}
           visualByStepKey={visualByStepKey}
           testResultById={testResultById}
+          errorModes={errorModes}
           statusFilter={filters.statuses}
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}
@@ -710,6 +872,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           onDecideLayer={decideOneLayer}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
           onRefresh={refreshFromServer}
+          buildA11y={{
+            score: props.build.a11yScore,
+            violationCount: props.build.a11yViolationCount,
+            criticalCount: props.build.a11yCriticalCount,
+            totalRulesChecked: props.build.a11yTotalRulesChecked,
+            trend: props.a11yTrend,
+          }}
         />
       )}
 

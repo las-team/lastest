@@ -31,6 +31,10 @@
  *   POST /api/v1/diffs/:id/reject - Reject single visual diff
  *   POST /api/v1/builds/:id/approve-all - Approve all diffs in a build
  *   POST /api/v1/builds/:id/share - Publish a public-share link for a build (optional `scopedTestId` in body)
+ *   GET  /api/v1/builds/:id/shares - List public shares anchored on a build
+ *   GET  /api/v1/tests/:id/shares - List public shares anchored on a test
+ *   GET  /api/v1/shares/:id - Get a single share by id
+ *   DELETE /api/v1/shares/:id - Revoke a public share
  *   POST /api/v1/repos - Create a local repository (optional baseUrl seeds env config)
  *   POST /api/v1/repos/:id/import - Import tests + functional areas (migration)
  *   POST /api/v1/functional-areas - Create functional area
@@ -38,8 +42,19 @@
  *   POST /api/v1/tests/create - Create test via AI
  *   POST /api/v1/tests/:id/heal - Heal a failing test via AI
  *   PUT  /api/v1/repos/:id - Update a repository (name/defaultBranch/selectedBranch/baseUrl)
- *   PUT  /api/v1/tests/:id - Update a test
+ *   GET  /api/v1/repos/:id/playwright-settings - Get repo-level Playwright settings (merged with defaults)
+ *   PUT  /api/v1/repos/:id/playwright-settings - Upsert repo-level Playwright settings (partial; whitelisted)
+ *   PUT  /api/v1/tests/:id - Update a test (name/code/targetUrl/functionalAreaId/quarantined/executionMode/viewportOverride/playwrightOverrides/diffOverrides/stabilizationOverrides + setupTestId/setupScriptId/setupOverrides/teardownOverrides)
  *   PUT  /api/v1/functional-areas/:id - Update a functional area
+ *   PUT  /api/v1/setup-scripts/:id - Update a setup script (name/type/code/description)
+ *   GET  /api/v1/repos/:id/storage-states - List storage states (metadata only)
+ *   POST /api/v1/repos/:id/storage-states - Create a storage state (Playwright storageState JSON)
+ *   GET  /api/v1/storage-states/:id - Get a storage state (metadata; pass `?includeJson=true` + bearer to fetch the cookie/origin blob)
+ *   DELETE /api/v1/storage-states/:id - Delete a storage state
+ *   GET  /api/v1/repos/:id/setup-scripts - List setup scripts
+ *   POST /api/v1/repos/:id/setup-scripts - Create a setup script
+ *   GET  /api/v1/setup-scripts/:id - Get a setup script
+ *   DELETE /api/v1/setup-scripts/:id - Delete a setup script (refuses if still wired into a test)
  *   DELETE /api/v1/tests/:id - Soft-delete a test
  *   DELETE /api/v1/functional-areas/:id - Soft-delete a functional area
  */
@@ -126,6 +141,224 @@ async function verifyDiffOwnership(diffId: string, session: { team?: { id: strin
   return verifyBuildOwnership(diff.buildId, session);
 }
 
+// Storage state list/get payload — strip storageStateJson, which contains
+// cookies and auth tokens. Callers that need the raw blob must pass
+// `?includeJson=true` AND be acting under a bearer token; we deliberately
+// gate the secret material so a stolen cookie session can't trivially
+// exfiltrate every session in the team.
+type StorageStateRow = Awaited<ReturnType<typeof queries.getStorageState>>;
+function slimStorageState(state: NonNullable<StorageStateRow>, includeJson = false) {
+  const { storageStateJson, ...rest } = state;
+  return includeJson ? { ...rest, storageStateJson } : rest;
+}
+
+// Verify a storage state belongs to the session's team (via its repository).
+// Team-wide rows (repositoryId === null) are refused for cross-tenant safety;
+// see requireStorageStateOwnership for the same reasoning.
+async function verifyStorageStateOwnership(stateId: string, session: { team?: { id: string } | null }) {
+  const state = await queries.getStorageState(stateId);
+  if (!state || !state.repositoryId) return { ok: false, state: null } as const;
+  if (!(await verifyRepoOwnership(state.repositoryId, session))) {
+    return { ok: false, state: null } as const;
+  }
+  return { ok: true, state } as const;
+}
+
+// Verify a public share belongs to the session's team. Shares carry both
+// `ownerTeamId` (the team that published the share) and `repositoryId` (the
+// underlying repo) — we trust the team binding directly and don't fall back
+// to repo→team so a deleted repo can still be revoked.
+async function verifyShareOwnership(shareId: string, session: { team?: { id: string } | null }) {
+  const share = await queries.getPublicShareById(shareId);
+  if (!share) return { ok: false, share: null } as const;
+  if (!session.team || share.ownerTeamId !== session.team.id) {
+    return { ok: false, share: null } as const;
+  }
+  return { ok: true, share } as const;
+}
+
+// Verify a setup script belongs to the session's team (via its repository).
+async function verifySetupScriptOwnership(scriptId: string, session: { team?: { id: string } | null }) {
+  const script = await queries.getSetupScript(scriptId);
+  if (!script || !script.repositoryId) return { ok: false, script: null } as const;
+  if (!(await verifyRepoOwnership(script.repositoryId, session))) {
+    return { ok: false, script: null } as const;
+  }
+  return { ok: true, script } as const;
+}
+
+// Validate + normalize a TestPlaywrightOverrides payload. The schema column
+// is `jsonb` so the DB will accept anything, but we don't want callers
+// stuffing arbitrary keys (or wrong-typed values that crash the runner).
+// Unknown keys are dropped silently — easier on agents — and bad types
+// return an error so misuse fails loudly rather than persisting junk.
+function normalizePlaywrightOverrides(raw: unknown): { ok: true; value: Record<string, unknown> | null } | { ok: false; error: string } {
+  if (raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'playwrightOverrides must be an object or null' };
+  }
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (r.browser !== undefined) {
+    if (r.browser !== 'chromium' && r.browser !== 'firefox' && r.browser !== 'webkit') {
+      return { ok: false, error: 'browser must be "chromium" | "firefox" | "webkit"' };
+    }
+    out.browser = r.browser;
+  }
+  for (const key of ['navigationTimeout', 'actionTimeout', 'screenshotDelay', 'maxParallelTests', 'cursorPlaybackSpeed', 'selectorTimeoutMs'] as const) {
+    if (r[key] === undefined) continue;
+    if (typeof r[key] !== 'number' || !Number.isFinite(r[key]) || (r[key] as number) < 0) {
+      return { ok: false, error: `${key} must be a non-negative number` };
+    }
+    out[key] = r[key];
+  }
+  for (const key of ['networkErrorMode', 'consoleErrorMode'] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== 'fail' && r[key] !== 'warn' && r[key] !== 'ignore') {
+      return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
+    }
+    out[key] = r[key];
+  }
+  if (r.acceptAnyCertificate !== undefined) {
+    if (typeof r.acceptAnyCertificate !== 'boolean') {
+      return { ok: false, error: 'acceptAnyCertificate must be boolean' };
+    }
+    out.acceptAnyCertificate = r.acceptAnyCertificate;
+  }
+  if (r.baseUrl !== undefined) {
+    if (typeof r.baseUrl !== 'string') {
+      return { ok: false, error: 'baseUrl must be a string' };
+    }
+    // Allow empty string to clear; otherwise validate URL shape.
+    if (r.baseUrl) {
+      try {
+        const u = new URL(r.baseUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+          return { ok: false, error: 'baseUrl must be http(s)' };
+        }
+      } catch {
+        return { ok: false, error: 'baseUrl must be a valid URL' };
+      }
+    }
+    out.baseUrl = r.baseUrl;
+  }
+  return { ok: true, value: Object.keys(out).length === 0 ? null : out };
+}
+
+// Validate + normalize a partial PlaywrightSettings payload (repository-level).
+// Only the runtime-relevant subset is accepted from the API — fields are
+// pre-validated so the agent can't insert garbage into the jsonb columns.
+// Unknown keys are dropped.
+function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: 'playwrightSettings must be an object' };
+  }
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  // Strings (enums)
+  if (r.browser !== undefined) {
+    if (r.browser !== 'chromium' && r.browser !== 'firefox' && r.browser !== 'webkit') {
+      return { ok: false, error: 'browser must be "chromium" | "firefox" | "webkit"' };
+    }
+    out.browser = r.browser;
+  }
+  if (r.headlessMode !== undefined) {
+    if (r.headlessMode !== 'true' && r.headlessMode !== 'false' && r.headlessMode !== 'shell') {
+      return { ok: false, error: 'headlessMode must be "true" | "false" | "shell"' };
+    }
+    out.headlessMode = r.headlessMode;
+  }
+  if (r.defaultRecordingEngine !== undefined) {
+    if (r.defaultRecordingEngine !== 'lastest' && r.defaultRecordingEngine !== 'playwright-inspector') {
+      return { ok: false, error: 'defaultRecordingEngine must be "lastest" | "playwright-inspector"' };
+    }
+    out.defaultRecordingEngine = r.defaultRecordingEngine;
+  }
+  for (const key of ['networkErrorMode', 'consoleErrorMode'] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== 'fail' && r[key] !== 'warn' && r[key] !== 'ignore') {
+      return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
+    }
+    out[key] = r[key];
+  }
+  if (r.customAttributeName !== undefined) {
+    if (r.customAttributeName !== null && typeof r.customAttributeName !== 'string') {
+      return { ok: false, error: 'customAttributeName must be a string or null' };
+    }
+    out.customAttributeName = r.customAttributeName;
+  }
+
+  // Numbers (non-negative)
+  for (const key of [
+    'viewportWidth', 'viewportHeight', 'navigationTimeout', 'actionTimeout', 'selectorTimeoutMs',
+    'cursorFPS', 'cursorPlaybackSpeed', 'screenshotDelay', 'maxParallelTests',
+    'maxParallelEBs', 'ebPoolMax', 'ebIdleTTLSeconds', 'autoRetryCount',
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (typeof r[key] !== 'number' || !Number.isFinite(r[key]) || (r[key] as number) < 0) {
+      return { ok: false, error: `${key} must be a non-negative number` };
+    }
+    out[key] = r[key];
+  }
+
+  // Booleans
+  for (const key of [
+    'lockViewportToRecording', 'pointerGestures', 'freezeAnimations', 'enableVideoRecording',
+    'acceptAnyCertificate', 'ignoreExternalNetworkErrors', 'grantClipboardAccess',
+    'acceptDownloads', 'enableNetworkInterception', 'enableDomDiff', 'enableA11y',
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (typeof r[key] !== 'boolean') {
+      return { ok: false, error: `${key} must be a boolean` };
+    }
+    out[key] = r[key];
+  }
+
+  // Arrays
+  if (r.browsers !== undefined) {
+    if (!Array.isArray(r.browsers) || r.browsers.some(b => b !== 'chromium' && b !== 'firefox' && b !== 'webkit')) {
+      return { ok: false, error: 'browsers must be an array of "chromium" | "firefox" | "webkit"' };
+    }
+    if (r.browsers.length === 0) {
+      return { ok: false, error: 'browsers must contain at least one browser' };
+    }
+    out.browsers = r.browsers;
+  }
+  if (r.enabledRecordingEngines !== undefined) {
+    if (!Array.isArray(r.enabledRecordingEngines) || r.enabledRecordingEngines.some(e => e !== 'lastest' && e !== 'playwright-inspector')) {
+      return { ok: false, error: 'enabledRecordingEngines must be an array of "lastest" | "playwright-inspector"' };
+    }
+    out.enabledRecordingEngines = r.enabledRecordingEngines;
+  }
+
+  // Pass-through jsonb (stabilization, selectorPriority) — accept as-is if
+  // shaped like an object/array. Deep validation lives in the settings UI.
+  if (r.stabilization !== undefined) {
+    if (r.stabilization !== null && (typeof r.stabilization !== 'object' || Array.isArray(r.stabilization))) {
+      return { ok: false, error: 'stabilization must be an object or null' };
+    }
+    out.stabilization = r.stabilization;
+  }
+  if (r.selectorPriority !== undefined) {
+    if (!Array.isArray(r.selectorPriority)) {
+      return { ok: false, error: 'selectorPriority must be an array' };
+    }
+    out.selectorPriority = r.selectorPriority;
+  }
+
+  if (Object.keys(out).length === 0) {
+    return { ok: false, error: 'No recognized fields to update' };
+  }
+  return { ok: true, value: out };
+}
+
+// Cap storageStateJson at 256 KB — Playwright storage state for a typical app
+// is a few KB; anything larger is almost certainly accidental misuse and we
+// don't want unbounded blobs landing in postgres.
+const MAX_STORAGE_STATE_JSON_BYTES = 256 * 1024;
+const MAX_SETUP_SCRIPT_CODE_BYTES = 128 * 1024;
+
 // GET handler
 export async function GET(
   request: NextRequest,
@@ -186,6 +419,21 @@ export async function GET(
         const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 10 : rawLimit, 1), 100);
         const builds = await queries.getBuildsByRepo(id, limit);
         return NextResponse.json(builds);
+      }
+
+      if (subResource === 'playwright-settings') {
+        const settings = await queries.getPlaywrightSettings(id);
+        return NextResponse.json(settings);
+      }
+
+      if (subResource === 'storage-states') {
+        const states = await queries.getStorageStates(id);
+        return NextResponse.json(states.map(s => slimStorageState(s)));
+      }
+
+      if (subResource === 'setup-scripts') {
+        const scripts = await queries.getSetupScripts(id);
+        return NextResponse.json(scripts);
       }
 
       if (subResource === 'coverage') {
@@ -274,8 +522,45 @@ export async function GET(
           return NextResponse.json({ error: 'Not found' }, { status: 404 });
         }
       }
+      if (subResource === 'shares') {
+        const shares = await queries.listPublicSharesForTest(id);
+        return NextResponse.json(shares);
+      }
       const [enriched] = await enrichTestsWithStatus([test]);
       return NextResponse.json(enriched);
+    }
+
+    // Public shares: GET /api/v1/shares/:id
+    if (resource === 'shares' && id) {
+      const { ok, share } = await verifyShareOwnership(id, session);
+      if (!ok || !share) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json(share);
+    }
+
+    // Storage states: GET /api/v1/storage-states/:id (?includeJson=true to
+    // get the cookie/origin blob — bearer-token only).
+    if (resource === 'storage-states' && id) {
+      const { ok, state } = await verifyStorageStateOwnership(id, session);
+      if (!ok || !state) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const wantJson = request.nextUrl.searchParams.get('includeJson') === 'true';
+      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      if (wantJson && !isBearer) {
+        return NextResponse.json({ error: 'includeJson requires bearer-token auth' }, { status: 403 });
+      }
+      return NextResponse.json(slimStorageState(state, wantJson));
+    }
+
+    // Setup scripts: GET /api/v1/setup-scripts/:id
+    if (resource === 'setup-scripts' && id) {
+      const { ok, script } = await verifySetupScriptOwnership(id, session);
+      if (!ok || !script) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json(script);
     }
 
     // Test runs
@@ -366,6 +651,15 @@ export async function GET(
         });
       }
 
+      // GET /api/v1/builds/:id/shares — list public shares anchored on this build
+      if (subResource === 'shares') {
+        if (!(await verifyBuildOwnership(id, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+        const shares = await queries.listPublicSharesForBuild(id);
+        return NextResponse.json(shares);
+      }
+
       // GET /api/v1/builds/:id/demo-notes — AI UI/UX summary from a demo run
       if (subResource === 'demo-notes') {
         if (!(await verifyBuildOwnership(id, session))) {
@@ -407,6 +701,54 @@ export async function GET(
       });
     }
 
+    // QuickStart agent session: GET /api/v1/quickstart/:sessionId
+    if (resource === 'quickstart' && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== 'quickstart') {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      return NextResponse.json({
+        id: sessionRow.id,
+        kind: sessionRow.kind,
+        repositoryId: sessionRow.repositoryId,
+        status: sessionRow.status,
+        currentStepId: sessionRow.currentStepId,
+        steps: sessionRow.steps.map((s) => ({
+          id: s.id,
+          status: s.status,
+          label: s.label,
+          description: s.description,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+          error: s.error,
+          result: s.result,
+        })),
+        metadata: {
+          quickstartEmail: sessionRow.metadata.quickstartEmail,
+          quickstartSlug: sessionRow.metadata.quickstartSlug,
+          publicScout: sessionRow.metadata.publicScout
+            ? {
+                classification: sessionRow.metadata.publicScout.classification,
+                authAutomatable: sessionRow.metadata.publicScout.authAutomatable,
+                tagline: sessionRow.metadata.publicScout.tagline,
+                concept: sessionRow.metadata.publicScout.concept,
+              }
+            : undefined,
+          authSetup: sessionRow.metadata.authSetup,
+          walkthroughTestId: sessionRow.metadata.walkthroughTestId,
+          buildId: sessionRow.metadata.buildId,
+          demoNotesId: sessionRow.metadata.demoNotesId,
+          disabledReason: sessionRow.metadata.disabledReason,
+        },
+        createdAt: sessionRow.createdAt,
+        updatedAt: sessionRow.updatedAt,
+        completedAt: sessionRow.completedAt,
+      });
+    }
+
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
@@ -433,6 +775,83 @@ export async function POST(
   const { resource, id, subResource } = parseSlug(slug);
 
   try {
+    // Create storage state: POST /api/v1/repos/:id/storage-states
+    // Body: { name, storageStateJson }
+    if (resource === 'repos' && id && subResource === 'storage-states') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json();
+      const { name, storageStateJson } = body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      if (!storageStateJson || typeof storageStateJson !== 'string') {
+        return NextResponse.json({ error: 'storageStateJson required' }, { status: 400 });
+      }
+      if (Buffer.byteLength(storageStateJson, 'utf8') > MAX_STORAGE_STATE_JSON_BYTES) {
+        return NextResponse.json({ error: `storageStateJson exceeds ${MAX_STORAGE_STATE_JSON_BYTES} bytes` }, { status: 413 });
+      }
+      let parsed: { cookies?: unknown; origins?: unknown };
+      try {
+        parsed = JSON.parse(storageStateJson);
+      } catch {
+        return NextResponse.json({ error: 'storageStateJson must be valid JSON' }, { status: 400 });
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return NextResponse.json({ error: 'storageStateJson must be a Playwright storageState object' }, { status: 400 });
+      }
+      if (parsed.cookies !== undefined && !Array.isArray(parsed.cookies)) {
+        return NextResponse.json({ error: 'storageStateJson.cookies must be an array' }, { status: 400 });
+      }
+      if (parsed.origins !== undefined && !Array.isArray(parsed.origins)) {
+        return NextResponse.json({ error: 'storageStateJson.origins must be an array' }, { status: 400 });
+      }
+      const created = await queries.createStorageState({
+        repositoryId: id,
+        name: name.trim(),
+        storageStateJson,
+      });
+      return NextResponse.json(slimStorageState(created), { status: 201 });
+    }
+
+    // Create setup script: POST /api/v1/repos/:id/setup-scripts
+    // Body: { name, type, code, description? }
+    if (resource === 'repos' && id && subResource === 'setup-scripts') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json();
+      const { name, type, code, description } = body;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      }
+      if (type !== 'playwright' && type !== 'api') {
+        return NextResponse.json({ error: 'type must be "playwright" or "api"' }, { status: 400 });
+      }
+      if (!code || typeof code !== 'string') {
+        return NextResponse.json({ error: 'code required' }, { status: 400 });
+      }
+      if (Buffer.byteLength(code, 'utf8') > MAX_SETUP_SCRIPT_CODE_BYTES) {
+        return NextResponse.json({ error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` }, { status: 413 });
+      }
+      if (type === 'api') {
+        const { validateApiScript } = await import('@/lib/setup/api-seeder');
+        const validation = validateApiScript(code);
+        if (!validation.valid) {
+          return NextResponse.json({ error: `Invalid API script: ${validation.error}` }, { status: 400 });
+        }
+      }
+      const created = await queries.createSetupScript({
+        repositoryId: id,
+        name: name.trim(),
+        type,
+        code,
+        description: typeof description === 'string' ? description : undefined,
+      });
+      return NextResponse.json(created, { status: 201 });
+    }
+
     // Create local repository: POST /api/v1/repos
     if (resource === 'repos' && !id) {
       if (!session.team) {
@@ -548,7 +967,7 @@ export async function POST(
         return NextResponse.json({ error: 'url required' }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { isCookieSession: !isBearer, sourceIp });
+        await validateTargetUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
@@ -630,8 +1049,8 @@ export async function POST(
       }
       try {
         await Promise.all([
-          validateTargetUrl(body.urlA, { isCookieSession: !isBearer, sourceIp }),
-          validateTargetUrl(body.urlB, { isCookieSession: !isBearer, sourceIp }),
+          validateTargetUrl(body.urlA, { sourceIp }),
+          validateTargetUrl(body.urlB, { sourceIp }),
         ]);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
@@ -645,7 +1064,6 @@ export async function POST(
         urlB: body.urlB,
         viewport: body.viewport,
         poolTier: isBearer ? 'build' : 'interactive',
-        isCookieSession: !isBearer,
         sourceIp,
         repositoryId: null,
       });
@@ -909,6 +1327,36 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // QuickStart agent: POST /api/v1/repos/:id/quickstart
+    // Body: { emailTemplate?: string }
+    if (resource === 'repos' && id && subResource === 'quickstart') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json().catch(() => ({}));
+      const emailTemplate = typeof body?.emailTemplate === 'string' ? body.emailTemplate : undefined;
+      try {
+        const { startQuickstart } = await import('@/server/actions/quickstart-agent');
+        const result = await startQuickstart(id, emailTemplate ? { emailTemplate } : undefined);
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        const e = err as Error & { code?: string; reason?: string };
+        if (e.code === 'quickstart_disabled') {
+          const { gateReasonHint } = await import('@/lib/quickstart/gating');
+          const reason = e.reason ?? 'no_repo';
+          return NextResponse.json(
+            {
+              error: 'quickstart_disabled',
+              reason,
+              hint: gateReasonHint(reason as Parameters<typeof gateReasonHint>[0]),
+            },
+            { status: 400 },
+          );
+        }
+        throw err;
+      }
+    }
+
     // Import tests + functional areas: POST /api/v1/repos/:id/import
     if (resource === 'repos' && id && subResource === 'import') {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -1070,9 +1518,25 @@ export async function PUT(
   }
 
   const { slug } = await params;
-  const { resource, id } = parseSlug(slug);
+  const { resource, id, subResource } = parseSlug(slug);
 
   try {
+    // Update repo playwright settings: PUT /api/v1/repos/:id/playwright-settings
+    // Body: partial PlaywrightSettings — only whitelisted fields are upserted.
+    if (resource === 'repos' && id && subResource === 'playwright-settings') {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json();
+      const norm = normalizePlaywrightSettingsPatch(body);
+      if (!norm.ok) {
+        return NextResponse.json({ error: norm.error }, { status: 400 });
+      }
+      await queries.upsertPlaywrightSettings(id, norm.value);
+      const settings = await queries.getPlaywrightSettings(id);
+      return NextResponse.json(settings);
+    }
+
     // Update repository: PUT /api/v1/repos/:id
     if (resource === 'repos' && id) {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -1131,6 +1595,58 @@ export async function PUT(
       return NextResponse.json(updated);
     }
 
+    // Update setup script: PUT /api/v1/setup-scripts/:id
+    if (resource === 'setup-scripts' && id) {
+      const { ok, script } = await verifySetupScriptOwnership(id, session);
+      if (!ok || !script) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const body = await request.json();
+      const updates: { name?: string; type?: 'playwright' | 'api'; code?: string; description?: string } = {};
+      if (body.name !== undefined) {
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 });
+        }
+        updates.name = body.name.trim();
+      }
+      if (body.type !== undefined) {
+        if (body.type !== 'playwright' && body.type !== 'api') {
+          return NextResponse.json({ error: 'type must be "playwright" or "api"' }, { status: 400 });
+        }
+        updates.type = body.type;
+      }
+      if (body.code !== undefined) {
+        if (typeof body.code !== 'string') {
+          return NextResponse.json({ error: 'code must be a string' }, { status: 400 });
+        }
+        if (Buffer.byteLength(body.code, 'utf8') > MAX_SETUP_SCRIPT_CODE_BYTES) {
+          return NextResponse.json({ error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` }, { status: 413 });
+        }
+        updates.code = body.code;
+      }
+      if (body.description !== undefined) {
+        if (body.description !== null && typeof body.description !== 'string') {
+          return NextResponse.json({ error: 'description must be a string or null' }, { status: 400 });
+        }
+        updates.description = body.description ?? undefined;
+      }
+      if (Object.keys(updates).length === 0) {
+        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+      }
+      const effectiveType = updates.type ?? script.type;
+      const effectiveCode = updates.code ?? script.code;
+      if (effectiveType === 'api' && updates.code !== undefined) {
+        const { validateApiScript } = await import('@/lib/setup/api-seeder');
+        const validation = validateApiScript(effectiveCode);
+        if (!validation.valid) {
+          return NextResponse.json({ error: `Invalid API script: ${validation.error}` }, { status: 400 });
+        }
+      }
+      await queries.updateSetupScript(id, updates);
+      const updated = await queries.getSetupScript(id);
+      return NextResponse.json(updated);
+    }
+
     // Update test: PUT /api/v1/tests/:id
     if (resource === 'tests' && id) {
       const test = await queries.getTest(id);
@@ -1150,6 +1666,149 @@ export async function PUT(
       if (body.code !== undefined) updates.code = body.code;
       if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
       if (body.functionalAreaId !== undefined) updates.functionalAreaId = body.functionalAreaId;
+      if (body.quarantined !== undefined) {
+        if (typeof body.quarantined !== 'boolean') {
+          return NextResponse.json({ error: 'quarantined must be a boolean' }, { status: 400 });
+        }
+        updates.quarantined = body.quarantined;
+      }
+      if (body.executionMode !== undefined) {
+        if (body.executionMode !== 'procedural' && body.executionMode !== 'agent') {
+          return NextResponse.json({ error: 'executionMode must be "procedural" | "agent"' }, { status: 400 });
+        }
+        updates.executionMode = body.executionMode;
+      }
+      if (body.viewportOverride !== undefined) {
+        if (body.viewportOverride === null) {
+          updates.viewportOverride = null;
+        } else {
+          const vp = body.viewportOverride;
+          if (typeof vp !== 'object' || Array.isArray(vp)
+            || typeof vp.width !== 'number' || typeof vp.height !== 'number'
+            || vp.width <= 0 || vp.height <= 0) {
+            return NextResponse.json({ error: 'viewportOverride must be { width, height } with positive numbers, or null' }, { status: 400 });
+          }
+          updates.viewportOverride = { width: Math.floor(vp.width), height: Math.floor(vp.height) };
+        }
+      }
+      if (body.playwrightOverrides !== undefined) {
+        const norm = normalizePlaywrightOverrides(body.playwrightOverrides);
+        if (!norm.ok) {
+          return NextResponse.json({ error: `playwrightOverrides: ${norm.error}` }, { status: 400 });
+        }
+        updates.playwrightOverrides = norm.value;
+      }
+      if (body.diffOverrides !== undefined) {
+        if (body.diffOverrides !== null && (typeof body.diffOverrides !== 'object' || Array.isArray(body.diffOverrides))) {
+          return NextResponse.json({ error: 'diffOverrides must be an object or null' }, { status: 400 });
+        }
+        updates.diffOverrides = body.diffOverrides;
+      }
+      if (body.stabilizationOverrides !== undefined) {
+        if (body.stabilizationOverrides !== null && (typeof body.stabilizationOverrides !== 'object' || Array.isArray(body.stabilizationOverrides))) {
+          return NextResponse.json({ error: 'stabilizationOverrides must be an object or null' }, { status: 400 });
+        }
+        updates.stabilizationOverrides = body.stabilizationOverrides;
+      }
+
+      // Setup wiring: accept setupTestId / setupScriptId / setupOverrides /
+      // teardownOverrides. setupTestId and setupScriptId are mutually exclusive
+      // — the DB precedence is "test > script", so we mirror that: if both are
+      // supplied (non-null) we reject. Each referenced ID must live in the
+      // same repo as the test being updated, otherwise a token holder could
+      // chain in setup from a different repo (still same team, but wrong
+      // wiring) or sniff for ID existence cross-tenant.
+      const setupTestIdProvided = Object.prototype.hasOwnProperty.call(body, 'setupTestId');
+      const setupScriptIdProvided = Object.prototype.hasOwnProperty.call(body, 'setupScriptId');
+      if (setupTestIdProvided || setupScriptIdProvided) {
+        const nextSetupTestId = setupTestIdProvided
+          ? (body.setupTestId === null || body.setupTestId === '' ? null : body.setupTestId)
+          : test.setupTestId ?? null;
+        const nextSetupScriptId = setupScriptIdProvided
+          ? (body.setupScriptId === null || body.setupScriptId === '' ? null : body.setupScriptId)
+          : test.setupScriptId ?? null;
+        if (nextSetupTestId && nextSetupScriptId) {
+          return NextResponse.json(
+            { error: 'setupTestId and setupScriptId are mutually exclusive' },
+            { status: 400 },
+          );
+        }
+        if (nextSetupTestId) {
+          if (nextSetupTestId === id) {
+            return NextResponse.json({ error: 'Test cannot reference itself as setup' }, { status: 400 });
+          }
+          const setupTest = await queries.getTest(nextSetupTestId);
+          if (!setupTest || setupTest.repositoryId !== test.repositoryId) {
+            return NextResponse.json({ error: 'Invalid setupTestId' }, { status: 400 });
+          }
+        }
+        if (nextSetupScriptId) {
+          const script = await queries.getSetupScript(nextSetupScriptId);
+          if (!script || script.repositoryId !== test.repositoryId) {
+            return NextResponse.json({ error: 'Invalid setupScriptId' }, { status: 400 });
+          }
+        }
+        if (setupTestIdProvided) updates.setupTestId = nextSetupTestId;
+        if (setupScriptIdProvided) updates.setupScriptId = nextSetupScriptId;
+      }
+
+      // setupOverrides / teardownOverrides — validate any step ids inside the
+      // extraSteps list against the same repo. We accept `null` to clear.
+      for (const key of ['setupOverrides', 'teardownOverrides'] as const) {
+        if (body[key] === undefined) continue;
+        if (body[key] === null) {
+          updates[key] = null;
+          continue;
+        }
+        const v = body[key];
+        if (typeof v !== 'object' || Array.isArray(v)) {
+          return NextResponse.json({ error: `${key} must be an object or null` }, { status: 400 });
+        }
+        const skipped = Array.isArray(v.skippedDefaultStepIds) ? v.skippedDefaultStepIds : [];
+        const extras = Array.isArray(v.extraSteps) ? v.extraSteps : [];
+        const normalizedExtras: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }> = [];
+        for (const step of extras) {
+          if (!step || typeof step !== 'object') {
+            return NextResponse.json({ error: `${key}.extraSteps entries must be objects` }, { status: 400 });
+          }
+          const stepType = step.stepType;
+          if (stepType !== 'test' && stepType !== 'script' && stepType !== 'storage_state') {
+            return NextResponse.json({ error: `${key}.extraSteps stepType must be 'test' | 'script' | 'storage_state'` }, { status: 400 });
+          }
+          if (stepType === 'test') {
+            if (!step.testId || typeof step.testId !== 'string') {
+              return NextResponse.json({ error: `${key} test step requires testId` }, { status: 400 });
+            }
+            const refTest = await queries.getTest(step.testId);
+            if (!refTest || refTest.repositoryId !== test.repositoryId) {
+              return NextResponse.json({ error: `${key} testId ${step.testId} not in this repo` }, { status: 400 });
+            }
+            normalizedExtras.push({ stepType, testId: step.testId, scriptId: null, storageStateId: null });
+          } else if (stepType === 'script') {
+            if (!step.scriptId || typeof step.scriptId !== 'string') {
+              return NextResponse.json({ error: `${key} script step requires scriptId` }, { status: 400 });
+            }
+            const refScript = await queries.getSetupScript(step.scriptId);
+            if (!refScript || refScript.repositoryId !== test.repositoryId) {
+              return NextResponse.json({ error: `${key} scriptId ${step.scriptId} not in this repo` }, { status: 400 });
+            }
+            normalizedExtras.push({ stepType, testId: null, scriptId: step.scriptId, storageStateId: null });
+          } else {
+            if (!step.storageStateId || typeof step.storageStateId !== 'string') {
+              return NextResponse.json({ error: `${key} storage_state step requires storageStateId` }, { status: 400 });
+            }
+            const refState = await queries.getStorageState(step.storageStateId);
+            if (!refState || refState.repositoryId !== test.repositoryId) {
+              return NextResponse.json({ error: `${key} storageStateId ${step.storageStateId} not in this repo` }, { status: 400 });
+            }
+            normalizedExtras.push({ stepType, testId: null, scriptId: null, storageStateId: step.storageStateId });
+          }
+        }
+        updates[key] = {
+          skippedDefaultStepIds: skipped.filter((s: unknown): s is string => typeof s === 'string'),
+          extraSteps: normalizedExtras,
+        };
+      }
 
       if (Object.keys(updates).length === 0) {
         return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
@@ -1206,6 +1865,60 @@ export async function DELETE(
   const { resource, id } = parseSlug(slug);
 
   try {
+    // Revoke public share: DELETE /api/v1/shares/:id
+    if (resource === 'shares' && id) {
+      const { ok } = await verifyShareOwnership(id, session);
+      if (!ok) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      await queries.revokePublicShareById(id);
+      return NextResponse.json({ success: true });
+    }
+
+    // Cancel QuickStart agent session: DELETE /api/v1/quickstart/:sessionId
+    if (resource === 'quickstart' && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== 'quickstart') {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { cancelQuickstart } = await import('@/server/actions/quickstart-agent');
+      const result = await cancelQuickstart(id);
+      return NextResponse.json(result);
+    }
+
+    // Delete storage state: DELETE /api/v1/storage-states/:id
+    if (resource === 'storage-states' && id) {
+      const { ok } = await verifyStorageStateOwnership(id, session);
+      if (!ok) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      await queries.deleteStorageState(id);
+      return NextResponse.json({ success: true });
+    }
+
+    // Delete setup script: DELETE /api/v1/setup-scripts/:id
+    if (resource === 'setup-scripts' && id) {
+      const { ok } = await verifySetupScriptOwnership(id, session);
+      if (!ok) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      // Refuse delete if the script is still wired into a test as setup —
+      // mirrors the server-action guard so we don't orphan setupScriptId
+      // references in the tests table.
+      const inUse = await queries.getTestsUsingSetupScript(id);
+      if (inUse.length > 0) {
+        return NextResponse.json(
+          { error: `Cannot delete: script is used by ${inUse.length} test(s)`, tests: inUse.map(t => ({ id: t.id, name: t.name })) },
+          { status: 409 },
+        );
+      }
+      await queries.deleteSetupScript(id);
+      return NextResponse.json({ success: true });
+    }
+
     // Soft-delete functional area: DELETE /api/v1/functional-areas/:id
     if (resource === 'functional-areas' && id) {
       const area = await queries.getFunctionalArea(id);

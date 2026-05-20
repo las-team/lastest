@@ -140,6 +140,10 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
 // string works — we use one that won't collide with real screenshot labels.
 export const ALL_STEPS_EXECUTED_LABEL = '@all-steps-executed';
 
+// Sentinel stepLabel for assertion rules. Must match `ASSERTION_STEP_LABEL`
+// in src/components/tests/step-criteria-tab.tsx.
+export const ASSERTION_STEP_LABEL = '__assertions__';
+
 // Synthesize StepCriteria entries from a test's TestVariables so that the
 // evaluation engine has a single rule path. Vars with assertEnabled are
 // turned into a 'variable_equals' rule under the special @eotest stepLabel.
@@ -208,6 +212,25 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
     criteria.push({
       stepLabel: ALL_STEPS_EXECUTED_LABEL,
       rules: [{ kind: 'all_steps_executed', severity: 'fail' }],
+    });
+  }
+
+  // Default-ON synthesis for the global `assertion_failed` rule (no
+  // assertionId): any failed assertion fails the test, unless the user has
+  // persisted their own global entry (severity:'warn' = opt out, 'fail' =
+  // explicit opt-in). Per-assertion entries (with assertionId) are orthogonal
+  // and don't count as "the user configured the global behavior".
+  const hasExplicitGlobalAssertion = criteria.some(c =>
+    c.rules.some(r => {
+      if (r.kind !== 'assertion_failed') return false;
+      const id = (r.params as { assertionId?: string } | undefined)?.assertionId;
+      return !id;
+    }),
+  );
+  if (!hasExplicitGlobalAssertion) {
+    criteria.push({
+      stepLabel: ASSERTION_STEP_LABEL,
+      rules: [{ kind: 'assertion_failed', severity: 'fail' }],
     });
   }
 

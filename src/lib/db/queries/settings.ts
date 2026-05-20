@@ -206,16 +206,8 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
     if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
   }
 
-  // Only return global config when explicitly asked (no repositoryId)
-  if (!repositoryId) {
-    const [globalConfig] = await db
-      .select()
-      .from(environmentConfigs)
-      .where(isNull(environmentConfigs.repositoryId));
-    if (globalConfig) return { ...globalConfig, baseUrl: globalConfig.baseUrl.replace(/\/+$/, '') };
-  }
-
-  // Return default config object (not saved)
+  // Synthetic default when no repository row exists. The team-level
+  // (repositoryId IS NULL) row has no UI writer and is intentionally ignored.
   return {
     id: 'default',
     repositoryId: repositoryId ?? null,
@@ -246,21 +238,17 @@ export async function updateEnvironmentConfig(id: string, data: Partial<NewEnvir
   await db.update(environmentConfigs).set({ ...data, updatedAt: new Date() }).where(eq(environmentConfigs.id, id));
 }
 
-export async function upsertEnvironmentConfig(repositoryId: string | null, data: Partial<NewEnvironmentConfig>) {
-  const whereClause = repositoryId
-    ? eq(environmentConfigs.repositoryId, repositoryId)
-    : isNull(environmentConfigs.repositoryId);
-
+export async function upsertEnvironmentConfig(repositoryId: string, data: Partial<NewEnvironmentConfig>) {
   const [existing] = await db
     .select()
     .from(environmentConfigs)
-    .where(whereClause);
+    .where(eq(environmentConfigs.repositoryId, repositoryId));
 
   if (existing) {
     await updateEnvironmentConfig(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createEnvironmentConfig({ ...data, repositoryId: repositoryId ?? undefined });
+    return createEnvironmentConfig({ ...data, repositoryId });
   }
 }
 

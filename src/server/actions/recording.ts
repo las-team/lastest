@@ -28,7 +28,7 @@ export async function startRecording(
   setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
   _storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
-  await requireCapability('recording:write');
+  const session = await requireCapability('recording:write');
   // Validate URL format
   try {
     new URL(url);
@@ -40,14 +40,23 @@ export async function startRecording(
   const settings = await getPlaywrightSettings(repositoryId);
   const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
 
+  // Tag every claim attempt with team+user+repo so a user-reported "disconnected"
+  // can be traced to a specific runner (or to "no EB available") without
+  // grepping a sea of anonymous `[Pool] Claimed EB ...` lines.
+  const traceTag = `team=${session.team.id} user=${session.user.id} repo=${repositoryId ?? 'none'}`;
+
   // Resolve 'auto' to a pool-managed system EB (atomic claim, with on-demand
   // provisioning when EB_PROVISIONER=kubernetes and no idle EB is available).
   if (runnerId === 'auto') {
     const poolEB = await claimOrProvisionPoolEB();
     if (!poolEB) {
+      console.warn(`[Recording] No EB available (claimOrProvisionPoolEB → null) ${traceTag} url=${url}`);
       return { error: 'All browsers are busy. Please try again later.' };
     }
+    console.log(`[Recording] EB claimed runner=${poolEB.runnerId.slice(0, 8)} ${traceTag} url=${url}`);
     runnerId = poolEB.runnerId;
+  } else {
+    console.log(`[Recording] Recording on explicit runner=${runnerId?.slice(0, 8) ?? 'none'} ${traceTag} url=${url}`);
   }
 
   // Require a runner or EB — local recording is not supported
@@ -480,12 +489,13 @@ export async function saveRecordedTest(data: {
     }
   }
 
-  // Update environment config baseUrl from the recording target URL
-  if (data.targetUrl) {
+  // Update environment config baseUrl from the recording target URL.
+  // Skip when there's no repo: env config is repository-scoped only.
+  if (data.targetUrl && data.repositoryId) {
     try {
       const origin = new URL(data.targetUrl).origin;
       const { upsertEnvironmentConfig } = await import('@/lib/db/queries');
-      await upsertEnvironmentConfig(data.repositoryId ?? null, { baseUrl: origin });
+      await upsertEnvironmentConfig(data.repositoryId, { baseUrl: origin });
     } catch {
       // Invalid URL — skip baseUrl update
     }

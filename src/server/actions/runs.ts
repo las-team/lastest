@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { executeTests } from '@/lib/execution/executor';
-import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
+import { resolveBuildSetup } from '@/lib/setup/resolve-build-setup';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import { requireRunOwnership, requireBackgroundJobOwnership } from '@/lib/auth/ownership';
 import { getBranchInfo } from '@/lib/github/content';
@@ -149,33 +149,24 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
-  // Initialize setup context and pre-load storage states from default setup
-  // steps (mirrors runBuildAsync in builds.ts — without this, tests whose
-  // setup is a pre-captured `storage_state` step start unauthenticated).
+  // Single-pass resolution: storage_state pre-load + per-test setup fallback.
+  // Without the storage_state pre-load, tests whose setup is a pre-captured
+  // `storage_state` step start unauthenticated. Mirrors runBuildAsync.
   const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const { setupInfo, setupContext: resolvedContext } = await resolveBuildSetup({
+    tests,
+    repositoryId: repositoryId ?? null,
+    build: null,
+    logTag: '[test-run]',
+  });
   const setupContext: SetupContext = {
     baseUrl,
-    variables: {},
+    variables: resolvedContext.variables,
+    storageState: resolvedContext.storageState,
     repositoryId: repositoryId || null,
   };
-  if (repositoryId) {
-    const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
-    for (const step of defaultSteps) {
-      if (step.stepType === 'storage_state' && step.storageStateId) {
-        const ss = await queries.getStorageState(step.storageStateId);
-        if (ss) {
-          setupContext.storageState = ss.storageStateJson;
-          console.log(`[test-run] Pre-loaded storage state "${ss.name}" for setup context`);
-          break;
-        }
-      }
-    }
-  }
 
   try {
-    // Resolve setup code to run on the runner
-    const setupInfo = await resolveSetupCodeForRunner(tests);
-
     const results = await executeTests(tests, runId, {
       repositoryId,
       teamId,
@@ -258,12 +249,18 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     await failJob(activeJobId, error instanceof Error ? error.message : 'Test run failed');
   }
 
-  // Recalculate team storage usage after run completes
+  // Recalculate team storage usage + record monthly run counters after the run completes.
   if (repositoryId) {
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
+      const teamIdForUsage = repoForStorage.teamId;
       const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
-      recalculateTeamStorage(repoForStorage.teamId).catch(() => {});
+      recalculateTeamStorage(teamIdForUsage).catch(() => {});
+      const completedRun = await queries.getTestRun(runId).catch(() => null);
+      const startedAt = completedRun?.startedAt ? new Date(completedRun.startedAt).getTime() : null;
+      const completedAt = completedRun?.completedAt ? new Date(completedRun.completedAt).getTime() : Date.now();
+      const durationMs = startedAt ? Math.max(0, completedAt - startedAt) : 0;
+      queries.recordTeamRunCompletion(teamIdForUsage, durationMs).catch(() => {});
     }
   }
 

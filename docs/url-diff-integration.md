@@ -80,7 +80,7 @@ Bypass options (configured server-side in the deployed Lastest pod):
 | `URL_DIFF_ALLOW_PRIVATE_HOSTS=true` | Disables the block entirely. Use only for fully-internal deployments. |
 | `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST=<cidr,...>` | Source IPs in this list can target private hosts. |
 
-Cookie-session (in-app) users always bypass. Bearer requests do not.
+Bypass is bound to environment, not auth type — set `URL_DIFF_ALLOW_PRIVATE_HOSTS=true` (alias: `LASTEST_ALLOW_PRIVATE_OUTBOUND`) or `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST=<cidr,...>` (alias: `LASTEST_OUTBOUND_PRIVATE_HOST_IP_ALLOWLIST`). Cookie-session and bearer requests are treated identically.
 
 Failure shape:
 

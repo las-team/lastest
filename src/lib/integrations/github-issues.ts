@@ -197,6 +197,15 @@ export async function createVisualDiffIssue(
 
     if (!response.ok) {
       const text = await response.text();
+      // 410 = Issues feature disabled on the repo. Translate to a one-line
+      // actionable hint so the toast on the diff page tells the reviewer what
+      // to do instead of dumping the raw JSON.
+      if (response.status === 410) {
+        return {
+          success: false,
+          error: `Issues are disabled on ${owner}/${repo}. Enable Issues in GitHub repo settings (Settings → Features → check "Issues"), or pick a different repo in Lastest Settings → Integrations → GitHub.`,
+        };
+      }
       return { success: false, error: `GitHub API error: ${response.status} ${text}` };
     }
 
@@ -237,6 +246,12 @@ export async function createGitHubIssue(
 
     if (!response.ok) {
       const text = await response.text();
+      if (response.status === 410) {
+        return {
+          success: false,
+          error: `Issues are disabled on ${owner}/${repo}. Enable Issues in GitHub repo settings (Settings → Features → check "Issues"), or pick a different repo in Lastest Settings → Integrations → GitHub.`,
+        };
+      }
       return { success: false, error: `GitHub API error: ${response.status} ${text}` };
     }
 

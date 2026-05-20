@@ -34,6 +34,7 @@ import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-se
 import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
 import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
 import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
+import { QuickstartEmailTemplateInput } from '@/components/settings/quickstart-email-template-input';
 import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
 import { GamificationToggle } from '@/components/settings/gamification-toggle';
 import { VerifyPhaseToggle } from '@/components/settings/verify-phase-toggle';
@@ -47,6 +48,7 @@ import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
 import { TestMigrationCard } from '@/components/settings/test-migration-card';
 import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
 import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
+import { RunUsageCard } from '@/components/settings/run-usage-card-client';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { DeleteRepoDialog } from '@/components/settings/delete-repo-dialog';
 
@@ -104,7 +106,9 @@ export default async function SettingsPage({
     : [null, null];
 
   const storageUsage = teamId ? await queries.getTeamStorageUsage(teamId) : null;
+  const runUsage = teamId ? await queries.getTeamRunUsage(teamId) : null;
   const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === 'true';
+  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === 'true';
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
@@ -161,6 +165,11 @@ export default async function SettingsPage({
         </CardHeader>
         <CardContent className="space-y-4">
           <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
+          {earlyAdopterMode && (
+            <QuickstartEmailTemplateInput
+              initial={session?.team?.quickstartEmailTemplate ?? 'viktor+{slug}{stamp}@lastest.cloud'}
+            />
+          )}
           <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
           <VerifyPhaseToggle enabled={session?.team?.verifyPhaseEnabled ?? false} />
         </CardContent>
@@ -470,6 +479,20 @@ export default async function SettingsPage({
             lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
             isAdmin={isAdmin}
             enforcementEnabled={enforcementEnabled}
+          />
+        </div>
+      )}
+
+      {/* Monthly Run Usage — visible to all team members */}
+      {runUsage && (
+        <div id="run-usage">
+          <RunUsageCard
+            runsThisMonth={runUsage.runsThisMonth}
+            monthlyRunQuota={runUsage.monthlyRunQuota}
+            runMinutesThisMonth={runUsage.runMinutesThisMonth}
+            usageMonth={runUsage.usageMonth ?? ''}
+            lastCalculatedAt={runUsage.runUsageLastCalculatedAt?.toISOString() ?? null}
+            enforcementEnabled={runEnforcementEnabled}
           />
         </div>
       )}

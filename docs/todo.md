@@ -4,10 +4,8 @@ Videos explaining use
     record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
-Build a skill to find startupideas and test them, provide testing feedback
-Welcome email, follow-up
+**Welcome email, follow-up**
 https://www.chromatic.com/start comp test?
-Legal stuff for Mark
 ## test
 VS Code extension
 Teardown
@@ -16,18 +14,23 @@ Create modes
 Openrouter agent sdk parity
 demo-mode
   without link?
+## security
 ## bugs
+Share
+  Video scrollahead
+Site
+  URL diffing
 Verify
-  if the screenshot is tall, its not scrollable on focus screen
-  warn for network/console errors is ignored
+VScode
+  repos show up multiple times
+  more disconnects in new version than previous
 ## features
-Prove your app is not AI slop - Lastest badge
-Auto-feedback to resolve loop
 Google verification for gsheets
 **Self-test**
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas
+Auto-feedback to resolve loop
 check tabs and enters and ctr+enters
 Heal on loop/schedule
 Migrate to gh app /home/ewyct/.claude/plans/cheeky-sparking-torvalds.md
@@ -64,3 +67,10 @@ SecurePass123
 --------
 
 
+L
+@lisalacythompsonaca
+May 15, 2026
+@wyctor wow that's pretty cool, thanks! Definitely a helpful tool for us vibe coders who kinda just cross our fingers and hope for the best 🫣 Are you launching on PeerPush? Once I get a chance to implement I'm happy to review!
+
++1 PeerPush earned
+1

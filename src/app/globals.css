@@ -235,18 +235,25 @@
   animation: shimmer 1.5s infinite;
 }
 
-/* Settings highlight pulse from onboarding navigation */
+/* Settings highlight pulse from onboarding / deep-link navigation.
+   Targets are usually plain wrapper <div>s without a border (e.g. the
+   div#playwright in settings/page.tsx), so we rely on outline + box-shadow
+   rather than `border-color` for the visible ring. The pulse is large enough
+   to read on a Card-sized child without overflowing into adjacent rows. */
 @keyframes settings-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 var(--c-amber);
+    box-shadow: 0 0 0 0 rgba(224, 152, 54, 0.55), 0 0 0 0 rgba(224, 152, 54, 0);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(224, 152, 54, 0.4);
+    box-shadow: 0 0 0 6px rgba(224, 152, 54, 0.35), 0 0 18px 4px rgba(224, 152, 54, 0.25);
   }
 }
 
 .settings-highlight {
   animation: settings-pulse 1s ease-in-out 3;
+  outline: 2px solid var(--c-amber);
+  outline-offset: 2px;
+  border-radius: 0.75rem;
   border-color: var(--c-amber) !important;
   scroll-margin-top: 2rem;
 }

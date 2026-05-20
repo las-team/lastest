@@ -23,10 +23,12 @@ interface DeriveInput {
   feedback: StepLayerFeedback[];
   /** True when the step's test belongs to a code-changed or manually-scoped area. */
   isInChangedArea: boolean;
-  /** True when the underlying test_result.status is 'failed' (runner threw —
-   *  timeout, assertion error, navigation failure, etc.). The diff scorer
-   *  doesn't know about this, so a failed test with no captured layer
-   *  evidence would otherwise score as green = done. */
+  /** True when the underlying test_result.status indicates a runner-side
+   *  failure ('failed' or 'setup_failed' — timeout, assertion error, nav
+   *  failure, setup script crash, etc.). The diff scorer doesn't know about
+   *  this, so a failed test with no captured layer evidence would otherwise
+   *  score as green = done. Hard failures dominate any verdict and force the
+   *  case into Broken until every evidence layer is explicitly approved. */
   testFailed?: boolean;
 }
 
@@ -61,9 +63,19 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   if (fullySnoozed) return 'missed';
 
   // Hard test failures dominate any layer-evidence verdict — they only count
-  // as resolved if every evidence layer is explicitly approved.
+  // as resolved if every evidence layer is explicitly approved by a reviewer.
+  // System auto-approval (the zero-diff shortcut at build completion) doesn't
+  // count here: a failed test with verdict='green' + empty evidence shares
+  // the shape of a clean pass, and we never want a hard runner failure to
+  // slip into Verified without a human signing off.
   if (testFailed) {
-    return fullyApproved ? 'done' : 'regression';
+    const explicitApprovedLayers = new Set(
+      feedback.filter((f) => f.status === 'approved').map((f) => f.layer),
+    );
+    const explicitFullyApproved = evidenceLayers.length > 0
+      ? evidenceLayers.every((l) => explicitApprovedLayers.has(l))
+      : explicitApprovedLayers.size > 0;
+    return explicitFullyApproved ? 'done' : 'regression';
   }
 
   if (step.verdict === 'red') {

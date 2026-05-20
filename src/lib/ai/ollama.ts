@@ -1,4 +1,5 @@
 import type { AIProvider, GenerateOptions, StreamCallbacks } from './types';
+import { assertSafeOutboundUrl } from '@/lib/security/outbound-url';
 
 export interface OllamaConfig {
   baseUrl: string;
@@ -14,7 +15,18 @@ export class OllamaProvider implements AIProvider {
     this.model = config.model;
   }
 
+  /**
+   * SSRF guard against the configured Ollama host. Runs lazily because the
+   * constructor is synchronous and DNS resolution is async; we want to fail
+   * the request, not the provider instantiation. Operators running a real
+   * private Ollama set `LASTEST_ALLOW_PRIVATE_OUTBOUND=true`.
+   */
+  private async assertBaseUrlSafe(): Promise<void> {
+    await assertSafeOutboundUrl(this.baseUrl);
+  }
+
   async generate(options: GenerateOptions): Promise<string> {
+    await this.assertBaseUrlSafe();
     const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images, signal } = options;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,6 +79,7 @@ export class OllamaProvider implements AIProvider {
   }
 
   async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
+    await this.assertBaseUrlSafe();
     const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, signal } = options;
 
     const messages: { role: string; content: string }[] = [];

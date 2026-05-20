@@ -15,7 +15,8 @@ import fs from 'fs';
 import path from 'path';
 import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
 import { awardScore } from '@/server/actions/gamification';
-import { buildVisualDiffIssue, createVisualDiffIssue } from '@/lib/integrations/github-issues';
+import { createVisualDiffIssue } from '@/lib/integrations/github-issues';
+import { buildVisualDiffBody } from '@/lib/integrations/github-issue-body';
 import {
   approveDiffCore,
   rejectDiffCore,
@@ -557,33 +558,32 @@ export async function submitDiffAsIssue(
     return { success: false, error: 'GitHub is not connected for this team. Connect it in Settings.' };
   }
 
-  // Enrich with test + test result context for the issue body
+  // Enrich with test + test result + step-comparison context for the issue body.
+  // The step-comparison (if one exists for this diff) carries the full
+  // multi-layer evidence chain that the verify pipeline computed, which is
+  // strictly richer than the visual-only signal on the diff row.
   const test = await queries.getTest(diff.testId);
   const functionalArea = test?.functionalAreaId
     ? await queries.getFunctionalArea(test.functionalAreaId)
     : null;
-  let errorMessage: string | null = null;
-  let consoleErrors: string[] | null = null;
-  let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
-  if (diff.testResultId) {
-    const tr = await queries.getTestResultById(diff.testResultId);
-    errorMessage = tr?.errorMessage ?? null;
-    consoleErrors = tr?.consoleErrors ?? null;
-    a11yViolations = tr?.a11yViolations ?? null;
-  }
+  const testResult = diff.testResultId
+    ? (await queries.getTestResultById(diff.testResultId)) ?? null
+    : null;
+  const stepComparison = (await queries.getStepComparisonByVisualDiff(diff.id)) ?? null;
 
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.BETTER_AUTH_BASE_URL ||
     'http://localhost:3000';
 
-  const payload = buildVisualDiffIssue({
-    diff: { ...diff, errorMessage, consoleErrors, a11yViolations },
-    test: test ? { name: test.name } : null,
+  const payload = buildVisualDiffBody({
+    diff,
+    test: test ? { id: test.id, name: test.name, targetUrl: test.targetUrl } : null,
     functionalAreaName: functionalArea?.name ?? null,
     build: { id: diff.buildId },
-    branch: testRun?.gitBranch ?? null,
-    commit: testRun?.gitCommit ?? null,
+    testRun: testRun ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit } : null,
+    testResult,
+    stepComparison,
     repoFullName: repo.fullName,
     reporterEmail: session.user.email,
     baseUrl,

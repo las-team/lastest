@@ -134,6 +134,75 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
 }
 
 /**
+ * Bulk-approve every case on a build that doesn't already carry a `rejected`
+ * decision. Used by the Verify header's "Mark all verified" button. Matches
+ * the per-card decideAllForStep semantics: for each step we approve every
+ * evidence-bearing layer (falling back to `visual` when nothing is scored)
+ * and any layer that already has feedback, so a stale `snoozed`/`pending`
+ * row can't pin the case in a non-approved column afterwards.
+ *
+ * Returns the number of step_comparisons that received at least one new
+ * approval — useful for the caller's toast.
+ */
+export async function approveAllVerifyCases(buildId: string): Promise<{ approved: number }> {
+  const build = await queries.getBuild(buildId);
+  if (!build) throw new Error('Build not found');
+  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const repoId = testRun?.repositoryId ?? null;
+  if (repoId) await requireRepoAccess(repoId);
+
+  const stepRows = await queries.getStepComparisonsByBuild(buildId);
+  if (stepRows.length === 0) return { approved: 0 };
+
+  const existingFeedback = await queries.getLayerFeedbackByBuild(buildId);
+  const fbByStep = new Map<string, StepLayerFeedback[]>();
+  for (const f of existingFeedback) {
+    if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
+    fbByStep.get(f.stepComparisonId)!.push(f);
+  }
+
+  let approved = 0;
+  for (const step of stepRows) {
+    const stepFb = fbByStep.get(step.id) ?? [];
+
+    // Skip rejected cases — the reviewer marked them as Broken; the bulk
+    // approve shouldn't silently flip those.
+    if (stepFb.some((f) => f.status === 'rejected')) continue;
+
+    // Skip already-fully-approved cases to keep the operation idempotent and
+    // avoid double-writing per-layer baselines.
+    const evidenceLayers = Array.from(new Set(step.evidence.map((e) => e.layer)));
+    const approvedSet = new Set(
+      stepFb.filter((f) => f.status === 'approved' || f.status === 'auto_approved').map((f) => f.layer),
+    );
+    const fullyApproved = evidenceLayers.length > 0
+      ? evidenceLayers.every((l) => approvedSet.has(l))
+      : approvedSet.size > 0;
+    if (fullyApproved) continue;
+
+    // Same layer set decideAllForStep computes client-side: every evidence
+    // layer + any layer that already has stored feedback (so we override it),
+    // with `visual` as the fallback when neither is present.
+    const existingLayers = stepFb.map((f) => f.layer);
+    const layerSet = new Set<EvidenceLayer>([...evidenceLayers, ...existingLayers]);
+    if (layerSet.size === 0) layerSet.add('visual');
+
+    for (const layer of layerSet) {
+      await decideLayer({
+        stepComparisonId: step.id,
+        buildId,
+        layer,
+        status: 'approved',
+      });
+    }
+    approved++;
+  }
+
+  revalidatePath(`/verify/${buildId}`);
+  return { approved };
+}
+
+/**
  * Bulk-approve every layer where the AI recommended `approve` and the
  * verdict was not red. Mirrors the existing "Accept AI Approvals" flow on
  * visual diffs but covers all layers at once.

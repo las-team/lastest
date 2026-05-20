@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import {
   getSelectedRepository,
   getRepositoriesByTeamWithTestCounts,
@@ -18,11 +17,7 @@ export async function SidebarServer() {
   const session = await getCurrentSession();
 
   if (!session) {
-    return (
-      <Suspense>
-        <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />
-      </Suspense>
-    );
+    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />;
   }
 
   const teamId = session.team?.id;
@@ -41,6 +36,11 @@ export async function SidebarServer() {
 
   const envConfig = await getEnvironmentConfig(selectedRepo?.id).catch(() => null);
 
+  // Mirror the Run page: prefer the branch-pinned URL, fall back to env config.
+  const activeBranch = selectedRepo?.selectedBranch ?? selectedRepo?.defaultBranch ?? 'main';
+  const branchBaseUrls = (selectedRepo?.branchBaseUrls as Record<string, string> | null) ?? null;
+  const baseUrlForBranch = branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? '';
+
   // Verify badge: count of unsorted (untriaged) cases on the active branch's
   // latest build. When zero, surface a "newer commit" hint instead so the
   // reviewer knows the code has moved past their last verified build.
@@ -52,19 +52,18 @@ export async function SidebarServer() {
     : { unsortedCount: 0, hasNewerCommit: false };
 
   return (
-    <Suspense>
-      <Sidebar
-        repos={repos}
-        selectedRepo={selectedRepo ?? null}
-        currentUser={session.user}
-        team={session.team}
-        baseUrl={envConfig?.baseUrl ?? ''}
-        repositoryId={selectedRepo?.id}
-        ebSessions={ebSessions}
-        verifyPendingCount={verifyBadge.unsortedCount}
-        verifyHasNewerCommit={verifyBadge.hasNewerCommit}
-      />
-    </Suspense>
+    <Sidebar
+      repos={repos}
+      selectedRepo={selectedRepo ?? null}
+      currentUser={session.user}
+      team={session.team}
+      baseUrl={baseUrlForBranch}
+      repositoryId={selectedRepo?.id}
+      activeBranch={activeBranch}
+      ebSessions={ebSessions}
+      verifyPendingCount={verifyBadge.unsortedCount}
+      verifyHasNewerCommit={verifyBadge.hasNewerCommit}
+    />
   );
 }
 

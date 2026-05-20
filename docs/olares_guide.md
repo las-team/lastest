@@ -125,3 +125,124 @@ The critical middleman is **bfl**. Without it in the path, any request from outs
 - Keep the chart source-of-truth synced with the kubectl-patched state. If you `kubectl set env` something, update `values.yaml` immediately.
 - Before touching `/etc/cloudflared/config.yaml`, back it up: `cp config.yaml config.yaml.bak-$(date +%s)`. Olares reconcilers may rewrite it.
 - External routing (CF Tunnel + bfl + authelia) lives outside the chart. Changes to app config don't reach this layer; you fix it via `/etc/cloudflared/config.yaml`, LarePass domain UI, or bfl API directly.
+
+## 16. Plan: package `lastest-dev` as a first-class Olares app (so Backup includes the DB)
+
+Goal: move from "devbox-installed app whose Postgres is invisible to Olares Backup" to "app whose `middleware.postgres` is declared, so an Application-type backup captures the DB alongside the storage hostPath."
+
+### Why this is needed
+- Current `OlaresManifest.yaml` (embedded in helm-release secret `sh.helm.release.v1.lastest-dev.v2`) has `middleware: { Argo: null, Elasticsearch: null, MariaDB: null, Minio: null, MySQL: null, Nats: null, RabbitMQ: null }` — **no postgres declared.**
+- The app talks to `citus-master-svc.user-system-ewyctorlab:5432/lastest_dev_ewyctorlab_lastest` using a manually-injected `DATABASE_URL` env (role was bootstrapped by hand per §8 of this doc, or inherited from `lastestalt`'s manifest).
+- Backup module only auto-includes Postgres data for apps that **declare** `middleware.postgres`. Without the declaration, Olares' Application backup type can't even list the DB. The Directory backup at `/Data/lastest-dev/` misses it (Citus data lives in `os-platform`, not the app's hostPath).
+
+### Current state worth preserving
+- `permission.appData: true` ✅
+- Entrance `lastest:3000` + custom domain `app.lastest.cloud` ✅
+- `provider: ebapi` bypass-authelia paths (`/api/embedded/*`, `/api/ws/runner`) ✅
+- `apiTimeout: 0` for SSE streams ✅
+- Two-deploy split (`lastest-dev` + `lastest-internal-dev`) per §1 ✅
+
+### Step 1 — Source-control the chart
+Today the chart only exists inside the helm release secret. Pull it out and check it in.
+
+```bash
+ssh root@ewyctorlab.olares.local 'kubectl get secret sh.helm.release.v1.lastest-dev.v2 -n lastest-dev-ewyctorlab -o jsonpath="{.data.release}" | base64 -d | base64 -d | gunzip' \
+  | python3 -c 'import json,sys,base64,os; r=json.load(sys.stdin); root="olares-chart"; os.makedirs(root, exist_ok=True); open(f"{root}/Chart.yaml","wb").write(base64.b64decode([f for f in r["chart"]["files"] if f["name"]=="Chart.yaml" or f["name"]=="Chart.bak"][0]["data"])); open(f"{root}/OlaresManifest.yaml","wb").write(base64.b64decode([f for f in r["chart"]["files"] if f["name"]=="OlaresManifest.yaml"][0]["data"])); [open(f"{root}/{t[\"name\"]}","wb").write(base64.b64decode(t["data"])) for t in r["chart"].get("templates",[]) if not __import__("os").makedirs(os.path.dirname(f"{root}/{t[\"name\"]}"), exist_ok=True)]'
+```
+
+Then commit `olares-chart/` to the repo. From this point on, deploys read the chart from the repo, not from the cluster.
+
+### Step 2 — Declare Postgres in `OlaresManifest.yaml`
+Following the n8n pattern (`beclab/apps/n8n/OlaresManifest.yaml`):
+
+```yaml
+middleware:
+  postgres:
+    username: lastest          # role name (Olares may prefix with appid)
+    password: lastest          # placeholder; Olares replaces with real generated secret
+    databases:
+      - name: lastest
+        distributed: true      # use Citus distributed plug-in
+        # extensions: []       # add here if any (e.g. uuid-ossp); none needed today
+```
+
+This is the load-bearing change. On install/reinstall, Olares' middleware controller provisions a real role + DB on citus and renders the helm values `.Values.postgres.{host,port,username,password,databases.lastest}`.
+
+### Step 3 — Templatize `DATABASE_URL` (and per §14 `DISABLE_SCHEDULER`)
+Replace the hardcoded value in `templates/deployment.yaml` for both `lastest-dev` and `lastest-internal-dev`:
+
+```yaml
+- name: DATABASE_URL
+  value: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@{{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.databases.lastest }}?sslmode=disable"
+```
+
+Also templatize:
+- `EB_IMAGE: "lastest-embedded-browser:{{ .Chart.AppVersion }}"` (or pin)
+- `LASTEST_URL: "http://lastest-internal.{{ .Release.Namespace }}.svc:3000"`
+- `NEXT_PUBLIC_APP_URL: "https://{{ index (split "," .Values.domain.lastest) "_0" }}"`
+
+### Step 4 — Switch the storage hostPath to `.Values.userspace.appData`
+Today:
+```yaml
+volumes:
+  - name: app-storage
+    hostPath:
+      path: /olares/rootfs/userspace/pvc-userspace-ewyctorlab-yu0x1nh2ugvljohl/Data/lastest-dev/lastest/lastest2/storage
+      type: DirectoryOrCreate
+```
+Replace with:
+```yaml
+volumes:
+  - name: app-storage
+    hostPath:
+      path: {{ .Values.userspace.appData }}/storage/
+      type: DirectoryOrCreate
+```
+The physical directory is the same (`/olares/rootfs/userspace/pvc-userspace-<owner>-<hash>/Data/lastest-dev/lastest/...`) — `userspace.appData` resolves to it. After re-install, run `chown -R 1000:1000 /olares/rootfs/userspace/.../Data/lastest-dev/` per §9, otherwise pods crashloop on permission denied.
+
+Drop the `emptyDir`-backed `/app/data` mount — the SQLite leftover (`lastest2.db*`) is from an old build and unused now.
+
+### Step 5 — Secrets management
+Pod env today carries `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET`, `RESEND_API_KEY`, `TWENTY_API_KEY`, `BUG_REPORT_DISCORD_WEBHOOK_URL` as plain `value:`. Move these to a chart-managed `Secret` (`templates/secret.yaml`) so they're versioned via the chart's `values.yaml` (encrypted with sops/age outside the repo, or bound to Infisical which is already running on the box).
+
+Without this step, a chart reinstall (Step 7) silently zeroes these out and sign-in / EB / integrations break.
+
+### Step 6 — Pre-reinstall DB dump
+Before any uninstall/reinstall (Step 7), dump the current DB so we can restore. Run from Olares host:
+```bash
+kubectl exec -n lastest-dev-ewyctorlab deploy/lastest-dev -c lastest -- \
+  sh -c 'apt-get update -q && apt-get install -y -q postgresql-client && pg_dump "$DATABASE_URL" | gzip' \
+  > /tmp/lastest-pre-reinstall.sql.gz
+scp /tmp/lastest-pre-reinstall.sql.gz ewyct@192.168.1.138:/DATA/.media/V3-SSD/Backups/
+```
+(Same temporary apt install we'd otherwise do for the ad-hoc backup.)
+
+### Step 7 — Re-install via Devbox
+Per §5 + §13, **helm-upgrading** an OlaresManifest that newly declares middleware is not safe — the middleware controller only provisions on app install. Do an uninstall/reinstall instead:
+
+1. LarePass → Apps → `lastest-dev` → Uninstall (this removes the Application CR, helm release, deployments, and the citus role/DB per §8 — **but keeps the hostPath under `/Data/lastest-dev/`**).
+2. Package the new chart: `tar czf lastest-dev.tgz olares-chart/` (folder name must match `^[a-z0-9]{1,30}$` per §11 — rename to `lastestdev/` inside the tarball with `--transform`).
+3. LarePass → Devbox → Install from local chart → upload tgz.
+4. Wait for Olares to provision the new postgres role + DB (visible as a new secret in `user-system-ewyctorlab/lastest-dev-user-system-ewyctorlab-postgres-password`).
+5. `chown -R 1000:1000 /olares/rootfs/userspace/.../Data/lastest-dev/` per §9.
+6. Restore DB: `gunzip -c /DATA/.media/V3-SSD/Backups/lastest-pre-reinstall.sql.gz | kubectl exec -i -n lastest-dev-ewyctorlab deploy/lastest-dev -c lastest -- psql "$DATABASE_URL"`.
+7. Re-bind custom domain `app.lastest.cloud` in LarePass settings (per §6, this is bfl state and gets dropped by Application CR recreation).
+8. Verify CF Tunnel `service:` in `/etc/cloudflared/config.yaml` still points at the bfl ClusterIP, not the lastest Service directly (per §4).
+
+### Step 8 — Create the Application-type backup
+Once postgres is declared in the manifest:
+- LarePass → Settings → Backup → New backup → type: **Application** → select `lastest-dev`. This snapshots: Citus DB rows for `lastest_dev_ewyctorlab_lastest` + appData hostPath + k8s configs/secrets for this app. Schedule weekly, same offsite target `/Files/External/olares/V_5TB_USB/`.
+- Keep the existing Directory backup of `/Data/lastest-dev/` as redundancy.
+
+### What's missing / open risks
+
+1. **No source-controlled chart yet.** Step 1 extracts it but commit + repo layout (`olares-chart/` vs `deploy/olares/`) hasn't been decided. Deploy script (`scripts/deploy.sh olares`) currently does image-import + rollout-restart only; needs a new path for `helm upgrade --install` once the chart is in the repo.
+2. **Citus distributed-table compatibility.** Drizzle schema (`src/lib/db/schema.ts`, ~1680 lines) hasn't been audited for Citus distributed-table restrictions: no `RETURNING` on distributed inserts with non-distribution-key cols, FK constraints across distributed tables are limited, `SERIAL` PKs interact awkwardly with distribution. We use `cuid()`/text PKs everywhere — likely fine — but worth a dry-run on a staging Citus install before committing to `distributed: true`. Fallback: omit `distributed: true` for a single-node table layout.
+3. **DB-name uncertainty.** When you redeclare middleware, Olares may name the new DB `lastest` (per manifest) or prefix-mangle it to `lastest_<owner>_<appid>` like today's `lastest_dev_ewyctorlab_lastest`. Restore command in Step 7.6 needs to match whatever it actually names — verify with `kubectl get secret -n user-system-ewyctorlab -l app=lastest-dev` after reinstall.
+4. **EB Job pods reference the namespace + image directly.** `src/lib/eb/provisioner.ts:127-168` writes a Job spec with `namespace: lastest` (or whatever `EB_NAMESPACE` is). If the reinstall changes the namespace (it shouldn't — `lastest-dev-ewyctorlab` stays), this needs no change; if it does, update `.env` / values.
+5. **Secrets bootstrap chicken-and-egg.** Step 5's chart-managed Secret needs the actual secret values committed somewhere encrypted. Options: sops+age in repo, an Infisical project (already running in `os-protected`), or a one-time `kubectl create secret` post-install. Pick before Step 7.
+6. **Internal-pod connectivity.** `lastest-internal-dev` reaches the envoy-fronted pod via `host.k3d.internal` in dev and via cluster DNS in prod. After reinstall, confirm `LASTEST_URL` resolves correctly inside the cluster — Step 3's templatization should handle this but test EB Job → app POSTs immediately after.
+7. **Downtime.** Step 7 is an uninstall/reinstall = full app outage. Schedule a maintenance window; right window is when no active runs are queued. Budget ~30 min including DB restore.
+8. **Backup encryption keys.** Olares encrypts backup archives end-to-end. If the restore is ever needed on a fresh Olares install, the encryption key (held in `os-framework`) must also be preserved separately — the backup is useless without it.
+9. **Custom domain re-add is manual.** Per §6, there's no kubectl path — re-add via LarePass UI. Documented but a step that can be missed.
+10. **No staging environment** to rehearse the reinstall. The two-pod dev split (per §15 of project memory `olares_two_pod_split`) is the prod env. Rehearse on a throwaway `lastestalt-dev` app if you want a dry run before touching `lastest-dev` itself.

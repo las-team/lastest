@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import * as queries from '@/lib/db/queries';
 import { requireAuth, requireTeamAccess } from '@/lib/auth';
+import { assertHttpScheme } from '@/lib/security/url-validation';
 import type { OnboardingPath } from '@/lib/db/schema';
 import { startPlayAgent } from './play-agent';
 
@@ -18,6 +19,12 @@ export async function setBaseUrl(repositoryId: string, url: string) {
   if (!repo || repo.teamId !== session.team.id) {
     throw new Error('Forbidden');
   }
+  // baseUrl flows into `page.goto(baseUrl + path)` and into rendered links
+  // on the run page; persisting `javascript:` / `data:` would turn that
+  // into an XSS sink. Scheme is checked here; network-reachability is not
+  // (devs legitimately set `http://localhost:3000`).
+  const schemeErr = assertHttpScheme(url);
+  if (schemeErr) throw new Error(`baseUrl rejected: ${schemeErr}`);
   const branch = repo.defaultBranch || 'main';
   const existing = (repo.branchBaseUrls ?? {}) as Record<string, string>;
   await queries.updateRepository(repositoryId, {

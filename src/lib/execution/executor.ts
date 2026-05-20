@@ -482,10 +482,20 @@ async function executeViaRunner(
   let cancelled = false;
   const baseTimeout = options.playwrightSettings?.navigationTimeout || 120000;
   // Scale timeout for concurrency — parallel tests compete for resources.
-  // Floor of 10 min: under heavy pool concurrency (e.g. 30 EBs on one node),
-  // Chromium gets CPU-starved and page.goto can take several minutes. A lower
-  // floor caused healthy tests to be cancelled mid-run with `command:cancel_test`.
-  const testTimeout = Math.max(baseTimeout * maxParallel, 600000);
+  // Floor was 10 min, but the build watchdog `markStaleJobsAsCrashed`
+  // (`background-jobs.ts:182`) flips a job to `failed` after 5 min of no
+  // `lastActivityAt` tick. With a 10-min per-test floor, a silently-dying
+  // EB would freeze the polling loop for 5 min, watchdog would kill the
+  // build as `blocked` with no per-test attribution, and the user would
+  // see "Build aborted mid-run — recovered 12 of 25 cases" instead of the
+  // real signal (the 13th test's EB hung). Floor of 4 min stays under the
+  // watchdog so the timeout path fires first: per-test `failed` row with
+  // `Test execution timed out after 240000ms`, build continues with the
+  // remaining tests. Trade-off: legitimately slow tests under heavy pool
+  // concurrency now cancel where they wouldn't before — bump the
+  // watchdog threshold (or add claim-wait heartbeats) before raising
+  // pool concurrency past current levels.
+  const testTimeout = Math.max(baseTimeout * maxParallel, 240000);
   let pollInterval = 250;
   const maxPollInterval = 500;
 
@@ -873,6 +883,17 @@ async function executeViaRunner(
         logs: Array.isArray(payload.logs) && payload.logs.length > 0
           ? payload.logs as Array<{ timestamp: number; level: string; message: string }>
           : undefined,
+        // EB ships a11yViolations / a11yPassesCount on the response payload
+        // when `enableA11y` was set on the command. Forward them onto the
+        // TestRunResult so `createTestResult` persists them; otherwise the
+        // verify A11y tab classifies the layer as `absent` even when axe-core
+        // ran and the EB captured violations.
+        a11yViolations: Array.isArray(payload.a11yViolations)
+          ? payload.a11yViolations as import('@/lib/db/schema').A11yViolation[]
+          : undefined,
+        a11yPassesCount: typeof payload.a11yPassesCount === 'number'
+          ? payload.a11yPassesCount
+          : undefined,
         urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
           ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]
           : undefined,
@@ -897,9 +918,106 @@ async function executeViaRunner(
     // Check for timeouts
     for (const [commandId, info] of inFlight) {
       if (Date.now() - info.startTime > testTimeout) {
-        console.error(`[Executor] Test ${info.testId} timed out after ${testTimeout}ms`);
-        // Cancel the stale test on the runner so it frees resources
-        await queueCancelCommandToDB(runnerId, runId, `Server-side timeout after ${testTimeout}ms`);
+        // Probe the runner row to disambiguate "EB died" vs "test code hung".
+        // Hard-failures inside a test (page.goto stuck, await never resolves)
+        // produce the same surface symptom as the EB itself dying (pod OOM,
+        // CNI yank, kubelet eviction): no results post for testTimeout. The
+        // recovery is different though — a dead EB warrants retry on a fresh
+        // pod, while a hung test should surface as-is and not burn a second
+        // EB. Tagging the dead-EB case with `[EB-dead]` makes the pool path's
+        // EB_INFRA_ERR_RX match and triggers `runOneTest`'s retry.
+        const runnerRow = await db
+          .select({ status: runners.status, lastSeen: runners.lastSeen, name: runners.name })
+          .from(runners)
+          .where(eq(runners.id, runnerId))
+          .limit(1)
+          .then((rows) => rows[0])
+          .catch(() => undefined);
+        const lastSeenMs = runnerRow?.lastSeen
+          ? Date.now() - new Date(runnerRow.lastSeen).getTime()
+          : -1;
+        // 90s matches the runner-side heartbeat reaper grace (cleanup-loop's
+        // SESSION_TIMEOUT_MS=60s + headroom). If lastSeen is older than that,
+        // the EB has effectively gone away even if the row hasn't flipped to
+        // 'offline' yet.
+        const runnerDead = !runnerRow
+          || runnerRow.status === 'offline'
+          || (lastSeenMs >= 0 && lastSeenMs > 90_000);
+
+        const lastSeenStr = lastSeenMs >= 0 ? `${Math.round(lastSeenMs / 1000)}s ago` : 'never';
+
+        // Snapshot the EB pod's status + last 80 log lines from k8s on EVERY
+        // timeout (not just runnerDead). When the runner is alive but the
+        // test code hung, the pod logs are the only window into what the
+        // test-executor was doing — often this is an early Chromium init
+        // stall (`browser.newContext` / `testContext.newPage` hanging on a
+        // CPU-starved or memory-pressured node) where the runner-client is
+        // happily heartbeating while the test-executor never reached
+        // `instrumentStepTracking` (so `lastReachedStep` / `totalSteps`
+        // stay null in the result). Best-effort, no-op if not in k8s mode.
+        let podDiagnostics = '';
+        if (runnerRow?.name) {
+          try {
+            const { getEBPodInfo, jobNameForRunnerName } = await import('@/lib/eb/provisioner');
+            const jobName = jobNameForRunnerName(runnerRow.name);
+            if (jobName) {
+              const info = await getEBPodInfo(jobName, 80);
+              if (info) {
+                const headerBits = [
+                  `pod=${info.podName}`,
+                  `phase=${info.phase}`,
+                  info.reason ? `reason=${info.reason}` : '',
+                  info.exitCode !== undefined ? `exitCode=${info.exitCode}` : '',
+                  info.message ? `message=${info.message.slice(0, 200)}` : '',
+                ].filter(Boolean).join(' ');
+                const trimmedLogs = (info.logs || '').slice(-2000); // last 2KB of stdout
+                podDiagnostics = `\n[EB-pod ${headerBits}]\n${trimmedLogs}`;
+              }
+            }
+          } catch (err) {
+            console.warn('[Executor] getEBPodInfo threw:', err instanceof Error ? err.message : err);
+          }
+        }
+
+        // Distinguish three timeout flavours for triage:
+        //   - EB-dead:    runner row gone / offline / heartbeat stale → pod
+        //                 death (OOMKilled, CNI yank, eviction) → retry on a
+        //                 fresh EB via `runOneTest`'s `EB_INFRA_ERR_RX` match.
+        //   - EB-stalled: runner alive AND the EB never POSTed ANY response
+        //                 for this command. The EB picked up the command
+        //                 (claimedAt is set on `runner_commands`) but never
+        //                 produced even a screenshot, step_event, or partial
+        //                 test_result → test-executor is hung in early init
+        //                 (browser.newContext / page.addInitScript / first
+        //                 page.goto, often CPU-starved on the node). Tag as
+        //                 EB-stalled so it matches `EB_INFRA_ERR_RX` and
+        //                 retries on a fresh EB — the user's test never ran.
+        //   - test-hung:  runner alive AND the EB POSTed at least one
+        //                 response → test code is itself stuck (await never
+        //                 resolves, deep selector retry, infinite
+        //                 waitForFunction). Surface as-is; retry won't help.
+        // One probe row is enough to know "EB sent something"; we don't need
+        // a full count.
+        const { runnerCommandResults } = await import('@/lib/db/schema');
+        const probe = await db
+          .select({ id: runnerCommandResults.id })
+          .from(runnerCommandResults)
+          .where(eq(runnerCommandResults.commandId, commandId))
+          .limit(1)
+          .catch(() => [] as Array<{ id: string }>);
+        const responseCount = probe.length;
+        const ebStalledNoStart = !runnerDead && responseCount === 0;
+        const errorMessage = runnerDead
+          ? `[EB-dead] runner went offline mid-test (status=${runnerRow?.status ?? 'missing'}, lastSeen=${lastSeenStr}, testTimeout=${testTimeout}ms)${podDiagnostics}`
+          : ebStalledNoStart
+            ? `[EB-stalled] EB picked up the command but never POSTed a response within ${testTimeout}ms (runner alive ${lastSeenStr}; Chromium/CDP init likely stuck on the EB pod before the test body ran)${podDiagnostics}`
+            : `Test execution timed out after ${testTimeout}ms (runner alive — test code hung; last reported activity ${lastSeenStr}; ${responseCount} partial response(s) received)${podDiagnostics}`;
+
+        console.error(`[Executor] Test ${info.testId} timed out: ${errorMessage}`);
+        // Cancel the stale test on the runner so it frees resources (no-op if
+        // the runner is already dead — the cancel command just gets reaped
+        // alongside the dead runner's other commands).
+        await queueCancelCommandToDB(runnerId, runId, errorMessage);
         inFlight.delete(commandId);
         completedCount++;
         const timeoutResult: TestRunResult = {
@@ -907,7 +1025,7 @@ async function executeViaRunner(
           status: 'failed',
           durationMs: testTimeout,
           screenshots: [],
-          errorMessage: `Test execution timed out after ${testTimeout}ms`,
+          errorMessage,
         };
         results.push(timeoutResult);
         await onResult?.(timeoutResult);
@@ -945,6 +1063,115 @@ async function executeViaRunner(
  * Returns the collected results, or `null` if no EB could be claimed at all
  * (so the caller can fall through to the queue path).
  */
+/**
+ * GET the EB pod's /health endpoint (port 9224, exposed by
+ * `packages/embedded-browser/src/index.ts`'s health server). Used to
+ * disambiguate "Target has been closed" style Playwright errors:
+ *   - probe 200 → EB is alive, error is test-code → don't burn another EB
+ *   - probe fails / non-200 → EB is dead → retry on a fresh EB
+ *
+ * Looks up `embedded_sessions.containerUrl` (set at register time to
+ * http://<host>:<streamPort>) and swaps the port to 9224. 2s timeout so the
+ * probe can't stall dispatch when the pod is actually offline. See
+ * docs/eb-and-setup-plan.md B5.
+ */
+async function probeEBHealth(runnerId: string): Promise<boolean> {
+  try {
+    const { db } = await import('@/lib/db');
+    const { embeddedSessions } = await import('@/lib/db/schema');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await db
+      .select({ containerUrl: embeddedSessions.containerUrl })
+      .from(embeddedSessions)
+      .where(eq(embeddedSessions.runnerId, runnerId))
+      .limit(1);
+    if (!row?.containerUrl) return false;
+    const healthUrl = row.containerUrl.replace(/:(\d+)(?=$|\/)/, ':9224') + '/health';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const res = await fetch(healthUrl, { signal: controller.signal });
+      return res.ok;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    // Treat any probe error (DNS, timeout, abort) as "dead" so we err toward
+    // retrying. The cost of a false dead-EB classification is one EB; the cost
+    // of a false alive classification is a confusing test failure.
+    return false;
+  }
+}
+
+/**
+ * Mark the just-completed test_result row as a dead-EB attempt so operators
+ * can see how often the executor is silently retrying due to EB infrastructure
+ * failures (CNI churn, Chromium crash, runner-client disconnect, etc.).
+ *
+ * `executeViaRunner`'s polling loop ALREADY persisted the failed result via
+ * `onResult` before `runOneTest` got to inspect it, so we don't insert a new
+ * row — we update the most recent failed row for this (testRunId, testId)
+ * that bears one of our infra tags. Setting `isFlaky=true` excludes it from
+ * the post-build retry loop in `builds.ts:980+` (the executor's own
+ * MAX_EB_ATTEMPTS retry already handles infra). Prefixing the errorMessage
+ * with `[EB-dead attempt N]` makes the cause grep-able in the verify board.
+ *
+ * Falls back to INSERT only if no recent row matches — that path is fire-and-
+ * forget and never throws: a missed marker is better than a build failing on
+ * a logging hiccup. See docs/eb-and-setup-plan.md B4.
+ */
+async function persistDeadEBAttempt(
+  testRunId: string,
+  testId: string,
+  attempt: number,
+  errorMessage: string,
+): Promise<void> {
+  const tagged = `[EB-dead attempt ${attempt}] ${errorMessage}`.slice(0, 4000);
+  try {
+    const { db: dbRw } = await import('@/lib/db');
+    const { testResults: trTable } = await import('@/lib/db/schema');
+    const { eq: eqOp, and: andOp } = await import('drizzle-orm');
+    // Find the failed row for this (testRunId, testId) that's NOT already
+    // marked flaky — that's the one `executeViaRunner` just persisted via
+    // its onResult call. test_results has no createdAt column, so we rely
+    // on `isFlaky=false` to exclude rows from prior dead-EB attempts in the
+    // same run (those get flipped to isFlaky=true by this same code).
+    const [row] = await dbRw
+      .select({ id: trTable.id })
+      .from(trTable)
+      .where(andOp(
+        eqOp(trTable.testRunId, testRunId),
+        eqOp(trTable.testId, testId),
+        eqOp(trTable.status, 'failed'),
+        eqOp(trTable.isFlaky, false),
+      ))
+      .limit(1);
+    if (row) {
+      await dbRw.update(trTable)
+        .set({
+          isFlaky: true,
+          errorMessage: tagged, // tagged already contains the original errorMessage
+        })
+        .where(eqOp(trTable.id, row.id));
+      return;
+    }
+    // Fallback: no recent row to update — insert a marker row instead.
+    const { createTestResult } = await import('@/lib/db/queries');
+    await createTestResult({
+      testRunId,
+      testId,
+      status: 'failed',
+      screenshots: [],
+      errorMessage: tagged,
+      durationMs: 0,
+      isFlaky: true,
+    });
+    return;
+  } catch (err) {
+    console.warn('[Dispatch] persistDeadEBAttempt failed (non-fatal):', err);
+  }
+}
+
 async function executeViaPoolWorkers(
   tests: Test[],
   runId: string,
@@ -956,6 +1183,27 @@ async function executeViaPoolWorkers(
 ): Promise<TestRunResult[] | null> {
   if (tests.length === 0) return [];
   const { claimOrProvisionPoolEB, releasePoolEB } = await import('@/server/actions/embedded-sessions');
+  const { incBuildDispatch, decBuildDispatch, prewarmForBuild, ensureWarmPool, isKubernetesMode } =
+    await import('@/lib/eb/provisioner');
+
+  // Suppress per-release warm-pool refill while this build is dispatching.
+  // ensureWarmPool no-ops; the build's claimOrProvisionPoolEB handles
+  // provisioning on demand. Without this, every test release spawns up to
+  // `warmPoolMin` replacement EBs that the build doesn't need and that get
+  // reaped idle after TTL. See docs/eb-and-setup-plan.md B1.
+  incBuildDispatch();
+
+  // Pre-launch one EB per concurrent worker (plus one for the broadcast
+  // setup, when configured) so the first batch of tests doesn't pay the
+  // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
+  // See docs/eb-and-setup-plan.md B3.
+  if (isKubernetesMode()) {
+    const prewarmTarget = Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
+    prewarmForBuild(prewarmTarget).catch((err) => {
+      console.warn('[Dispatch] prewarmForBuild failed (non-fatal):', err);
+    });
+  }
+  try {
 
   const claimMaxWaitMs = parseInt(process.env.EB_CLAIM_MAX_WAIT_MS || '120000', 10);
   const claimWithRetry = async () => {
@@ -983,7 +1231,37 @@ async function executeViaPoolWorkers(
   // "Target has been closed" style error). Anything beyond that is almost
   // certainly the test itself, not infra — surface the failure.
   const MAX_EB_ATTEMPTS = 2;
-  const EB_DEAD_ERR_RX = /Target .*has been closed|offline|crash|runner went|ECONNREFUSED|EB network unhealthy|page\.screenshot.*Target page.*closed/i;
+  // Split the dead-EB classifier (B5):
+  //   - INFRA_RX matches things only the EB infra produces (refused conn,
+  //     crash, runner registration loss) — retry immediately, no probe.
+  //   - MAYBE_INFRA_RX matches Playwright-side messages that often coincide
+  //     with EB failure but also occur in legitimate test cleanup
+  //     ("Target has been closed", "page.screenshot ... Target page closed").
+  //     We probe the EB's /health before deciding to burn another EB.
+  const EB_INFRA_ERR_RX = /offline|crash|runner went|ECONNREFUSED|EB network unhealthy|EB-stalled/i;
+  const EB_MAYBE_INFRA_ERR_RX = /Target .*has been closed|page\.screenshot.*Target page.*closed/i;
+  // Explicit tag the executor emits for test-code-hung timeouts (runner alive,
+  // ≥1 partial response received). Must NOT be treated as infra; the test was
+  // actually running and the user's code is to blame.
+  const TEST_HUNG_RX = /\(runner alive — test code hung;/;
+  const isDeadEBError = async (msg: string, runnerId: string): Promise<boolean> => {
+    // Only inspect the first line of the error. The executor appends a pod-
+    // log tail (`[EB-pod …]\n<last 80 stdout lines>`) for diagnostics, and
+    // that tail routinely contains "Target page, context or browser has been
+    // closed" warnings emitted by Playwright AFTER the executor cancelled
+    // the test on timeout — a substring match against the full message would
+    // misclassify legit test-code hangs as dead-EB and burn a second pod.
+    const firstLine = msg.split('\n')[0] ?? msg;
+    // Explicit test-hung tag always wins — never retry.
+    if (TEST_HUNG_RX.test(firstLine)) return false;
+    // Explicit infra tags trigger retry without probing.
+    if (EB_INFRA_ERR_RX.test(firstLine)) return true;
+    if (!EB_MAYBE_INFRA_ERR_RX.test(firstLine)) return false;
+    // Ambiguous Playwright "Target has been closed" — probe /health. If
+    // reachable + 200, the EB is alive and this is a test-code issue; don't
+    // waste another EB. If probe fails, treat as dead.
+    return !(await probeEBHealth(runnerId));
+  };
 
   const resultMap = new Map<string, TestRunResult>();
   let completedCount = 0;
@@ -1056,7 +1334,7 @@ async function executeViaPoolWorkers(
         setupErr = msg;
         // Only retry on infra-looking failures — a real setup bug (script
         // error, bad selector, wrong URL) shouldn't consume EBs.
-        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+        if (attempt < MAX_EB_ATTEMPTS && await isDeadEBError(msg, eb.runnerId)) {
           console.warn(`[Dispatch] Broadcast setup hit dead-EB on attempt ${attempt}, retrying: ${msg}`);
           continue;
         }
@@ -1131,18 +1409,21 @@ async function executeViaPoolWorkers(
 
         const deadResult = result.status === 'failed'
           && !!result.errorMessage
-          && EB_DEAD_ERR_RX.test(result.errorMessage);
-        if (deadResult && attempt < MAX_EB_ATTEMPTS) {
-          lastError = result.errorMessage;
+          && attempt < MAX_EB_ATTEMPTS
+          && await isDeadEBError(result.errorMessage, eb.runnerId);
+        if (deadResult) {
+          lastError = result.errorMessage!;
           console.warn(`[Dispatch] Dead-EB result on attempt ${attempt} for "${test.name}", retrying: ${lastError}`);
+          await persistDeadEBAttempt(runId, test.id, attempt, lastError);
           continue;
         }
         return result;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         lastError = msg;
-        if (EB_DEAD_ERR_RX.test(msg) && attempt < MAX_EB_ATTEMPTS) {
+        if (attempt < MAX_EB_ATTEMPTS && await isDeadEBError(msg, eb.runnerId)) {
           console.warn(`[Dispatch] Dead-EB exception on attempt ${attempt} for "${test.name}", retrying: ${msg}`);
+          await persistDeadEBAttempt(runId, test.id, attempt, msg);
           continue;
         }
         return fireResult({
@@ -1221,6 +1502,14 @@ async function executeViaPoolWorkers(
   }
 
   return everClaimed ? results : null;
+  } finally {
+    decBuildDispatch();
+    // Let the warm pool catch up exactly once after the build finishes.
+    // Fire-and-forget so the build response isn't blocked on a pool refill.
+    ensureWarmPool().catch((err) => {
+      console.warn('[Dispatch] post-build ensureWarmPool failed:', err);
+    });
+  }
 }
 
 /**

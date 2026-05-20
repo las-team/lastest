@@ -10,7 +10,20 @@ import type {
   NewRunnerCommandResult,
   RunnerCommandStatus,
 } from '../schema';
-import { eq, and, inArray, lt } from 'drizzle-orm';
+import { eq, and, inArray, lt, or, isNull, notExists, sql } from 'drizzle-orm';
+
+// Time the server waits for an EB `response:command_ack` after dispatching a
+// command before redelivering on the next heartbeat. EB sends the ack as the
+// first thing in its `onCommand` handler, so this only needs to cover normal
+// network latency. Bigger if EBs ack slowly, smaller for faster retry.
+const REDISPATCH_TTL_MS = 10_000;
+
+// Once the row is at status='claimed' (EB ack'd), how long we wait for the
+// first `runner_command_results` row before declaring the EB stuck and
+// returning the command to `pending` for redelivery. Long enough that a slow
+// Chromium init doesn't get yanked, short enough to recover before the 240s
+// executor test timeout.
+const MAX_CLAIMED_NO_RESULT_MS = 90_000;
 
 // Runner queries
 export async function getRunnerById(runnerId: string) {
@@ -28,29 +41,61 @@ export async function createRunnerCommand(cmd: NewRunnerCommand) {
 }
 
 /**
- * Atomically claim pending commands for a runner.
- * Sets status='claimed' and claimedAt=now, returns the updated rows.
- * @param limit Max commands to claim (prevents bulk execution after crash-loop). Defaults to all.
+ * Dispatch pending commands to a runner: mark them as in-flight delivery
+ * by stamping `dispatchedAt = now`, but do NOT yet flip status. The runner
+ * confirms receipt by POSTing `response:command_ack`, which calls
+ * `ackDispatchedCommand` to flip the row to status='claimed'.
+ *
+ * If no ack arrives within REDISPATCH_TTL_MS, the next heartbeat redispatches
+ * the same row (its `dispatchedAt` has aged out). EB-side `activeTestIds`
+ * dedup makes double-delivery safe.
+ *
+ * @param limit Max commands to dispatch (prevents bulk execution after crash-loop). Defaults to all.
  */
-export async function claimPendingCommands(runnerId: string, limit?: number) {
+export async function dispatchPendingCommands(runnerId: string, limit?: number) {
   const now = new Date();
+  const redispatchCutoff = new Date(now.getTime() - REDISPATCH_TTL_MS);
+
   const query = db
     .select()
     .from(runnerCommands)
-    .where(and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.status, 'pending')))
+    .where(and(
+      eq(runnerCommands.runnerId, runnerId),
+      eq(runnerCommands.status, 'pending'),
+      or(
+        isNull(runnerCommands.dispatchedAt),
+        lt(runnerCommands.dispatchedAt, redispatchCutoff),
+      ),
+    ))
     .orderBy(runnerCommands.createdAt);
 
-  const pending = limit ? await query.limit(limit) : await query;
+  const eligible = limit ? await query.limit(limit) : await query;
 
-  if (pending.length === 0) return [];
+  if (eligible.length === 0) return [];
 
-  const ids = pending.map(c => c.id);
+  const ids = eligible.map(c => c.id);
   await db
     .update(runnerCommands)
-    .set({ status: 'claimed', claimedAt: now })
+    .set({ dispatchedAt: now })
     .where(inArray(runnerCommands.id, ids));
 
-  return pending;
+  return eligible;
+}
+
+/**
+ * Mark a dispatched command as actually received by the runner. Called from
+ * the `response:command_ack` handler in /api/ws/runner. Idempotent — only
+ * flips rows still at status='pending' so a duplicate ack (from redispatch +
+ * EB dedup-retry) is a no-op.
+ */
+export async function ackDispatchedCommand(commandId: string) {
+  await db
+    .update(runnerCommands)
+    .set({ status: 'claimed' as RunnerCommandStatus, claimedAt: new Date() })
+    .where(and(
+      eq(runnerCommands.id, commandId),
+      eq(runnerCommands.status, 'pending'),
+    ));
 }
 
 export async function getCommandsByTestRun(testRunId: string) {
@@ -154,20 +199,53 @@ export async function cleanupOldCommands(olderThanMs: number) {
 }
 
 /**
- * Mark unclaimed commands as timed out after maxAge ms.
+ * Periodic sweep for stuck commands. Two passes:
+ *   1. Timeout pending rows older than `maxPendingAgeMs` (never picked up by
+ *      any runner — likely no runner online).
+ *   2. Reclaim *orphaned* claimed rows: status='claimed' AND no rows in
+ *      runner_command_results AND claimed_at older than
+ *      MAX_CLAIMED_NO_RESULT_MS → reset to status='pending', clear
+ *      claimed_at + dispatched_at so the next heartbeat redispatches. EB
+ *      dedup makes the redispatch safe even if the original EB is still
+ *      working.
+ *   3. After that, anything still at claimed older than `maxClaimedAgeMs`
+ *      (i.e. EB acked but never produced terminal status AND has produced
+ *      *some* results) is genuinely stuck inside test code — flag as
+ *      timeout the same as before.
  */
 export async function timeoutStaleCommands(maxPendingAgeMs: number, maxClaimedAgeMs: number) {
   const now = Date.now();
   const pendingCutoff = new Date(now - maxPendingAgeMs);
   const claimedCutoff = new Date(now - maxClaimedAgeMs);
+  const noResultCutoff = new Date(now - MAX_CLAIMED_NO_RESULT_MS);
 
-  // Timeout pending commands older than maxPendingAgeMs
+  // 1. Timeout pending commands older than maxPendingAgeMs
   await db
     .update(runnerCommands)
     .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })
     .where(and(eq(runnerCommands.status, 'pending'), lt(runnerCommands.createdAt, pendingCutoff)));
 
-  // Timeout claimed commands older than maxClaimedAgeMs
+  // 2. Reclaim orphaned `claimed` rows — EB ack'd but never produced any
+  //    runner_command_results within MAX_CLAIMED_NO_RESULT_MS. Most often a
+  //    Chromium/CDP init hang inside the EB pod. Reset to pending so the next
+  //    heartbeat redelivers; EB dedup prevents the original pod from running
+  //    it twice if it's just slow.
+  await db
+    .update(runnerCommands)
+    .set({ status: 'pending' as RunnerCommandStatus, claimedAt: null, dispatchedAt: null })
+    .where(and(
+      eq(runnerCommands.status, 'claimed'),
+      lt(runnerCommands.claimedAt, noResultCutoff),
+      notExists(
+        db.select({ x: sql`1` })
+          .from(runnerCommandResults)
+          .where(eq(runnerCommandResults.commandId, runnerCommands.id)),
+      ),
+    ));
+
+  // 3. Timeout claimed commands older than maxClaimedAgeMs (i.e. EB acked,
+  //    produced partial results, but never reached terminal status — stuck
+  //    inside test code, retry won't help).
   await db
     .update(runnerCommands)
     .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })

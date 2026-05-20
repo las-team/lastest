@@ -108,6 +108,7 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private repositories: RepositoryNode[] = [];
   private testNodeMap = new Map<number, TestNode>();
+  private refreshInFlight: Promise<void> | null = null;
 
   constructor(
     private readonly api: LastestApi,
@@ -176,11 +177,22 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     return undefined;
   }
 
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
+    // De-dupe concurrent calls. Activate, config-change reconnect, and manual
+    // refresh can all fire near-simultaneously; without this, each overlapping
+    // call clears + repushes, leaving every repo in the tree N times.
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.doRefresh().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  private async doRefresh(): Promise<void> {
     try {
       const repos = await this.api.getRepositories();
-      this.repositories = [];
-      this.testNodeMap.clear();
+      const nextRepositories: RepositoryNode[] = [];
+      const nextTestNodeMap = new Map<number, TestNode>();
 
       for (const repo of repos) {
         const repoNode = new RepositoryNode(repo);
@@ -188,7 +200,6 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
         const areas = await this.api.getFunctionalAreas(repo.id);
         const tests = await this.api.getTests(repo.id);
 
-        // Skip repos that have no tests at all — these are noise in the sidebar.
         if (tests.length === 0) continue;
 
         for (const area of areas) {
@@ -199,7 +210,7 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
 
           areaNode.children = areaTests.map(t => {
             const testNode = new TestNode(t);
-            this.testNodeMap.set(t.id, testNode);
+            nextTestNodeMap.set(t.id, testNode);
             return testNode;
           });
 
@@ -209,9 +220,11 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
 
         if (repoNode.children.length === 0) continue;
 
-        this.repositories.push(repoNode);
+        nextRepositories.push(repoNode);
       }
 
+      this.repositories = nextRepositories;
+      this.testNodeMap = nextTestNodeMap;
       this._onDidChangeTreeData.fire();
     } catch (e) {
       vscode.window.showErrorMessage(`Failed to load tests: ${e}`);

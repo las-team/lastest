@@ -8,11 +8,15 @@ import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
 import { eq } from 'drizzle-orm';
 import type { EvidenceLayer, StepIssueKind, StepIssueState } from '@/lib/db/schema';
 import { searchGitHubIssues, getGitHubIssueDetail, type GitHubIssueListItem, type GitHubIssueDetail } from '@/lib/integrations/github-issues';
+import { buildVerifyCaseBody } from '@/lib/integrations/github-issue-body';
 import { decideLayer } from './layer-feedback';
 
 interface CreateIssueInput {
   stepComparisonId: string;
   title?: string;
+  /** Pre-composed body. When omitted the server composes a rich body from the
+   *  full step + layer evidence (preferred — pulls real network/console/DOM
+   *  details that the client can't see). */
   body?: string;
   /** Whether the case is a regression (auto state) or manual link. */
   state?: 'auto' | 'open';
@@ -20,6 +24,12 @@ interface CreateIssueInput {
    *  board can filter and the webhook can interpret close events correctly.
    *  Defaults to 'verification' for the legacy manual-file path. */
   kind?: StepIssueKind;
+  /** Subset of evidence layers to include. Used by the "Include evidence
+   *  (X/Y)" selector on the verify focus view. Ignored when `body` is set. */
+  includedLayers?: EvidenceLayer[];
+  /** Free-text reviewer description prepended to the body. When omitted, the
+   *  stored reviewerNote on the step is used. Ignored when `body` is set. */
+  reviewerNote?: string;
 }
 
 interface IssueResult {
@@ -56,17 +66,43 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
   if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
 
   const test = await queries.getTest(step.testId);
-  const title = input.title ?? `[Verify] ${test?.name ?? 'case'} — ${step.stepLabel ?? 'step'}`;
-  const body = input.body ?? buildIssueBody({
-    reviewerNote: step.reviewerNote ?? null,
-    branch: testRun?.gitBranch ?? null,
-    commit: testRun?.gitCommit ?? null,
-    buildId: build.id,
-    testName: test?.name ?? null,
-    stepLabel: step.stepLabel ?? null,
-    verdict: step.verdict,
-    evidence: step.evidence ?? [],
+  const functionalArea = test?.functionalAreaId
+    ? await queries.getFunctionalArea(test.functionalAreaId)
+    : null;
+  const testResult = step.testResultId
+    ? (await queries.getTestResultById(step.testResultId)) ?? null
+    : null;
+  const diff = step.visualDiffId
+    ? (await queries.getVisualDiff(step.visualDiffId)) ?? null
+    : null;
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.BETTER_AUTH_BASE_URL ||
+    'http://localhost:3000';
+
+  const reviewerNote = (input.reviewerNote ?? step.reviewerNote)?.trim() || null;
+
+  // When the caller passed a pre-composed body, honor it verbatim (the
+  // issue-picker dialog's free-form Create tab uses this path). Otherwise
+  // compose the rich body from the full step context so reviewers don't
+  // need to copy-paste env/network/console themselves.
+  const enriched = buildVerifyCaseBody({
+    step,
+    diff,
+    test: test ? { id: test.id, name: test.name, targetUrl: test.targetUrl } : null,
+    functionalAreaName: functionalArea?.name ?? null,
+    build: { id: build.id },
+    testRun: testRun ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit } : null,
+    testResult,
+    repoFullName: repo.fullName,
+    reporterEmail: session.user?.email ?? null,
+    baseUrl,
+    includedLayers: input.includedLayers ?? null,
+    reviewerNote,
   });
+
+  const title = input.title ?? enriched.title;
+  const body = input.body ?? enriched.body;
 
   // Always tag with the typed kind so the webhook can match on close. Falls
   // back to verdict-based label so the legacy manual flow stays useful.
@@ -89,6 +125,16 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
     );
     if (!response.ok) {
       const text = await response.text();
+      // 410 Gone from POST /repos/:o/:r/issues means Issues is disabled at the
+      // repo level (GitHub feature flag, not a token scope thing). Body looks
+      // like `{"message":"Issues has been disabled in this repository.", ...}`.
+      // Surface the actionable instruction directly instead of the raw body.
+      if (response.status === 410) {
+        return {
+          ok: false,
+          error: `Issues are disabled on ${repo.owner}/${repo.name}. Enable Issues in GitHub repo settings (Settings → Features → check "Issues"), or pick a different repo in Lastest Settings → Integrations → GitHub.`,
+        };
+      }
       // A 404 from POST /repos/:o/:r/issues almost always means the token
       // lacks `issues:write` (GitHub returns 404 instead of 403 for
       // permission failures as a security measure). Probe a read endpoint
@@ -222,39 +268,10 @@ async function getStep(stepComparisonId: string) {
   return row;
 }
 
-interface IssueBodyInput {
-  reviewerNote: string | null;
-  branch: string | null;
-  commit: string | null;
-  buildId: string;
-  testName: string | null;
-  stepLabel: string | null;
-  verdict: string;
-  evidence: Array<{ layer: string; signal: string; summary: string }>;
-}
-
-function buildIssueBody(input: IssueBodyInput): string {
-  const lines: string[] = [];
-  // Reviewer's note leads — that's the human framing of what's wrong.
-  if (input.reviewerNote && input.reviewerNote.trim().length > 0) {
-    lines.push(input.reviewerNote.trim(), '', '---', '');
-  }
-  lines.push(
-    `**Branch:** \`${input.branch ?? 'unknown'}\`${input.commit ? ` @ \`${input.commit.slice(0, 7)}\`` : ''}`,
-    `**Build:** \`${input.buildId.slice(0, 8)}\``,
-    `**Test:** ${input.testName ?? 'unknown'}`,
-    `**Step:** ${input.stepLabel ?? 'unspecified'}`,
-    `**Verdict:** \`${input.verdict}\``,
-    '',
-    '## Evidence',
-    '',
-  );
-  for (const e of input.evidence) {
-    lines.push(`- **${e.layer}** (${e.signal}): ${e.summary}`);
-  }
-  lines.push('', '_Filed automatically by Lastest Verify_');
-  return lines.join('\n');
-}
+// Legacy local buildIssueBody removed in favor of buildVerifyCaseBody from
+// @/lib/integrations/github-issue-body — the new composer drills into
+// step.layers (full network/console/dom/a11y diffs) instead of only the
+// top-level evidence summaries.
 
 /**
  * Search the case's repo for existing GitHub issues. Used by the Browse tab
@@ -393,7 +410,10 @@ export async function confirmCase(
 
   // 3. Ticket lifecycle. The three kinds map to different GH actions:
   //    - regression  → file a bugfix issue (if not already linked)
-  //    - improvement → file an improvement issue (if not already linked)
+  //    - improvement → no auto-file. Reviewer can file one manually from the
+  //                    focus view's "File a new issue" card if they want. If
+  //                    an issue was already linked we still retag it so board
+  //                    filters stay correct.
   //    - done        → close any linked issue (no-op if none)
   let ticketChanged = false;
   let issueUrl: string | undefined;
@@ -402,9 +422,10 @@ export async function confirmCase(
   let issueKind: StepIssueKind | undefined;
 
   const targetKind = KIND_TO_ISSUE[kind];
+  const shouldAutoFile = kind === 'regression';
 
-  if (targetKind && !step.githubIssueNumber) {
-    // No issue yet → file one of the correct kind.
+  if (targetKind && !step.githubIssueNumber && shouldAutoFile) {
+    // No issue yet AND this kind opts into auto-file → file one.
     const result = await createIssueForCase({
       stepComparisonId,
       state: 'auto',

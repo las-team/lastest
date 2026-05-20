@@ -63,76 +63,6 @@ function EvidenceRow({ item }: { item: EvidenceItem }) {
   );
 }
 
-function NetworkLayerDetails({ network }: { network: NonNullable<StepComparison['layers']['network']> }) {
-  return (
-    <div className="space-y-2 text-sm">
-      <div className="grid grid-cols-4 gap-2">
-        <div className="rounded border border-border bg-muted/30 p-2 text-center">
-          <div className="text-xs text-muted-foreground">Added</div>
-          <div className="font-mono text-base">{network.added}</div>
-        </div>
-        <div className="rounded border border-border bg-muted/30 p-2 text-center">
-          <div className="text-xs text-muted-foreground">Removed</div>
-          <div className="font-mono text-base">{network.removed}</div>
-        </div>
-        <div className="rounded border border-border bg-muted/30 p-2 text-center">
-          <div className="text-xs text-muted-foreground">Changed</div>
-          <div className="font-mono text-base">{network.changed}</div>
-        </div>
-        <div className="rounded border border-border bg-muted/30 p-2 text-center">
-          <div className="text-xs text-muted-foreground">New errors</div>
-          <div className="font-mono text-base text-red-600">{network.newErrorCount}</div>
-        </div>
-      </div>
-      {network.newServerErrors.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-medium text-red-600">New 5xx</div>
-          <ul className="space-y-1">
-            {network.newServerErrors.slice(0, 5).map((e, i) => (
-              <li key={i} className="font-mono text-xs"><span className="text-red-600">{e.status}</span> {e.method} <span className="text-muted-foreground">{e.url}</span></li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {network.newClientErrors.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-medium text-amber-600">New 4xx</div>
-          <ul className="space-y-1">
-            {network.newClientErrors.slice(0, 5).map((e, i) => (
-              <li key={i} className="font-mono text-xs"><span className="text-amber-600">{e.status}</span> {e.method} <span className="text-muted-foreground">{e.url}</span></li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ConsoleLayerDetails({ console: c }: { console: NonNullable<StepComparison['layers']['consoleDiff']> }) {
-  return (
-    <div className="space-y-2 text-sm">
-      {c.newFingerprints.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-medium text-red-600">New errors ({c.newFingerprints.length})</div>
-          <ul className="space-y-1">
-            {c.newFingerprints.slice(0, 5).map((f, i) => (
-              <li key={i} className="font-mono text-xs text-muted-foreground">
-                <span className="text-foreground">{f.sample}</span>
-                {f.count > 1 && <span className="ml-1 text-muted-foreground">×{f.count}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {c.disappeared.length > 0 && (
-        <div>
-          <div className="mb-1 text-xs font-medium text-green-600">Resolved ({c.disappeared.length})</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function UrlLayerDetails({ url }: { url: NonNullable<StepComparison['layers']['url']> }) {
   if (url.divergedSteps.length === 0) {
     return <div className="text-sm text-muted-foreground">No URL trajectory changes.</div>;
@@ -151,28 +81,6 @@ function UrlLayerDetails({ url }: { url: NonNullable<StepComparison['layers']['u
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function A11yLayerDetails({ a11y }: { a11y: NonNullable<StepComparison['layers']['a11y']> }) {
-  return (
-    <div className="space-y-2 text-sm">
-      <div className="grid grid-cols-4 gap-2">
-        {(['critical', 'serious', 'moderate', 'minor'] as const).map(sev => (
-          <div key={sev} className="rounded border border-border bg-muted/30 p-2 text-center">
-            <div className="text-xs text-muted-foreground capitalize">{sev}</div>
-            <div className="font-mono text-base">{a11y.newBySeverity[sev]}</div>
-          </div>
-        ))}
-      </div>
-      {a11y.newViolations.length > 0 && (
-        <ul className="space-y-1">
-          {a11y.newViolations.slice(0, 8).map((v, i) => (
-            <li key={i} className="text-xs"><span className="font-medium">{v.id}</span> <span className="text-muted-foreground">({v.impact})</span> · {v.help}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -220,10 +128,47 @@ function VariableLayerDetails({ variable }: { variable: NonNullable<StepComparis
   );
 }
 
+// Network/console/a11y/dom/visual evidence is also rendered by their dedicated
+// panels lower on the diff page (RuntimeErrorsPanel, A11yViolationsPanel,
+// DomChangesPanel, the visual diff itself). We keep the verdict pill but skip
+// the row so the summary doesn't double up with the detail view below.
+const LAYERS_WITH_DEDICATED_PANEL: ReadonlySet<EvidenceLayer> = new Set<EvidenceLayer>([
+  'visual',
+  'network',
+  'console',
+  'a11y',
+  'dom',
+]);
+
+function dedupeEvidence(evidence: EvidenceItem[]): EvidenceItem[] {
+  const seen = new Set<EvidenceLayer>();
+  const out: EvidenceItem[] = [];
+  for (const item of evidence) {
+    if (LAYERS_WITH_DEDICATED_PANEL.has(item.layer)) continue;
+    if (seen.has(item.layer)) continue;
+    seen.add(item.layer);
+    out.push(item);
+  }
+  return out;
+}
+
 export function MultiLayerPanel({ comparison }: MultiLayerPanelProps) {
-  const [expanded, setExpanded] = useState(comparison.verdict !== 'green');
-  const evidence = comparison.evidence as EvidenceItem[];
   const layers = comparison.layers as StepComparison['layers'];
+  const rawEvidence = comparison.evidence as EvidenceItem[];
+  const evidence = dedupeEvidence(rawEvidence);
+  const hasUniqueDetails = !!(layers.url || layers.perf || layers.variable);
+  const [expanded, setExpanded] = useState(comparison.verdict !== 'green' && (evidence.length > 0 || hasUniqueDetails));
+
+  if (evidence.length === 0 && !hasUniqueDetails) {
+    // Nothing this panel can show that isn't already covered elsewhere — keep
+    // just the verdict pill so reviewers still see the headline.
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2 text-sm">
+        <VerdictPill verdict={comparison.verdict} />
+        <span className="text-muted-foreground">Multi-layer comparison</span>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -236,44 +181,23 @@ export function MultiLayerPanel({ comparison }: MultiLayerPanelProps) {
           <span className="font-medium">Multi-layer comparison</span>
           <VerdictPill verdict={comparison.verdict} />
           <span className="text-sm text-muted-foreground">
-            {evidence.length === 0 ? 'No layer changes' : `${evidence.length} layer(s) reporting`}
+            {evidence.length === 0 ? 'See details below' : `${evidence.length} layer(s) reporting`}
           </span>
         </div>
       </button>
       {expanded && (
         <div className="space-y-3 border-t border-border p-4">
-          {evidence.length === 0 ? (
-            <div className="text-sm text-muted-foreground">All layers match the baseline.</div>
-          ) : (
+          {evidence.length > 0 && (
             <div className="space-y-2">
               {evidence.map((e, i) => (
                 <EvidenceRow key={i} item={e} />
               ))}
             </div>
           )}
-          {/* Per-layer detail blocks */}
-          {layers.network && (
-            <details className="rounded border border-border p-3">
-              <summary className="cursor-pointer text-sm font-medium">Network details</summary>
-              <div className="mt-3"><NetworkLayerDetails network={layers.network} /></div>
-            </details>
-          )}
-          {layers.consoleDiff && (
-            <details className="rounded border border-border p-3">
-              <summary className="cursor-pointer text-sm font-medium">Console details</summary>
-              <div className="mt-3"><ConsoleLayerDetails console={layers.consoleDiff} /></div>
-            </details>
-          )}
           {layers.url && (
             <details className="rounded border border-border p-3">
               <summary className="cursor-pointer text-sm font-medium">URL trajectory details</summary>
               <div className="mt-3"><UrlLayerDetails url={layers.url} /></div>
-            </details>
-          )}
-          {layers.a11y && (
-            <details className="rounded border border-border p-3">
-              <summary className="cursor-pointer text-sm font-medium">Accessibility details</summary>
-              <div className="mt-3"><A11yLayerDetails a11y={layers.a11y} /></div>
             </details>
           )}
           {layers.perf && (

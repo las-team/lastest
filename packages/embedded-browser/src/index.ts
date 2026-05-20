@@ -335,6 +335,19 @@ async function startup(): Promise<void> {
   runnerClient.onCommand = async (command) => {
     console.log(`[Command] Received: ${command.type}`);
 
+    // Ack receipt FIRST, before any work. Server flips the runner_commands
+    // row from status='pending' (dispatched) → 'claimed' on this ack. Without
+    // it, the server's stale-claim reaper would redispatch the same command
+    // every REDISPATCH_TTL window. Fire-and-forget — even if it fails the
+    // worst case is one harmless redispatch which `activeTestIds` dedup
+    // (below) drops.
+    runnerClient?.sendMessage({
+      id: crypto.randomUUID(),
+      type: 'response:command_ack',
+      timestamp: Date.now(),
+      payload: { commandId: command.id },
+    }, { timeoutMs: 5_000 }).catch(() => { /* swallow — redispatch covers loss */ });
+
     switch (command.type) {
       case 'command:run_test': {
         if (!browser || !testExecutor || !runnerClient) break;
@@ -554,6 +567,15 @@ async function startup(): Promise<void> {
                 accessibilityTree: result.accessibilityTree,
                 extractedVariables: result.extractedVariables,
                 selectorOutcomes: result.selectorOutcomes,
+                // Per-step multi-layer comparison capture: these populate
+                // testResults.urlTrajectory / .webVitals on the host and are
+                // the only source of `layers.url` / `layers.perf` evidence in
+                // the verify focus view. Omitting them leaves URL and Perf
+                // panes empty even when the EB collected samples.
+                urlTrajectory: result.urlTrajectory,
+                webVitals: result.webVitals,
+                assertionResults: result.assertionResults,
+                storageStateSnapshot: result.storageStateSnapshot,
               },
             });
 

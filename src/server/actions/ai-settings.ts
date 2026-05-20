@@ -2,12 +2,22 @@
 
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
+import { assertSafeOutboundUrl, SsrfBlockedError } from '@/lib/security/outbound-url';
 import type { AIProvider, AgentSdkPermissionMode } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+/**
+ * Reject any user-supplied baseUrl that points at a private/internal address.
+ * Internal Ollama deployments must whitelist via env (see outbound-url.ts).
+ */
+async function assertOllamaBaseUrlSafe(url: string | null | undefined): Promise<void> {
+  if (!url) return;
+  await assertSafeOutboundUrl(url);
+}
 
 function maskSecret(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -75,6 +85,18 @@ export async function saveAISettings(data: {
   if (isMaskedValue(settingsData.aiDiffingApiKey)) delete settingsData.aiDiffingApiKey;
   if (isMaskedValue(settingsData.anthropicApiKey)) delete settingsData.anthropicApiKey;
   if (isMaskedValue(settingsData.openaiApiKey)) delete settingsData.openaiApiKey;
+
+  // SSRF guard at write-time: a team admin cannot point the app at an
+  // internal address (cloud metadata, k8s API, etc.) via Ollama baseUrls.
+  try {
+    await assertOllamaBaseUrlSafe(settingsData.ollamaBaseUrl);
+    await assertOllamaBaseUrlSafe(settingsData.aiDiffingOllamaBaseUrl);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      throw new Error(`Ollama baseUrl rejected: ${err.message}`);
+    }
+    throw err;
+  }
 
   await queries.upsertAISettings(repositoryId || null, settingsData);
 
@@ -191,6 +213,18 @@ export async function testAIConnection(
       }
 
       const baseUrl = ollamaBaseUrl || 'http://localhost:11434';
+
+      // Guard the probe — the test-connection button is reachable to any
+      // team member, so without this it doubles as an SSRF primitive.
+      // Internal Ollama must whitelist via LASTEST_ALLOW_PRIVATE_OUTBOUND.
+      try {
+        await assertSafeOutboundUrl(baseUrl);
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return { success: false, message: `Ollama baseUrl rejected: ${err.message}` };
+        }
+        throw err;
+      }
 
       try {
         const response = await fetch(`${baseUrl}/v1/chat/completions`, {

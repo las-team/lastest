@@ -70,7 +70,7 @@ export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: Explore
 
       if (result.success) {
         toast.success('Test generation started — check the activity feed for progress');
-        router.push('/home');
+        router.push('/');
       } else {
         toast.error(result.error || 'Failed to start test generation');
       }

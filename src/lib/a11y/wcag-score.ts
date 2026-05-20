@@ -50,7 +50,18 @@ export function calculateWcagScore(
     bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
 
     const weight = SEVERITY_WEIGHTS[severity] ?? 2;
-    const nodeMultiplier = Math.min(v.nodes ?? 1, 3);
+    // Tolerate legacy/raw axe shapes where `nodes` arrived as an array
+    // instead of a count — otherwise the multiplier becomes NaN and
+    // poisons the build a11y_score. Source remap is in
+    // packages/embedded-browser/src/test-executor.ts and
+    // src/lib/url-diff/capture.ts.
+    const rawNodes = v.nodes as unknown;
+    const nodeCount = Array.isArray(rawNodes)
+      ? rawNodes.length
+      : typeof rawNodes === 'number' && Number.isFinite(rawNodes)
+      ? rawNodes
+      : 1;
+    const nodeMultiplier = Math.min(nodeCount, 3);
     const level = v.wcagLevel ?? getWcagLevel(v.tags) ?? 'AA';
     const levelMultiplier = LEVEL_MULTIPLIERS[level] ?? 1.0;
 

@@ -1,6 +1,6 @@
 import Script from "next/script";
 
-export function UmamiScript() {
+export function UmamiScript({ nonce }: { nonce?: string }) {
   const websiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID;
   if (!websiteId) return null;
 
@@ -11,6 +11,7 @@ export function UmamiScript() {
       data-host-url="/_umami"
       data-do-not-track="true"
       strategy="afterInteractive"
+      nonce={nonce}
     />
   );
 }

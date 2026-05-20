@@ -68,8 +68,19 @@ export async function POST(request: Request) {
   }
 
   const token = authHeader.slice(7);
-  const validTokens = expectedToken.split(',').map(t => t.trim());
-  if (!validTokens.includes(token)) {
+  const validTokens = expectedToken.split(',').map(t => t.trim()).filter(Boolean);
+  // Constant-time match. `Array.includes` short-circuits on first hit and
+  // compares strings byte-by-byte, leaking which token in a rotation list
+  // matches via response timing.
+  const tokenBuf = Buffer.from(token);
+  let matched = false;
+  for (const candidate of validTokens) {
+    const candBuf = Buffer.from(candidate);
+    if (candBuf.length === tokenBuf.length && crypto.timingSafeEqual(candBuf, tokenBuf)) {
+      matched = true;
+    }
+  }
+  if (!matched) {
     return NextResponse.json({ error: 'Invalid system token' }, { status: 401 });
   }
 
