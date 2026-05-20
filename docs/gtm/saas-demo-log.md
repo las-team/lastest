@@ -1607,3 +1607,53 @@ Per-target status appended below each draft.
 - Sent: **NO** — paused at approval gate per user constraint
 - Reply (48h check): —
 
+
+## 2026-05-20 — Streamnode (Iter 3 — BLOCKED)
+- Source: peerpush.net `?sort=newest&view=recent`
+- Site: https://streamnode.io
+- DNS-check: ✓ resolved (Cloudflare 188.114.97.7), HTTP 200
+- AUTH_MODE: password + Cloudflare Turnstile
+- Repo: cf5f17d2-ec4f-4186-8dea-844589f3367a (streamnode-demo)
+- Test: 31c3f247-9337-44c9-bda5-cb1ec1d19615 — blocked by Turnstile on BOTH register and login: "Verification failed. Please try again." Submit silently rejected, email field cleared. Build elapsedMs 105s/118s. The EB pod's Playwright fingerprint is flagged; MCP browser passed Turnstile silently.
+- Outcome: no shippable share. Repo + test kept as a record of the bot-check blocker so the next iteration knows to flag Turnstile-protected signups at qualification time.
+- Channel: skip
+- Sent: no
+
+## 2026-05-20 — michaela / Cardamon
+- Source: peerpush.net (after X login + Streamnode pivots)
+- Site: https://cardamon.so
+- DNS-check: ✓ resolved (3 AWS IPs), HTTP 200
+- AUTH_MODE: password + confirm-password, NO captcha. Also offers Google OAuth + magic-link.
+- Lastest repo: 6a53af97-2a0b-4212-8350-bad8226afd32 (cardamon-demo)
+- Test: 0bd08244-3b33-46f9-957e-77ab1d3f5a0c (self-contained, inline register + authed workspace walk)
+- Builds: 26c9be8f (baseline, 12 screenshots, 47s) → 7f95c9e1 (pairing rerun, 0 diffs, 49s) — clean two-build pipeline.
+- Final build: 7f95c9e1-748e-47fe-8c75-d68edb42a8ba — P:1 F:0 C:0 auto-approved
+- Share: https://app.lastest.cloud/r/ubD6sKCE7Vev6_3wISSbWA (scoped to Test 2)
+- Best authed screenshot (Step 7): "Concierge" agent-build interface with sidebar (New Agent / My Agents / Schedule / Assets / Billing / Connections / My Profile) and primary interaction in motion — user clicked "Email me a daily calendar summary" suggestion, prompt echoed, AI spinner generating the agent. Plus Step 11 (Connections) which shows 50+ integrations across 16 categories.
+- Channel: X DM (founder @michaela personal handle, @buildcardamon product handle)
+- Sent: **NO** — paused at approval gate per user constraint
+- Reply (48h check): —
+
+
+## 2026-05-20 — Arlo (Iter 4 — DROPPED, not real product)
+- Source: peerpush.net
+- Site: https://arlo.fyi
+- Outcome: "Coming soon" waitlist page. No app to demo. Dropped at qualification.
+- Founder X: @uziiuzair
+
+## 2026-05-20 — JesusLopezSEO / LLMFY (Iter 4)
+- Source: peerpush.net (after Arlo's "coming soon" pivot)
+- Site: https://llmfy.ai
+- DNS-check: ✓ resolved (216.198.79.1), HTTP 200
+- AUTH_MODE: Google OAuth OR email magic-link only — no password signup
+- Lastest repo: 16d4b114-ba29-47e6-8f4f-52db2ef64098 (llmfy-demo)
+- Test: 7b257c49-9122-47d1-8bfe-ce78228e2912 (defensive Test 2 — MCP browser was locked mid-iter so wrote without inline recon; heuristic form-shape discovery + graceful fallbacks)
+- Builds: 7d768032 (baseline, 7 screenshots, 38s) → 9d2df0cc (pairing rerun, 0 diffs, 39s)
+- Final build: 9d2df0cc-ae1c-425b-b2d7-bdea41c1582c — P:1 F:0 C:0 (auto-approved)
+- Share: https://app.lastest.cloud/r/tU3jBY0jNRrGOrg01ad3hw
+- Best authed screenshot: N/A — authed walk gated. Best frame is Step 4 /auth/signin showing the magic-link-only Spanish-localized gate ("Iniciar Sesion · Continuar con Google · Enviar enlace de acceso") that the founder may not realize all English-funnel CTAs land on. Step 7 (dashboard redirect) also shows the LLMO Consultant chat widget that pops in.
+- Notable findings logged in demo notes: Marketing→auth→Spanish-only language shock, magic-link-only signup blocking automated walks, "3 free analyses no card" promise behind the auth gate
+- Channel: TBD (founder X handle: needs lookup — JesusLopezSEO suggests @JesusLopezSEO)
+- Sent: **NO** — paused at approval gate per user constraint
+- Reply (48h check): —
+
