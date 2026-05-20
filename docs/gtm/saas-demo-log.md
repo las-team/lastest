@@ -1657,3 +1657,19 @@ Per-target status appended below each draft.
 - Sent: **NO** — paused at approval gate per user constraint
 - Reply (48h check): —
 
+
+## 2026-05-20 — Kreuzberg Cloud (Iter 5)
+- Source: Hacker News Show HN (peerpush feed unchanged from iter 4)
+- Site: https://kreuzberg.dev — "Document intelligence for AI engineering workflows", 97 file formats, public beta. Has OSS engine + Cloud.
+- DNS-check: ✓ (35.219.200.7), HTTP 200
+- AUTH_MODE: passwordless — Google OAuth + GitHub OAuth + email magic-link. No password path. Same EB-isolation blocker as VitalTrends + LLMFY.
+- Lastest repo: a847adc8-0f61-4f3c-9999-53ac743c6498 (kreuzberg-demo)
+- Test: e10b2125-24fc-4a66-b7cc-e8addb391a42 (defensive heuristic — MCP browser was locked, written from curl recon only)
+- Builds: f5dab2db (baseline, 8 screenshots, 42s) → c54405f7 (pair, 0 diffs, 46s)
+- Final build: c54405f7-f32b-4605-88ba-c1ab8f0a5485 — P:1 F:0 C:0
+- Share: https://app.lastest.cloud/r/MIrH95BzyS7KP1xmWQNWRg
+- Best frame: Step 4 — signup card with Google / GitHub / email-only field, "Create an account" CTA, terms checkbox. Honest representation of the friction surface; no authed dashboard walk on tape.
+- Notable findings: 3-of-last-4 iterations (VitalTrends, LLMFY, Kreuzberg) gated by passwordless-only auth; /dashboard returns 404 instead of redirecting to signin
+- Channel: TBD (no founder X handle harvested yet — Kreuzberg's nav shows Community link but X handle wasn't on the landing's outbound)
+- Sent: **NO** — paused at approval gate
+
