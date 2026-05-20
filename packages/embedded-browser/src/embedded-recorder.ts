@@ -5,14 +5,13 @@
  * Key differences:
  * - Receives an existing Browser instance (does NOT launch one)
  * - Creates a fresh BrowserContext + Page per recording session (full isolation)
- * - Runs setup code via executeSetupCode() before injecting recording script
+ * - Setup runs upstream via testExecutor.runSetup; captured storageState is seeded into the recording context
  * - Closes the recording context/page on stop (browser stays alive)
  * - Sends events via callback
  */
 
 import type { Browser, Page, BrowserContext } from 'playwright';
 import { browserRecordingScript } from './browser-script.js';
-import { executeSetupCode } from './setup-executor.js';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -26,6 +25,10 @@ interface StartRecordingPayload {
   pointerGestures?: boolean;
   cursorFPS?: number;
   setupSteps?: Array<{ code: string; codeHash: string }>;
+  // Captured storageState from running setupSteps via testExecutor.runSetup
+  // (the same path test runs use). Seeded into the recording context so
+  // cookies/localStorage from auth setup are present from the first frame.
+  storageStateJson?: string;
 }
 
 interface RecordingSelectorMatch {
@@ -79,11 +82,24 @@ export class EmbeddedRecorder {
 
     const viewport = payload.viewport ?? { width: 1280, height: 720 };
 
-    // Create isolated context + page
+    // Parse storageState from setup chain (test runs use the same parser).
+    // Bad JSON falls back to a fresh context with a warning rather than
+    // failing the whole recording — the user can re-run setup separately.
+    let parsedStorageState: NonNullable<Parameters<Browser['newContext']>[0]>['storageState'] | undefined;
+    if (payload.storageStateJson) {
+      try {
+        parsedStorageState = JSON.parse(payload.storageStateJson);
+      } catch (err) {
+        console.warn(`  [EmbeddedRecorder] Bad storageStateJson, recording starts un-authed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // Create isolated context + page (seeded with setup-captured auth if any)
     this.context = await browser.newContext({
       viewport,
       ignoreHTTPSErrors: true,
       acceptDownloads: true,
+      ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
     });
     this.page = await this.context.newPage();
     await this.page.addInitScript(() => {
@@ -141,23 +157,11 @@ export class EmbeddedRecorder {
       }
     });
 
-    // Run setup steps FIRST (before navigating to target). Setup typically
-    // authenticates by navigating to /login and submitting, leaving the page
-    // on a post-login URL. We then navigate to payload.targetUrl so recording
-    // begins at the URL the user asked for, regardless of what setup did.
-    if (payload.setupSteps?.length) {
-      for (const step of payload.setupSteps) {
-        try {
-          console.log(`  [EmbeddedRecorder] Running setup step...`);
-          await executeSetupCode(this.page, step.code, this.baseOrigin);
-        } catch (err) {
-          console.error(`  [EmbeddedRecorder] Setup step failed:`, err);
-          throw err;
-        }
-      }
-    }
-
-    // Navigate to target URL (after setup has established session state)
+    // Setup chain already ran via testExecutor.runSetup in the caller
+    // (packages/embedded-browser/src/index.ts case 'command:start_recording')
+    // and its captured storageState is seeded into this.context above. We
+    // just navigate to the target URL — cookies / localStorage from auth
+    // setup are present from the first frame.
     await this.page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Set up recording event capture (exposeFunction + inject script)

@@ -669,8 +669,38 @@ async function startup(): Promise<void> {
         await inputHandler?.detach();
 
         try {
-          // Start recording on a fresh context+page
-          const recordingPage = await recorder.start(browser, payload, (events) => {
+          // Run setup chain via the SAME path test runs use (testExecutor.runSetup).
+          // The recorder previously ran setup inline via setup-executor.ts, which is
+          // a stripped-down implementation missing features (extractTestBody,
+          // stripTypeAnnotations, removeFunctionDefinition, full expect/locator
+          // helpers, soft-action stepLogger) — setup that worked in test runs
+          // would silently no-op in recordings. Now each step runs in a real
+          // setup context, returns storageStateJson, and we hand the LAST
+          // step's storageState to the recording context.
+          let setupStorageStateJson: string | undefined;
+          if (testExecutor && payload.setupSteps?.length) {
+            for (let i = 0; i < payload.setupSteps.length; i++) {
+              const step = payload.setupSteps[i]!;
+              const result = await testExecutor.runSetup(browser, {
+                setupId: `rec-${payload.sessionId.slice(0, 8)}-${i}`,
+                code: step.code,
+                codeHash: step.codeHash,
+                targetUrl: payload.targetUrl,
+                timeout: 120_000,
+                viewport: payload.viewport,
+              });
+              if (result.status !== 'passed') {
+                throw new Error(`Setup step ${i + 1}/${payload.setupSteps.length} failed: ${result.error ?? 'unknown'}`);
+              }
+              if (result.storageStateJson) {
+                setupStorageStateJson = result.storageStateJson;
+              }
+            }
+          }
+
+          // Start recording on a fresh context+page, seeded with the captured
+          // setup storageState if any step produced one.
+          const recordingPage = await recorder.start(browser, { ...payload, storageStateJson: setupStorageStateJson }, (events) => {
             lastRecordingEventTime = Date.now();
             runnerClient!.sendMessage({
               id: crypto.randomUUID(),

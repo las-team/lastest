@@ -1573,3 +1573,37 @@ Per-target status appended below each draft.
 - Sent: not yet
 
 > Footnote: X / Twitter sourcing requires login state this MCP session doesn't have. Iteration 1 pivoted to IAC. If the loop is to keep sourcing from X specifically, log @HeroLastest into x.com once in this MCP browser context so storage persists across iterations.
+
+## 2026-05-20 — @posttrail / PostTrail
+- Source: peerpush.net `?sort=newest` (X login unavailable in MCP this iter — pivoted to peerpush per fallback discovery list)
+- Site: https://posttrail.social (marketing) + https://posttrail.cloud (app)
+- DNS-check: both apex + app subdomain resolved + HTTP 200
+- AUTH_MODE: password (email+password only — no OAuth, no captcha, no magic-link)
+- Lastest repo: 97109bd5-e576-4e1f-a358-57a201acd862 (posttrail-demo)
+- Test: 92e38e70-449f-4bf8-aad9-ee571a6ec0ef (self-contained, no chain per user constraint)
+- Builds: 2b1075d3 (baseline gen) → 1dd2bb25 (pairing) → e18be413 (fixed wait + real result) — needed 3 builds to land the 14-post screenshot (original wait regex matched page subtitle and short-circuited; updated to wait for `Generating` button text to detach)
+- Final build: e18be413-0884-4e52-8b4e-099fdecf6bb1 — P:1 F:0 C:0 (auto-approved), elapsed 175s
+- Share: https://app.lastest.cloud/r/CopQgVxZwN8maEVOXD-Z_A (scoped to Test 2)
+- Best authed screenshot (Step 12): Content Calendar with stats "14 Total / 6 LinkedIn / 8 X / 0 Ready / 0 Posted" + first generated LinkedIn Hot Take post about PostTrail's own PeerPush listing (recursive demo)
+- Channel: TBD (X handle confirmed @posttrail; LinkedIn/email/Reddit handle unverified)
+- Sent: **NO** — paused at approval gate per user constraint
+- Reply (48h check): —
+
+
+## 2026-05-20 — Daniel Andrade / VitalTrends
+- Source: Hacker News Show HN (X login was still unavailable in MCP this iter — pivoted to HN Show HN which is consistently fresh + login-free)
+- Site: https://vitaltrends.net
+- DNS-check: resolved (172.67.210.80 cloudflare) + HTTP 200
+- AUTH_MODE: password (Laravel-style, with confirm-password field + Google OAuth offered as alternative)
+- Auth automatable: partial — verify-email gate is unreachable from EB pod (no Gmail+suffix path to lastest.cloud mailbox). Used the founder's own public /demo route to walk the authed Control Center surface instead.
+- Lastest repo: e374a3e5-5be7-4e5c-a2e9-48e982cd777a (vitaltrends-demo)
+- Test: 037d8298-4977-4692-9572-b21608e3e9a2 (self-contained, no chain; honest about register-friction then pivots to /demo)
+- Builds: 1c824a69 (baseline gen, 11 screenshots, 79s) → 06ad886e (pairing rerun, 0 diffs, 83s)
+- Final build: 06ad886e-8b1f-46aa-8ff9-2b2722754081 — P:1 F:0 C:0 (auto-approved after pairing)
+- Share: https://app.lastest.cloud/r/-GzfglQR_k4MfLv2kiuv1g (scoped to Test 2)
+- Best authed screenshot (Step 7): /demo Control Center showing "Good morning, John." with full unified dashboard — Today Synthesis Clear, Recovery Consensus +33/+5pts (WHOOP+Oura agree), Sleep Confidence 6.6h, Training Stimulus → Recovery Response 1002.2/127, Last Workouts rings (Cycling/Weightlifting/Running), Stress vs Strain, Body Composition × Training, Chronic Trends, Behavioral Patterns, Data Provenance row.
+- Surprise finding (logged in demo notes): Email validator strips plus-aliases — every `viktor+anything@lastest.cloud` returns "email already exists" on register, suggesting Laravel User unique-constraint normalization. Real friction signal for the founder.
+- Channel: X (founder handles: app @vitaltrends_app, personal Daniel Andrade @ danielandrade.net)
+- Sent: **NO** — paused at approval gate per user constraint
+- Reply (48h check): —
+
