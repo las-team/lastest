@@ -11,6 +11,7 @@ import * as queries from '@/lib/db/queries';
 import { requireRepoAccess } from '@/lib/auth';
 import { generateWithAI } from '@/lib/ai';
 import { extractCodeFromResponse } from '@/lib/ai/prompts';
+import { runValidationWithRetry } from '@/lib/ai/validation-retry';
 import { getAIConfig, buildSeedFixture } from './agent-context';
 
 // ---------------------------------------------------------------------------
@@ -115,23 +116,36 @@ ${seed.seedPrompt}`;
 
     const useMCP = config.provider !== 'claude-agent-sdk';
 
-    const response = await generateWithAI(config, prompt, ENHANCER_SYSTEM_PROMPT, {
-      repositoryId,
-      actionType: 'enhance_test',
-      useMCP,
-      ...(useMCP && {
-        mcpConfig: {
-          servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-        },
-      }),
-    });
+    const callLLM = async (userPrompt: string): Promise<string> => {
+      const response = await generateWithAI(config, userPrompt, ENHANCER_SYSTEM_PROMPT, {
+        repositoryId,
+        actionType: 'enhance_test',
+        useMCP,
+        ...(useMCP && {
+          mcpConfig: {
+            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
+          },
+        }),
+      });
+      return extractCodeFromResponse(response) ?? '';
+    };
 
-    const code = extractCodeFromResponse(response);
-    if (!code) {
+    const initial = await callLLM(prompt);
+    if (!initial) {
       return { success: false, error: 'Enhancer agent produced no enhanced code' };
     }
 
-    return { success: true, code };
+    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
+      console.log(`[EnhancerAgent] Validation failed, retry ${attempt}/2 with feedback`);
+      const retryPrompt = `${prompt}\n\n---\n\nPrevious enhancement attempt failed validation. ${feedback}\n\nRegenerate the enhanced test code addressing the validation errors. Output ONLY the corrected code block.`;
+      return callLLM(retryPrompt);
+    });
+
+    if (!validated.valid) {
+      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+    }
+
+    return { success: true, code: validated.code };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Enhancer agent failed';
     return { success: false, error: message };

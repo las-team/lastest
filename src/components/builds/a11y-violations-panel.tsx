@@ -35,28 +35,30 @@ export function A11yViolationsPanel({ violations }: A11yViolationsPanelProps) {
 
   const criticalCount = violations.filter(v => v.impact === 'critical').length;
   const seriousCount = violations.filter(v => v.impact === 'serious').length;
+  const hasSevere = criticalCount + seriousCount > 0;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-warning" />
-        <span className="font-medium">Accessibility Issues</span>
-        <Badge variant="secondary" className="ml-auto">
-          {violations.length} {violations.length === 1 ? 'issue' : 'issues'}
+    <details className={`mt-2 border rounded-lg ${hasSevere ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30' : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30'}`}>
+      <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
+        <AlertTriangle className={`w-4 h-4 shrink-0 ${hasSevere ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+        <span className={`font-medium ${hasSevere ? 'text-red-800 dark:text-red-200' : 'text-amber-800 dark:text-amber-200'}`}>
+          Accessibility Issues
+        </span>
+        {hasSevere && (
+          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+            {criticalCount + seriousCount} critical/serious
+          </Badge>
+        )}
+        <Badge variant="secondary" className="ml-auto text-xs">
+          {violations.length}
         </Badge>
-      </div>
+      </summary>
 
-      {(criticalCount > 0 || seriousCount > 0) && (
-        <div className="p-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
-          <strong>{criticalCount + seriousCount}</strong> critical/serious issues found
-        </div>
-      )}
-
-      <div className="space-y-2 max-h-64 overflow-y-auto">
+      <div className="px-2.5 pb-2.5 space-y-2 max-h-64 overflow-y-auto">
         {sortedViolations.map((violation, index) => (
           <div
             key={`${violation.id}-${index}`}
-            className="p-3 border rounded-lg space-y-2"
+            className="p-3 border rounded-lg space-y-2 bg-background/60"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -82,6 +84,6 @@ export function A11yViolationsPanel({ violations }: A11yViolationsPanelProps) {
           </div>
         ))}
       </div>
-    </div>
+    </details>
   );
 }

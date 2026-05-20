@@ -42,6 +42,7 @@ import {
   type IgnoreRegionRect,
 } from '@/components/diff/slider-comparison';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
+import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import type {
   StepComparison,
   StepLayerFeedback,
@@ -83,6 +84,16 @@ interface FocusViewProps {
   /** Pull a fresh /verify-status snapshot. Used after Close-issue so the
    *  chip flips to `closed` without a hard reload. */
   onRefresh?: () => void;
+  /** Build-level WCAG 2.2 AA roll-up + repo trend, rendered at the top of
+   *  the A11y pane so reviewers see the same compliance card they get on
+   *  the build detail page without leaving Verify. */
+  buildA11y?: {
+    score: number | null;
+    violationCount: number | null;
+    criticalCount: number | null;
+    totalRulesChecked: number | null;
+    trend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  };
 }
 
 type CompareTab = EvidenceLayer | 'text' | 'run';
@@ -762,6 +773,7 @@ export function FocusView(props: FocusViewProps) {
             runStepCells={runStepCells}
             activeStepId={activeCase?.step.id ?? null}
             onSelectStep={props.onSelect}
+            buildA11y={props.buildA11y}
             regionsCtx={{
               showRegions,
               setShowRegions,
@@ -1182,9 +1194,11 @@ interface ComparePaneProps {
   runStepCells: RunStepCell[];
   activeStepId: string | null;
   onSelectStep: (stepId: string) => void;
+  /** Build-level a11y roll-up + repo trend forwarded to <A11yPane>. */
+  buildA11y?: FocusViewProps['buildA11y'];
 }
 
-function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep }: ComparePaneProps) {
+function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep, buildA11y }: ComparePaneProps) {
   if (!step) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
@@ -1223,7 +1237,7 @@ function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runSte
   if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
   if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'console') return <ConsolePane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} />;
+  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} buildA11y={buildA11y} />;
   if (tab === 'perf') return <PerfPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'url') return <UrlPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'variable') return <VariablePane step={step} result={result} clean={layerState === 'clean'} />;
@@ -2817,12 +2831,21 @@ function ConsolePane({ step, result, clean }: { step: StepComparison; result: Te
   );
 }
 
-function A11yPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function A11yPane({ step, result, clean, buildA11y }: { step: StepComparison; result: TestResultLite | null; clean: boolean; buildA11y?: FocusViewProps['buildA11y'] }) {
   const a = step.layers?.a11y;
   const violations = result?.a11yViolations ?? [];
   const passes = result?.a11yPassesCount ?? null;
   return (
     <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {buildA11y && buildA11y.score != null && (
+        <A11yComplianceCard
+          score={buildA11y.score}
+          violationCount={buildA11y.violationCount}
+          criticalCount={buildA11y.criticalCount}
+          totalRulesChecked={buildA11y.totalRulesChecked}
+          trend={buildA11y.trend}
+        />
+      )}
       {clean && <CleanBanner message={`No new a11y issues — ${violations.length} violation${violations.length === 1 ? '' : 's'} captured${passes != null ? `, ${passes} rules passed` : ''}`} />}
       {a && (
         <>

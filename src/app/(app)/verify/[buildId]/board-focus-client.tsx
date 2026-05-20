@@ -113,6 +113,10 @@ interface BoardFocusClientProps {
   repositoryId: string | null;
   branches: string[];
   defaultBranch: string | null;
+  /** Per-repo a11y score history (most recent N builds) used to render the
+   *  Recent-trend sparkline inside the focus view's A11y pane. Mirrors the
+   *  data shape consumed by `<A11yComplianceCard>` on the build detail page. */
+  a11yTrend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
 }
 
 type Mode = 'board' | 'focus';
@@ -868,6 +872,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           onDecideLayer={decideOneLayer}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
           onRefresh={refreshFromServer}
+          buildA11y={{
+            score: props.build.a11yScore,
+            violationCount: props.build.a11yViolationCount,
+            criticalCount: props.build.a11yCriticalCount,
+            totalRulesChecked: props.build.a11yTotalRulesChecked,
+            trend: props.a11yTrend,
+          }}
         />
       )}
 
