@@ -46,10 +46,11 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
   }
   const repositorySetupSteps = defaultSteps.map(s => ({
     id: s.id,
-    stepType: s.stepType as 'test' | 'script',
+    stepType: s.stepType as 'test' | 'script' | 'storage_state',
     testId: s.testId,
     scriptId: s.scriptId,
-    name: s.testName || s.scriptName || 'Unknown',
+    storageStateId: s.storageStateId,
+    name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
   }));
   const availableTests = availableTestsRaw.map(t => ({ id: t.id, name: t.name }));
   const availableScripts = availableScriptsRaw.map(s => ({ id: s.id, name: s.name }));

@@ -2,7 +2,7 @@
 
 import type { AssertionType, WaitParams } from '@/lib/playwright/types';
 import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
-import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript } from '@/lib/db/queries';
+import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript, getRepository, getStorageState, getDefaultSetupSteps } from '@/lib/db/queries';
 import { requireCapability, requireRepoCapability } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
 import { v4 as uuid } from 'uuid';
@@ -25,7 +25,12 @@ export async function startRecording(
   url: string,
   repositoryId?: string | null,
   runnerId?: string,
-  setupOptions?: { testId?: string | null; scriptId?: string | null; steps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }> },
+  setupOptions?: {
+    testId?: string | null;
+    scriptId?: string | null;
+    steps?: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>;
+    rerecordTestId?: string | null;
+  },
   _storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
   const session = await requireCapability('recording:write');
@@ -74,11 +79,89 @@ export async function startRecording(
   // Create the remote recording session on the server
   createRemoteRecordingSession(sessionId, runnerId, repositoryId ?? null, url, selectorPriority);
 
-  // Resolve setup steps to code (runners have no DB access)
-  let resolvedSetupSteps: Array<{ code: string; codeHash: string }> | undefined;
+  // Resolve setup steps to code (runners have no DB access).
+  //
+  // Mirrors `setup-orchestrator.ts:runTestSetup` so recording sees the same
+  // chain as test execution. Order of precedence:
+  //   1. Steps explicitly provided by the client (recording UI)
+  //   2. When re-recording: the existing test's setupOverrides on top of
+  //      `defaultSetupSteps`, falling back to its legacy setupTestId/setupScriptId
+  //   3. Repo `defaultSetupSteps` (multi-step) for fresh recordings
+  //   4. Legacy `repo.defaultSetupTestId` / `defaultSetupScriptId`
+  //
+  // Storage-state steps are realised as a synthesized cookie-injection setup
+  // script — matches the orchestrator's `context.addCookies` behaviour without
+  // requiring a protocol change.
+  type ChainStep = { stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null };
+  const stepsToResolve: ChainStep[] = [];
+
   if (setupOptions?.steps?.length) {
+    stepsToResolve.push(...setupOptions.steps);
+  } else if (setupOptions?.testId || setupOptions?.scriptId) {
+    stepsToResolve.push({
+      stepType: setupOptions.testId ? 'test' : 'script',
+      testId: setupOptions.testId ?? null,
+      scriptId: setupOptions.scriptId ?? null,
+    });
+  } else if (setupOptions?.rerecordTestId) {
+    // Re-record: resolve the existing test's chain (defaults + overrides, or legacy)
+    const existing = await getTest(setupOptions.rerecordTestId);
+    if (existing?.repositoryId) {
+      const defaults = await getDefaultSetupSteps(existing.repositoryId);
+      if (defaults.length > 0) {
+        const overrides = existing.setupOverrides;
+        const skipped = new Set(overrides?.skippedDefaultStepIds ?? []);
+        for (const d of defaults) {
+          if (skipped.has(d.id)) continue;
+          stepsToResolve.push({ stepType: d.stepType as ChainStep['stepType'], testId: d.testId, scriptId: d.scriptId, storageStateId: d.storageStateId });
+        }
+        for (const e of overrides?.extraSteps ?? []) {
+          stepsToResolve.push({ stepType: e.stepType as ChainStep['stepType'], testId: e.testId ?? null, scriptId: e.scriptId ?? null, storageStateId: (e as { storageStateId?: string | null }).storageStateId ?? null });
+        }
+      } else if (existing.setupTestId) {
+        stepsToResolve.push({ stepType: 'test', testId: existing.setupTestId });
+      } else if (existing.setupScriptId) {
+        stepsToResolve.push({ stepType: 'script', scriptId: existing.setupScriptId });
+      }
+    }
+  } else if (repositoryId) {
+    // Fresh recording: pick up whatever the repo declares as the default chain
+    const defaults = await getDefaultSetupSteps(repositoryId);
+    if (defaults.length > 0) {
+      for (const d of defaults) {
+        stepsToResolve.push({ stepType: d.stepType as ChainStep['stepType'], testId: d.testId, scriptId: d.scriptId, storageStateId: d.storageStateId });
+      }
+    } else {
+      const repo = await getRepository(repositoryId);
+      if (repo?.defaultSetupTestId) {
+        stepsToResolve.push({ stepType: 'test', testId: repo.defaultSetupTestId });
+      } else if (repo?.defaultSetupScriptId) {
+        stepsToResolve.push({ stepType: 'script', scriptId: repo.defaultSetupScriptId });
+      }
+    }
+  }
+
+  let resolvedSetupSteps: Array<{ code: string; codeHash: string }> | undefined;
+  if (stepsToResolve.length > 0) {
     resolvedSetupSteps = [];
-    for (const step of setupOptions.steps) {
+    for (const step of stepsToResolve) {
+      if (step.stepType === 'storage_state') {
+        if (!step.storageStateId) continue;
+        const ss = await getStorageState(step.storageStateId);
+        if (!ss?.storageStateJson) continue;
+        try {
+          const parsed = JSON.parse(ss.storageStateJson);
+          const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : [];
+          if (cookies.length === 0) continue;
+          // Synthesize a one-line setup script that re-uses the orchestrator
+          // contract: `export async function setup(page)` with `page.context().addCookies`.
+          const code = `export async function setup(page) { await page.context().addCookies(${JSON.stringify(cookies)}); }`;
+          resolvedSetupSteps.push({ code, codeHash: '' });
+        } catch (err) {
+          console.warn(`[Recording] Failed to parse storage state ${step.storageStateId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        continue;
+      }
       const id = step.stepType === 'test' ? step.testId : step.scriptId;
       if (!id) continue;
       const record = step.stepType === 'test' ? await getTest(id) : await getSetupScript(id);
@@ -87,14 +170,10 @@ export async function startRecording(
         resolvedSetupSteps.push({ code: record.code, codeHash: typeof hash === 'string' ? hash : '' });
       }
     }
-  } else if (setupOptions?.testId || setupOptions?.scriptId) {
-    const id = setupOptions.testId || setupOptions.scriptId;
-    const record = setupOptions.testId ? await getTest(id!) : await getSetupScript(id!);
-    if (record?.code) {
-      const hash = (record as Record<string, unknown>).codeHash;
-      resolvedSetupSteps = [{ code: record.code, codeHash: typeof hash === 'string' ? hash : '' }];
-    }
+    if (resolvedSetupSteps.length === 0) resolvedSetupSteps = undefined;
   }
+
+  console.log(`[Recording] Setup chain: ${stepsToResolve.length} step(s) declared, ${resolvedSetupSteps?.length ?? 0} resolved with code ${traceTag}`);
 
   // Queue start_recording command to the runner
   const command = createMessage<StartRecordingCommand>('command:start_recording', {

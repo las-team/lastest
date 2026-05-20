@@ -308,6 +308,19 @@ export function FocusView(props: FocusViewProps) {
   const goNext = useCallback(() => {
     if (activeIdx >= 0 && activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
   }, [activeIdx, visibleCases, props]);
+  // After approving via hotkey we want the cursor to land on the next case
+  // that still needs a decision — skipping anything already in `done` so the
+  // reviewer never has to manually scroll past verified cases.
+  const goNextUndecided = useCallback(() => {
+    if (activeIdx < 0) return;
+    for (let i = activeIdx + 1; i < visibleCases.length; i++) {
+      if (visibleCases[i].status !== 'done') {
+        props.onSelect(visibleCases[i].step.id);
+        return;
+      }
+    }
+    if (activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
+  }, [activeIdx, visibleCases, props]);
 
   const decideOneLayer = (layer: EvidenceLayer, status: 'approved' | 'rejected' | 'snoozed') => {
     if (!activeCase) return;
@@ -337,11 +350,24 @@ export function FocusView(props: FocusViewProps) {
   const handleOK = useCallback(() => {
     if (!activeCase) return;
     props.onMarkDecision(activeCase.step.id, 'approved');
-  }, [activeCase, props]);
+    goNextUndecided();
+  }, [activeCase, props, goNextUndecided]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Skip hotkeys when the user is genuinely typing — text-like inputs,
+      // textareas, contenteditable. The comparison `<input type="range">`
+      // slider is also an HTMLInputElement, so a blanket instanceof check
+      // would swallow every hotkey once the slider grabs focus.
+      const target = e.target;
+      if (target instanceof HTMLInputElement) {
+        const textTypes = ['text', 'search', 'email', 'password', 'url', 'tel', 'number'];
+        if (textTypes.includes(target.type)) return;
+      } else if (target instanceof HTMLTextAreaElement) {
+        return;
+      } else if (target instanceof HTMLElement && target.isContentEditable) {
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case 'e':

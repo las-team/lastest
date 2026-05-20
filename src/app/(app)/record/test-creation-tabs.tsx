@@ -18,9 +18,10 @@ type RecordingStep = 'setup' | 'recording' | 'saving';
 
 interface SetupStepInfo {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   testId: string | null;
   scriptId: string | null;
+  storageStateId?: string | null;
   name: string;
 }
 

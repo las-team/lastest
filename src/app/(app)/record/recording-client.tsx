@@ -78,9 +78,10 @@ import { Events } from '@/lib/analytics/events';
 
 interface SetupStepInfo {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: 'test' | 'script' | 'storage_state';
   testId: string | null;
   scriptId: string | null;
+  storageStateId?: string | null;
   name: string;
 }
 
@@ -670,14 +671,22 @@ export function RecordingClient({
       }
 
       {
-        // Start recorder with optional setup
+        // Start recorder with optional setup.
+        //
+        // When the user has the toggle on but no UI-visible steps, still pass
+        // setupOptions through (with rerecordTestId where relevant) so the
+        // server can resolve the legacy `repo.defaultSetupTestId` / per-test
+        // `setupTestId` chains the recording UI doesn't surface.
         const activeDefaults = repositorySetupSteps.filter(s => !skippedDefaultStepIds.has(s.id));
         const allSteps = [
-          ...activeDefaults.map(s => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
-          ...extraSetupSteps.map(s => ({ stepType: s.stepType, testId: s.testId ?? null, scriptId: s.scriptId ?? null })),
+          ...activeDefaults.map(s => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId, storageStateId: s.storageStateId ?? null })),
+          ...extraSetupSteps.map(s => ({ stepType: s.stepType, testId: s.testId ?? null, scriptId: s.scriptId ?? null, storageStateId: null })),
         ];
-        const setupOptions = runSetupBeforeRecording && allSteps.length > 0
-          ? { steps: allSteps }
+        const setupOptions = runSetupBeforeRecording
+          ? {
+              steps: allSteps.length > 0 ? allSteps : undefined,
+              rerecordTestId: isRerecording ? rerecordTest?.id ?? null : null,
+            }
           : undefined;
 
         const result = await startRecording(url, repositoryId, 'auto', setupOptions, selectedStorageStateId ?? undefined);
@@ -1179,7 +1188,11 @@ export function RecordingClient({
                       {runSetupBeforeRecording && (
                         <div className="border-t px-3 pb-3">
                           <RecordingSetupPicker
-                            defaultSteps={repositorySetupSteps}
+                            // RecordingSetupPicker only renders test/script
+                            // rows. storage_state defaults still flow through
+                            // to startRecording via `repositorySetupSteps`;
+                            // they just don't show up as toggleable here.
+                            defaultSteps={repositorySetupSteps.filter((s): s is SetupStepInfo & { stepType: 'test' | 'script' } => s.stepType !== 'storage_state')}
                             extraSteps={extraSetupSteps}
                             skippedDefaultStepIds={skippedDefaultStepIds}
                             availableTests={availableTests}
