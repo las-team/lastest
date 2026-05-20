@@ -1344,13 +1344,35 @@ export class EmbeddedTestExecutor {
               const AxeBuilder = (mod as unknown as { default?: unknown; AxeBuilder?: unknown }).default
                 ?? (mod as unknown as { AxeBuilder?: unknown }).AxeBuilder
                 ?? mod;
+              type AxeRawViolation = {
+                id: string;
+                impact: 'critical' | 'serious' | 'moderate' | 'minor';
+                description: string;
+                help: string;
+                helpUrl: string;
+                nodes: unknown[];
+                tags?: string[];
+              };
               type AxeBuilderCtor = new (opts: { page: Page }) => {
-                withTags(tags: string[]): { analyze(): Promise<{ violations: unknown[]; passes: unknown[] }> };
+                withTags(tags: string[]): { analyze(): Promise<{ violations: AxeRawViolation[]; passes: unknown[] }> };
               };
               const builder = new (AxeBuilder as unknown as AxeBuilderCtor)({ page });
               const axeResults = await builder.withTags(['wcag2a', 'wcag2aa']).analyze();
-              const violations = Array.isArray(axeResults.violations)
-                ? axeResults.violations as NonNullable<EmbeddedTestResult['a11yViolations']>
+              // axe-core returns `nodes` as an Array<NodeResult>, but our
+              // schema (and wcag-score) expect a count. Without this remap
+              // `Math.min(array, 3)` coerces to NaN, poisoning the build
+              // a11y_score and rejecting the update at the Postgres layer.
+              // Mirrors src/lib/url-diff/capture.ts:102.
+              const violations: NonNullable<EmbeddedTestResult['a11yViolations']> = Array.isArray(axeResults.violations)
+                ? axeResults.violations.map((v) => ({
+                    id: v.id,
+                    impact: v.impact,
+                    description: v.description,
+                    help: v.help,
+                    helpUrl: v.helpUrl,
+                    nodes: Array.isArray(v.nodes) ? v.nodes.length : 0,
+                    tags: v.tags,
+                  }))
                 : [];
               a11yViolations = violations;
               a11yPassesCount = Array.isArray(axeResults.passes) ? axeResults.passes.length : 0;
