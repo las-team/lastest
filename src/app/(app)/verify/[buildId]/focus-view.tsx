@@ -54,6 +54,8 @@ import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 interface AreaLite { id: string; name: string }
 interface TestLite { id: string; name: string; functionalAreaId: string | null }
 
+type ErrorMode = 'fail' | 'warn' | 'ignore';
+
 interface FocusViewProps {
   buildId: string;
   steps: StepComparison[];
@@ -63,6 +65,10 @@ interface FocusViewProps {
   changedAreaIds: Set<string>;
   visualByStepKey: Map<string, VisualDiffLite>;
   testResultById: Map<string, TestResultLite>;
+  /** Repo-level error mode toggles. Drive how the Network and Console layer
+   *  tabs render their high-signal evidence: `fail` → red X (test-failing),
+   *  `warn` → amber ⚠ (logged, not failing), `ignore` → nothing. */
+  errorModes: { network: ErrorMode; console: ErrorMode };
   statusFilter: Set<CaseStatus>;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
@@ -160,6 +166,25 @@ interface CaseRow {
   result: TestResultLite | null;
 }
 
+type RunStepStatus = 'passed' | 'changed' | 'flaky' | 'failed' | 'notrun';
+
+interface RunStepCell {
+  stepId: string;
+  stepIndex: number;
+  stepLabel: string | null;
+  status: RunStepStatus;
+}
+
+// Visual treatment per step status. `notrun` is intentionally muted: it means
+// the runner died before reaching the step, not "passed".
+const RUN_STEP_STYLE: Record<RunStepStatus, { dot: string; label: string }> = {
+  passed:  { dot: 'var(--c-teal)',  label: 'passed' },
+  changed: { dot: 'var(--c-amber)', label: 'changed' },
+  flaky:   { dot: 'var(--c-amber)', label: 'flaky' },
+  failed:  { dot: 'var(--c-red)',   label: 'failed' },
+  notrun:  { dot: 'var(--fg-3)',    label: 'not run' },
+};
+
 export function FocusView(props: FocusViewProps) {
   const [tab, setTab] = useState<CompareTab>('visual');
   // Issue panel is hidden by default — only opens when the reviewer takes a
@@ -226,6 +251,45 @@ export function FocusView(props: FocusViewProps) {
 
   const activeCase = visibleCases.find((c) => c.step.id === props.selectedStepId) ?? visibleCases[0] ?? null;
   const activeIdx = activeCase ? visibleCases.findIndex((c) => c.step.id === activeCase.step.id) : -1;
+
+  // Per-test step strip for the Run tab. Derives one cell per step of the
+  // active test from `cases` (the full, unfiltered list — filter state on
+  // the rail shouldn't hide steps from the test's own Run view), in the same
+  // (testName, stepIndex, stepLabel) order as the sorted cases. Status per
+  // step combines step.verdict + visual classification + lastReachedStep so
+  // a runner that died mid-test surfaces the dying step in red and trailing
+  // steps as "not run" instead of "passed".
+  const runStepCells = useMemo<RunStepCell[]>(() => {
+    const tid = activeCase?.test?.id;
+    if (!tid) return [];
+    const rows = cases.filter((c) => c.test?.id === tid);
+    if (rows.length === 0) return [];
+    const cells: RunStepCell[] = rows.map((c, i) => {
+      const stepIdx = c.step.stepIndex ?? i;
+      const cls = c.visual?.classification;
+      let status: RunStepStatus = 'passed';
+      if (c.step.verdict === 'red') status = 'failed';
+      else if (cls === 'changed') status = 'changed';
+      else if (cls === 'flaky') status = 'flaky';
+      else if (c.step.verdict === 'yellow') status = 'changed';
+      return { stepId: c.step.id, stepIndex: stepIdx, stepLabel: c.step.stepLabel, status };
+    });
+
+    const result = rows[0]?.result ?? null;
+    const lastReached = result?.lastReachedStep ?? null;
+    const isFailed = result?.status === 'failed';
+    if (lastReached != null && isFailed) {
+      for (const cell of cells) {
+        if (cell.stepIndex > lastReached + 1) {
+          cell.status = 'notrun';
+        } else if (cell.stepIndex === lastReached + 1 && cell.status === 'passed') {
+          // Dying step: runner died before any verdict could be computed for it.
+          cell.status = 'failed';
+        }
+      }
+    }
+    return cells;
+  }, [cases, activeCase?.test?.id]);
 
   const goPrev = useCallback(() => {
     if (activeIdx > 0) props.onSelect(visibleCases[activeIdx - 1].step.id);
@@ -486,6 +550,14 @@ export function FocusView(props: FocusViewProps) {
             const layerState: LayerState = activeCase
               ? classifyLayer(k.id, activeCase.step, activeCase.result, activeCase.visual)
               : 'absent';
+            // Matching evidence item (if any) carries the human-readable
+            // reason + signal that drives the red-X "broken" treatment. Run
+            // and Text aren't EvidenceLayer ids so they skip this lookup;
+            // Run derives "broken" from result.status, Text from the visual
+            // diff summary.
+            const evidenceItem = (k.id !== 'run' && k.id !== 'text' && activeCase?.step)
+              ? activeCase.step.evidence.find((e) => e.layer === k.id) ?? null
+              : null;
             // Run tab surfaces the failure message as its delta directly
             // from the test_result; other tabs use the step's layer deltas.
             const delta = k.id === 'run'
@@ -501,60 +573,162 @@ export function FocusView(props: FocusViewProps) {
                 : activeCase?.step
                   ? layerDelta(activeCase.step, k.id)
                   : null;
+            // "Broken" vs "warned" depends on (1) the evidence signal, and
+            // (2) the repo's error-mode toggle for network/console (those two
+            // layers are configurable to "warn only" or "ignore", in which
+            // case high-signal evidence shouldn't read as test-failing).
+            // Other layers use the legacy `signal === 'high'` rule.
+            //
+            //   fail  → red X  (broken: a real regression that failed the test)
+            //   warn  → amber ⚠ (logged, but the runner didn't fail on it)
+            //   ignore → no pill (deliberately suppressed at runner level)
+            //
+            // Run is special: the test_result.status === 'failed' is the
+            // source of truth, regardless of layer toggles.
+            const layerMode: ErrorMode | null =
+              k.id === 'network' ? props.errorModes.network
+              : k.id === 'console' ? props.errorModes.console
+              : null;
+            let broken = false;
+            let warned = false;
+            if (k.id === 'run') {
+              broken = activeCase?.result?.status === 'failed';
+            } else if (evidenceItem?.signal === 'high') {
+              if (layerMode === 'ignore') { /* suppressed */ }
+              else if (layerMode === 'warn') warned = true;
+              else broken = true; // layerMode === 'fail' OR non-configurable layer
+            }
+            // Reason text rendered as the title attribute on the broken pill
+            // (and on the whole button as a fallback). Falls back to the
+            // delta text when no structured summary exists.
+            const modeNote = layerMode && (broken || warned)
+              ? (broken
+                  ? ` · ${k.name} Error Mode is "Fail" (configured in Playwright settings)`
+                  : ` · ${k.name} Error Mode is "Warn only" so the runner logged this without failing the test (configured in Playwright settings)`)
+              : '';
+            const reason = k.id === 'run'
+              ? ((activeCase?.result?.errorMessage ?? '').trim() || 'Test failed')
+              : evidenceItem?.summary
+                ? `${evidenceItem.summary}${modeNote}`
+                : (delta ? `${k.name}: ${delta}${modeNote}` : null);
             // All tabs clickable — `absent` panes explain *why* the layer
             // isn't captured + how to enable it, which is more useful than
             // a disabled button.
             const tabBorder = isActive
               ? 'color-mix(in oklab, var(--c-teal) 22%, transparent)'
-              : 'var(--border)';
+              : broken
+                ? 'color-mix(in oklab, var(--c-red) 30%, transparent)'
+                : warned
+                  ? 'color-mix(in oklab, var(--c-amber) 30%, transparent)'
+                  : 'var(--border)';
             const tabColor = isActive
               ? '#1F7B66'
               : layerState === 'absent' ? 'var(--fg-4)' : 'var(--fg-2)';
+            // Settings link target: Network and Console both live under the
+            // Playwright settings card's Errors & Network section. Other
+            // layers don't have a per-layer toggle, so we don't surface a
+            // link for them.
+            const settingsTarget = (k.id === 'network' || k.id === 'console')
+              ? '/settings?highlight=playwright'
+              : null;
             return (
               <button
                 key={k.id}
                 onClick={() => setTab(k.id)}
+                title={reason ?? `${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
                 style={{
                   padding: '6px 10px', borderRadius: 6, fontSize: 12,
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6,
-                  background: isActive ? 'color-mix(in oklab, var(--c-teal) 12%, white)' : 'transparent',
+                  background: isActive
+                    ? 'color-mix(in oklab, var(--c-teal) 12%, white)'
+                    : broken
+                      ? 'color-mix(in oklab, var(--c-red) 6%, white)'
+                      : warned
+                        ? 'color-mix(in oklab, var(--c-amber) 6%, white)'
+                        : 'transparent',
                   border: `1px solid ${tabBorder}`,
                   color: tabColor,
                   fontWeight: isActive ? 600 : 400,
                   opacity: layerState === 'absent' ? 0.55 : 1,
                 }}
-                aria-label={`${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
+                aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ''}` : warned ? `warning: ${reason ?? ''}` : layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
               >
                 <span>{k.name}</span>
-                {/* Run tab uses a fail icon (no delta text) so the row stays
-                    compact — full error lives inside the pane. Other tabs
-                    keep their numeric delta. */}
-                {k.id === 'run' && layerState === 'diff' && (
+                {/* Broken pill: red X with the evidence summary as the
+                    mouseover reason. Used when the layer evidence is high
+                    signal AND the error mode is "fail" (or non-configurable
+                    layers default to broken). */}
+                {broken && (
                   <span
-                    aria-hidden
-                    title={delta ?? 'Test failed'}
+                    title={reason ?? 'Test failed'}
+                    aria-label={reason ?? 'Test failed'}
                     style={{
                       width: 14, height: 14, borderRadius: '50%',
                       background: 'color-mix(in oklab, var(--c-red) 16%, white)',
                       color: 'var(--c-red)',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, lineHeight: 1, fontWeight: 700,
+                      flexShrink: 0,
                     }}
                   >
                     ✕
                   </span>
                 )}
+                {/* Warned pill: amber ⚠ when the layer evidence is high
+                    signal but the error mode is "warn only" — the runner
+                    logged it without failing the test, so the reviewer sees
+                    it as a soft signal, not a regression. */}
+                {warned && (
+                  <span
+                    title={reason ?? 'Warning'}
+                    aria-label={reason ?? 'Warning'}
+                    style={{
+                      width: 14, height: 14, borderRadius: '50%',
+                      background: 'color-mix(in oklab, var(--c-amber) 18%, white)',
+                      color: '#8C5C19',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, lineHeight: 1, fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ⚠
+                  </span>
+                )}
+                {/* Numeric/structured delta — kept alongside the broken/warn
+                    pill so reviewers see both the signal and the magnitude
+                    (e.g. "Network ✕ +2 −1"). Skipped on Run since the X
+                    already encodes the failure. */}
                 {k.id !== 'run' && layerState === 'diff' && delta !== null && (
                   <span
                     className="mono"
-                    style={{ fontSize: 10, color: 'var(--fg-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={delta}
+                    style={{ fontSize: 10, color: broken ? 'var(--c-red)' : warned ? '#8C5C19' : 'var(--fg-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={reason ?? delta}
                   >
                     {delta}
                   </span>
                 )}
-                {layerState === 'clean' && (
+                {/* Inline settings link: opens the Playwright settings card
+                    so reviewers can flip the error mode without leaving the
+                    flow. Only attached to Network/Console pills since those
+                    are the configurable layers. */}
+                {settingsTarget && (broken || warned) && (
+                  <span
+                    role="link"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); window.location.href = settingsTarget; }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); window.location.href = settingsTarget; } }}
+                    title={`Open Playwright settings to change ${k.name} Error Mode`}
+                    aria-label={`Open Playwright settings to change ${k.name} Error Mode`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--fg-3)', cursor: 'pointer', padding: 2,
+                    }}
+                  >
+                    <Settings size={11} />
+                  </span>
+                )}
+                {layerState === 'clean' && !broken && !warned && (
                   <span
                     aria-hidden
                     style={{
@@ -585,6 +759,9 @@ export function FocusView(props: FocusViewProps) {
                 ? classifyLayer(tab, activeCase.step, activeCase.result, activeCase.visual)
                 : 'absent'
             }
+            runStepCells={runStepCells}
+            activeStepId={activeCase?.step.id ?? null}
+            onSelectStep={props.onSelect}
             regionsCtx={{
               showRegions,
               setShowRegions,
@@ -1000,9 +1177,14 @@ interface ComparePaneProps {
   result: TestResultLite | null;
   layerState: LayerState;
   regionsCtx: VisualRegionsCtx;
+  /** Per-step strip data for the Run tab. Pre-derived at the parent so the
+   *  Run pane stays presentational. Empty when there's no active test. */
+  runStepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
 }
 
-function ComparePane({ tab, step, visual, result, layerState, regionsCtx }: ComparePaneProps) {
+function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep }: ComparePaneProps) {
   if (!step) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
@@ -1035,7 +1217,7 @@ function ComparePane({ tab, step, visual, result, layerState, regionsCtx }: Comp
   }
 
   // diff or clean — render the layer-specific pane and let it differentiate.
-  if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} />;
+  if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} stepCells={runStepCells} activeStepId={activeStepId} onSelectStep={onSelectStep} />;
   if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} regions={regionsCtx} />;
   if (tab === 'text') return <TextPane visual={visual} clean={layerState === 'clean'} />;
   if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
@@ -1130,7 +1312,19 @@ function CleanBanner({ message }: { message: string }) {
   );
 }
 
-function RunPane({ result, failed }: { result: TestResultLite | null; failed: boolean }) {
+function RunPane({
+  result,
+  failed,
+  stepCells,
+  activeStepId,
+  onSelectStep,
+}: {
+  result: TestResultLite | null;
+  failed: boolean;
+  stepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
+}) {
   if (!result) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1186,6 +1380,64 @@ function RunPane({ result, failed }: { result: TestResultLite | null; failed: bo
           </div>
         )}
       </div>
+
+      {/* All steps of the test with per-step passage. Cells are buttons so
+          reviewers can jump to any step's other layers (visual/network/...)
+          without leaving the focus view. The active step gets a teal ring;
+          status colors mirror the build's at-a-glance palette. */}
+      {stepCells.length > 0 && (
+        <div className="v-card" style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="label" style={{ fontSize: 10 }}>Test steps</span>
+            <span style={{ flex: 1 }} />
+            <span className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
+              {stepCells.length} step{stepCells.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {stepCells.map((cell) => {
+              const style = RUN_STEP_STYLE[cell.status];
+              const isActive = cell.stepId === activeStepId;
+              return (
+                <button
+                  type="button"
+                  key={cell.stepId}
+                  onClick={() => onSelectStep(cell.stepId)}
+                  title={`Step ${cell.stepIndex + 1}${cell.stepLabel ? ` (${cell.stepLabel})` : ''}: ${style.label}`}
+                  aria-current={isActive ? 'step' : undefined}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 8px', fontSize: 11, lineHeight: 1.2,
+                    background: isActive
+                      ? 'color-mix(in oklab, var(--c-teal) 10%, white)'
+                      : 'var(--c-white)',
+                    border: `1px solid ${isActive ? 'var(--c-teal)' : 'var(--border)'}`,
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    color: 'var(--fg-1)',
+                    fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: style.dot,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-2)' }}>{cell.stepIndex + 1}</span>
+                  {cell.stepLabel && (
+                    <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {cell.stepLabel}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Failed: show the error inline. Passed: show a green confirmation. */}
       {failed ? (
@@ -2174,8 +2426,8 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
       {net && (
         <>
           <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '54px 1fr 100px', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-              <span className="label" style={{ fontSize: 9 }}>Δ vs baseline</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+              <span className="label" style={{ fontSize: 9 }} title="Δ vs baseline">Δ</span>
               <span className="label" style={{ fontSize: 9 }}>Request</span>
               <span className="label" style={{ fontSize: 9 }}>Status</span>
             </div>
@@ -2297,6 +2549,7 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
           {/* Column header */}
           <div style={{
             display: 'grid', gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
+            columnGap: 10,
             padding: '6px 12px', borderBottom: '1px solid var(--border)',
             background: 'var(--c-soft)',
           }}>
@@ -2352,6 +2605,7 @@ function NetworkRequestRow({
         style={{
           display: 'grid',
           gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
+          columnGap: 10,
           padding: '6px 12px', borderBottom: '1px solid var(--border)',
           alignItems: 'center', fontSize: 11,
           width: '100%', textAlign: 'left',
@@ -2471,9 +2725,36 @@ function formatBytes(b: number): string {
 }
 
 function NetworkRow({ kind, url, status, cls }: { kind: string; url: string; status: string; cls: string }) {
+  // Δ column is a tight 32px slot, so the chip is a minimal badge rather
+  // than a full `.v-chip` pill (the default pill's 2x8 padding + pill radius
+  // + 6px gap made the marker visually overweight in the narrow column).
+  const isRegression = cls === 'regression';
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '54px 1fr 100px', padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 12 }}>
-      <span className={`v-chip ${cls}`} style={{ fontSize: 9, padding: '1px 6px' }}>{kind}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 12 }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0 4px',
+          minWidth: 22,
+          fontSize: 9,
+          lineHeight: '14px',
+          fontWeight: 600,
+          fontFamily: 'var(--font-sans)',
+          borderRadius: 3,
+          background: isRegression
+            ? 'color-mix(in oklab, var(--c-red) 14%, white)'
+            : 'color-mix(in oklab, var(--c-amber) 16%, white)',
+          color: isRegression ? 'var(--c-red)' : '#8C5C19',
+          border: `1px solid color-mix(in oklab, ${isRegression ? 'var(--c-red)' : 'var(--c-amber)'} 30%, transparent)`,
+          whiteSpace: 'nowrap',
+          letterSpacing: 0,
+        }}
+        title={isRegression ? 'New since baseline' : 'Changed since baseline'}
+      >
+        {kind}
+      </span>
       <span className="mono" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{url}</span>
       <span className="mono" style={{ fontSize: 11 }}>{status}</span>
     </div>

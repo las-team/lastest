@@ -203,6 +203,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
   );
+  // Repo-level error-mode toggles, hydrated from verify-status on first poll.
+  // Default 'warn' matches the server-side default in the playwright settings
+  // schema, so the focus view shows the same "warn only" treatment until the
+  // first poll lands.
+  const [errorModes, setErrorModes] = useState<{ network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' }>(
+    { network: 'warn', console: 'warn' },
+  );
   const [runningTests, setRunningTests] = useState<Array<{ testId: string; name: string }>>([]);
   const [liveCounts, setLiveCounts] = useState<{ totalTests: number; passed: number; failed: number }>({
     totalTests: props.build.totalTests ?? 0,
@@ -234,6 +241,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         testResults: TestResultLite[];
         runningTests: Array<{ testId: string; name: string }>;
         changeMap: ChangeMap | null;
+        errorModes?: { network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' };
       };
       setStepComparisons(data.stepComparisons);
       // Merge-not-replace: keep any local `optimistic-*` rows whose step has
@@ -252,6 +260,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       setRunningTests(data.runningTests);
       setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
       if (data.changeMap) setChangeMap(data.changeMap);
+      if (data.errorModes) setErrorModes(data.errorModes);
       if (data.completedAt && !completedAt) {
         setCompletedAt(data.completedAt);
       }
@@ -851,6 +860,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           changedAreaIds={changedAreaIds}
           visualByStepKey={visualByStepKey}
           testResultById={testResultById}
+          errorModes={errorModes}
           statusFilter={filters.statuses}
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}

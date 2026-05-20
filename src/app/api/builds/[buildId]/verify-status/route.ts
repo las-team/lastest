@@ -18,7 +18,9 @@ export async function GET(
   const build = await queries.getBuild(buildId);
   if (!build) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // Authorize via the build's repo.
+  // Authorize via the build's repo and remember repoId for downstream
+  // lookups (playwright settings).
+  let repoId: string | null = null;
   if (build.testRunId) {
     const run = await queries.getTestRun(build.testRunId);
     if (run?.repositoryId) {
@@ -26,6 +28,7 @@ export async function GET(
       if (!repo || repo.teamId !== teamId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
+      repoId = run.repositoryId;
     }
   }
 
@@ -40,6 +43,7 @@ export async function GET(
     visualDiffs,
     runningTestRows,
     cachedChangeMap,
+    pwSettings,
   ] = await Promise.all([
     queries.getStepComparisonsByBuild(buildId).catch(() => []),
     queries.getLayerFeedbackByBuild(buildId).catch(() => []),
@@ -48,6 +52,10 @@ export async function GET(
       ? queries.getTestResultsByRun(build.testRunId).catch(() => [])
       : Promise.resolve([]),
     queries.getBuildChangeMap(buildId).catch(() => null),
+    // Repo-level playwright settings drive the network / console error mode
+    // hint pills in the focus view. Per-test overrides exist but are rare;
+    // the focus view is OK with the repo-level value here.
+    queries.getPlaywrightSettings(repoId).catch(() => null),
   ]);
 
   let stepComparisons = initialStepComparisons;
@@ -117,6 +125,14 @@ export async function GET(
     .filter((r) => r.status === 'running')
     .map((r) => ({ testId: r.testId, name: r.testId }));
 
+  // Repo-level error-mode toggles. Drives the focus view's network/console
+  // tab "broken vs warn vs ignore" treatment so the red X pill matches what
+  // the runner actually does when it sees a network 4xx / console error.
+  const errorModes = {
+    network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+    console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+  };
+
   return NextResponse.json(
     {
       buildId,
@@ -132,6 +148,7 @@ export async function GET(
       testResults: slimResults,
       runningTests,
       changeMap,
+      errorModes,
     },
     {
       headers: {

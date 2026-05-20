@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, CheckCircle, XCircle, ListTodo, ExternalLink, XIcon, Sparkles, Flag, Loader2, ChevronRight, ChevronsUpDown } from 'lucide-react';
-import type { AIDiffAnalysis, EvaluationOutcome, VisualDiffWithTestStatus } from '@/lib/db/schema';
+import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -106,228 +106,6 @@ const branchStatusConfig: Record<BranchStatus, { label: string; className: strin
   new_test: { label: 'New Test', className: 'bg-purple-100 text-purple-700' },
   has_todo: { label: 'Todo', className: 'bg-amber-100 text-amber-700' },
 };
-
-// Per-step status strip
-// Per-step status used by the compact step strip shown in each test card.
-// Priority (highest first):
-//   1. evaluationOutcome.triggeredRules matching stepLabel (severity 'fail' becomes failed, 'warn' becomes changed)
-//   2. visualDiff.classification ('changed' becomes changed, 'flaky' becomes flaky, 'unchanged' becomes passed)
-//   3. testResultStatus + dying-step heuristic (step at lastReachedStep+1 on a failed test becomes failed)
-//   4. fallback becomes passed
-// Steps with stepIndex > lastReachedStep on a non-passed test render as 'notrun'.
-type StepStatus = 'passed' | 'changed' | 'flaky' | 'failed' | 'notrun' | 'skipped';
-
-interface StepCell {
-  stepIndex: number;
-  stepLabel: string;
-  status: StepStatus;
-  diffId?: string;
-}
-
-const stepStatusStyle: Record<StepStatus, { dot: string; label: string; ring: string }> = {
-  passed:  { dot: 'var(--c-teal)',  label: 'Passed',  ring: 'color-mix(in oklab, var(--c-teal) 22%, transparent)' },
-  changed: { dot: 'var(--c-amber)', label: 'Changed', ring: 'color-mix(in oklab, var(--c-amber) 22%, transparent)' },
-  flaky:   { dot: 'var(--c-amber)', label: 'Flaky',   ring: 'color-mix(in oklab, var(--c-amber) 22%, transparent)' },
-  failed:  { dot: 'var(--c-red)',   label: 'Failed',  ring: 'color-mix(in oklab, var(--c-red) 22%, transparent)' },
-  notrun:  { dot: 'var(--fg-3)',    label: 'Not run', ring: 'color-mix(in oklab, var(--fg-3) 16%, transparent)' },
-  skipped: { dot: 'var(--fg-3)',    label: 'Skipped', ring: 'color-mix(in oklab, var(--fg-3) 16%, transparent)' },
-};
-
-const stepLabelCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-
-function deriveStepCells(diffs: VisualDiffWithTestStatus[]): StepCell[] {
-  if (diffs.length === 0) return [];
-
-  // All diffs for a test share the same testResult, so any diff carries the
-  // per-result fields. Pull them once.
-  const head = diffs[0];
-  const lastReached = head.lastReachedStep ?? null;
-  const totalSteps = head.totalSteps ?? null;
-  const outcome = head.evaluationOutcome as EvaluationOutcome | null | undefined;
-  const isTestFailed = head.testResultStatus === 'failed';
-
-  // Build an index of triggered rules by stepLabel for O(1) lookup.
-  const triggersByLabel = new Map<string, { fail: boolean; warn: boolean }>();
-  if (outcome?.triggeredRules) {
-    for (const t of outcome.triggeredRules) {
-      const prev = triggersByLabel.get(t.stepLabel) ?? { fail: false, warn: false };
-      if (t.rule.severity === 'fail') prev.fail = true;
-      else if (t.rule.severity === 'warn') prev.warn = true;
-      triggersByLabel.set(t.stepLabel, prev);
-    }
-  }
-
-  // Order diffs by natural sort on stepLabel and assign 0-based stepIndex.
-  const ordered = [...diffs].sort((a, b) =>
-    stepLabelCollator.compare(a.stepLabel || '', b.stepLabel || '')
-  );
-
-  // De-duplicate diffs that share the same stepLabel (multi-browser runs
-  // create one row per browser). Status is the worst-case across browsers.
-  const seen = new Map<string, StepCell>();
-  for (let i = 0; i < ordered.length; i++) {
-    const d = ordered[i];
-    const label = d.stepLabel || `Step ${i + 1}`;
-    const triggered = triggersByLabel.get(label);
-
-    let status: StepStatus = 'passed';
-    if (triggered?.fail) {
-      status = 'failed';
-    } else if (d.classification === 'changed') {
-      status = 'changed';
-    } else if (d.classification === 'flaky') {
-      status = 'flaky';
-    } else if (triggered?.warn) {
-      status = 'changed';
-    } else if (d.classification === 'unchanged') {
-      status = 'passed';
-    }
-
-    const prev = seen.get(label);
-    if (!prev) {
-      seen.set(label, { stepIndex: seen.size, stepLabel: label, status, diffId: d.id });
-    } else {
-      // Worst-case merge: failed > changed > flaky > passed
-      const rank: Record<StepStatus, number> = { failed: 4, changed: 3, flaky: 2, passed: 1, notrun: 0, skipped: 0 };
-      if (rank[status] > rank[prev.status]) {
-        prev.status = status;
-        prev.diffId = d.id;
-      }
-    }
-  }
-
-  const cells: StepCell[] = Array.from(seen.values());
-
-  // Mark steps beyond lastReachedStep as 'notrun' when the test errored mid-run.
-  // (For passed tests we trust the diff statuses regardless of lastReachedStep.)
-  if (lastReached != null && isTestFailed) {
-    for (const cell of cells) {
-      if (cell.stepIndex > lastReached) {
-        cell.status = 'notrun';
-      }
-    }
-    // The step right after lastReached is the dying step on a failed test,
-    // mark it 'failed' if we don't already have a per-step rule trip there.
-    const dyingIdx = lastReached + 1;
-    const dying = cells.find(c => c.stepIndex === dyingIdx);
-    if (dying && dying.status === 'notrun') {
-      dying.status = 'failed';
-    }
-  }
-
-  // Synthesize trailing 'notrun' cells if totalSteps > rendered cells (i.e.
-  // the runner died before any diff was written for those steps).
-  if (totalSteps != null && totalSteps > cells.length) {
-    const missing = totalSteps - cells.length;
-    for (let i = 0; i < missing; i++) {
-      const idx = cells.length;
-      const status: StepStatus = isTestFailed && lastReached != null && idx === lastReached + 1
-        ? 'failed'
-        : 'notrun';
-      cells.push({
-        stepIndex: idx,
-        stepLabel: `Step ${idx + 1}`,
-        status,
-      });
-    }
-  }
-
-  return cells;
-}
-
-function StepStatusStrip({
-  cells,
-  buildId,
-  testFailed,
-  errorStepLabel,
-}: {
-  cells: StepCell[];
-  buildId: string;
-  testFailed: boolean;
-  errorStepLabel: string | null;
-}) {
-  const router = useRouter();
-  if (cells.length === 0) return null;
-
-  const passed = cells.filter(c => c.status === 'passed').length;
-  const changed = cells.filter(c => c.status === 'changed' || c.status === 'flaky').length;
-  const failed = cells.filter(c => c.status === 'failed').length;
-  const notrun = cells.filter(c => c.status === 'notrun' || c.status === 'skipped').length;
-
-  return (
-    <div className="flex flex-col gap-1.5 mt-2" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-1 flex-wrap">
-        {cells.map((cell) => {
-          const style = stepStatusStyle[cell.status];
-          const baseTitle = `Step ${cell.stepIndex + 1}: ${cell.stepLabel} (${style.label})`;
-          const title = testFailed && errorStepLabel === cell.stepLabel
-            ? `${baseTitle} (execution stopped here)`
-            : baseTitle;
-          const interactive = !!cell.diffId;
-          return (
-            <button
-              key={`${cell.stepIndex}-${cell.stepLabel}`}
-              type="button"
-              disabled={!interactive}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (cell.diffId) router.push(`/builds/${buildId}/diff/${cell.diffId}`);
-              }}
-              title={title}
-              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-default"
-              style={{
-                background: style.ring,
-                borderColor: 'transparent',
-                color: 'var(--foreground, currentColor)',
-                cursor: interactive ? 'pointer' : 'default',
-              }}
-            >
-              <span
-                aria-hidden
-                className="inline-block w-1.5 h-1.5 rounded-full"
-                style={{ background: style.dot }}
-              />
-              <span className="tabular-nums opacity-70">{cell.stepIndex + 1}</span>
-              <span className="max-w-[160px] truncate">{cell.stepLabel}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-        {passed > 0 && (
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: stepStatusStyle.passed.dot }} />
-            {passed} passed
-          </span>
-        )}
-        {changed > 0 && (
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: stepStatusStyle.changed.dot }} />
-            {changed} changed
-          </span>
-        )}
-        {failed > 0 && (
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: stepStatusStyle.failed.dot }} />
-            {failed} failed
-          </span>
-        )}
-        {notrun > 0 && (
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: stepStatusStyle.notrun.dot }} />
-            {notrun} not run
-          </span>
-        )}
-        {testFailed && errorStepLabel && (
-          <span className="inline-flex items-center gap-1 text-[var(--c-red,#E03E36)]">
-            <AlertTriangle className="w-3 h-3" />
-            stopped at: {errorStepLabel}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export interface BuildDetailClientProps {
   buildId: string;
@@ -907,35 +685,16 @@ function TestGroupedList({
         const failedCount = testDiffs.filter(d => d.testResultStatus === 'failed' || d.status === 'rejected').length;
         const stepLabel = testDiffs.length === 1 ? '1 case' : `${testDiffs.length} cases`;
 
-        // Per-step status strip (compact). On a failed test, highlight the dying step.
-        const stepCells = deriveStepCells(testDiffs);
-        const head = testDiffs[0];
-        const testFailed = head.testResultStatus === 'failed';
-        // Dying step = lastReachedStep + 1 (the first NOT-fully-reached step).
-        // We surface its label so the strip footer can call it out.
-        const dyingIdx = head.lastReachedStep != null ? head.lastReachedStep + 1 : null;
-        const errorStepLabel = testFailed && dyingIdx != null
-          ? (stepCells.find(c => c.stepIndex === dyingIdx)?.stepLabel ?? null)
-          : null;
-
         return (
           <Collapsible key={`test-${testId}-${expandKey}`} defaultOpen={allExpanded}>
             <div>
-              <CollapsibleTrigger className="flex items-start justify-between w-full p-2 bg-muted/20 hover:bg-muted/40 rounded-lg transition-colors group text-left">
-                <div className="flex flex-col gap-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                    <span className="text-sm font-medium truncate">{testName}</span>
-                    <Badge variant="secondary" className="text-xs shrink-0">{stepLabel}</Badge>
-                  </div>
-                  <StepStatusStrip
-                    cells={stepCells}
-                    buildId={buildId}
-                    testFailed={testFailed}
-                    errorStepLabel={errorStepLabel}
-                  />
+              <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/20 hover:bg-muted/40 rounded-lg transition-colors group">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                  <span className="text-sm font-medium truncate">{testName}</span>
+                  <Badge variant="secondary" className="text-xs shrink-0">{stepLabel}</Badge>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0 pt-1">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {pendingCount > 0 && <span className="text-yellow-600">{pendingCount} pending</span>}
                   {failedCount > 0 && <span className="text-red-600">{failedCount} failed</span>}
                 </div>
