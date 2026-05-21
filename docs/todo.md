@@ -23,10 +23,7 @@ WebSite
   URL diffing
 Verify
 VScode
-  repos show up multiple times
-  more disconnects in new version than previous
 ## features
-npx @sentry/wizard@latest -i nextjs --saas --org dexilion --project lastest Read and follow: https://github.com/getsentry/sentry-for-ai/blob/main/skills/sentry-nextjs-sdk/SKILL.md
 Google verification for gsheets
 **Self-test**
 Default ai, openrouter test
