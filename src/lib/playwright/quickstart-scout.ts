@@ -20,6 +20,7 @@ import { getAIConfig } from './agent-context';
 import type {
   QuickstartPublicScout,
   QuickstartAuthedScout,
+  QuickstartBusinessInteraction,
 } from '@/lib/db/schema';
 
 /**
@@ -58,14 +59,18 @@ function applyScoutMcpWiring(
   };
 }
 
-const PUBLIC_SCOUT_SYSTEM_PROMPT = `You are a web app reconnaissance agent. Your job is to (1) describe what a SaaS does and (2) classify whether its sign-up flow is automatable.
+const PUBLIC_SCOUT_SYSTEM_PROMPT = `You are a web app reconnaissance agent. Your job is to (1) describe what a SaaS does, (2) extract its primary business interaction, and (3) classify whether its sign-up flow is automatable.
 
 Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_click) to:
 1. Visit the base URL.
 2. Capture the tagline and concept from the hero (one to two sentences, in your own words — do NOT invent features that aren't on the page).
 3. Read \`<a href>\` paths from the navigation; collect the public ones.
-4. Find the registration page by examining the landing page DOM ONLY. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. NEVER guess paths like /signup, /register, /join — if no CTA exists in the DOM, return registerPath: null and classification: "no_public_register". Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"). NEVER mix the two formats (do not prefix a path with a partial URL).
-5. Snapshot the register page and classify the sign-up flow.
+4. Extract the **primary business interaction** the product is built around. From the hero \`h1\` + supporting paragraph + the most-prominent visible CTA button, derive:
+   - primaryInputLabel: the visible label / placeholder of the input the founder's hero CTA points at (e.g. "Paste a startup idea", "Search anything", "Enter a URL"). If no input is visible publicly, return null.
+   - primaryCtaLabel: the literal text of the hero CTA button (e.g. "Validate idea", "Generate brief", "Run search").
+   - demoInputValue: a SAFE additive demo string to type into primaryInputLabel that exercises the product's core function. Examples: "AI-powered birthday-card generator for parents of 3-7 year olds" for an idea-validator, "https://example.com/article" for a URL summariser, "best coffee shops in Berlin" for a search tool. NEVER pick a value that triggers destructive actions, real payments, outbound messaging on the founder's behalf, or scans of real third-party accounts.
+5. Find the registration page by examining the landing page DOM ONLY. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. NEVER guess paths like /signup, /register, /join — if no CTA exists in the DOM, return registerPath: null and classification: "no_public_register". Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"). NEVER mix the two formats (do not prefix a path with a partial URL).
+6. Snapshot the register page and classify the sign-up flow.
 
 CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick the first match):
 
@@ -90,6 +95,11 @@ Return STRICT JSON (no markdown, no prose), shape:
   "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
   "authAutomatable": true | false,
   "cookieBannerSelectorHint": "optional — if you saw a cookie banner, the button label that dismisses it",
+  "businessInteraction": {
+    "primaryInputLabel": "Paste a startup idea | null",
+    "primaryCtaLabel": "Validate idea | null",
+    "demoInputValue": "AI birthday-card generator for parents of 3-7yos | null"
+  },
   "friction": [{ "kind": "cookie_overlap | slow_route | console_error | ...", "note": "string" }]
 }`;
 
@@ -150,6 +160,22 @@ function asCta(item: unknown): { label: string; selectorHint?: string } | null {
     label: obj.label,
     selectorHint: typeof obj.selectorHint === 'string' ? obj.selectorHint : undefined,
   };
+}
+
+function asBusinessInteraction(value: unknown): QuickstartBusinessInteraction | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const obj = value as Record<string, unknown>;
+  const out: QuickstartBusinessInteraction = {};
+  if (typeof obj.primaryInputLabel === 'string' && obj.primaryInputLabel.length > 0) {
+    out.primaryInputLabel = obj.primaryInputLabel.slice(0, 200);
+  }
+  if (typeof obj.primaryCtaLabel === 'string' && obj.primaryCtaLabel.length > 0) {
+    out.primaryCtaLabel = obj.primaryCtaLabel.slice(0, 200);
+  }
+  if (typeof obj.demoInputValue === 'string' && obj.demoInputValue.length > 0) {
+    out.demoInputValue = obj.demoInputValue.slice(0, 500);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function classify(value: unknown): QuickstartPublicScout['classification'] {
@@ -260,6 +286,7 @@ export async function runQuickstartScoutPublic(
     registerPath: typeof parsed.registerPath === 'string' ? parsed.registerPath : null,
     cookieBannerSelectorHint:
       typeof parsed.cookieBannerSelectorHint === 'string' ? parsed.cookieBannerSelectorHint : undefined,
+    businessInteraction: asBusinessInteraction(parsed.businessInteraction),
     friction: safeArray(parsed.friction, asFriction),
   };
 

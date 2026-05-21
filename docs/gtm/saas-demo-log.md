@@ -1673,3 +1673,36 @@ Per-target status appended below each draft.
 - Channel: TBD (no founder X handle harvested yet — Kreuzberg's nav shows Community link but X handle wasn't on the landing's outbound)
 - Sent: **NO** — paused at approval gate
 
+
+## 2026-05-21 — @Caesarkuta / Envoice
+- Source: X live search ("just launched" saas -filter:replies lang:en) — MCP X login finally working
+- Site: https://envoice.site — invoicing platform for freelancers/startups, Next.js + NestJS, just-launched today (X tweet was top match in live search)
+- DNS-check: ✓ (216.198.79.65 Cloudflare), HTTP 200
+- AUTH_MODE: username + email + password (3-field, no captcha, no OAuth, no confirm-pw) — **CLEANEST FORM SHAPE OF THE SESSION** ... but
+- 🚨 **CRITICAL FINDING**: Backend at envoice-production.up.railway.app has a CORS misconfig — Access-Control-Allow-Origin header missing for www.envoice.site origin. **100% of signups fail with "Something went wrong."** Caught in the FIRST HOURS of launch. This is the highest-signal demo result of the entire session.
+- Lastest repo: 7484a186-232e-443b-8683-cbcfaf24dc88 (envoice-demo)
+- Test: a11261cb-b38f-46a4-af61-0874a280cc30
+- Builds: 0deab80d (baseline, 10 screenshots, 44s) → 76b7112f (pair, 0 diffs, 44s, safe_to_merge)
+- Final build: 76b7112f-80b8-46d5-ac02-2edfb792567d
+- Share: https://app.lastest.cloud/r/ytcmQMOB8A7TazQ8FulFZQ
+- Best frame: Step 8 — signup form filled with viktor/email/password, "Creating Account..." spinner — the form WORKS, the API DOESN'T
+- Channel: X DM to @Caesarkuta (founder, just launched today — actively listening for feedback)
+- Sent: **NO** — paused at approval gate. **This one is time-sensitive**: every hour the CORS bug stays unfixed, more visitors bounce.
+- Reply (48h check): —
+
+
+## 2026-05-21 — @wade_bhavy55123 / Clarity Compass (a.k.a. Decisia)
+- Source: X live search ("just launched"/"build in public"/"shipped" min_faves:2) — fresh, posted 10 min before sourcing
+- Site: https://clarity-compass-64.vercel.app — decision intelligence dashboard, Vercel-hosted MVP, no-auth (likely localStorage-backed). Brand mismatch: tweet says "Clarity Compass", UI says "Decisia · Daily Decision Assistant"
+- DNS-check: ✓ (Vercel edge, HTTP 200)
+- AUTH_MODE: NONE — public no-auth, anyone lands directly in Dashboard with sample data. Cleanest demo target of the entire session.
+- Lastest repo: b654168b-6664-448f-afd8-a2ba71266ef4 (clarity-compass-demo)
+- Test: a3586ff1-fd1c-4c54-890d-1a0623c1f534
+- Builds: cc3c8e56 (baseline, 10 screenshots, 36s) → efe006b1 (pair, 0 diffs, 36s)
+- Final build: efe006b1-1ec4-4542-ad49-bd470cb84c1a — P:1 F:0 C:0 review_required
+- Share: https://app.lastest.cloud/r/bY8hXqiubhDLS8kyD-gZXQ
+- Best authed screenshot (Step 10): Decision Matrix view for "Adopt Lastest for visual-regression testing (tfdg8q)" — fresh decision created end-to-end via the form, toast "Decision created. Add some options next." visible top-right, Confidence 20% Low with named factors, Status Active, criteria + options scaffolds ready. Money shot.
+- Channel: X DM @wade_bhavy55123 (or public reply on launch tweet)
+- Sent: **NO** — paused at approval gate
+- Reply (48h check): —
+

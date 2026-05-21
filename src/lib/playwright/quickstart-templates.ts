@@ -37,6 +37,13 @@ export interface RenderWalkthroughOptions {
   /** Login URL observed by the scout. Required when chainedAuth=false (fallback mode).
    *  Same format rules as registerUrl: relative path or full https URL. */
   loginUrl?: string;
+  /** Primary business interaction extracted by the public scout. When present and the
+   *  walkthrough runs authed, the template attempts to type demoInputValue into a
+   *  primaryInputLabel-matched input and click a primaryCtaLabel-matched button before
+   *  falling back to the generic safe-CTA pattern. */
+  primaryInputLabel?: string;
+  primaryCtaLabel?: string;
+  demoInputValue?: string;
 }
 
 function jsString(value: string): string {
@@ -220,9 +227,17 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
 
 export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const authAutomatable = opts.authAutomatable;
+  const inputLabel = opts.primaryInputLabel?.trim() ?? '';
+  const ctaLabel = opts.primaryCtaLabel?.trim() ?? '';
+  const demoValue = opts.demoInputValue?.trim() ?? '';
+  const hasBizInteraction = inputLabel.length > 0 && demoValue.length > 0;
 
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const AUTH_AUTOMATABLE = ${authAutomatable};
+  const BIZ_INPUT_LABEL = ${jsString(inputLabel)};
+  const BIZ_CTA_LABEL = ${jsString(ctaLabel)};
+  const BIZ_DEMO_VALUE = ${jsString(demoValue)};
+  const HAS_BIZ_INTERACTION = ${hasBizInteraction};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   const settle = () => page.waitForLoadState('networkidle').catch(() => {});
@@ -304,22 +319,95 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
         publicScenario++;
       }
 
-      try {
-        const beforeUrl = page.url();
-        const safeCta = page.getByRole('button', { name: /^(create|new|add|view|open|explore|browse|start|continue|get started)\\b/i }).first();
-        if (await safeCta.isVisible().catch(() => false)) {
-          await safeCta.click({ timeout: 3000 }).catch(() => {});
-          await settle();
-          const afterUrl = page.url();
-          const dialogVisible = await page.locator('dialog, [role="dialog"], .modal').first().isVisible().catch(() => false);
-          if (afterUrl !== beforeUrl || dialogVisible) {
-            stepLogger.log(\`Scenario \${publicScenario}: Post-CTA state\`);
-            await page.screenshot({ path: shot(publicScenario, 'post-cta'), fullPage: true });
-            publicScenario++;
+      // Business interaction — only fires when the public scout extracted both
+      // an input label and a demo value. We try several locator strategies in
+      // order: getByLabel, getByPlaceholder, role=textbox by accessible-name.
+      // If any one of them resolves to a visible input, we type the demo value
+      // and look for a hero-CTA-shaped button to submit it. This is what shows
+      // the founder THEIR app being used, not just generic nav clicks.
+      let bizFired = false;
+      if (HAS_BIZ_INTERACTION) {
+        try {
+          const labelRe = new RegExp(BIZ_INPUT_LABEL.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&'), 'i');
+          const candidates = [
+            page.getByLabel(labelRe).first(),
+            page.getByPlaceholder(labelRe).first(),
+            page.getByRole('textbox', { name: labelRe }).first(),
+            page.locator('textarea').first(),
+            page.locator('input[type="text"], input[type="search"], input:not([type])').first(),
+          ];
+          let input = null;
+          for (const cand of candidates) {
+            if (await cand.isVisible().catch(() => false)) {
+              input = cand;
+              break;
+            }
           }
+          if (input) {
+            await input.click({ timeout: 3000 }).catch(() => {});
+            await input.pressSequentially(BIZ_DEMO_VALUE, { delay: 15 }).catch(() => {});
+            // Submit: prefer the scout-named CTA, else any hero-shape verb.
+            const heroVerbRe = /^(validate|generate|create|run|search|find|analy[sz]e|check|test|try|start|go|build|score|review|summarize)\\b/i;
+            const ctaCandidates = [];
+            if (BIZ_CTA_LABEL) {
+              const ctaRe = new RegExp(BIZ_CTA_LABEL.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&'), 'i');
+              ctaCandidates.push(page.getByRole('button', { name: ctaRe }).first());
+              ctaCandidates.push(page.getByRole('link', { name: ctaRe }).first());
+            }
+            ctaCandidates.push(page.getByRole('button', { name: heroVerbRe }).first());
+            let clicked = false;
+            for (const cand of ctaCandidates) {
+              if (await cand.isVisible().catch(() => false)) {
+                await cand.click({ timeout: 3000 }).catch(() => {});
+                clicked = true;
+                break;
+              }
+            }
+            if (!clicked) {
+              // Some interfaces submit on Enter (search bars, single-input
+              // forms). Try pressing Enter as a last resort before giving up.
+              await input.press('Enter').catch(() => {});
+            }
+            // Wait for the page to react: URL change, network settle, or a
+            // new result-shaped surface (list / panel / dialog). 8s cap.
+            await Promise.race([
+              page.waitForLoadState('networkidle', { timeout: 8000 }),
+              page.waitForSelector('[role="dialog"], [role="list"], [role="article"], [data-testid*="result"], .results, .result-list', { timeout: 8000 }),
+            ]).catch(() => {});
+            await settle();
+            stepLogger.log(\`Scenario \${publicScenario}: Business interaction "\${BIZ_DEMO_VALUE.slice(0, 40)}"\`);
+            await page.screenshot({ path: shot(publicScenario, 'biz-interaction'), fullPage: true });
+            publicScenario++;
+            bizFired = true;
+          } else {
+            stepLogger.warn(\`Business-interaction input "\${BIZ_INPUT_LABEL}" not found on authed surface\`);
+          }
+        } catch (bizErr) {
+          stepLogger.warn(\`Business-interaction step skipped: \${bizErr && bizErr.message}\`);
         }
-      } catch (ctaErr) {
-        stepLogger.warn(\`Safe-CTA step skipped: \${ctaErr && ctaErr.message}\`);
+      }
+
+      // Generic safe-CTA fallback — only when the targeted business interaction
+      // didn't fire (no scout data, or input not found). Avoids double-clicking
+      // when biz fired since both would screenshot near-identical states.
+      if (!bizFired) {
+        try {
+          const beforeUrl = page.url();
+          const safeCta = page.getByRole('button', { name: /^(create|new|add|view|open|explore|browse|start|continue|get started)\\b/i }).first();
+          if (await safeCta.isVisible().catch(() => false)) {
+            await safeCta.click({ timeout: 3000 }).catch(() => {});
+            await settle();
+            const afterUrl = page.url();
+            const dialogVisible = await page.locator('dialog, [role="dialog"], .modal').first().isVisible().catch(() => false);
+            if (afterUrl !== beforeUrl || dialogVisible) {
+              stepLogger.log(\`Scenario \${publicScenario}: Post-CTA state\`);
+              await page.screenshot({ path: shot(publicScenario, 'post-cta'), fullPage: true });
+              publicScenario++;
+            }
+          }
+        } catch (ctaErr) {
+          stepLogger.warn(\`Safe-CTA step skipped: \${ctaErr && ctaErr.message}\`);
+        }
       }
     } catch (e) {
       stepLogger.warn(\`Authed phase aborted: \${e && e.message ? e.message : String(e)}\`);

@@ -39,7 +39,7 @@ Today: 2026-05-20. T-103 days.
 ### Integrations + Platform
 - [ ] Google verification for gsheets (OAuth consent screen + scopes review)
 - [ ] MCP OAuth flow (auth handshake for `@lastest/mcp-server` connections)
-- [ ] Publish GitHub Action to Actions marketplace
+- [ ] Publish GitHub Action to Actions marketplace, GH APP marketplace
 - [ ] "Saved demos" public gallery page
 
 ### Self-test (dogfood)

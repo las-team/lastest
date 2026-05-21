@@ -1,7 +1,4 @@
 import * as vscode from 'vscode';
-import type { LastestApi } from './api';
-import type { LastestWebSocket } from './websocket';
-import type { TestTreeDataProvider } from './testTree';
 
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
@@ -11,42 +8,37 @@ export class StatusBarManager {
   private totalCount = 0;
   private runningCount = 0;
 
-  constructor(
-    private readonly api: LastestApi,
-    private readonly ws: LastestWebSocket,
-    private readonly treeProvider: TestTreeDataProvider
-  ) {
+  constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
       100
     );
     this.statusBarItem.command = 'lastest.showOutput';
     this.updateDisplay();
+  }
 
-    // Listen for connection changes
-    this.ws.onConnectionChange((connected) => {
-      this.isConnected = connected;
-      this.updateDisplay();
-    });
+  setConnected(connected: boolean) {
+    this.isConnected = connected;
+    this.updateDisplay();
+  }
 
-    // Listen for test completion to update counts
-    this.ws.onTestStart(() => {
-      this.runningCount++;
-      this.updateDisplay();
-    });
+  incrementRunning() {
+    this.runningCount++;
+    this.updateDisplay();
+  }
 
-    this.ws.onTestComplete((payload) => {
-      this.runningCount = Math.max(0, this.runningCount - 1);
+  decrementRunning() {
+    this.runningCount = Math.max(0, this.runningCount - 1);
+    this.updateDisplay();
+  }
 
-      if (payload.status === 'passed') {
-        // If it was previously failed, adjust
-        this.passedCount++;
-      } else {
-        this.failedCount++;
-      }
-
-      this.updateDisplay();
-    });
+  recordResult(passed: boolean) {
+    if (passed) {
+      this.passedCount++;
+    } else {
+      this.failedCount++;
+    }
+    this.updateDisplay();
   }
 
   private updateDisplay() {

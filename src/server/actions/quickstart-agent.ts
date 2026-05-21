@@ -29,6 +29,8 @@ import {
 import { captureStorageState } from '@/lib/quickstart/storage-capture';
 import { generateDemoNotes, type QuickstartRunFacts } from '@/lib/quickstart/quickstart-notes';
 import { createAndRunBuildCore, getBuildSummary } from './builds';
+import { approveAllDiffs } from './diffs';
+import { publishBuildShare } from './public-shares';
 import { claimEmbeddedBrowserForAgent } from './ai';
 import { releasePoolEB } from './embedded-sessions';
 import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
@@ -44,6 +46,9 @@ const QS_STEP_DEFINITIONS: Array<{ id: AgentStepId; label: string; description: 
   { id: 'qs_scout_authed', label: 'Authed Scout', description: 'Walk the in-app surface as the demo user' },
   { id: 'qs_generate', label: 'Generate Walkthrough', description: 'Author the walkthrough test from scout results' },
   { id: 'qs_run_and_notes', label: 'Run & Notes', description: 'Run the build with video and write demo notes' },
+  { id: 'qs_approve_baselines', label: 'Approve Baselines', description: 'Accept first-run baselines so the share looks clean' },
+  { id: 'qs_rerun_after_approval', label: 'Rerun for Pairing', description: 'Re-run walkthrough so authed shots pair with their own baselines' },
+  { id: 'qs_publish_share', label: 'Publish Share', description: 'Publish the founder-facing /r/<slug> share URL' },
 ];
 
 const QS_STEP_ORDER: AgentStepId[] = QS_STEP_DEFINITIONS.map(s => s.id);
@@ -469,9 +474,13 @@ async function runQsGenerate(
     && (meta.authSetup?.captured ?? false)
     && !!meta.authSetup?.storageStateId;
 
+  const biz = publicScout.businessInteraction;
   const code = renderWalkthroughCode({
     authAutomatable,
     chainedAuth: authAutomatable,
+    primaryInputLabel: biz?.primaryInputLabel,
+    primaryCtaLabel: biz?.primaryCtaLabel,
+    demoInputValue: biz?.demoInputValue,
   });
 
   const setupOverrides: TestSetupOverrides | undefined =
@@ -497,6 +506,9 @@ async function runQsGenerate(
     walkthroughTestId: created.id,
     authAutomatable,
     mode: authAutomatable ? 'chained' : 'public_only',
+    businessInteractionBaked: !!(biz?.primaryInputLabel && biz?.demoInputValue),
+    businessInteractionInput: biz?.primaryInputLabel,
+    businessInteractionCta: biz?.primaryCtaLabel,
   });
   emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
     `Walkthrough test generated (${authAutomatable ? 'authed' : 'public-only'})`,
@@ -633,15 +645,169 @@ async function runQsRunAndNotes(
     demoNotesPersisted,
   });
 
-  await queries.updateAgentSession(sessionId, {
-    status: 'completed',
-    completedAt: new Date(),
-  });
-  emitActivity(teamId, repositoryId, sessionId, 'session:complete',
-    `QuickStart complete: ${summary.passedCount} passed, ${summary.failedCount} failed, ${summary.changesDetected} screenshots`,
+  emitActivity(teamId, repositoryId, sessionId, 'step:complete',
+    `Run + notes complete: ${summary.passedCount} passed, ${summary.failedCount} failed, ${summary.changesDetected} screenshots`,
     { stepId: 'qs_run_and_notes', detail: { buildId, demoNotesPersisted } as Record<string, unknown> },
   );
   return true;
+}
+
+async function runQsApproveBaselines(
+  sessionId: string,
+  repositoryId: string,
+  teamId: string,
+): Promise<boolean> {
+  await setActive(sessionId, 'qs_approve_baselines');
+
+  const session = await queries.getAgentSession(sessionId);
+  const buildId = session?.metadata.buildId;
+  if (!buildId) {
+    await setFailed(sessionId, 'qs_approve_baselines', 'No build id on session.');
+    return false;
+  }
+
+  try {
+    const { approvedCount } = await approveAllDiffs(buildId, 'quickstart-agent');
+    await setCompleted(sessionId, 'qs_approve_baselines', { buildId, approvedCount });
+    emitActivity(teamId, repositoryId, sessionId, 'step:complete',
+      `Approved ${approvedCount} baselines`,
+      { stepId: 'qs_approve_baselines', agentType: 'quickstart' },
+    );
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await setFailed(sessionId, 'qs_approve_baselines', `Approve all failed: ${msg}`);
+    return false;
+  }
+}
+
+async function runQsRerunAfterApproval(
+  sessionId: string,
+  repositoryId: string,
+  teamId: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  await setActive(sessionId, 'qs_rerun_after_approval');
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) {
+    await setFailed(sessionId, 'qs_rerun_after_approval', 'Session missing.');
+    return false;
+  }
+
+  const meta = session.metadata;
+  const walkthroughTestId = meta.walkthroughTestId;
+  if (!walkthroughTestId) {
+    await setFailed(sessionId, 'qs_rerun_after_approval', 'No walkthrough test id.');
+    return false;
+  }
+
+  // The rerun is walkthrough-only — auth setup ran in the first build and is
+  // either replayed via storageState (chained) or already captured. Running it
+  // twice in a row trips Firebase per-IP rate limits + risks the "email already
+  // exists" path when the stamp doesn't rotate. Always rerun just the walkthrough.
+  let rerunBuildId: string;
+  try {
+    const result = await createAndRunBuildCore(
+      'manual',
+      [walkthroughTestId],
+      repositoryId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    if (!result.buildId) {
+      await setFailed(sessionId, 'qs_rerun_after_approval',
+        `Rerun queued (EB pool busy). Job ID: ${(result as { jobId?: string }).jobId ?? 'unknown'}.`);
+      return false;
+    }
+    rerunBuildId = result.buildId;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await setFailed(sessionId, 'qs_rerun_after_approval', `Rerun failed to start: ${msg}`);
+    return false;
+  }
+
+  await mergeMetadata(sessionId, { rerunBuildId });
+  emitActivity(teamId, repositoryId, sessionId, 'artifact:created',
+    `Rerun queued: ${rerunBuildId.slice(0, 8)}`,
+    { stepId: 'qs_rerun_after_approval', artifactType: 'build', artifactId: rerunBuildId },
+  );
+
+  const started = Date.now();
+  let summary = await getBuildSummary(rerunBuildId);
+  while (!summary || !summary.completedAt) {
+    if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
+      await setFailed(sessionId, 'qs_rerun_after_approval', 'Rerun timed out (>8 min).');
+      return false;
+    }
+    if (await isCancelled(sessionId, signal)) return false;
+    await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
+    summary = await getBuildSummary(rerunBuildId);
+  }
+
+  await setCompleted(sessionId, 'qs_rerun_after_approval', {
+    rerunBuildId,
+    passed: summary.passedCount,
+    failed: summary.failedCount,
+    changes: summary.changesDetected,
+  });
+  return true;
+}
+
+async function runQsPublishShare(
+  sessionId: string,
+  repositoryId: string,
+  teamId: string,
+): Promise<boolean> {
+  await setActive(sessionId, 'qs_publish_share');
+
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) {
+    await setFailed(sessionId, 'qs_publish_share', 'Session missing.');
+    return false;
+  }
+
+  const meta = session.metadata;
+  const walkthroughTestId = meta.walkthroughTestId;
+  if (!walkthroughTestId) {
+    await setFailed(sessionId, 'qs_publish_share', 'No walkthrough test id.');
+    return false;
+  }
+
+  // Prefer the rerun build so newly-created baselines pair with the rerun's
+  // current images on the share renderer. Falls back to the first build if
+  // the rerun step was skipped or failed.
+  const buildToShare = meta.rerunBuildId ?? meta.buildId;
+  if (!buildToShare) {
+    await setFailed(sessionId, 'qs_publish_share', 'No build id available to publish.');
+    return false;
+  }
+
+  try {
+    const result = await publishBuildShare(buildToShare, { scopedTestId: walkthroughTestId });
+    await mergeMetadata(sessionId, {
+      shareId: result.shareId,
+      shareSlug: result.slug,
+      shareUrl: result.url,
+    });
+    await setCompleted(sessionId, 'qs_publish_share', {
+      shareId: result.shareId,
+      slug: result.slug,
+      url: result.url,
+      buildId: buildToShare,
+    });
+    emitActivity(teamId, repositoryId, sessionId, 'session:complete',
+      `Share published: ${result.url}`,
+      { stepId: 'qs_publish_share', detail: { shareId: result.shareId, url: result.url } as Record<string, unknown> },
+    );
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await setFailed(sessionId, 'qs_publish_share', `Publish share failed: ${msg}`);
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +828,9 @@ const QS_RUNNERS: Record<AgentStepId, QsStepRunner | undefined> = {
   qs_scout_authed: runQsScoutAuthed,
   qs_generate: runQsGenerate,
   qs_run_and_notes: runQsRunAndNotes,
+  qs_approve_baselines: runQsApproveBaselines,
+  qs_rerun_after_approval: runQsRerunAfterApproval,
+  qs_publish_share: runQsPublishShare,
 } as Partial<Record<AgentStepId, QsStepRunner>> as Record<AgentStepId, QsStepRunner | undefined>;
 
 async function executeQuickstart(sessionId: string, repositoryId: string, teamId: string) {
@@ -688,6 +857,22 @@ async function executeQuickstart(sessionId: string, repositoryId: string, teamId
         stepId,
         durationMs: Date.now() - stepStart,
       });
+    }
+    // All steps completed without bailing — mark the session done. Individual
+    // step runners no longer set session.status; the orchestrator owns that
+    // transition once the full pipeline (including publish_share) succeeds.
+    const finalSession = await queries.getAgentSession(sessionId).catch(() => null);
+    if (finalSession && finalSession.status === 'active') {
+      await queries.updateAgentSession(sessionId, {
+        status: 'completed',
+        completedAt: new Date(),
+      });
+      emitActivity(teamId, repositoryId, sessionId, 'session:complete',
+        finalSession.metadata.shareUrl
+          ? `QuickStart complete: ${finalSession.metadata.shareUrl}`
+          : 'QuickStart complete',
+        { detail: { shareUrl: finalSession.metadata.shareUrl } as Record<string, unknown> },
+      );
     }
     revalidatePath('/run');
   } finally {

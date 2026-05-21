@@ -56,23 +56,3 @@ export interface TestTreeItem {
   lastRunAt?: string | null;
 }
 
-// WebSocket message types
-export interface WSMessage {
-  type: 'test:start' | 'test:progress' | 'test:complete' | 'build:start' | 'build:complete' | 'connected';
-  payload: Record<string, unknown>;
-}
-
-export interface TestProgressPayload {
-  testId: number;
-  runId: number;
-  step: string;
-  progress: number;
-}
-
-export interface TestCompletePayload {
-  testId: number;
-  runId: number;
-  status: 'passed' | 'failed' | 'error';
-  errorMessage?: string;
-  duration: number;
-}

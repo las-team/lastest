@@ -673,9 +673,9 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.cursorPlaybackSpeedOverride ?? pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
-        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'warn',
-        ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? false,
+        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? true,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
         // Without this, the runner never invokes axe-core even when the user
         // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount

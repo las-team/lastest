@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
 import { LastestApi } from './api';
-import { LastestWebSocket } from './websocket';
 import { TestTreeDataProvider } from './testTree';
 import { TestRunner } from './testRunner';
 import { StatusBarManager } from './statusBar';
 import { getOutputChannel, disposeOutputChannel } from './output';
 
 let api: LastestApi;
-let ws: LastestWebSocket;
 let treeProvider: TestTreeDataProvider;
 let testRunner: TestRunner;
 let statusBar: StatusBarManager;
@@ -15,31 +13,19 @@ let statusBar: StatusBarManager;
 export function activate(context: vscode.ExtensionContext) {
   console.log('Lastest extension activating...');
 
-  // Initialize API client
   api = new LastestApi();
+  treeProvider = new TestTreeDataProvider(api);
+  statusBar = new StatusBarManager();
+  testRunner = new TestRunner(api, treeProvider, statusBar);
 
-  // Initialize WebSocket
-  ws = new LastestWebSocket();
-
-  // Initialize tree provider
-  treeProvider = new TestTreeDataProvider(api, ws);
-
-  // Initialize test runner
-  testRunner = new TestRunner(api, ws, treeProvider);
-
-  // Initialize status bar
-  statusBar = new StatusBarManager(api, ws, treeProvider);
-
-  // Register tree view
   const treeView = vscode.window.createTreeView('lastest.testExplorer', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
 
-  // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('lastest.refreshTests', () => {
-      treeProvider.refresh();
+    vscode.commands.registerCommand('lastest.refreshTests', async () => {
+      await refresh();
     }),
 
     vscode.commands.registerCommand('lastest.runTest', async (item) => {
@@ -72,41 +58,47 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Listen for configuration changes
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
+    vscode.workspace.onDidChangeConfiguration(async (e) => {
       if (e.affectsConfiguration('lastest.serverUrl') || e.affectsConfiguration('lastest.apiToken')) {
         api.updateConfig();
-        reconnect();
+        await connect();
       }
     })
   );
 
-  // Add disposables
   context.subscriptions.push(
     treeView,
-    { dispose: () => ws.dispose() },
     { dispose: () => testRunner.dispose() },
     { dispose: () => statusBar.dispose() }
   );
 
-  // Initial connection
   connect();
 
   console.log('Lastest extension activated');
 }
 
-async function connect() {
-  const config = vscode.workspace.getConfiguration('lastest');
-  const serverUrl = config.get<string>('serverUrl', 'http://localhost:3000');
-  const apiToken = config.get<string>('apiToken', '');
+async function refresh() {
   const output = getOutputChannel();
+  output.appendLine(`[health] GET ${api.getServerUrl()}/api/v1/health`);
+  const connected = await api.checkConnection();
+  statusBar.setConnected(connected);
+  if (!connected) {
+    output.appendLine(`[health] failed — cannot reach ${api.getServerUrl()}`);
+    return;
+  }
+  output.appendLine('[health] ok');
+  await treeProvider.refresh();
+}
 
+async function connect() {
+  const output = getOutputChannel();
+  const serverUrl = api.getServerUrl();
   output.appendLine(`[health] GET ${serverUrl}/api/v1/health`);
   const connected = await api.checkConnection();
+  statusBar.setConnected(connected);
   if (connected) {
     output.appendLine('[health] ok');
-    ws.connect(serverUrl, apiToken);
     await treeProvider.refresh();
     vscode.window.showInformationMessage('Connected to Lastest server');
   } else {
@@ -125,13 +117,7 @@ async function connect() {
   }
 }
 
-async function reconnect() {
-  ws.disconnect();
-  await connect();
-}
-
 export function deactivate() {
-  ws?.dispose();
   testRunner?.dispose();
   statusBar?.dispose();
   disposeOutputChannel();

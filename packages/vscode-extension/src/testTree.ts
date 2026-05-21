@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import type { LastestApi } from './api';
-import type { LastestWebSocket } from './websocket';
 import type { Repository, FunctionalArea, Test } from './types';
 
 type TreeNode = RepositoryNode | FunctionalAreaNode | TestNode;
@@ -60,7 +59,6 @@ class TestNode extends vscode.TreeItem {
   }
 
   updateDisplay() {
-    // Status icon
     switch (this.status) {
       case 'passed':
         this.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
@@ -75,7 +73,6 @@ class TestNode extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon('circle-outline');
     }
 
-    // Description with last run time
     if (this.lastRunAt) {
       const ago = this.formatTimeAgo(new Date(this.lastRunAt));
       this.description = ago;
@@ -83,7 +80,6 @@ class TestNode extends vscode.TreeItem {
       this.description = 'never run';
     }
 
-    // Tooltip
     this.tooltip = new vscode.MarkdownString();
     this.tooltip.appendMarkdown(`**${this.test.name}**\n\n`);
     this.tooltip.appendMarkdown(`URL: ${this.test.targetUrl}\n\n`);
@@ -110,30 +106,7 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   private testNodeMap = new Map<number, TestNode>();
   private refreshInFlight: Promise<void> | null = null;
 
-  constructor(
-    private readonly api: LastestApi,
-    private readonly ws: LastestWebSocket
-  ) {
-    // Listen for test updates
-    this.ws.onTestStart((payload) => {
-      const node = this.testNodeMap.get(payload.testId);
-      if (node) {
-        node.status = 'running';
-        node.updateDisplay();
-        this._onDidChangeTreeData.fire(node);
-      }
-    });
-
-    this.ws.onTestComplete((payload) => {
-      const node = this.testNodeMap.get(payload.testId);
-      if (node) {
-        node.status = payload.status === 'error' ? 'failed' : payload.status;
-        node.lastRunAt = new Date().toISOString();
-        node.updateDisplay();
-        this._onDidChangeTreeData.fire(node);
-      }
-    });
-  }
+  constructor(private readonly api: LastestApi) {}
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;

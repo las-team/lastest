@@ -976,9 +976,9 @@ export const playwrightSettings = pgTable('playwright_settings', {
   ebIdleTTLSeconds: integer('eb_idle_ttl_seconds').default(120),
   stabilization: jsonb('stabilization').$type<StabilizationSettings>(), // snapshot stabilization settings
   acceptAnyCertificate: boolean('accept_any_certificate').default(false), // ignore HTTPS/SSL cert errors
-  networkErrorMode: text('network_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
-  ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(false), // skip errors from different origins
-  consoleErrorMode: text('console_error_mode').default('warn'), // 'fail' | 'warn' | 'ignore'
+  networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(true), // skip errors from different origins
+  consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
@@ -1814,7 +1814,10 @@ export type AgentStepId =
   | 'qs_auth_setup'
   | 'qs_scout_authed'
   | 'qs_generate'
-  | 'qs_run_and_notes';
+  | 'qs_run_and_notes'
+  | 'qs_approve_baselines'
+  | 'qs_rerun_after_approval'
+  | 'qs_publish_share';
 
 export type AgentStepStatus = 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
 
@@ -1888,6 +1891,17 @@ export interface QuickstartAuthClassification {
   authAutomatable: boolean;
 }
 
+export interface QuickstartBusinessInteraction {
+  /** Visible label / placeholder of the primary input the founder's hero CTA points at
+   *  (e.g. "Paste a startup idea", "Search anything", "Enter a URL"). */
+  primaryInputLabel?: string;
+  /** Visible text of the hero / primary CTA (e.g. "Validate idea", "Generate brief"). */
+  primaryCtaLabel?: string;
+  /** Safe demo value to type into the primary input. Plain string, no quotes — must be
+   *  additive/idempotent (no destructive actions, no real payments, no outbound mail). */
+  demoInputValue?: string;
+}
+
 export interface QuickstartPublicScout extends QuickstartAuthClassification {
   tagline?: string;
   concept?: string;
@@ -1895,6 +1909,7 @@ export interface QuickstartPublicScout extends QuickstartAuthClassification {
   registerPath?: string | null;
   cookieBannerSelectorHint?: string;
   friction?: Array<{ kind: string; note: string }>;
+  businessInteraction?: QuickstartBusinessInteraction;
 }
 
 export interface QuickstartAuthedScout {
@@ -1935,7 +1950,15 @@ export interface AgentSessionMetadata {
   authSetup?: QuickstartAuthSetupMeta;
   walkthroughTestId?: string;
   buildId?: string;
+  /** Build id of the second walkthrough run (after baselines are approved). Replaces
+   *  buildId for share publication so newly-added authed scenarios pair with their own
+   *  baselines (isNewTest pairing trap fix). */
+  rerunBuildId?: string;
   demoNotesId?: string;
+  /** Share id returned by publishBuildShare after the rerun completes. */
+  shareId?: string;
+  shareSlug?: string;
+  shareUrl?: string;
   disabledReason?: string;
   [key: string]: unknown;
 }

@@ -129,8 +129,8 @@ export async function GET(
   // tab "broken vs warn vs ignore" treatment so the red X pill matches what
   // the runner actually does when it sees a network 4xx / console error.
   const errorModes = {
-    network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
-    console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'warn',
+    network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+    console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
   };
 
   return NextResponse.json(

@@ -108,9 +108,9 @@ export function PlaywrightSettingsCard({
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [enableA11y, setEnableA11y] = useState(settings.enableA11y ?? false);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
-  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'warn');
-  const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? false);
-  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'warn');
+  const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
+  const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? true);
+  const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
@@ -148,9 +148,9 @@ export function PlaywrightSettingsCard({
     enableVideoRecording: settings.enableVideoRecording ?? false,
     enableA11y: settings.enableA11y ?? false,
     acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
-    networkErrorMode: settings.networkErrorMode ?? 'warn',
-    ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
-    consoleErrorMode: settings.consoleErrorMode ?? 'warn',
+    networkErrorMode: settings.networkErrorMode ?? 'fail',
+    ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
+    consoleErrorMode: settings.consoleErrorMode ?? 'fail',
     grantClipboardAccess: settings.grantClipboardAccess ?? false,
     acceptDownloads: settings.acceptDownloads ?? false,
     enableNetworkInterception: settings.enableNetworkInterception ?? false,
@@ -181,9 +181,9 @@ export function PlaywrightSettingsCard({
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
     setEnableA11y(settings.enableA11y ?? false);
     setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
-    setNetworkErrorMode(settings.networkErrorMode ?? 'warn');
-    setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? false);
-    setConsoleErrorMode(settings.consoleErrorMode ?? 'warn');
+    setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
+    setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? true);
+    setConsoleErrorMode(settings.consoleErrorMode ?? 'fail');
     setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
     setAcceptDownloads(settings.acceptDownloads ?? false);
     setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
@@ -211,9 +211,9 @@ export function PlaywrightSettingsCard({
       enableVideoRecording: settings.enableVideoRecording ?? false,
       enableA11y: settings.enableA11y ?? false,
       acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
-      networkErrorMode: settings.networkErrorMode ?? 'warn',
-      ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? false,
-      consoleErrorMode: settings.consoleErrorMode ?? 'warn',
+      networkErrorMode: settings.networkErrorMode ?? 'fail',
+      ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
+      consoleErrorMode: settings.consoleErrorMode ?? 'fail',
       grantClipboardAccess: settings.grantClipboardAccess ?? false,
       acceptDownloads: settings.acceptDownloads ?? false,
       enableNetworkInterception: settings.enableNetworkInterception ?? false,
