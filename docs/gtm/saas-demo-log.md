@@ -1630,8 +1630,8 @@ Per-target status appended below each draft.
 - Final build: 7f95c9e1-748e-47fe-8c75-d68edb42a8ba — P:1 F:0 C:0 auto-approved
 - Share: https://app.lastest.cloud/r/ubD6sKCE7Vev6_3wISSbWA (scoped to Test 2)
 - Best authed screenshot (Step 7): "Concierge" agent-build interface with sidebar (New Agent / My Agents / Schedule / Assets / Billing / Connections / My Profile) and primary interaction in motion — user clicked "Email me a daily calendar summary" suggestion, prompt echoed, AI spinner generating the agent. Plus Step 11 (Connections) which shows 50+ integrations across 16 categories.
-- Channel: X DM (founder @michaela personal handle, @buildcardamon product handle)
-- Sent: **NO** — paused at approval gate per user constraint
+- Channel: public reply on launch tweet (DM blocked by Cardamon's followers-only + encryption gate)
+- Sent: **yes** 2026-05-21T05:58:21Z — first reply under https://x.com/buildcardamon/status/2057124226201510007 per user constraint
 - Reply (48h check): —
 
 
@@ -1653,8 +1653,8 @@ Per-target status appended below each draft.
 - Share: https://app.lastest.cloud/r/tU3jBY0jNRrGOrg01ad3hw
 - Best authed screenshot: N/A — authed walk gated. Best frame is Step 4 /auth/signin showing the magic-link-only Spanish-localized gate ("Iniciar Sesion · Continuar con Google · Enviar enlace de acceso") that the founder may not realize all English-funnel CTAs land on. Step 7 (dashboard redirect) also shows the LLMO Consultant chat widget that pops in.
 - Notable findings logged in demo notes: Marketing→auth→Spanish-only language shock, magic-link-only signup blocking automated walks, "3 free analyses no card" promise behind the auth gate
-- Channel: TBD (founder X handle: needs lookup — JesusLopezSEO suggests @JesusLopezSEO)
-- Sent: **NO** — paused at approval gate per user constraint
+- Channel: public reply on @Llmfy_ai pinned tweet (handle found 2026-05-21)
+- Sent: **yes** 2026-05-21T07:42:10Z — reply under https://x.com/Llmfy_ai/status/2049839183921877488
 - Reply (48h check): —
 
 
@@ -1670,8 +1670,8 @@ Per-target status appended below each draft.
 - Share: https://app.lastest.cloud/r/MIrH95BzyS7KP1xmWQNWRg
 - Best frame: Step 4 — signup card with Google / GitHub / email-only field, "Create an account" CTA, terms checkbox. Honest representation of the friction surface; no authed dashboard walk on tape.
 - Notable findings: 3-of-last-4 iterations (VitalTrends, LLMFY, Kreuzberg) gated by passwordless-only auth; /dashboard returns 404 instead of redirecting to signin
-- Channel: TBD (no founder X handle harvested yet — Kreuzberg's nav shows Community link but X handle wasn't on the landing's outbound)
-- Sent: **NO** — paused at approval gate
+- Channel: public reply on @kreuzberg_dev latest tweet
+- Sent: **yes** 2026-05-21T07:42:50Z — reply under https://x.com/kreuzberg_dev/status/2054642708887564774
 
 
 ## 2026-05-21 — @Caesarkuta / Envoice
@@ -1686,8 +1686,9 @@ Per-target status appended below each draft.
 - Final build: 76b7112f-80b8-46d5-ac02-2edfb792567d
 - Share: https://app.lastest.cloud/r/ytcmQMOB8A7TazQ8FulFZQ
 - Best frame: Step 8 — signup form filled with viktor/email/password, "Creating Account..." spinner — the form WORKS, the API DOESN'T
-- Channel: X DM to @Caesarkuta (founder, just launched today — actively listening for feedback)
-- Sent: **NO** — paused at approval gate. **This one is time-sensitive**: every hour the CORS bug stays unfixed, more visitors bounce.
+- Channel: public reply on launch tweet (DM blocked by Caesarkuta's followers-only DM setting)
+- Updated test: a11261cb-b38f-46a4-af61-0874a280cc30 now has assertions (P:0 F:1 build b8541a73). Updated share /r/mYiI5GhoGYuSG_9g4LMH8w shows Failed status pill + descriptive throw
+- Sent: **yes** 2026-05-21T05:55:39Z — public reply under https://x.com/Caesarkuta/status/2056772341963571465 (2nd reply in thread)
 - Reply (48h check): —
 
 
@@ -1702,7 +1703,58 @@ Per-target status appended below each draft.
 - Final build: efe006b1-1ec4-4542-ad49-bd470cb84c1a — P:1 F:0 C:0 review_required
 - Share: https://app.lastest.cloud/r/bY8hXqiubhDLS8kyD-gZXQ
 - Best authed screenshot (Step 10): Decision Matrix view for "Adopt Lastest for visual-regression testing (tfdg8q)" — fresh decision created end-to-end via the form, toast "Decision created. Add some options next." visible top-right, Confidence 20% Low with named factors, Status Active, criteria + options scaffolds ready. Money shot.
-- Channel: X DM @wade_bhavy55123 (or public reply on launch tweet)
-- Sent: **NO** — paused at approval gate
+- Channel: public reply on launch tweet (DM blocked by Bhavya's followers-only DM setting)
+- Sent: **yes** 2026-05-21T05:30:44Z — public reply under https://x.com/wade_bhavy55123/status/2057326704214065419
 - Reply (48h check): —
 
+
+## 2026-05-21 — @coolsodhi / Rekroots
+- Source: X live search ("just launched" saas min_faves:1) — sourced ~3 min after his launch tweet
+- Site: https://rekroots.com — modern job board, Next.js + better-auth
+- DNS-check: ✓ (Cloudflare 216.198.79.1), HTTP 200
+- AUTH_MODE: 4-field signup (name/username/email/password) → 4-digit code verify-email gate ("Four digits. Ten minutes. No links to click."). No OAuth, no captcha. Better-auth library disclosed in footer.
+- Lastest repo: 9d278f8c-ed84-4f6a-b8b0-2a1f30cf9d74 (rekroots-demo)
+- Test: d9a156de-c120-4058-bc9e-9f27d43c2333
+- Builds: 7eb4354e (baseline, 10 screenshots, 54s) → 1f18fa4c (pair, 0 diffs, 55s)
+- Final build: 1f18fa4c-9969-4cd4-ba92-a28cf107af28 — P:1 F:0 C:0
+- Share v1 (verify-gate only): https://app.lastest.cloud/r/I-hS098ML8q3ENvtXQFXdA
+- Share v2 (FULL AUTHED WALK): https://app.lastest.cloud/r/hcE6rU97tF0iHUqoR3jEiA — pre-registered lastestcloud+rktfdl2s@gmail.com via MCP+Gmail MCP, retrieved 4-digit code 8801, verified, then Test 2 logs in via /api/auth/sign-in/email REST endpoint and walks: home / for-recruiters / pricing / sign-in (empty + filled) / dashboard Overview (4 seed roles) / Browse jobs (18 listings) / Applications / Saved / Resumes / Alerts / Profile / Settings. 12 screenshots, 66s, build c5c77f9b.
+- Best authed frame: Step 6 — authed Overview with sidebar, VL Viktor Lastest avatar, 4 stat cards, Recommended-for-you panel showing real seed roles, Profile completion widget, PRIVATE BETA pill.
+- Notable findings (in demo notes): /signup→404 (vs /sign-up valid), Better-auth disclosure in footer is smart trust signal, code-vs-link verify beats magic-link for evaluators, dual-sided wizard sharper than typical job boards
+- Channel: public reply on @coolsodhi launch tweet
+- Sent: **yes** 2026-05-21T07:39:36Z — reply under https://x.com/coolsodhi/status/2057340364890284168
+
+
+## 2026-05-21 — Revise (revise.io)
+- Source: Hacker News Show HN ("Show HN: A fast, free AI rewriter")
+- Site: https://revise.io — no-auth free AI rewriter, split-pane editor + prompt library
+- DNS-check: ✓ (AWS edge, HTTP 200)
+- AUTH_MODE: NONE for the free tier — visitor uses the rewriter directly. Login/Create-Account exist but aren't gating.
+- Lastest repo: d45d9c01-a42c-44a8-83d8-e8add8212dc3 (revise-demo)
+- Test: a0133f79-a859-476b-a3fa-f5a0d5772c3a
+- Builds: f4e849fc (baseline, 9 screenshots, 36s) → f2ebdd17 (pair, 0 diffs, 37s)
+- Final build: f2ebdd17-1327-48ef-83f0-92105c70bf25
+- Share: https://app.lastest.cloud/r/VCiQ2aT2vowlATxwY2Huig
+- Best frame: Step 9 — AI Rewriter split-pane with source text left + AI-rewritten version right + active Copy/Share/Open-in-Editor buttons. End-to-end interaction completed in seconds.
+- Notable findings (in demo notes): Cleanest evaluator UX of the cohort (free tier IS the product, no auth wall), prompt textarea vs source contenteditable share visual treatment but different semantics (paste-into-wrong-field risk), no char counter on free tier, "GPT 5.4" model label opaque
+- Channel: public reply on @reviseio latest tweet (handle found via X search: bio 'Agentic word processor from the future')
+- Sent: **yes** 2026-05-21T07:41:30Z — reply under https://x.com/reviseio/status/2056800635618463877
+
+
+---
+
+## Iter 10 — Portlora (client portal SaaS) — 2026-05-21
+
+- **Founder:** @hasith98 (X)
+- **Product:** portlora.com — Client portal for freelancers/agencies (Dashboard / Inbox / Projects / Storage / Clients / Settings). "Your clients deserve better than email threads."
+- **Source:** X live search (logged in @HeroLastest), recent launch
+- **DNS:** OK (Cloudflare, 200)
+- **Auth mode:** email+password 3-step signup wizard (Freelancer/Agency → details → plan) + magic-link email verify
+- **Pre-register flow:** MCP filled signup wizard → Gmail MCP retrieved magic-link from lastestcloud+portloratfdnbr@gmail.com → followed link → /dashboard with sidebar
+- **Repo:** 66a6d2b6-5512-4c24-afb2-e31875513692
+- **Test:** 5ad3bc0a-2a0b-48f8-9d8d-8491badd7522 (login-in-EB pattern; baked creds on email+password form)
+- **Build 1 (baseline):** b72f82e3-94e8-4ae9-bdda-58d80355f507 — P:1 F:0 C:12 (62s) — login succeeded, dashboard-after-skip fired (extra screenshot)
+- **Build 2 (pairing):** ce17f2cf-b628-415e-a967-ddfcebc84eca — P:1 F:0 C:0 (clean)
+- **Share:** https://app.lastest.cloud/r/Rcc7BpQ7DCaaaXdW1xtcIw
+- **Best authed screenshot:** Dashboard "Good morning, Viktor 👋" + sidebar (Dashboard / Inbox / Projects / Storage / Clients / Settings) + onboarding pills
+- **Status:** Awaiting approval to send public reply on X

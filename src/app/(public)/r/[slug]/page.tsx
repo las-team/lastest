@@ -44,10 +44,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
     : `Visual regression check for ${domain} — recording, screenshots, and diff report.`;
 
-  // metadataBase lets relative image URLs resolve to absolute URLs in the
-  // emitted <meta og:image> tag (crawlers need absolute).
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  // Resolve the canonical origin from the request first; fall back to the
+  // build-time env var. Some Twitter/Slack scrapes ended up with a stale
+  // localhost twitter:image when NEXT_PUBLIC_APP_URL wasn't pinned at build,
+  // which is the "missing thumbnail" symptom callers reported.
+  const origin = await resolveRequestOrigin();
   const ogImageUrl = `/api/og/share/${slug}`;
+  const absoluteOgImage = `${origin}${ogImageUrl}`;
   const ogAlt = ctx.build.changesDetected
     ? `${ctx.build.changesDetected} visual changes on ${domain}`
     : `Visual regression report for ${domain}`;
@@ -55,7 +58,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return {
     title,
     description,
-    metadataBase: new URL(appUrl),
+    metadataBase: new URL(origin),
     robots: { index: false, follow: false },
     openGraph: {
       title,
@@ -63,15 +66,40 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: buildShareUrl(slug),
       type: 'article',
       siteName: 'Lastest',
-      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: ogAlt }],
+      images: [
+        {
+          url: absoluteOgImage,
+          secureUrl: absoluteOgImage,
+          width: 1200,
+          height: 630,
+          alt: ogAlt,
+          type: 'image/png',
+        },
+      ],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: [ogImageUrl],
+      images: [{ url: absoluteOgImage, alt: ogAlt }],
     },
   };
+}
+
+async function resolveRequestOrigin(): Promise<string> {
+  try {
+    const h = await headers();
+    const forwardedProto = h.get('x-forwarded-proto')?.split(',')[0]?.trim();
+    const forwardedHost = h.get('x-forwarded-host')?.split(',')[0]?.trim();
+    const host = forwardedHost || h.get('host');
+    if (host) {
+      const proto = forwardedProto || (host.startsWith('localhost') ? 'http' : 'https');
+      return `${proto}://${host}`;
+    }
+  } catch {
+    // headers() unavailable during static analysis / preview builds — fall through.
+  }
+  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 }
 
 export default async function PublicSharePage({ params }: PageProps) {
@@ -119,6 +147,26 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
 
   const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
+
+  // VideoObject structured data — surface the test recording to Google per
+  // https://support.google.com/webmasters/answer/7552505 so /r/ pages get
+  // video-rich previews instead of plain links.
+  const origin = await resolveRequestOrigin();
+  const primaryVideoPath = primaryResult?.videoPath
+    ? toUrl(primaryResult.videoPath)
+    : fallbackVideoUrl;
+  const videoSchema = primaryVideoPath
+    ? buildVideoSchema({
+        origin,
+        slug,
+        videoPath: primaryVideoPath,
+        displayName: test?.name ?? displayDomain,
+        domain: displayDomain,
+        durationMs: primaryResult?.durationMs ?? null,
+        uploadedAt: build.completedAt ?? build.createdAt ?? null,
+        changesDetected: build.changesDetected ?? 0,
+      })
+    : null;
 
   // Optional AI UI/UX summary captured at the end of a /gtm-lastest-saas-demo
   // run. Prefer the latest notes for the share's repo so re-runs flow into
@@ -223,8 +271,71 @@ export default async function PublicSharePage({ params }: PageProps) {
           nonce="" during hydration. The script has already loaded
           correctly under the original nonce; suppress the cosmetic mismatch. */}
       <script src="/share-slider.js" defer nonce={nonce} suppressHydrationWarning />
+      {videoSchema && (
+        <script
+          type="application/ld+json"
+          nonce={nonce}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(videoSchema).replace(/</g, '\\u003c'),
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function buildVideoSchema({
+  origin,
+  slug,
+  videoPath,
+  displayName,
+  domain,
+  durationMs,
+  uploadedAt,
+  changesDetected,
+}: {
+  origin: string;
+  slug: string;
+  videoPath: string;
+  displayName: string;
+  domain: string;
+  durationMs: number | null;
+  uploadedAt: Date | null;
+  changesDetected: number;
+}): Record<string, unknown> {
+  const absVideo = videoPath.startsWith('http') ? videoPath : `${origin}${videoPath}`;
+  const thumbnailUrl = `${origin}/api/og/share/${slug}`;
+  const uploadDate = (uploadedAt ?? new Date()).toISOString();
+  const description = changesDetected > 0
+    ? `Visual regression recording for ${domain} — ${changesDetected} change${changesDetected === 1 ? '' : 's'} detected.`
+    : `Visual regression recording for ${domain} — no changes detected against baseline.`;
+  const schema: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'VideoObject',
+    name: `${displayName} · Lastest visual regression run`,
+    description,
+    thumbnailUrl: [thumbnailUrl],
+    uploadDate,
+    contentUrl: absVideo,
+    embedUrl: `${origin}/r/${slug}`,
+  };
+  if (durationMs && durationMs > 0) {
+    schema.duration = msToIso8601Duration(durationMs);
+  }
+  return schema;
+}
+
+function msToIso8601Duration(ms: number): string {
+  const totalSec = Math.max(1, Math.round(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  let out = 'PT';
+  if (h > 0) out += `${h}H`;
+  if (m > 0) out += `${m}M`;
+  if (s > 0 || (h === 0 && m === 0)) out += `${s}S`;
+  return out;
 }
 
 // --- sub-components ---------------------------------------------------------

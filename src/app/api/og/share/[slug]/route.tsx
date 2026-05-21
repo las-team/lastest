@@ -1,5 +1,5 @@
 import { ImageResponse } from 'next/og';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import {
   getPublicShareContext,
@@ -15,6 +15,11 @@ export const revalidate = 300;
 
 const OG_W = 1200;
 const OG_H = 630;
+// Cap on hero screenshot size before embedding as a data URL. Full-page
+// screenshots can run multiple MB; once embedded + base64'd, Satori takes
+// long enough that Twitter/Slack scrapers time out (~5–10s) and silently
+// drop the card. Past this size we fall back to the placeholder pane.
+const MAX_HERO_BYTES = 1_800_000;
 
 // Brand palette (sync with src/app/globals.css)
 const COLOR_PAPER = '#F6F4EF';
@@ -60,6 +65,8 @@ async function readImageAsDataUrl(storagePath: string): Promise<string | null> {
   const abs = resolveStoragePath(cleaned);
   if (!abs || !existsSync(abs)) return null;
   try {
+    const st = await stat(abs);
+    if (st.size > MAX_HERO_BYTES) return null;
     const buf = await readFile(abs);
     const ext = cleaned.slice(cleaned.lastIndexOf('.') + 1).toLowerCase();
     const mime =
