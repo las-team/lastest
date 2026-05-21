@@ -2019,3 +2019,34 @@ User pushed back: "I NEED YOU TO REGISTER AND THEN TEST THE FUCKING LOGGED IN AP
 - **Best authed screenshot:** the **/dashboard "Welcome to FuelTheGains" wizard intro** showing the Compute → Generate → Track pillars, OR the **Goal picker** with Bulk / Cut (Soon) / Maintain (Soon) cards. The whole wizard renders inside one URL with React state transitions — Lastest captures each step distinctly.
 - **Creds:** /tmp/fuelthegains-creds.env — lastestcloud+ftgft1@gmail.com / Demoft1!A1B2C3
 - **Founder-side bug found:** verify-email URL embeds `email=...+...@gmail.com` without URL-encoding the `+` — fails with a generic "Something went wrong" page. Cost me one signup attempt. Worth flagging to @matthieumatical.
+
+---
+
+## Iter 19 — ScriptRaid (scriptraid.com) — 2026-05-21 — NO-AUTH REAL AI GENERATION
+
+- **Founder:** @Dckrig (X, "@CoinHouse746" reposted same launch tweet)
+- **Source:** X live search — fresh launch, "no signup" callout
+- **Product:** AI TikTok/YouTube Shorts script generator for gaming creators. Claude Sonnet 4.5 backed. 3 free scripts, no signup. 8 games × 5 vibes × 3 runtimes.
+- **Auth mode:** none — public-only with REAL AI interaction
+- **Repo:** 398084fe-11cf-42d6-857a-eb4991ff3597 · test 9803e6c4
+- **Test 2:** walks home → /raid-captains → /app → picks TikTok platform + Fortnite + HYPE + 15s → clicks GENERATE SCRIPT → captures the real Claude-generated script (primary business interaction = AI generation with the founder's actual prompt chain running).
+- **Builds:** baseline 018fae45 (P:1 F:0 C:7), pair d5390383 (P:1 F:0 C:3 — expected diffs: the AI-generated script text varies per run, GPU-warmup indicator, free-script counter).
+- **Share:** https://app.lastest.cloud/r/MGVBgFczxxN6XXCKqAhGnw
+- **Best screenshot:** /app after GENERATE SCRIPT — actual Claude Sonnet 4.5 output rendered as a viral TikTok hook in gamer slang. Real AI inference per build.
+
+---
+
+## Iter 20 — HermesDeploy (hermesdeploy.app) — 2026-05-21 — REAL AUTHED WALK
+
+- **Founder:** @omkar_builds (X) — "Hermes is an open-source personal AI agent. I built HermesDeploy to deploy it"
+- **Source:** X live search ("I just shipped" + signup keyword)
+- **DNS:** hermesdeploy.app → 66.241.125.127 OK
+- **Product:** Managed hosting for personal Hermes AI agents. Each agent gets a server, remembers user, learns skills, runs errands. 3-day free trial Pro, no card.
+- **Auth mode:** email+password (and magic-link option) backed by Supabase. **Clean Supabase template** this time — the `=` in token URL came through intact, unlike the StudyHub/Slideshot/EyeCap/PDFOutput bug. Worth noting which Supabase instances render the template correctly.
+- **Pre-register flow:** /signup → Supabase verify-email URL → /onboarding (5-step wizard).
+- **Repo:** e95dac0c-ca1f-4c5e-bc65-51fbe94ffb0b · test 38a49565
+- **Test 2:** EB walks home → /login → real email+password sign-in → 5-step agent-creation wizard (Name → Plan → Model → Telegram → Ready) with "Hermes" picked as the agent name.
+- **Builds:** baseline db1d3073 (P:1 F:0 C:9), pair fdfbaa56 (P:1 F:0 C:0 — perfectly clean).
+- **Share:** https://app.lastest.cloud/r/uLEhIN7A_RQIGwKvDBBKLQ
+- **Best authed screenshot:** the wizard Step 1 "Name your agent" with the 8 quick-pick options (Hermes / Atlas / Juno / Iris / Sage / Orin / Vesper / Echo) + the chosen-name state. Founder's actual creation flow captured end-to-end.
+- **Creds:** /tmp/hermesdeploy-creds.env — lastestcloud+hermeshd1@gmail.com / Demohd1!A1B2C3D4

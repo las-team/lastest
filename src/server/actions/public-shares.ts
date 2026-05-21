@@ -8,7 +8,12 @@ import * as queries from '@/lib/db/queries';
 import { requireAuth, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
 import { generateShareSlug, buildShareUrl } from '@/lib/share/slug';
 import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
+import { sendDiscordShareNotification } from '@/lib/integrations/discord';
 import type { PublicShare } from '@/lib/db/schema';
+
+const INTERNAL_SHARE_DISCORD_WEBHOOK_URL =
+  process.env.LASTEST_SHARE_DISCORD_WEBHOOK_URL ||
+  'https://discord.com/api/webhooks/1506995703593828434/8mwqS7FH7dk9SxqBok4QEMPv2sZ9f1w5J5DD1PR5Wajqtp2mHvNf0C99ggZobDo6V_If';
 
 export interface PublishShareResult {
   shareId: string;
@@ -64,8 +69,23 @@ export async function publishBuildShare(
     targetDomain,
   });
 
+  const shareUrl = buildShareUrl(share.slug);
+  if (INTERNAL_SHARE_DISCORD_WEBHOOK_URL) {
+    void sendDiscordShareNotification(INTERNAL_SHARE_DISCORD_WEBHOOK_URL, {
+      shareUrl,
+      slug: share.slug,
+      targetDomain,
+      repoName: session.repo.name || session.repo.fullName || 'unknown',
+      publishedByEmail: session.user.email,
+      teamName: session.team.name,
+      scopedTestName: scopedTest?.name ?? null,
+    }).catch((e) => {
+      console.error('[publicShare] discord ping failed', e);
+    });
+  }
+
   revalidatePath(`/builds/${buildId}`);
-  return { shareId: share.id, slug: share.slug, url: buildShareUrl(share.slug) };
+  return { shareId: share.id, slug: share.slug, url: shareUrl };
 }
 
 export async function publishLatestTestShare(testId: string): Promise<PublishShareResult> {

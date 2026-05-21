@@ -176,6 +176,65 @@ export async function sendDiscordBugReport(
   }
 }
 
+// Public Share Notification (internal Lastest activity firehose)
+
+export interface DiscordShareNotification {
+  shareUrl: string;
+  slug: string;
+  targetDomain: string | null;
+  repoName: string;
+  publishedByEmail: string;
+  teamName: string;
+  scopedTestName?: string | null;
+}
+
+export async function sendDiscordShareNotification(
+  webhookUrl: string,
+  notification: DiscordShareNotification,
+): Promise<{ success: boolean; error?: string }> {
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: 'Target', value: notification.targetDomain || '—', inline: true },
+    { name: 'Repo', value: notification.repoName, inline: true },
+    { name: 'Published by', value: notification.publishedByEmail, inline: true },
+    { name: 'Team', value: notification.teamName, inline: true },
+  ];
+  if (notification.scopedTestName) {
+    fields.push({ name: 'Scoped test', value: notification.scopedTestName, inline: true });
+  }
+  fields.push({ name: 'Slug', value: `\`${notification.slug}\``, inline: true });
+
+  const embed = {
+    title: '🚀 Fresh share dropped in the wild',
+    url: notification.shareUrl,
+    description: 'Someone just pinned a baseline to the public internet. Click before they change their mind.',
+    color: 0x8b5cf6,
+    fields,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [embed],
+        allowed_mentions: { parse: [] },
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error sending Discord share notification',
+    };
+  }
+}
+
 function getStatusColor(status: BuildStatus): number {
   switch (status) {
     case 'safe_to_merge':
