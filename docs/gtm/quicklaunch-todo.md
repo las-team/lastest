@@ -27,7 +27,7 @@ Today: 2026-05-20. T-103 days.
 ### Onboarding + Self-serve
 - [ ] Paste URL -> first baseline in 60s, no signup gate
 - [ ] Pre-cache common stack baselines (Next.js, Laravel, Vite, Astro)
-- [ ] Activity tracking events: signup, first-baseline, first-diff, first-approve
+- [x] Activity tracking events: signup, first-baseline, first-diff, first-approve
 
 ### Demo template fixes (unblock sales pipeline)
 - [ ] Confirm-password fill
@@ -46,10 +46,7 @@ Today: 2026-05-20. T-103 days.
 - [ ] OpenRouter self-test: switch AI provider, rerun same suite, compare healing behaviour
 
 ### Analytics + Replay
-- [ ] Sentry (decision pending: cloud-first vs self-host on Olares)
-- [ ] Sentry snippet in app shell (`src/app/layout.tsx` or root client provider)
-- [ ] Tag key flows: signup, first-baseline, first-diff, approve, share-publish
-- [ ] Privacy: mask passwords + screenshot URLs in replays; update privacy policy
+- [x] Umami replays
 
 ---
 
@@ -58,7 +55,7 @@ Today: 2026-05-20. T-103 days.
 - [x] Create Lastest Discord server (#general, #demos, #feedback, #releases, #showoff)
 - [x] Wire Discord invite link into app footer, pricing page, welcome email
 - [x] Discord bot: post every public demo share link automatically
-- [ ] Discord role "Founding User" for first 50 paid; visible badge
+- [0] Discord role "Founding User" for first 50 paid; visible badge
 - [1] Manual welcome DM to every new join until 100 members
 
 ---

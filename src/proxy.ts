@@ -61,6 +61,8 @@ function buildCsp(nonce: string): string {
     // and Tailwind v4 uses inline runtime styles. CSS-based XSS is theoretical.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://*.gravatar.com https://www.google.com https://*.gstatic.com",
+    // worker-src: umami's recorder.js spawns a Blob-URL Web Worker for replay compression.
+    "worker-src 'self' blob:",
     "connect-src 'self' ws: wss: https://github.com https://api.github.com https://gitlab.com",
     "font-src 'self' data:",
     "frame-src 'self' https://trace.playwright.dev",

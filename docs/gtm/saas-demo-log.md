@@ -2050,3 +2050,28 @@ User pushed back: "I NEED YOU TO REGISTER AND THEN TEST THE FUCKING LOGGED IN AP
 - **Share:** https://app.lastest.cloud/r/uLEhIN7A_RQIGwKvDBBKLQ
 - **Best authed screenshot:** the wizard Step 1 "Name your agent" with the 8 quick-pick options (Hermes / Atlas / Juno / Iris / Sage / Orin / Vesper / Echo) + the chosen-name state. Founder's actual creation flow captured end-to-end.
 - **Creds:** /tmp/hermesdeploy-creds.env — lastestcloud+hermeshd1@gmail.com / Demohd1!A1B2C3D4
+
+### Iter 19 v2 — ScriptRaid republished with popup-dismiss fix
+- The earlier baseline included the "FIRST RAID 1/3" intro carousel popup on every page (the `^skip$` regex didn't match the actual aria-label "Skip intro"). Updated dismissIntro() to try multiple selectors: `button[aria-label="Skip intro"]`, `button[aria-label*="Skip"]`, `button:has-text("SKIP")`, plus DOM-level fallback.
+- Pair on the popup-dismissed baseline: P:1 F:0 C:2 (the AI-generated TikTok hook varies per build, expected).
+- **New share:** https://app.lastest.cloud/r/cSSWdN7mZSR3wHGQWnhJsw — replaces the prior MGVBgFczxxN6XXCKqAhGnw which had the popup occluding every screen.
+
+## Iter 21 — Dropped candidates (Iter 20 was Hermes, completed)
+- **georankland.com** (@georankland local SEO SaaS): SAME Supabase email-template DC3/U+FFFD bug — token URL contains `token�9e408eda...` instead of `token=9e408eda...`. Verify-email broken in prod. Worth flagging to founder.
+- **hrvstr.com** (@jnthnwnr resume optimizer): Clerk PROD signup form requires real keyboard input — Playwright `fill()` doesn't trigger Clerk's React state, Continue button stays disabled. Common Clerk-prod blocker.
+
+---
+
+## Iter 22 — GeoRankLand (georankland.com) — 2026-05-21 — BUG-FIND DEMO
+
+- **Founder:** @georankland (X)
+- **Source:** X live search ("I launched" + "free to try")
+- **Product:** Local SEO SaaS — Google Maps grid rank tracking across 25 locations with AI fix report. Launched 2026-05-21.
+- **Auth mode:** Supabase email+password+confirm. **VERIFY-EMAIL BROKEN IN PROD** for every external signup — same template corruption bug that's also breaking StudyHub, Slideshot, EyeCap, PDFOutput.
+- **The bug:** the Supabase verify URL ships as `?token<U+FFFD>9e408eda...&type=signup` (with U+FFFD where `=` should be) instead of `?token=9e408eda...&type=signup`. The corrupt char also seems to eat a few hex chars; reconstructing with `=` gives a 54-hex-char token, but real PKCE tokens are 64 hex. No external user can complete signup.
+- **Test 2:** home → app.georankland.com → switches to Sign Up tab → fills email+password+confirm with per-run stamp → clicks Sign Up → captures the "Account created! Please check your email" stuck-state. Demo notes call out the exact fix (regenerate the Supabase email template — the default "Confirm signup" template ships HTML-escaped `=` that Gmail renders as U+FFFD on some Supabase project versions).
+- **Repo:** 3961ced3-f5cf-430d-8470-7d0b1351fae1 · test 8d31c182
+- **Builds:** baseline 381ba7af (P:1 F:0 C:6), pair 8472f7b9 (P:1 F:0 C:0 — clean).
+- **Share:** https://app.lastest.cloud/r/hbdK4ZOIzoM8tftzAlUsfQ
+- **Best screenshot:** the "Account created! Please check your email to confirm your account" banner — proves every external user hits the broken path. The demo notes spell out the fix.
+- **Demo value:** instead of just shipping screenshots, this share is a **prod-bug report** for @georankland — Lastest acting as a launch-day audit tool.

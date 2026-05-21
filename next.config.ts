@@ -70,6 +70,7 @@ const nextConfig: NextConfig = {
     if (umamiUrl) {
       rewrites.push(
         { source: "/_umami/script.js", destination: `${umamiUrl}/script.js` },
+        { source: "/_umami/recorder.js", destination: `${umamiUrl}/recorder.js` },
         { source: "/_umami/api/send", destination: `${umamiUrl}/api/send` },
       );
     }
