@@ -17,12 +17,11 @@ Today: 2026-05-20. T-103 days.
 ## PRODUCT (one-time)
 
 ### Checkout + Auth
-- [ ] Pricing page (3 tiers)
+- [x] Pricing page (3 tiers)
 - [ ] Stripe Checkout integration
 - [ ] Stripe customer portal (cancel, upgrade, invoices)
 - [ ] Stripe webhook -> Twenty CRM (lifecycleStage = CUSTOMER on first payment)
-- [ ] Sign in with Discord (better-auth provider)
-- [ ] Free -> paid trial gate (14 days, single CTA after day 7)
+- [x] Sign in with Discord (better-auth provider)
 - [ ] Annual pre-pay discount option (2 months free)
 
 ### Onboarding + Self-serve
@@ -40,16 +39,15 @@ Today: 2026-05-20. T-103 days.
 - [ ] Google verification for gsheets (OAuth consent screen + scopes review)
 - [ ] MCP OAuth flow (auth handshake for `@lastest/mcp-server` connections)
 - [ ] Publish GitHub Action to Actions marketplace, GH APP marketplace
-- [ ] "Saved demos" public gallery page
+- [x] "Saved demos" public gallery page
 
 ### Self-test (dogfood)
 - [ ] Default AI provider self-test: run Lastest against Lastest, capture diffs
 - [ ] OpenRouter self-test: switch AI provider, rerun same suite, compare healing behaviour
 
 ### Analytics + Replay
-- [ ] PostHog (decision pending: cloud-first vs self-host on Olares)
-- [ ] PostHog snippet in app shell (`src/app/layout.tsx` or root client provider)
-- [ ] `posthog.identify(userId, { email, plan, signupDate })` on login
+- [ ] Sentry (decision pending: cloud-first vs self-host on Olares)
+- [ ] Sentry snippet in app shell (`src/app/layout.tsx` or root client provider)
 - [ ] Tag key flows: signup, first-baseline, first-diff, approve, share-publish
 - [ ] Privacy: mask passwords + screenshot URLs in replays; update privacy policy
 
@@ -57,7 +55,7 @@ Today: 2026-05-20. T-103 days.
 
 ## COMMUNITY (one-time)
 
-- [ ] Create Lastest Discord server (#general, #demos, #feedback, #releases, #showoff)
+- [x] Create Lastest Discord server (#general, #demos, #feedback, #releases, #showoff)
 - [ ] Wire Discord invite link into app footer, pricing page, welcome email
 - [ ] Discord bot: post every public demo share link automatically
 - [ ] Discord role "Founding User" for first 50 paid; visible badge
@@ -75,7 +73,7 @@ Today: 2026-05-20. T-103 days.
 
 ## SALES (recurring)
 
-- [ ] **Daily:** 10 personalised demos built + 10 founder DMs sent
+- [1] **Daily:** 10 personalised demos built + 10 founder DMs sent
 - [ ] **Daily:** triage Twenty CRM inbox; reply within 4h, send Loom for warm replies
 - [ ] **Weekly:** review Twenty pipeline counts (NEW -> OUTREACH -> REPLIED -> CUSTOMER), prune stale
 - [ ] **Weekly:** named-account push: 5 hand-picked targets with full baseline before DM

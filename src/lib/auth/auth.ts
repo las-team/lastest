@@ -128,6 +128,15 @@ export const auth = betterAuth({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     },
+    discord: {
+      clientId: process.env.DISCORD_CLIENT_ID!,
+      clientSecret: process.env.DISCORD_CLIENT_SECRET!,
+      // Phone-only Discord accounts return email: null even with the `email` scope.
+      // Fall back to a synthetic .local placeholder so onboarding doesn't fail.
+      mapProfileToUser: (profile: { id: string; email: string | null }) => ({
+        email: profile.email ?? `${profile.id}@discord.placeholder.local`,
+      }),
+    },
   },
 
   session: {

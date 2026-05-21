@@ -25,6 +25,7 @@ VScode
   repos show up multiple times
   more disconnects in new version than previous
 ## features
+npx @sentry/wizard@latest -i nextjs --saas --org dexilion --project lastest Read and follow: https://github.com/getsentry/sentry-for-ai/blob/main/skills/sentry-nextjs-sdk/SKILL.md
 Google verification for gsheets
 **Self-test**
 Default ai, openrouter test
@@ -43,6 +44,7 @@ Figma plugin
 Sitemap -flow
 Use DOM diff/verify to fix test as context
 ## marketing
+* Launch your startup test with us, founder of the week
 * gh issue for mai0ntained repos w lastest public link
 * test: screenshot diff tool 
 * Re-fetch search volume, CPC & competition from DataForSEO
