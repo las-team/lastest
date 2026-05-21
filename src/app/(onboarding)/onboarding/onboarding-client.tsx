@@ -108,6 +108,9 @@ export function OnboardingClient({
   const [step, setStep] = useState(initialStep);
   const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? 'ai');
   const [pending, startTransition] = useTransition();
+  // Captured from createLocalRepo when the sandbox flow picks a known template
+  // so Step 5 can deep-link to the seeded test instead of /tests/new?ai=true.
+  const [seededTestId, setSeededTestId] = useState<string | null>(null);
 
   // For manual path, step 4 (AI) is skipped entirely.
   const visibleSteps = useMemo(() => {
@@ -217,10 +220,11 @@ export function OnboardingClient({
                 router.refresh();
               })
             }
-            onCreateSandbox={(name, baseUrl) =>
+            onCreateSandbox={(name, baseUrl, templateId) =>
               startTransition(async () => {
                 try {
-                  await createLocalRepo(name, baseUrl);
+                  const created = await createLocalRepo(name, baseUrl, templateId);
+                  setSeededTestId(created.seededTestId ?? null);
                   track(Events.repo_linked, { source: 'sandbox' });
                 } catch (err) {
                   // Without surfacing this, a silent createLocalRepo failure
@@ -301,6 +305,7 @@ export function OnboardingClient({
             path={path ?? 'ai'}
             selectedRepoId={selectedRepoId}
             selectedRepoBaseUrl={selectedRepoBaseUrl}
+            seededTestId={seededTestId}
             pending={pending}
             onLaunch={async (target) => {
               if (path === 'agent' && selectedRepoId) {
@@ -483,7 +488,7 @@ function Step2Repo({
   selectedRepoId: string | null;
   pending: boolean;
   onSelectRepo: (id: string) => void;
-  onCreateSandbox: (name: string, baseUrl?: string) => void;
+  onCreateSandbox: (name: string, baseUrl?: string, templateId?: string) => void;
   onSyncGithub: () => void;
   onSyncGitlab: () => void;
   onNext: () => void;
@@ -672,7 +677,7 @@ function Step2Repo({
                 onClick={() => {
                   const tpl = SANDBOX_TEMPLATES.find((t) => t.id === sandboxTemplateId);
                   const name = sandboxName.trim() || 'My First Project';
-                  onCreateSandbox(name, tpl?.url ?? undefined);
+                  onCreateSandbox(name, tpl?.url ?? undefined, tpl?.id);
                   setShowSandbox(false);
                 }}
                 disabled={pending || !sandboxName.trim()}
@@ -952,6 +957,7 @@ function Step5Launch({
   path,
   selectedRepoId,
   selectedRepoBaseUrl,
+  seededTestId,
   pending,
   onLaunch,
   onSkipToDashboard,
@@ -960,6 +966,7 @@ function Step5Launch({
   path: OnboardingPath;
   selectedRepoId: string | null;
   selectedRepoBaseUrl: string | null;
+  seededTestId: string | null;
   pending: boolean;
   onLaunch: (target: string) => void;
   onSkipToDashboard: () => void;
@@ -980,6 +987,17 @@ function Step5Launch({
       };
     }
     if (path === 'ai') {
+      // If the sandbox flow already seeded a real test, skip /tests/new
+      // (which kicks off AI generation against an MCP it may not reach) and
+      // drop the user straight into a ready-to-run test.
+      if (seededTestId) {
+        return {
+          title: 'Your first test is ready',
+          body: 'We seeded a real Playwright test against the sandbox template. Open it, hit run, and watch the diff.',
+          cta: 'Open the test',
+          target: `/tests?test=${encodeURIComponent(seededTestId)}`,
+        };
+      }
       return {
         title: "Let's generate your first test",
         body: 'Tell the AI what to test and it writes a draft you can run, review, and approve.',

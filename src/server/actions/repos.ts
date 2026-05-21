@@ -7,6 +7,11 @@ import { getUserRepos, getRepoBranches } from '@/lib/github/oauth';
 import { getUserProjectsDetailed, getProjectBranches } from '@/lib/gitlab/oauth';
 import { TESTING_TEMPLATES, isValidTemplateId } from '@/lib/templates/testing-templates';
 import { deleteRepoStorage } from '@/lib/storage/cleanup';
+import {
+  isSandboxSeedId,
+  seedSandboxTemplate,
+  type SandboxSeedId,
+} from '@/lib/demo/sandbox-seeds';
 
 const REPO_SYNC_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -166,7 +171,7 @@ export async function selectRepo(repositoryId: string | null) {
   revalidatePath('/run');
 }
 
-export async function createLocalRepo(name: string, baseUrl?: string) {
+export async function createLocalRepo(name: string, baseUrl?: string, templateId?: string) {
   const session = await requireCapability('repos:manage');
   const repo = await queries.createRepository({
     teamId: session.team.id,
@@ -178,9 +183,16 @@ export async function createLocalRepo(name: string, baseUrl?: string) {
   });
   // Auto-select the new repo on user
   await queries.updateUser(session.user.id, { selectedRepositoryId: repo.id });
+  // Seed a real first test when the sandbox flow picked a known template.
+  // Without this, the onboarding "ai" path lands the user on /tests/new
+  // with no MCP-reachable agent and a stale ?test= id that 500s next visit.
+  let seededTestId: string | null = null;
+  if (isSandboxSeedId(templateId)) {
+    seededTestId = await seedSandboxTemplate(repo.id, templateId as SandboxSeedId);
+  }
   revalidatePath('/');
   revalidatePath('/settings');
-  return repo;
+  return { ...repo, seededTestId };
 }
 
 export async function getSelectedRepo() {

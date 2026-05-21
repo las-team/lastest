@@ -676,6 +676,23 @@ export function DefinitionPageClient({
         setOpenTestData(data.test);
         setOpenTestDetailData(data);
       }
+    } catch (err) {
+      // A stale ?test=<id> in the URL (e.g. after switching teams, or after a
+      // failed AI/agent test creation that never persisted) bubbles up here as
+      // `Forbidden: Test not found`. Clear the param and surface a toast so the
+      // user lands on the test list instead of a 500.
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.startsWith('Forbidden:')) {
+        setOpenTestId(null);
+        setOpenTestData(null);
+        setOpenTestDetailData(null);
+        const url = new URL(window.location.href);
+        url.searchParams.delete('test');
+        window.history.replaceState({}, '', url.pathname + url.search);
+        toast.error('Test not found or no longer accessible.');
+      } else {
+        toast.error(msg || 'Could not open test.');
+      }
     } finally {
       setIsLoadingTestDetail(false);
     }
@@ -1158,10 +1175,15 @@ export function DefinitionPageClient({
                     contentClassName="max-w-5xl mx-0"
                     onRefresh={async () => {
                       if (!openTestId) return;
-                      const data = await getTestDetailData(openTestId, repositoryId);
-                      if (data) {
-                        setOpenTestData(data.test);
-                        setOpenTestDetailData(data);
+                      try {
+                        const data = await getTestDetailData(openTestId, repositoryId);
+                        if (data) {
+                          setOpenTestData(data.test);
+                          setOpenTestDetailData(data);
+                        }
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : '';
+                        toast.error(msg.startsWith('Forbidden:') ? 'Test was removed.' : msg || 'Refresh failed.');
                       }
                     }}
                   />

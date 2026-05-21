@@ -16,9 +16,10 @@ demo-mode
   without link?
 ## security
 ## bugs
-Share
+local agent mcp
+Test page
   Video scrollahead
-Site
+WebSite
   URL diffing
 Verify
 VScode

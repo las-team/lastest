@@ -2001,3 +2001,21 @@ User pushed back: "I NEED YOU TO REGISTER AND THEN TEST THE FUCKING LOGGED IN AP
 - **Best authed screenshot:** /outliers (Banco de Títulos / Title Bank) showing the paywalled mining surface visible in free mode, OR /account showing "Viktor (Lastest) / Premium" + "Plano atual: Gratuito" + the API token generation surface.
 - **Creds:** `/tmp/tubehunt-creds.env` — original lastestcloud+tubehunttb1@gmail.com (test creates a fresh stamp per run).
 - **Why this worked:** Custom auth backend (no third-party identity provider), no email verification gate. Per-run signup with stamp = cleanest re-runnable test pattern. Bake into skill: prefer products with no email-verify gate, custom backend, free plan that exposes the UI surface.
+
+---
+
+## Iter 18 — FuelTheGains (fuelthegains.com) — 2026-05-21 — REAL AUTHED WIZARD WALK
+
+- **Founder:** @matthieumatical (X)
+- **Source:** X live search — @matthieumatical posted about PH launch feedback
+- **DNS:** fuelthegains.com → 216.198.79.1 OK
+- **Product:** Personalized meal plan + macro calculator for lifters who want to bulk. Mifflin-St Jeor algorithm + 7-day adaptive meal plan + grocery list. PH launched yesterday.
+- **Auth mode:** email+name+password+confirm with verify-email gate. Custom backend (Resend for email). Verify-email URL must have `+` URL-encoded as `%2B` — sending the raw `+` returned the founder's own "Something went wrong" error page (worth flagging to him).
+- **Pre-register flow:** /auth → "Create one free" → fill register form → verify-email URL with %2B-encoded + → /dashboard.
+- **Repo:** a2848829-fd22-416d-88a8-2dc5e8a26ced · test 357e7b44
+- **Test 2:** baked creds; EB walks home → /pricing → /auth → email+password login → 5-step authed onboarding wizard (Welcome → Science / Mifflin-St Jeor formula → Macros / Protein+Fat ratios → You're All Set → Goal picker → Bulk selected).
+- **Builds:** baseline 01b477c4 (P:1 F:0 C:11), pair c463fc8e (P:1 F:0 C:0 — perfectly clean).
+- **Share:** https://app.lastest.cloud/r/FK1GZqskDb3ayUWMmC1hLQ
+- **Best authed screenshot:** the **/dashboard "Welcome to FuelTheGains" wizard intro** showing the Compute → Generate → Track pillars, OR the **Goal picker** with Bulk / Cut (Soon) / Maintain (Soon) cards. The whole wizard renders inside one URL with React state transitions — Lastest captures each step distinctly.
+- **Creds:** /tmp/fuelthegains-creds.env — lastestcloud+ftgft1@gmail.com / Demoft1!A1B2C3
+- **Founder-side bug found:** verify-email URL embeds `email=...+...@gmail.com` without URL-encoding the `+` — fails with a generic "Something went wrong" page. Cost me one signup attempt. Worth flagging to @matthieumatical.
