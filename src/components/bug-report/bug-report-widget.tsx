@@ -23,6 +23,8 @@ import {
 } from '@/components/ui/select';
 import { useContextCollector } from '@/components/bug-report/context-collector';
 import { submitBugReport } from '@/server/actions/bug-reports';
+import { DiscordIcon } from '@/components/icons/discord-icon';
+import { DISCORD_INVITE_URL } from '@/lib/brand';
 import type { BugReportSeverity } from '@/lib/db/schema';
 
 export function BugReportWidget() {
@@ -109,6 +111,18 @@ export function BugReportWidget() {
           <SheetTitle>Report a Bug</SheetTitle>
         </SheetHeader>
         <div className="mt-6 space-y-4">
+          <a
+            href={DISCORD_INVITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 rounded-md border border-[#5865F2]/30 bg-[#5865F2]/10 px-3 py-2.5 text-sm transition-colors hover:bg-[#5865F2]/20"
+          >
+            <DiscordIcon className="h-5 w-5 text-[#5865F2]" />
+            <div className="flex-1">
+              <div className="font-medium">Need instant support?</div>
+              <div className="text-xs text-muted-foreground">Chat with us on Discord</div>
+            </div>
+          </a>
           <div className="space-y-2">
             <Label htmlFor="bug-description">Description</Label>
             <Textarea
