@@ -25,6 +25,8 @@ import { ActivityFeedIndicator } from '@/components/activity-feed/activity-feed-
 import { UserMenu } from '@/components/auth/user-menu';
 import { InlineScore } from '@/components/gamification/user-score-chip';
 import { SidebarQuickActions } from './sidebar-quick-actions';
+import { DiscordIcon } from '@/components/icons/discord-icon';
+import { DISCORD_INVITE_URL } from '@/lib/brand';
 import type { Repository, User, Team, EmbeddedSession } from '@/lib/db/schema';
 
 interface SidebarProps {
@@ -289,6 +291,15 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
           <Settings className="h-4 w-4" />
           Settings
         </Link>
+        <a
+          href={DISCORD_INVITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted"
+        >
+          <DiscordIcon className="h-4 w-4" />
+          Discord
+        </a>
       </div>
 
       <div className="border-t pt-3">

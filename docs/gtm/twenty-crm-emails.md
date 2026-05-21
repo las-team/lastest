@@ -30,8 +30,9 @@ Useful links:
   - Docs / quickstart: https://lastest.cloud/docs
   - 3-min walkthrough: https://lastest.cloud/docs/quickstart
   - MCP for AI agents: https://lastest.cloud/docs/mcp
+  - Join the Discord (live help, demos, releases): https://discord.gg/nAHuGsNzS
 
-Stuck on a step? Reply and you'll hit me directly.
+Stuck on a step? Reply and you'll hit me directly, or drop into the Discord.
 
 — Viktor (founder, Lastest)
 

@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { authClient } from '@/lib/auth/auth-client';
 import { toast } from 'sonner';
+import { DiscordIcon } from '@/components/icons/discord-icon';
+import { DISCORD_INVITE_URL } from '@/lib/brand';
 import {
   setOnboardingPath,
   setBaseUrl,
@@ -325,14 +327,24 @@ export function OnboardingClient({
       </div>
 
       {/* Bottom escape hatch — always available */}
-      <div className="mt-8 text-center">
+      <div className="mt-8 flex items-center justify-center gap-3 text-xs text-muted-foreground">
         <button
           type="button"
           onClick={() => finish('/')}
-          className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          className="underline-offset-4 hover:text-foreground hover:underline"
         >
           Skip setup, take me to the dashboard
         </button>
+        <span aria-hidden>·</span>
+        <a
+          href={DISCORD_INVITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 underline-offset-4 hover:text-foreground hover:underline"
+        >
+          <DiscordIcon className="h-3 w-3" />
+          Need help? Join Discord
+        </a>
       </div>
     </div>
   );

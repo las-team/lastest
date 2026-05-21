@@ -56,7 +56,7 @@ Today: 2026-05-20. T-103 days.
 ## COMMUNITY (one-time)
 
 - [x] Create Lastest Discord server (#general, #demos, #feedback, #releases, #showoff)
-- [ ] Wire Discord invite link into app footer, pricing page, welcome email
+- [x] Wire Discord invite link into app footer, pricing page, welcome email
 - [ ] Discord bot: post every public demo share link automatically
 - [ ] Discord role "Founding User" for first 50 paid; visible badge
 - [ ] Manual welcome DM to every new join until 100 members

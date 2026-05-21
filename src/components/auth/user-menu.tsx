@@ -8,9 +8,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { DiscordIcon } from '@/components/icons/discord-icon';
+import { DISCORD_INVITE_URL } from '@/lib/brand';
 
 interface UserMenuProps {
   user: User;
@@ -48,6 +51,13 @@ export function UserMenu({ user }: UserMenuProps) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuItem asChild>
+          <a href={DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer">
+            <DiscordIcon className="mr-2 h-4 w-4" />
+            Join Discord
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut}>
           <LogOut className="mr-2 h-4 w-4" />
           Sign out
