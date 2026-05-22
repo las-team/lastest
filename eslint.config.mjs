@@ -29,6 +29,7 @@ const eslintConfig = defineConfig([
     "scripts/**",
     "migration-work/**",
     "tests/**",
+    ".recovery/**",
   ]),
 ]);
 
