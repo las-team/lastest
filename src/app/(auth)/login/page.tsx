@@ -14,7 +14,6 @@ import { Github } from 'lucide-react';
 import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
 import { isValidShareSlug } from '@/lib/share/slug';
 import { checkEmailExists, recordRegistrationConsent } from '@/server/actions/consent';
-import { signInAsDemo } from '@/server/actions/demo';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 
@@ -110,24 +109,6 @@ function LoginForm() {
 
   async function handleOAuth(provider: 'github' | 'google' | 'discord') {
     await authClient.signIn.social({ provider, callbackURL: oauthPostAuthUrl });
-  }
-
-  async function handleDemo() {
-    setError('');
-    setLoading(true);
-    try {
-      const result = await signInAsDemo();
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      track(Events.signup_completed, { method: 'demo', source: 'login-demo-button' });
-      window.location.href = '/';
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start demo session');
-    } finally {
-      setLoading(false);
-    }
   }
 
   if (signupMode) {
@@ -351,16 +332,6 @@ function LoginForm() {
           </form>
         </CardContent>
       </Card>
-
-      <Button
-        type="button"
-        variant="ghost"
-        className="w-full"
-        disabled={loading}
-        onClick={handleDemo}
-      >
-        Try demo without signing up
-      </Button>
 
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{' '}

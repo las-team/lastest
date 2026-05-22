@@ -36,7 +36,7 @@ Today: 2026-05-20. T-103 days.
 - [ ] Runtime stamp by default
 
 ### Integrations + Platform
-- [ ] Google verification for gsheets (OAuth consent screen + scopes review)
+- [i] Google verification for gsheets (OAuth consent screen + scopes review)
 - [ ] MCP OAuth flow (auth handshake for `@lastest/mcp-server` connections)
 - [ ] Publish GitHub Action to Actions marketplace, GH APP marketplace
 - [x] "Saved demos" public gallery page
@@ -65,8 +65,8 @@ Today: 2026-05-20. T-103 days.
 - [x] Activate Twenty CRM Welcome workflow (Gmail OAuth + paste email body)
 - [X] Activate Twenty CRM Outreach workflow (paste body, wire filter)
 - [ ] Reply-triage Loom template (30s personal video per inbound reply)
-- [ ] Calendly "20-min walkthrough" link, embed in DM templates
-- [ ] Rerun 4 salvageable demo targets through patched template (FileReadyNow, HabitHeat, Causo, Trace)
+- [x] Calendly "20-min walkthrough" link, embed in DM templates
+- [x] Rerun 4 salvageable demo targets through patched template (FileReadyNow, HabitHeat, Causo, Trace)
 
 ## SALES (recurring)
 
