@@ -5,9 +5,9 @@
 export async function syncUserToTwentyCRM(user: { name: string; email: string }): Promise<void> {
   const apiUrl = process.env.TWENTY_API_URL;
   const apiKey = process.env.TWENTY_API_KEY;
-  const companyId = process.env.TWENTY_COMPANY_ID;
 
-  if (!apiUrl || !apiKey || !companyId) return;
+  if (!apiUrl || !apiKey) return;
+  if (user.email.endsWith('.internal')) return;
 
   try {
     const nameParts = (user.name || '').trim().split(/\s+/);
@@ -23,7 +23,8 @@ export async function syncUserToTwentyCRM(user: { name: string; email: string })
       body: JSON.stringify({
         name: { firstName, lastName },
         emails: { primaryEmail: user.email, additionalEmails: [] },
-        companyId,
+        outreachSegment: 'APP_USER',
+        lifecycleStage: 'NEW',
       }),
     });
 

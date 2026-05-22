@@ -62,15 +62,15 @@ Today: 2026-05-20. T-103 days.
 
 ## SALES (one-time)
 
-- [ ] Activate Twenty CRM Welcome workflow (Gmail OAuth + paste email body)
-- [ ] Activate Twenty CRM Outreach workflow (paste body, wire filter)
+- [x] Activate Twenty CRM Welcome workflow (Gmail OAuth + paste email body)
+- [X] Activate Twenty CRM Outreach workflow (paste body, wire filter)
 - [ ] Reply-triage Loom template (30s personal video per inbound reply)
 - [ ] Calendly "20-min walkthrough" link, embed in DM templates
 - [ ] Rerun 4 salvageable demo targets through patched template (FileReadyNow, HabitHeat, Causo, Trace)
 
 ## SALES (recurring)
 
-- [1] **Daily:** 10 personalised demos built + 10 founder DMs sent
+- [2] **Daily:** 10 personalised demos built + 10 founder DMs sent
 - [ ] **Daily:** triage Twenty CRM inbox; reply within 4h, send Loom for warm replies
 - [ ] **Weekly:** review Twenty pipeline counts (NEW -> OUTREACH -> REPLIED -> CUSTOMER), prune stale
 - [ ] **Weekly:** named-account push: 5 hand-picked targets with full baseline before DM

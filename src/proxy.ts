@@ -6,6 +6,10 @@ const PUBLIC_PATHS = [
   '/register',
   '/invite',
   '/awards',     // "Prove your app is not AI slop" campaign landing
+  '/terms',      // Public legal pages (Google OAuth verification requires
+  '/privacy',    // these to be directly reachable as plain HTML, no auth)
+  '/cookies',
+  '/dpa',
   '/r/',         // Public share pages
   '/share/',     // Static share media (public/share/<slug>/...)
   '/api/og/', // Public OG/Twitter card images for shared builds

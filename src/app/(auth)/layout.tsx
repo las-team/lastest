@@ -15,6 +15,17 @@ export default function AuthLayout({
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
         Prove your app is not AI slop, earn a Lastest badge
       </Link>
+      <nav className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
+        <Link href="/terms" className="hover:text-foreground hover:underline underline-offset-4">
+          Terms
+        </Link>
+        <Link href="/privacy" className="hover:text-foreground hover:underline underline-offset-4">
+          Privacy
+        </Link>
+        <Link href="/cookies" className="hover:text-foreground hover:underline underline-offset-4">
+          Cookies
+        </Link>
+      </nav>
     </div>
   );
 }
