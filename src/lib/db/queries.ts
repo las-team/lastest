@@ -37,3 +37,4 @@ export * from './queries/demo-notes';
 export * from './queries/layer-baselines';
 export * from './queries/layer-feedback';
 export * from './queries/awards';
+export * from './queries/launch';

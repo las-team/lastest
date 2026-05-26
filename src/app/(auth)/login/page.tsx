@@ -30,9 +30,14 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const rawClaim = searchParams.get('claim');
   const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
-  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/';
-  const signupPostAuthUrl = claim ? `/r/${claim}/claim` : '/onboarding';
-  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
+  // `returnTo` lets flows like /oauth/authorize bounce through login and come
+  // back. Only same-origin relative paths are honored (no open redirect).
+  const rawReturnTo = searchParams.get('returnTo');
+  const returnTo =
+    rawReturnTo && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//') ? rawReturnTo : null;
+  const emailPostAuthUrl = returnTo ?? (claim ? `/r/${claim}/claim` : '/');
+  const signupPostAuthUrl = returnTo ?? (claim ? `/r/${claim}/claim` : '/onboarding');
+  const oauthPostAuthUrl = returnTo ?? (claim ? `/r/${claim}/claim` : '/consent');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -65,6 +70,12 @@ function LoginForm() {
       return;
     }
 
+    // returnTo may point at a route handler (e.g. /oauth/authorize) that the
+    // client router can't render — use a hard navigation in that case.
+    if (returnTo) {
+      window.location.href = emailPostAuthUrl;
+      return;
+    }
     router.push(emailPostAuthUrl);
     router.refresh();
   }

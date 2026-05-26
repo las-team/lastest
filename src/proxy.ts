@@ -12,6 +12,9 @@ const PUBLIC_PATHS = [
   '/dpa',
   '/r/',         // Public share pages
   '/share/',     // Static share media (public/share/<slug>/...)
+  '/oauth/',     // Launch OAuth authorize endpoint — the handler itself does
+                 // the auth check + /login?returnTo bounce (needs to run for
+                 // both authed token-mint and unauth redirect cases).
   '/api/og/', // Public OG/Twitter card images for shared builds
   '/api/badge/', // Public embeddable badge SVGs
   '/api/auth/',

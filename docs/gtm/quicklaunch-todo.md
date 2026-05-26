@@ -12,8 +12,6 @@ Today: 2026-05-20. T-103 days.
 → 5 paid
 ```
 
----
-
 ## PRODUCT (one-time)
 
 ### Checkout + Auth

@@ -82,3 +82,19 @@ Easy and intuitive, i pressed run but i didn't get any info on the failed test, 
 Yes i activated the gamification, so when i ran the test successfully i got a leaderboard with other bot agents haha!
 Yes, the test itself, running the scripts, the IA fixing the bugs, the info provided during the onboarding and honestly the entire process is well guided and easy to follow through.
 As of now i made no app as i am busy coding mine, but it would surely make me confident to try and host an app here, it seems a very profesional and legit ai workflow, with a nice code editor and debugger unlike many i know, its dev ready honestly i would recommend it.
+
+abhiiii88
+3:33 PM
+This genuinely made my day 😄
+
+Really appreciate you taking the time to test the flow and share feedback. The frictionless onboarding was intentional as I wanted users to experience the product instantly without setup fatigue.
+
+Still very early, but actively improving the affordability engine and calculation transparency. Going through the walkthrough now 🙌
+
+stuffyoushould
+2:06 PM
+neat stuff!
+
+GustavooIV
+7:22 PM
+Hey, looks really cool tbh. I have been thinking of making something like this myself in the past. Currnently dont have a need for it, but maybe in the future. How is it going for you, how many users does lastest have? Just curious

@@ -5,6 +5,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { getNextRunTime } from './cron';
+import { processLaunchCohorts } from '@/lib/launch/cohort-engine';
 
 let started = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -28,6 +29,11 @@ export function ensureSchedulerStarted() {
       await processDueSchedules();
     } catch (error) {
       console.error('[scheduler] Error processing due schedules:', error);
+    }
+    try {
+      await processLaunchCohorts();
+    } catch (error) {
+      console.error('[scheduler] Error processing launch cohorts:', error);
     }
   }, 60_000); // Check every 60 seconds
 

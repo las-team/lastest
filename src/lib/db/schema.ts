@@ -1420,11 +1420,16 @@ export const sessions = pgTable('sessions', {
   updatedAt: timestamp('updated_at'),
   // 'browser' = standard interactive session (default)
   // 'api'     = long-lived programmatic API token (MCP, VSCode extension, scripts)
+  // 'launch'  = short-lived scoped token minted by the /oauth/authorize handoff
+  //             for the launch.lastest.cloud frontend (see DEFAULT_LAUNCH).
   kind: text('kind').notNull().default('browser'),
   // Human label for 'api' tokens (e.g. "Claude Code laptop"). Null for browser sessions.
   label: text('label'),
   // Last time the token was used (for 'api' tokens). Null for browser sessions.
   lastUsedAt: timestamp('last_used_at'),
+  // Space-separated OAuth-style scopes for 'launch' tokens
+  // (e.g. "launch:vote launch:submit"). Null for browser/api sessions.
+  scope: text('scope'),
 });
 
 export type Session = typeof sessions.$inferSelect;
@@ -3206,3 +3211,130 @@ export const repoAwards = pgTable('repo_awards', {
 
 export type RepoAward = typeof repoAwards.$inferSelect;
 export type NewRepoAward = typeof repoAwards.$inferInsert;
+
+// ============================================
+// Launch directory (launch.lastest.cloud)
+// ============================================
+//
+// Backs the "Tested & Featured" launch board. The board's frontend lives in a
+// separate static-export repo and persists nothing — submissions, votes, the
+// weekly cohort cadence, and the per-user auth handoff all live here. Reads are
+// public; mutations require a short-lived launch-scoped token (sessions.kind =
+// 'launch'). See src/lib/launch/* + src/app/api/v1/launch/[...path]/route.ts.
+
+// Tunables for the launch board. Surfaced as DEFAULT_LAUNCH so the route +
+// state engine + gating layer share one source of truth.
+export const DEFAULT_LAUNCH = {
+  // Curated quality bar: max featured slots that go live per weekly cohort.
+  featuredSlotsPerWeek: 12,
+  // Anti-gaming velocity caps (rolling 1h window).
+  votesPerAccountPerHour: 30,
+  votesPerIpPerHour: 60,
+  submissionsPerAccountPerHour: 5,
+  // Launch token TTL (seconds) minted by /oauth/authorize.
+  tokenTtlSeconds: 3600,
+  // Scope string the implicit OAuth flow grants.
+  scope: 'launch:vote launch:submit',
+  // Vote-clearing: votes sharing an IP beyond this count in a cohort are flagged
+  // as a suspicious cluster and excluded from the winner decision.
+  suspiciousIpClusterThreshold: 5,
+} as const;
+
+// Weekly cohort: open (accepting/queued) → voting (live Mon–Sun) →
+// locked (winner decided Sun) → closed (archived).
+export type LaunchCohortState = 'open' | 'voting' | 'locked' | 'closed';
+
+export const launchCohorts = pgTable('launch_cohorts', {
+  id: text('id').primaryKey(),
+  // Monday 00:00 PT — start of the voting week. Unique = one cohort per week.
+  weekStartAt: timestamp('week_start_at').notNull().unique(),
+  // Sunday 23:59 PT — voting closes.
+  weekEndAt: timestamp('week_end_at').notNull(),
+  state: text('state').$type<LaunchCohortState>().notNull().default('open'),
+  // Slug of the Founder-of-the-Week winner, set when the cohort locks.
+  winnerSlug: text('winner_slug'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => ([
+  index('idx_launch_cohorts_state').on(table.state),
+]));
+
+export type LaunchCohort = typeof launchCohorts.$inferSelect;
+export type NewLaunchCohort = typeof launchCohorts.$inferInsert;
+
+export type LaunchProfileStatus = 'pending_review' | 'featured' | 'rejected' | 'archived';
+
+export interface LaunchWalkthrough {
+  src: string;
+  poster?: string;
+  description?: string;
+}
+
+export const launchProfiles = pgTable('launch_profiles', {
+  id: text('id').primaryKey(),
+  // Human-readable URL handle (kebab of name + uniqueness counter).
+  slug: text('slug').notNull().unique(),
+  cohortId: text('cohort_id').references(() => launchCohorts.id, { onDelete: 'set null' }),
+  submittedByUserId: text('submitted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  tagline: text('tagline'),
+  description: text('description'),
+  category: text('category'),
+  websiteUrl: text('website_url').notNull(),
+  // Normalized host (lowercase, no www/port) for dup-domain detection.
+  domain: text('domain'),
+  founderName: text('founder_name'),
+  founderHandle: text('founder_handle'),
+  contactEmail: text('contact_email'),
+  logoUrl: text('logo_url'),
+  status: text('status').$type<LaunchProfileStatus>().notNull().default('pending_review'),
+  // Admin-attached test report (points at an existing /r/<slug> public share)
+  // + AI walkthrough video. Set via the admin PATCH endpoint.
+  testReportShareUrl: text('test_report_share_url'),
+  walkthrough: jsonb('walkthrough').$type<LaunchWalkthrough>(),
+  // Denormalized cache of non-cleared votes; source of truth is launch_votes.
+  upvoteCount: integer('upvote_count').notNull().default(0),
+  // Anti-gaming editorial signals.
+  flagged: boolean('flagged').notNull().default(false),
+  suspiciousVoteRatio: doublePrecision('suspicious_vote_ratio'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => ([
+  index('idx_launch_profiles_cohort').on(table.cohortId),
+  index('idx_launch_profiles_domain').on(table.domain),
+  index('idx_launch_profiles_status').on(table.status),
+]));
+
+export type LaunchProfile = typeof launchProfiles.$inferSelect;
+export type NewLaunchProfile = typeof launchProfiles.$inferInsert;
+
+export const launchVotes = pgTable('launch_votes', {
+  id: text('id').primaryKey(),
+  profileId: text('profile_id').notNull().references(() => launchProfiles.id, { onDelete: 'cascade' }),
+  voterUserId: text('voter_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  ipAddress: text('ip_address'),
+  // Vote-clearing soft-flag: a cleared vote is excluded from upvoteCount/winner.
+  cleared: boolean('cleared').notNull().default(false),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  // One vote per account per profile — drives the 409 already-voted response.
+  uniqueIndex('uq_launch_votes_profile_voter').on(table.profileId, table.voterUserId),
+  index('idx_launch_votes_voter').on(table.voterUserId),
+  index('idx_launch_votes_ip').on(table.ipAddress),
+]));
+
+export type LaunchVote = typeof launchVotes.$inferSelect;
+export type NewLaunchVote = typeof launchVotes.$inferInsert;
+
+// "Tested Startup of the Month" — admin-set from the month's weekly winners.
+export const launchMonthlyWinners = pgTable('launch_monthly_winners', {
+  id: text('id').primaryKey(),
+  month: text('month').notNull().unique(), // 'YYYY-MM' (PT)
+  profileSlug: text('profile_slug').notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => ([
+  index('idx_launch_monthly_winners_month').on(table.month),
+]));
+
+export type LaunchMonthlyWinner = typeof launchMonthlyWinners.$inferSelect;
+export type NewLaunchMonthlyWinner = typeof launchMonthlyWinners.$inferInsert;

@@ -250,6 +250,37 @@ export async function deleteApiToken(id: string, userId: string) {
 }
 
 // ============================================
+// Launch tokens (short-lived scoped sessions of kind='launch')
+// ============================================
+
+/**
+ * Mint a short-lived scoped token for the launch.lastest.cloud frontend
+ * (implicit OAuth handoff). Stored in the sessions table with kind='launch'
+ * and a space-separated scope string so `verifyBearerToken` resolves it like
+ * any other session while the launch route enforces the scope.
+ */
+export async function createLaunchToken(data: {
+  userId: string;
+  token: string;
+  scope: string;
+  expiresAt: Date;
+}) {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(sessions).values({
+    id,
+    userId: data.userId,
+    token: data.token,
+    expiresAt: data.expiresAt,
+    kind: 'launch',
+    scope: data.scope,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id };
+}
+
+// ============================================
 // OAuth Accounts
 // ============================================
 
