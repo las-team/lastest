@@ -1361,7 +1361,7 @@ export const teams = pgTable('teams', {
    *  Default lands the verification mail in Viktor's inbox via plus-addressing. */
   quickstartEmailTemplate: text('quickstart_email_template').default('viktor+{slug}{stamp}@lastest.cloud'),
   banAiMode: boolean('ban_ai_mode').default(false),
-  gamificationEnabled: boolean('gamification_enabled').default(false),
+  gamificationEnabled: boolean('gamification_enabled').default(true),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
   verifyPhaseEnabled: boolean('verify_phase_enabled').default(false),

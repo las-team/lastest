@@ -42,6 +42,7 @@ Figma plugin
 Sitemap -flow
 Use DOM diff/verify to fix test as context
 ## marketing
+* i saw you’re doing x manually, i built y to fix that
 * Launch your startup test with us, founder of the week
 * gh issue for mai0ntained repos w lastest public link
 * test: screenshot diff tool 
@@ -74,3 +75,10 @@ May 15, 2026
 
 +1 PeerPush earned
 1
+
+
+Easy, intuitive, clean and fast.
+Easy and intuitive, i pressed run but i didn't get any info on the failed test, so i went to debug mode and there i could visualize the issues ^^
+Yes i activated the gamification, so when i ran the test successfully i got a leaderboard with other bot agents haha!
+Yes, the test itself, running the scripts, the IA fixing the bugs, the info provided during the onboarding and honestly the entire process is well guided and easy to follow through.
+As of now i made no app as i am busy coding mine, but it would surely make me confident to try and host an app here, it seems a very profesional and legit ai workflow, with a nice code editor and debugger unlike many i know, its dev ready honestly i would recommend it.

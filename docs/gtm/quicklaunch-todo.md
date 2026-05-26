@@ -38,11 +38,11 @@ Today: 2026-05-20. T-103 days.
 ### Integrations + Platform
 - [i] Google verification for gsheets (OAuth consent screen + scopes review)
 - [ ] MCP OAuth flow (auth handshake for `@lastest/mcp-server` connections)
-- [ ] Publish GitHub Action to Actions marketplace, GH APP marketplace
+- [i] Publish GitHub Action to Actions marketplace, GH APP marketplace
 - [x] "Saved demos" public gallery page
 
 ### Self-test (dogfood)
-- [ ] Default AI provider self-test: run Lastest against Lastest, capture diffs
+- [x] Default AI provider self-test: run Lastest against Lastest, capture diffs
 - [ ] OpenRouter self-test: switch AI provider, rerun same suite, compare healing behaviour
 
 ### Analytics + Replay
@@ -70,7 +70,7 @@ Today: 2026-05-20. T-103 days.
 
 ## SALES (recurring)
 
-- [2] **Daily:** 10 personalised demos built + 10 founder DMs sent
+- [4] **Daily:** 10 personalised demos built + 10 founder DMs sent
 - [ ] **Daily:** triage Twenty CRM inbox; reply within 4h, send Loom for warm replies
 - [ ] **Weekly:** review Twenty pipeline counts (NEW -> OUTREACH -> REPLIED -> CUSTOMER), prune stale
 - [ ] **Weekly:** named-account push: 5 hand-picked targets with full baseline before DM
