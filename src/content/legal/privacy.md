@@ -1,5 +1,3 @@
-# Privacy Policy
-
 This policy describes how Dexilion, a company registered in Hungary (Tax ID: HU32698031, domiciled at Kisgömb utca 17, Budapest, Hungary, H-1135) ("we," "us," or "our"), collects, stores, uses, and shares your personal information when you use our Lastest service, visit our websites, or interact with us.
 
 By accessing or using our Services, you agree to the practices described in this Privacy Policy.
@@ -337,5 +335,3 @@ To exercise these rights, you can contact us by email at privacy@lastest.cloud o
 13. ## **Update of the privacy policy**
 
 We do our best to keep our privacy policy fully updated on a monthly basis. If we make changes, they will be clearly identifiable in a conspicuous manner (for example: we may communicate changes to you by email).
-
-Last updated: May 24th, 2026

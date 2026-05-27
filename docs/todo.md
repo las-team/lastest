@@ -68,33 +68,14 @@ SecurePass123
 --------
 
 
-L
-@lisalacythompsonaca
-May 15, 2026
-@wyctor wow that's pretty cool, thanks! Definitely a helpful tool for us vibe coders who kinda just cross our fingers and hope for the best 🫣 Are you launching on PeerPush? Once I get a chance to implement I'm happy to review!
+Weird-Shake8670
+1:32 AM
+I really appreciate you giving me the heads up on this.. my sentry notification for this just went off 2 hours ago. All fixed.
 
-+1 PeerPush earned
-1
+If you find the app useful.. here’s a promo as a thank you: RR1YR
 
+aviya88
+10:42 PM
+Hi, thanks for this. That looks cool.
 
-Easy, intuitive, clean and fast.
-Easy and intuitive, i pressed run but i didn't get any info on the failed test, so i went to debug mode and there i could visualize the issues ^^
-Yes i activated the gamification, so when i ran the test successfully i got a leaderboard with other bot agents haha!
-Yes, the test itself, running the scripts, the IA fixing the bugs, the info provided during the onboarding and honestly the entire process is well guided and easy to follow through.
-As of now i made no app as i am busy coding mine, but it would surely make me confident to try and host an app here, it seems a very profesional and legit ai workflow, with a nice code editor and debugger unlike many i know, its dev ready honestly i would recommend it.
-
-abhiiii88
-3:33 PM
-This genuinely made my day 😄
-
-Really appreciate you taking the time to test the flow and share feedback. The frictionless onboarding was intentional as I wanted users to experience the product instantly without setup fatigue.
-
-Still very early, but actively improving the affordability engine and calculation transparency. Going through the walkthrough now 🙌
-
-stuffyoushould
-2:06 PM
-neat stuff!
-
-GustavooIV
-7:22 PM
-Hey, looks really cool tbh. I have been thinking of making something like this myself in the past. Currnently dont have a need for it, but maybe in the future. How is it going for you, how many users does lastest have? Just curious
+Just a comment on your app as a user - it was not immediately clear to me what it does. I can see it generated a demo video, but did you do it manually or is it automated by the app (in that case it's great).

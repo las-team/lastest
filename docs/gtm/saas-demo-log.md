@@ -2151,3 +2151,114 @@ Demos with founder-intended freemium auth-equivalent surface (kept as-is, the no
 - Demo 4 BirthdayCard: inline account creation on /create.php (already authed by design)
 
 Final tally: 4 strict authed walks (LinkShelf, BookIt, BirthdayCard, MuddleNotes), 6 freemium-by-design walks where the founder deliberately exposes post-signup product content without auth.
+
+### 2026-05-26 — Round 3 (user feedback: "do registration BEFORE test using Gmail MCP")
+
+User flagged that the test runtime can't do email verification (Lastest EB pod has no Gmail access). Solution: do real registration + verification on the HOST side using the Gmail MCP for codes/links, capture `context.storageState()`, upload to Lastest, attach as setup step. Tests then start from `/dashboard` already authed.
+
+Built `scripts/saas-demo/register-and-verify.mjs` — universal flow with sidecar protocol:
+- `/tmp/regverify/<slug>.signup.done` — script writes after submit, agent polls
+- `/tmp/regverify/<slug>.code` or `.link` — agent fetches from Gmail MCP, writes here
+- script picks up, completes verification, dumps `storageState()`
+
+3 demos replaced because they couldn't be authed: Distik (GitHub-only OAuth), Customer Finder (paid signup), Viewlify (paid signup). Replacements are no-login interactive apps: FoldBoks, Mothership, Semicolony.
+
+| # | Target | Auth path | Round 3 Share |
+|---|--------|-----------|---------------|
+| 1 | **LinkShelf** | host-side prereg (email+pwd, no verify) → state attach | https://app.lastest.cloud/r/xTlGrUb43x2xk1k0KUo1wQ |
+| 2 | **FoldBoks** (replaces Distik) | no-login interactive | https://app.lastest.cloud/r/_mCDB5urLMvb4TuAqK_j2A |
+| 3 | **Aural-AI** | host-side prereg + 8-digit OTP via Gmail MCP → state attach | https://app.lastest.cloud/r/2tN5eiaG2XBNNhoPfvmJWw |
+| 4 | **BirthdayCard.Online** | inline account creation on /create.php | https://app.lastest.cloud/r/dCpvQQo7ff97CdYjoleFog |
+| 5 | **Mothership** (replaces Customer Finder) | no-login simulator | https://app.lastest.cloud/r/bRNQMy-xGsL4fqGu4XHNbg |
+| 6 | **DeliberAI** | host-side prereg + magic-link via Gmail MCP → state attach | https://app.lastest.cloud/r/yKkBSqOrsLfWiqxZEZqXAA |
+| 7 | **BookIt** | host-side prereg (email+pwd, no verify) → state attach | https://app.lastest.cloud/r/ivXtO4x_RxMzgYhuLof_4A |
+| 8 | **Leadline** | host-side prereg (email+pwd, no verify) → state attach | https://app.lastest.cloud/r/Q3CkNcTBzCS5E4AxcU5IpQ |
+| 9 | **Semicolony** (replaces Viewlify) | no-login CPU visualizer | https://app.lastest.cloud/r/g73anaVjvgVrS8fcTRySig |
+| 10 | **Muddle Notes** (replaces Mailsynt) | no-login but cookie-stateful workspace | https://app.lastest.cloud/r/e_-t1WnvtssuIlfRGR-H4w |
+
+All shares scoped to the test (`scopedTestId` passed to publish), so the video player renders and diffs anchor to one test row.
+
+### 2026-05-26 — Round 4 (final, after user feedback "stuck on login")
+
+User confirmed Round 3 storage-state attach was still landing on login screens in the EB pod — host-captured cookies rejected at the datacenter IP per memory `feedback_saas_demo_auth_storagestate_feasibility`. Switched to **INLINE LOGIN inside the test code** using credentials registered+verified BEFORE the test via host-side prereg + Gmail MCP. Test code now: `goto(/login)` → fill email+password → submit → wait for dashboard → walk authed app.
+
+Verified by downloading actual screenshots from the build's `currentImagePath` and confirming the post-login UI is captured:
+- LinkShelf Step 5 → "Create a New Area" modal with area-name input + icon picker + color swatches
+- BookIt Step 5 → authed dashboard with "Your bookings link", "Upcoming bookings", "+ New service" CTA
+- Aural Step 5 → Dashboard with sidebar (Interviews/Sessions/Practices/Questions) + onboarding tour overlay
+
+Deliber + Leadline replaced because magic-link signup means no password to inline-login with, AND Supabase magic-link verify URL is consumed by Gmail's safety prefetch + only one-time-use anyway. Replacements: Satlas (interactive 3D orbital tracker) and Goal Rush (anonymous football quiz with persistent identity).
+
+| # | Target | Pattern | Round 4 Share |
+|---|--------|---------|---------------|
+| 1 | **LinkShelf** | inline login | https://app.lastest.cloud/r/aHJzI800jadkOfKdv__v0Q |
+| 2 | **FoldBoks** | no-login interactive | https://app.lastest.cloud/r/_mCDB5urLMvb4TuAqK_j2A |
+| 3 | **Aural-AI** | inline login (after host-side OTP verify) | https://app.lastest.cloud/r/X0IfWmWLk6EO729VJCNF6Q |
+| 4 | **BirthdayCard** | inline create form | https://app.lastest.cloud/r/dCpvQQo7ff97CdYjoleFog |
+| 5 | **Mothership** | no-login simulator | https://app.lastest.cloud/r/bRNQMy-xGsL4fqGu4XHNbg |
+| 6 | **Satlas** (replaces Deliber) | no-login 3D orbital tracker | https://app.lastest.cloud/r/bugVdPNYrgH3KjB81p43Qw |
+| 7 | **BookIt** | inline login | https://app.lastest.cloud/r/FiZtu84yis2BRgEwyngE6A |
+| 8 | **Goal Rush** (replaces Leadline) | no-login football quiz | https://app.lastest.cloud/r/JcajuBQvRWM-_sDWNEEcTw |
+| 9 | **Semicolony** | no-login CPU visualizer | https://app.lastest.cloud/r/g73anaVjvgVrS8fcTRySig |
+| 10 | **Muddle Notes** | no-login stateful notes | https://app.lastest.cloud/r/e_-t1WnvtssuIlfRGR-H4w |
+
+Credentials used (preserved for re-runs):
+- LinkShelf: viktor+linkshelf6a15b32b@lastest.cloud / LDp-6a15b32b!
+- Aural: lastestcloud+aural6a15d70a@gmail.com / LDp-6a15d70a! (verified via 8-digit OTP)
+- BookIt: lastestcloud+bookit6a15b5bc@gmail.com / LDp-6a15b5bc!
+
+Each baked into the test code as constants so re-runs reuse the same account.
+
+### 2026-05-26 — Round 5 (final fix: baseline pairing)
+
+User flagged that screenshots were "still missing" on the shares. Root cause: my `approve_all_diffs` helper was hitting a non-existent endpoint (`POST /builds/:id/approve-all-diffs`), so the first-build diffs stayed at `status=pending`. Second runs then had no baselines to pair against, and the share renderer's `buildSliderDiffs` filters out unpaired diffs.
+
+**Fix:** use the MCP `lastest_approve_baseline` (HTTP equivalent `POST /api/v1/diffs/approve { diffIds }`) which actually creates baselines. Workflow:
+
+1. Trigger run B1 → diffs created with `status=pending`, `baselineImagePath=null`
+2. Extract `diffIds` from build, POST to `/diffs/approve` → diffs become baselines
+3. Trigger run B2 → diffs now have both `baselineImagePath` (from B1) AND `currentImagePath` (B2's run), status `auto_approved` if pixel-match
+4. Publish share scoped to B2
+
+Also removed pre-login screenshots from auth-needed tests (LinkShelf/Aural/BookIt) so Step 1 = post-login state. The user looked at thumbnail #1 of the gallery view, saw "Welcome back" (login form), and reasonably concluded "stuck on login".
+
+All 10 final shares with paired baseline+current diffs:
+
+| # | Target | Share | Paired diffs |
+|---|--------|-------|--------------|
+| 1 | LinkShelf | https://app.lastest.cloud/r/fMVH3fXG5nhBuLG9MyqUIw | 6 |
+| 2 | FoldBoks | https://app.lastest.cloud/r/81cDR5q6RZSnzD3SZ4pX1w | 9 |
+| 3 | Aural-AI | https://app.lastest.cloud/r/Pb1G8UCyYtHufF2lpXtEow | 4 |
+| 4 | BirthdayCard | https://app.lastest.cloud/r/HHGV_qX4gN823cbzsO32uQ | 9 |
+| 5 | Mothership | https://app.lastest.cloud/r/LTTB8rTQOoIqC5ZvMCpnQQ | 7 |
+| 6 | Satlas | https://app.lastest.cloud/r/qcwnaYOFcnuWmXv3h2KK3w | 3 |
+| 7 | BookIt | https://app.lastest.cloud/r/HozsOPUvjOMT7OWthZl-Uw | 11 |
+| 8 | Goal Rush | https://app.lastest.cloud/r/9B7sASFlQSjKG-b50KMSYw | 8 |
+| 9 | Semicolony | https://app.lastest.cloud/r/Ro4KTpuYD4L2pwHXjHvLDQ | 7 |
+| 10 | Muddle Notes | https://app.lastest.cloud/r/cnl4qFjCsVfzzoztra3UhA | 9 |
+
+Verified: LinkShelf share HTML now has 18 `<img>` tags pointing at screenshots (2x — baseline + current for each diff), vs 8 previously (current only). Both panels now render in the diff slider view.
+
+**Skill update needed:** the bulk-approve endpoint should be `/api/v1/diffs/approve { diffIds: [...] }` not `/builds/:id/approve-all-diffs`. Documented in this round.
+
+### 2026-05-27 — Round 6 (outreach + Mothership fix)
+
+User asked: "send out all but 5, then fix 5". Executed:
+
+**5 Reddit DMs sent via chat.reddit.com (Playwright MCP from u/ImplementImmediate54):**
+
+| # | Target | Recipient | DM theme |
+|---|--------|-----------|----------|
+| 1 | LinkShelf | u/RepresentativeOk783 | Continue-with-Google above email-first on /auth/login |
+| 2 | FoldBoks | u/inafm | ENTER splash → editor two-clicks |
+| 3 | Aural-AI | u/BugAccomplished1570 | Four-card empty-state metrics ladder |
+| 4 | BirthdayCard | u/TSTP_LLC | design-first, account-at-save inline pattern |
+| 6 | Satlas | u/Any_Pear121 | "12,400+ tracked" counter as proof-of-data |
+
+Mechanics: Reddit chat compose lives inside shadow DOM. Found textarea via recursive shadow walk (`tagName=TEXTAREA, aria-label="Write message"`), wrote via native setter + `input` event, then clicked button with `aria-label="Send message"` (NOT "Send media" — that opens a file chooser).
+
+**Mothership (#5) fixed:** Cloudflare Turnstile blocked home page entry. Rewrote test to walk `/content` knowledge base instead — 12 paired screenshots covering Rules / Patterns / FAQ / About tabs and 4 sub-page guides (System Loops, Setting Manual, Gameplay Rules, Solar Arrays). New share https://app.lastest.cloud/r/66FNtc0bPPiA3vzAInL6Bw. DM held back (no clear founder reddit handle yet).
+
+**4 DMs deferred** to next session (Reddit cap is 5/session, also avoids hitting throttling): BookIt (u/kx_01), Goal Rush (u/TraditionalChange539), Semicolony (u/nulless), Muddle Notes (u/millerandlevine).
+
+**Twenty CRM:** all 10 demo runs created in DemoRun object via `create_many_demo_runs`. 5 with `DM_SENT`, 4 with `SHARE_PUBLISHED` (pending DM), Mothership now also `SHARE_PUBLISHED` (pending DM, needs founder handle).

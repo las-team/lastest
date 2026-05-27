@@ -1,5 +1,3 @@
-# **Cookie policy**
-
 LASTEST, directly or via a third party contracted for providing measurement services, may use cookies and other similar mechanisms for storing and retrieving data from terminals ("cookies") when you browse the Website to allow and facilitate your interaction with the Website. The statistics services (own and third-party) used by the Website may use cookies for the purposes of establishing metrics and usage patterns of the Website.
 
 The use of cookies lets the server on which the Website is hosted recognise your web browser and know your connection IP address, source (URL), use time, browsing history and preferences so as to make your browsing more straightforward and allow, for example, access if you have previously registered, and access to areas, services, promotions or competitions reserved exclusively for you without you having to log in on each visit. Cookies are also used to measure the audience and traffic parameters and to track the trend and number of visits.
@@ -81,5 +79,3 @@ If you use a different browser, see the documentation for your browser.
 The opt-out mechanism creates a cookie that allows us to remember that you don't want additional cookies. However, if you delete your cookies after opting out, you will have to opt out again.
 
 These changes only apply to the browser via which you are currently connected. To delete cookies in other devices, you must follow the process described in those devices. For more information and information about your rights in relation to the processing associated with cookies, please also visit our Privacy Policy.
-
-Last updated: May 24th, 2026

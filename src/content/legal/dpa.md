@@ -1,12 +1,8 @@
-# **Data Processing Addendum (DPA)**
-
 For DEXILION SZOLGÁLTATÓ KORLÁTOLT FELELŐSSÉGŰ TÁRSASÁG (hereinafter, indistinctly, "DEXILION") it is very important to process personal data in a secure, fair and transparent manner. DEXILION therefore processes such data in accordance with the European Union's General Data Protection Regulation (hereinafter "GDPR")
 
 In order to adequately protect the right to data protection and privacy of individuals, the following are the terms and conditions governing the processing of personal data by DEXILION (hereinafter referred to as "DPA"). This DPA therefore amends, supplements and/or replaces any other document of a contractual nature signed with DEXILION and does not require any further action.
 
 If you do not agree with the terms and conditions indicated in this DPA, please cease to use and/or interact with DEXILION and any of its products, services and associated domains.
-
-## **LASTEST PROCESSING TERMS AND CONDITIONS**
 
 ## **1. DEFINITIONS**
 
@@ -140,16 +136,14 @@ Both Parties (hereinafter, individually, the "Indemnifying Party") mutually unde
 All notices between the Parties shall be in writing and through one of the following means:
 
 * a) Registered mail with acknowledgement of receipt.
-* c) E-mail with confirmation of delivery and reading.
+* b) E-mail with confirmation of delivery and reading.
 
 Notifications made to Client, with reference to this DPA, shall be sent to the following address:
 
 Dexilion Kft, Kisgömb utca 17, Budapest, Hungary, H-1135
 
-## **18. GOVERNING LAW AND JURISDICTION**
+## **14. GOVERNING LAW AND JURISDICTION**
 
 This agreement shall be governed by and construed in accordance with the EU General Data Protection Regulation.
 
 The parties waive their own jurisdiction or any other jurisdiction to which they may be entitled by law and agree to be bound by the courts of Budapest for the purpose of settling any disputes arising between the parties in connection with this DPA.
-
-Last updated: January 31st 2023

@@ -1,5 +1,3 @@
-# **Terms and Conditions**
-
 These terms and conditions ("Terms and Conditions") explain the general terms that govern the access and use of the different websites, products and services offered by Dexilion Kft. ("Dexilion", "we", "our").
 
 Our identification data are as follows:
@@ -99,7 +97,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
       3. We may suspend, disable, or remove Third-Party Services from your User account or website at our sole discretion. You undertake to make sure that the outcome from the use of Third-Party Services complies with Dexilion's User Obligations (detailed in Section 5), and with standard, appropriate and accepted business conduct.
 
-5. **USER OBLIGATIONS**
+5. ## **USER OBLIGATIONS**
 
    1. By accessing or using Dexilion's Products & Services the User undertakes to comply with the provisions of these Terms and Conditions as well as with any applicable law.
 
@@ -119,7 +117,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
    3. The User undertakes to defend, indemnify, and hold Dexilion harmless (and its affiliates, employees, officers and directors) for any judicial or extrajudicial claim, damage or penalty related to the User's obligations under these Terms and Conditions.
 
-6. **TERM AND CANCELLATION**
+6. ## **TERM AND CANCELLATION**
 
    1. Term and cancellation rules applicable to cloud Dexilion's Products & Services
 
@@ -145,7 +143,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
       5. The fact that Dexilion prevents the User from accessing or using Dexilion's Products & Services in accordance with the provisions of this Section shall not entail any liability for Dexilion nor shall it entitle the User to make any kind of claim against Dexilion, except for damages caused by Dexilion's willful misconduct, and provided that they are ruled by a court or tribunal.
 
-7. **DATA PROTECTION**
+7. ## **DATA PROTECTION**
 
    1.  In order to have access to some functionalities of Dexilion's Products & Services, and, in particular, in order to register a User account, you must provide certain data and information.
 
@@ -159,7 +157,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
    6. Our Cookies Policy, our Privacy Policy and our DPA are incorporated by reference to these Terms and Conditions. Please, note that the applicable Privacy Policy and Cookies Policy will depend on the Dexilion's Products & Services that you are accessing or using.
 
-8. **WARRANTIES AND LIMITATION OF LIABILITY**
+8. ## **WARRANTIES AND LIMITATION OF LIABILITY**
 
    1. Dexilion's Products & Services are provided "AS IS" and "AS AVAILABLE".
 
@@ -191,7 +189,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
    7. Additionally, Dexilion's Products & Services may contain links to third-party sites. Dexilion shall not be liable for any damage or loss caused or alleged to be caused by or in connection with the content or any other aspect related to said sites. Please, note that your access and use of such third-party sites will be governed by said third-party own Terms and Conditions, privacy policy, cookies policy, and any other applicable terms.
 
-9. **CUSTOMERS' SPECIFIC DUTIES**
+9. ## **CUSTOMERS' SPECIFIC DUTIES**
 
    1. In addition to any other term and obligation applicable to Users in general and to Customers in particular under these Terms and Conditions, the following terms shall apply to Customers:
 
@@ -201,7 +199,7 @@ In case Dexilion and the User have agreed different terms on a separate document
 
       3. You represent that you are entitled to transfer the relevant data (and, in particular, any personal data, including your End Users' personal data) in order for Dexilion and its service providers to lawfully use, transfer and process said data for the provision of the services related to Dexilion's Products & Services.
 
-10. **USERS' CONTENT AND INTERACTION**
+10. ## **USERS' CONTENT AND INTERACTION**
 
     1. Some of Dexilion's Products & Services' functionalities may allow Users to participate in chats, leave comments, share content or interact with each other and/or with Dexilion.
 
@@ -213,25 +211,25 @@ In case Dexilion and the User have agreed different terms on a separate document
 
        1. lastest.cloud: used for onboarding emails and getting started guide, account-related communications and support requests.
 
-11. **SUGGESTIONS AND COMPLAINTS**
+11. ## **SUGGESTIONS AND COMPLAINTS**
 
     1. Any User who wishes to address a complaint, question or suggestion may do so by:
 
        1. sending an email to support@lastest.cloud
 
-12. **NOTICES**
+12. ## **NOTICES**
 
     1. We may send notices to you by e-mail, by posting them on the websites and/or dashboards of the different Dexilion's Products & Services or by any other method we choose. Such notice will be effective on dispatch.
 
     2. If you want to send notices to us, please use our email address (notice@lastest.cloud).
 
-13. **FORCE MAJEURE**
+13. ## **FORCE MAJEURE**
 
     1. For the purposes of these Terms and Conditions, a force majeure event means any event or occurrence beyond the reasonable control of Dexilion, including a breakdown or interruption in public or private telecommunications networks, war, riots, disasters, strikes, civil disorder, terrorist acts, unforeseen events, fires, pandemics, explosions, or any action by the authorities, including any government regulation.
 
     2. Dexilion will not be liable for any failure, delay, or suspension in the performance of any of its obligations under these Terms and Conditions caused by a force majeure event.
 
-14. **MISCELLANEOUS**
+14. ## **MISCELLANEOUS**
 
     1. Dexilion reserves the right to make, at any time and without prior notice, improvements, replacements or modifications to any functionality or content of Dexilion's Products & Services, as well as to discontinue Dexilion's Products & Services and its related services, with or without notice, and with no liability to Dexilion.
 
@@ -243,10 +241,8 @@ In case Dexilion and the User have agreed different terms on a separate document
 
     5. The original version of these Terms and Conditions is drawn up in English, and the English version of this Terms and Conditions shall prevail in the event of any conflict with any version of these Terms and Conditions or portion thereof that has been translated into another language (including Hungarian).
 
-15. **APPLICABLE LAW AND JURISDICTION**
+15. ## **APPLICABLE LAW AND JURISDICTION**
 
     1. These Terms and Conditions shall be governed by the Laws of Hungary (both national Hungarian laws and all EU applicable laws).
 
     2. Where allowed by law, you and Dexilion waive you/our own jurisdiction and agree to submit any conflict, controversy and/or claim related to these Terms and Conditions to the exclusive jurisdiction of the Courts of the City of Budapest.
-
-Last updated: May 24th 2026

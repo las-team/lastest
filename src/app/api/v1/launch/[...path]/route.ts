@@ -88,7 +88,16 @@ function err(status: number, error: string, extra?: Record<string, unknown>, hea
   return NextResponse.json({ error, ...extra }, { status, headers });
 }
 
-// Build the leaderboard payload for a cohort (ranked featured profiles).
+// Machine-readable failure: the frontend switches on `code` (snake_case) and
+// falls back to `error` for the message. Keep both in sync.
+// Codes the launch frontend understands: already_voted, account_too_new,
+// email_unverified, velocity_exceeded, voting_closed (+ dup_domain, insufficient_scope).
+function fail(status: number, code: string, extra?: Record<string, unknown>, headers?: HeadersInit) {
+  return NextResponse.json({ code, error: code, ...extra }, { status, headers });
+}
+
+// Detail payload: nested { cohort, profiles } — used by /cohorts/current and
+// /cohorts/:id, which the live client (fetchCurrentCohort) expects nested.
 async function cohortPayload(cohort: LaunchCohort, votedSet: Set<string>) {
   const featured = await queries.listFeaturedProfilesByCohort(cohort.id);
   const ranked = rankProfiles(featured, cohort.weekStartAt ?? new Date());
@@ -97,6 +106,18 @@ async function cohortPayload(cohort: LaunchCohort, votedSet: Set<string>) {
     profiles: ranked.map((r) =>
       serializeProfile(r.profile, { rank: r.rank, hasVoted: votedSet.has(r.profile.id) }),
     ),
+  };
+}
+
+// List payload: FLAT cohort with `profiles` inlined — the build-time snapshot
+// script (build-launch-data.mjs → mapCohort) reads cohort fields + profiles off
+// each array element directly.
+async function flatCohortPayload(cohort: LaunchCohort) {
+  const featured = await queries.listFeaturedProfilesByCohort(cohort.id);
+  const ranked = rankProfiles(featured, cohort.weekStartAt ?? new Date());
+  return {
+    ...serializeCohort(cohort),
+    profiles: ranked.map((r) => serializeProfile(r.profile, { rank: r.rank })),
   };
 }
 
@@ -112,18 +133,18 @@ export async function GET(
   const [resource, a, b] = path;
   const actor = await resolveActor(request).catch(() => null);
 
-  // GET /winners/monthly
+  // GET /winners/monthly → top-level array of { slug, month } (build script reads `.slug`).
   if (resource === 'winners' && a === 'monthly') {
     const winners = await queries.getMonthlyWinners();
-    return NextResponse.json({ winners: winners.map(serializeMonthlyWinner) });
+    return NextResponse.json(winners.map(serializeMonthlyWinner));
   }
 
-  // GET /profiles/:slug
+  // GET /profiles/:slug → bare profile object (frontend fetchProfile reads top-level).
   if (resource === 'profiles' && a && !b) {
     const profile = await queries.getProfileBySlug(a);
     if (!profile) return err(404, 'Not found');
     const hasVoted = actor ? await queries.hasUserVoted(profile.id, actor.userId) : false;
-    return NextResponse.json({ profile: serializeProfile(profile, { hasVoted }) });
+    return NextResponse.json(serializeProfile(profile, { hasVoted }));
   }
 
   if (resource === 'cohorts') {
@@ -165,7 +186,7 @@ export async function GET(
     }
     const withProfiles = [];
     for (const cohort of cohorts) {
-      withProfiles.push(await cohortPayload(cohort, new Set()));
+      withProfiles.push(await flatCohortPayload(cohort));
     }
     return NextResponse.json({ cohorts: withProfiles });
   }
@@ -188,10 +209,10 @@ export async function POST(
 
   // POST /submissions
   if (resource === 'submissions' && !a) {
-    if (!hasScope(actor, 'launch:submit')) return err(403, 'insufficient_scope');
+    if (!hasScope(actor, 'launch:submit')) return fail(403, 'insufficient_scope');
     const gate = await assertCanSubmit(actor.userId, actor.emailVerified);
     if (gate) {
-      return err(gate.status, gate.code, undefined, gate.retryAfterSec ? { 'Retry-After': String(gate.retryAfterSec) } : undefined);
+      return fail(gate.status, gate.code, undefined, gate.retryAfterSec ? { 'Retry-After': String(gate.retryAfterSec) } : undefined);
     }
 
     const body = await request.json().catch(() => null);
@@ -203,7 +224,7 @@ export async function POST(
     const domain = normalizeDomain(websiteUrl);
     if (!domain) return err(422, 'websiteUrl invalid');
     const dup = await queries.findProfileByDomain(domain);
-    if (dup) return err(409, 'dup-domain', { existingSlug: dup.slug });
+    if (dup) return fail(409, 'dup_domain', { existingSlug: dup.slug });
 
     // Queue into the upcoming (open) cohort.
     const cohort = await ensureUpcomingCohort();
@@ -229,17 +250,17 @@ export async function POST(
 
   // POST /profiles/:slug/upvote
   if (resource === 'profiles' && a && b === 'upvote') {
-    if (!hasScope(actor, 'launch:vote')) return err(403, 'insufficient_scope');
+    if (!hasScope(actor, 'launch:vote')) return fail(403, 'insufficient_scope');
     const profile = await queries.getProfileBySlug(a);
     if (!profile) return err(404, 'Not found');
 
     // Voting is only open while the profile's cohort is in the voting window.
     const cohort = profile.cohortId ? await queries.getCohortById(profile.cohortId) : undefined;
-    if (!cohort || cohort.state !== 'voting') return err(423, 'voting-closed');
+    if (!cohort || cohort.state !== 'voting') return fail(423, 'voting_closed');
 
     const gate = await assertCanVote(actor.userId, actor.emailVerified, extractSourceIp(request.headers));
     if (gate) {
-      return err(gate.status, gate.code, undefined, gate.retryAfterSec ? { 'Retry-After': String(gate.retryAfterSec) } : undefined);
+      return fail(gate.status, gate.code, undefined, gate.retryAfterSec ? { 'Retry-After': String(gate.retryAfterSec) } : undefined);
     }
 
     try {
@@ -250,7 +271,7 @@ export async function POST(
       });
     } catch (e) {
       if (e instanceof DuplicateVoteError) {
-        return err(409, 'already-voted', { slug: profile.slug, upvoteCount: profile.upvoteCount, hasVoted: true });
+        return fail(409, 'already_voted', { slug: profile.slug, upvoteCount: profile.upvoteCount, hasVoted: true });
       }
       throw e;
     }
@@ -275,7 +296,7 @@ export async function DELETE(
   if (!actor) return err(401, 'Unauthorized');
 
   if (resource === 'profiles' && a && b === 'upvote') {
-    if (!hasScope(actor, 'launch:vote')) return err(403, 'insufficient_scope');
+    if (!hasScope(actor, 'launch:vote')) return fail(403, 'insufficient_scope');
     const profile = await queries.getProfileBySlug(a);
     if (!profile) return err(404, 'Not found');
     await queries.deleteVote(profile.id, actor.userId);

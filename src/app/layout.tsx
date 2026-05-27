@@ -5,6 +5,7 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
 import { UmamiScript } from "@/components/analytics/umami-script";
+import { CookieNotice } from "@/components/layout/cookie-notice-client";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -65,6 +66,7 @@ export default async function RootLayout({
           {children}
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
+        <CookieNotice />
         <UmamiScript nonce={nonce} />
       </body>
     </html>

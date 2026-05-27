@@ -93,3 +93,4 @@ docs/gtm/saas-demo-log.md
 .recovery/
 scripts/saas-demo/*
 docs/gtm/saas-demo*
+/*.png

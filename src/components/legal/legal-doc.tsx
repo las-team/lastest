@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 type LegalSlug = 'terms' | 'privacy' | 'cookies' | 'dpa';
 
@@ -18,7 +19,7 @@ export async function LegalDoc({ slug, title, version }: LegalDocProps) {
     <article className="prose prose-neutral dark:prose-invert max-w-none">
       <h1>{title}</h1>
       <p className="text-sm text-muted-foreground">Last updated: {version}</p>
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </article>
   );
 }
