@@ -47,4 +47,15 @@ export async function register() {
   } catch (err) {
     console.error('[Boot] startCleanupLoop failed:', err);
   }
+
+  // Activity-feed WS server (port 9400). Previously started from the (app)
+  // layout, which forced every static-page-collection worker during `next
+  // build` to race for the port and EADDRINUSE against the dev server.
+  // Booting once here keeps the singleton process-scoped.
+  try {
+    const { startActivityFeedServer } = await import('@/lib/ws/activity-feed-server');
+    startActivityFeedServer();
+  } catch (err) {
+    console.error('[Boot] startActivityFeedServer failed:', err);
+  }
 }

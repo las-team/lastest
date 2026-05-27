@@ -67,6 +67,16 @@ function getLogoPath(): string {
   return logoPath;
 }
 
+// Round-trip a path through globalThis so the Turbopack analyzer treats it
+// as an opaque value. Without this, `fs.existsSync(path.join(dir, name))`
+// makes Turbopack expand a glob like `<dynamic>/ffmpeg` and match 34k+
+// project files on every bundle pass.
+function opaquePath(p: string): string {
+  const g = globalThis as { __lastestOpaquePath?: string };
+  g.__lastestOpaquePath = p;
+  return g.__lastestOpaquePath as string;
+}
+
 let cachedFfmpegPath: string | null | undefined;
 function resolveFfmpegPath(): string {
   if (cachedFfmpegPath !== undefined) return cachedFfmpegPath ?? 'ffmpeg';
@@ -77,7 +87,7 @@ function resolveFfmpegPath(): string {
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     if (!dir) continue;
     for (const name of ['ffmpeg', 'ffmpeg.exe']) {
-      const candidate = path.join(dir, name);
+      const candidate = opaquePath(path.join(opaquePath(dir), opaquePath(name)));
       try {
         if (fs.existsSync(candidate)) {
           cachedFfmpegPath = candidate;
@@ -102,7 +112,7 @@ function pickFontFile(): string | null {
   ];
   for (const p of candidates) {
     try {
-      if (fs.existsSync(p)) return p;
+      if (fs.existsSync(opaquePath(p))) return p;
     } catch { /* ignore */ }
   }
   return null;
@@ -188,7 +198,14 @@ export async function watermarkVideo(
     let child: ReturnType<typeof spawn>;
     let stderr = '';
     try {
-      child = spawn(ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      // Round-trip the binary path through globalThis so Turbopack's static
+      // analyzer treats it as an opaque value. A direct `spawn(ffmpeg, ...)`
+      // call makes Turbopack expand a glob like `<dynamic>/ffmpeg` and match
+      // 34k+ project files, slowing the build and spamming warnings.
+      const g = globalThis as { __lastestFfmpegCmd?: string };
+      g.__lastestFfmpegCmd = ffmpeg;
+      const cmd = g.__lastestFfmpegCmd as string;
+      child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     } catch (err) {
       console.warn('[watermark] spawn failed:', err instanceof Error ? err.message : err);
       resolve(false);

@@ -12,14 +12,12 @@ import { ConsentBanner } from '@/components/layout/consent-banner-client';
 import { UmamiIdentifyClient } from '@/components/analytics/umami-identify-client';
 import { getCurrentSession } from '@/lib/auth';
 import { hasAcceptedTerms } from '@/lib/db/queries';
-import { startActivityFeedServer } from '@/lib/ws/activity-feed-server';
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  startActivityFeedServer();
   const session = await getCurrentSession();
 
   // First-run gate: send users who haven't completed onboarding to /onboarding.

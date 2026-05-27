@@ -26,7 +26,7 @@ DEXILION SZOLGÁLTATÓ KORLÁTOLT FELELŐSSÉGŰ TÁRSASÁG has established thes
 
 "Processing" or "Data Processing": Shall have the same meaning as in the GDPR, among other things, the following constitute Data Processing: the collection, recording, use, storage, modification, adaptation, disclosure, transfer or transmission, structuring, use, combination and deletion or destruction of personal data.
 
-"Incident": Shall mean (a) a complaint or a request with respect to the exercise of a person's rights under the RGPD; (b) an investigation or seizure of personal data by a competent public authority, or a specific indication that such an investigation or seizure is imminent; or (c) any breach of security and/or confidentiality as set out in this DPA leading to the accidental or unlawful destruction, loss, alteration, disclosure or unauthorized access to the personal data, or any indication that such a breach has occurred or is about to occur.
+"Incident": Shall mean (a) a complaint or a request with respect to the exercise of a person's rights under the GDPR; (b) an investigation or seizure of personal data by a competent public authority, or a specific indication that such an investigation or seizure is imminent; or (c) any breach of security and/or confidentiality as set out in this DPA leading to the accidental or unlawful destruction, loss, alteration, disclosure or unauthorized access to the personal data, or any indication that such a breach has occurred or is about to occur.
 
 "End users" or "Client": Shall mean the users of the Controller (DEXILION Client) and the possible Data Subjects on whom DEXILION can process their personal data, according to the needs and requirements of the Controller.
 
