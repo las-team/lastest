@@ -4,7 +4,6 @@ Videos explaining use
     record urldiff with archive page
 MCP deploy for smithery
 Reach out to podcasts, meetups, youtube channels, add them to crm
-**Welcome email, follow-up**
 https://www.chromatic.com/start comp test?
 ## test
 VS Code extension
@@ -51,6 +50,7 @@ Use DOM diff/verify to fix test as context
 * Invite 50–20 teams (target: solo founders, YC startups, component teams) via outreach to clubs, Slack communities, and test automation forums. Offer extended free tiers and white-glove onboarding for first 20 paying customers.
 
 ## commands
+/goal create 10 new /gtm-lastest-saas-demo demos with post-log-in content, inc demonotes and screenshots - verify them each. For log in register yourself, check emails via pw mcp, and let the tests start with session cookies or hardcoded login details. no questions, this time, have the 10 shares available.
 ## ourmotto
 Sanyi: "Pont erre van szükségünk. Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre"
 
@@ -68,14 +68,45 @@ SecurePass123
 --------
 
 
-Weird-Shake8670
-1:32 AM
-I really appreciate you giving me the heads up on this.. my sentry notification for this just went off 2 hours ago. All fixed.
+Bhavya Wade
+@wade_bhavy55123
+·
+May 22
+Replying to 
+@HeroLastest
+Really appreciate you trying it out and sharing feedback 🙌 Glad the no-auth flow felt smooth and worked on the first try. The confidence model was one area I wanted to make more thoughtful than a typical decision matrix.
 
-If you find the app useful.. here’s a promo as a thank you: RR1YR
+GeoRankLand
+@georankland
+·
+May 21
+Replying to 
+@HeroLastest
+Just tested the signup flow end-to-end and verification is working cleanly. Links are single-use though, so if you clicked it twice that would trigger the error you're seeing.
 
-aviya88
-10:42 PM
-Hi, thanks for this. That looks cool.
+Happy to manually verify your account or troubleshoot via DM. What's your signup email?
 
-Just a comment on your app as a user - it was not immediately clear to me what it does. I can see it generated a demo video, but did you do it manually or is it automated by the app (in that case it's great).
+
+Lasse - building FixyFlow
+@Awaki18
+·
+May 21
+Replying to 
+@HeroLastest
+Thanks, will investigate verify email!
+
+
+Omkar
+ liked your reply·
+May 21
+Signed up for HermesDeploy and ran every screen through @lastestcloud: home → login → full 5-step agent wizard (Name → Plan → Model → Telegram → Ready). 9 baselines, paired perfectly clean. 
+
+
+Omkar
+@omkar_builds
+·
+May 21
+Replying to 
+@HeroLastest
+That's so awesome, thanks!
+

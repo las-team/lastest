@@ -258,6 +258,16 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   const [editName, setEditName] = useState(test.name);
   const [editUrl, setEditUrl] = useState(test.targetUrl || '');
   const [editCode, setEditCode] = useState(test.code || '');
+  // Re-sync edit fields when the underlying test changes (e.g. after onRefresh
+  // refetches inline detail state). Guarded by !isEditing so it never clobbers
+  // an in-progress edit.
+  useEffect(() => {
+    if (!isEditing) {
+      setEditName(test.name);
+      setEditUrl(test.targetUrl || '');
+      setEditCode(test.code || '');
+    }
+  }, [test.name, test.targetUrl, test.code, isEditing]);
   // URL hash drives the initial tab so cross-page deep-links work, e.g.
   // `/tests/<id>#vars` from the verify focus page lands on the Vars tab.
   const VALID_TABS = new Set(['code', 'spec', 'steps', 'criteria', 'vars', 'playback', 'screenshots', 'inspect', 'history', 'recordings', 'versions']);
@@ -412,7 +422,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     try {
       await restoreTestVersion(test.id, version);
       toast.success(`Restored to version ${version}`);
-      router.refresh();
+      if (onRefresh) await onRefresh(); else router.refresh();
       loadVersions();
     } catch {
       toast.error('Failed to restore version');
@@ -437,7 +447,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
     setIsRestoringDeleted(true);
     try {
       await restoreTest(test.id);
-      router.refresh();
+      if (onRefresh) await onRefresh(); else router.refresh();
     } finally {
       setIsRestoringDeleted(false);
     }
@@ -560,7 +570,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         code: editCode,
       });
       setIsEditing(false);
-      router.refresh();
+      if (onRefresh) await onRefresh(); else router.refresh();
     } finally {
       setIsSaving(false);
     }
@@ -604,7 +614,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         if (saveResult.success) {
           toast.success('Test enhanced and saved');
           setEnhancePrompt('');
-          router.refresh();
+          if (onRefresh) await onRefresh(); else router.refresh();
         } else {
           toast.error(saveResult.error || 'Failed to save enhanced test');
         }

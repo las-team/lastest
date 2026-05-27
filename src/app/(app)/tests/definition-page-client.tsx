@@ -1181,6 +1181,9 @@ export function DefinitionPageClient({
                           setOpenTestData(data.test);
                           setOpenTestDetailData(data);
                         }
+                        // Also refresh server page props (tree + test list) so a
+                        // renamed/edited test updates outside the detail panel.
+                        router.refresh();
                       } catch (err) {
                         const msg = err instanceof Error ? err.message : '';
                         toast.error(msg.startsWith('Forbidden:') ? 'Test was removed.' : msg || 'Refresh failed.');
