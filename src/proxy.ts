@@ -12,6 +12,8 @@ const PUBLIC_PATHS = [
   '/dpa',
   '/r/',         // Public share pages
   '/share/',     // Static share media (public/share/<slug>/...)
+  '/sitemap.xml', // Crawler discovery of /r/<slug> share pages
+  '/robots.txt',  // Crawler directives
   '/oauth/',     // Launch OAuth authorize endpoint — the handler itself does
                  // the auth check + /login?returnTo bounce (needs to run for
                  // both authed token-mint and unauth redirect cases).

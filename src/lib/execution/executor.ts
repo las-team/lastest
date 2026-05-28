@@ -673,8 +673,8 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.cursorPlaybackSpeedOverride ?? pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        consoleErrorMode: (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
-        networkErrorMode: (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') || 'fail',
+        consoleErrorMode: pwOverrides?.consoleErrorMode ?? (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+        networkErrorMode: pwOverrides?.networkErrorMode ?? (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? true,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
         // Without this, the runner never invokes axe-core even when the user

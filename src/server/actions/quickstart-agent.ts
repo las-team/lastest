@@ -217,17 +217,6 @@ async function runQsPreflight(
     return false;
   }
 
-  // Force consoleErrorMode + networkErrorMode to 'warn' so third-party noise
-  // (analytics 401s, etc.) doesn't red the demo build. Idempotent: only update
-  // if either is currently 'fail'.
-  const pwSettings = await queries.getPlaywrightSettings(repositoryId);
-  if (pwSettings.consoleErrorMode === 'fail' || pwSettings.networkErrorMode === 'fail') {
-    await queries.upsertPlaywrightSettings(repositoryId, {
-      consoleErrorMode: 'warn',
-      networkErrorMode: 'warn',
-    });
-  }
-
   const stamp = utcStamp();
   const slug = slugify(gate.repo.name);
   const template = gate.team.quickstartEmailTemplate
@@ -246,8 +235,6 @@ async function runQsPreflight(
     baseUrl: gate.baseUrl,
     slug,
     stamp,
-    consoleErrorModeAdjusted:
-      pwSettings.consoleErrorMode === 'fail' || pwSettings.networkErrorMode === 'fail',
   });
   emitActivity(teamId, repositoryId, sessionId, 'step:complete', 'Preflight passed', {
     stepId: 'qs_preflight',

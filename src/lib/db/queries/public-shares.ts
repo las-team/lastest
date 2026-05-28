@@ -56,6 +56,31 @@ export async function listPublicSharesForTest(testId: string): Promise<PublicSha
     .orderBy(desc(publicShares.createdAt));
 }
 
+// Sitemap input: every non-revoked share with its build timestamp for lastmod.
+// Limited at the call site (sitemap.ts) to keep the XML under Google's 50k-URL
+// cap; the share table is currently far below that ceiling but the limit makes
+// the contract explicit.
+export async function listPublicSharesForSitemap(limit = 5000): Promise<
+  Array<{ slug: string; updatedAt: Date | null }>
+> {
+  const rows = await db
+    .select({
+      slug: publicShares.slug,
+      buildCompletedAt: builds.completedAt,
+      buildCreatedAt: builds.createdAt,
+      shareCreatedAt: publicShares.createdAt,
+    })
+    .from(publicShares)
+    .leftJoin(builds, eq(publicShares.buildId, builds.id))
+    .where(eq(publicShares.status, 'public'))
+    .orderBy(desc(publicShares.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    slug: r.slug,
+    updatedAt: r.buildCompletedAt ?? r.buildCreatedAt ?? r.shareCreatedAt ?? null,
+  }));
+}
+
 export async function revokePublicShareById(id: string): Promise<void> {
   await db
     .update(publicShares)
