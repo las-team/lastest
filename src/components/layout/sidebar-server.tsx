@@ -13,11 +13,11 @@ import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
 import { Sidebar } from './sidebar';
 
-export async function SidebarServer() {
+export async function SidebarServer({ className }: { className?: string } = {}) {
   const session = await getCurrentSession();
 
   if (!session) {
-    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} />;
+    return <Sidebar repos={[]} selectedRepo={null} currentUser={null} team={null} className={className} />;
   }
 
   const teamId = session.team?.id;
@@ -63,6 +63,7 @@ export async function SidebarServer() {
       ebSessions={ebSessions}
       verifyPendingCount={verifyBadge.unsortedCount}
       verifyHasNewerCommit={verifyBadge.hasNewerCommit}
+      className={className}
     />
   );
 }

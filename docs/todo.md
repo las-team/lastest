@@ -18,8 +18,6 @@ demo-mode
 local agent mcp
 Test page
   Video scrollahead
-WebSite
-  URL diffing
 Verify
 VScode
 ## features
@@ -50,7 +48,7 @@ Use DOM diff/verify to fix test as context
 * Invite 50–20 teams (target: solo founders, YC startups, component teams) via outreach to clubs, Slack communities, and test automation forums. Offer extended free tiers and white-glove onboarding for first 20 paying customers.
 
 ## commands
-/goal create 10 new /gtm-lastest-saas-demo demos with post-log-in content, inc demonotes and screenshots - verify them each. For log in register yourself, check emails via pw mcp, and let the tests start with session cookies or hardcoded login details. no questions, this time, have the 10 shares available.
+/goal create 10 new /gtm-lastest-saas-demo demos with post-log-in content, inc demonotes and screenshots - verify them each to have at least 3 post-login actions. To enable log-in register yourself, check emails via pw mcp, and let the tests start with session cookies or hardcoded login details. no questions, this time, have the 10 shares available.
 ## ourmotto
 Sanyi: "Pont erre van szükségünk. Ilyen AI segítség nélkül soha nem lenne elég erőforrásunk user interface tesztelésre"
 

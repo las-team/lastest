@@ -35,9 +35,12 @@ export default async function AppLayout({
       <ContextCollectorProvider>
         <ActivityFeedProvider>
           <div className="flex h-screen">
-            <div className="hidden md:flex">
-              <SidebarServer />
-            </div>
+            {/* Desktop sidebar — responsive class lives on the <aside> itself.
+             *  An outer wrapper `<div className="hidden md:flex">` around the
+             *  async <SidebarServer/> caused a server/client hydration tree
+             *  mismatch on mobile-hidden render; merging the class onto the
+             *  Sidebar's own root keeps the tree shallow and stable. */}
+            <SidebarServer className="hidden md:flex" />
             <div className="flex-1 flex flex-col overflow-hidden">
               <MobileTopBarServer />
               {showConsentBanner && <ConsentBanner />}

@@ -5,6 +5,7 @@ import { Readable } from 'stream';
 import { getCurrentSession } from '@/lib/auth';
 import { verifyBearerToken } from '@/lib/auth/api-key';
 import { checkMediaAccess } from '@/lib/auth/media-access';
+import { parseByteRange } from '@/lib/http/byte-range';
 import { resolveStoragePathStrict } from '@/lib/storage/paths';
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -68,21 +69,57 @@ export async function GET(
 
   const fileStat = await stat(filePath);
   const contentType = getContentType(filePath);
-  const nodeStream = createReadStream(filePath);
-  const webStream = Readable.toWeb(nodeStream) as ReadableStream;
+  const totalSize = fileStat.size;
 
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     'Content-Type': contentType,
-    'Content-Length': fileStat.size.toString(),
     'Cache-Control': 'public, max-age=31536000, immutable',
+    // Advertise byte-range support so <video>/<audio> can seek to arbitrary
+    // timestamps without re-downloading from byte 0. Without this header
+    // browsers issue a Range request, get a plain 200 in reply, and reset
+    // currentTime to 0 — which surfaces as the scrubber "jumping back to
+    // the beginning" on the test detail + share pages.
+    'Accept-Ranges': 'bytes',
   };
   if (segments[0] === 'traces') {
-    headers['Access-Control-Allow-Origin'] = 'https://trace.playwright.dev';
-    headers['Access-Control-Allow-Methods'] = 'GET';
+    baseHeaders['Access-Control-Allow-Origin'] = 'https://trace.playwright.dev';
+    baseHeaders['Access-Control-Allow-Methods'] = 'GET';
   }
 
-  return new Response(webStream, { status: 200, headers });
+  const rangeHeader = request.headers.get('range');
+  const range = rangeHeader ? parseByteRange(rangeHeader, totalSize) : null;
+
+  if (rangeHeader && !range) {
+    // Malformed or unsatisfiable range — per RFC 7233 reply 416 with the
+    // total size so the client can recover.
+    return new Response('Range Not Satisfiable', {
+      status: 416,
+      headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+    });
+  }
+
+  if (range) {
+    const { start, end } = range;
+    const partialStream = createReadStream(filePath, { start, end });
+    const partialWebStream = Readable.toWeb(partialStream) as ReadableStream;
+    return new Response(partialWebStream, {
+      status: 206,
+      headers: {
+        ...baseHeaders,
+        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+        'Content-Length': (end - start + 1).toString(),
+      },
+    });
+  }
+
+  const nodeStream = createReadStream(filePath);
+  const webStream = Readable.toWeb(nodeStream) as ReadableStream;
+  return new Response(webStream, {
+    status: 200,
+    headers: { ...baseHeaders, 'Content-Length': totalSize.toString() },
+  });
 }
+
 
 export async function OPTIONS(
   _request: NextRequest,

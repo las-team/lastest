@@ -5,6 +5,8 @@ import { Readable } from 'stream';
 import * as queries from '@/lib/db/queries';
 import { resolveStoragePath } from '@/lib/storage/paths';
 import { isValidShareSlug } from '@/lib/share/slug';
+import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
+import { parseByteRange } from '@/lib/http/byte-range';
 import type { CapturedScreenshot, PublicShare } from '@/lib/db/schema';
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -68,6 +70,26 @@ async function buildAllowedPaths(share: PublicShare): Promise<Set<string>> {
     }
   }
 
+  // Disk-fallback: when the executor wrote a .webm but didn't persist
+  // `test_results.video_path`, the share page rewrites the fallback URL
+  // through /share/{slug}/videos/... — so the asset route has to allow that
+  // exact file too, otherwise the <video> element 404s and the progress bar
+  // never moves. Mirror the same scan `resolveTestVideoUrl` does so the URL
+  // and the allow-list always agree.
+  if (share.repositoryId) {
+    const testIdsNeedingFallback = new Set<string>();
+    for (const r of results) {
+      if (!r.videoPath && r.testId) testIdsNeedingFallback.add(r.testId);
+    }
+    if (share.testId && !results.some((r) => r.testId === share.testId && r.videoPath)) {
+      testIdsNeedingFallback.add(share.testId);
+    }
+    for (const tid of testIdsNeedingFallback) {
+      const fallback = await resolveTestVideoUrl(share.repositoryId, tid);
+      if (fallback) allowed.add(normalize(fallback));
+    }
+  }
+
   const baselineTestIds = new Set<string>();
   if (share.testId) {
     baselineTestIds.add(share.testId);
@@ -87,7 +109,7 @@ async function buildAllowedPaths(share: PublicShare): Promise<Set<string>> {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ slug: string; path: string[] }> },
 ) {
   const { slug, path: segments } = await params;
@@ -117,15 +139,47 @@ export async function GET(
 
   const fileStat = await stat(filePath);
   const contentType = getContentType(filePath);
+  const totalSize = fileStat.size;
+
+  // Mirrors the Range support in `/api/media/...`. Without `Accept-Ranges`
+  // and `206 Partial Content`, the browser's <video> element can't seek to
+  // un-buffered timestamps — `currentTime = X` triggers a Range request,
+  // gets back a plain 200 with the full file, and resets to 0. That surfaces
+  // on the share page as the scrubber thumb jumping back to the start.
+  const baseHeaders: Record<string, string> = {
+    'Content-Type': contentType,
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Accept-Ranges': 'bytes',
+  };
+
+  const rangeHeader = request.headers.get('range');
+  const range = rangeHeader ? parseByteRange(rangeHeader, totalSize) : null;
+
+  if (rangeHeader && !range) {
+    return new Response('Range Not Satisfiable', {
+      status: 416,
+      headers: { ...baseHeaders, 'Content-Range': `bytes */${totalSize}` },
+    });
+  }
+
+  if (range) {
+    const { start, end } = range;
+    const partialStream = createReadStream(filePath, { start, end });
+    const partialWebStream = Readable.toWeb(partialStream) as ReadableStream;
+    return new Response(partialWebStream, {
+      status: 206,
+      headers: {
+        ...baseHeaders,
+        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+        'Content-Length': (end - start + 1).toString(),
+      },
+    });
+  }
+
   const nodeStream = createReadStream(filePath);
   const webStream = Readable.toWeb(nodeStream) as ReadableStream;
-
   return new Response(webStream, {
     status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Content-Length': fileStat.size.toString(),
-      'Cache-Control': 'public, max-age=31536000, immutable',
-    },
+    headers: { ...baseHeaders, 'Content-Length': totalSize.toString() },
   });
 }

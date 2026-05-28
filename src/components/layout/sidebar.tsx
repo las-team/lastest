@@ -41,6 +41,12 @@ interface SidebarProps {
   /** When pending=0 but the active branch has a newer commit since the last
    *  build, surface a small icon hinting that there's something new to verify. */
   verifyHasNewerCommit?: boolean;
+  /** Layout-supplied wrapper classes (e.g. `hidden md:flex` for the desktop
+   *  rail vs no class inside the mobile drawer). Kept here so the layout
+   *  doesn't need its own wrapper `<div>` around the `<aside>` — that wrapper
+   *  was triggering an SSR/client tree mismatch with the async server
+   *  component nested inside it. */
+  className?: string;
 }
 
 const dashboardNav = [
@@ -70,7 +76,7 @@ const settingsNav = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, activeBranch, ebSessions, verifyPendingCount = 0, verifyHasNewerCommit = false }: SidebarProps) {
+export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repositoryId, activeBranch, ebSessions, verifyPendingCount = 0, verifyHasNewerCommit = false, className }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -99,7 +105,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
     : filteredExecutionNav;
 
   return (
-    <aside className="w-64 border-r bg-muted/30 flex flex-col">
+    <aside className={cn('w-64 border-r bg-muted/30 flex flex-col', className)}>
       <div className="p-4 border-b">
         <Link
           href="/"

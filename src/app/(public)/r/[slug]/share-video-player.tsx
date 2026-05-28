@@ -1,44 +1,6 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
-import { VideoPlayer, type VideoPlayerHandle } from '@/components/video-player';
-
-interface ShareVideoPlayerProps {
-  sources: string[];
-}
-
-export function ShareVideoPlayer({ sources }: ShareVideoPlayerProps) {
-  const handlesRef = useRef<(VideoPlayerHandle | null)[]>([]);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      const seekEl = target?.closest('[data-seek]') as HTMLElement | null;
-      if (!seekEl) return;
-      const sec = parseFloat(seekEl.getAttribute('data-seek') || '');
-      if (!Number.isFinite(sec)) return;
-      handlesRef.current[0]?.seekAndPlay(sec);
-    };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, []);
-
-  return (
-    <>
-      {sources.map((src, i) => (
-        <VideoPlayer
-          key={i}
-          src={src}
-          autoPlay
-          loop
-          playsInline
-          preload="metadata"
-          className="share-video w-full aspect-video rounded-md border bg-black"
-          onReady={(h) => {
-            handlesRef.current[i] = h;
-          }}
-        />
-      ))}
-    </>
-  );
-}
+// Thin compatibility re-export. The implementation now lives in
+// `@/components/replay-player` so the in-app test detail page can reuse the
+// same autoplay/loop/`[data-seek]`-aware wrapper as the public share page.
+// Keep the `ShareVideoPlayer` named export so the share page import and the
+// commentary references in `server/actions/builds.ts` remain valid.
+export { ReplayPlayer as ShareVideoPlayer } from '@/components/replay-player';

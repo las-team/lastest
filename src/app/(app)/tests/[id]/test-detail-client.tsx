@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { VideoPlayer } from '@/components/video-player';
+import { ReplayPlayer } from '@/components/replay-player';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
@@ -278,9 +278,21 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
   });
   const [highlightLine, setHighlightLine] = useState<number | null>(null);
 
-  // Run state
+  // Run state (declared early so handleTabChange can reference isRunning).
   const [isRunning, setIsRunning] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Switching tabs renders from props captured when the detail panel opened —
+  // re-pull `getTestDetailData` in the background so Steps / Criteria / Vars /
+  // History / Screenshots always reflect current DB state. Skip while editing
+  // (would clobber the open edit) or running (the 1s poll is already pulling
+  // fresh results).
+  const handleTabChange = useCallback((next: string) => {
+    if (next === activeTab) return;
+    setActiveTab(next);
+    if (isEditing || isRunning) return;
+    onRefresh?.()?.catch(() => { /* best-effort */ });
+  }, [activeTab, isEditing, isRunning, onRefresh]);
 
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -1031,7 +1043,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
         )}
 
         {/* Tabs for Code, Screenshots, History */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="h-11 w-full p-1 gap-1 bg-white dark:bg-zinc-950 border">
             <TabsTrigger value="code" className="h-full flex-1 px-2 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">Code</TabsTrigger>
             {earlyAdopterMode && (
@@ -1512,11 +1524,7 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                               : 'Unknown'}
                           </span>
                         </div>
-                        <VideoPlayer
-                          src={result.videoPath!}
-                          preload="metadata"
-                          className="w-full aspect-video rounded border"
-                        />
+                        <ReplayPlayer clips={[{ src: result.videoPath!, durationMs: result.durationMs }]} />
                       </div>
                     ))}
                   </div>

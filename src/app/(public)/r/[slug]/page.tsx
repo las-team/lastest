@@ -137,9 +137,14 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   // Executor sometimes omits video_path even when a .webm exists. Scan disk
   // under storage/videos/<repositoryId>/ for a file ending in `-<testId>.webm`.
-  const fallbackVideoUrl = isTestShare
+  // `resolveTestVideoUrl` returns the bare `/videos/<repo>/<file>.webm` path;
+  // funnel it through `toUrl()` so unauthenticated share viewers fetch via
+  // /share/{slug}/... (which the same route auth-checks against the slug's
+  // allowed paths) instead of /api/media/... (which 401s without a session).
+  const fallbackVideoRaw = isTestShare
     ? await resolveTestVideoUrl(share.repositoryId, share.testId)
     : null;
+  const fallbackVideoUrl = fallbackVideoRaw ? toUrl(fallbackVideoRaw) : null;
 
   const shareUrl = buildShareUrl(slug);
   const primaryResult: ShareTestResult | null = isTestShare
@@ -1270,12 +1275,18 @@ function TestShareBody({
   claimLink: string;
   signInLink: string;
 }) {
-  const videos = results
-    .map((r) => (r.videoPath ? toUrl(r.videoPath) : null))
-    .filter((v): v is string => !!v);
+  const clips = results
+    .map((r) => {
+      const src = r.videoPath ? toUrl(r.videoPath) : null;
+      return src ? { src, durationMs: r.durationMs ?? null } : null;
+    })
+    .filter((c): c is { src: string; durationMs: number | null } => !!c);
 
-  if (videos.length === 0 && fallbackVideoUrl) {
-    videos.push(fallbackVideoUrl);
+  // Disk-fallback when no result has a persisted video_path. Use the
+  // primary result's recorded duration so the scrubber has a usable max
+  // even though we can't trust the webm to embed it.
+  if (clips.length === 0 && fallbackVideoUrl) {
+    clips.push({ src: fallbackVideoUrl, durationMs: testResult?.durationMs ?? null });
   }
 
   const steps = collectSteps(testResult, results, toUrl);
@@ -1313,9 +1324,9 @@ function TestShareBody({
 
   return (
     <>
-      {videos.length > 0 && (
+      {clips.length > 0 && (
         <section className="space-y-3">
-          <ShareVideoPlayer sources={videos} />
+          <ShareVideoPlayer clips={clips} />
         </section>
       )}
 

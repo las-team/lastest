@@ -53,6 +53,18 @@ export interface VideoPlayerProps {
   controlsTimeoutMs?: number;
   onReady?: (handle: VideoPlayerHandle) => void;
   ariaLabel?: string;
+  /**
+   * Known total duration in milliseconds, used as a fallback when the
+   * `<video>` element reports `Infinity`/`NaN`. Playwright-recorded webms
+   * frequently omit the EBML duration tag, which causes `video.duration`
+   * to read `Infinity` and silently breaks the scrubber (max becomes 0,
+   * `currentTime` clamps to 1, the played-fill jumps to 100% on the first
+   * timeupdate). When the caller already knows the recorded duration
+   * (e.g. from `test_results.duration_ms`), pass it here so the slider
+   * has a usable max immediately. If `video.duration` later resolves to a
+   * finite value (via `durationchange`), the real value takes over.
+   */
+  durationMsFallback?: number | null;
 }
 
 function formatTime(s: number): string {
@@ -72,12 +84,20 @@ function clamp(n: number, lo: number, hi: number): number {
 }
 
 function computeBufferedEnd(video: HTMLVideoElement, currentTime: number): number {
+  // Prefer the end of the range containing `currentTime` (that's the
+  // "buffered ahead" indicator users intuitively expect). With the media
+  // route now serving Range requests, `buffered` can hold multiple disjoint
+  // chunks; if currentTime sits between them, fall back to the maximum end
+  // across all ranges so the gray "downloaded" overlay still reflects how
+  // much of the file has actually been fetched instead of collapsing to 0.
+  let maxEnd = 0;
   for (let i = 0; i < video.buffered.length; i++) {
-    if (video.buffered.start(i) <= currentTime && video.buffered.end(i) >= currentTime) {
-      return video.buffered.end(i);
-    }
+    const start = video.buffered.start(i);
+    const end = video.buffered.end(i);
+    if (start <= currentTime && end >= currentTime) return end;
+    if (end > maxEnd) maxEnd = end;
   }
-  return 0;
+  return maxEnd;
 }
 
 function formatRate(rate: number): string {
@@ -99,6 +119,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     controlsTimeoutMs = 2200,
     onReady,
     ariaLabel,
+    durationMsFallback,
   },
   ref,
 ) {
@@ -114,7 +135,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  // Seed `duration` from the caller's fallback so the time display +
+  // scrubber max are correct on the very first render — without this,
+  // Playwright webms (which lack an EBML duration tag) leave the slider
+  // pinned at max=0/value=1 until `loadedmetadata` fires, and the UI
+  // looks broken for that window. `onMeta` below still replaces this
+  // with `v.duration` when it eventually resolves to a finite value.
+  const [duration, setDuration] = useState(() =>
+    durationMsFallback != null && durationMsFallback > 0
+      ? durationMsFallback / 1000
+      : 0,
+  );
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [volume, setVolume] = useState(1);
   const initialMuted = mutedProp ?? true;
@@ -256,7 +287,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       setControlsVisible(true);
     };
     const onMeta = () => {
-      setDuration(Number.isFinite(v.duration) ? v.duration : 0);
+      // Prefer the real duration. When the webm lacks an EBML duration tag
+      // (typical for Playwright recordings), v.duration is `Infinity` —
+      // fall back to the caller-provided value so the scrubber has a sane
+      // max instead of clamping currentTime to 1 and showing 100% playback.
+      if (Number.isFinite(v.duration) && v.duration > 0) {
+        setDuration(v.duration);
+      } else if (durationMsFallback != null && durationMsFallback > 0) {
+        setDuration(durationMsFallback / 1000);
+      } else {
+        setDuration(0);
+      }
       v.playbackRate = playbackRate;
     };
 
@@ -277,7 +318,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       v.removeEventListener('durationchange', onMeta);
       if (raf != null) cancelAnimationFrame(raf);
     };
-  }, [playbackRate, scheduleHide]);
+  }, [playbackRate, scheduleHide, durationMsFallback]);
 
   useEffect(() => {
     const pv = previewVideoRef.current;
@@ -593,7 +634,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           >
             <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-white/20">
               <div
-                className="absolute h-full bg-white/30"
+                className="absolute left-0 top-0 h-full bg-white/30"
                 style={{ width: `${bufferedPct}%` }}
               />
               <SliderPrimitive.Range className="absolute h-full bg-white" />
