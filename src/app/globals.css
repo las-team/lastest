@@ -316,10 +316,14 @@
                         + the hidden IME textarea inside the canvas card
    playback-timeline 20 · Right-side step list when overlaid on the live canvas
                         (fullscreen). Above the canvas, below floating chrome.
-   playback-controls 30 · Floating bottom-center pill (Running / exit-fullscreen
-                        / recording mini-menu). Always reachable.
-   Portals (Radix HoverCard, Dropdown, Dialog) keep their default `z-50` and
-   therefore always sit above the page chrome above. */
+   cookie-notice   40  · Bottom-bound informational banner. Above page content
+                        but below the interactive controls so it never blocks
+                        the Stop button or other recording-critical CTAs.
+   playback-controls 50 · Floating bottom-center pill (Running / exit-fullscreen
+                        / recording mini-menu). Always reachable, including
+                        when the cookie notice is showing. Ties with Radix
+                        portals at z-50; portals mount later in the DOM so
+                        modals/dropdowns still paint above the pill. */
 .layer-canvas-overlay { z-index: 10; }
 .layer-playback-timeline { z-index: 20; }
-.layer-playback-controls { z-index: 30; }
+.layer-playback-controls { z-index: 50; }

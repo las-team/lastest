@@ -451,6 +451,25 @@ export class EmbeddedTestExecutor {
       try { await page.setViewportSize(viewport); } catch { /* best-effort */ }
     }
 
+    // Self-test bypass: when the EB pod is running Lastest's own e2e suite
+    // against its own host (target origin === LASTEST_URL origin), inject
+    // SYSTEM_EB_TOKEN as a Bearer header so login POSTs skip the per-IP
+    // rate limit. Strict origin guard prevents the token leaking into
+    // customer apps the EB renders. Uses the first comma-separated token
+    // (provisioner-style) per the SYSTEM_EB_TOKEN split convention.
+    {
+      const systemTokenRaw = process.env.SYSTEM_EB_TOKEN?.split(',')[0]?.trim();
+      const lastestUrlRaw = process.env.LASTEST_URL;
+      if (systemTokenRaw && lastestUrlRaw) {
+        try {
+          if (new URL(lastestUrlRaw).origin === new URL(command.targetUrl).origin) {
+            await testContext.setExtraHTTPHeaders({ Authorization: `Bearer ${systemTokenRaw}` });
+            logFn('info', 'Self-test bypass: injected SYSTEM_EB_TOKEN for rate-limit exemption');
+          }
+        } catch { /* malformed URL — skip injection */ }
+      }
+    }
+
     // ── Multi-layer comparison capture (v1.13) ──────────────────────────
     // URL trajectory recorder and Web Vitals init script must be installed
     // BEFORE any navigation. The recorder listens to framenavigated; the
@@ -1282,7 +1301,11 @@ export class EmbeddedTestExecutor {
         }
         // Ignore transient network bursts on sub-resource loads (CNI/DNS
         // instability during build startup). Keep real 4xx/5xx.
-        if (r.failed && r.errorText && /net::ERR_NETWORK_CHANGED|net::ERR_NAME_NOT_RESOLVED|net::ERR_CONNECTION_RESET|net::ERR_CONNECTION_CLOSED|net::ERR_NETWORK_IO_SUSPENDED/i.test(r.errorText)) {
+        // ERR_ABORTED covers SPA navigations that cancel in-flight RSC
+        // prefetches (?_rsc=…) — not a real failure, just the framework
+        // doing its job. The rest are transient sub-resource bursts during
+        // CNI/DNS instability on container startup.
+        if (r.failed && r.errorText && /net::ERR_ABORTED|net::ERR_NETWORK_CHANGED|net::ERR_NAME_NOT_RESOLVED|net::ERR_CONNECTION_RESET|net::ERR_CONNECTION_CLOSED|net::ERR_NETWORK_IO_SUSPENDED/i.test(r.errorText)) {
           return false;
         }
         return true;

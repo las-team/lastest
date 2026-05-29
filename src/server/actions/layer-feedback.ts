@@ -2,6 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
+import { approveDiffCore } from '@/lib/diff/core';
 import { revalidatePath } from 'next/cache';
 import type {
   EvidenceLayer,
@@ -62,18 +63,29 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
   let reviewTodoId: string | null = null;
 
   if (input.status === 'approved') {
-    baselineKind = LAYER_TO_BASELINE_KIND[input.layer] ?? null;
-    if (baselineKind && repoId) {
-      await writeLayerBaseline({
-        layer: input.layer,
-        kind: baselineKind,
-        testId: step.testId,
-        stepLabel: step.stepLabel ?? null,
-        branch,
-        approvedFromComparisonId: input.stepComparisonId,
-        approvedBy: userId,
-        layers: step.layers,
-      });
+    if (input.layer === 'visual') {
+      // Visual lives in visualDiffs/baselines — not in the per-layer baseline
+      // tables this file handles. Without this branch the step_layer_feedback
+      // row gets written (so the verify card moves to Verified) but the diff
+      // stays pending and no new baseline is created, so the next run re-flags
+      // the same change.
+      if (step.visualDiffId) {
+        await approveDiffCore(step.visualDiffId, userId ?? 'verify-user');
+      }
+    } else {
+      baselineKind = LAYER_TO_BASELINE_KIND[input.layer] ?? null;
+      if (baselineKind && repoId) {
+        await writeLayerBaseline({
+          layer: input.layer,
+          kind: baselineKind,
+          testId: step.testId,
+          stepLabel: step.stepLabel ?? null,
+          branch,
+          approvedFromComparisonId: input.stepComparisonId,
+          approvedBy: userId,
+          layers: step.layers,
+        });
+      }
     }
   } else if (input.status === 'rejected') {
     if (repoId) {
@@ -219,10 +231,12 @@ export async function approveAIRecommendedLayers(buildId: string): Promise<{ app
   for (const step of stepRows) {
     if (step.verdict === 'red') continue;
     for (const ev of step.evidence) {
-      // Only approve when the evidence's signal is at most medium and we have
-      // a defined baseline kind for the layer.
+      // Only approve when the evidence's signal is at most medium and the
+      // layer is one we know how to baseline. Visual goes through
+      // approveDiffCore (visualDiffs + baselines table); the other seven
+      // layers go through writeLayerBaseline.
       if (ev.signal === 'high') continue;
-      if (!LAYER_TO_BASELINE_KIND[ev.layer]) continue;
+      if (ev.layer !== 'visual' && !LAYER_TO_BASELINE_KIND[ev.layer]) continue;
       await decideLayer({
         stepComparisonId: step.id,
         buildId,

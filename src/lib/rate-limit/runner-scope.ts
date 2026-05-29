@@ -10,20 +10,43 @@
  * Bearer tokens are verified against the DB before granting runner status —
  * trusting the header alone would let any anonymous client bypass throttling
  * by attaching a junk `Authorization: Bearer x`.
+ *
+ * Special case: the platform's own EB pods inject `Authorization: Bearer
+ * <SYSTEM_EB_TOKEN>` on Playwright traffic when the test target origin equals
+ * `LASTEST_URL`. That token already gates `/api/embedded/*` so it's a
+ * reasonable signal that the request is internal infra, not an end user.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import * as queries from '@/lib/db/queries';
 
 export interface RunnerCheck {
   isRunner: boolean;
   /** Coarse reason for telemetry; never branched on. */
-  reason: 'bearer-token' | 'api-session' | 'cookie-browser' | 'unauth';
+  reason: 'bearer-token' | 'api-session' | 'system-eb-token' | 'cookie-browser' | 'unauth';
+}
+
+function matchesSystemToken(token: string): boolean {
+  const env = process.env.SYSTEM_EB_TOKEN;
+  if (!env || !token) return false;
+  const candidateBuf = Buffer.from(token);
+  for (const raw of env.split(',')) {
+    const expected = raw.trim();
+    if (!expected) continue;
+    if (expected.length !== candidateBuf.length) continue;
+    const expectedBuf = Buffer.from(expected);
+    if (timingSafeEqual(candidateBuf, expectedBuf)) return true;
+  }
+  return false;
 }
 
 export async function classifyRequest(request: Request): Promise<RunnerCheck> {
   const auth = request.headers.get('authorization');
   if (auth?.startsWith('Bearer ')) {
     const token = auth.slice('Bearer '.length).trim();
+    if (token && matchesSystemToken(token)) {
+      return { isRunner: true, reason: 'system-eb-token' };
+    }
     if (token && (await isApiSessionToken(token))) {
       return { isRunner: true, reason: 'api-session' };
     }
