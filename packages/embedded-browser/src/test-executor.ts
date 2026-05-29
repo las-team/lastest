@@ -452,19 +452,30 @@ export class EmbeddedTestExecutor {
     }
 
     // Self-test bypass: when the EB pod is running Lastest's own e2e suite
-    // against its own host (target origin === LASTEST_URL origin), inject
-    // SYSTEM_EB_TOKEN as a Bearer header so login POSTs skip the per-IP
-    // rate limit. Strict origin guard prevents the token leaking into
-    // customer apps the EB renders. Uses the first comma-separated token
-    // (provisioner-style) per the SYSTEM_EB_TOKEN split convention.
+    // against its own host, inject SYSTEM_EB_TOKEN as a Bearer header so
+    // login POSTs skip the per-IP rate limit. Strict origin guard prevents
+    // the token leaking into customer apps the EB renders. Uses the first
+    // comma-separated token (provisioner-style) per the SYSTEM_EB_TOKEN
+    // split convention.
+    //
+    // Eligible target origins: LASTEST_URL (internal cluster DNS used for
+    // EB→host coordination) plus LASTEST_PUBLIC_URL if set (external URL
+    // the self-test repo targets, e.g. https://app.lastest.cloud). On Olares
+    // these differ — the internal DNS doesn't match what the test browser
+    // navigates to — so both must be allowlisted.
     {
       const systemTokenRaw = process.env.SYSTEM_EB_TOKEN?.split(',')[0]?.trim();
-      const lastestUrlRaw = process.env.LASTEST_URL;
-      if (systemTokenRaw && lastestUrlRaw) {
+      const allowedOrigins = new Set<string>();
+      for (const raw of [process.env.LASTEST_URL, process.env.LASTEST_PUBLIC_URL]) {
+        if (!raw) continue;
+        try { allowedOrigins.add(new URL(raw).origin); } catch { /* skip malformed */ }
+      }
+      if (systemTokenRaw && allowedOrigins.size > 0) {
         try {
-          if (new URL(lastestUrlRaw).origin === new URL(command.targetUrl).origin) {
+          const testOrigin = new URL(command.targetUrl).origin;
+          if (allowedOrigins.has(testOrigin)) {
             await testContext.setExtraHTTPHeaders({ Authorization: `Bearer ${systemTokenRaw}` });
-            logFn('info', 'Self-test bypass: injected SYSTEM_EB_TOKEN for rate-limit exemption');
+            logFn('info', `Self-test bypass: injected SYSTEM_EB_TOKEN for ${testOrigin}`);
           }
         } catch { /* malformed URL — skip injection */ }
       }

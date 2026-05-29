@@ -256,6 +256,12 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   const creds = (() => { try { return loadClusterCreds(); } catch { return null; } })();
   const image = process.env.EB_IMAGE || 'lastest-embedded-browser:latest';
   const lastestUrl = process.env.LASTEST_URL || 'http://lastest-app.lastest.svc.cluster.local:3000';
+  // Public-facing URL the self-test repo targets (e.g. https://app.lastest.cloud)
+  // — used by the executor's rate-limit bypass to recognize "this test is
+  // hitting our own platform" when the public URL differs from LASTEST_URL
+  // (Olares: internal cluster DNS vs. external envoy hostname). Optional;
+  // when unset the bypass falls back to LASTEST_URL only.
+  const lastestPublicUrl = process.env.LASTEST_PUBLIC_URL || '';
   // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
   // (auto-register validates by splitting on `,`). Each EB sends the env var
   // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
@@ -308,6 +314,7 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
               imagePullPolicy: 'IfNotPresent',
               env: [
                 { name: 'LASTEST_URL', value: lastestUrl },
+                ...(lastestPublicUrl ? [{ name: 'LASTEST_PUBLIC_URL', value: lastestPublicUrl }] : []),
                 { name: 'SYSTEM_EB_TOKEN', value: systemToken },
                 { name: 'INSTANCE_ID', value: instanceId },
                 { name: 'STREAM_PORT', value: '9223' },

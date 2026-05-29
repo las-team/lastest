@@ -2403,3 +2403,36 @@ Lastest team-API token; existing `/scripts/saas-demo/_demo_pipeline.mjs` + `_tes
 
 **No outreach sent.** Shares are published-public but user only asked for them to be "available". User can DM each contact independently using the share URLs above.
 
+
+## 2026-05-29 — QA-hiring batch v3 (authed walkthrough upgrade)
+
+Re-attempted login + post-login walkthroughs for the 11 QA-hiring targets after Playwright MCP became reachable. Approach: MCP browser to discover real signup URLs from each homepage DOM (no URL guessing), perform real registration, capture state via Playwright `context.storageState()` (where possible) or via MCP `document.cookie` + `localStorage` extraction (where the auth happens to be in non-HttpOnly storage), upload as Lastest `storage_state`, build a new authed walkthrough test in the same repo, run twice (initial + isNewTest-pairing rerun), approve baselines, publish a NEW share scoped to the authed test.
+
+**4/11 newly shipped with real authed content:**
+
+| Target | Auth path | New authed share |
+|---|---|---|
+| boompay | screen.boompay.app magic-OTP (Gmail MCP fetched 6-digit code) | https://app.lastest.cloud/r/fSMeSXIwEPlNzudvnvQsqA |
+| speak.com | 6-step onboarding wizard → email+password (Firebase Auth localStorage replayed) | https://app.lastest.cloud/r/HW1oYs2pQF6yNIEMwaAK4Q |
+| rinse | 3-step wizard step-1 creates account; rinse_authenticated_user + kustomer_jwt cookies | https://app.lastest.cloud/r/zgaiGSC365ZMTWHH6leSZw |
+| crazygames | Log-in modal (after removing Sourcepoint iframe DOM-side) → password+age → Firebase Auth | https://app.lastest.cloud/r/yoWHuhhXf1NPD1BsvL-xQw |
+
+**7/11 confirmed blocked (after honest attempt this round):**
+
+| Target | Blocker |
+|---|---|
+| heymarvin | Server-side @gmail.com block; viktor@lastest.cloud accepted but mailbox not Gmail-MCP-readable |
+| pocketsuite | Step-2 jQuery validation bypassable; step-3 SMS verification is hard wall (no email-OTP fallback) |
+| nxlog | Form accepts @gmail.com but server silently never sends verify-link (10+ min wait, no mail) |
+| 40grid | Homepage DOM has zero auth links — SPA catch-all, no discoverable signup |
+| provensoftware | Sales-led B2B; no register endpoint linked from public DOM |
+| tango-business | Web is brochure for mobile app + creator-application gate; no SaaS surface to walk |
+| flaconi | Cloudflare WAF redirects every request to /cloudflare/challenge/ — no page renders for headless |
+
+**v3 demo notes** posted to each repo's latest build via `POST /builds/:id/demo-notes`. The 4 newly-authed repos' latest builds are the new authed walkthroughs; the 7 blocked repos' latest builds remain the public-only walks from v1 — notes describe the specific blocker so the founder sees what stopped the demo.
+
+**Mailbox / inbox notes for next round:**
+- viktor@lastest.cloud is a real Google Workspace inbox but separate from the demo's lastestcloud@gmail.com Gmail-MCP account. To unblock heymarvin (and any other work-email-only signups), wire viktor@lastest.cloud either to forward to lastestcloud@gmail.com OR add it as a delegated Gmail account.
+- nxlog's silent-drop behaviour means the only viable path is Google OAuth via lastestcloud@gmail.com; that path hits Google's 'verify it's you' device gate on first headless OAuth.
+- pocketsuite requires a real US mobile number that can receive SMS — out of scope for the demo automation; only path is to use a TextNow / Burner number tied to a persistent device.
+
