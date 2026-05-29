@@ -15,7 +15,12 @@
   --card-foreground: #1F2A33;
   --popover: #FFFFFF;
   --popover-foreground: #1F2A33;
-  --primary: #36A88E;
+  /* Darkened from brand teal #36A88E (L≈0.31) to #1F7B66 (L≈0.155) so
+   * white-on-primary buttons clear AA 4.5:1 (5.12:1) and `text-primary`
+   * links clear AA on the soft #F6F6F4 surface (4.76:1). The brand teal
+   * #36A88E remains available via `--c-teal` / `--color-success` for
+   * accents/charts/states where contrast isn't required. */
+  --primary: #1F7B66;
   --primary-foreground: #FFFFFF;
   --secondary: #EFEFEC;
   --secondary-foreground: #1F2A33;
@@ -40,7 +45,7 @@
 
   --sidebar: #F1F1EE;
   --sidebar-foreground: #1F2A33;
-  --sidebar-primary: #36A88E;
+  --sidebar-primary: #1F7B66;
   --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: rgba(31, 42, 51, 0.05);
   --sidebar-accent-foreground: #1F2A33;
@@ -113,8 +118,12 @@
   --card-foreground: #FFFFFF;
   --popover: #2A3640;
   --popover-foreground: #FFFFFF;
+  /* Brand teal (L≈0.31) stays as `--primary` so `text-primary` clears AA
+   * against the dark surface (4.93:1). White-on-teal fails (2.92:1), so
+   * `--primary-foreground` flips to a near-black (#0A0F12) — clears AA on
+   * the rendered button (>6:1 even after axe's compositing tint). */
   --primary: #36A88E;
-  --primary-foreground: #FFFFFF;
+  --primary-foreground: #0A0F12;
   --secondary: rgba(255, 255, 255, 0.06);
   --secondary-foreground: #FFFFFF;
   --muted: rgba(255, 255, 255, 0.04);
@@ -136,7 +145,7 @@
   --sidebar: #1F2A33;
   --sidebar-foreground: #FFFFFF;
   --sidebar-primary: #36A88E;
-  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-primary-foreground: #0A0F12;
   --sidebar-accent: rgba(255, 255, 255, 0.06);
   --sidebar-accent-foreground: #FFFFFF;
   --sidebar-border: rgba(255, 255, 255, 0.10);

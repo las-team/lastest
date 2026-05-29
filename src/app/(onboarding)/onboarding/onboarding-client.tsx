@@ -411,7 +411,7 @@ function Step1Fork({
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 space-y-0.5 border-t pt-2 text-[11px] uppercase tracking-wide text-muted-foreground/80">
+              <div className="mt-3 space-y-0.5 border-t pt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <div>{p.time}</div>
                 <div>Best for: {p.bestFor}</div>
               </div>

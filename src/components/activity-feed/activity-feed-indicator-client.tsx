@@ -28,6 +28,7 @@ export function ActivityFeedIndicator() {
         size="sm"
         className="relative gap-1.5 h-8"
         onClick={() => setIsOpen(true)}
+        aria-label="Activity feed"
         suppressHydrationWarning
       >
         <Radio className="h-4 w-4 text-muted-foreground" />
@@ -44,6 +45,7 @@ export function ActivityFeedIndicator() {
       size="sm"
       className="relative gap-1.5 h-8"
       onClick={() => setIsOpen(true)}
+      aria-label={isConnected ? 'Activity feed (connected)' : 'Activity feed (disconnected)'}
       title={isConnected ? 'Activity Feed (connected)' : 'Activity Feed (disconnected)'}
     >
       <Radio

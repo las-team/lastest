@@ -46,6 +46,7 @@ export function QueueIndicator() {
         size="sm"
         className="relative gap-2"
         onClick={() => setOpen(!open)}
+        aria-label={hasActive ? `Job queue: ${activeJobs.length} running` : 'Job queue'}
       >
         <Activity className={`h-4 w-4 ${hasActive ? 'text-primary' : 'text-muted-foreground'}`} />
         {hasActive && (

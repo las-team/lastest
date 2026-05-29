@@ -345,6 +345,17 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             <button
               onClick={handlePlayPause}
               disabled={loading || session?.status === 'completed'}
+              aria-label={
+                loading
+                  ? 'Loading play agent'
+                  : isRunning
+                    ? 'Pause play agent'
+                    : isPaused
+                      ? 'Resume play agent'
+                      : session?.status === 'completed'
+                        ? 'Play agent run completed'
+                        : 'Start play agent'
+              }
               className={cn(
                 'relative h-8 w-8 rounded-full flex items-center justify-center transition-all',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -416,6 +427,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                       showRepoPrompt && step.id === 'select_repo' && 'ring-2 ring-warning ring-offset-1 ring-offset-background animate-pulse',
                     )}
                     disabled={!hasDetail}
+                    aria-label={`${step.label} — ${step.status}`}
                   >
                     {icon}
                   </button>

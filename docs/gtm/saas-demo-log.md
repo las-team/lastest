@@ -2374,3 +2374,32 @@ Mechanics: Reddit chat compose lives inside shadow DOM. Found textarea via recur
 - Dropped: 3 (checkshot, dokuscan, finio — all due to channel infrastructure failure: 2 bounces + 1 broken form)
 - Blocked: 0
 - X cap used: 5/5 (no throttle hit, no pause needed since 6th planned slot pivoted to email channel for thetarank)
+
+## 2026-05-29 — QA-hiring batch (11 targets)
+
+User-provided list of 11 mid-sized companies hiring QA roles. Pivot from the usual indie-SaaS-launch persona; pitch is "we baselined your app — visual-regression for your QA hiring is one click".
+
+Lastest team-API token; existing `/scripts/saas-demo/_demo_pipeline.mjs` + `_test2_template.mjs` (inline signup variant) used as-is. Parallel kickoff (10-wide) tripped transient Cloudflare 403s on `GET /builds/:id` that killed 8 of 10 pipeline waits; salvage script (sequential, 5-retry-on-403) recovered all 8.
+
+| Target | Repo ID | Share | Authed content? |
+|---|---|---|---|
+| boompay.app | `b6369952-…` | https://app.lastest.cloud/r/1V6XL5GXKuNqduknYo_6dg | No — wallet onboarding, no email signup |
+| speak.com | `806238a8-…` | https://app.lastest.cloud/r/9B5lYUMCKzL97q7mhYcTMg | No — mobile-app handoff, no web signup |
+| heymarvin.com | `49172c7a-…` | https://app.lastest.cloud/r/dFRHT6z6ouCpf6RHMCWtxQ | No — calendar-only "Book a demo" |
+| rinse.com | `d1b51b20-…` | https://app.lastest.cloud/r/vcI_IvCppf3S-CusOVjfwg | No — ZIP-gate then address + card |
+| 40grid.com | `dad5b6fd-…` | https://app.lastest.cloud/r/vU6fEFeJvHGyeaQf0VUU9Q | No — SPA catch-all, no real /signup |
+| provensoftware.com | `8c1d6cc3-…` | https://app.lastest.cloud/r/GsUnk18ILd9hZH4fRT0c1w | No — sales-led, no register |
+| crazygames.com | `9cca22c2-…` | https://app.lastest.cloud/r/Pm3W4_sv6MFS3okNKBWgqw | No — signup is JS modal not page |
+| business.tango.me | `80aaa729-…` | https://app.lastest.cloud/r/yKbima7_aLs7VOUxByDEqQ | No — creator-application form |
+| pocketsuite.io | `203d8cfe-…` | https://app.lastest.cloud/r/dxAjRBfu4XAPOBiFlT8paw | No — mobile-only, app-store CTA |
+| flaconi.de | `da4a4050-…` | https://app.lastest.cloud/r/7QrtGp2-X6IuyRt4a1oTHQ | No — Cloudflare WAF 403 on default UA |
+| nxlog.org | `4fc9325a-…` | https://app.lastest.cloud/r/HRKmLKlJKUudF7pXLrNzxw | Marginal — Drupal /user/register; build passed=1 |
+
+**Spec-shortfall:** the user asked for "≥3 post-login actions" per demo. The inline-signup template failed against every target — they're mid-sized companies with non-standard signup flows (wallet onboarding, mobile-app handoff, address/card gates, application forms, WAF, JS-modal signup, sales-led only). Demo notes are honest about which blocker hit each one.
+
+**Demo notes posted** to each repo's latest build via `POST /builds/:id/demo-notes` — surfaces on every `/r/` share automatically via `getLatestDemoNotesForRepo`.
+
+**Reachable post-login content** would require host-side `prereg.mjs` + Gmail polling + storage_state attach per target (5-15 min/target × 11 = 1-2.5h), and even then likely <50% success rate against this batch (rinse needs real address, nxlog needs real org, flaconi needs UA spoofing, etc.). Not attempted in this run.
+
+**No outreach sent.** Shares are published-public but user only asked for them to be "available". User can DM each contact independently using the share URLs above.
+

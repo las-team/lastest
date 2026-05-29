@@ -134,6 +134,7 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-label={selected ? `Repository: ${selected.fullName}` : 'Select repository'}
           disabled={isPending || repos.length === 0}
           className="w-full justify-between font-normal"
         >

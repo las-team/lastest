@@ -81,12 +81,12 @@ export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
           <CardTitle className="text-base">Getting Started</CardTitle>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">{progress}%</span>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={dismissGuide}>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={dismissGuide} aria-label="Dismiss getting started guide">
               <X className="h-4 w-4" />
             </Button>
           </div>
         </div>
-        <Progress value={progress} className="h-1.5 mt-2" />
+        <Progress value={progress} className="h-1.5 mt-2" aria-label={`Getting started progress: ${progress}%`} />
       </CardHeader>
       <CardContent className="pt-0">
         <div className="divide-y">
