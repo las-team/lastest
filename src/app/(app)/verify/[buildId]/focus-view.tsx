@@ -1784,7 +1784,7 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'stretch', justifyContent: 'center', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
+      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
         {!hasBaseline && !hasCurrent && (
           <div className="v-card" style={{ width: '100%', padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
             No screenshots captured for this step.

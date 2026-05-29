@@ -2262,3 +2262,115 @@ Mechanics: Reddit chat compose lives inside shadow DOM. Found textarea via recur
 **4 DMs deferred** to next session (Reddit cap is 5/session, also avoids hitting throttling): BookIt (u/kx_01), Goal Rush (u/TraditionalChange539), Semicolony (u/nulless), Muddle Notes (u/millerandlevine).
 
 **Twenty CRM:** all 10 demo runs created in DemoRun object via `create_many_demo_runs`. 5 with `DM_SENT`, 4 with `SHARE_PUBLISHED` (pending DM), Mothership now also `SHARE_PUBLISHED` (pending DM, needs founder handle).
+
+### 2026-05-28 — Round 7 outreach (10 SaaS demo shares)
+
+## 2026-05-28 — appwatch
+- channel: x-public-reply
+- target: https://x.com/laterretagames/status/2051295954347704604
+- handle: @laterretagames
+- liked: "real itch.io integration, exact downloads via OAuth not estimates"
+- message body: `liked the "real itch.io integration, exact downloads via OAuth not estimates" angle. ran a Lastest walkthrough on appwatch: https://app.lastest.cloud/r/XfCXEH8dm9-R4-bY_8z-Zw`
+- share: https://app.lastest.cloud/r/XfCXEH8dm9-R4-bY_8z-Zw
+- sent_at: 2026-05-28T12:36:00Z
+- send_evidence: HeroLastest reply visible at https://x.com/HeroLastest/status/2059976988132065658 with full body text. (Initial attempt 2059976516641996861 lost body to execCommand quirk; deleted, retried via Playwright fill which succeeded.)
+- followup_2026-05-28T17:57Z: posted authed-walk update with merged-repo share. Body: `update on appwatch: signed in and ran the authed walk across /dashboard, /settings, /help/google-play-setup, /help/apple-setup. https://app.lastest.cloud/r/m_2Lm8pDkaYYV_pVP47AZA`. Evidence: HeroLastest reply at https://x.com/HeroLastest/status/2060057659789791375 visible on the @laterretagames thread alongside the earlier reply.
+- followup_share: https://app.lastest.cloud/r/m_2Lm8pDkaYYV_pVP47AZA (test scoped to canonical appwatch repo d737d894; 8 step screenshots, /dashboard + /settings + /help/google-play-setup + /help/apple-setup all authed)
+
+## 2026-05-28 — lurner
+- channel: x-public-reply
+- target: https://x.com/lurnerapp/status/2057858340815081865
+- handle: @lurnerapp
+- liked: "from messy jottings to beautiful notes" (their site hero)
+- message body: `liked the "from messy jottings to beautiful notes" framing on lurner. ran a Lastest walkthrough on it: https://app.lastest.cloud/r/0nuqgcwtytN7DLB-1mTtpA`
+- share: https://app.lastest.cloud/r/0nuqgcwtytN7DLB-1mTtpA
+- sent_at: 2026-05-28T12:36:58Z
+- send_evidence: HeroLastest reply at https://x.com/HeroLastest/status/2059977207510925814 with full body text and Lastest link card.
+
+## 2026-05-28 — tryapplynow
+- channel: x-public-reply
+- target: https://x.com/TryApplyNow_Job/status/2057937800431857670 (their "biggest job search frustration" engagement question)
+- handle: @TryApplyNow_Job
+- liked: "stop applying into a black hole" (their hero tagline)
+- message body: `liked the "stop applying into a black hole" framing on tryapplynow. ran a Lastest walkthrough on it: https://app.lastest.cloud/r/9vfHz49iCPkdu6Oah2jaeA`
+- share: https://app.lastest.cloud/r/9vfHz49iCPkdu6Oah2jaeA
+- sent_at: 2026-05-28T12:37:36Z
+- send_evidence: HeroLastest reply at https://x.com/HeroLastest/status/2059977368685412803.
+
+## 2026-05-28 — jobrays
+- channel: x-public-reply
+- target: https://x.com/JobRays_/status/2059658384920711475 (their 21h-old "the gap never is" tweet)
+- handle: @JobRays_
+- liked: "skills, salary, milestones, Ray your AI companion" (their May 22 product tweet)
+- message body: `liked the "skills, salary, milestones, Ray your AI companion" framing on jobrays. ran a Lastest walkthrough on it: https://app.lastest.cloud/r/bbQjGpuLPa1vZyiSu1tI8g`
+- share: https://app.lastest.cloud/r/bbQjGpuLPa1vZyiSu1tI8g
+- sent_at: 2026-05-28T12:38:40Z
+- send_evidence: HeroLastest reply at https://x.com/HeroLastest/status/2059977638861533649 with link card.
+
+## 2026-05-28 — corpusiq
+- channel: x-public-reply
+- target: https://x.com/CorpusIQ/status/2059806533089992958 (their 11h-old fulfillment tweet)
+- handle: @CorpusIQ
+- liked: "43+ tools, 250+ skills" (their PeerPush listing tagline)
+- message body: `liked the "43+ tools, 250+ skills" scope on corpusiq. ran a Lastest walkthrough on it: https://app.lastest.cloud/r/FVfmQ15IdJA4_dokHacazw`
+- share: https://app.lastest.cloud/r/FVfmQ15IdJA4_dokHacazw
+- sent_at: 2026-05-28T12:39:20Z
+- send_evidence: HeroLastest reply at https://x.com/HeroLastest/status/2059977804695928923.
+
+## 2026-05-28 — thetarank
+- channel: email (no good x-public-reply target; mfife26 founder X unknown, peerpush_net round-up too diluted)
+- target: support@thetarank.com
+- handle: support@thetarank.com
+- liked: "find better wheel trades faster" (their site hero)
+- message body subject: `Lastest walkthrough for ThetaRank`
+- message body: `Hi team, liked the "find better wheel trades faster" framing on thetarank. Ran a Lastest walkthrough on it, here's the feedback: https://app.lastest.cloud/r/RphL7pCWR8Vsnodzq_cuwg`
+- share: https://app.lastest.cloud/r/RphL7pCWR8Vsnodzq_cuwg
+- sent_at: 2026-05-28T12:41:50Z
+- send_evidence: Gmail Sent toast confirmed; no bounce observed within 5 minutes.
+
+## 2026-05-28 — origano
+- channel: email (no public X; Facebook/Instagram only)
+- target: info@origano.app
+- handle: Jean-Francois Cote (info@origano.app)
+- liked: "organize your recipes, simplify your meals" (their hero)
+- message body subject: `Lastest walkthrough for Origano`
+- message body: `Hi Jean-Francois, liked the "organize your recipes, simplify your meals" framing on origano. Ran a Lastest walkthrough on it, here's the feedback: https://app.lastest.cloud/r/wjSsmUiO9Po3QYJs1gJOcA`
+- share: https://app.lastest.cloud/r/wjSsmUiO9Po3QYJs1gJOcA
+- sent_at: 2026-05-28T12:43:43Z
+- send_evidence: Gmail Sent toast confirmed; no bounce observed within 5 minutes.
+
+## 2026-05-28 — checkshot
+- channel: dropped
+- target: tried hello@checkshot.app (their site's mailto) → bounce: "domain checkshot.app couldn't be found"; retried hello@checkshot.io → bounce: "remote server is misconfigured"
+- handle: n/a
+- liked: "Sponsor Deal Guard" workflow naming
+- message body: `Hi team, liked the "Sponsor Deal Guard" framing on checkshot. Ran a Lastest review on it, here's the feedback: https://app.lastest.cloud/r/9j5mGdCkEsNfceFkLRyCrw`
+- share: https://app.lastest.cloud/r/9j5mGdCkEsNfceFkLRyCrw
+- sent_at: dropped after 2 bounces
+- send_evidence: 2 NDR bounces visible in lastestcloud@gmail.com inbox. No X presence found. Site only exposes the broken mailto.
+
+## 2026-05-28 — dokuscan
+- channel: dropped
+- target: kontakt@dokuscan.com (their Impressum) → bounce: 550 5.1.1 address not found
+- handle: n/a
+- liked: "no rigid templates, no subscription required" angle
+- message body: `Hi team, liked the "no rigid templates, no subscription required" angle on dokuscan. Ran a Lastest walkthrough on it, here's the feedback: https://app.lastest.cloud/r/1vJ6JPmvdlrE7JvERwD1zA`
+- share: https://app.lastest.cloud/r/1vJ6JPmvdlrE7JvERwD1zA
+- sent_at: dropped after 1 bounce
+- send_evidence: NDR in lastestcloud@gmail.com inbox. Domain dokuscan.com has MX but mailbox kontakt@ rejects. No X presence for Nibsy Tech Ltd / DokuScan found.
+
+## 2026-05-28 — finio
+- channel: dropped
+- target: finio.live /en/about/ contact form → POST /api/sendMessage.php returns `{"success":false,"message":"Něco chybí vyplnit."}` (Czech: "Something is missing to fill in") on every payload variant (JSON + FormData, full + minimal). Server-side broken / hidden anti-bot.
+- handle: Jan Kolář (no public X; only PeerPush handle @jankolar24)
+- liked: "registration without email" + "no ads or spam" stance
+- message body (drafted but not delivered): `Hi Jan, liked the "registration without email" and "no ads or spam" stance on finio.live. Ran a Lastest walkthrough on it, here's the feedback: https://app.lastest.cloud/r/LNTkoHluZj3Hu8_F-vqWnQ`
+- share: https://app.lastest.cloud/r/LNTkoHluZj3Hu8_F-vqWnQ
+- sent_at: dropped — form server returns generic error to all payloads
+- send_evidence: Direct fetch to ../../app/0/api/sendMessage.php returned `{"success":false,"message":"Něco chybí vyplnit."}` for both UI-driven submit and minimal payload.
+
+### Round 7 totals
+- Sent: 7 (5 X public replies + 2 emails: thetarank, origano)
+- Dropped: 3 (checkshot, dokuscan, finio — all due to channel infrastructure failure: 2 bounces + 1 broken form)
+- Blocked: 0
+- X cap used: 5/5 (no throttle hit, no pause needed since 6th planned slot pivoted to email channel for thetarank)

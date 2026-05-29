@@ -31,7 +31,7 @@ import type {
 } from '@/lib/db/schema';
 import { computeNetworkDiff, summarizeNetworkDiff } from './network-diff';
 import { computeConsoleDiff, summarizeConsoleDiff } from './console-diff';
-import { computeUrlTrajectoryDiff, summarizeUrlTrajectoryDiff } from './url-trajectory-diff';
+import { computeUrlTrajectoryDiff, normalizeTrajectoryUrl, summarizeUrlTrajectoryDiff } from './url-trajectory-diff';
 import { computeA11yDiff, summarizeA11yDiff } from './a11y-diff';
 import { computeVariableDiff, summarizeVariableDiff } from './variable-diff';
 import { computePerfDiff, summarizePerfDiff } from './perf-diff';
@@ -149,9 +149,15 @@ export function scoreMultiLayer({
   );
   if (urlDiff.divergedSteps.length > 0) {
     layers.url = urlDiff;
+    // A divergedStep is "real" only when the normalized finalUrl actually
+    // changed. A redirect-chain-length-only change with identical normalized
+    // finalUrl is CDN/A-B/auth-cache noise — keep it visible but don't fail.
+    const hasRealUrlChange = urlDiff.divergedSteps.some(s =>
+      normalizeTrajectoryUrl(s.baselineUrl) !== normalizeTrajectoryUrl(s.currentUrl),
+    );
     evidence.push({
       layer: 'url',
-      signal: 'high',
+      signal: hasRealUrlChange ? 'high' : 'low',
       summary: summarizeUrlTrajectoryDiff(urlDiff),
       details: { divergedSteps: urlDiff.divergedSteps.slice(0, 5) },
     });

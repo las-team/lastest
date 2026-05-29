@@ -48,6 +48,21 @@ describe('scoreMultiLayer', () => {
     expect(r.verdict).toBe('red');
   });
 
+  it('does not fail when only the redirect-chain length changed (same final URL)', () => {
+    // CDN/A-B/auth-cache adds or removes a hop; final URL is identical after normalization.
+    const baseline = emptyResult({
+      urlTrajectory: [{ stepIndex: 0, finalUrl: 'https://excalidraw.com/', redirectChain: ['https://excalidraw.com/'] } as UrlTrajectoryStep],
+    });
+    const current = emptyResult({
+      urlTrajectory: [{ stepIndex: 0, finalUrl: 'https://excalidraw.com/', redirectChain: ['https://www.excalidraw.com/', 'https://excalidraw.com/'] } as UrlTrajectoryStep],
+    });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('green');
+    const url = r.evidence.find(e => e.layer === 'url');
+    expect(url?.signal).toBe('low');
+    expect(r.layers.url?.divergedSteps).toHaveLength(1);
+  });
+
   it('returns red on a new critical a11y violation', () => {
     const v = (id: string, impact: A11yViolation['impact']): A11yViolation => ({
       id, impact, description: id, help: id, helpUrl: '', nodes: 1,

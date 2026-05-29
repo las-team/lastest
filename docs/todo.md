@@ -24,6 +24,7 @@ Google verification for gsheets
 Default ai, openrouter test
 mcp-oauth flow
 ## ideas
+why does our button have three paddings now? Design system comparison
 Auto-feedback to resolve loop
 check tabs and enters and ctr+enters
 Heal on loop/schedule
