@@ -1445,7 +1445,7 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_verify_build ---
   server.tool(
     'lastest_verify_build',
-    'Get the full verify-build view: Change Map + step comparisons grouped by regression vs intent gate.',
+    'Get the full verify-build view: Change Map + step comparisons grouped by regression vs intent gate. Includes `visualUrlsByDiffId` (clickable /api/media URLs for baseline/current/diff PNGs per visual diff — same bearer token works) and `testsByTestId` (test name/code/targetUrl + setupTestId/setupScriptId/storageStateId hints) so the agent can read source and screenshots without a follow-up chain.',
     {
       buildId: z.string().describe('Build ID'),
     },

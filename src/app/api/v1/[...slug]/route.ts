@@ -632,22 +632,66 @@ export async function GET(
       }
 
       // GET /api/v1/builds/:id/verify — Change Map + step comparisons + verdict counts
+      // + visual diff thumbnail URLs (C4) + per-test source/setup/storage map (C6).
       if (subResource === 'verify') {
         if (!(await verifyBuildOwnership(id, session))) {
           return NextResponse.json({ error: 'Not found' }, { status: 404 });
         }
-        const [changeMap, stepComparisons, counts, layerFeedback] = await Promise.all([
+        const [changeMap, stepComparisons, counts, layerFeedback, visualDiffs] = await Promise.all([
           queries.getBuildChangeMap(id),
           queries.getStepComparisonsByBuild(id),
           queries.countStepComparisonVerdicts(id),
           queries.getLayerFeedbackByBuild(id),
+          queries.getVisualDiffsByBuild(id),
         ]);
+        // Build a {diffId → {baseline,current,diff} URL} map so each step
+        // comparison's `visualDiffId` resolves to clickable image URLs without
+        // an extra round-trip. URLs use `/api/media/<path>` — same bearer
+        // token the MCP server already holds.
+        const mediaUrl = (p: string | null | undefined) => p ? `/api/media/${p.replace(/^\/+/, '')}` : null;
+        const visualUrlsByDiffId: Record<string, { baselineUrl: string | null; currentUrl: string | null; diffUrl: string | null }> = {};
+        for (const d of visualDiffs) {
+          visualUrlsByDiffId[d.id] = {
+            baselineUrl: mediaUrl(d.baselineImagePath),
+            currentUrl: mediaUrl(d.currentImagePath),
+            diffUrl: mediaUrl(d.diffImagePath),
+          };
+        }
+        // Per-test source / setup / storage resolution so the agent can read
+        // the test code + how the test was wired without a chain of follow-up
+        // calls. Keyed by testId — multiple step comparisons share one entry.
+        const distinctTestIds = Array.from(new Set(stepComparisons.map((s) => s.testId).filter((t): t is string => !!t)));
+        const testRows = distinctTestIds.length > 0
+          ? await Promise.all(distinctTestIds.map((tid) => queries.getTest(tid).catch(() => null)))
+          : [];
+        const testsByTestId: Record<string, { name: string; code: string; targetUrl: string | null; setupTestId: string | null; setupScriptId: string | null; storageStateId: string | null }> = {};
+        for (const t of testRows) {
+          if (!t) continue;
+          // storageStateId is sourced from a default_setup_step row if the
+          // test inherits one; per-test override lives in setupOverrides JSON
+          // (extraSteps[].storageStateId). Surface the test-record-level
+          // hints; callers can use lastest_get_test for the full setup chain.
+          const overrides = t.setupOverrides;
+          const extraStorageStateStep = Array.isArray(overrides?.extraSteps)
+            ? overrides.extraSteps.find((s) => s.stepType === 'storage_state' && s.storageStateId)
+            : undefined;
+          testsByTestId[t.id] = {
+            name: t.name,
+            code: t.code,
+            targetUrl: t.targetUrl ?? null,
+            setupTestId: t.setupTestId ?? null,
+            setupScriptId: t.setupScriptId ?? null,
+            storageStateId: extraStorageStateStep?.storageStateId ?? null,
+          };
+        }
         return NextResponse.json({
           buildId: id,
           changeMap,
           stepComparisons,
           verdictCounts: counts,
           layerFeedback,
+          visualUrlsByDiffId,
+          testsByTestId,
         });
       }
 

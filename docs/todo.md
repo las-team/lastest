@@ -38,6 +38,7 @@ Figma plugin
 Sitemap -flow
 Use DOM diff/verify to fix test as context
 ## marketing
+* find people who are hiring QA and target them
 * i saw you’re doing x manually, i built y to fix that
 * Launch your startup test with us, founder of the week
 * gh issue for mai0ntained repos w lastest public link

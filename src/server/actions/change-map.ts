@@ -148,7 +148,23 @@ export async function computeChangeMap(buildId: string): Promise<ChangeMap | nul
   let aiSkippedReason: string | undefined;
   const areaAINarrative = new Map<string, { risk: ChangeRisk; aiNarrative: string[] }>();
 
-  if (candidateAreaIds.length > 0 && files.length > 0) {
+  // Upfront skip reasons — distinguish "not applicable" (no PR context, branch
+  // matches base, repo not on GitHub) from "wanted to run but couldn't"
+  // (AI call failed, missing API key). Previously every no-diff path emitted
+  // the same misleading "No file diff available" — making it look like the
+  // analyzer was attempted when it never had inputs to chew on.
+  const skipUpfront = (() => {
+    if (candidateAreaIds.length === 0) return 'No candidate areas';
+    if (files.length > 0) return null;
+    if (repo.provider !== 'github') return 'AI diff analysis requires a GitHub-connected repo';
+    if (branch === baseBranch) return `Build ran on the base branch (${baseBranch}) — no diff to analyze`;
+    return 'No file diff available (compareBranches returned nothing — check GitHub credentials)';
+  })();
+
+  if (skipUpfront) {
+    aiSkipped = true;
+    aiSkippedReason = skipUpfront;
+  } else {
     const aiResult = await runChangeMapAI({
       repoId,
       branch,
@@ -174,12 +190,6 @@ export async function computeChangeMap(buildId: string): Promise<ChangeMap | nul
       aiSkipped = true;
       aiSkippedReason = aiResult.reason;
     }
-  } else if (candidateAreaIds.length === 0) {
-    aiSkipped = true;
-    aiSkippedReason = 'No candidate areas';
-  } else {
-    aiSkipped = true;
-    aiSkippedReason = 'No file diff available';
   }
 
   // ── Assemble & rank ─────────────────────────────────────────────────────

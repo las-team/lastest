@@ -12,12 +12,64 @@
  * pre-filtered to errors-only by the EB executor's console event handler.
  */
 
-import type { ConsoleDiffSummary } from '@/lib/db/schema';
+import type { ConsoleDiffSummary, ConsoleFingerprintCategory } from '@/lib/db/schema';
 
 interface Fingerprint {
   fingerprint: string;
   sample: string;
   count: number;
+  category: ConsoleFingerprintCategory;
+}
+
+/** Hostname / path fragments that indicate a third-party SDK / analytics tag.
+ *  Matched against the stack-frame URL — kept conservative; only well-known
+ *  vendors so genuine app errors emitted from a CDN-hosted bundle aren't
+ *  silenced. */
+const THIRD_PARTY_HOSTS = [
+  'googletagmanager.com', 'google-analytics.com', 'doubleclick.net',
+  'facebook.net', 'fbcdn.net', 'connect.facebook.net',
+  'segment.io', 'segment.com',
+  'mixpanel.com', 'amplitude.com',
+  'hotjar.com', 'fullstory.com', 'logrocket.com',
+  'intercom.io', 'intercomcdn.com',
+  'stripe.com', 'stripe.network',
+  'sentry-cdn.com', 'sentry.io',
+  'cdnjs.cloudflare.com',
+  // Cloudflare email-decode injects a script that fires "Failed to decode
+  // address" warnings on every page with an obfuscated mailto:
+  'email-decode.min.js',
+];
+
+/** Classify a console message by its likely owner so the verdict scorer can
+ *  weight new app errors above transient network or third-party noise.
+ *
+ *  Inputs are the raw message + the (optional) top-of-stack frame string the
+ *  fingerprinter already extracted. We pattern-match on the stack URL first
+ *  (most reliable), then fall back to message-shape heuristics. */
+export function classifyConsoleFingerprint(
+  rawMessage: string,
+  stackFrame: string,
+): ConsoleFingerprintCategory {
+  // 1. Stack-frame URL match — most reliable signal.
+  const urlInStack = stackFrame.match(/https?:\/\/[^\s)]+/)?.[0] ?? '';
+  if (urlInStack) {
+    if (THIRD_PARTY_HOSTS.some(host => urlInStack.includes(host))) return 'thirdParty';
+  }
+  // 2. CSP violation reports.
+  if (/Content Security Policy|Refused to (execute|load|connect|frame|apply)/i.test(rawMessage)) {
+    return 'csp';
+  }
+  // 3. "Failed to load resource" lines — these are network failures emitted
+  //    by the browser itself, not the app. The fingerprint surfaces them
+  //    (useful for "is this a regression?"), but they shouldn't read as an
+  //    app exception when scoring.
+  if (/^Failed to load resource:|net::ERR_/i.test(rawMessage)) {
+    return 'network';
+  }
+  // 4. App vs unknown — if we have a stack URL that wasn't third-party, treat
+  //    as app. Otherwise we don't know enough to claim ownership.
+  if (urlInStack) return 'app';
+  return 'unknown';
 }
 
 /** Reduce a console message to a stable fingerprint key.
@@ -26,7 +78,7 @@ interface Fingerprint {
  * the message body — keeping the structural shape of the error. The
  * top-of-stack line is preserved so we can distinguish errors that share a
  * message but originate in different code. */
-export function fingerprintConsoleMessage(raw: string): { fingerprint: string; sample: string } {
+export function fingerprintConsoleMessage(raw: string): { fingerprint: string; sample: string; category: ConsoleFingerprintCategory } {
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   const head = lines[0] ?? '';
   // Find the first stack frame line (heuristic: starts with "at " or contains a colon-line-col pattern)
@@ -48,18 +100,19 @@ export function fingerprintConsoleMessage(raw: string): { fingerprint: string; s
     .trim();
 
   const fingerprint = `${headNorm} :: ${stackNorm}`;
-  return { fingerprint, sample: head.slice(0, 200) };
+  const category = classifyConsoleFingerprint(head, stack);
+  return { fingerprint, sample: head.slice(0, 200), category };
 }
 
 function fingerprintCounts(messages: string[]): Map<string, Fingerprint> {
   const map = new Map<string, Fingerprint>();
   for (const m of messages) {
-    const { fingerprint, sample } = fingerprintConsoleMessage(m);
+    const { fingerprint, sample, category } = fingerprintConsoleMessage(m);
     const existing = map.get(fingerprint);
     if (existing) {
       existing.count++;
     } else {
-      map.set(fingerprint, { fingerprint, sample, count: 1 });
+      map.set(fingerprint, { fingerprint, sample, count: 1, category });
     }
   }
   return map;

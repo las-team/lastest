@@ -66,10 +66,17 @@ interface FocusViewProps {
   changedAreaIds: Set<string>;
   visualByStepKey: Map<string, VisualDiffLite>;
   testResultById: Map<string, TestResultLite>;
-  /** Repo-level error mode toggles. Drive how the Network and Console layer
-   *  tabs render their high-signal evidence: `fail` → red X (test-failing),
-   *  `warn` → amber ⚠ (logged, not failing), `ignore` → nothing. */
-  errorModes: { network: ErrorMode; console: ErrorMode };
+  /** Error mode toggles. `network`/`console` are repo-level defaults; `byTestId`
+   *  carries per-test playwrightOverrides so a test that opted into "warn" for
+   *  console still renders amber even when the repo defaults to "fail". Drives
+   *  how the Network and Console layer tabs render their high-signal evidence:
+   *  `fail` → red X (test-failing), `warn` → amber ⚠ (logged, not failing),
+   *  `ignore` → nothing. */
+  errorModes: {
+    network: ErrorMode;
+    console: ErrorMode;
+    byTestId: Record<string, { network?: ErrorMode; console?: ErrorMode }>;
+  };
   statusFilter: Set<CaseStatus>;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
@@ -622,9 +629,12 @@ export function FocusView(props: FocusViewProps) {
             //
             // Run is special: the test_result.status === 'failed' is the
             // source of truth, regardless of layer toggles.
+            // Per-test override wins; falls back to repo-level default.
+            const tid = activeCase?.test?.id;
+            const perTest = tid ? props.errorModes.byTestId[tid] : undefined;
             const layerMode: ErrorMode | null =
-              k.id === 'network' ? props.errorModes.network
-              : k.id === 'console' ? props.errorModes.console
+              k.id === 'network' ? (perTest?.network ?? props.errorModes.network)
+              : k.id === 'console' ? (perTest?.console ?? props.errorModes.console)
               : null;
             let broken = false;
             let warned = false;
@@ -638,10 +648,13 @@ export function FocusView(props: FocusViewProps) {
             // Reason text rendered as the title attribute on the broken pill
             // (and on the whole button as a fallback). Falls back to the
             // delta text when no structured summary exists.
+            const modeSource = perTest?.[k.id === 'network' ? 'network' : k.id === 'console' ? 'console' : 'network']
+              ? 'per-test override'
+              : 'configured in Playwright settings';
             const modeNote = layerMode && (broken || warned)
               ? (broken
-                  ? ` · ${k.name} Error Mode is "Fail" (configured in Playwright settings)`
-                  : ` · ${k.name} Error Mode is "Warn only" so the runner logged this without failing the test (configured in Playwright settings)`)
+                  ? ` · ${k.name} Error Mode is "Fail" (${modeSource})`
+                  : ` · ${k.name} Error Mode is "Warn only" so the runner logged this without failing the test (${modeSource})`)
               : '';
             const reason = k.id === 'run'
               ? ((activeCase?.result?.errorMessage ?? '').trim() || 'Test failed')

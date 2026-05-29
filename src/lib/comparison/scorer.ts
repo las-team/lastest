@@ -100,9 +100,17 @@ export function scoreMultiLayer({
       || Object.keys(consoleDiff.countDelta).length > 0) {
     layers.consoleDiff = consoleDiff;
     if (consoleDiff.newFingerprints.length > 0) {
+      // Only NEW *app* (or CSP) fingerprints redden the verdict. Third-party
+      // SDK noise (analytics, Cloudflare email-decoder, Hotjar) and transient
+      // network 4xx/5xx surfacing as "Failed to load resource: …" are kept
+      // visible at medium signal but do not gate. The `category` field on each
+      // fingerprint is set by classifyConsoleFingerprint at fingerprint time.
+      const hasOwnedNew = consoleDiff.newFingerprints.some(
+        f => f.category === 'app' || f.category === 'csp' || f.category === 'unknown',
+      );
       evidence.push({
         layer: 'console',
-        signal: 'high',
+        signal: hasOwnedNew ? 'high' : 'medium',
         summary: summarizeConsoleDiff(consoleDiff),
         details: { newFingerprints: consoleDiff.newFingerprints.slice(0, 5) },
       });

@@ -207,12 +207,19 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
   );
-  // Repo-level error-mode toggles, hydrated from verify-status on first poll.
-  // Default 'warn' matches the server-side default in the playwright settings
-  // schema, so the focus view shows the same "warn only" treatment until the
-  // first poll lands.
-  const [errorModes, setErrorModes] = useState<{ network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' }>(
-    { network: 'warn', console: 'warn' },
+  // Error-mode toggles hydrated from verify-status on first poll. Repo
+  // defaults at `network`/`console`; `byTestId` is the per-test override map
+  // populated when a test has a playwrightOverrides row. Default 'warn'
+  // matches the server-side default in the playwright settings schema, so
+  // the focus view shows the same "warn only" treatment until the first
+  // poll lands.
+  type ErrorModeMap = {
+    network: 'fail' | 'warn' | 'ignore';
+    console: 'fail' | 'warn' | 'ignore';
+    byTestId: Record<string, { network?: 'fail' | 'warn' | 'ignore'; console?: 'fail' | 'warn' | 'ignore' }>;
+  };
+  const [errorModes, setErrorModes] = useState<ErrorModeMap>(
+    { network: 'warn', console: 'warn', byTestId: {} },
   );
   const [runningTests, setRunningTests] = useState<Array<{ testId: string; name: string }>>([]);
   const [liveCounts, setLiveCounts] = useState<{ totalTests: number; passed: number; failed: number }>({
@@ -245,7 +252,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         testResults: TestResultLite[];
         runningTests: Array<{ testId: string; name: string }>;
         changeMap: ChangeMap | null;
-        errorModes?: { network: 'fail' | 'warn' | 'ignore'; console: 'fail' | 'warn' | 'ignore' };
+        errorModes?: ErrorModeMap;
       };
       setStepComparisons(data.stepComparisons);
       // Merge-not-replace: keep any local `optimistic-*` rows whose step has

@@ -2597,9 +2597,14 @@ export interface NetworkDiffSummary {
   statusFlips: Array<{ url: string; method: string; from: number; to: number }>;
 }
 
+/** Where a console fingerprint most likely originated. Used by the scorer to
+ *  demote noise (third-party SDKs, transient network 4xx/5xx) from high to
+ *  medium signal so it doesn't redden the verdict on its own. */
+export type ConsoleFingerprintCategory = 'app' | 'thirdParty' | 'network' | 'csp' | 'unknown';
+
 export interface ConsoleDiffSummary {
-  newFingerprints: Array<{ fingerprint: string; sample: string; count: number }>;
-  disappeared: Array<{ fingerprint: string; sample: string; count: number }>;
+  newFingerprints: Array<{ fingerprint: string; sample: string; count: number; category?: ConsoleFingerprintCategory }>;
+  disappeared: Array<{ fingerprint: string; sample: string; count: number; category?: ConsoleFingerprintCategory }>;
   countDelta: Record<string, number>;
 }
 

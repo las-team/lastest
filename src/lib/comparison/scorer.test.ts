@@ -33,6 +33,33 @@ describe('scoreMultiLayer', () => {
     expect(r.evidence.find(e => e.layer === 'console')?.signal).toBe('high');
   });
 
+  it('does NOT paint verdict red when only a third-party SDK fingerprint is new', () => {
+    // Cloudflare email-decoder fires on every page with an obfuscated mailto.
+    // Demoting third-party noise from high→medium prevents this from gating.
+    const baseline = emptyResult();
+    const current = emptyResult({
+      consoleErrors: [
+        'Failed to decode address\n    at https://cdn.example.com/cdn-cgi/scripts/email-decode.min.js:1:200',
+      ],
+    });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('yellow');
+    expect(r.evidence.find(e => e.layer === 'console')?.signal).toBe('medium');
+  });
+
+  it('does NOT paint verdict red when only a transient network fingerprint is new', () => {
+    // "Failed to load resource: ... 429" surfaces via console but is a network
+    // signal — the network layer already gates 4xx/5xx; console should not
+    // double-count it as an app exception.
+    const baseline = emptyResult();
+    const current = emptyResult({
+      consoleErrors: ['Failed to load resource: the server responded with a status of 429 ()'],
+    });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('yellow');
+    expect(r.evidence.find(e => e.layer === 'console')?.signal).toBe('medium');
+  });
+
   it('returns red on a new 5xx response', () => {
     const baseline = emptyResult({ networkRequests: [{ url: 'https://x/a', method: 'GET', status: 200, duration: 50, resourceType: 'fetch' } as NetworkRequest] });
     const current = emptyResult({ networkRequests: [{ url: 'https://x/a', method: 'GET', status: 500, duration: 50, resourceType: 'fetch' } as NetworkRequest] });

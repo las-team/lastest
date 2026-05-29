@@ -125,12 +125,29 @@ export async function GET(
     .filter((r) => r.status === 'running')
     .map((r) => ({ testId: r.testId, name: r.testId }));
 
-  // Repo-level error-mode toggles. Drives the focus view's network/console
-  // tab "broken vs warn vs ignore" treatment so the red X pill matches what
-  // the runner actually does when it sees a network 4xx / console error.
+  // Error-mode toggles drive the focus view's network/console tab "broken vs
+  // warn vs ignore" treatment so the red X pill matches what the runner
+  // actually does when it sees a network 4xx / console error.
+  //
+  // Per-test playwrightOverrides take precedence over the repo defaults — the
+  // executor already uses them at run time, so the UI must match or the panel
+  // will mislabel passing/failing layers for tests that opted out.
+  const distinctTestIds = Array.from(new Set(runningTestRows.map((r) => r.testId).filter((id): id is string => !!id)));
+  const perTestOverrides = distinctTestIds.length > 0
+    ? await queries.getPlaywrightOverridesByTestIds(distinctTestIds).catch(() => [])
+    : [];
+  const byTestId: Record<string, { network?: 'fail' | 'warn' | 'ignore'; console?: 'fail' | 'warn' | 'ignore' }> = {};
+  for (const t of perTestOverrides) {
+    const o = t.playwrightOverrides;
+    if (!o) continue;
+    const network = o.networkErrorMode;
+    const cons = o.consoleErrorMode;
+    if (network || cons) byTestId[t.id] = { network, console: cons };
+  }
   const errorModes = {
     network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
     console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+    byTestId,
   };
 
   return NextResponse.json(

@@ -81,6 +81,16 @@ export async function getTests() {
   return db.select().from(tests).where(isNull(tests.deletedAt)).orderBy(desc(tests.createdAt));
 }
 
+/** Fetch just the playwrightOverrides JSON for a set of test ids — used by
+ *  the verify route to build a per-test error-mode resolution map without
+ *  pulling the full test rows (which include code / specs / metadata). */
+export async function getPlaywrightOverridesByTestIds(testIds: string[]) {
+  if (testIds.length === 0) return [] as Array<{ id: string; playwrightOverrides: typeof tests.$inferSelect.playwrightOverrides }>;
+  return db.select({ id: tests.id, playwrightOverrides: tests.playwrightOverrides })
+    .from(tests)
+    .where(inArray(tests.id, testIds));
+}
+
 export async function getTestsByFunctionalArea(functionalAreaId: string) {
   return db.select().from(tests).where(and(eq(tests.functionalAreaId, functionalAreaId), isNull(tests.deletedAt)));
 }
