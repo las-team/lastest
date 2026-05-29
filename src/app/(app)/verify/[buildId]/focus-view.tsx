@@ -902,7 +902,8 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
     case 'network': {
       const n = layers?.network;
       if (!n) return null;
-      return `+${n.added} −${n.removed}`;
+      // Prefer endpoint counts; fall back to raw counts for pre-migration rows.
+      return `+${n.addedEndpoints ?? n.added} −${n.removedEndpoints ?? n.removed}`;
     }
     case 'console': {
       const c = layers?.consoleDiff;

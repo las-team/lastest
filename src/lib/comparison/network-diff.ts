@@ -83,6 +83,9 @@ export function computeNetworkDiff(
     removed: 0,
     changed: 0,
     unchanged: 0,
+    addedEndpoints: 0,
+    removedEndpoints: 0,
+    changedEndpoints: 0,
     newErrorCount: 0,
     newClientErrors: [],
     newServerErrors: [],
@@ -95,6 +98,9 @@ export function computeNetworkDiff(
     const b = baseMap.get(key) ?? [];
     const c = currMap.get(key) ?? [];
     const pairCount = Math.min(b.length, c.length);
+    let bucketAdded = 0;
+    let bucketRemoved = 0;
+    let bucketChanged = 0;
 
     // Paired: detect status flips, count unchanged vs changed
     for (let i = 0; i < pairCount; i++) {
@@ -104,6 +110,7 @@ export function computeNetworkDiff(
         summary.unchanged++;
       } else {
         summary.changed++;
+        bucketChanged++;
         const baseClass = statusClass(baseReq.status);
         const currClass = statusClass(currReq.status);
         // High-signal: anything → 4xx/5xx, or 4xx/5xx → recovery still flagged
@@ -129,6 +136,7 @@ export function computeNetworkDiff(
     // Excess on current side = added requests
     for (let i = pairCount; i < c.length; i++) {
       summary.added++;
+      bucketAdded++;
       const cls = statusClass(c[i].status);
       if (cls === '4xx') {
         summary.newClientErrors.push({ url: c[i].url, method: c[i].method, status: c[i].status });
@@ -142,7 +150,15 @@ export function computeNetworkDiff(
     // Excess on baseline side = removed requests
     for (let i = pairCount; i < b.length; i++) {
       summary.removed++;
+      bucketRemoved++;
     }
+
+    // Promote per-bucket totals to endpoint-level counts so a single endpoint
+    // firing N times (cache warmup, retries) reports as 1, not N. (Field is
+    // typed optional for read-back of legacy rows; here we always populate it.)
+    if (bucketAdded > 0) summary.addedEndpoints = (summary.addedEndpoints ?? 0) + 1;
+    if (bucketRemoved > 0) summary.removedEndpoints = (summary.removedEndpoints ?? 0) + 1;
+    if (bucketChanged > 0) summary.changedEndpoints = (summary.changedEndpoints ?? 0) + 1;
   }
 
   return summary;
@@ -152,9 +168,11 @@ export function summarizeNetworkDiff(d: NetworkDiffSummary): string {
   const parts: string[] = [];
   if (d.newServerErrors.length) parts.push(`${d.newServerErrors.length} new 5xx`);
   if (d.newClientErrors.length) parts.push(`${d.newClientErrors.length} new 4xx`);
-  if (d.added) parts.push(`${d.added} added`);
-  if (d.removed) parts.push(`${d.removed} removed`);
-  if (d.changed && !d.newErrorCount) parts.push(`${d.changed} changed`);
+  // Endpoint-level counts: a single endpoint firing N extra times reports as 1,
+  // not N. Avoids inflated "84 added" lines when an auth retry loop fires.
+  if (d.addedEndpoints) parts.push(`${d.addedEndpoints} endpoint(s) added`);
+  if (d.removedEndpoints) parts.push(`${d.removedEndpoints} endpoint(s) removed`);
+  if (d.changedEndpoints && !d.newErrorCount) parts.push(`${d.changedEndpoints} endpoint(s) changed`);
   if (parts.length === 0) return 'No network changes';
   return parts.join(', ');
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { scoreMultiLayer } from './scorer';
-import type { NetworkRequest, A11yViolation, UrlTrajectoryStep } from '@/lib/db/schema';
+import type { NetworkRequest, A11yViolation, UrlTrajectoryStep, WebVitalsSample } from '@/lib/db/schema';
 
 type ScoreInput = Parameters<typeof scoreMultiLayer>[0]['baseline'];
 
@@ -132,6 +132,33 @@ describe('scoreMultiLayer', () => {
     expect(r.evidence[0].layer).toBe('visual');
     expect(r.layers.visual).toBeDefined();
     expect(r.layers.consoleDiff).toBeUndefined();
+  });
+
+  it('does not paint verdict red when only a pre-existing perf breach is present', () => {
+    // Baseline already over CLS budget (0.4 vs 0.1) and current is identical.
+    // This is the "every run inherits the same red" trap — must stay green.
+    const sample: WebVitalsSample[] = [
+      { stepIndex: 0, url: 'https://x/dashboard', cls: 0.4 } as WebVitalsSample,
+    ];
+    const baseline = emptyResult({ webVitals: sample });
+    const current = emptyResult({ webVitals: sample });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('green');
+    expect(r.evidence.find(e => e.layer === 'perf')?.signal).toBe('low');
+    expect(r.layers.perf?.deltas.some(d => d.budgetBreached)).toBe(true);
+    expect(r.layers.perf?.deltas.some(d => d.newlyBreached)).toBe(false);
+  });
+
+  it('paints verdict red when a NEW perf breach is introduced', () => {
+    const baseline = emptyResult({
+      webVitals: [{ stepIndex: 0, url: 'https://x/dashboard', cls: 0.05 } as WebVitalsSample],
+    });
+    const current = emptyResult({
+      webVitals: [{ stepIndex: 0, url: 'https://x/dashboard', cls: 0.4 } as WebVitalsSample],
+    });
+    const r = scoreMultiLayer({ baseline, current });
+    expect(r.verdict).toBe('red');
+    expect(r.evidence.find(e => e.layer === 'perf')?.signal).toBe('high');
   });
 
   it('network non-error churn (added/removed of 200s) does not paint verdict', () => {

@@ -2580,10 +2580,17 @@ export interface EvidenceItem {
 }
 
 export interface NetworkDiffSummary {
+  /** Raw request-level counts (multiple requests to the same endpoint count separately). */
   added: number;
   removed: number;
   changed: number;
   unchanged: number;
+  /** Endpoint-level counts (unique (method, normalized URL) buckets with any added/removed/changed activity).
+   *  Use these for verdict scoring and summaries — they collapse cache/retry churn that inflates raw counts.
+   *  Optional because historical step_comparisons predating the field will not have them on read. */
+  addedEndpoints?: number;
+  removedEndpoints?: number;
+  changedEndpoints?: number;
   newErrorCount: number;
   newClientErrors: Array<{ url: string; method: string; status: number }>;
   newServerErrors: Array<{ url: string; method: string; status: number }>;
@@ -2626,6 +2633,11 @@ export interface PerfDiffSummary {
     delta: number;
     /** True if `current` exceeds the absolute budget for the metric. */
     budgetBreached: boolean;
+    /** True if `current` breaches the budget AND baseline did not — i.e. a NEW
+     *  breach this run. Pre-existing breaches with delta≈0 stay `budgetBreached`
+     *  but `newlyBreached=false`, so scorer can skip them as non-regressions.
+     *  Optional because historical rows predating the field will not have it on read. */
+    newlyBreached?: boolean;
     /** True if `delta` exceeds the relative-drift threshold (default 20%). */
     drifted: boolean;
   }>;

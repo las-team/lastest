@@ -72,6 +72,8 @@ describe('computeNetworkDiff', () => {
     const d = computeNetworkDiff(baseline, current);
     expect(d.added).toBe(1);
     expect(d.removed).toBe(0);
+    expect(d.addedEndpoints).toBe(1);
+    expect(d.removedEndpoints).toBe(0);
   });
 
   it('records removed requests', () => {
@@ -80,6 +82,24 @@ describe('computeNetworkDiff', () => {
     const d = computeNetworkDiff(baseline, current);
     expect(d.removed).toBe(1);
     expect(d.added).toBe(0);
+    expect(d.removedEndpoints).toBe(1);
+    expect(d.addedEndpoints).toBe(0);
+  });
+
+  it('collapses cache/retry churn for a single endpoint into one endpoint count', () => {
+    // Same endpoint fires 1× in baseline and 5× in current (e.g. a retry loop
+    // or cache-busted warm-up). Raw count = 4 added; endpoint count = 1.
+    const baseline = [req('https://x.com/api/auth', 200)];
+    const current = [
+      req('https://x.com/api/auth', 200),
+      req('https://x.com/api/auth', 200),
+      req('https://x.com/api/auth', 200),
+      req('https://x.com/api/auth', 200),
+      req('https://x.com/api/auth', 200),
+    ];
+    const d = computeNetworkDiff(baseline, current);
+    expect(d.added).toBe(4);
+    expect(d.addedEndpoints).toBe(1);
   });
 
   it('treats nonce-only differences as same key', () => {

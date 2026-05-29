@@ -117,15 +117,19 @@ export function scoreMultiLayer({
 
   // ── Network (HIGH SIGNAL on new 4xx/5xx; non-error churn is info-only) ─
   // `newErrorCount` already counts both new 4xx/5xx and error-class status
-  // flips (see network-diff.ts). Added/removed of non-error requests stays
-  // surfaced in `layers.network` for the verify UI but is demoted to 'low'
-  // so verdict mapping (high|medium → red|yellow) ignores it by default.
+  // flips (see network-diff.ts). Endpoint-level counts (one bump per unique
+  // (method, normalized URL) bucket) drive surface checks so cache warmup or
+  // retry storms don't pad the report. Raw request counts stay in
+  // `layers.network` for drill-down.
   const networkDiff = computeNetworkDiff(
     baseline?.networkRequests ?? [],
     current.networkRequests ?? [],
   );
-  if (networkDiff.newErrorCount > 0 || networkDiff.added > 0 || networkDiff.removed > 0
-      || networkDiff.changed > 0) {
+  // computeNetworkDiff is fresh-compute → endpoint counts are always populated.
+  if (networkDiff.newErrorCount > 0
+      || (networkDiff.addedEndpoints ?? 0) > 0
+      || (networkDiff.removedEndpoints ?? 0) > 0
+      || (networkDiff.changedEndpoints ?? 0) > 0) {
     layers.network = networkDiff;
     if (networkDiff.newErrorCount > 0) {
       evidence.push({
@@ -194,18 +198,22 @@ export function scoreMultiLayer({
     });
   }
 
-  // ── Perf (HIGH SIGNAL on budget breach, MEDIUM on relative drift) ────
+  // ── Perf (HIGH SIGNAL only on a NEWLY-introduced budget breach) ──────
+  // Pre-existing breaches (current still over budget but baseline already was,
+  // delta ≈ 0) are surfaced in `layers.perf` for visibility but stay 'low' —
+  // otherwise every subsequent run inherits the same red verdict forever.
+  // Relative drift within budget remains 'medium' (yellow gate).
   const perfDiff = computePerfDiff(
     baseline?.webVitals ?? [],
     current.webVitals ?? [],
   );
   if (perfDiff.deltas.length > 0) {
     layers.perf = perfDiff;
-    const breached = perfDiff.deltas.some(d => d.budgetBreached);
+    const newBreach = perfDiff.deltas.some(d => d.newlyBreached);
     const drifted = perfDiff.deltas.some(d => d.drifted);
     evidence.push({
       layer: 'perf',
-      signal: breached ? 'high' : (drifted ? 'medium' : 'low'),
+      signal: newBreach ? 'high' : (drifted ? 'medium' : 'low'),
       summary: summarizePerfDiff(perfDiff),
     });
   }

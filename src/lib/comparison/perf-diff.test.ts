@@ -19,7 +19,29 @@ describe('computePerfDiff', () => {
     const d = computePerfDiff(baseline, current);
     const lcp = d.deltas.find(x => x.metric === 'lcp');
     expect(lcp?.budgetBreached).toBe(true);
+    expect(lcp?.newlyBreached).toBe(true);
     expect(lcp?.delta).toBe(1000);
+  });
+
+  it('marks pre-existing breach as budgetBreached but NOT newlyBreached', () => {
+    // Baseline already over budget; current is essentially identical. Scorer
+    // must not flip the verdict to red on a stable, already-broken page.
+    const baseline = [s(0, { cls: 0.4 })];
+    const current = [s(0, { cls: 0.4 })];
+    const d = computePerfDiff(baseline, current);
+    const cls = d.deltas.find(x => x.metric === 'cls');
+    expect(cls?.budgetBreached).toBe(true);
+    expect(cls?.newlyBreached).toBe(false);
+    expect(cls?.delta).toBe(0);
+  });
+
+  it('does not mark newlyBreached when baseline was already over budget', () => {
+    const baseline = [s(0, { lcp: 3000 })];
+    const current = [s(0, { lcp: 3050 })];
+    const d = computePerfDiff(baseline, current);
+    const lcp = d.deltas.find(x => x.metric === 'lcp');
+    expect(lcp?.budgetBreached).toBe(true);
+    expect(lcp?.newlyBreached).toBe(false);
   });
 
   it('flags relative drift even within budget', () => {
@@ -59,5 +81,13 @@ describe('summarizePerfDiff', () => {
   it('reports within-budget when no breaches or drifts', () => {
     const sample = [s(0, { lcp: 1500 })];
     expect(summarizePerfDiff(computePerfDiff(sample, sample))).toBe('Within budget');
+  });
+
+  it('separates new breaches from pre-existing ones', () => {
+    const baseline = [s(0, { lcp: 3000, cls: 0.05 })];
+    const current = [s(0, { lcp: 3050, cls: 0.4 })];
+    const summary = summarizePerfDiff(computePerfDiff(baseline, current));
+    expect(summary).toContain('1 new breach');
+    expect(summary).toContain('1 pre-existing breach');
   });
 });

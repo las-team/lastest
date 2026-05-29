@@ -1008,11 +1008,16 @@ function deltaForLayer(step: StepComparison, layer: string): string {
     case 'network': {
       const n = layers?.network;
       if (!n) return '';
+      // Endpoint counts are the new shape; raw added/removed are the legacy
+      // fallback for rows persisted before the endpoint-count field landed.
+      const added = n.addedEndpoints ?? n.added;
+      const removed = n.removedEndpoints ?? n.removed;
+      const changed = n.changedEndpoints ?? n.changed;
       const parts: string[] = [];
-      if (n.added) parts.push(`+${n.added}`);
-      if (n.removed) parts.push(`−${n.removed}`);
+      if (added) parts.push(`+${added}`);
+      if (removed) parts.push(`−${removed}`);
       if (n.newErrorCount) parts.push(`${n.newErrorCount} err`);
-      return parts.join(' ') || `${n.changed} chg`;
+      return parts.join(' ') || `${changed} chg`;
     }
     case 'console': {
       const c = layers?.consoleDiff;

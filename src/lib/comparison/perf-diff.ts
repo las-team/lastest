@@ -62,6 +62,11 @@ export function computePerfDiff(
       const delta = cv - bv;
       const budget = budgets[metric];
       const budgetBreached = cv > budget;
+      // A breach is only a *new* regression when baseline was within budget.
+      // Pre-existing breaches (baseline already > budget, delta ≈ 0) are
+      // surfaced for visibility but must not flip the verdict to red —
+      // otherwise every subsequent run inherits the same red signal forever.
+      const newlyBreached = budgetBreached && bv <= budget;
       // Drift: regressed by > driftThreshold AND moved by an absolute amount
       // worth flagging (avoids noise on tiny CLS deltas like 0.001 → 0.002).
       const minAbsoluteDelta = metric === 'cls' ? 0.05 : metric === 'inp' || metric === 'tbt' ? 30 : 100;
@@ -75,6 +80,7 @@ export function computePerfDiff(
           current: cv,
           delta,
           budgetBreached,
+          newlyBreached,
           drifted,
         });
       }
@@ -85,11 +91,13 @@ export function computePerfDiff(
 }
 
 export function summarizePerfDiff(d: PerfDiffSummary): string {
-  const breaches = d.deltas.filter(x => x.budgetBreached).length;
+  const newBreaches = d.deltas.filter(x => x.newlyBreached).length;
+  const existingBreaches = d.deltas.filter(x => x.budgetBreached && !x.newlyBreached).length;
   const drifts = d.deltas.filter(x => x.drifted && !x.budgetBreached).length;
-  if (breaches === 0 && drifts === 0) return 'Within budget';
+  if (newBreaches === 0 && existingBreaches === 0 && drifts === 0) return 'Within budget';
   const parts: string[] = [];
-  if (breaches) parts.push(`${breaches} budget breach(es)`);
+  if (newBreaches) parts.push(`${newBreaches} new breach(es)`);
+  if (existingBreaches) parts.push(`${existingBreaches} pre-existing breach(es)`);
   if (drifts) parts.push(`${drifts} drift(s)`);
   return parts.join(', ');
 }
