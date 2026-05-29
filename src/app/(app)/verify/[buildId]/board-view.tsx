@@ -1084,6 +1084,9 @@ function firstLine(s: string): string {
 
 function IssueChipReal({ step, onOpenPicker }: { step: StepComparison; onOpenPicker?: () => void }) {
   if (!step.githubIssueUrl) {
+    // 24px min hit-target + AA contrast on the "no issue" pill. Earlier
+    // opacity:0.55 dropped the text to ~2.3:1 and the chip's intrinsic
+    // height landed at 23.6px — axe flagged both.
     return (
       <span
         role={onOpenPicker ? 'button' : undefined}
@@ -1091,7 +1094,11 @@ function IssueChipReal({ step, onOpenPicker }: { step: StepComparison; onOpenPic
         onClick={onOpenPicker ? (e) => { e.stopPropagation(); onOpenPicker(); } : undefined}
         onKeyDown={onOpenPicker ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenPicker(); } } : undefined}
         className="v-chip"
-        style={{ opacity: 0.55, cursor: onOpenPicker ? 'pointer' : 'default' }}
+        style={{
+          cursor: onOpenPicker ? 'pointer' : 'default',
+          minHeight: 24,
+          color: 'var(--fg-2)',
+        }}
         title={onOpenPicker ? 'Browse or file an issue for this case' : 'No linked issue'}
       >
         <CircleDot size={11} />no issue

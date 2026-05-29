@@ -20,7 +20,10 @@
   --secondary: #EFEFEC;
   --secondary-foreground: #1F2A33;
   --muted: #F1F1EE;
-  --muted-foreground: rgba(31, 42, 51, 0.55);
+  /* Bumped from 0.55→0.72 to clear WCAG AA 4.5:1 on white AND on --muted
+   * (#F1F1EE). At 0.55 the blended color was rgb(133,138,143) → 3.4:1,
+   * which axe-core flagged on every `text-muted-foreground` use. */
+  --muted-foreground: rgba(31, 42, 51, 0.72);
   --accent: rgba(54, 168, 142, 0.12);
   --accent-foreground: #1F2A33;
   --destructive: #E03E36;
@@ -115,7 +118,8 @@
   --secondary: rgba(255, 255, 255, 0.06);
   --secondary-foreground: #FFFFFF;
   --muted: rgba(255, 255, 255, 0.04);
-  --muted-foreground: rgba(255, 255, 255, 0.55);
+  /* Match the light-mode bump (0.55→0.78) so dark mode also clears AA. */
+  --muted-foreground: rgba(255, 255, 255, 0.78);
   --accent: rgba(54, 168, 142, 0.18);
   --accent-foreground: #FFFFFF;
   --destructive: #E03E36;

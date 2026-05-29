@@ -682,14 +682,15 @@ export function FocusView(props: FocusViewProps) {
               ? '/settings?highlight=playwright'
               : null;
             return (
+              <span key={k.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               <button
-                key={k.id}
                 onClick={() => setTab(k.id)}
                 title={reason ?? `${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
                 style={{
                   padding: '6px 10px', borderRadius: 6, fontSize: 12,
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6,
+                  minHeight: 32,
                   background: isActive
                     ? 'color-mix(in oklab, var(--c-teal) 12%, white)'
                     : broken
@@ -758,26 +759,6 @@ export function FocusView(props: FocusViewProps) {
                     {delta}
                   </span>
                 )}
-                {/* Inline settings link: opens the Playwright settings card
-                    so reviewers can flip the error mode without leaving the
-                    flow. Only attached to Network/Console pills since those
-                    are the configurable layers. */}
-                {settingsTarget && (broken || warned) && (
-                  <span
-                    role="link"
-                    tabIndex={0}
-                    onClick={(e) => { e.stopPropagation(); window.location.href = settingsTarget; }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); window.location.href = settingsTarget; } }}
-                    title={`Open Playwright settings to change ${k.name} Error Mode`}
-                    aria-label={`Open Playwright settings to change ${k.name} Error Mode`}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      color: 'var(--fg-3)', cursor: 'pointer', padding: 2,
-                    }}
-                  >
-                    <Settings size={11} />
-                  </span>
-                )}
                 {layerState === 'clean' && !broken && !warned && (
                   <span
                     aria-hidden
@@ -793,6 +774,28 @@ export function FocusView(props: FocusViewProps) {
                   </span>
                 )}
               </button>
+              {/* Settings link as a separate button (NOT nested inside the tab
+                  button — nested interactives fail a11y and the inline link
+                  also failed target-size at 15px). Only attached to
+                  Network/Console when the layer is broken/warned, so the
+                  reviewer can flip the error mode without leaving Verify. */}
+              {settingsTarget && (broken || warned) && (
+                <a
+                  href={settingsTarget}
+                  title={`Open Playwright settings to change ${k.name} Error Mode`}
+                  aria-label={`Open Playwright settings to change ${k.name} Error Mode`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, borderRadius: 6,
+                    color: 'var(--fg-2)', textDecoration: 'none',
+                    border: '1px solid var(--border)',
+                    background: 'var(--c-white)',
+                  }}
+                >
+                  <Settings size={13} />
+                </a>
+              )}
+              </span>
             );
           })}
         </div>
@@ -966,10 +969,13 @@ function HotkeyHint({ keys, className }: { keys: string; className?: string }) {
         fontFamily: 'var(--font-mono)',
         fontSize: 9,
         lineHeight: '14px',
-        color: 'var(--fg-3)',
-        background: 'color-mix(in oklab, var(--fg-3) 8%, transparent)',
+        // Solid ink ≥ AA on the soft-2 / chip backgrounds where the hint
+        // appears. The earlier var(--fg-3) + opacity 0.85 combo blended to
+        // ~3.6:1 and tripped axe's color-contrast rule even though the
+        // element is aria-hidden.
+        color: 'var(--c-ink)',
+        background: 'color-mix(in oklab, var(--c-ink) 8%, transparent)',
         borderRadius: 3,
-        opacity: 0.85,
       }}
     >
       {keys}
@@ -993,10 +999,13 @@ function TriageButton({
     tone === 'success' ? 'var(--c-teal)' :
     tone === 'warning' ? 'var(--c-amber)' :
     'var(--c-red)';
+  // Text-only deep-shade tokens guarantee AA 4.5:1 on the tinted button
+  // surface. Using the brand base (var(--c-red), etc.) as foreground was
+  // ~3.2:1 on the active-state mid-tint — axe-core flagged it.
   const fg =
-    tone === 'success' ? '#1F7B66' :
-    tone === 'warning' ? '#8C5C19' :
-    'var(--c-red)';
+    tone === 'success' ? 'var(--c-teal-text)' :
+    tone === 'warning' ? 'var(--c-amber-text)' :
+    'var(--c-red-text)';
   return (
     <button
       type="button"

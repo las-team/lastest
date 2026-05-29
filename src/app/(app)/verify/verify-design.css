@@ -8,12 +8,21 @@
   --c-amber: #E09836;
   --c-teal: var(--primary);
   --c-blue: #3674A8;
+  /* Darker variants used wherever the brand colour appears as TEXT (chips,
+   * "primary" CTA labels, link-like accents). The base brand stops are
+   * tuned for backgrounds & icons but blow past AA when used as foreground
+   * on light surfaces. */
+  --c-teal-text: #1F7B66;
+  --c-red-text: #B12F29;
+  --c-amber-text: #8C5C19;
+  --c-blue-text: #2E5E8C;
   --c-soft: var(--muted);
   --c-soft-2: var(--secondary);
   --c-white: var(--card);
   --fg-1: var(--foreground);
   --fg-2: var(--muted-foreground);
-  --fg-3: rgba(31, 42, 51, 0.55);
+  /* Bumped 0.55→0.7 so labels & captions hit WCAG AA 4.5:1 on white. */
+  --fg-3: rgba(31, 42, 51, 0.7);
   --border-strong: rgba(31, 42, 51, 0.16);
   --r-md: 8px;
   --r-pill: 999px;
@@ -66,19 +75,19 @@
 .verify-page .v-chip.regression {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
-  color: var(--c-red);
+  color: var(--c-red-text);
 }
 .verify-page .v-chip.regression .dot { background: var(--c-red); }
 .verify-page .v-chip.done {
   background: color-mix(in oklab, var(--c-teal) 10%, white);
   border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
-  color: #1F7B66;
+  color: var(--c-teal-text);
 }
 .verify-page .v-chip.done .dot { background: var(--c-teal); }
 .verify-page .v-chip.missed {
   background: color-mix(in oklab, var(--c-amber) 12%, white);
   border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
-  color: #8C5C19;
+  color: var(--c-amber-text);
 }
 .verify-page .v-chip.missed .dot { background: var(--c-amber); }
 .verify-page .v-chip.unknown {
@@ -90,7 +99,7 @@
 .verify-page .v-chip.info {
   background: color-mix(in oklab, var(--c-blue) 8%, white);
   border-color: color-mix(in oklab, var(--c-blue) 22%, transparent);
-  color: #2E5E8C;
+  color: var(--c-blue-text);
 }
 .verify-page .v-chip.info .dot { background: var(--c-blue); }
 
@@ -116,35 +125,37 @@
 }
 .verify-page .v-btn:hover { background: var(--c-soft); }
 .verify-page .v-btn.primary {
-  /* Reserved for the single page-level primary CTA (the Run button). */
-  background: var(--c-teal);
+  /* Reserved for the single page-level primary CTA (the Run button).
+   * Uses the deeper text-teal as the surface so white labels stay above
+   * AA 4.5:1 — the base brand teal is too light for white text. */
+  background: var(--c-teal-text);
   border-color: transparent;
   color: white;
 }
-.verify-page .v-btn.primary:hover { background: #2E957D; }
+.verify-page .v-btn.primary:hover { background: #155F4F; }
 .verify-page .v-btn.success {
   /* Approve / "yes this is intended" — tinted, not solid, so it doesn't
      compete with the page-level primary. */
   background: color-mix(in oklab, var(--c-teal) 10%, white);
   border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
-  color: #1F7B66;
+  color: var(--c-teal-text);
 }
 .verify-page .v-btn.success:hover { background: color-mix(in oklab, var(--c-teal) 16%, white); }
 .verify-page .v-btn.danger {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
-  color: var(--c-red);
+  color: var(--c-red-text);
 }
 .verify-page .v-btn.warning {
   background: color-mix(in oklab, var(--c-amber) 10%, white);
   border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
-  color: #8C5C19;
+  color: var(--c-amber-text);
 }
 .verify-page .v-btn.tinted {
   /* Subtle "active" toggle state without claiming the page primary. */
   background: color-mix(in oklab, var(--c-teal) 10%, white);
   border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
-  color: #1F7B66;
+  color: var(--c-teal-text);
 }
 .verify-page .v-btn.ghost {
   background: transparent;
