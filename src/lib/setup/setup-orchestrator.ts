@@ -195,11 +195,59 @@ export class SetupOrchestrator {
               if (storageState) {
                 currentContext = { ...currentContext, storageState: storageState.storageStateJson };
                 // Inject cookies into current browser context
-                const parsed = JSON.parse(storageState.storageStateJson);
-                if (parsed.cookies?.length > 0) {
+                const parsed = JSON.parse(storageState.storageStateJson) as {
+                  cookies?: Parameters<ReturnType<typeof page.context>['addCookies']>[0];
+                  origins?: Array<{
+                    origin: string;
+                    localStorage?: Array<{ name: string; value: string }>;
+                    sessionStorage?: Array<{ name: string; value: string }>;
+                  }>;
+                };
+                if (parsed.cookies?.length) {
                   await page.context().addCookies(parsed.cookies);
                 }
-                console.log(`[setup] Loaded storage state "${storageState.name}": ${parsed.cookies?.length ?? 0} cookies`);
+                // Inject localStorage / sessionStorage per origin.
+                // Playwright's storage_state format requires us to navigate to the origin
+                // before writing — localStorage is same-origin-scoped, so it cannot be set
+                // from about:blank or any other origin.
+                let lsCount = 0;
+                let ssCount = 0;
+                if (parsed.origins?.length) {
+                  for (const origin of parsed.origins) {
+                    const ls = origin.localStorage ?? [];
+                    const ss = origin.sessionStorage ?? [];
+                    if (!ls.length && !ss.length) continue;
+                    try {
+                      await page.goto(origin.origin, { waitUntil: 'domcontentloaded' });
+                    } catch (gotoErr) {
+                      console.warn(
+                        `[setup] Failed to navigate to ${origin.origin} for storage injection: ${
+                          gotoErr instanceof Error ? gotoErr.message : String(gotoErr)
+                        }`
+                      );
+                      continue;
+                    }
+                    if (ls.length) {
+                      await page.evaluate((items) => {
+                        for (const { name, value } of items) {
+                          window.localStorage.setItem(name, value);
+                        }
+                      }, ls);
+                      lsCount += ls.length;
+                    }
+                    if (ss.length) {
+                      await page.evaluate((items) => {
+                        for (const { name, value } of items) {
+                          window.sessionStorage.setItem(name, value);
+                        }
+                      }, ss);
+                      ssCount += ss.length;
+                    }
+                  }
+                }
+                console.log(
+                  `[setup] Loaded storage state "${storageState.name}": ${parsed.cookies?.length ?? 0} cookies, ${lsCount} localStorage, ${ssCount} sessionStorage across ${parsed.origins?.length ?? 0} origin(s)`
+                );
               } else {
                 console.warn(`[setup] Storage state not found: ${step.storageStateId} - skipping`);
               }
