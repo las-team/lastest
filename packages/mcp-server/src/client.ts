@@ -239,7 +239,17 @@ export class LastestClient {
     return this.get(`/api/v1/storage-states/${stateId}${qs}`);
   }
 
-  async createStorageState(repoId: string, data: { name: string; storageStateJson: string }): Promise<unknown> {
+  async createStorageState(
+    repoId: string,
+    data: {
+      name: string;
+      storageStateJson: string;
+      authFlavor?: string | null;
+      tokenLocations?: string[] | null;
+      firebaseApiKey?: string | null;
+      expiresAt?: string | null;
+    },
+  ): Promise<unknown> {
     return this.post(`/api/v1/repos/${repoId}/storage-states`, data);
   }
 

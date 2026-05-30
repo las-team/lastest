@@ -79,9 +79,11 @@ export async function captureSetupForRemoteRunner(
           // URL didn't change
         }
 
-        // Capture storageState
+        // Capture storageState. `indexedDB: true` (Playwright v1.51+) carries
+        // Firebase Auth / Clerk / Supabase-v2 session tokens that previously fell
+        // out of the JSON blob silently — see project_playwright_v151_indexeddb_opt_in.
         try {
-          const state = await page.context().storageState();
+          const state = await page.context().storageState({ indexedDB: true });
           console.log(`[setup-capture] Captured storageState: ${state.cookies.length} cookies, ${state.origins.length} origins`);
           return {
             storageState: JSON.stringify(state),

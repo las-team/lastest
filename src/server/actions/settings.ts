@@ -35,6 +35,8 @@ export async function savePlaywrightSettings(data: {
   networkErrorMode?: string;
   ignoreExternalNetworkErrors?: boolean;
   consoleErrorMode?: string;
+  consoleErrorIgnoreHosts?: string[] | null;
+  userAgentOverride?: string | null;
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
   enableNetworkInterception?: boolean;

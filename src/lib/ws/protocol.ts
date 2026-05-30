@@ -107,6 +107,17 @@ export interface RunTestCommandPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  /** Hostname substrings whose console errors the EB drops BEFORE applying
+   *  consoleErrorMode. Mirrors the post-hoc 3rd-party classifier in
+   *  src/lib/comparison/console-diff.ts; moved upstream so noisy 3rd-party SDKs
+   *  (Cloudflare email-decoder, Sentry CDN, Segment, etc.) don't red customer-app
+   *  demos. The "any in-scope console error = fail" rule is preserved. */
+  consoleErrorIgnoreHosts?: string[];
+  /** When set, override Chromium's default User-Agent on every newContext().
+   *  Pass a current stable Chrome string to bypass HeadlessChrome-based bot
+   *  detection (Cloudflare Turnstile, Clerk, several SaaS edge routers).
+   *  Null/undefined preserves stock Playwright UA. */
+  userAgentOverride?: string;
   /** When true, the EB harvests `window.__urlDiffResult` after the body runs
    *  and returns `a11yViolations`/`a11yPassesCount`/`accessibilityTree` on
    *  the test result. Used by the URL Diff feature. */
@@ -182,6 +193,9 @@ export interface RunSetupCommandPayload {
   // OAuth redirects). Default false preserves the CPU-saving behavior of
   // headless batch runs.
   headed?: boolean;
+  /** Mirror of RunTestCommandPayload.userAgentOverride — must apply to setup too
+   *  so the auth handshake runs with the same UA as the downstream tests. */
+  userAgentOverride?: string;
 }
 
 export interface RunSetupCommand extends BaseMessage {

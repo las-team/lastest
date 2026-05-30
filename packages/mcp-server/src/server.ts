@@ -1263,20 +1263,28 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_create_storage_state ---
   server.tool(
     'lastest_create_storage_state',
-    'Create a new storage state for a repo from a Playwright `storageState()` JSON string. The JSON should be the output of `await context.storageState()` — an object with `cookies` and `origins` arrays. Use this to share a logged-in session across tests instead of re-logging in. Treat the raw JSON like a password: only call this with tokens you intend Lastest to use.',
+    'Create a new storage state for a repo from a Playwright `storageState()` JSON string. The JSON should be the output of `await context.storageState({ indexedDB: true })` (Playwright v1.51+, captures Firebase Auth) or the legacy bare `storageState()` call. Use this to share a logged-in session across tests instead of re-logging in. Treat the raw JSON like a password: only call this with tokens you intend Lastest to use. Optional provenance fields (authFlavor / tokenLocations / firebaseApiKey / expiresAt) let agents pick the right re-auth strategy at re-run time without re-scouting the target.',
     {
       repositoryId: z.string().describe('Repository ID'),
       name: z.string().describe('Display name (e.g. "Admin login (staging)")'),
-      storageStateJson: z.string().describe('Playwright storageState JSON string — `{ "cookies": [...], "origins": [...] }`'),
+      storageStateJson: z.string().describe('Playwright storageState JSON string — `{ "cookies": [...], "origins": [...] }`. Include `indexedDB` per-origin entries when the source app stores tokens there (Firebase Auth, Clerk, Supabase v2).'),
+      authFlavor: z.string().optional().describe('Hint at the auth library so future runs pick the right recapture strategy. Suggested values: firebase | supabase | clerk | next-auth | better-auth | cookie | unknown'),
+      tokenLocations: z.array(z.string()).optional().describe('Where the session token lives. Subset of: cookie | localStorage | sessionStorage | indexedDB. Helps surface captures that are missing a location they should have.'),
+      firebaseApiKey: z.string().optional().describe('When authFlavor=firebase, the project Web API key (public, not a secret) so the documented PW #35302/#35504 IndexedDB workaround can target the right `firebase:authUser:<apiKey>:[DEFAULT]` record.'),
+      expiresAt: z.string().optional().describe('Best-effort capture-validity hint (ISO date string). Lets surfaces flag stale captures before silent expiry. See reference_session_lifetime_by_auth_library for defaults per library.'),
     },
     withActivityReporting(client, 'lastest_create_storage_state', async (params) => {
       const result = (await client.createStorageState(params.repositoryId as string, {
         name: params.name as string,
         storageStateJson: params.storageStateJson as string,
+        authFlavor: (params.authFlavor as string | undefined) ?? null,
+        tokenLocations: (params.tokenLocations as string[] | undefined) ?? null,
+        firebaseApiKey: (params.firebaseApiKey as string | undefined) ?? null,
+        expiresAt: (params.expiresAt as string | undefined) ?? null,
       })) as Record<string, unknown>;
       const response: ToolResponse = {
         status: 'created',
-        summary: `Storage state "${result.name}" created (ID: ${result.id}, cookies: ${result.cookieCount ?? 0}, origins: ${result.originCount ?? 0})`,
+        summary: `Storage state "${result.name}" created (ID: ${result.id}, cookies: ${result.cookieCount ?? 0}, origins: ${result.originCount ?? 0}, indexedDB: ${result.includesIndexedDB ? 'yes' : 'no'})`,
         actionRequired: [
           'Wire it into a test by calling lastest_update_test with setupOverrides.extraSteps = [{ stepType: "storage_state", storageStateId: "<this id>" }]',
         ],

@@ -114,6 +114,8 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     networkErrorMode: 'fail',
     ignoreExternalNetworkErrors: true,
     consoleErrorMode: 'fail',
+    consoleErrorIgnoreHosts: null as string[] | null,
+    userAgentOverride: null as string | null,
     grantClipboardAccess: false,
     acceptDownloads: false,
     enableNetworkInterception: false,

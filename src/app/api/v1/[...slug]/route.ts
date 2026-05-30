@@ -288,6 +288,20 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
     }
     out.customAttributeName = r.customAttributeName;
   }
+  if (r.userAgentOverride !== undefined) {
+    if (r.userAgentOverride !== null && typeof r.userAgentOverride !== 'string') {
+      return { ok: false, error: 'userAgentOverride must be a string or null' };
+    }
+    out.userAgentOverride = r.userAgentOverride === '' ? null : r.userAgentOverride;
+  }
+  if (r.consoleErrorIgnoreHosts !== undefined) {
+    if (r.consoleErrorIgnoreHosts !== null) {
+      if (!Array.isArray(r.consoleErrorIgnoreHosts) || r.consoleErrorIgnoreHosts.some((s) => typeof s !== 'string')) {
+        return { ok: false, error: 'consoleErrorIgnoreHosts must be an array of strings or null' };
+      }
+    }
+    out.consoleErrorIgnoreHosts = r.consoleErrorIgnoreHosts;
+  }
 
   // Numbers (non-negative)
   for (const key of [
@@ -831,7 +845,7 @@ export async function POST(
         return NextResponse.json({ error: 'Not found' }, { status: 404 });
       }
       const body = await request.json();
-      const { name, storageStateJson } = body;
+      const { name, storageStateJson, authFlavor, tokenLocations, firebaseApiKey, expiresAt } = body;
       if (!name || typeof name !== 'string' || !name.trim()) {
         return NextResponse.json({ error: 'name required' }, { status: 400 });
       }
@@ -856,10 +870,35 @@ export async function POST(
       if (parsed.origins !== undefined && !Array.isArray(parsed.origins)) {
         return NextResponse.json({ error: 'storageStateJson.origins must be an array' }, { status: 400 });
       }
+      // Validate optional provenance metadata. Reject malformed values, but
+      // accept absence — backwards-compatible with pre-2026-05-30 callers.
+      if (authFlavor !== undefined && authFlavor !== null && typeof authFlavor !== 'string') {
+        return NextResponse.json({ error: 'authFlavor must be a string' }, { status: 400 });
+      }
+      if (tokenLocations !== undefined && tokenLocations !== null) {
+        if (!Array.isArray(tokenLocations) || tokenLocations.some((s: unknown) => typeof s !== 'string')) {
+          return NextResponse.json({ error: 'tokenLocations must be an array of strings' }, { status: 400 });
+        }
+      }
+      if (firebaseApiKey !== undefined && firebaseApiKey !== null && typeof firebaseApiKey !== 'string') {
+        return NextResponse.json({ error: 'firebaseApiKey must be a string' }, { status: 400 });
+      }
+      let expiresAtDate: Date | null = null;
+      if (expiresAt !== undefined && expiresAt !== null) {
+        const d = new Date(expiresAt as string | number);
+        if (Number.isNaN(d.getTime())) {
+          return NextResponse.json({ error: 'expiresAt must be an ISO date string or epoch ms' }, { status: 400 });
+        }
+        expiresAtDate = d;
+      }
       const created = await queries.createStorageState({
         repositoryId: id,
         name: name.trim(),
         storageStateJson,
+        authFlavor: (authFlavor as string | undefined) ?? null,
+        tokenLocations: (tokenLocations as string[] | undefined) ?? null,
+        firebaseApiKey: (firebaseApiKey as string | undefined) ?? null,
+        expiresAt: expiresAtDate,
       });
       return NextResponse.json(slimStorageState(created), { status: 201 });
     }

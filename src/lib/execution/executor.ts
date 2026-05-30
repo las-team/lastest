@@ -333,6 +333,9 @@ export async function executeSetupViaRunner(
     stabilization: buildStabilizationPayload(playwrightSettings),
     browser,
     headed: headed || undefined,
+    // Apply UA override to the setup context too — auth handshakes are exactly
+    // where Cloudflare Turnstile / Clerk reject HeadlessChrome fingerprints.
+    userAgentOverride: playwrightSettings?.userAgentOverride || undefined,
   });
 
   console.log(`[Executor] Queuing setup command ${command.id.slice(0, 8)} for runner ${runnerId}`);
@@ -677,6 +680,13 @@ async function executeViaRunner(
         networkErrorMode: pwOverrides?.networkErrorMode ?? (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? true,
         enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
+        // Repo-level allowlist for documented 3rd-party noise hosts. Null on the row
+        // means "use the EB default" (DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS); the EB
+        // applies the filter BEFORE the consoleErrorMode fail gate.
+        consoleErrorIgnoreHosts: options.playwrightSettings?.consoleErrorIgnoreHosts ?? undefined,
+        // UA override — when set, EB passes to newContext({ userAgent }) so Chromium
+        // sends a stable Chrome string instead of HeadlessChrome.
+        userAgentOverride: options.playwrightSettings?.userAgentOverride || undefined,
         // Without this, the runner never invokes axe-core even when the user
         // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
         // stay null and the verify A11y tab shows "not captured".

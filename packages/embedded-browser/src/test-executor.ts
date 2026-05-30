@@ -169,6 +169,10 @@ export interface RunSetupPayload {
   stabilization?: StabilizationPayload;
   browser?: string;
   headed?: boolean;
+  /** Stable Chrome UA string to bypass HeadlessChrome bot detection. Applied
+   *  via newContext({ userAgent }) on the setup context. Sourced from
+   *  playwright_settings.userAgentOverride. */
+  userAgentOverride?: string;
 }
 
 export interface RunTestPayload {
@@ -188,6 +192,15 @@ export interface RunTestPayload {
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
+  /** Hostname substrings whose console errors the EB drops BEFORE applying
+   *  consoleErrorMode. Mirrors src/lib/db/schema.ts DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS;
+   *  null/undefined falls back to the in-EB default list (kept in sync).
+   *  "Any in-scope console error = fail" rule is preserved. */
+  consoleErrorIgnoreHosts?: string[];
+  /** Stable Chrome UA string to bypass HeadlessChrome bot detection. Applied
+   *  via newContext({ userAgent }) on every test context. Sourced from
+   *  playwright_settings.userAgentOverride. */
+  userAgentOverride?: string;
   /** When true, after the test body completes the executor reads
    *  `window.__urlDiffResult` and stamps `a11yViolations`/`a11yPassesCount`/
    *  `accessibilityTree` onto the result. Used by the URL Diff feature; the
@@ -402,6 +415,10 @@ export class EmbeddedTestExecutor {
         ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
         ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+        // UA override — bypasses HeadlessChrome-based bot detection (Cloudflare
+        // Turnstile, Clerk, several SaaS edge routers). Sourced from
+        // playwright_settings.userAgentOverride via the executor command.
+        ...(command.userAgentOverride ? { userAgent: command.userAgentOverride } : {}),
       });
     };
     if (persistentSetupId) {
@@ -604,6 +621,33 @@ export class EmbeddedTestExecutor {
       // the test's intent. Keep them out of the failure classification; log as
       // info so they're still traceable.
       const TRANSIENT_NET_CONSOLE_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+      // Third-party host allowlist applied BEFORE the consoleErrorMode fail gate.
+      // Mirrors src/lib/db/schema.ts DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS — kept
+      // in sync at the data layer (executor.ts threads command.consoleErrorIgnoreHosts
+      // from playwright_settings; this fallback covers commands sent before the
+      // setting was added or by older callers). Filter parses the console message's
+      // source URL (msg.location().url) AND the message body for in-line URL
+      // references (Cloudflare's email-decoder error doesn't always carry a stack).
+      const DEFAULT_IGNORE_HOSTS = [
+        'googletagmanager.com', 'google-analytics.com', 'doubleclick.net',
+        'facebook.net', 'fbcdn.net', 'connect.facebook.net',
+        'segment.io', 'segment.com',
+        'mixpanel.com', 'amplitude.com',
+        'hotjar.com', 'fullstory.com', 'logrocket.com',
+        'intercom.io', 'intercomcdn.com',
+        'stripe.com', 'stripe.network',
+        'sentry-cdn.com', 'browser.sentry-cdn.com', 'sentry.io',
+        'cdnjs.cloudflare.com',
+        'email-decode.min.js',
+      ];
+      const ignoreHosts: string[] = Array.isArray(command.consoleErrorIgnoreHosts)
+        ? command.consoleErrorIgnoreHosts
+        : DEFAULT_IGNORE_HOSTS;
+      const matchesIgnoredHost = (text: string, sourceUrl: string): boolean => {
+        if (!ignoreHosts.length) return false;
+        const haystack = `${sourceUrl} ${text}`.toLowerCase();
+        return ignoreHosts.some((host) => host && haystack.includes(host.toLowerCase()));
+      };
       page.on('console', (msg) => {
         const text = msg.text();
         // Log shim messages to container output for debugging
@@ -613,6 +657,11 @@ export class EmbeddedTestExecutor {
         if (msg.type() === 'error') {
           if (TRANSIENT_NET_CONSOLE_RX.test(text)) {
             logFn('info', `Transient network console error (ignored for classification): ${text}`);
+            return;
+          }
+          const sourceUrl = (() => { try { return msg.location()?.url ?? ''; } catch { return ''; } })();
+          if (matchesIgnoredHost(text, sourceUrl)) {
+            logFn('info', `Console error from ignored host (ignored for classification): ${text}`);
             return;
           }
           consoleErrors.push(text);
@@ -1640,6 +1689,10 @@ export class EmbeddedTestExecutor {
       ...(needsStabilizedContext ? { deviceScaleFactor: 1 } : {}),
       ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
       ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      // UA override — auth handshakes are exactly where Cloudflare Turnstile /
+      // Clerk reject HeadlessChrome fingerprints; setup must use the same UA
+      // as the downstream test contexts.
+      ...(command.userAgentOverride ? { userAgent: command.userAgentOverride } : {}),
     });
     const page = await setupContext.newPage();
     // On success, we transfer ownership of setupContext to this.setupContexts
@@ -1821,12 +1874,15 @@ export class EmbeddedTestExecutor {
 
       // Capture storageState snapshot. Used as a fallback: if Chromium
       // disposes the live context's target between tests (observed behavior),
-      // we rebuild a fresh context with these cookies + localStorage instead
-      // of failing the test with "Target has been closed".
+      // we rebuild a fresh context with these cookies + localStorage + IndexedDB
+      // instead of failing the test with "Target has been closed".
+      // `indexedDB: true` (Playwright v1.51+) carries Firebase Auth / Clerk DB /
+      // Supabase-v2 session tokens that previously fell out silently — see
+      // project_playwright_v151_indexeddb_opt_in.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let storageStateSnapshot: any = undefined;
       try {
-        storageStateSnapshot = await setupContext.storageState();
+        storageStateSnapshot = await setupContext.storageState({ indexedDB: true });
         logFn('info', `Captured storageState snapshot: ${storageStateSnapshot.cookies.length} cookies, ${storageStateSnapshot.origins.length} origins`);
       } catch (e) {
         logFn('warn', `Failed to capture storageState snapshot: ${e}`);

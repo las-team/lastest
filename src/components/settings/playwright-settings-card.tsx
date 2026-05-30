@@ -4,6 +4,7 @@ import { useState, useTransition, useEffect, useRef, useCallback, useMemo } from
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -111,6 +112,13 @@ export function PlaywrightSettingsCard({
   const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? true);
   const [consoleErrorMode, setConsoleErrorMode] = useState(settings.consoleErrorMode ?? 'fail');
+  // consoleErrorIgnoreHosts: null on the row → "use the EB default list". Render
+  // as a comma/newline-separated textarea; empty string maps back to null.
+  const [consoleErrorIgnoreHostsRaw, setConsoleErrorIgnoreHostsRaw] = useState<string>(
+    Array.isArray(settings.consoleErrorIgnoreHosts) ? settings.consoleErrorIgnoreHosts.join('\n') : ''
+  );
+  // userAgentOverride: empty string → null (preserve stock Playwright UA).
+  const [userAgentOverride, setUserAgentOverride] = useState<string>(settings.userAgentOverride ?? '');
   const [grantClipboardAccess, setGrantClipboardAccess] = useState(settings.grantClipboardAccess ?? false);
   const [acceptDownloads, setAcceptDownloads] = useState(settings.acceptDownloads ?? false);
   const [enableNetworkInterception, setEnableNetworkInterception] = useState(settings.enableNetworkInterception ?? false);
@@ -151,6 +159,8 @@ export function PlaywrightSettingsCard({
     networkErrorMode: settings.networkErrorMode ?? 'fail',
     ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
     consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+    consoleErrorIgnoreHostsRaw: Array.isArray(settings.consoleErrorIgnoreHosts) ? settings.consoleErrorIgnoreHosts.join('\n') : '',
+    userAgentOverride: settings.userAgentOverride ?? '',
     grantClipboardAccess: settings.grantClipboardAccess ?? false,
     acceptDownloads: settings.acceptDownloads ?? false,
     enableNetworkInterception: settings.enableNetworkInterception ?? false,
@@ -184,6 +194,8 @@ export function PlaywrightSettingsCard({
     setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
     setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? true);
     setConsoleErrorMode(settings.consoleErrorMode ?? 'fail');
+    setConsoleErrorIgnoreHostsRaw(Array.isArray(settings.consoleErrorIgnoreHosts) ? settings.consoleErrorIgnoreHosts.join('\n') : '');
+    setUserAgentOverride(settings.userAgentOverride ?? '');
     setGrantClipboardAccess(settings.grantClipboardAccess ?? false);
     setAcceptDownloads(settings.acceptDownloads ?? false);
     setEnableNetworkInterception(settings.enableNetworkInterception ?? false);
@@ -214,6 +226,8 @@ export function PlaywrightSettingsCard({
       networkErrorMode: settings.networkErrorMode ?? 'fail',
       ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
       consoleErrorMode: settings.consoleErrorMode ?? 'fail',
+      consoleErrorIgnoreHostsRaw: Array.isArray(settings.consoleErrorIgnoreHosts) ? settings.consoleErrorIgnoreHosts.join('\n') : '',
+      userAgentOverride: settings.userAgentOverride ?? '',
       grantClipboardAccess: settings.grantClipboardAccess ?? false,
       acceptDownloads: settings.acceptDownloads ?? false,
       enableNetworkInterception: settings.enableNetworkInterception ?? false,
@@ -271,6 +285,14 @@ export function PlaywrightSettingsCard({
         networkErrorMode,
         ignoreExternalNetworkErrors,
         consoleErrorMode,
+        // Empty textarea → null on the row (use EB default list).
+        // Non-empty → split on newlines/commas, trim, drop blanks.
+        consoleErrorIgnoreHosts: (() => {
+          const trimmed = consoleErrorIgnoreHostsRaw.trim();
+          if (!trimmed) return null;
+          return trimmed.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+        })(),
+        userAgentOverride: userAgentOverride.trim() || null,
         grantClipboardAccess,
         acceptDownloads,
         enableNetworkInterception,
@@ -288,7 +310,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -313,6 +335,8 @@ export function PlaywrightSettingsCard({
       networkErrorMode !== orig.networkErrorMode ||
       ignoreExternalNetworkErrors !== orig.ignoreExternalNetworkErrors ||
       consoleErrorMode !== orig.consoleErrorMode ||
+      consoleErrorIgnoreHostsRaw !== orig.consoleErrorIgnoreHostsRaw ||
+      userAgentOverride !== orig.userAgentOverride ||
       grantClipboardAccess !== orig.grantClipboardAccess ||
       acceptDownloads !== orig.acceptDownloads ||
       enableNetworkInterception !== orig.enableNetworkInterception ||
@@ -338,7 +362,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -1172,6 +1196,32 @@ export function PlaywrightSettingsCard({
                 <SelectItem value="ignore">Ignore console errors</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Console Error Ignore Hosts</Label>
+            <p className="text-xs text-muted-foreground">
+              Hostname substrings whose console errors are dropped BEFORE the fail gate. Leave blank to use the built-in 3rd-party list (Cloudflare email-decoder, Sentry, Segment, etc.). One per line or comma-separated. The &quot;any in-scope console error = fail&quot; rule still applies.
+            </p>
+            <Textarea
+              value={consoleErrorIgnoreHostsRaw}
+              onChange={(e) => setConsoleErrorIgnoreHostsRaw(e.target.value)}
+              placeholder="email-decode.min.js&#10;sentry-cdn.com&#10;cdn.segment.com"
+              className="font-mono text-xs min-h-[80px]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">User-Agent Override</Label>
+            <p className="text-xs text-muted-foreground">
+              Override Chromium&apos;s default UA on every newContext. Leave blank to use stock Playwright (sends <code>HeadlessChrome</code>, which Cloudflare Turnstile / Clerk reject). Recommended: a current stable Chrome UA string.
+            </p>
+            <Input
+              value={userAgentOverride}
+              onChange={(e) => setUserAgentOverride(e.target.value)}
+              placeholder="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+              className="font-mono text-xs"
+            />
           </div>
         </div>
       </CollapsibleSection>

@@ -466,6 +466,10 @@ export class TestRunner {
           ...(needsStabilizedContext ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
           ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
           ...(videoDir ? { recordVideo: { dir: videoDir, size: viewport } } : {}),
+          // UA override — bypasses HeadlessChrome-based bot detection (Cloudflare
+          // Turnstile, Clerk). Sourced from playwright_settings.userAgentOverride
+          // via the executor command.
+          ...(command.userAgentOverride ? { userAgent: command.userAgentOverride } : {}),
         });
       }
       page = await context.newPage();
@@ -768,6 +772,8 @@ export class TestRunner {
         ...(needsStabilizedSetupCtx ? { deviceScaleFactor: 1 } : {}),
         ...(needsStabilizedSetupCtx ? { locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
         ...(command.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        // UA override applied to setup context too — same reason as the test context.
+        ...(command.userAgentOverride ? { userAgent: command.userAgentOverride } : {}),
       });
       page = await context.newPage();
       page.setDefaultNavigationTimeout(30000);
@@ -832,14 +838,17 @@ export class TestRunner {
         }
       }
 
-      // Capture storageState (cookies/localStorage) for logging + as a fallback marker.
+      // Capture storageState (cookies/localStorage/IndexedDB) for logging + as a fallback marker.
       // The authoritative state carrier is the persistent BrowserContext kept alive below —
-      // storageState alone drops sessionStorage, IndexedDB, service workers, and in-memory
-      // auth tokens, which is why setup-based builds were losing login state across tests.
+      // storageState still drops sessionStorage, service workers, and in-memory auth tokens
+      // (sessionStorage isn't captured at all; see feedback_storagestate_does_not_capture_sessionstorage),
+      // which is why we also keep the live context around for tests in the same run.
+      // The `indexedDB: true` flag (Playwright v1.51+) covers Firebase Auth and similar
+      // IDB-backed session stores.
       let storageState: string | undefined;
       if (context) {
         try {
-          const state = await context.storageState();
+          const state = await context.storageState({ indexedDB: true });
           logFn('info', `Captured storageState snapshot: ${state.cookies.length} cookies, ${state.origins.length} origins`);
         } catch (e) {
           logFn('warn', `Failed to capture storageState snapshot: ${e}`);

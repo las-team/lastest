@@ -65,6 +65,10 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
+  /** Stable Chrome UA string to bypass HeadlessChrome bot detection. Applied
+   *  via newContext({ userAgent }) on the test context. Sourced from
+   *  playwright_settings.userAgentOverride. */
+  userAgentOverride?: string;
   // When true, re-throw TypeError / ReferenceError / SyntaxError from the
   // soft-wrap so broken test bodies fail the run. Driven by the test's
   // `all_steps_executed` Criteria rule (default ON, off only when opted out).
@@ -115,6 +119,9 @@ export interface RunSetupCommandPayload {
   // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
   // the setup page so the user can watch setup execute live.
   headed?: boolean;
+  /** Mirror of RunTestCommandPayload.userAgentOverride — must apply to setup
+   *  too so the auth handshake uses the same UA as the downstream tests. */
+  userAgentOverride?: string;
 }
 
 export interface RunSetupCommand extends BaseMessage {

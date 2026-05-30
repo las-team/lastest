@@ -2436,3 +2436,44 @@ Re-attempted login + post-login walkthroughs for the 11 QA-hiring targets after 
 - nxlog's silent-drop behaviour means the only viable path is Google OAuth via lastestcloud@gmail.com; that path hits Google's 'verify it's you' device gate on first headless OAuth.
 - pocketsuite requires a real US mobile number that can receive SMS — out of scope for the demo automation; only path is to use a TextNow / Burner number tied to a persistent device.
 
+
+## 2026-05-29 — devtanna / LaunchPact
+
+- Source: HN https://news.ycombinator.com/item?id=48305934
+- Site: https://www.launchpact.io
+- Lastest repo: bbb6bd40-9bd9-4d1d-891c-d9506266bdf1 (launchpact-demo)
+- Tests: 621c20e7 (auth setup), fb778bba (app walkthrough)
+- Auth: email+password registered fresh in-test (Date.now stamp), storage_state inlined into Test 2 to replay Supabase session
+- Build: 00ecf2b4-8761-41eb-81c7-306ed25c521a P:1 F:0 changes:0 (re-run after baseline approval, all paired)
+- Share: https://app.lastest.cloud/r/YIHCNJeASDtOaS_UYWxD2w
+- Channel: not sent (batch is shares-only, user reviews before outreach)
+- Sent: no
+- Reply (48h check): n/a
+
+## 2026-05-29 — Anti-Agent (antiagent.io) — Louis (Reddit u/ActivityFun7637)
+
+- Source: Reddit /r/SideProject "Learning for humans in the age of machine learning"
+- Site: https://www.antiagent.io/
+- Lastest repo: b1153156-9ac9-4032-a2f7-ba6bae2a191e (antiagent-demo)
+- Build: f7f23707-c57e-4b26-b5c8-c199ba930e45  passed=1 failed=0 changes=0 (9 screenshots)
+- Share: https://app.lastest.cloud/r/Yr_JkzmlmOj7bKaeD27hpw (test-scoped, video, demo notes attached)
+- Auth path: magic-link (Supabase) -> verified email lastestcloud+antiagentant@gmail.com, captured cookie from MCP browser, baked into test via page.context().addCookies() inline (Lastest storage_state replay bounced to /login on EB pod even with valid cookie)
+- Post-login actions exercised: (1) authed /notebook home, (2) typed real topic into "What do you want to learn?" input, (3) /notebook/review (FSRS spaced-repetition surface), (4) clicked preset topic chip "Preparing for an interview", (5) /notebook/settings
+- Channel: Reddit u/ActivityFun7637 (NOT sent — shares-only batch, user reviewing first)
+- Sent: NO
+- Reply (48h check): —
+echo "logged"
+
+## 2026-05-29 — own.page (Elitza, solo maker)
+
+- Source: ProductHunt (target 8/10 batch, queued by user)
+- Site: https://own.page
+- Lastest repo: 3e3a7a59-8432-4f2b-8045-ae28a07740ca (ownpage-demo)
+- Build: f2b2b8e5-161d-47e5-b962-96aa0240c7bd  passed=1 failed=0 changes=3 elapsed=57s
+- Test: 1acd93fe-ad46-4884-a523-e921a29f25be (own.page — public walkthrough + published page)
+- Share: https://app.lastest.cloud/r/2LWdsH8r1HK0Jr0Z7qUJnw
+- Channel: PH DM (NOT sent — shares-only batch per user instruction)
+- Sent: no
+- Auth path: registered lastestcloud+ownpagempr18khy@gmail.com via MCP + 4-digit code via Gmail MCP; handle lastestmpr18khy published live at own.page/lastestmpr18khy and featured in the share
+- Storage state replay: BLOCKED (Firebase IndexedDB) — public-only walkthrough with live published page as the deliverable proof
+- Reply (48h check): —

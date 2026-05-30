@@ -937,6 +937,25 @@ export interface StabilityMetadata {
 export type RecordingEngine = 'lastest' | 'playwright-inspector';
 export const DEFAULT_RECORDING_ENGINES: RecordingEngine[] = ['lastest', 'playwright-inspector'];
 
+// Hostname substrings whose console errors the EB executor drops BEFORE applying
+// `consoleErrorMode`. Mirrors the post-hoc third-party classifier in
+// src/lib/comparison/console-diff.ts:28 — moved upstream so noisy 3rd-party SDKs
+// don't red customer-app demo runs by default. Per-repo override via
+// playwright_settings.consoleErrorIgnoreHosts.
+export const DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS: string[] = [
+  'googletagmanager.com', 'google-analytics.com', 'doubleclick.net',
+  'facebook.net', 'fbcdn.net', 'connect.facebook.net',
+  'segment.io', 'segment.com',
+  'mixpanel.com', 'amplitude.com',
+  'hotjar.com', 'fullstory.com', 'logrocket.com',
+  'intercom.io', 'intercomcdn.com',
+  'stripe.com', 'stripe.network',
+  'sentry-cdn.com', 'browser.sentry-cdn.com', 'sentry.io',
+  'cdnjs.cloudflare.com',
+  // Cloudflare email-decode script noise — see feedback_lastest_executor_console_error_fail
+  'email-decode.min.js',
+];
+
 // Playwright settings for recording and running tests
 export const playwrightSettings = pgTable('playwright_settings', {
   id: text('id').primaryKey(),
@@ -979,6 +998,16 @@ export const playwrightSettings = pgTable('playwright_settings', {
   networkErrorMode: text('network_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
   ignoreExternalNetworkErrors: boolean('ignore_external_network_errors').default(true), // skip errors from different origins
   consoleErrorMode: text('console_error_mode').default('fail'), // 'fail' | 'warn' | 'ignore'
+  // Hostname substrings whose console errors are dropped BEFORE consoleErrorMode is
+  // evaluated. Seed with DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS so the recurring
+  // Cloudflare email-decoder noise doesn't red customer-app demos by default. The
+  // "any in-scope console error = fail" rule is preserved: only these documented
+  // 3rd-party hostnames are filtered.
+  consoleErrorIgnoreHosts: jsonb('console_error_ignore_hosts').$type<string[]>(),
+  // Override Chromium's default User-Agent on every newContext(). Set to a modern
+  // stable Chrome string to bypass HeadlessChrome-based bot detection (Cloudflare
+  // Turnstile, Clerk, several SaaS edge routers). Null preserves stock Playwright UA.
+  userAgentOverride: text('user_agent_override'),
   grantClipboardAccess: boolean('grant_clipboard_access').default(false), // grant clipboard-read/write permissions
   acceptDownloads: boolean('accept_downloads').default(false), // accept file downloads in tests
   enableNetworkInterception: boolean('enable_network_interception').default(false), // enable page.route() network mocking
@@ -2249,6 +2278,25 @@ export const storageStates = pgTable('storage_states', {
   storageStateJson: text('storage_state_json').notNull(),
   cookieCount: integer('cookie_count').default(0),
   originCount: integer('origin_count').default(0),
+  // Provenance metadata — surfaces capture quality + replay strategy hints.
+  // includesIndexedDB: true when the JSON was produced with `storageState({ indexedDB: true })`
+  // (Playwright v1.51+). Lets the runner decide whether the capture covers Firebase Auth.
+  includesIndexedDB: boolean('includes_indexed_db').default(false),
+  // authFlavor: free-form hint so the agent can pick the right re-auth strategy.
+  // Common values: 'firebase' | 'supabase' | 'clerk' | 'next-auth' | 'better-auth' | 'cookie' | 'unknown'.
+  authFlavor: text('auth_flavor'),
+  // tokenLocations: where the session lives. Array of 'cookie' | 'localStorage' |
+  // 'sessionStorage' | 'indexedDB'. Lets future surfaces flag captures that are
+  // missing a location they should have (e.g. firebase without indexedDB).
+  tokenLocations: jsonb('token_locations').$type<string[]>(),
+  // firebaseApiKey: when authFlavor === 'firebase', stores the project's Web API key
+  // so the documented #35302/#35504 IndexedDB workaround can target the right key in
+  // firebaseLocalStorageDb. Public web-API key, not a secret.
+  firebaseApiKey: text('firebase_api_key'),
+  // expiresAt: best-effort estimate based on the auth library's session TTL.
+  // Surfaces stale captures so the agent recaptures instead of debugging
+  // chain-auth-yielded-unauthenticated as if it were a different bug.
+  expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').$defaultFn(() => new Date()),
   updatedAt: timestamp('updated_at').$defaultFn(() => new Date()),
 }, (table) => ([
