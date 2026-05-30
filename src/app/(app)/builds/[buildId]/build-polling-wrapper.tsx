@@ -8,6 +8,7 @@ import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-clie
 import { ChevronDown, ChevronUp, Tv2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
+import type { BuildA11yViolationRow } from '@/lib/db/queries/builds';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 
@@ -39,6 +40,7 @@ interface BuildPollingWrapperProps {
     criticalCount: number | null;
     totalRulesChecked: number | null;
     trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+    violations?: BuildA11yViolationRow[];
   };
   children?: ReactNode;
 }

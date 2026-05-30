@@ -17,6 +17,7 @@ const LAYER_LABELS: Record<EvidenceLayer, string> = {
   visual: 'Visual',
   dom: 'DOM',
   a11y: 'Accessibility',
+  design: 'Design System',
   network: 'Network',
   console: 'Console',
   url: 'URL Trajectory',

@@ -65,10 +65,10 @@ export function InlineScore({
   if (!snapshot) return null;
 
   const numberColor = active
-    ? 'text-white'
+    ? 'text-primary-foreground'
     : snapshot.blitz
-      ? 'text-[#854D0E]'
-      : 'text-[#1F7B66]';
+      ? 'text-yellow-500'
+      : 'text-primary';
 
   return (
     <span

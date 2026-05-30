@@ -617,7 +617,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
     processedCount++;
 
     // Save test result immediately
@@ -637,6 +637,8 @@ async function runBuildAsync(
       downloads: result.downloads,
       a11yViolations: result.a11yViolations,
       a11yPassesCount: result.a11yPassesCount,
+      designSystemViolations: result.designSystemViolations,
+      designSystemRulesChecked: result.designSystemRulesChecked,
       videoPath: result.videoPath,
       softErrors: result.softErrors,
       assertionResults: result.assertionResults,
@@ -1014,6 +1016,8 @@ async function runBuildAsync(
                 downloads: result.downloads,
                 a11yViolations: result.a11yViolations,
                 a11yPassesCount: result.a11yPassesCount,
+                designSystemViolations: result.designSystemViolations,
+                designSystemRulesChecked: result.designSystemRulesChecked,
                 videoPath: result.videoPath,
                 softErrors: result.softErrors,
                 assertionResults: result.assertionResults,
@@ -1099,12 +1103,14 @@ async function runBuildAsync(
 
     // Aggregate a11y scores across all test results for this build (only if a11y data exists)
     let a11yUpdate: { a11yScore?: number; a11yViolationCount?: number; a11yCriticalCount?: number; a11yTotalRulesChecked?: number } = {};
+    let designSystemUpdate: { designSystemScore?: number; designSystemViolationCount?: number; designSystemCriticalCount?: number; designSystemTotalRulesChecked?: number } = {};
     try {
       const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
-      const testResultsForA11y = await queries.getTestResultsByRun(testRunId);
-      const hasA11yData = testResultsForA11y.some(r => r.a11yViolations != null || r.a11yPassesCount != null);
+      const { aggregateDesignSystemForBuild } = await import('@/lib/design-system/score');
+      const testResultsForRollup = await queries.getTestResultsByRun(testRunId);
+      const hasA11yData = testResultsForRollup.some(r => r.a11yViolations != null || r.a11yPassesCount != null);
       if (hasA11yData) {
-        const a11ySummary = aggregateA11yForBuild(testResultsForA11y);
+        const a11ySummary = aggregateA11yForBuild(testResultsForRollup);
         a11yUpdate = {
           a11yScore: a11ySummary.score,
           a11yViolationCount: a11ySummary.violationCount,
@@ -1112,8 +1118,18 @@ async function runBuildAsync(
           a11yTotalRulesChecked: a11ySummary.totalRulesChecked,
         };
       }
+      const hasDsData = testResultsForRollup.some(r => r.designSystemViolations != null || r.designSystemRulesChecked != null);
+      if (hasDsData) {
+        const dsSummary = aggregateDesignSystemForBuild(testResultsForRollup);
+        designSystemUpdate = {
+          designSystemScore: dsSummary.score,
+          designSystemViolationCount: dsSummary.violationCount,
+          designSystemCriticalCount: dsSummary.criticalCount,
+          designSystemTotalRulesChecked: dsSummary.totalRulesChecked,
+        };
+      }
     } catch {
-      // a11y scoring is best-effort
+      // a11y / design-system scoring is best-effort
     }
 
     await queries.updateBuild(buildId, {
@@ -1125,6 +1141,7 @@ async function runBuildAsync(
       elapsedMs: Date.now() - startTime,
       completedAt: new Date(),
       ...a11yUpdate,
+      ...designSystemUpdate,
     });
     await completeJob(jobId);
 
@@ -1977,6 +1994,68 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
 export async function getBuild(buildId: string) {
   await requireBuildOwnership(buildId);
   return queries.getBuild(buildId);
+}
+
+/**
+ * Per-rule a11y violation drill-in for a build. Aggregates every
+ * captured violation across the build's test results by rule id and
+ * returns one row per rule with severity, WCAG level, occurrence
+ * count, total offending nodes, and a few sample test results
+ * (with a sample selector + failureSummary when present). Auth: the
+ * caller must own the build's repo.
+ */
+export async function getBuildA11yViolations(buildId: string) {
+  await requireBuildOwnership(buildId);
+  return queries.getBuildA11yViolations(buildId);
+}
+
+/**
+ * CSV serialisation of the drill-in rows for the download button on
+ * the build a11y card. One row per (rule × sample test) so reviewers
+ * can pivot in a spreadsheet. Keeps the column set narrow on purpose;
+ * the JSON endpoint is the long-form source.
+ */
+export async function downloadBuildA11yViolationsCsv(buildId: string): Promise<string> {
+  await requireBuildOwnership(buildId);
+  const rows = await queries.getBuildA11yViolations(buildId);
+  const header = [
+    'rule_id',
+    'impact',
+    'wcag_level',
+    'occurrences',
+    'total_nodes',
+    'help_url',
+    'help',
+    'test_name',
+    'area',
+    'sample_selector',
+    'failure_summary',
+  ];
+  const escape = (cell: string | number | undefined | null): string => {
+    if (cell === null || cell === undefined) return '';
+    const s = String(cell);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines: string[] = [header.join(',')];
+  for (const r of rows) {
+    if (r.samples.length === 0) {
+      lines.push([
+        r.id, r.impact, r.wcagLevel ?? '', r.occurrenceCount, r.totalNodes,
+        r.helpUrl, r.help, '', '', '', '',
+      ].map(escape).join(','));
+      continue;
+    }
+    for (const s of r.samples) {
+      lines.push([
+        r.id, r.impact, r.wcagLevel ?? '', r.occurrenceCount, r.totalNodes,
+        r.helpUrl, r.help,
+        s.testName ?? '', s.areaName ?? '',
+        s.sampleNode?.target?.join(' ') ?? '',
+        s.sampleNode?.failureSummary ?? '',
+      ].map(escape).join(','));
+    }
+  }
+  return lines.join('\n') + '\n';
 }
 
 /**

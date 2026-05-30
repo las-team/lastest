@@ -12,7 +12,11 @@ import {
 import type {
   NewBuild,
   BuildStatus,
+  A11yViolation,
+  DesignSystemViolation,
+  DesignTokenCategory,
 } from '../schema';
+import { getWcagLevel } from '@/lib/a11y/wcag-score';
 import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -88,6 +92,10 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       a11yViolationCount: builds.a11yViolationCount,
       a11yCriticalCount: builds.a11yCriticalCount,
       a11yTotalRulesChecked: builds.a11yTotalRulesChecked,
+      designSystemScore: builds.designSystemScore,
+      designSystemViolationCount: builds.designSystemViolationCount,
+      designSystemCriticalCount: builds.designSystemCriticalCount,
+      designSystemTotalRulesChecked: builds.designSystemTotalRulesChecked,
       executorError: builds.executorError,
       executorFailedAt: builds.executorFailedAt,
       manuallyScopedAreaIds: builds.manuallyScopedAreaIds,
@@ -422,4 +430,283 @@ export async function getA11yScoreTrend(repositoryId: string, limit = 10) {
     ;
 
   return repoBuilds.reverse(); // oldest first for charting
+}
+
+// Aggregated per-rule a11y violation row used by the build drill-in UI
+// and the bulk-download endpoint. Groups every violation across the
+// build's test_results by `id` (the axe rule id) so reviewers see one
+// row per rule with the occurrence count, total offending nodes, the
+// severity/WCAG-level/help URL pulled from the first occurrence, and a
+// small set of sample test results that hit the rule (with one sample
+// node each when the harvester captured selectors).
+export interface BuildA11yViolationRow {
+  id: string;
+  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  description: string;
+  help: string;
+  helpUrl: string;
+  wcagLevel?: 'A' | 'AA' | 'AAA';
+  tags: string[];
+  occurrenceCount: number; // # of test_results that hit this rule
+  totalNodes: number;      // sum of `nodes` counts across all occurrences
+  samples: Array<{
+    testResultId: string;
+    testId: string | null;
+    testName: string | null;
+    areaName: string | null;
+    nodes: number;
+    sampleNode?: {
+      target: string[];
+      failureSummary?: string;
+      html?: string;
+    };
+  }>;
+}
+
+const SEVERITY_RANK: Record<string, number> = {
+  critical: 0,
+  serious: 1,
+  moderate: 2,
+  minor: 3,
+};
+
+export async function getBuildA11yViolations(buildId: string): Promise<BuildA11yViolationRow[]> {
+  const [build] = await db
+    .select({ testRunId: builds.testRunId })
+    .from(builds)
+    .where(eq(builds.id, buildId));
+  if (!build?.testRunId) return [];
+
+  const rows = await db
+    .select({
+      testResultId: testResults.id,
+      testId: testResults.testId,
+      a11yViolations: testResults.a11yViolations,
+      testName: tests.name,
+      areaName: functionalAreas.name,
+    })
+    .from(testResults)
+    .leftJoin(tests, eq(testResults.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(eq(testResults.testRunId, build.testRunId));
+
+  const byRule = new Map<string, BuildA11yViolationRow>();
+  for (const r of rows) {
+    const violations = (r.a11yViolations ?? []) as A11yViolation[];
+    if (!Array.isArray(violations) || violations.length === 0) continue;
+    for (const v of violations) {
+      if (!v?.id) continue;
+      let row = byRule.get(v.id);
+      if (!row) {
+        row = {
+          id: v.id,
+          impact: v.impact ?? 'moderate',
+          description: v.description ?? '',
+          help: v.help ?? '',
+          helpUrl: v.helpUrl ?? '',
+          wcagLevel: v.wcagLevel ?? getWcagLevel(v.tags) ?? undefined,
+          tags: Array.isArray(v.tags) ? v.tags : [],
+          occurrenceCount: 0,
+          totalNodes: 0,
+          samples: [],
+        };
+        byRule.set(v.id, row);
+      }
+      row.occurrenceCount += 1;
+      row.totalNodes += typeof v.nodes === 'number' ? v.nodes : 0;
+      if (row.samples.length < 5) {
+        const sampleNode = Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
+          ? v.sampleNodes[0]
+          : undefined;
+        row.samples.push({
+          testResultId: r.testResultId,
+          testId: r.testId ?? null,
+          testName: r.testName ?? null,
+          areaName: r.areaName ?? null,
+          nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+          sampleNode,
+        });
+      }
+    }
+  }
+
+  return Array.from(byRule.values()).sort((a, b) => {
+    const sa = SEVERITY_RANK[a.impact] ?? 9;
+    const sb = SEVERITY_RANK[b.impact] ?? 9;
+    if (sa !== sb) return sa - sb;
+    if (b.occurrenceCount !== a.occurrenceCount) return b.occurrenceCount - a.occurrenceCount;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+// Drill-in view for a single test result — same per-rule shape but bound
+// to one test_results row, so the API and Verify focus pane share one
+// schema. Returns null when the test result has no captured violations
+// (different from "0 rules violated", which returns an empty array).
+export interface TestResultA11yViolationRow {
+  id: string;
+  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  description: string;
+  help: string;
+  helpUrl: string;
+  wcagLevel?: 'A' | 'AA' | 'AAA';
+  tags: string[];
+  nodes: number;
+  sampleNodes: Array<{
+    target: string[];
+    failureSummary?: string;
+    html?: string;
+  }>;
+}
+
+export async function getTestResultA11yViolations(
+  testResultId: string,
+): Promise<TestResultA11yViolationRow[] | null> {
+  const [row] = await db
+    .select({ a11yViolations: testResults.a11yViolations })
+    .from(testResults)
+    .where(eq(testResults.id, testResultId));
+  if (!row) return null;
+  const violations = (row.a11yViolations ?? null) as A11yViolation[] | null;
+  if (violations === null) return null;
+  return violations
+    .filter((v) => v?.id)
+    .map((v) => ({
+      id: v.id,
+      impact: v.impact ?? 'moderate',
+      description: v.description ?? '',
+      help: v.help ?? '',
+      helpUrl: v.helpUrl ?? '',
+      wcagLevel: v.wcagLevel ?? getWcagLevel(v.tags) ?? undefined,
+      tags: Array.isArray(v.tags) ? v.tags : [],
+      nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+      sampleNodes: Array.isArray(v.sampleNodes) ? v.sampleNodes : [],
+    }))
+    .sort((a, b) => {
+      const sa = SEVERITY_RANK[a.impact] ?? 9;
+      const sb = SEVERITY_RANK[b.impact] ?? 9;
+      if (sa !== sb) return sa - sb;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+// ── Design System rollups (mirror of getA11yScoreTrend / getBuildA11yViolations) ──
+
+export async function getDesignSystemScoreTrend(repositoryId: string, limit = 10) {
+  const rows = await db
+    .select({
+      id: builds.id,
+      designSystemScore: builds.designSystemScore,
+      designSystemViolationCount: builds.designSystemViolationCount,
+      designSystemCriticalCount: builds.designSystemCriticalCount,
+      designSystemTotalRulesChecked: builds.designSystemTotalRulesChecked,
+      createdAt: builds.createdAt,
+    })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(and(
+      eq(testRuns.repositoryId, repositoryId),
+      sql`${builds.designSystemScore} IS NOT NULL`,
+    ))
+    .orderBy(desc(builds.createdAt))
+    .limit(limit);
+  return rows.reverse(); // oldest first
+}
+
+/** Build-level drill-in row: one entry per off-token value, with the
+ *  occurrence count and a couple of sample selectors. Mirrors
+ *  BuildA11yViolationRow shape so the UI components can share styling. */
+export interface BuildDesignSystemViolationRow {
+  id: string;
+  category: DesignTokenCategory;
+  property: string;
+  actual: string;
+  expected?: string;
+  expectedName?: string;
+  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  occurrenceCount: number;
+  totalNodes: number;
+  samples: Array<{
+    testResultId: string;
+    testId: string | null;
+    testName: string | null;
+    areaName: string | null;
+    nodes: number;
+    sampleNode?: {
+      target: string[];
+      failureSummary?: string;
+      html?: string;
+    };
+  }>;
+}
+
+export async function getBuildDesignSystemViolations(
+  buildId: string,
+): Promise<BuildDesignSystemViolationRow[]> {
+  const [build] = await db
+    .select({ testRunId: builds.testRunId })
+    .from(builds)
+    .where(eq(builds.id, buildId));
+  if (!build?.testRunId) return [];
+
+  const rows = await db
+    .select({
+      testResultId: testResults.id,
+      testId: testResults.testId,
+      designSystemViolations: testResults.designSystemViolations,
+      testName: tests.name,
+      areaName: functionalAreas.name,
+    })
+    .from(testResults)
+    .leftJoin(tests, eq(testResults.testId, tests.id))
+    .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
+    .where(eq(testResults.testRunId, build.testRunId));
+
+  const byRule = new Map<string, BuildDesignSystemViolationRow>();
+  for (const r of rows) {
+    const violations = (r.designSystemViolations ?? []) as DesignSystemViolation[];
+    if (!Array.isArray(violations) || violations.length === 0) continue;
+    for (const v of violations) {
+      if (!v?.id) continue;
+      let row = byRule.get(v.id);
+      if (!row) {
+        row = {
+          id: v.id,
+          category: v.category,
+          property: v.property,
+          actual: v.actual,
+          expected: v.expected,
+          expectedName: v.expectedName,
+          impact: v.impact ?? 'moderate',
+          occurrenceCount: 0,
+          totalNodes: 0,
+          samples: [],
+        };
+        byRule.set(v.id, row);
+      }
+      row.occurrenceCount += 1;
+      row.totalNodes += typeof v.nodes === 'number' ? v.nodes : 0;
+      if (row.samples.length < 5) {
+        const sampleNode = Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
+          ? v.sampleNodes[0]
+          : undefined;
+        row.samples.push({
+          testResultId: r.testResultId,
+          testId: r.testId ?? null,
+          testName: r.testName ?? null,
+          areaName: r.areaName ?? null,
+          nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+          sampleNode,
+        });
+      }
+    }
+  }
+
+  return Array.from(byRule.values()).sort((a, b) => {
+    const sa = SEVERITY_RANK[a.impact] ?? 9;
+    const sb = SEVERITY_RANK[b.impact] ?? 9;
+    if (sa !== sb) return sa - sb;
+    if (b.totalNodes !== a.totalNodes) return b.totalNodes - a.totalNodes;
+    return a.id.localeCompare(b.id);
+  });
 }

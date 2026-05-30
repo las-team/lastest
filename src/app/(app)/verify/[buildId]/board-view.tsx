@@ -972,6 +972,7 @@ function wasLayerCaptured(layer: EvidenceLayer, result: TestResultLite | null, v
     case 'network': return result?.networkRequests != null;
     case 'console': return result?.consoleErrors != null;
     case 'a11y': return result?.a11yViolations != null || result?.a11yPassesCount != null;
+    case 'design': return result?.designSystemViolations != null || result?.designSystemRulesChecked != null;
     case 'perf': return result?.webVitals != null;
     case 'url': return result?.urlTrajectory != null;
     case 'variable': return result?.extractedVariables != null || result?.assignedVariables != null;

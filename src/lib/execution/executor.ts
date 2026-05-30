@@ -16,6 +16,7 @@ import { createMessage } from '@/lib/ws/protocol';
 import { queueCommandToDB, queueCancelCommandToDB } from '@/app/api/ws/runner/route';
 import { getRecordingViewport } from '@/lib/db/queries';
 import { runnerRegistry } from '@/lib/ws/runner-registry';
+import { mergeDesignSystemConfig, isConfigUsable } from '@/lib/design-system/tokens';
 import { db } from '@/lib/db';
 import { runners, tests as testsTable, backgroundJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -691,6 +692,23 @@ async function executeViaRunner(
         // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
         // stay null and the verify A11y tab shows "not captured".
         enableA11y: options.playwrightSettings?.enableA11y ?? false,
+        // Design-system token compliance — merge repo-level config with
+        // per-test overrides. The EB only runs the harvester when the
+        // toggle is on AND the merged token set has at least one allowed
+        // value (parity with the a11y opt-in shape).
+        designSystem: (() => {
+          if (!options.playwrightSettings?.enableDesignSystem) return undefined;
+          const effective = mergeDesignSystemConfig(
+            options.playwrightSettings?.designSystem ?? null,
+            test.designSystemOverrides ?? null,
+          );
+          if (!effective || !isConfigUsable(effective) || effective.enabled === false) return undefined;
+          return {
+            tokens: effective.tokens,
+            ignoredCategories: effective.ignoredCategories,
+            maxViolationsPerScreenshot: effective.maxViolationsPerScreenshot,
+          };
+        })(),
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -916,6 +934,15 @@ async function executeViaRunner(
           : undefined,
         a11yPassesCount: typeof payload.a11yPassesCount === 'number'
           ? payload.a11yPassesCount
+          : undefined,
+        // Same forwarding pattern as a11y — EB ships violations + rules-checked
+        // count when the design-system toggle is on; otherwise both stay
+        // undefined and the verify Design pane classifies the layer absent.
+        designSystemViolations: Array.isArray(payload.designSystemViolations)
+          ? payload.designSystemViolations as import('@/lib/db/schema').DesignSystemViolation[]
+          : undefined,
+        designSystemRulesChecked: typeof payload.designSystemRulesChecked === 'number'
+          ? payload.designSystemRulesChecked
           : undefined,
         urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
           ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]

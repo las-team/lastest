@@ -112,6 +112,8 @@ export async function GET(
     networkRequests: r.networkRequests,
     a11yViolations: r.a11yViolations,
     a11yPassesCount: r.a11yPassesCount,
+    designSystemViolations: r.designSystemViolations,
+    designSystemRulesChecked: r.designSystemRulesChecked,
     urlTrajectory: r.urlTrajectory,
     webVitals: r.webVitals,
     extractedVariables: r.extractedVariables,

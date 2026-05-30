@@ -15,20 +15,16 @@
   --card-foreground: #1F2A33;
   --popover: #FFFFFF;
   --popover-foreground: #1F2A33;
-  /* Darkened from brand teal #36A88E (L≈0.31) to #1F7B66 (L≈0.155) so
-   * white-on-primary buttons clear AA 4.5:1 (5.12:1) and `text-primary`
-   * links clear AA on the soft #F6F6F4 surface (4.76:1). The brand teal
-   * #36A88E remains available via `--c-teal` / `--color-success` for
-   * accents/charts/states where contrast isn't required. */
-  --primary: #1F7B66;
+  /* Brand teal — anchored to the design system (docs/design/colors_and_type.css).
+   * For UI states that need AA-text contrast on light surfaces, components reach
+   * for the darker `--success` / `--c-teal-text` variants below, NOT the brand
+   * primary. The brand teal stays exact so visual identity matches the kit. */
+  --primary: #36A88E;
   --primary-foreground: #FFFFFF;
   --secondary: #EFEFEC;
   --secondary-foreground: #1F2A33;
   --muted: #F1F1EE;
-  /* Bumped from 0.55→0.72 to clear WCAG AA 4.5:1 on white AND on --muted
-   * (#F1F1EE). At 0.55 the blended color was rgb(133,138,143) → 3.4:1,
-   * which axe-core flagged on every `text-muted-foreground` use. */
-  --muted-foreground: rgba(31, 42, 51, 0.72);
+  --muted-foreground: rgba(31, 42, 51, 0.55);
   --accent: rgba(54, 168, 142, 0.12);
   --accent-foreground: #1F2A33;
   --destructive: #E03E36;
@@ -45,7 +41,7 @@
 
   --sidebar: #F1F1EE;
   --sidebar-foreground: #1F2A33;
-  --sidebar-primary: #1F7B66;
+  --sidebar-primary: #36A88E;
   --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: rgba(31, 42, 51, 0.05);
   --sidebar-accent-foreground: #1F2A33;
@@ -90,10 +86,23 @@
   --action-secondary: var(--c-blue);
   --action-secondary-hover: #2E6594;
   --brand: var(--c-red);
+
+  /* Brand semantic colors — straight from the Lastest design system.
+   * Use for fills, icons, badges, charts, status dots. */
   --success: var(--c-teal);
   --warning: var(--c-amber);
   --info: var(--c-blue);
   --danger: var(--c-red);
+
+  /* Darker text-only variants. Reach for these wherever the brand color
+   * appears as FOREGROUND text on a light surface and must clear WCAG AA
+   * 4.5:1 — chip labels, link-like accents, "primary" CTA labels on tinted
+   * backgrounds. NEVER substitute these for the brand stops on backgrounds,
+   * icons, or charts — that breaks visual identity. */
+  --c-teal-text: #1F7B66;
+  --c-amber-text: #8C5C19;
+  --c-blue-text: #2E5E8C;
+  --c-red-text: #B12F29;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -118,17 +127,12 @@
   --card-foreground: #FFFFFF;
   --popover: #2A3640;
   --popover-foreground: #FFFFFF;
-  /* Brand teal (L≈0.31) stays as `--primary` so `text-primary` clears AA
-   * against the dark surface (4.93:1). White-on-teal fails (2.92:1), so
-   * `--primary-foreground` flips to a near-black (#0A0F12) — clears AA on
-   * the rendered button (>6:1 even after axe's compositing tint). */
   --primary: #36A88E;
-  --primary-foreground: #0A0F12;
+  --primary-foreground: #FFFFFF;
   --secondary: rgba(255, 255, 255, 0.06);
   --secondary-foreground: #FFFFFF;
   --muted: rgba(255, 255, 255, 0.04);
-  /* Match the light-mode bump (0.55→0.78) so dark mode also clears AA. */
-  --muted-foreground: rgba(255, 255, 255, 0.78);
+  --muted-foreground: rgba(255, 255, 255, 0.55);
   --accent: rgba(54, 168, 142, 0.18);
   --accent-foreground: #FFFFFF;
   --destructive: #E03E36;
@@ -145,7 +149,7 @@
   --sidebar: #1F2A33;
   --sidebar-foreground: #FFFFFF;
   --sidebar-primary: #36A88E;
-  --sidebar-primary-foreground: #0A0F12;
+  --sidebar-primary-foreground: #FFFFFF;
   --sidebar-accent: rgba(255, 255, 255, 0.06);
   --sidebar-accent-foreground: #FFFFFF;
   --sidebar-border: rgba(255, 255, 255, 0.10);
@@ -196,11 +200,16 @@
 
   /* Brand semantic colors — usable as Tailwind utilities (`text-success`,
      `bg-warning`, `border-info`, etc.). Use these instead of `text-green-500`
-     / `bg-yellow-500` so palette migrations stay in one place. */
+     / `bg-yellow-500` so palette migrations stay in one place. These resolve
+     to the brand stops (teal/amber/blue/red). For text on a white surface that
+     must clear WCAG AA 4.5:1, use `text-[var(--c-teal-text)]` /
+     `text-[var(--c-amber-text)]` / `text-[var(--c-blue-text)]` /
+     `text-[var(--c-red-text)]` instead — the brand stops stay reserved for
+     fills, icons, charts, badges. */
   --color-brand: var(--c-red);
-  --color-success: var(--c-teal);
-  --color-warning: var(--c-amber);
-  --color-info: var(--c-blue);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-danger: var(--c-red);
   --color-ink: var(--c-ink);
 

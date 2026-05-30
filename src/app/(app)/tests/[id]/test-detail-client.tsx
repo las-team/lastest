@@ -40,6 +40,7 @@ import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/d
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
+import { TestDesignSystemOverrides } from '@/components/settings/test-design-system-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
 import { TestStepsTab } from '@/components/tests/success-criteria-tab';
@@ -112,6 +113,8 @@ interface PlaywrightSettingsForDefaults {
   acceptAnyCertificate?: boolean | null;
   maxParallelTests?: number | null;
   cursorPlaybackSpeed?: number | null;
+  enableDesignSystem?: boolean | null;
+  designSystem?: import('@/lib/db/schema').DesignSystemConfig | null;
 }
 
 interface TestDetailClientProps {
@@ -1268,6 +1271,13 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
               testId={test.id}
               overrides={test.stabilizationOverrides ?? null}
               defaults={stabilizationDefaults ?? DEFAULT_STABILIZATION_SETTINGS}
+            />
+
+            <TestDesignSystemOverrides
+              testId={test.id}
+              overrides={test.designSystemOverrides ?? null}
+              repoDefault={playwrightDefaults?.designSystem ?? null}
+              enabledForRepo={!!playwrightDefaults?.enableDesignSystem}
             />
 
             {earlyAdopterMode && (

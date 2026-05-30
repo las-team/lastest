@@ -7,6 +7,9 @@ import {
   getFunctionalAreasByRepo,
   getTestsByRepo,
   getA11yScoreTrend,
+  getBuildA11yViolations,
+  getDesignSystemScoreTrend,
+  getBuildDesignSystemViolations,
 } from '@/lib/db/queries';
 import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
 import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
@@ -37,12 +40,21 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
   // Heavy data (step_comparisons, layer feedback, visual_diffs, test_results,
   // change-map compute, crashed-build backfill) is deferred to the client's
   // first /verify-status fetch so the page renders the frame instantly.
-  const [areas, tests, branches, changeMap, a11yTrend] = await Promise.all([
+  const [areas, tests, branches, changeMap, a11yTrend, a11yViolations, designSystemTrend, designSystemViolations] = await Promise.all([
     repo ? getFunctionalAreasByRepo(repo.id).catch(() => []) : Promise.resolve([]),
     repo ? getTestsByRepo(repo.id).catch(() => []) : Promise.resolve([]),
     repo ? fetchRepoBranches(repo.id).catch(() => []) : Promise.resolve([]),
     getBuildChangeMap(buildId).catch(() => null),
     repo ? getA11yScoreTrend(repo.id).catch(() => []) : Promise.resolve([]),
+    // Drill-in rows are needed only when the build actually has violations;
+    // an empty array short-circuits the A11yViolationsCard render.
+    (build.a11yViolationCount ?? 0) > 0
+      ? getBuildA11yViolations(buildId).catch(() => [])
+      : Promise.resolve([]),
+    repo ? getDesignSystemScoreTrend(repo.id).catch(() => []) : Promise.resolve([]),
+    (build.designSystemViolationCount ?? 0) > 0
+      ? getBuildDesignSystemViolations(buildId).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   return (
@@ -60,6 +72,9 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
       branches={branches.map((b) => b.name)}
       defaultBranch={repo?.defaultBranch ?? null}
       a11yTrend={a11yTrend}
+      a11yViolations={a11yViolations}
+      designSystemTrend={designSystemTrend}
+      designSystemViolations={designSystemViolations}
     />
   );
 }

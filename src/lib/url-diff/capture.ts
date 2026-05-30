@@ -93,15 +93,24 @@ export function buildSyntheticTestBody(targetUrl: string): string {
     /* axe-core unavailable — leave violations empty so capture still completes */
   }
   const harvest = {
-    violations: (axeResults.violations || []).map((v) => ({
-      id: v.id,
-      impact: v.impact || 'moderate',
-      description: v.description || '',
-      help: v.help || '',
-      helpUrl: v.helpUrl || '',
-      nodes: Array.isArray(v.nodes) ? v.nodes.length : 0,
-      tags: v.tags || [],
-    })),
+    violations: (axeResults.violations || []).map((v) => {
+      const rawNodes = Array.isArray(v.nodes) ? v.nodes : [];
+      const sampleNodes = rawNodes.slice(0, 3).map((n) => ({
+        target: Array.isArray(n && n.target) ? n.target.map(String) : [],
+        failureSummary: typeof (n && n.failureSummary) === 'string' ? n.failureSummary : undefined,
+        html: typeof (n && n.html) === 'string' ? String(n.html).slice(0, 240) : undefined,
+      }));
+      return {
+        id: v.id,
+        impact: v.impact || 'moderate',
+        description: v.description || '',
+        help: v.help || '',
+        helpUrl: v.helpUrl || '',
+        nodes: rawNodes.length,
+        tags: v.tags || [],
+        sampleNodes,
+      };
+    }),
     passes: Array.isArray(axeResults.passes) ? axeResults.passes.length : 0,
     accessibilityTree,
   };

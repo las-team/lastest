@@ -24,8 +24,8 @@ import { SelectorPriorityList } from './selector-priority-list';
 import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction } from '@/server/actions/settings';
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
-import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle } from 'lucide-react';
+import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle, Palette } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -108,6 +108,11 @@ export function PlaywrightSettingsCard({
   const [freezeAnimations, setFreezeAnimations] = useState(settings.freezeAnimations ?? false);
   const [enableVideoRecording, setEnableVideoRecording] = useState(settings.enableVideoRecording ?? false);
   const [enableA11y, setEnableA11y] = useState(settings.enableA11y ?? false);
+  const [enableDesignSystem, setEnableDesignSystem] = useState(settings.enableDesignSystem ?? false);
+  // designSystem itself is read-only here — it's uploaded on the Setup tab.
+  // We keep it in state only so the toggle's helper text can reflect the
+  // current token count and update when the settings prop changes.
+  const [designSystem, setDesignSystem] = useState<DesignSystemConfig | null>(settings.designSystem ?? null);
   const [acceptAnyCertificate, setAcceptAnyCertificate] = useState(settings.acceptAnyCertificate ?? false);
   const [networkErrorMode, setNetworkErrorMode] = useState(settings.networkErrorMode ?? 'fail');
   const [ignoreExternalNetworkErrors, setIgnoreExternalNetworkErrors] = useState(settings.ignoreExternalNetworkErrors ?? true);
@@ -155,6 +160,8 @@ export function PlaywrightSettingsCard({
     freezeAnimations: settings.freezeAnimations ?? false,
     enableVideoRecording: settings.enableVideoRecording ?? false,
     enableA11y: settings.enableA11y ?? false,
+    enableDesignSystem: settings.enableDesignSystem ?? false,
+    designSystem: settings.designSystem ?? null,
     acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
     networkErrorMode: settings.networkErrorMode ?? 'fail',
     ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
@@ -190,6 +197,8 @@ export function PlaywrightSettingsCard({
     setFreezeAnimations(settings.freezeAnimations ?? false);
     setEnableVideoRecording(settings.enableVideoRecording ?? false);
     setEnableA11y(settings.enableA11y ?? false);
+    setEnableDesignSystem(settings.enableDesignSystem ?? false);
+    setDesignSystem(settings.designSystem ?? null);
     setAcceptAnyCertificate(settings.acceptAnyCertificate ?? false);
     setNetworkErrorMode(settings.networkErrorMode ?? 'fail');
     setIgnoreExternalNetworkErrors(settings.ignoreExternalNetworkErrors ?? true);
@@ -222,6 +231,8 @@ export function PlaywrightSettingsCard({
       freezeAnimations: settings.freezeAnimations ?? false,
       enableVideoRecording: settings.enableVideoRecording ?? false,
       enableA11y: settings.enableA11y ?? false,
+      enableDesignSystem: settings.enableDesignSystem ?? false,
+      designSystem: settings.designSystem ?? null,
       acceptAnyCertificate: settings.acceptAnyCertificate ?? false,
       networkErrorMode: settings.networkErrorMode ?? 'fail',
       ignoreExternalNetworkErrors: settings.ignoreExternalNetworkErrors ?? true,
@@ -281,6 +292,8 @@ export function PlaywrightSettingsCard({
         freezeAnimations,
         enableVideoRecording,
         enableA11y,
+        enableDesignSystem,
+        designSystem,
         acceptAnyCertificate,
         networkErrorMode,
         ignoreExternalNetworkErrors,
@@ -310,7 +323,7 @@ export function PlaywrightSettingsCard({
         toast.success('Playwright settings saved');
       }
     });
-  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, compact]);
+  }, [repositoryId, selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, enableDesignSystem, designSystem, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, compact]);
 
   // Auto-save with debounce - only when values differ from original props
   useEffect(() => {
@@ -331,6 +344,8 @@ export function PlaywrightSettingsCard({
       freezeAnimations !== orig.freezeAnimations ||
       enableVideoRecording !== orig.enableVideoRecording ||
       enableA11y !== orig.enableA11y ||
+      enableDesignSystem !== orig.enableDesignSystem ||
+      JSON.stringify(designSystem) !== JSON.stringify(orig.designSystem) ||
       acceptAnyCertificate !== orig.acceptAnyCertificate ||
       networkErrorMode !== orig.networkErrorMode ||
       ignoreExternalNetworkErrors !== orig.ignoreExternalNetworkErrors ||
@@ -362,7 +377,7 @@ export function PlaywrightSettingsCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, doSave]);
+  }, [selectorPriority, browser, viewportWidth, viewportHeight, headlessMode, navigationTimeout, actionTimeout, selectorTimeoutMs, pointerGestures, cursorFPS, cursorPlaybackSpeed, defaultRecordingEngine, freezeAnimations, enableVideoRecording, enableA11y, enableDesignSystem, designSystem, acceptAnyCertificate, networkErrorMode, ignoreExternalNetworkErrors, consoleErrorMode, consoleErrorIgnoreHostsRaw, userAgentOverride, grantClipboardAccess, acceptDownloads, enableNetworkInterception, enableDomDiff, lockViewportToRecording, screenshotDelay, stabilization, browsers, customAttributeName, doSave]);
 
   // Notify parent of save status changes
   useEffect(() => {
@@ -385,6 +400,8 @@ export function PlaywrightSettingsCard({
       setFreezeAnimations(false);
       setEnableVideoRecording(false);
       setEnableA11y(false);
+      setEnableDesignSystem(false);
+      setDesignSystem(null);
       setGrantClipboardAccess(false);
       setAcceptDownloads(false);
       setEnableNetworkInterception(false);
@@ -1084,6 +1101,28 @@ export function PlaywrightSettingsCard({
               </div>
             </div>
             <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
+          </div>
+
+          {/* Design System Checks — toggle only. Token upload lives on
+              the Setup tab → API Configurations section so the file
+              browser stays out of the settings page. */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-muted-foreground" />
+              <div className="space-y-0.5">
+                <Label className="text-sm">Design System Checks</Label>
+                {!compact && (
+                  <p className="text-xs text-muted-foreground">
+                    Compare computed colors, radii, fonts, and spacing against the repo&apos;s token bundle.{' '}
+                    {designSystem
+                      ? <span className="text-foreground/80">{Object.values(designSystem.tokens ?? {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0)} tokens loaded.</span>
+                      : <span className="text-warning-foreground/80">No tokens yet — upload a bundle on the Setup tab.</span>
+                    }
+                  </p>
+                )}
+              </div>
+            </div>
+            <Switch checked={enableDesignSystem} onCheckedChange={setEnableDesignSystem} />
           </div>
 
           {/* Network Capture */}

@@ -45,6 +45,8 @@ import { CodeDiffScanDialog } from '@/components/ai/code-diff-scan-dialog';
 import { createArea, deleteArea, deleteAreaWithContents, moveTestToArea, moveArea, exportAllPlans, updateAreaPlan, updateArea } from '@/server/actions/areas';
 import { deleteTests, restoreTests, permanentlyDeleteTests, getTestDetailData } from '@/server/actions/tests';
 import { ApiConfigList } from '@/components/setup/api-config-list';
+import { DesignSystemBundleUpload } from '@/components/setup/design-system-bundle-upload';
+import type { DesignSystemConfig } from '@/lib/db/schema';
 import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
 import { addDefaultTeardownStep, removeDefaultTeardownStep, reorderDefaultTeardownSteps } from '@/server/actions/teardown-steps';
 import { createPlaceholderTestCase } from '@/server/actions/specs';
@@ -114,6 +116,8 @@ interface DefinitionPageClientProps {
   defaultSetupSteps: SetupStep[];
   defaultTeardownSteps: TeardownStep[];
   storageStates: StorageState[];
+  designSystem: DesignSystemConfig | null;
+  designSystemEnabled: boolean;
 }
 
 // Collect all test IDs recursively from an area subtree
@@ -168,6 +172,8 @@ export function DefinitionPageClient({
   defaultSetupSteps,
   defaultTeardownSteps,
   storageStates,
+  designSystem,
+  designSystemEnabled,
 }: DefinitionPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1664,6 +1670,12 @@ export function DefinitionPageClient({
                       <ApiConfigList
                         repositoryId={repository.id}
                         configs={setupConfigs}
+                      />
+                      <DesignSystemBundleUpload
+                        repositoryId={repository.id}
+                        config={designSystem}
+                        enabled={designSystemEnabled}
+                        repoName={repository.name ?? undefined}
                       />
                     </section>
                   </TabsContent>

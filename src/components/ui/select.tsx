@@ -32,10 +32,31 @@ function SelectTrigger({
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
 }) {
+  // axe-core flags Select triggers with no selected value as "button-name"
+  // violations because the visible text is the placeholder (a `data-placeholder`
+  // attribute, not the accessible name). Default `aria-label` to the child
+  // SelectValue's placeholder so every Select gets a meaningful label out of
+  // the box. Explicit `aria-label`/`aria-labelledby` on the caller wins.
+  const fallbackLabel = (() => {
+    if (props['aria-label'] || props['aria-labelledby']) return undefined
+    let placeholder: string | undefined
+    React.Children.forEach(children, (child) => {
+      if (placeholder) return
+      if (
+        React.isValidElement<{ placeholder?: string }>(child) &&
+        typeof child.props.placeholder === 'string'
+      ) {
+        placeholder = child.props.placeholder
+      }
+    })
+    return placeholder
+  })()
+
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       data-size={size}
+      aria-label={fallbackLabel ?? props['aria-label']}
       className={cn(
         "border-input data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 dark:hover:bg-input/50 flex w-fit items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-9 data-[size=sm]:h-8 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className

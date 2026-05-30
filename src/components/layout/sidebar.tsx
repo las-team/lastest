@@ -159,7 +159,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                   className={cn(
                     'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                     isActive
-                      ? 'bg-[#1F7B66] text-white'
+                      ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-muted'
                   )}
                 >
@@ -183,7 +183,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                     className={cn(
                       'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                       isActive
-                        ? 'bg-[#1F7B66] text-white'
+                        ? 'bg-primary text-primary-foreground'
                         : 'hover:bg-muted'
                     )}
                   >
@@ -209,7 +209,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                     className={cn(
                       'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                       isActive
-                        ? 'bg-[#1F7B66] text-white'
+                        ? 'bg-primary text-primary-foreground'
                         : 'hover:bg-muted'
                     )}
                   >
@@ -220,7 +220,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                         className={cn(
                           'inline-flex items-center justify-center rounded-full text-[10px] font-mono font-semibold leading-none px-1.5 min-w-[18px] h-[18px] ring-1',
                           isActive
-                            ? 'bg-white text-[#1F7B66] ring-white/40'
+                            ? 'bg-white text-primary ring-white/40'
                             // Inactive: amber ("attention" — pending verification),
                             // not red ("destructive" — blocking error).
                             : 'bg-[#E09836] text-white ring-[#E09836]/30',
@@ -236,7 +236,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                         className={cn(
                           'inline-flex items-center justify-center rounded-full leading-none w-[18px] h-[18px] ring-1',
                           isActive
-                            ? 'bg-white text-[#1F7B66] ring-white/40'
+                            ? 'bg-white text-primary ring-white/40'
                             : 'bg-[#3674A8] text-white ring-[#3674A8]/30',
                         )}
                         aria-label="Newer commit on this branch hasn't been verified yet"
@@ -265,7 +265,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
                       className={cn(
                         'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                         isActive
-                          ? 'bg-[#1F7B66] text-white'
+                          ? 'bg-primary text-primary-foreground'
                           : 'hover:bg-muted'
                       )}
                     >
@@ -288,7 +288,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
           className={cn(
             'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
             pathname === '/settings' || pathname.startsWith('/settings')
-              ? 'bg-[#1F7B66] text-white'
+              ? 'bg-primary text-primary-foreground'
               : 'hover:bg-muted'
           )}
         >

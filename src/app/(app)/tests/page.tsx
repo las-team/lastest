@@ -9,6 +9,7 @@ import {
   getEnvironmentConfig,
   getDeletedTests,
   getRepositoriesByTeam,
+  getPlaywrightSettings,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
@@ -46,6 +47,7 @@ export default async function DefinitionPage() {
     defaultSetupSteps,
     defaultTeardownSteps,
     storageStates,
+    playwrightSettings,
   ] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
@@ -59,6 +61,7 @@ export default async function DefinitionPage() {
     getDefaultSetupSteps(selectedRepo.id),
     getDefaultTeardownSteps(selectedRepo.id),
     listStorageStates(selectedRepo.id),
+    getPlaywrightSettings(selectedRepo.id),
   ]);
 
   const uncategorizedTests = tests
@@ -88,6 +91,8 @@ export default async function DefinitionPage() {
         defaultSetupSteps={defaultSetupSteps}
         defaultTeardownSteps={defaultTeardownSteps}
         storageStates={storageStates}
+        designSystem={playwrightSettings?.designSystem ?? null}
+        designSystemEnabled={!!playwrightSettings?.enableDesignSystem}
       />
     </div>
   );

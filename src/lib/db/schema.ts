@@ -266,6 +266,10 @@ export const tests = pgTable('tests', {
   viewportOverride: jsonb('viewport_override').$type<{ width: number; height: number }>(),
   diffOverrides: jsonb('diff_overrides').$type<TestDiffOverrides>(),
   playwrightOverrides: jsonb('playwright_overrides').$type<TestPlaywrightOverrides>(),
+  // Per-test design-system overrides. When null, falls back to the repo-level
+  // playwright_settings.designSystem config. Same merge semantics as the
+  // other overrides — the EB receives the effective merged token set.
+  designSystemOverrides: jsonb('design_system_overrides').$type<Partial<DesignSystemConfig>>(),
   assertions: jsonb('assertions').$type<TestAssertion[]>(),
   // Per-step pass/fail rules. Evaluated post-execution by evaluateStepCriteria.
   stepCriteria: jsonb('step_criteria').$type<StepCriterion[]>(),
@@ -309,7 +313,17 @@ export interface CapturedScreenshot {
   label?: string;
 }
 
-// Accessibility violation from axe-core
+// Accessibility violation from axe-core.
+// `nodes` is a count (preserved for back-compat with the wcag-score severity ×
+// min(nodes, 3) formula). `sampleNodes` carries up to a handful of the actual
+// offending nodes from axe so the build/test drill-in UI can surface a real
+// selector + failureSummary alongside each rule — the previous shape stored
+// only the count and lost the per-node context.
+export interface A11yViolationSampleNode {
+  target: string[];
+  failureSummary?: string;
+  html?: string;
+}
 export interface A11yViolation {
   id: string;
   impact: 'critical' | 'serious' | 'moderate' | 'minor';
@@ -319,6 +333,134 @@ export interface A11yViolation {
   nodes: number;
   tags?: string[];
   wcagLevel?: 'A' | 'AA' | 'AAA';
+  sampleNodes?: A11yViolationSampleNode[];
+}
+
+// ── Design System tokens / violations ────────────────────────────────────
+// A test/repo can declare a "design system" — a closed set of allowed
+// values for color, border-radius, font-family, font-size, and spacing
+// (margin/padding). During each test the EB walks the live DOM at
+// screenshot time, samples computed styles per visible element, and the
+// host marks any computed value not present in the allowed set as a
+// violation. Same flow as a11y: per-test_result violations roll up into a
+// build-level design_system_score (0-100), drill-in shows occurrence count
+// and a sample selector for each off-token value.
+export type DesignTokenCategory =
+  | 'color'           // any color computed property (color, background-color, border-color, fill, stroke)
+  | 'border-radius'   // border-*-radius
+  | 'font-family'     // font-family (first family in stack)
+  | 'font-size'       // font-size (px)
+  | 'spacing';        // margin-*, padding-*, gap (px)
+
+export interface DesignSystemConfig {
+  /** When false, the layer is opt-out for this test even if the repo
+   *  toggle is on. Repo-level config has no `enabled` (the toggle on
+   *  playwright_settings.enableDesignSystem governs that). */
+  enabled?: boolean;
+  /** Allowed CSS values per category. Values are stored normalized
+   *  (lowercase hex, px ints). Token NAMES (`--c-red`) can be supplied as
+   *  keys so the violation card surfaces a friendly label, but the raw
+   *  resolved value is what the comparator matches against. */
+  tokens: Partial<Record<DesignTokenCategory, DesignToken[]>>;
+  /** Hide a class of violations entirely. Useful when a repo controls
+   *  color tokens centrally but vendor 3rd-parties bring their own. */
+  ignoredCategories?: DesignTokenCategory[];
+  /** Per-screenshot cap on collected violations. Defaults to 200 to keep
+   *  test_results.design_system_violations sane in JSONB. */
+  maxViolationsPerScreenshot?: number;
+  /** Display-only grouping the parser builds when ingesting a CSS file.
+   *  The matcher in the EB never reads this — it exists solely to render
+   *  the Claude-Design-style preview card on the Setup tab. */
+  groups?: DesignSystemGroups;
+  /** Bundle metadata captured at upload time. Used by the preview to
+   *  show the bundle title, source files, and asset filenames. */
+  meta?: DesignSystemMeta;
+}
+
+export interface DesignToken {
+  /** Display name — typically the CSS custom property (`--c-red`) or a
+   *  human label ("Brand Red"). Used in violation messages. */
+  name: string;
+  /** Resolved value — normalized: hex for colors ("#e03e36"), int+"px"
+   *  for radii/sizes/spacing, lowercase family name for font. */
+  value: string;
+}
+
+/** A token with a display role and the value it resolves to (after
+ *  `var()` chasing). Used in the Setup preview to show "BRAND · Red ·
+ *  #E03E36" tiles instead of just raw token names. */
+export interface DesignRoleToken {
+  /** Token name in CSS (`--c-red`). */
+  name: string;
+  /** Resolved literal value (hex / px / family). */
+  value: string;
+  /** Optional uppercase eyebrow label ("BRAND", "ACTION", "ACCENT") that
+   *  the preview puts on the tile. Inferred from the token name by the
+   *  parser. */
+  role?: string;
+  /** Optional human label ("Red", "Steel Blue") for the tile. Defaults
+   *  to a Title-Cased version of the name suffix. */
+  label?: string;
+}
+
+export interface DesignSystemGroups {
+  brandPalette?: DesignRoleToken[];
+  surfaces?: DesignRoleToken[];
+  inkScale?: DesignRoleToken[];
+  semantic?: DesignRoleToken[];
+  radii?: DesignRoleToken[];
+  spacing?: DesignRoleToken[];
+  typeScale?: DesignRoleToken[];
+  fonts?: DesignRoleToken[];
+}
+
+export interface DesignSystemMeta {
+  /** Title pulled from the bundle README (first H1). */
+  title?: string;
+  /** First paragraph after the H1 in the README. */
+  description?: string;
+  /** All file paths the upload action ingested (CSS + README + assets). */
+  files?: string[];
+  /** Asset filenames (svg / png / woff / woff2) found in the archive.
+   *  Used by the preview's "Missing brand fonts" detection. */
+  assets?: string[];
+  /** When set, the bundle carried `.woff` / `.woff2` files — no font
+   *  warning needed. */
+  hasFontFiles?: boolean;
+}
+
+export interface DesignSystemViolation {
+  /** Stable id used for rule grouping in the violations card.
+   *  Format: `${category}:${normalizedValue}` so the same rogue value
+   *  on N elements collapses into one row. */
+  id: string;
+  category: DesignTokenCategory;
+  /** CSS property the value was sampled from (e.g. "background-color",
+   *  "border-radius", "padding-left"). */
+  property: string;
+  /** Normalized off-token value the comparator saw on the page. */
+  actual: string;
+  /** Nearest allowed value, when the comparator can suggest one.
+   *  For colors this is the closest token in ΔE; for sizes/spacing the
+   *  closest absolute value. */
+  expected?: string;
+  /** Display label for `expected` (the token name). */
+  expectedName?: string;
+  /** "critical" used by the score formula for color/font-family (brand
+   *  identity); "moderate" for radii; "minor" for spacing. */
+  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  /** Count of DOM nodes that hit this rule on this screenshot. */
+  nodes: number;
+  /** Up to N sample selectors + the offending element snippets. */
+  sampleNodes?: A11yViolationSampleNode[];
+}
+
+export interface DesignSystemScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
 // Success criteria / assertion tracking
@@ -489,6 +631,11 @@ export const testResults = pgTable('test_results', {
   networkRequests: jsonb('network_requests').$type<NetworkRequest[]>(),
   downloads: jsonb('downloads').$type<DownloadRecord[]>(),
   a11yViolations: jsonb('a11y_violations').$type<A11yViolation[]>(),
+  // Off-token CSS values captured by the design-system harvester. Same
+  // surface model as a11y: collected per-screenshot, aggregated to a
+  // build-level score (designSystemScore) and drill-in row set.
+  designSystemViolations: jsonb('design_system_violations').$type<DesignSystemViolation[]>(),
+  designSystemRulesChecked: integer('design_system_rules_checked'),
   // EB-side test executor log lines (info/warn/error from runner-client + test-executor).
   // Populated for embedded-browser runs; null for legacy/local. Lets us inspect
   // [Nav]/[Shot] probe lines post-hoc when an EB pod is already GC'd.
@@ -640,6 +787,10 @@ export const builds = pgTable('builds', {
   a11yViolationCount: integer('a11y_violation_count'),
   a11yCriticalCount: integer('a11y_critical_count'),
   a11yTotalRulesChecked: integer('a11y_total_rules_checked'),
+  designSystemScore: integer('design_system_score'),
+  designSystemViolationCount: integer('design_system_violation_count'),
+  designSystemCriticalCount: integer('design_system_critical_count'),
+  designSystemTotalRulesChecked: integer('design_system_total_rules_checked'),
   comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
   comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
   comparisonMeta: jsonb('comparison_meta').$type<{
@@ -814,6 +965,7 @@ export type VisualDiffWithTestStatus = VisualDiff & {
   stepLabel?: string | null;
   errorMessage?: string | null;
   a11yViolations?: A11yViolation[] | null;
+  designSystemViolations?: DesignSystemViolation[] | null;
   consoleErrors?: string[] | null;
   networkRequests?: NetworkRequest[] | null;
   browser?: string | null;
@@ -1015,6 +1167,11 @@ export const playwrightSettings = pgTable('playwright_settings', {
   browsers: jsonb('browsers').$type<string[]>().default(['chromium']), // browsers to use for build execution
   autoRetryCount: integer('auto_retry_count').default(0), // 0-3: how many times to retry a failing test to detect flakiness
   enableA11y: boolean('enable_a11y').default(false), // enable WCAG accessibility checks with axe-core
+  enableDesignSystem: boolean('enable_design_system').default(false), // enable design-token compliance checks (colors / radii / font-family)
+  // Repo-level allowed-tokens set. Tests can override per-test via
+  // tests.designSystemOverrides. Empty / null disables the layer even when
+  // the enableDesignSystem toggle is on.
+  designSystem: jsonb('design_system').$type<DesignSystemConfig>(),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -2608,6 +2765,7 @@ export type EvidenceLayer =
   | 'visual'
   | 'dom'
   | 'a11y'
+  | 'design'
   | 'network'
   | 'console'
   | 'url'
@@ -2675,6 +2833,12 @@ export interface A11yDiffSummary {
   newBySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
+export interface DesignSystemDiffSummary {
+  newViolations: DesignSystemViolation[];
+  disappeared: DesignSystemViolation[];
+  newBySeverity: { critical: number; serious: number; moderate: number; minor: number };
+}
+
 export interface PerfDiffSummary {
   /** Per-step deltas for each metric (current minus baseline). */
   deltas: Array<{
@@ -2710,6 +2874,7 @@ export interface StepComparisonEvidence {
   visual?: { pixelDifference: number; percentageDifference: string | null; diffId?: string };
   dom?: DomDiffResult;
   a11y?: A11yDiffSummary;
+  designSystem?: DesignSystemDiffSummary;
   network?: NetworkDiffSummary;
   consoleDiff?: ConsoleDiffSummary;
   url?: UrlTrajectoryDiffSummary;

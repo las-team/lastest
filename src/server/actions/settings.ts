@@ -2,7 +2,7 @@
 
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import type { SelectorConfig, RecordingEngine, StabilizationSettings } from '@/lib/db/schema';
+import type { SelectorConfig, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
 import { revalidatePath } from 'next/cache';
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
@@ -28,6 +28,8 @@ export async function savePlaywrightSettings(data: {
   freezeAnimations?: boolean;
   enableVideoRecording?: boolean;
   enableA11y?: boolean;
+  enableDesignSystem?: boolean;
+  designSystem?: DesignSystemConfig | null;
   screenshotDelay?: number;
   maxParallelTests?: number;
   stabilization?: StabilizationSettings;

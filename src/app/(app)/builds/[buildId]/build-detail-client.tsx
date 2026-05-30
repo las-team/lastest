@@ -6,6 +6,8 @@ import { AlertTriangle, CheckCircle, XCircle, ListTodo, ExternalLink, XIcon, Spa
 import type { AIDiffAnalysis, VisualDiffWithTestStatus } from '@/lib/db/schema';
 import { MetricsRow } from '@/components/dashboard/metrics-row';
 import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
+import { A11yViolationsCard } from '@/components/builds/a11y-violations-card';
+import type { BuildA11yViolationRow } from '@/lib/db/queries/builds';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -125,6 +127,7 @@ export interface BuildDetailClientProps {
     criticalCount: number | null;
     totalRulesChecked: number | null;
     trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+    violations?: BuildA11yViolationRow[];
   };
   hasPendingDiffs: boolean;
   isRunning?: boolean;
@@ -356,6 +359,9 @@ export function BuildDetailClient({
           totalRulesChecked={a11y.totalRulesChecked}
           trend={a11y.trend}
         />
+      )}
+      {a11y?.violations && a11y.violations.length > 0 && (
+        <A11yViolationsCard buildId={buildId} rows={a11y.violations} />
       )}
 
       {/* Tests for Review Section */}

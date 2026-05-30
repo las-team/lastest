@@ -123,6 +123,8 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     browsers: ['chromium'] as string[],
     autoRetryCount: 0,
     enableA11y: false,
+    enableDesignSystem: false,
+    designSystem: null,
     createdAt: null,
     updatedAt: null,
   };

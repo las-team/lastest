@@ -78,6 +78,8 @@ export interface TestResultLite {
   networkRequests: import('@/lib/db/schema').NetworkRequest[] | null;
   a11yViolations: import('@/lib/db/schema').A11yViolation[] | null;
   a11yPassesCount: number | null;
+  designSystemViolations: import('@/lib/db/schema').DesignSystemViolation[] | null;
+  designSystemRulesChecked: number | null;
   urlTrajectory: import('@/lib/db/schema').UrlTrajectoryStep[] | null;
   webVitals: import('@/lib/db/schema').WebVitalsSample[] | null;
   extractedVariables: Record<string, string> | null;
@@ -117,6 +119,16 @@ interface BoardFocusClientProps {
    *  Recent-trend sparkline inside the focus view's A11y pane. Mirrors the
    *  data shape consumed by `<A11yComplianceCard>` on the build detail page. */
   a11yTrend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  /** Per-rule drill-in feeding `<A11yViolationsCard>` inside the focus A11y
+   *  pane. Server-fetched once with the page so the pane can render without
+   *  a client-side waterfall. Empty when the build has no violations. */
+  a11yViolations: import('@/lib/db/queries/builds').BuildA11yViolationRow[];
+  /** Per-repo design-system score history. Used to render the Recent-trend
+   *  sparkline inside the focus view's Design pane. */
+  designSystemTrend: Array<{ id: string; designSystemScore: number | null; createdAt: Date | null }>;
+  /** Per-off-token-rule drill-in feeding `<DesignSystemViolationsCard>`
+   *  inside the focus Design pane. */
+  designSystemViolations: import('@/lib/db/queries/builds').BuildDesignSystemViolationRow[];
 }
 
 type Mode = 'board' | 'focus';
@@ -885,6 +897,15 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             criticalCount: props.build.a11yCriticalCount,
             totalRulesChecked: props.build.a11yTotalRulesChecked,
             trend: props.a11yTrend,
+            violations: props.a11yViolations,
+          }}
+          buildDesignSystem={{
+            score: props.build.designSystemScore,
+            violationCount: props.build.designSystemViolationCount,
+            criticalCount: props.build.designSystemCriticalCount,
+            totalRulesChecked: props.build.designSystemTotalRulesChecked,
+            trend: props.designSystemTrend,
+            violations: props.designSystemViolations,
           }}
         />
       )}

@@ -21,8 +21,7 @@
   --c-white: var(--card);
   --fg-1: var(--foreground);
   --fg-2: var(--muted-foreground);
-  /* Bumped 0.55→0.7 so labels & captions hit WCAG AA 4.5:1 on white. */
-  --fg-3: rgba(31, 42, 51, 0.7);
+  --fg-3: rgba(31, 42, 51, 0.55);
   --border-strong: rgba(31, 42, 51, 0.16);
   --r-md: 8px;
   --r-pill: 999px;
@@ -75,7 +74,7 @@
 .verify-page .v-chip.regression {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
-  color: var(--c-red-text);
+  color: var(--c-red);
 }
 .verify-page .v-chip.regression .dot { background: var(--c-red); }
 .verify-page .v-chip.done {
@@ -125,14 +124,12 @@
 }
 .verify-page .v-btn:hover { background: var(--c-soft); }
 .verify-page .v-btn.primary {
-  /* Reserved for the single page-level primary CTA (the Run button).
-   * Uses the deeper text-teal as the surface so white labels stay above
-   * AA 4.5:1 — the base brand teal is too light for white text. */
-  background: var(--c-teal-text);
+  /* Reserved for the single page-level primary CTA (the Run button). */
+  background: var(--c-teal);
   border-color: transparent;
   color: white;
 }
-.verify-page .v-btn.primary:hover { background: #155F4F; }
+.verify-page .v-btn.primary:hover { background: #2E957D; }
 .verify-page .v-btn.success {
   /* Approve / "yes this is intended" — tinted, not solid, so it doesn't
      compete with the page-level primary. */
@@ -144,7 +141,7 @@
 .verify-page .v-btn.danger {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
-  color: var(--c-red-text);
+  color: var(--c-red);
 }
 .verify-page .v-btn.warning {
   background: color-mix(in oklab, var(--c-amber) 10%, white);

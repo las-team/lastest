@@ -22,7 +22,7 @@ export function CookieNotice() {
       containerClasses="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t bg-background/95 px-4 py-3 text-sm text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
       contentClasses="flex-1"
       buttonWrapperClasses="flex shrink-0 items-center"
-      buttonClasses="inline-flex h-9 items-center justify-center rounded-md bg-[#1F7B66] px-4 text-sm font-medium text-white transition hover:bg-[#155F4F]"
+      buttonClasses="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
     >
       We only use cookies that are strictly necessary to keep you signed in and
       secure. No tracking or advertising cookies. See our{' '}

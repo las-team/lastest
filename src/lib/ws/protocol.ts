@@ -122,6 +122,14 @@ export interface RunTestCommandPayload {
    *  and returns `a11yViolations`/`a11yPassesCount`/`accessibilityTree` on
    *  the test result. Used by the URL Diff feature. */
   enableA11y?: boolean;
+  /** Design-system token config. When `tokens` is non-empty the EB walks
+   *  the live DOM after the test body and returns `designSystemViolations`
+   *  + `designSystemRulesChecked` on the test result. */
+  designSystem?: {
+    tokens: Partial<Record<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing', Array<{ name: string; value: string }>>>;
+    ignoredCategories?: Array<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing'>;
+    maxViolationsPerScreenshot?: number;
+  };
   // Extract-mode TestVariables — runner reads these page fields after the test body runs.
   extractVariables?: Array<{
     name: string;

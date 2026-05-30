@@ -43,6 +43,10 @@ import {
 } from '@/components/diff/slider-comparison';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
+import { A11yViolationsCard } from '@/components/builds/a11y-violations-card';
+import { DesignSystemComplianceCard } from '@/components/builds/design-system-compliance-card';
+import { DesignSystemViolationsCard } from '@/components/builds/design-system-violations-card';
+import type { BuildA11yViolationRow, BuildDesignSystemViolationRow } from '@/lib/db/queries/builds';
 import type {
   StepComparison,
   StepLayerFeedback,
@@ -94,12 +98,21 @@ interface FocusViewProps {
   /** Build-level WCAG 2.2 AA roll-up + repo trend, rendered at the top of
    *  the A11y pane so reviewers see the same compliance card they get on
    *  the build detail page without leaving Verify. */
+  buildDesignSystem?: {
+    score: number | null;
+    violationCount: number | null;
+    criticalCount: number | null;
+    totalRulesChecked: number | null;
+    trend: Array<{ id: string; designSystemScore: number | null; createdAt: Date | null }>;
+    violations?: BuildDesignSystemViolationRow[];
+  };
   buildA11y?: {
     score: number | null;
     violationCount: number | null;
     criticalCount: number | null;
     totalRulesChecked: number | null;
     trend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+    violations?: BuildA11yViolationRow[];
   };
 }
 
@@ -113,6 +126,7 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: 'network',  name: 'Network' },
   { id: 'console',  name: 'Console' },
   { id: 'a11y',     name: 'A11y' },
+  { id: 'design',   name: 'Design' },
   { id: 'perf',     name: 'Perf' },
   { id: 'url',      name: 'URL' },
   { id: 'variable', name: 'Variables' },
@@ -163,6 +177,12 @@ function classifyLayer(
     case 'a11y':
       // A11y requires the enableA11y toggle, so null/null means *not* run.
       return result?.a11yViolations != null || result?.a11yPassesCount != null ? 'clean' : 'absent';
+    case 'design':
+      // Same opt-in shape as a11y: only marked captured when the EB
+      // harvester ran (violations array or rulesChecked is non-null).
+      return result?.designSystemViolations != null || result?.designSystemRulesChecked != null
+        ? 'clean'
+        : 'absent';
     case 'perf':
       if (!result?.status) return 'absent';
       return 'clean';
@@ -816,6 +836,8 @@ export function FocusView(props: FocusViewProps) {
             activeStepId={activeCase?.step.id ?? null}
             onSelectStep={props.onSelect}
             buildA11y={props.buildA11y}
+            buildDesignSystem={props.buildDesignSystem}
+            buildId={props.buildId}
             regionsCtx={{
               showRegions,
               setShowRegions,
@@ -1245,9 +1267,13 @@ interface ComparePaneProps {
   onSelectStep: (stepId: string) => void;
   /** Build-level a11y roll-up + repo trend forwarded to <A11yPane>. */
   buildA11y?: FocusViewProps['buildA11y'];
+  buildDesignSystem?: FocusViewProps['buildDesignSystem'];
+  /** Build ID forwarded so A11yPane can render <A11yViolationsCard>, which
+   *  hits /api/builds/[buildId]/a11y-violations?format=csv for downloads. */
+  buildId: string;
 }
 
-function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep, buildA11y }: ComparePaneProps) {
+function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep, buildA11y, buildDesignSystem, buildId }: ComparePaneProps) {
   if (!step) {
     return (
       <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
@@ -1286,7 +1312,8 @@ function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runSte
   if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
   if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'console') return <ConsolePane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} buildA11y={buildA11y} />;
+  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} buildA11y={buildA11y} buildId={buildId} />;
+  if (tab === 'design') return <DesignSystemPane step={step} result={result} clean={layerState === 'clean'} buildDesignSystem={buildDesignSystem} buildId={buildId} />;
   if (tab === 'perf') return <PerfPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'url') return <UrlPane step={step} result={result} clean={layerState === 'clean'} />;
   if (tab === 'variable') return <VariablePane step={step} result={result} clean={layerState === 'clean'} />;
@@ -1349,6 +1376,11 @@ function absentHint(layer: CompareTab, testId: string | null, result?: TestResul
     };
     case 'a11y':   return {
       message: 'A11y checks are off. Enable "Accessibility checks (axe-core)" in Playwright settings to see WCAG violations and pass counts.',
+      settingsHref: '/settings?highlight=playwright',
+      settingsLabel: 'Open Playwright settings',
+    };
+    case 'design': return {
+      message: 'Design System checks are off. Enable "Design System checks" in Playwright settings and paste your token CSS to see off-token colors, radii, and fonts here.',
       settingsHref: '/settings?highlight=playwright',
       settingsLabel: 'Open Playwright settings',
     };
@@ -2880,7 +2912,7 @@ function ConsolePane({ step, result, clean }: { step: StepComparison; result: Te
   );
 }
 
-function A11yPane({ step, result, clean, buildA11y }: { step: StepComparison; result: TestResultLite | null; clean: boolean; buildA11y?: FocusViewProps['buildA11y'] }) {
+function A11yPane({ step, result, clean, buildA11y, buildId }: { step: StepComparison; result: TestResultLite | null; clean: boolean; buildA11y?: FocusViewProps['buildA11y']; buildId: string }) {
   const a = step.layers?.a11y;
   const violations = result?.a11yViolations ?? [];
   const passes = result?.a11yPassesCount ?? null;
@@ -2894,6 +2926,9 @@ function A11yPane({ step, result, clean, buildA11y }: { step: StepComparison; re
           totalRulesChecked={buildA11y.totalRulesChecked}
           trend={buildA11y.trend}
         />
+      )}
+      {buildA11y?.violations && buildA11y.violations.length > 0 && (
+        <A11yViolationsCard buildId={buildId} rows={buildA11y.violations} />
       )}
       {clean && <CleanBanner message={`No new a11y issues — ${violations.length} violation${violations.length === 1 ? '' : 's'} captured${passes != null ? `, ${passes} rules passed` : ''}`} />}
       {a && (
@@ -2927,6 +2962,93 @@ function A11yPane({ step, result, clean, buildA11y }: { step: StepComparison; re
               <span className="v-chip" style={{ fontSize: 9 }}>{v.impact}</span>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.description}>{v.id}</span>
               {v.wcagLevel && <span className="v-chip info" style={{ fontSize: 9, justifySelf: 'start' }}>WCAG {v.wcagLevel}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DesignSystemPane({
+  step,
+  result,
+  clean,
+  buildDesignSystem,
+  buildId,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+  buildDesignSystem?: FocusViewProps['buildDesignSystem'];
+  buildId: string;
+}) {
+  const violations = result?.designSystemViolations ?? [];
+  const rules = result?.designSystemRulesChecked ?? null;
+  // step.layers.designSystem follows the same diff-summary shape as a11y
+  // — populated by the verify diff stage when present.
+  const ds = step.layers?.designSystem;
+  return (
+    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {buildDesignSystem && buildDesignSystem.score != null && (
+        <DesignSystemComplianceCard
+          score={buildDesignSystem.score}
+          violationCount={buildDesignSystem.violationCount}
+          criticalCount={buildDesignSystem.criticalCount}
+          totalRulesChecked={buildDesignSystem.totalRulesChecked}
+          trend={buildDesignSystem.trend}
+        />
+      )}
+      {buildDesignSystem?.violations && buildDesignSystem.violations.length > 0 && (
+        <DesignSystemViolationsCard buildId={buildId} rows={buildDesignSystem.violations} />
+      )}
+      {clean && (
+        <CleanBanner
+          message={`No design-system drift — ${violations.length} off-token value${violations.length === 1 ? '' : 's'} captured${rules != null ? `, ${rules} rule checks` : ''}`}
+        />
+      )}
+      {ds && (
+        <>
+          <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+              <span className="label" style={{ fontSize: 10 }}>New off-token values vs baseline</span>
+            </div>
+            {ds.newViolations.length === 0 && (
+              <div style={{ padding: 12 }} className="label">no new off-token values</div>
+            )}
+            {ds.newViolations.map((v, i) => (
+              <div
+                key={i}
+                style={{ display: 'grid', gridTemplateColumns: '60px 70px 1fr 110px', padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}
+              >
+                <span className="v-chip regression" style={{ fontSize: 9 }}>new</span>
+                <span className="v-chip" style={{ fontSize: 9 }}>{v.category}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.property} → {v.actual}</span>
+                <span className="v-chip" style={{ fontSize: 9, justifySelf: 'start' }}>{v.impact}</span>
+              </div>
+            ))}
+          </div>
+          <div className="label" style={{ padding: '0 4px' }}>
+            crit {ds.newBySeverity.critical} · ser {ds.newBySeverity.serious} · mod {ds.newBySeverity.moderate} · min {ds.newBySeverity.minor}
+          </div>
+        </>
+      )}
+      {violations.length > 0 && (
+        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+            <span className="label" style={{ fontSize: 10 }}>Captured violations · {violations.length}{rules != null ? ` · ${rules} rules` : ''}</span>
+          </div>
+          {violations.slice(0, 50).map((v, i) => (
+            <div
+              key={i}
+              style={{ display: 'grid', gridTemplateColumns: '70px 70px 1fr 70px', padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}
+            >
+              <span className="v-chip" style={{ fontSize: 9 }}>{v.impact}</span>
+              <span className="v-chip" style={{ fontSize: 9 }}>{v.category}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${v.property}: ${v.actual}${v.expected ? ' (expected ' + v.expected + ')' : ''}`}>
+                {v.property}: {v.actual}{v.expected ? ` → ${v.expected}` : ''}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>{v.nodes} node{v.nodes === 1 ? '' : 's'}</span>
             </div>
           ))}
         </div>

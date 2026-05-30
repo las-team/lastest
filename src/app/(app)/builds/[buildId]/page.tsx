@@ -63,13 +63,19 @@ export default async function BuildPage({ params }: PageProps) {
 
   const banAiMode = session?.team?.banAiMode ?? false;
 
-  // Fetch a11y compliance data
+  // Fetch a11y compliance data. The score/trend feed A11yComplianceCard;
+  // `violations` is the per-rule drill-in surfaced by A11yViolationsCard
+  // just below it. Both are server-fetched once so the page renders
+  // without a client-side waterfall.
   const a11yData = buildRecord ? {
     score: buildRecord.a11yScore ?? null,
     violationCount: buildRecord.a11yViolationCount ?? null,
     criticalCount: buildRecord.a11yCriticalCount ?? null,
     totalRulesChecked: buildRecord.a11yTotalRulesChecked ?? null,
     trend: selectedRepo ? await queries.getA11yScoreTrend(selectedRepo.id) : [],
+    violations: (buildRecord.a11yViolationCount ?? 0) > 0
+      ? await queries.getBuildA11yViolations(buildId)
+      : [],
   } : undefined;
   const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
   const aiApproveCount = banAiMode ? 0 : build.diffs.filter(

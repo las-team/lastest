@@ -126,6 +126,25 @@ export interface EmbeddedTestResult {
     wcagLevel?: 'A' | 'AA' | 'AAA';
   }>;
   a11yPassesCount?: number;
+  /** Off-token CSS values harvested by walking the live DOM and matching
+   *  computed styles against the configured DesignSystemConfig. Duck-typed
+   *  to mirror `DesignSystemViolation` in src/lib/db/schema.ts. */
+  designSystemViolations?: Array<{
+    id: string;
+    category: 'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing';
+    property: string;
+    actual: string;
+    expected?: string;
+    expectedName?: string;
+    impact: 'critical' | 'serious' | 'moderate' | 'minor';
+    nodes: number;
+    sampleNodes?: Array<{
+      target: string[];
+      failureSummary?: string;
+      html?: string;
+    }>;
+  }>;
+  designSystemRulesChecked?: number;
   /** Playwright `page.accessibility.snapshot()` output, capped at ~512 KB
    *  by the executor. Truncated trees are marked `{ _truncated: true }`. */
   accessibilityTree?: unknown;
@@ -207,6 +226,15 @@ export interface RunTestPayload {
    *  synthetic test body is responsible for running axe-core and assigning
    *  the harvest payload. */
   enableA11y?: boolean;
+  /** Design-system token config. When present (and `tokens` carries at
+   *  least one allowed value), the executor walks the live DOM after the
+   *  test body runs and emits `designSystemViolations[]` for any computed
+   *  CSS value not in the allowed set. Mirrors the a11y flow. */
+  designSystem?: {
+    tokens: Partial<Record<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing', Array<{ name: string; value: string }>>>;
+    ignoredCategories?: Array<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing'>;
+    maxViolationsPerScreenshot?: number;
+  };
   acceptDownloads?: boolean;
   forceVideoRecording?: boolean;
   extractVariables?: Array<{
@@ -1439,13 +1467,18 @@ export class EmbeddedTestExecutor {
               const AxeBuilder = (mod as unknown as { default?: unknown; AxeBuilder?: unknown }).default
                 ?? (mod as unknown as { AxeBuilder?: unknown }).AxeBuilder
                 ?? mod;
+              type AxeRawNode = {
+                target?: unknown;
+                failureSummary?: string;
+                html?: string;
+              };
               type AxeRawViolation = {
                 id: string;
                 impact: 'critical' | 'serious' | 'moderate' | 'minor';
                 description: string;
                 help: string;
                 helpUrl: string;
-                nodes: unknown[];
+                nodes: AxeRawNode[];
                 tags?: string[];
               };
               type AxeBuilderCtor = new (opts: { page: Page }) => {
@@ -1457,17 +1490,31 @@ export class EmbeddedTestExecutor {
               // schema (and wcag-score) expect a count. Without this remap
               // `Math.min(array, 3)` coerces to NaN, poisoning the build
               // a11y_score and rejecting the update at the Postgres layer.
-              // Mirrors src/lib/url-diff/capture.ts:102.
+              // Mirrors src/lib/url-diff/capture.ts:102. We also keep the
+              // first 3 nodes' selector + failureSummary so the build/test
+              // a11y drill-in UI can surface a real anchor without making
+              // an extra DB column.
+              const SAMPLE_NODE_CAP = 3;
+              const HTML_CAP = 240;
               const violations: NonNullable<EmbeddedTestResult['a11yViolations']> = Array.isArray(axeResults.violations)
-                ? axeResults.violations.map((v) => ({
-                    id: v.id,
-                    impact: v.impact,
-                    description: v.description,
-                    help: v.help,
-                    helpUrl: v.helpUrl,
-                    nodes: Array.isArray(v.nodes) ? v.nodes.length : 0,
-                    tags: v.tags,
-                  }))
+                ? axeResults.violations.map((v) => {
+                    const rawNodes = Array.isArray(v.nodes) ? v.nodes : [];
+                    const sampleNodes = rawNodes.slice(0, SAMPLE_NODE_CAP).map((n) => ({
+                      target: Array.isArray(n.target) ? n.target.map(String) : [],
+                      failureSummary: typeof n.failureSummary === 'string' ? n.failureSummary : undefined,
+                      html: typeof n.html === 'string' ? n.html.slice(0, HTML_CAP) : undefined,
+                    }));
+                    return {
+                      id: v.id,
+                      impact: v.impact,
+                      description: v.description,
+                      help: v.help,
+                      helpUrl: v.helpUrl,
+                      nodes: rawNodes.length,
+                      tags: v.tags,
+                      ...(sampleNodes.length > 0 ? { sampleNodes } : {}),
+                    };
+                  })
                 : [];
               a11yViolations = violations;
               a11yPassesCount = Array.isArray(axeResults.passes) ? axeResults.passes.length : 0;
@@ -1482,6 +1529,253 @@ export class EmbeddedTestExecutor {
           }
         } catch (err) {
           logFn('warn', `a11y harvest failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      // Harvest design-system violations. Walks the live DOM after the
+      // test body completes, samples computed styles per visible element,
+      // and reports values not in the allowed-token set. Categories follow
+      // the Lastest design-system spec: color (any color property),
+      // border-radius, font-family, font-size, and spacing (margin/padding/gap).
+      // Same surface model as a11y — collected per-screenshot, aggregated
+      // to a build-level score on the host side.
+      let designSystemViolations: EmbeddedTestResult['designSystemViolations'];
+      let designSystemRulesChecked: number | undefined;
+      if (command.designSystem && command.designSystem.tokens) {
+        try {
+          const tokenSet = command.designSystem.tokens;
+          const ignoredSet = new Set(command.designSystem.ignoredCategories ?? []);
+          const cap = command.designSystem.maxViolationsPerScreenshot ?? 200;
+
+          // Send the allowed-set into the page so the walker can match
+          // computed values without round-tripping per element.
+          const harvested = await page.evaluate(
+            ({ tokens, ignored, cap: vCap }) => {
+              type Cat = 'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing';
+              const ignoredCats = new Set(ignored as Cat[]);
+
+              const allowed: Record<Cat, Map<string, string>> = {
+                color: new Map(),
+                'border-radius': new Map(),
+                'font-family': new Map(),
+                'font-size': new Map(),
+                spacing: new Map(),
+              };
+              for (const cat of Object.keys(allowed) as Cat[]) {
+                const list = (tokens as Record<Cat, Array<{ name: string; value: string }>>)[cat] ?? [];
+                for (const t of list) allowed[cat].set(t.value, t.name);
+              }
+
+              // Normalize a CSS color from the browser's getComputedStyle
+              // output (always rgb()/rgba() literals) to 6/8-digit lowercase hex.
+              const RGB = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/;
+              const hh = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+              function normColor(raw: string): string | null {
+                const v = raw.trim().toLowerCase();
+                if (v === 'transparent' || v === 'rgba(0, 0, 0, 0)') return '#00000000';
+                const m = v.match(RGB);
+                if (!m) return null;
+                const r = parseInt(m[1], 10);
+                const g = parseInt(m[2], 10);
+                const b = parseInt(m[3], 10);
+                const a = m[4] !== undefined ? Math.round(parseFloat(m[4]) * 255) : null;
+                return a === null || a === 255 ? `#${hh(r)}${hh(g)}${hh(b)}` : `#${hh(r)}${hh(g)}${hh(b)}${hh(a)}`;
+              }
+
+              function normPx(raw: string): string | null {
+                const v = raw.trim().toLowerCase();
+                if (v === 'auto' || v === 'normal' || v === '') return null;
+                const m = v.match(/^(-?\d+(?:\.\d+)?)px$/);
+                if (!m) return null;
+                return `${Math.round(parseFloat(m[1]))}px`;
+              }
+
+              function normFamily(raw: string): string | null {
+                const first = raw.split(',')[0]?.trim();
+                if (!first) return null;
+                return first.replace(/["']/g, '').toLowerCase();
+              }
+
+              // Best-effort selector for a violation sample. data-testid →
+              // id → tag.class — matches what the rest of the codebase
+              // prefers when surfacing element anchors.
+              function makeSelector(el: Element): string {
+                const t = el.getAttribute('data-testid');
+                if (t) return `[data-testid="${t}"]`;
+                if (el.id) return `#${el.id}`;
+                const cls = (el.getAttribute('class') ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+                return cls ? `${el.tagName.toLowerCase()}.${cls}` : el.tagName.toLowerCase();
+              }
+
+              const violationsByKey = new Map<string, {
+                id: string;
+                category: Cat;
+                property: string;
+                actual: string;
+                expected?: string;
+                expectedName?: string;
+                impact: 'critical' | 'serious' | 'moderate' | 'minor';
+                nodes: number;
+                sampleNodes: Array<{ target: string[]; failureSummary?: string; html?: string }>;
+              }>();
+              const SAMPLE_CAP = 3;
+
+              const record = (
+                category: Cat,
+                property: string,
+                actual: string,
+                el: Element,
+              ) => {
+                if (ignoredCats.has(category)) return;
+                const allow = allowed[category];
+                if (!allow || allow.size === 0) return;
+                if (allow.has(actual)) return;
+                if (violationsByKey.size >= vCap && !violationsByKey.has(`${category}:${actual}`)) return;
+                const key = `${category}:${actual}`;
+                const impact: 'critical' | 'serious' | 'moderate' | 'minor' =
+                  category === 'color' || category === 'font-family' ? 'serious'
+                  : category === 'border-radius' ? 'moderate'
+                  : 'minor';
+
+                let row = violationsByKey.get(key);
+                if (!row) {
+                  // Compute nearest-allowed only for the first occurrence —
+                  // saves work in the per-element hot loop. For colors we
+                  // pick by RGB distance; for px values by absolute delta;
+                  // font-family has no useful "nearest".
+                  let expected: string | undefined;
+                  let expectedName: string | undefined;
+                  if (category === 'color') {
+                    const a = actual.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/);
+                    if (a) {
+                      const ar = parseInt(a[1], 16), ag = parseInt(a[2], 16), ab = parseInt(a[3], 16);
+                      let best: { v: string; n: string; d: number } | null = null;
+                      for (const [v, n] of allow) {
+                        const m = v.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/);
+                        if (!m) continue;
+                        const dr = ar - parseInt(m[1], 16);
+                        const dg = ag - parseInt(m[2], 16);
+                        const db = ab - parseInt(m[3], 16);
+                        const d = dr * dr + dg * dg + db * db;
+                        if (!best || d < best.d) best = { v, n, d };
+                      }
+                      if (best) { expected = best.v; expectedName = best.n; }
+                    }
+                  } else if (category === 'border-radius' || category === 'font-size' || category === 'spacing') {
+                    const a = parseFloat(actual);
+                    if (!Number.isNaN(a)) {
+                      let best: { v: string; n: string; d: number } | null = null;
+                      for (const [v, n] of allow) {
+                        const m = parseFloat(v);
+                        if (Number.isNaN(m)) continue;
+                        const d = Math.abs(m - a);
+                        if (!best || d < best.d) best = { v, n, d };
+                      }
+                      if (best) { expected = best.v; expectedName = best.n; }
+                    }
+                  }
+                  row = {
+                    id: key,
+                    category,
+                    property,
+                    actual,
+                    expected,
+                    expectedName,
+                    impact,
+                    nodes: 0,
+                    sampleNodes: [],
+                  };
+                  violationsByKey.set(key, row);
+                }
+                row.nodes += 1;
+                if (row.sampleNodes.length < SAMPLE_CAP) {
+                  row.sampleNodes.push({
+                    target: [makeSelector(el)],
+                    failureSummary: row.expectedName
+                      ? `Expected ${row.expectedName} (${row.expected}); got ${actual}`
+                      : `Off-token ${category} value: ${actual}`,
+                    html: el.outerHTML?.slice(0, 240),
+                  });
+                }
+              };
+
+              // Walk every visible element. Cap at 5000 to keep the in-page
+              // budget bounded on huge SPAs.
+              const all = Array.from(document.body.querySelectorAll('*')).slice(0, 5000);
+              let rulesChecked = 0;
+              for (const el of all) {
+                const cs = getComputedStyle(el);
+                if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+
+                // Color properties. background-color is only sampled when
+                // not transparent (sentinel hex above).
+                if (!ignoredCats.has('color')) {
+                  const colorProps: Array<[string, string]> = [
+                    ['color', cs.color],
+                    ['background-color', cs.backgroundColor],
+                    ['border-top-color', cs.borderTopColor],
+                    ['border-bottom-color', cs.borderBottomColor],
+                    ['border-left-color', cs.borderLeftColor],
+                    ['border-right-color', cs.borderRightColor],
+                  ];
+                  for (const [prop, raw] of colorProps) {
+                    const norm = normColor(raw);
+                    if (!norm) continue;
+                    if (norm === '#00000000') continue; // skip fully transparent
+                    rulesChecked++;
+                    record('color', prop, norm, el);
+                  }
+                }
+
+                if (!ignoredCats.has('border-radius')) {
+                  for (const prop of ['border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius'] as const) {
+                    const raw = cs.getPropertyValue(prop);
+                    const norm = normPx(raw);
+                    if (norm === null || norm === '0px') continue;
+                    rulesChecked++;
+                    record('border-radius', prop, norm, el);
+                  }
+                }
+
+                if (!ignoredCats.has('font-family')) {
+                  const norm = normFamily(cs.fontFamily);
+                  if (norm) {
+                    rulesChecked++;
+                    record('font-family', 'font-family', norm, el);
+                  }
+                }
+
+                if (!ignoredCats.has('font-size')) {
+                  const norm = normPx(cs.fontSize);
+                  if (norm) {
+                    rulesChecked++;
+                    record('font-size', 'font-size', norm, el);
+                  }
+                }
+
+                if (!ignoredCats.has('spacing')) {
+                  for (const prop of ['margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left'] as const) {
+                    const raw = cs.getPropertyValue(prop);
+                    const norm = normPx(raw);
+                    if (norm === null || norm === '0px') continue;
+                    rulesChecked++;
+                    record('spacing', prop, norm, el);
+                  }
+                }
+              }
+
+              return {
+                violations: Array.from(violationsByKey.values()),
+                rulesChecked,
+              };
+            },
+            { tokens: tokenSet, ignored: Array.from(ignoredSet), cap },
+          );
+          designSystemViolations = harvested.violations;
+          designSystemRulesChecked = harvested.rulesChecked;
+          logFn('info', `design-system harvest: ${designSystemViolations?.length ?? 0} violations / ${designSystemRulesChecked} rules checked`);
+        } catch (err) {
+          logFn('warn', `design-system harvest failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
@@ -1529,6 +1823,8 @@ export class EmbeddedTestExecutor {
         a11yViolations,
         a11yPassesCount,
         accessibilityTree,
+        designSystemViolations,
+        designSystemRulesChecked,
         extractedVariables,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,

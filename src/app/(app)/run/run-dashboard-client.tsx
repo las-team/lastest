@@ -574,19 +574,21 @@ export function RunDashboardClient({ tests, runs: _runs, builds, repositoryId, a
                   </div>
                 )}
               </div>
-              {repositoryId && (
-                <div className="flex items-center justify-between mt-3 pt-3 border-t">
-                  <div className="flex items-center gap-2">
-                    <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-sm font-medium">Branch</span>
-                  </div>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-sm font-medium">Branch</span>
+                </div>
+                {repositoryId ? (
                   <BranchSelector
                     repositoryId={repositoryId}
                     currentBranch={currentBranch}
                     defaultBranch={defaultBranch}
                   />
-                </div>
-              )}
+                ) : (
+                  <span className="text-sm text-muted-foreground">Select a repository first</span>
+                )}
+              </div>
             </CardContent>
           </Card>
 
