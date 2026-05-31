@@ -5,8 +5,16 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "sideEffects": true,
   "exports": {
     ".": "./src/index.ts",
-    "./selector-stats": "./src/selector-stats.ts"
+    "./selector-stats": "./src/selector-stats.ts",
+    "./globals.css": {
+      "types": "./src/globals.css.d.ts",
+      "default": "./src/globals.css"
+    }
+  },
+  "dependencies": {
+    "sonner": "^2.0.7"
   }
 }
