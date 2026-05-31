@@ -22,6 +22,7 @@ import {
   flagDownload,
   insertTimestamp,
   togglePauseRecording,
+  analyzeUrlForSelectors,
   saveRecordedTest,
   updateRerecordedTest,
   getOrCreateFunctionalArea,
@@ -61,10 +62,11 @@ import {
   Maximize2,
   Minimize2,
   Cookie,
+  ScanSearch,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import type { FunctionalArea, PlaywrightSettings, Test } from '@/lib/db/schema';
+import type { FunctionalArea, PlaywrightSettings, SelectorConfig, Test } from '@/lib/db/schema';
 import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
 import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
 import { toast } from 'sonner';
@@ -447,6 +449,11 @@ export function RecordingClient({
   const stoppedPollsRef = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [settingsSaveStatus, setSettingsSaveStatus] = useState({ isPending: false, showSaved: false });
+  // "Analyze URL" → recommends a selector priority from the page's HTML and
+  // applies it to the Recording Settings card (which auto-saves it).
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisSummary, setAnalysisSummary] = useState<string | null>(null);
+  const [appliedPriority, setAppliedPriority] = useState<{ value: SelectorConfig[]; nonce: number } | null>(null);
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [savedTestId, setSavedTestId] = useState<string | null>(null);
   const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'finished' | 'error'>('idle');
@@ -640,6 +647,40 @@ export function RecordingClient({
 
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
+
+  const handleAnalyzeUrl = async () => {
+    if (!url || !url.startsWith('http')) return;
+    setIsAnalyzing(true);
+    setAnalysisSummary(null);
+    try {
+      const result = await analyzeUrlForSelectors(url, repositoryId);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      if (!result.meaningful) {
+        setAnalysisSummary(
+          'Page looks client-rendered (little markup in the initial HTML). Keeping current selector config.'
+        );
+        toast.info('Limited markup found — selector config left unchanged.');
+        return;
+      }
+      if (result.recommendedPriority) {
+        setAppliedPriority({ value: result.recommendedPriority, nonce: Date.now() });
+      }
+      const top = (result.topStrategies ?? []).map((s) => `${s.type} (${s.count})`).join(', ');
+      setAnalysisSummary(
+        top
+          ? `Prioritized by page content: ${top}. Selector config ${result.changed ? 'updated' : 'already optimal'}.`
+          : `Selector config ${result.changed ? 'updated' : 'already optimal'} for this page.`
+      );
+      toast.success(result.changed ? 'Selector config tuned for this page' : 'Selector config already optimal');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to analyze URL');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const handleStartRecording = async () => {
     if (!testName.trim()) {
@@ -1086,8 +1127,24 @@ export function RecordingClient({
                     <Input
                       placeholder="https://example.com"
                       value={url}
-                      onChange={(e) => setUrl(e.target.value)}
+                      onChange={(e) => {
+                        setUrl(e.target.value);
+                        if (analysisSummary) setAnalysisSummary(null);
+                      }}
                     />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleAnalyzeUrl}
+                      disabled={!url.startsWith('http') || isAnalyzing}
+                      title="Analyze page and tune selector priority"
+                    >
+                      {isAnalyzing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ScanSearch className="h-4 w-4" />
+                      )}
+                    </Button>
                     <Button
                       variant="outline"
                       size="icon"
@@ -1097,6 +1154,12 @@ export function RecordingClient({
                       <ExternalLink className="h-4 w-4" />
                     </Button>
                   </div>
+                  {analysisSummary && (
+                    <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                      <ScanSearch className="h-3 w-3 mt-0.5 shrink-0" />
+                      <span>{analysisSummary}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Test Name */}
@@ -1290,6 +1353,7 @@ export function RecordingClient({
                   repositoryId={repositoryId}
                   compact
                   onSaveStatusChange={setSettingsSaveStatus}
+                  applyPriority={appliedPriority}
                 />
               </CardContent>
             </Card>
