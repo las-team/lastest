@@ -103,3 +103,4 @@ ranksurf-test-code.ts
 rinse-state-from-mcp.json
 storeclaw-state.json
 .workflows/saas-demo-batch-10.workflow.js
+docs/gtm/*
