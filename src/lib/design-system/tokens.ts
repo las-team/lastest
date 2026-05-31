@@ -113,65 +113,73 @@ export function parseDesignSystemCss(css: string): DesignSystemConfig {
   };
 
   // ---- Pass 1: collect every `--name: value;` declaration ---------------
-  // We need the raw map (var refs intact) before we can resolve aliases —
-  // `--action: var(--c-teal);` only resolves correctly once `--c-teal` is
-  // in the map. Insertion order is preserved so downstream display logic
-  // sees tokens in source order.
-  const rawDecls = new Map<string, string>();
+  // A token name can carry MULTIPLE raw values across selectors —
+  // typically `:root` (light) + `.dark` (dark mode override). The matcher
+  // wants every variant in the allowed set (the EB walking a dark-themed
+  // page should still see on-token values), so we accumulate per-name
+  // lists instead of overwriting. Preview grouping then uses the first
+  // (root) value per name so the swatches show light-mode tokens.
+  const rawDecls = new Map<string, string[]>();
   const decl = /--([\w-]+)\s*:\s*([^;]+);/g;
   let m: RegExpExecArray | null;
   while ((m = decl.exec(css)) !== null) {
-    rawDecls.set(`--${m[1]}`, m[2].trim());
+    const key = `--${m[1]}`;
+    const val = m[2].trim();
+    const existing = rawDecls.get(key);
+    if (existing) existing.push(val); else rawDecls.set(key, [val]);
   }
 
   // ---- Pass 2: resolve `var()` references to literals -------------------
-  // `--action: var(--c-teal);` chases `--c-teal: #36A88E;` and ends up as
-  // `#36A88E`. Bounded recursion (10 hops) so a malicious cycle can't
-  // infinite-loop the parser.
+  // `--action: var(--c-teal);` chases `--c-teal: #36A88E;` (first
+  // declaration, i.e. the `:root` value) and ends up as `#36A88E`.
+  // Bounded recursion (10 hops) so a malicious cycle can't infinite-loop
+  // the parser.
   const resolve = (raw: string, depth = 0): string | null => {
     if (depth > 10) return null;
     const trimmed = raw.trim();
     const varMatch = trimmed.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\s*\)$/);
     if (!varMatch) return trimmed;
-    const referenced = rawDecls.get(varMatch[1]);
-    if (referenced !== undefined) return resolve(referenced, depth + 1);
+    const referencedList = rawDecls.get(varMatch[1]);
+    if (referencedList && referencedList.length > 0) return resolve(referencedList[0], depth + 1);
     if (varMatch[2]) return resolve(varMatch[2], depth + 1);
     return null;
   };
 
-  // Resolved literal value per token name.
-  const resolved = new Map<string, string>();
-  for (const [name, raw] of rawDecls) {
-    const r = resolve(raw);
-    if (r !== null) resolved.set(name, r);
-  }
+  // First resolved value per name — drives display grouping.
+  const resolvedPrimary = new Map<string, string>();
 
   // ---- Pass 3: bucket literals into matcher categories ------------------
-  for (const [name, value] of resolved) {
-    const asColor = normalizeColor(value);
-    if (asColor) {
-      pushToken('color', name, asColor);
-      continue;
-    }
-    const asPx = normalizePx(value);
-    if (asPx) {
-      const cat = classifyByName(name.replace(/^--/, ''));
-      if (cat) pushToken(cat, name, asPx);
-      continue;
-    }
-    if (value.includes(',') || /^['"]?[a-z]/i.test(value)) {
-      const family = normalizeFontFamily(value);
-      if (family) {
-        const bare = name.replace(/^--/, '');
-        if (bare.includes('font') || bare.includes('family')) {
-          pushToken('font-family', name, family);
+  for (const [name, rawValues] of rawDecls) {
+    for (let i = 0; i < rawValues.length; i++) {
+      const r = resolve(rawValues[i]);
+      if (r === null) continue;
+      if (i === 0) resolvedPrimary.set(name, r);
+
+      const asColor = normalizeColor(r);
+      if (asColor) {
+        pushToken('color', name, asColor);
+        continue;
+      }
+      const asPx = normalizePx(r);
+      if (asPx) {
+        const cat = classifyByName(name.replace(/^--/, ''));
+        if (cat) pushToken(cat, name, asPx);
+        continue;
+      }
+      if (r.includes(',') || /^['"]?[a-z]/i.test(r)) {
+        const family = normalizeFontFamily(r);
+        if (family) {
+          const bare = name.replace(/^--/, '');
+          if (bare.includes('font') || bare.includes('family')) {
+            pushToken('font-family', name, family);
+          }
         }
       }
     }
   }
 
   // ---- Pass 4: build display groups for the Setup-tab preview -----------
-  const groups = buildGroups(resolved);
+  const groups = buildGroups(resolvedPrimary);
 
   return { tokens, groups };
 }

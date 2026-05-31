@@ -1550,7 +1550,7 @@ export const teams = pgTable('teams', {
   gamificationEnabled: boolean('gamification_enabled').default(true),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
-  verifyPhaseEnabled: boolean('verify_phase_enabled').default(false),
+  verifyPhaseEnabled: boolean('verify_phase_enabled').default(true),
   storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).default(10737418240), // 10 GB
   storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }).default(0),
   storageLastCalculatedAt: timestamp('storage_last_calculated_at'),

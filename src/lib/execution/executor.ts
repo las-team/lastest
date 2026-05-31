@@ -488,7 +488,7 @@ async function executeViaRunner(
   // the grace, both sides fire at the same instant — host marks [EB-stalled],
   // EB closes context, late test_result is dropped, screenshots fail with
   // "Target page, context or browser has been closed".
-  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; effectiveTimeout: number; completedSeenAt?: number; assignedVariables?: Record<string, string> }>();
+  const inFlight = new Map<string, { testId: string; testName: string; startTime: number; effectiveTimeout: number; completedSeenAt?: number; assignedVariables?: Record<string, string>; sentDesignSystem?: boolean }>();
   let completedCount = 0;
   let cancelled = false;
   // Extra wall-clock the host waits AFTER the EB's own command.timeout fires,
@@ -663,6 +663,39 @@ async function executeViaRunner(
         console.warn(`[executor] Failed to load selector_stats for test ${test.id}:`, err);
       }
 
+      // Compute the design-system payload up front so we can log whether
+      // the harvester was opted into for this test — silent skips ("toggle
+      // on but tokens empty" or "merge produced no usable config") are the
+      // #1 cause of "Design tab: not captured" support reports. Without
+      // this log there's no way to tell from the dev server output whether
+      // the EB was even told to run.
+      const designSystemPayload = (() => {
+        if (!options.playwrightSettings?.enableDesignSystem) return undefined;
+        const effective = mergeDesignSystemConfig(
+          options.playwrightSettings?.designSystem ?? null,
+          test.designSystemOverrides ?? null,
+        );
+        if (!effective) {
+          console.warn(`[executor] design-system: toggle on but no token bundle for test ${test.id}; upload one on the Setup tab.`);
+          return undefined;
+        }
+        if (!isConfigUsable(effective)) {
+          console.warn(`[executor] design-system: token bundle has 0 usable values for test ${test.id}; re-upload may be required.`);
+          return undefined;
+        }
+        if (effective.enabled === false) return undefined;
+        const tokenCount = Object.values(effective.tokens ?? {}).reduce<number>(
+          (n, list) => n + (Array.isArray(list) ? list.length : 0),
+          0,
+        );
+        console.log(`[executor] design-system: sending ${tokenCount} tokens to EB for test ${test.id}`);
+        return {
+          tokens: effective.tokens,
+          ignoredCategories: effective.ignoredCategories,
+          maxViolationsPerScreenshot: effective.maxViolationsPerScreenshot,
+        };
+      })();
+
       const command = createMessage<RunTestCommand>('command:run_test', {
         testId: test.id,
         testRunId: runId,
@@ -692,23 +725,9 @@ async function executeViaRunner(
         // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
         // stay null and the verify A11y tab shows "not captured".
         enableA11y: options.playwrightSettings?.enableA11y ?? false,
-        // Design-system token compliance — merge repo-level config with
-        // per-test overrides. The EB only runs the harvester when the
-        // toggle is on AND the merged token set has at least one allowed
-        // value (parity with the a11y opt-in shape).
-        designSystem: (() => {
-          if (!options.playwrightSettings?.enableDesignSystem) return undefined;
-          const effective = mergeDesignSystemConfig(
-            options.playwrightSettings?.designSystem ?? null,
-            test.designSystemOverrides ?? null,
-          );
-          if (!effective || !isConfigUsable(effective) || effective.enabled === false) return undefined;
-          return {
-            tokens: effective.tokens,
-            ignoredCategories: effective.ignoredCategories,
-            maxViolationsPerScreenshot: effective.maxViolationsPerScreenshot,
-          };
-        })(),
+        // Design-system token compliance payload computed above so the
+        // host-side log fires before the command is queued.
+        designSystem: designSystemPayload,
         browser: effectiveBrowser,
         fixtures: fixturePayloads,
         grantClipboardAccess: options.playwrightSettings?.grantClipboardAccess ?? false,
@@ -751,6 +770,7 @@ async function executeViaRunner(
         startTime: Date.now(),
         effectiveTimeout,
         assignedVariables: Object.keys(assignedVariables).length > 0 ? assignedVariables : undefined,
+        sentDesignSystem: !!designSystemPayload,
       });
     }
   };
@@ -954,6 +974,22 @@ async function executeViaRunner(
           ? payload.storageStateSnapshot as import('@/lib/db/schema').StorageStateSnapshot
           : undefined,
       };
+
+      // Stale-EB detector: we sent a token bundle but the EB didn't return
+      // either of the design-system fields. The most common cause is the
+      // EB Docker image being older than this host's source — `pnpm
+      // stack:refresh:eb` (k3d) or redeploying the EB container
+      // (Olares/Zima) picks up the new harvester.
+      if (
+        info.sentDesignSystem &&
+        !Array.isArray(payload.designSystemViolations) &&
+        typeof payload.designSystemRulesChecked !== 'number'
+      ) {
+        console.warn(
+          `[executor] design-system: EB returned no harvest for test ${info.testId} despite tokens being sent. ` +
+          `Most likely the EB image predates the design-system harvester — rebuild with \`pnpm stack:refresh:eb\` (k3d) or redeploy the EB container.`,
+        );
+      }
 
       results.push(testResult);
       await onResult?.(testResult);

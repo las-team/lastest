@@ -3,6 +3,7 @@
 import * as queries from '@/lib/db/queries';
 import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
 import { approveDiffCore } from '@/lib/diff/core';
+import { awardScore } from '@/server/actions/gamification';
 import { revalidatePath } from 'next/cache';
 import type {
   EvidenceLayer,
@@ -12,6 +13,19 @@ import type {
   StepComparisonEvidence,
   StepComparison,
 } from '@/lib/db/schema';
+
+/**
+ * Recompute the build's overallStatus and re-render the build pages. Shared by
+ * decideLayer's single-card path and the bulk approvers below. Mirrors the
+ * tail of approveDiffCore — without this, layer-only approvals leave the
+ * build pinned in `review_required` even when every layer has been verified.
+ */
+async function recomputeBuildStatus(buildId: string): Promise<void> {
+  const newStatus = await queries.computeBuildStatus(buildId);
+  await queries.updateBuild(buildId, { overallStatus: newStatus });
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${buildId}`);
+}
 
 /**
  * Maps each non-visual layer to its baseline kind. Visual stays in the
@@ -33,6 +47,9 @@ interface DecideInput {
   layer: EvidenceLayer;
   status: LayerFeedbackStatus;
   note?: string | null;
+  /** Bulk callers set this to skip the per-call build status recompute and
+   *  run a single recompute at the end of their loop. */
+  skipBuildRecompute?: boolean;
 }
 
 /**
@@ -70,7 +87,36 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
       // stays pending and no new baseline is created, so the next run re-flags
       // the same change.
       if (step.visualDiffId) {
+        // Snapshot pre-approval status so we can mirror approveDiff's
+        // gamification awards (the action wrapper, not approveDiffCore,
+        // owns awardScore on the build-detail path).
+        const diffBefore = await queries.getVisualDiff(step.visualDiffId);
         await approveDiffCore(step.visualDiffId, userId ?? 'verify-user');
+        if (session?.team && userId && diffBefore && diffBefore.status === 'pending') {
+          awardScore({
+            teamId: session.team.id,
+            kind: 'diff_approved_as_change',
+            actor: { kind: 'user', id: userId },
+            sourceType: 'diff',
+            sourceId: step.visualDiffId,
+            detail: { testId: diffBefore.testId },
+          }).catch((err) => console.error('[gamification] diff_approved_as_change failed', err));
+          const teamId = session.team.id;
+          queries
+            .getTestCreator(diffBefore.testId)
+            .then((creator) => {
+              if (!creator) return;
+              awardScore({
+                teamId,
+                kind: 'regression_caught',
+                actor: creator,
+                sourceType: 'diff',
+                sourceId: step.visualDiffId!,
+                detail: { testId: diffBefore.testId },
+              }).catch((err) => console.error('[gamification] regression_caught failed', err));
+            })
+            .catch(() => {});
+        }
       }
     } else {
       baselineKind = LAYER_TO_BASELINE_KIND[input.layer] ?? null;
@@ -117,31 +163,15 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
     decidedBy: userId,
   });
 
-  // Analytics — fire-and-forget activity event (skip in test envs).
-  const eventTypeMap = {
-    approved: 'verify:layer_approved',
-    rejected: 'verify:layer_rejected',
-    snoozed: 'verify:layer_snoozed',
-    auto_approved: 'verify:layer_approved',
-    pending: null,
-  } as const;
-  const teamIdForEvent = session?.team?.id;
-  const eventType = eventTypeMap[input.status];
-  if (teamIdForEvent && eventType) {
-    queries.emitAndPersistActivityEvent({
-      teamId: teamIdForEvent,
-      repositoryId: repoId,
-      sourceType: 'mcp_server',
-      eventType,
-      summary: `Verify: ${input.layer} ${input.status}`,
-      detail: { stepComparisonId: input.stepComparisonId, buildId: input.buildId, layer: input.layer },
-      artifactType: 'build',
-      artifactId: input.buildId,
-      artifactLabel: input.buildId.slice(0, 8),
-    }).catch(() => {});
-  }
+  // Note: no activity-event emission here. Activity events are reserved for
+  // agent-sourced actions (play_agent / mcp_server / generate_agent / heal_agent).
+  // User-driven UI clicks intentionally don't write to the feed — same convention
+  // as approveDiffCore on the build-detail path.
 
   revalidatePath(`/verify/${input.buildId}`);
+  if (!input.skipBuildRecompute) {
+    await recomputeBuildStatus(input.buildId);
+  }
   return result;
 }
 
@@ -205,12 +235,14 @@ export async function approveAllVerifyCases(buildId: string): Promise<{ approved
         buildId,
         layer,
         status: 'approved',
+        skipBuildRecompute: true,
       });
     }
     approved++;
   }
 
   revalidatePath(`/verify/${buildId}`);
+  await recomputeBuildStatus(buildId);
   return { approved };
 }
 
@@ -242,10 +274,12 @@ export async function approveAIRecommendedLayers(buildId: string): Promise<{ app
         buildId,
         layer: ev.layer,
         status: 'approved',
+        skipBuildRecompute: true,
       });
       approved++;
     }
   }
+  await recomputeBuildStatus(buildId);
   return { approved };
 }
 

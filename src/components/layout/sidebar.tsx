@@ -298,7 +298,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
       </div>
 
       <div className="border-t pt-3">
-        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} activeBranch={activeBranch} ebSessions={ebSessions} />
+        <SidebarQuickActions baseUrl={baseUrl} repositoryId={repositoryId} activeBranch={activeBranch} ebSessions={ebSessions} verifyPhaseEnabled={verifyPhaseEnabled} />
       </div>
 
       <div className="p-4 border-t space-y-3">

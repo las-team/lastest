@@ -2477,3 +2477,19 @@ echo "logged"
 - Auth path: registered lastestcloud+ownpagempr18khy@gmail.com via MCP + 4-digit code via Gmail MCP; handle lastestmpr18khy published live at own.page/lastestmpr18khy and featured in the share
 - Storage state replay: BLOCKED (Firebase IndexedDB) — public-only walkthrough with live published page as the deliverable proof
 - Reply (48h check): —
+
+## 2026-05-30 — QA-hiring batch v5 (inline-register pattern)
+
+After v3/v4 storageState-replay attempts failed across the host→EB context boundary (auth cookies/localStorage didn't restore in Lastest's executor — likely IP-pinned sessions for cookie-auth, IndexedDB-only for Firebase Auth), pivoted to the skill's recommended **hybrid pattern**: inline-register-fresh-each-run inside the test code. Each EB run creates a real account in the target's prod DB with a unique `Date.now()`-derived email/phone.
+
+**Outcomes:**
+
+| Target | Result | Share | Notes |
+|---|---|---|---|
+| rinse | ✓ AUTHED (verified) | https://app.lastest.cloud/r/3KccbteWE3oYiCC4UQ6VbA | Step 4 = post-signup "Schedule your order" wizard (Saturday May 30 + Wash & Fold preselected); Step 5 = "Where should we stop by?" address step (Google Maps autocomplete). Real authed content. |
+| crazygames | ⚠️ PARTIAL — account created, stuck at username gate | https://app.lastest.cloud/r/UkuC3CLdAuSTYr5k8ZStoQ | Email+password+age accepted; Firebase Auth signs user in; header sidebar shows authed icons (notification bell, profile, gem); BUT "Set your username" modal blocks the catalog view. Username input selector resists standard Playwright fills. Demo shows the auth-completion flow + post-signup gating. |
+| boompay | ✓ Public-only (honest) | https://app.lastest.cloud/r/6FP1M8es_uYKeBRxadpAPw | Marketing pages walk + signin form. OTP signin can't be replayed in EB (no Gmail access from pod); refresh-token storageState doesn't restore SPA session. Demo notes call this out explicitly. |
+| speak.com | ✓ Public-only (honest) | https://app.lastest.cloud/r/L5RapBi6mst8dV1y1NxRuw | Marketing pages walk. Firebase Auth IndexedDB-only auth + account-TTL meant cross-day login attempts failed. Demo notes call this out explicitly. |
+
+**Demo notes updated** for all 4: boompay + speak got the honest "auth not automatable" frictionPoints; rinse + crazygames repos still carry the original v3 demo notes (which described UX correctly even though the original v3 authed-walk failed).
+

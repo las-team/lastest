@@ -404,6 +404,7 @@ export async function confirmCase(
         buildId: step.buildId,
         layer,
         status: decision,
+        skipBuildRecompute: true,
       }).catch(() => null),
     ),
   );
@@ -455,28 +456,20 @@ export async function confirmCase(
     }
   }
 
-  // 4. Activity event so the audit log + notifications fire. Best-effort.
-  const eventTypeMap: Record<ConfirmKind, 'verify:case_confirmed' | 'verify:bugfix_filed' | 'verify:improvement_filed'> = {
-    done: 'verify:case_confirmed',
-    improvement: 'verify:improvement_filed',
-    regression: 'verify:bugfix_filed',
-  };
-  const teamIdForEvent = session.team?.id;
-  if (teamIdForEvent) {
-    queries.emitAndPersistActivityEvent({
-      teamId: teamIdForEvent,
-      repositoryId: repoId,
-      sourceType: 'mcp_server',
-      eventType: eventTypeMap[kind],
-      summary: `Verify case ${kind} — ${step.stepLabel ?? 'step'}`,
-      detail: { stepComparisonId, buildId: step.buildId, kind, issueUrl, issueKind },
-      artifactType: 'build',
-      artifactId: step.buildId,
-      artifactLabel: step.buildId.slice(0, 8),
-    }).catch(() => {});
-  }
+  // 4. Recompute build status now that every evidence layer for this step has
+  //    settled. Mirrors the tail of approveDiffCore so the verify board's
+  //    drop-to-column actions move the build to safe_to_merge / blocked just
+  //    like the build-detail page's per-diff approve does.
+  const newStatus = await queries.computeBuildStatus(step.buildId);
+  await queries.updateBuild(step.buildId, { overallStatus: newStatus });
+
+  // Note: no activity-event emission here. Activity events are reserved for
+  // agent-sourced actions; user UI confirmations stay out of the feed (same
+  // convention as approveDiffCore on the build-detail path).
 
   revalidatePath(`/verify/${step.buildId}`);
+  revalidatePath('/builds');
+  revalidatePath(`/builds/${step.buildId}`);
   return { ok: true, ticketChanged, issueUrl, issueNumber, issueState, issueKind };
 }
 

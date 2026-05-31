@@ -565,6 +565,8 @@ async function startup(): Promise<void> {
                 a11yViolations: result.a11yViolations,
                 a11yPassesCount: result.a11yPassesCount,
                 accessibilityTree: result.accessibilityTree,
+                designSystemViolations: result.designSystemViolations,
+                designSystemRulesChecked: result.designSystemRulesChecked,
                 extractedVariables: result.extractedVariables,
                 selectorOutcomes: result.selectorOutcomes,
                 // Per-step multi-layer comparison capture: these populate

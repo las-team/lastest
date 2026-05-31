@@ -8,6 +8,7 @@ import {
   visualDiffs,
   functionalAreas,
   stepComparisons,
+  stepLayerFeedback,
 } from '../schema';
 import type {
   NewBuild,
@@ -15,6 +16,7 @@ import type {
   A11yViolation,
   DesignSystemViolation,
   DesignTokenCategory,
+  LayerFeedbackStatus,
 } from '../schema';
 import { getWcagLevel } from '@/lib/a11y/wcag-score';
 import { eq, desc, and, inArray, sql } from 'drizzle-orm';
@@ -271,32 +273,77 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
 
   const allDiffs = await db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId));
 
-  if (allDiffs.length === 0) return 'safe_to_merge';
-
-  // Filter out diffs from quarantined tests — they don't block builds
+  // Quarantined tests don't block builds — pre-load the set so it can filter
+  // both diffs and step comparisons.
   const quarantinedTestIds = new Set(
     (await db.select({ id: tests.id }).from(tests).where(eq(tests.quarantined, true))).map(t => t.id)
   );
+
+  // Per-layer feedback is checked alongside diffs because a verify-board
+  // confirmation lands in step_layer_feedback rather than visualDiffs (it
+  // covers network / console / a11y / perf / url / dom / variable too). A
+  // rejected layer must block the build the same way a rejected diff does,
+  // and an approved/snoozed layer set must let an otherwise-red step pass.
+  const feedbackRows = await db
+    .select()
+    .from(stepLayerFeedback)
+    .where(eq(stepLayerFeedback.buildId, buildId));
+  const hasRejectedLayer = feedbackRows.some(f => f.status === 'rejected');
+
+  if (allDiffs.length === 0) {
+    if (hasRejectedLayer) return 'blocked';
+    return 'safe_to_merge';
+  }
+
   const diffs = allDiffs.filter(d => !d.testId || !quarantinedTestIds.has(d.testId));
 
-  if (diffs.length === 0) return 'safe_to_merge';
+  if (diffs.length === 0) {
+    if (hasRejectedLayer) return 'blocked';
+    return 'safe_to_merge';
+  }
 
   const hasFailed = diffs.some(d => d.status === 'rejected');
   const hasPending = diffs.some(d => d.status === 'pending');
   const hasTodo = diffs.some(d => d.status === 'todo');
 
-  if (hasFailed) return 'blocked';
+  if (hasFailed || hasRejectedLayer) return 'blocked';
 
   // Multi-layer step verdicts can also escalate the build status. A `red`
   // verdict from non-visual layers (new console errors, new 4xx/5xx, URL
   // divergence, critical a11y) means there is high-signal evidence of a
-  // real regression even if the visual diffs were all auto-approved.
+  // real regression even if the visual diffs were all auto-approved. BUT —
+  // once the reviewer has settled every evidence layer on that step (via
+  // the verify board's drag-to-column or "Verify all" actions), the step
+  // is treated as resolved even though step.verdict itself is never
+  // mutated. This mirrors the build-detail "Approve all" semantics.
   const stepRows = await db
-    .select({ verdict: stepComparisons.verdict, testId: stepComparisons.testId })
+    .select({
+      id: stepComparisons.id,
+      verdict: stepComparisons.verdict,
+      testId: stepComparisons.testId,
+      evidence: stepComparisons.evidence,
+    })
     .from(stepComparisons)
     .where(eq(stepComparisons.buildId, buildId));
   const nonQuarantinedSteps = stepRows.filter(s => !quarantinedTestIds.has(s.testId));
-  const hasRedStep = nonQuarantinedSteps.some(s => s.verdict === 'red');
+
+  const SETTLED: LayerFeedbackStatus[] = ['approved', 'auto_approved', 'snoozed'];
+  const fbByStep = new Map<string, Set<string>>();
+  for (const f of feedbackRows) {
+    if (!SETTLED.includes(f.status)) continue;
+    if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, new Set());
+    fbByStep.get(f.stepComparisonId)!.add(f.layer);
+  }
+
+  const stepIsVerified = (step: typeof nonQuarantinedSteps[number]): boolean => {
+    const evLayers = Array.from(new Set((step.evidence ?? []).map(e => e.layer)));
+    if (evLayers.length === 0) return false;
+    const settled = fbByStep.get(step.id);
+    if (!settled) return false;
+    return evLayers.every(l => settled.has(l));
+  };
+
+  const hasRedStep = nonQuarantinedSteps.some(s => s.verdict === 'red' && !stepIsVerified(s));
   if (hasRedStep) return 'review_required';
 
   if (hasPending) return 'review_required';

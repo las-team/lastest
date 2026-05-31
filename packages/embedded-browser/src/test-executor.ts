@@ -1703,25 +1703,61 @@ export class EmbeddedTestExecutor {
               // budget bounded on huge SPAs.
               const all = Array.from(document.body.querySelectorAll('*')).slice(0, 5000);
               let rulesChecked = 0;
+
+              // Generic CSS keywords that should never be reported as
+              // off-token — they're system fallbacks the design system
+              // explicitly delegates to the OS.
+              const GENERIC_FONT_FAMILIES = new Set([
+                'sans-serif', 'serif', 'monospace', 'system-ui',
+                'ui-sans-serif', 'ui-serif', 'ui-monospace', 'ui-rounded',
+                'cursive', 'fantasy', 'emoji', 'math', 'fangsong',
+                'inherit', 'initial', 'unset', 'revert',
+              ]);
+
               for (const el of all) {
                 const cs = getComputedStyle(el);
                 if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+                if (cs.opacity === '0') continue;
 
-                // Color properties. background-color is only sampled when
-                // not transparent (sentinel hex above).
+                // Skip elements that don't render to any pixels — invisible
+                // <span>s, zero-size wrappers, etc. Their computed styles
+                // count toward nothing the user actually sees.
+                const htmlEl = el as HTMLElement;
+                if (htmlEl.offsetWidth === 0 && htmlEl.offsetHeight === 0) continue;
+
+                const parent = el.parentElement;
+                const parentCs = parent ? getComputedStyle(parent) : null;
+
+                // ── Colors ──
+                // text color is inherited by default. Only flag the element
+                // when its color DIFFERS from the parent's — otherwise we'd
+                // report the same off-token color on every descendant of a
+                // single styled ancestor. Border colors are filtered by
+                // border-width so colors on borderless elements don't count.
                 if (!ignoredCats.has('color')) {
-                  const colorProps: Array<[string, string]> = [
-                    ['color', cs.color],
-                    ['background-color', cs.backgroundColor],
-                    ['border-top-color', cs.borderTopColor],
-                    ['border-bottom-color', cs.borderBottomColor],
-                    ['border-left-color', cs.borderLeftColor],
-                    ['border-right-color', cs.borderRightColor],
-                  ];
+                  const colorProps: Array<[string, string]> = [];
+
+                  // Color (text): only when explicitly different from parent.
+                  const parentColor = parentCs ? parentCs.color : null;
+                  if (cs.color !== parentColor) {
+                    colorProps.push(['color', cs.color]);
+                  }
+
+                  // Background: not inherited; always check when set.
+                  colorProps.push(['background-color', cs.backgroundColor]);
+
+                  // Border colors only matter when a border is actually drawn.
+                  for (const side of ['top', 'bottom', 'left', 'right'] as const) {
+                    const width = cs.getPropertyValue(`border-${side}-width`);
+                    if (width && width !== '0px') {
+                      colorProps.push([`border-${side}-color`, cs.getPropertyValue(`border-${side}-color`)]);
+                    }
+                  }
+
                   for (const [prop, raw] of colorProps) {
                     const norm = normColor(raw);
                     if (!norm) continue;
-                    if (norm === '#00000000') continue; // skip fully transparent
+                    if (norm === '#00000000') continue; // fully transparent
                     rulesChecked++;
                     record('color', prop, norm, el);
                   }
@@ -1737,19 +1773,28 @@ export class EmbeddedTestExecutor {
                   }
                 }
 
+                // Font family: inherited. Only flag on elements that
+                // override the parent's family, and never flag the bare
+                // generic-family keywords (sans-serif / monospace / etc.) —
+                // those are explicit OS-fallback sentinels.
                 if (!ignoredCats.has('font-family')) {
-                  const norm = normFamily(cs.fontFamily);
-                  if (norm) {
-                    rulesChecked++;
-                    record('font-family', 'font-family', norm, el);
+                  if (!parentCs || cs.fontFamily !== parentCs.fontFamily) {
+                    const norm = normFamily(cs.fontFamily);
+                    if (norm && !GENERIC_FONT_FAMILIES.has(norm)) {
+                      rulesChecked++;
+                      record('font-family', 'font-family', norm, el);
+                    }
                   }
                 }
 
+                // Font size: inherited. Same logic as font-family.
                 if (!ignoredCats.has('font-size')) {
-                  const norm = normPx(cs.fontSize);
-                  if (norm) {
-                    rulesChecked++;
-                    record('font-size', 'font-size', norm, el);
+                  if (!parentCs || cs.fontSize !== parentCs.fontSize) {
+                    const norm = normPx(cs.fontSize);
+                    if (norm) {
+                      rulesChecked++;
+                      record('font-size', 'font-size', norm, el);
+                    }
                   }
                 }
 

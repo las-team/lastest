@@ -28,6 +28,7 @@ interface SidebarQuickActionsProps {
   repositoryId?: string | null;
   activeBranch?: string;
   ebSessions?: EmbeddedSession[];
+  verifyPhaseEnabled?: boolean;
 }
 
 const HISTORY_KEY = 'baseurl-history';
@@ -56,7 +57,7 @@ function isLocalUrl(url: string): boolean {
   }
 }
 
-export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, activeBranch, ebSessions: initialEbSessions = [] }: SidebarQuickActionsProps) {
+export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId, activeBranch, ebSessions: initialEbSessions = [], verifyPhaseEnabled = false }: SidebarQuickActionsProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
@@ -173,7 +174,7 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
       if ('queued' in result && result.queued) {
         toast.info('All browsers are busy — build queued and will start automatically');
       } else {
-        router.push(`/builds/${result.buildId}`);
+        router.push(verifyPhaseEnabled ? `/verify/${result.buildId}` : `/builds/${result.buildId}`);
       }
     } catch (error) {
       console.error('Failed to start build:', error);
