@@ -87,6 +87,7 @@
     "postgres": "^3.4.8",
     "react": "19.2.3",
     "react-cookie-consent": "^10.0.1",
+    "kysely": "0.28.17",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.6.2",
