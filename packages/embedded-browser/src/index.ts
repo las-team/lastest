@@ -567,6 +567,7 @@ async function startup(): Promise<void> {
                 accessibilityTree: result.accessibilityTree,
                 designSystemViolations: result.designSystemViolations,
                 designSystemRulesChecked: result.designSystemRulesChecked,
+                designSystemTokenUsage: result.designSystemTokenUsage,
                 extractedVariables: result.extractedVariables,
                 selectorOutcomes: result.selectorOutcomes,
                 // Per-step multi-layer comparison capture: these populate

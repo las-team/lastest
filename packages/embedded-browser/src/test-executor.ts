@@ -145,6 +145,9 @@ export interface EmbeddedTestResult {
     }>;
   }>;
   designSystemRulesChecked?: number;
+  /** Per-category, per-token-value usage count for ON-token values.
+   *  Powers the verify "Tokens in use" review panel. */
+  designSystemTokenUsage?: Record<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing', Record<string, number>>;
   /** Playwright `page.accessibility.snapshot()` output, capped at ~512 KB
    *  by the executor. Truncated trees are marked `{ _truncated: true }`. */
   accessibilityTree?: unknown;
@@ -1541,6 +1544,7 @@ export class EmbeddedTestExecutor {
       // to a build-level score on the host side.
       let designSystemViolations: EmbeddedTestResult['designSystemViolations'];
       let designSystemRulesChecked: number | undefined;
+      let designSystemTokenUsage: EmbeddedTestResult['designSystemTokenUsage'];
       if (command.designSystem && command.designSystem.tokens) {
         try {
           const tokenSet = command.designSystem.tokens;
@@ -1620,6 +1624,18 @@ export class EmbeddedTestExecutor {
               }>();
               const SAMPLE_CAP = 3;
 
+              // Per-category, per-token-value usage counter. Populated for
+              // ON-token values only — these power the verify "Tokens in
+              // use" graphical review (palette tiles annotated with
+              // usage counts, unused tokens dimmed).
+              const tokenUsage: Record<Cat, Record<string, number>> = {
+                color: {},
+                'border-radius': {},
+                'font-family': {},
+                'font-size': {},
+                spacing: {},
+              };
+
               const record = (
                 category: Cat,
                 property: string,
@@ -1629,7 +1645,10 @@ export class EmbeddedTestExecutor {
                 if (ignoredCats.has(category)) return;
                 const allow = allowed[category];
                 if (!allow || allow.size === 0) return;
-                if (allow.has(actual)) return;
+                if (allow.has(actual)) {
+                  tokenUsage[category][actual] = (tokenUsage[category][actual] ?? 0) + 1;
+                  return;
+                }
                 if (violationsByKey.size >= vCap && !violationsByKey.has(`${category}:${actual}`)) return;
                 const key = `${category}:${actual}`;
                 const impact: 'critical' | 'serious' | 'moderate' | 'minor' =
@@ -1812,13 +1831,17 @@ export class EmbeddedTestExecutor {
               return {
                 violations: Array.from(violationsByKey.values()),
                 rulesChecked,
+                tokenUsage,
               };
             },
             { tokens: tokenSet, ignored: Array.from(ignoredSet), cap },
           );
           designSystemViolations = harvested.violations;
           designSystemRulesChecked = harvested.rulesChecked;
-          logFn('info', `design-system harvest: ${designSystemViolations?.length ?? 0} violations / ${designSystemRulesChecked} rules checked`);
+          designSystemTokenUsage = harvested.tokenUsage;
+          const usedTokens = Object.values(harvested.tokenUsage).reduce<number>(
+            (n, m) => n + Object.keys(m as Record<string, number>).length, 0);
+          logFn('info', `design-system harvest: ${designSystemViolations?.length ?? 0} violations / ${designSystemRulesChecked} rules checked / ${usedTokens} on-token values`);
         } catch (err) {
           logFn('warn', `design-system harvest failed: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -1870,6 +1893,7 @@ export class EmbeddedTestExecutor {
         accessibilityTree,
         designSystemViolations,
         designSystemRulesChecked,
+        designSystemTokenUsage,
         extractedVariables,
         selectorOutcomes: selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
         urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,

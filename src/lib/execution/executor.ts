@@ -964,6 +964,9 @@ async function executeViaRunner(
         designSystemRulesChecked: typeof payload.designSystemRulesChecked === 'number'
           ? payload.designSystemRulesChecked
           : undefined,
+        designSystemTokenUsage: payload.designSystemTokenUsage && typeof payload.designSystemTokenUsage === 'object'
+          ? payload.designSystemTokenUsage as import('@/lib/db/schema').DesignSystemTokenUsage
+          : undefined,
         urlTrajectory: Array.isArray(payload.urlTrajectory) && payload.urlTrajectory.length > 0
           ? payload.urlTrajectory as import('@/lib/db/schema').UrlTrajectoryStep[]
           : undefined,

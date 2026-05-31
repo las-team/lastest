@@ -617,7 +617,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
     processedCount++;
 
     // Save test result immediately
@@ -639,6 +639,7 @@ async function runBuildAsync(
       a11yPassesCount: result.a11yPassesCount,
       designSystemViolations: result.designSystemViolations,
       designSystemRulesChecked: result.designSystemRulesChecked,
+      designSystemTokenUsage: result.designSystemTokenUsage,
       videoPath: result.videoPath,
       softErrors: result.softErrors,
       assertionResults: result.assertionResults,
@@ -1103,7 +1104,7 @@ async function runBuildAsync(
 
     // Aggregate a11y scores across all test results for this build (only if a11y data exists)
     let a11yUpdate: { a11yScore?: number; a11yViolationCount?: number; a11yCriticalCount?: number; a11yTotalRulesChecked?: number } = {};
-    let designSystemUpdate: { designSystemScore?: number; designSystemViolationCount?: number; designSystemCriticalCount?: number; designSystemTotalRulesChecked?: number } = {};
+    let designSystemUpdate: { designSystemScore?: number; designSystemViolationCount?: number; designSystemCriticalCount?: number; designSystemTotalRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage } = {};
     try {
       const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
       const { aggregateDesignSystemForBuild } = await import('@/lib/design-system/score');
@@ -1126,6 +1127,7 @@ async function runBuildAsync(
           designSystemViolationCount: dsSummary.violationCount,
           designSystemCriticalCount: dsSummary.criticalCount,
           designSystemTotalRulesChecked: dsSummary.totalRulesChecked,
+          designSystemTokenUsage: dsSummary.tokenUsage,
         };
       }
     } catch {

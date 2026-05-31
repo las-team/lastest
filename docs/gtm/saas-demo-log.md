@@ -2493,3 +2493,37 @@ After v3/v4 storageState-replay attempts failed across the host→EB context bou
 
 **Demo notes updated** for all 4: boompay + speak got the honest "auth not automatable" frictionPoints; rinse + crazygames repos still carry the original v3 demo notes (which described UX correctly even though the original v3 authed-walk failed).
 
+
+## 2026-05-31 — Zoho (B2B SaaS suite, 50+ apps)
+
+- Source: User-requested showcase demo (not founder outreach — Zoho is a giant, no one-to-one founder reach)
+- Site: https://www.zoho.com / https://accounts.zoho.eu (EU data center auto-routed by IP)
+- Lastest repo: zoho-demo (b26b1d22-2873-4fe6-9f3c-cc7a9c682d2f)
+- Build: 1a0fa3a1-3ef1-4e91-834f-ae59caa422fd  ✓ P=1/1 F=0 changes=10 elapsed=95s
+- Share: https://app.lastest.cloud/r/losf2ULtmrPU9zxx98DTbg (test-scoped, 10 screenshots + video)
+- Channel: none — showcase demo, no outreach intended
+- Sent: n/a
+- Reply (48h check): —
+- Account created: lastest.demo.2026@zohomail.eu (Zoho Mail mailbox), email lastestcloud.zoho2026@gmail.com, phone +36 705 636 376 (user-provided, OTP read from real SMS)
+- Storage state: 25d3f03d-bb86-42fc-bcf4-312db49e2433 (51 cookies, 45 HttpOnly, 6 .zoho.* subdomains)
+- 10 scenarios: home + CRM (public) → Mail inbox/drafts/sent/settings (authed) → Calendar week/month/day/settings (authed)
+- Reusable learning: Zoho product marketing pages (/mail/, /books/, /crm/) hang Lastest EB headless Chromium for 200+ seconds under network-constrained conditions. Workaround: stick to home + crm public + jump directly to *.zoho.eu authed app pages via storage_state. contacts.zoho.eu also hangs (excluded from final walk).
+- Reusable learning: Zoho rejects plus-aliased Gmail at signup ('+' character disallowed). Use bare gmail with non-plus disambiguation (e.g. lastestcloud.zoho2026@gmail.com).
+- Reusable learning: Zoho signup mandates 7-digit SMS-OTP for every account. AUTH_MODE=OTP-SMS, AUTH_AUTOMATABLE=false without human-in-the-loop phone. With user phone + OTP, storage_state capture via MCP browser is viable for replay.
+
+## 2026-05-31 — Rinse outreach (HN locked, CRM-logged for manual send)
+
+User asked to send out the rinse demo + track everything in CRM. Sam Cheng's CRM record (id 207d2932-3dfc-4f70-a54e-d34c95b76bf7) only carries his HN handle (`@samcheng`); no email, no LinkedIn, no X. Per channel-scope memory, didn't pivot — user confirmed HN was the right route.
+
+Found his May 2026 RINSE hiring comment (HN item id 47987456 in parent thread 47975571). Drafted a 2-clause + link reply, got user approval to send. **Blocker:** the May thread is 28 days old; HN locks comments ~14 days after posting — no "reply" link visible on the comment page when logged in as lastesthero. June 2026 "Ask HN: Who is hiring?" thread is the next natural opportunity (typically posted June 1-2).
+
+User opted to **skip automated send and handle outreach manually via own channel**. Everything tracked in Twenty CRM:
+
+- **DemoRun id**: `d38dfa67-448a-481f-b62a-5060e10d193a` — name "Rinse — QA Engineer hiring demo (inline-register v5)", status=SHARE_PUBLISHED, channel=NONE, blocker field documents HN window closure, notesMd has full draft + alternative-channel suggestions
+- **Linked Person**: Sam Cheng (id 207d2932-3dfc-4f70-a54e-d34c95b76bf7)
+- **Linked Company**: Rinse (id a372f872-78a8-4642-8299-b5fe651b7eef)
+- **Task**: `9e6de27e-90f5-42d7-9a7a-bedf47206030` — "Reply to Sam Cheng on June 2026 'Ask HN: Who is hiring?' with rinse demo", due 2026-06-02T14:00Z; body has the verbatim draft + step-by-step posting instructions + DemoRun update recipe (status=DM_SENT, channel=HN_SHOWHN_COMMENT). TaskTarget link to Person/Company/DemoRun failed (workflow object protected); IDs live in the task body markdown instead.
+
+**Approved outreach draft (saved for re-use):**
+> Built a visual-regression baseline of your customer signup wizard (steps 2/3 schedule + 3/3 address, fresh sandbox account) while you were hiring QA — in case useful: https://app.lastest.cloud/r/3KccbteWE3oYiCC4UQ6VbA
+

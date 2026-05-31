@@ -46,6 +46,7 @@ import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import { A11yViolationsCard } from '@/components/builds/a11y-violations-card';
 import { DesignSystemComplianceCard } from '@/components/builds/design-system-compliance-card';
 import { DesignSystemViolationsCard } from '@/components/builds/design-system-violations-card';
+import { DesignSystemReviewPanel } from '@/components/builds/design-system-review-panel';
 import type { BuildA11yViolationRow, BuildDesignSystemViolationRow } from '@/lib/db/queries/builds';
 import type {
   StepComparison,
@@ -103,6 +104,13 @@ interface FocusViewProps {
     violationCount: number | null;
     criticalCount: number | null;
     totalRulesChecked: number | null;
+    /** Per-token-value usage map summed across every test_result in the
+     *  build. Drives the "Tokens in use" graphical review panel. */
+    tokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage | null;
+    /** The repo's uploaded design-system bundle. Lets the review panel
+     *  render the FULL palette (including unused tokens) — without this,
+     *  the panel can only show what was rendered, not what's missing. */
+    config?: import('@/lib/db/schema').DesignSystemConfig | null;
     trend: Array<{ id: string; designSystemScore: number | null; createdAt: Date | null }>;
     violations?: BuildDesignSystemViolationRow[];
   };
@@ -2997,6 +3005,16 @@ function DesignSystemPane({
           criticalCount={buildDesignSystem.criticalCount}
           totalRulesChecked={buildDesignSystem.totalRulesChecked}
           trend={buildDesignSystem.trend}
+        />
+      )}
+      {/* Graphical review — only renders when we have BOTH the uploaded
+          bundle AND a non-empty usage map. Falls back to the flat list
+          card below when token usage wasn't captured (older builds). */}
+      {buildDesignSystem?.config && buildDesignSystem?.tokenUsage && (
+        <DesignSystemReviewPanel
+          config={buildDesignSystem.config}
+          tokenUsage={buildDesignSystem.tokenUsage}
+          violations={buildDesignSystem.violations ?? []}
         />
       )}
       {buildDesignSystem?.violations && buildDesignSystem.violations.length > 0 && (

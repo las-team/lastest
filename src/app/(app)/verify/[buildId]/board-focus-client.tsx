@@ -129,6 +129,10 @@ interface BoardFocusClientProps {
   /** Per-off-token-rule drill-in feeding `<DesignSystemViolationsCard>`
    *  inside the focus Design pane. */
   designSystemViolations: import('@/lib/db/queries/builds').BuildDesignSystemViolationRow[];
+  /** Repo-level design-system config (the uploaded token bundle) so the
+   *  review panel can render every token tile, not just those that
+   *  appear in violations. */
+  repoDesignSystem: import('@/lib/db/schema').DesignSystemConfig | null;
 }
 
 type Mode = 'board' | 'focus';
@@ -904,8 +908,10 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             violationCount: props.build.designSystemViolationCount,
             criticalCount: props.build.designSystemCriticalCount,
             totalRulesChecked: props.build.designSystemTotalRulesChecked,
+            tokenUsage: props.build.designSystemTokenUsage,
             trend: props.designSystemTrend,
             violations: props.designSystemViolations,
+            config: props.repoDesignSystem,
           }}
         />
       )}

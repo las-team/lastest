@@ -98,6 +98,7 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
       designSystemViolationCount: builds.designSystemViolationCount,
       designSystemCriticalCount: builds.designSystemCriticalCount,
       designSystemTotalRulesChecked: builds.designSystemTotalRulesChecked,
+      designSystemTokenUsage: builds.designSystemTokenUsage,
       executorError: builds.executorError,
       executorFailedAt: builds.executorFailedAt,
       manuallyScopedAreaIds: builds.manuallyScopedAreaIds,

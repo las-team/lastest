@@ -9,6 +9,8 @@
 import type {
   DesignSystemViolation,
   DesignSystemScoreSummary,
+  DesignSystemTokenUsage,
+  DesignTokenCategory,
 } from '@/lib/db/schema';
 
 const SEVERITY_WEIGHTS: Record<string, number> = {
@@ -60,19 +62,34 @@ export function aggregateDesignSystemForBuild(
   results: Array<{
     designSystemViolations?: DesignSystemViolation[] | null;
     designSystemRulesChecked?: number | null;
+    designSystemTokenUsage?: DesignSystemTokenUsage | null;
   }>,
 ): {
   score: number;
   violationCount: number;
   criticalCount: number;
   totalRulesChecked: number;
+  tokenUsage: DesignSystemTokenUsage;
 } {
   const all: DesignSystemViolation[] = [];
   let totalChecked = 0;
+  const tokenUsage: DesignSystemTokenUsage = {};
 
   for (const r of results) {
     if (r.designSystemViolations) all.push(...r.designSystemViolations);
     if (typeof r.designSystemRulesChecked === 'number') totalChecked += r.designSystemRulesChecked;
+    if (r.designSystemTokenUsage) {
+      for (const [cat, map] of Object.entries(r.designSystemTokenUsage) as Array<[
+        DesignTokenCategory,
+        Record<string, number>,
+      ]>) {
+        if (!map) continue;
+        const dest = (tokenUsage[cat] ??= {});
+        for (const [value, count] of Object.entries(map)) {
+          dest[value] = (dest[value] ?? 0) + count;
+        }
+      }
+    }
   }
 
   const summary = calculateDesignSystemScore(all, totalChecked);
@@ -83,5 +100,6 @@ export function aggregateDesignSystemForBuild(
     violationCount: all.length,
     criticalCount,
     totalRulesChecked: summary.totalRules,
+    tokenUsage,
   };
 }

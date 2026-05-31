@@ -1,4 +1,4 @@
-import type { NetworkRequest, DownloadRecord, A11yViolation, DesignSystemViolation, AssertionResult, DomSnapshotData, UrlTrajectoryStep, WebVitalsSample, StorageStateSnapshot } from '@/lib/db/schema';
+import type { NetworkRequest, DownloadRecord, A11yViolation, DesignSystemViolation, DesignSystemTokenUsage, AssertionResult, DomSnapshotData, UrlTrajectoryStep, WebVitalsSample, StorageStateSnapshot } from '@/lib/db/schema';
 
 export interface CapturedScreenshot {
   path: string;
@@ -18,6 +18,7 @@ export interface TestRunResult {
   a11yPassesCount?: number;
   designSystemViolations?: DesignSystemViolation[];
   designSystemRulesChecked?: number;
+  designSystemTokenUsage?: DesignSystemTokenUsage;
   assertionResults?: AssertionResult[];
   setupDurationMs?: number;
   teardownDurationMs?: number;

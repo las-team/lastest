@@ -463,6 +463,14 @@ export interface DesignSystemScoreSummary {
   bySeverity: { critical: number; serious: number; moderate: number; minor: number };
 }
 
+/** Per-category, per-value usage counter — `usage.color['#e03e36'] = 12`
+ *  means twelve elements rendered with that color across the captured DOM.
+ *  Used by the verify Design review panel to light up tokens that were
+ *  actually used and dim tokens the page never rendered. */
+export type DesignSystemTokenUsage = Partial<
+  Record<DesignTokenCategory, Record<string, number>>
+>;
+
 // Success criteria / assertion tracking
 export interface TestAssertion {
   id: string;
@@ -636,6 +644,11 @@ export const testResults = pgTable('test_results', {
   // build-level score (designSystemScore) and drill-in row set.
   designSystemViolations: jsonb('design_system_violations').$type<DesignSystemViolation[]>(),
   designSystemRulesChecked: integer('design_system_rules_checked'),
+  // Per-category, per-value usage counter for ON-token values captured
+  // during the harvester walk. Used by the verify Design review panel to
+  // light up "tokens in use" tiles. Shape:
+  //   { color: { '#e03e36': 12, ... }, spacing: { '8px': 30, ... }, ... }
+  designSystemTokenUsage: jsonb('design_system_token_usage').$type<DesignSystemTokenUsage>(),
   // EB-side test executor log lines (info/warn/error from runner-client + test-executor).
   // Populated for embedded-browser runs; null for legacy/local. Lets us inspect
   // [Nav]/[Shot] probe lines post-hoc when an EB pod is already GC'd.
@@ -791,6 +804,10 @@ export const builds = pgTable('builds', {
   designSystemViolationCount: integer('design_system_violation_count'),
   designSystemCriticalCount: integer('design_system_critical_count'),
   designSystemTotalRulesChecked: integer('design_system_total_rules_checked'),
+  // Build-level merge of test_results.designSystemTokenUsage. Sums each
+  // (category, value) usage across every test in the run so the review
+  // panel reads a single object instead of folding it client-side.
+  designSystemTokenUsage: jsonb('design_system_token_usage').$type<DesignSystemTokenUsage>(),
   comparisonPairId: text('comparison_pair_id'), // shared ID linking baseline + feature builds
   comparisonRole: text('comparison_role'), // 'baseline' | 'feature' | null
   comparisonMeta: jsonb('comparison_meta').$type<{
