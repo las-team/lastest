@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@lastest/shared/*": ["./packages/shared/src/*"]
     }
   },
   "include": [
