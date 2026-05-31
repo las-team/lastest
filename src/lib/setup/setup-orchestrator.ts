@@ -161,9 +161,10 @@ export class SetupOrchestrator {
     // Check for multi-step default setup
     if (test.repositoryId) {
       const defaultSteps = await queries.getDefaultSetupSteps(test.repositoryId);
+      const overrides = test.setupOverrides;
+      const hasExtraSteps = (overrides?.extraSteps?.length ?? 0) > 0;
 
-      if (defaultSteps.length > 0) {
-        const overrides = test.setupOverrides;
+      if (defaultSteps.length > 0 || hasExtraSteps) {
         const skippedIds = new Set(overrides?.skippedDefaultStepIds ?? []);
 
         // Filter out skipped defaults

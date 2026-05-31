@@ -2527,3 +2527,14 @@ User opted to **skip automated send and handle outreach manually via own channel
 **Approved outreach draft (saved for re-use):**
 > Built a visual-regression baseline of your customer signup wizard (steps 2/3 schedule + 3/3 address, fresh sandbox account) while you were hiring QA — in case useful: https://app.lastest.cloud/r/3KccbteWE3oYiCC4UQ6VbA
 
+
+## 2026-05-31 — Zoho REDO (storage_state wiring bug + Mail step-up)
+
+- Original share /r/losf2ULtmrPU9zxx98DTbg landed at sign-in for steps 3-10 (storage_state extraSteps silently dropped before reaching EB).
+- Diagnosed: `captureSetupForRemoteRunner()` exported but never called from dispatcher. UA override field also blocked (deployed mid-session).
+- Workaround: inlined 53 Zoho cookies as a base64 const in test code, called `page.context().addCookies()` at test start.
+- Re-published: https://app.lastest.cloud/r/7YwPazbwZL_PIb5XdYQf_w (build c95ae0cf-2b41-4ba9-b970-7c5a1f026bf7)
+- Old share revoked.
+- Final 10 scenarios: Home (public) → CRM (public) → Mail step-up gate (Zoho's "Verify your identity" — strong security signal) → Calendar week → Calendar day → Calendar (agenda bounces to week) → New Event composer dialog (real authed business interaction with user's email + Mail ToDo/Notes integration) → Calendar week → Calendar day → All Products (50+ apps).
+- Reusable learning: Zoho Mail accessing the inbox on a new browser context triggers adaptive auth step-up ("Verify your identity — sensitive operation") even with all valid session cookies + Chrome UA. Calendar surface accepts the session without step-up. Mail demos likely need either real-device session continuity (not possible from EB pod) or accepting the step-up as a security-feature screenshot.
+- Reusable learning: setupOverrides.extraSteps storage_state silently no-ops in the EB execution path. Inlining cookies via `addCookies()` in the test code is the working pattern.
