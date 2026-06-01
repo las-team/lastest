@@ -85,6 +85,13 @@ interface PlaywrightSettingsCardProps {
    * normal debounced auto-save so the change is persisted.
    */
   applyPriority?: { value: SelectorConfig[]; nonce: number } | null;
+  /**
+   * Hide the Selector Priority drag-to-reorder list. The list is owned by the
+   * Record page (which is where users tune selectors), so the settings page
+   * passes this to suppress the duplicate. The "Custom test-id attribute"
+   * input stays visible because it's a global selector config.
+   */
+  hideSelectorPriority?: boolean;
 }
 
 export function PlaywrightSettingsCard({
@@ -93,6 +100,7 @@ export function PlaywrightSettingsCard({
   compact = false,
   onSaveStatusChange,
   applyPriority,
+  hideSelectorPriority = false,
 }: PlaywrightSettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [showSaved, setShowSaved] = useState(false);
@@ -439,18 +447,22 @@ export function PlaywrightSettingsCard({
       {/* Selectors */}
       <CollapsibleSection title="Selectors" icon={List} enabled={!compact}>
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
-        {compact && (
-          <div className="flex items-center gap-2">
-            <List className="w-4 h-4 text-muted-foreground" />
-            <Label className="text-sm font-medium">Selector Priority</Label>
-          </div>
+        {!hideSelectorPriority && (
+          <>
+            {compact && (
+              <div className="flex items-center gap-2">
+                <List className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Selector Priority</Label>
+              </div>
+            )}
+            <SelectorPriorityList
+              value={selectorPriority}
+              onChange={setSelectorPriority}
+              compact={compact}
+              recommendations={recommendations}
+            />
+          </>
         )}
-        <SelectorPriorityList
-          value={selectorPriority}
-          onChange={setSelectorPriority}
-          compact={compact}
-          recommendations={recommendations}
-        />
         {/* Custom test-id attribute (e.g. data-automation-id). When set, the
             recorder, fallback locator, and AI test-gen prompt prefer this
             attribute. Position it in the priority list above by adding a

@@ -418,6 +418,7 @@ export default async function SettingsPage({
         <PlaywrightSettingsCard
           settings={playwrightSettings}
           repositoryId={selectedRepo?.id}
+          hideSelectorPriority
         />
       </div>
     </>
