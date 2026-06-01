@@ -43,7 +43,6 @@ import type { AssertionType, WaitParams, WaitType, WaitSelectorCondition } from 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Timer, CalendarClock } from 'lucide-react';
 import {
-  Video,
   Square,
   Camera,
   Loader2,
@@ -454,6 +453,39 @@ export function RecordingClient({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisSummary, setAnalysisSummary] = useState<string | null>(null);
   const [appliedPriority, setAppliedPriority] = useState<{ value: SelectorConfig[]; nonce: number } | null>(null);
+  const lastAnalyzedUrlRef = useRef<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Promise resolver for the next settings-card auto-save flush. Used by
+  // "Analyze and Start Recording" to ensure the recommended selector priority
+  // is persisted before startRecording reads settings from the server.
+  const pendingSettingsSaveRef = useRef<{ resolve: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+
+  // Resolve a pending "wait for settings save" promise on the transition
+  // out of pending (a save has flushed). Tracking the previous value avoids
+  // resolving on the initial render when isPending is already false.
+  const prevSavePendingRef = useRef(false);
+  useEffect(() => {
+    const wasPending = prevSavePendingRef.current;
+    prevSavePendingRef.current = settingsSaveStatus.isPending;
+    if (!pendingSettingsSaveRef.current) return;
+    if (wasPending && !settingsSaveStatus.isPending) {
+      const { resolve, timer } = pendingSettingsSaveRef.current;
+      pendingSettingsSaveRef.current = null;
+      clearTimeout(timer);
+      resolve();
+    }
+  }, [settingsSaveStatus]);
+
+  const waitForSettingsSaved = (timeoutMs = 2500) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        if (pendingSettingsSaveRef.current) {
+          pendingSettingsSaveRef.current = null;
+          resolve();
+        }
+      }, timeoutMs);
+      pendingSettingsSaveRef.current = { resolve, timer };
+    });
   const [embeddedStreamUrl, setEmbeddedStreamUrl] = useState<string | null>(null);
   const [savedTestId, setSavedTestId] = useState<string | null>(null);
   const [autoPlayStatus, setAutoPlayStatus] = useState<'idle' | 'saving' | 'playing' | 'finished' | 'error'>('idle');
@@ -648,22 +680,26 @@ export function RecordingClient({
     return () => clearInterval(pollInterval);
   }, [step, repositoryId]);
 
-  const handleAnalyzeUrl = async () => {
-    if (!url || !url.startsWith('http')) return;
+  // Run analyze on the current URL, apply the recommended priority, and update
+  // the summary. Returns `{ changed }` so the combined CTA can decide whether
+  // to wait for the auto-save flush; returns null if the run was skipped.
+  const runAnalyze = async (opts: { silent?: boolean } = {}): Promise<{ changed: boolean } | null> => {
+    if (!url || !url.startsWith('http')) return null;
     setIsAnalyzing(true);
     setAnalysisSummary(null);
     try {
       const result = await analyzeUrlForSelectors(url, repositoryId);
       if (result.error) {
         toast.error(result.error);
-        return;
+        return null;
       }
+      lastAnalyzedUrlRef.current = url;
       if (!result.meaningful) {
         setAnalysisSummary(
           'Page looks client-rendered (little markup in the initial HTML). Keeping current selector config.'
         );
-        toast.info('Limited markup found — selector config left unchanged.');
-        return;
+        if (!opts.silent) toast.info('Limited markup found — selector config left unchanged.');
+        return { changed: false };
       }
       if (result.recommendedPriority) {
         setAppliedPriority({ value: result.recommendedPriority, nonce: Date.now() });
@@ -678,12 +714,40 @@ export function RecordingClient({
         ? `Prioritized by page content: ${top}. Selector config ${result.changed ? 'updated' : 'already optimal'}.`
         : `Selector config ${result.changed ? 'updated' : 'already optimal'} for this page.`;
       setAnalysisSummary(ambiguous ? `${base} Downranked (ambiguous): ${ambiguous}.` : base);
-      toast.success(result.changed ? 'Selector config tuned for this page' : 'Selector config already optimal');
+      if (!opts.silent) {
+        toast.success(result.changed ? 'Selector config tuned for this page' : 'Selector config already optimal');
+      }
+      return { changed: !!result.changed };
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to analyze URL');
+      return null;
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // Stand-alone "Analyze URL" button (advanced section).
+  const handleAnalyzeUrl = () => runAnalyze();
+
+  // Primary CTA: analyze the URL (if useful), wait for the recommended
+  // selector priority to persist, then start recording.
+  const handleAnalyzeAndStart = async () => {
+    if (!testName.trim()) {
+      setTestNameMissing(true);
+      testNameInputRef.current?.focus();
+      return;
+    }
+    if (!url) return;
+
+    if (url.startsWith('http') && lastAnalyzedUrlRef.current !== url) {
+      const res = await runAnalyze({ silent: true });
+      // Only wait for the auto-save flush if the recommendation actually
+      // diverges from what's already persisted.
+      if (res?.changed) {
+        await waitForSettingsSaved();
+      }
+    }
+    await handleStartRecording();
   };
 
   const handleStartRecording = async () => {
@@ -891,10 +955,15 @@ export function RecordingClient({
     if (document.fullscreenElement) {
       try { await document.exitFullscreen(); } catch {}
     }
-    setEmbeddedStreamUrl(null);
     activeSessionIdRef.current = null;
     activeRunnerIdRef.current = null;
     stoppedPollsRef.current = 0;
+    // Flip to the saving step BEFORE the round-trip so the recording layout
+    // unmounts immediately. Without this, an EB stop briefly nulls the stream
+    // while step is still 'recording', flashing the local-Playwright fallback
+    // layout for ~1s. The saving step renders its loading skeleton (driven by
+    // !generatedCode) until the session payload arrives below.
+    setStep('saving');
     try {
       const session = await stopRecording(repositoryId);
       if (session) {
@@ -902,11 +971,18 @@ export function RecordingClient({
         setRequiredCapabilities(session.requiredCapabilities ?? null);
         setCapturedStorageState(session.capturedStorageState ?? null);
         setDomSnapshot(session.domSnapshot ?? null);
-        setStep('saving');
+      } else {
+        // No session payload — bail back to setup rather than stranding the
+        // user on a permanent "Wrapping up…" skeleton.
+        setStep('setup');
+        toast.error('Recording ended without a captured session');
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
+      toast.error('Could not finish the recording');
+      setStep('setup');
     } finally {
+      setEmbeddedStreamUrl(null);
       setIsLoading(false);
     }
   };
@@ -1111,9 +1187,8 @@ export function RecordingClient({
   if (step === 'setup') {
     return (
       <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-5xl mx-auto space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Left Column - Form */}
+        <div className="max-w-3xl mx-auto space-y-4">
+            {/* New Recording form */}
             <Card>
               <CardHeader>
                 <CardTitle>{isRerecording ? 'Re-record Test' : 'New Recording'}</CardTitle>
@@ -1134,21 +1209,11 @@ export function RecordingClient({
                       onChange={(e) => {
                         setUrl(e.target.value);
                         if (analysisSummary) setAnalysisSummary(null);
+                        if (lastAnalyzedUrlRef.current && lastAnalyzedUrlRef.current !== e.target.value) {
+                          lastAnalyzedUrlRef.current = null;
+                        }
                       }}
                     />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={handleAnalyzeUrl}
-                      disabled={!url.startsWith('http') || isAnalyzing}
-                      title="Analyze page and tune selector priority"
-                    >
-                      {isAnalyzing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ScanSearch className="h-4 w-4" />
-                      )}
-                    </Button>
                     <Button
                       variant="outline"
                       size="icon"
@@ -1309,37 +1374,57 @@ export function RecordingClient({
                   </div>
                 )}
 
-                {/* Start Button */}
+                {/* Primary CTA: analyze then start */}
                 <Button
-                  onClick={handleStartRecording}
-                  disabled={!url || isLoading}
+                  onClick={handleAnalyzeAndStart}
+                  disabled={!url || isLoading || isAnalyzing}
                   className="w-full"
                   size="lg"
                 >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Analyzing page…
+                    </>
+                  ) : isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Starting recording…
+                    </>
                   ) : (
-                    <Video className="h-4 w-4 mr-2" />
+                    <>
+                      <ScanSearch className="h-4 w-4 mr-2" />
+                      Analyze and Start Recording
+                    </>
                   )}
-                  Start Recording
                 </Button>
               </CardContent>
             </Card>
 
-            {/* Right Column - Settings */}
+            {/* OR divider */}
+            <div className="flex items-center gap-3 py-1">
+              <div className="flex-1 border-t" />
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">or</span>
+              <div className="flex-1 border-t" />
+            </div>
+
+            {/* Advanced Settings (collapsed by default) */}
             <Card>
-              <CardHeader className="pb-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Settings2 className="h-4 w-4 text-muted-foreground" />
-                    <CardTitle className="text-base">Recording Settings</CardTitle>
-                  </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="w-full flex items-center justify-between p-4 hover:bg-muted/40 transition-colors rounded-lg"
+                aria-expanded={showAdvanced}
+              >
+                <div className="flex items-center gap-2">
+                  <Settings2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-base font-semibold">Advanced Settings</span>
                   {(settingsSaveStatus.isPending || settingsSaveStatus.showSaved) && (
-                    <div className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground ml-2">
                       {settingsSaveStatus.isPending ? (
                         <span className="flex items-center gap-1">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          Saving...
+                          Saving…
                         </span>
                       ) : (
                         <span className="flex items-center gap-1 text-green-600">
@@ -1347,21 +1432,68 @@ export function RecordingClient({
                           Saved
                         </span>
                       )}
-                    </div>
+                    </span>
                   )}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <PlaywrightSettingsCard
-                  settings={settings}
-                  repositoryId={repositoryId}
-                  compact
-                  onSaveStatusChange={setSettingsSaveStatus}
-                  applyPriority={appliedPriority}
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
                 />
-              </CardContent>
+              </button>
+              {showAdvanced && (
+                <CardContent className="pt-0 space-y-4">
+                  {/* Analyze-only entry point lives here so the main URL row stays clean */}
+                  <div className="flex items-center justify-between gap-2 p-3 rounded-lg border bg-muted/30">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">Analyze URL</p>
+                      <p className="text-xs text-muted-foreground">
+                        Inspect the page and tune the selector priority without starting a recording.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAnalyzeUrl}
+                      disabled={!url.startsWith('http') || isAnalyzing}
+                    >
+                      {isAnalyzing ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <ScanSearch className="h-4 w-4 mr-1.5" />
+                      )}
+                      Analyze
+                    </Button>
+                  </div>
+                  <PlaywrightSettingsCard
+                    settings={settings}
+                    repositoryId={repositoryId}
+                    compact
+                    onSaveStatusChange={setSettingsSaveStatus}
+                    applyPriority={appliedPriority}
+                  />
+                  {/* Manual path: skip analyze, record with the settings the
+                      user just dialed in. */}
+                  <Button
+                    onClick={handleStartRecording}
+                    disabled={!url || isLoading || isAnalyzing}
+                    variant="secondary"
+                    className="w-full"
+                    size="lg"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Starting recording…
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4 mr-2" />
+                        Start Recording with these settings
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              )}
             </Card>
-          </div>
         </div>
       </div>
     );
@@ -1691,6 +1823,33 @@ export function RecordingClient({
           </div>
 
           <RecordingTutorialOverlay layout="card" />
+        </div>
+      </div>
+    );
+  }
+
+  // Saving step — lazy-load skeleton until the session payload arrives.
+  // Rendered on the "user clicked Stop" path while the stopRecording round-trip
+  // is in flight: step has already flipped to 'saving' so the EB layout unmounts
+  // immediately, but generatedCode (and friends) haven't been set yet.
+  if (step === 'saving' && !generatedCode) {
+    return (
+      <div className="flex-1 p-6 overflow-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{isRerecording ? 'Update Test' : 'Save Recording'}</CardTitle>
+              <CardDescription>Wrapping up your recording…</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col items-center justify-center gap-3 py-16">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  Capturing the final session state and generating test code.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
