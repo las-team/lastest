@@ -9,14 +9,8 @@ import {
   getEnvironmentConfig,
   getDeletedTests,
   getRepositoriesByTeam,
-  getPlaywrightSettings,
 } from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
-import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
-import { getSetupConfigs } from '@/server/actions/setup-configs';
-import { getDefaultSetupSteps } from '@/server/actions/setup-steps';
-import { getDefaultTeardownSteps } from '@/server/actions/teardown-steps';
-import { listStorageStates } from '@/server/actions/storage-states';
 
 export default async function DefinitionPage() {
   const session = await getCurrentSession();
@@ -41,13 +35,6 @@ export default async function DefinitionPage() {
     routes,
     envConfig,
     deletedTests,
-    setupScripts,
-    setupConfigs,
-    availableSetupTests,
-    defaultSetupSteps,
-    defaultTeardownSteps,
-    storageStates,
-    playwrightSettings,
   ] = await Promise.all([
     getFunctionalAreasTree(selectedRepo.id),
     getTestsWithStatusByRepo(selectedRepo.id),
@@ -55,13 +42,6 @@ export default async function DefinitionPage() {
     getRoutesByRepo(selectedRepo.id),
     getEnvironmentConfig(selectedRepo.id),
     getDeletedTests(selectedRepo.id),
-    getSetupScripts(selectedRepo.id),
-    getSetupConfigs(selectedRepo.id),
-    getAvailableSetupTests(selectedRepo.id),
-    getDefaultSetupSteps(selectedRepo.id),
-    getDefaultTeardownSteps(selectedRepo.id),
-    listStorageStates(selectedRepo.id),
-    getPlaywrightSettings(selectedRepo.id),
   ]);
 
   const uncategorizedTests = tests
@@ -75,7 +55,6 @@ export default async function DefinitionPage() {
       <DefinitionPageClient
         tree={tree}
         uncategorizedTests={uncategorizedTests}
-        repository={selectedRepo}
         repositoryId={selectedRepo.id}
         selectedBranch={selectedRepo.selectedBranch || selectedRepo.defaultBranch || 'main'}
         banAiMode={banAiMode}
@@ -85,14 +64,6 @@ export default async function DefinitionPage() {
         routes={routes}
         baseUrl={envConfig.baseUrl}
         deletedTests={deletedTests}
-        setupScripts={setupScripts}
-        setupConfigs={setupConfigs}
-        availableSetupTests={availableSetupTests}
-        defaultSetupSteps={defaultSetupSteps}
-        defaultTeardownSteps={defaultTeardownSteps}
-        storageStates={storageStates}
-        designSystem={playwrightSettings?.designSystem ?? null}
-        designSystemEnabled={!!playwrightSettings?.enableDesignSystem}
       />
     </div>
   );
