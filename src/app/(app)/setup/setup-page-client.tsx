@@ -36,10 +36,7 @@ export function SetupPageClient({
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="overflow-auto flex-1">
         <div className="p-6 pt-4">
-          <div className="max-w-5xl space-y-6">
-            <p className="text-sm text-muted-foreground">
-              Configure seed and teardown steps for test preparation and cleanup.
-            </p>
+          <div className="max-w-5xl mx-auto space-y-6">
             <Tabs defaultValue="seed-setup">
               <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
                 <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
