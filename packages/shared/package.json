@@ -10,8 +10,8 @@
     ".": "./src/index.ts",
     "./selector-stats": "./src/selector-stats.ts",
     "./globals.css": {
-      "types": "./src/globals.css.d.ts",
-      "default": "./src/globals.css"
+      "types": "./globals.css.d.ts",
+      "default": "./globals.css"
     },
     "./lib/utils": "./src/lib/utils.ts",
     "./lib/share/slug": "./src/lib/share/slug.ts",
@@ -37,5 +37,12 @@
     "lucide-react": "^0.511.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.28",
+    "@types/react-dom": "^18.0.11",
+    "typescript": "^5.0.4",
+    "@tailwindcss/postcss": "^4",
+    "tailwindcss": "^4"
   }
 }

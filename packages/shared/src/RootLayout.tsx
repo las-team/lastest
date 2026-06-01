@@ -1,6 +1,5 @@
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
-import "@lastest/shared/globals.css";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { Toaster } from "sonner";
 import { UmamiScript } from "./components/analytics/umami-script";

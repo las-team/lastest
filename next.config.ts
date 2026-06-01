@@ -92,6 +92,10 @@ const nextConfig: NextConfig = {
     const authZone = process.env.AUTH_ZONE;
     if (authZone) {
       rewrites.push({
+        source: "/auth_static/:path+",
+        destination: `${process.env.AUTH_ZONE}/auth_static/:path+`,
+      });
+      rewrites.push({
         source: "/forgot-password/:path*",
         destination: `${process.env.AUTH_ZONE}/forgot-password/:path*`,
       });

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import "@lastest/shared/globals.css";
+import "./globals.css";
 import { RootLayout } from "@lastest/shared";
 
 export const metadata: Metadata = {
