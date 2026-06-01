@@ -1535,9 +1535,9 @@ export function RecordingClient({
                       Waiting for interactions...
                     </div>
                   ) : (
-                    events.map((event, i) => (
+                    events.map((event) => (
                       <StepCard
-                        key={`${event.sequence}-${i}`}
+                        key={event.sequence}
                         event={event}
                         description={getEventDescription(event)}
                         replayStatus={isActionReplayable(event)}
@@ -1764,9 +1764,9 @@ export function RecordingClient({
                         Waiting for interactions...
                       </div>
                     ) : (
-                      events.map((event, i) => (
+                      events.map((event) => (
                         <StepCard
-                          key={`${event.sequence}-${i}`}
+                          key={event.sequence}
                           event={event}
                           description={getEventDescription(event)}
                           replayStatus={isActionReplayable(event)}
