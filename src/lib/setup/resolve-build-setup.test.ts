@@ -190,6 +190,89 @@ describe('resolveBuildSetup', () => {
     expect(out.setupInfo).toEqual({ code: 'PER_TEST_CODE', setupId: 'per-test-id' });
   });
 
+  // Regression: las-team/lastest demo. The saas-demo skill + MCP attach a
+  // captured session to a single test via `setupOverrides.extraSteps`
+  // (stepType:'storage_state'), with NO repo default step and NO setup code.
+  // Before the fix, resolveBuildSetup only scanned repo-level default_setup_steps,
+  // so setupContext.storageState stayed undefined → the EB command carried no
+  // state → the demo cold-started on the target's login page.
+  it('loads storage_state from per-test setupOverrides.extraSteps (las-team/lastest demo path)', async () => {
+    mockQueries.getDefaultSetupSteps.mockResolvedValue([]); // no repo defaults
+    mockQueries.getStorageState.mockResolvedValue({
+      id: 'ss-demo',
+      name: 'lastest-session',
+      storageStateJson: '{"cookies":[{"name":"session_id"}],"origins":[]}',
+    });
+
+    const demoTest = makeTest({
+      id: 'demo-test',
+      name: 'lastest app walkthrough',
+      setupOverrides: {
+        skippedDefaultStepIds: [],
+        extraSteps: [{ stepType: 'storage_state', storageStateId: 'ss-demo' }],
+      },
+    });
+
+    const out = await resolveBuildSetup({
+      tests: [demoTest],
+      repositoryId: 'las-team-lastest',
+      build: null,
+    });
+
+    expect(out.setupContext.storageState).toBe('{"cookies":[{"name":"session_id"}],"origins":[]}');
+    expect(mockQueries.getStorageState).toHaveBeenCalledWith('ss-demo');
+    // storage_state-only setup produces no runner code — broadcast path then
+    // skips the one-shot setup EB and threads this state straight to each test.
+    expect(out.setupInfo).toBeUndefined();
+  });
+
+  it('per-test override storage_state overrides the repo-default state', async () => {
+    mockQueries.getDefaultSetupSteps.mockResolvedValue([
+      { id: 's1', stepType: 'storage_state', storageStateId: 'ss-default' },
+    ]);
+    mockQueries.getStorageState.mockImplementation(async (id: string) =>
+      id === 'ss-default'
+        ? { id, name: 'default', storageStateJson: '{"default":true}' }
+        : { id, name: 'override', storageStateJson: '{"override":true}' },
+    );
+
+    const out = await resolveBuildSetup({
+      tests: [
+        makeTest({
+          setupOverrides: {
+            skippedDefaultStepIds: [],
+            extraSteps: [{ stepType: 'storage_state', storageStateId: 'ss-override' }],
+          },
+        }),
+      ],
+      repositoryId: 'repo1',
+      build: null,
+    });
+
+    // Mirrors setup-orchestrator: extras run after defaults, last write wins.
+    expect(out.setupContext.storageState).toBe('{"override":true}');
+  });
+
+  it('ignores non-storage_state extraSteps when picking a state to pre-load', async () => {
+    mockQueries.getDefaultSetupSteps.mockResolvedValue([]);
+
+    const out = await resolveBuildSetup({
+      tests: [
+        makeTest({
+          setupOverrides: {
+            skippedDefaultStepIds: [],
+            extraSteps: [{ stepType: 'script', scriptId: 'sc-1', storageStateId: null }],
+          },
+        }),
+      ],
+      repositoryId: 'repo1',
+      build: null,
+    });
+
+    expect(out.setupContext.storageState).toBeUndefined();
+    expect(mockQueries.getStorageState).not.toHaveBeenCalled();
+  });
+
   it('skips storage_state pre-load when repositoryId is null', async () => {
     const out = await resolveBuildSetup({
       tests: [makeTest({ repositoryId: null })],
