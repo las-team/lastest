@@ -25,7 +25,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle, Palette } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Lock, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -1087,59 +1087,11 @@ export function PlaywrightSettingsCard({
             <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
           </div>
 
-          {/* Accessibility Checks */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Accessibility className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Accessibility Checks</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Run WCAG 2.2 AA compliance checks with axe-core
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
-          </div>
-
-          {/* Design System Checks — toggle only. Token upload lives on
-              the Setup tab → API Configurations section so the file
-              browser stays out of the settings page. */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Design System Checks</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Compare computed colors, radii, fonts, and spacing against the repo&apos;s token bundle.{' '}
-                    {designSystem
-                      ? <span className="text-foreground/80">{Object.values(designSystem.tokens ?? {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0)} tokens loaded.</span>
-                      : <span className="text-warning-foreground/80">No tokens yet — upload a bundle on the Setup tab.</span>
-                    }
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableDesignSystem} onCheckedChange={setEnableDesignSystem} />
-          </div>
-
-          {/* Network Capture */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Network Capture</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Record every HTTP request and response during the test for inspection (Wireshark-style monitoring)
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
-          </div>
+          {/* Accessibility / Design System / Network Capture used to live
+              here as standalone switches. They now live in the Verify focus
+              view's Run Variables cogwheel modal as 3-way modes (enforce /
+              log / disable). The repo's design-system token bundle still
+              gets uploaded on the Setup tab. */}
         </div>
       </CollapsibleSection>
 
@@ -1199,20 +1151,12 @@ export function PlaywrightSettingsCard({
       {/* Errors & Network */}
       <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
         <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Network Error Mode</Label>
-            <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore network errors</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+          {/* Network Error Mode + Console Error Mode used to live here as
+              fail/warn/ignore selects. They are now per-layer 3-way modes
+              configured from the Verify focus view's Run Variables cogwheel
+              modal. The remaining controls below (ignore-list, UA override)
+              are not exposed in the modal because they apply across all
+              tests rather than per-layer. */}
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">Ignore External Network Errors</Label>
@@ -1221,20 +1165,6 @@ export function PlaywrightSettingsCard({
               </p>
             </div>
             <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Console Error Mode</Label>
-            <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on console errors</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore console errors</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="space-y-1.5">

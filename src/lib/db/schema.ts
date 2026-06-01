@@ -181,8 +181,26 @@ export interface TestPlaywrightOverrides {
   navigationTimeout?: number;
   actionTimeout?: number;
   screenshotDelay?: number;
+  // Legacy network/console error mode (fail/warn/ignore). Kept for back-
+  // compat with the per-test override JSON shape; new code should write
+  // `networkMode`/`consoleMode` below and the persisting layer will mirror
+  // them onto these for back-compat with code that still reads the legacy
+  // names.
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  // Per-test 3-way modes overriding the repo's playwright_settings.*Mode
+  // values. Sparse: only present keys override; absent keys fall through
+  // to the repo defaults. The Verify cogwheel modal writes these when
+  // opened in per-test mode.
+  visualMode?: 'enforce' | 'log' | 'disable';
+  textMode?: 'enforce' | 'log' | 'disable';
+  domMode?: 'enforce' | 'log' | 'disable';
+  networkMode?: 'enforce' | 'log' | 'disable';
+  consoleMode?: 'enforce' | 'log' | 'disable';
+  a11yMode?: 'enforce' | 'log' | 'disable';
+  designMode?: 'enforce' | 'log' | 'disable';
+  perfMode?: 'enforce' | 'log' | 'disable';
+  urlMode?: 'enforce' | 'log' | 'disable';
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
@@ -1189,6 +1207,20 @@ export const playwrightSettings = pgTable('playwright_settings', {
   // tests.designSystemOverrides. Empty / null disables the layer even when
   // the enableDesignSystem toggle is on.
   designSystem: jsonb('design_system').$type<DesignSystemConfig>(),
+  // Per-check 3-way mode columns driving the Verify cogwheel modal. Each is
+  // 'enforce' | 'log' | 'disable'. Source of truth — the legacy enable*/
+  // *ErrorMode columns above are mirrored on write for back-compat with
+  // executor/runner code paths that still read them. See
+  // src/lib/verify/check-modes.ts for the derivation helpers.
+  visualMode: text('visual_mode'),   // pixel screenshot comparison
+  textMode: text('text_mode'),       // innerText capture + diff (legacy textDiffEnabled on diff_sensitivity_settings)
+  domMode: text('dom_mode'),         // DOM snapshot capture (legacy enableDomDiff)
+  networkMode: text('network_mode'), // network capture + 4xx/5xx gate (legacy enableNetworkInterception + networkErrorMode)
+  consoleMode: text('console_mode'), // console error gate (legacy consoleErrorMode)
+  a11yMode: text('a11y_mode'),       // axe-core (legacy enableA11y)
+  designMode: text('design_mode'),   // token compliance (legacy enableDesignSystem)
+  perfMode: text('perf_mode'),       // web vitals capture
+  urlMode: text('url_mode'),         // URL trajectory comparison
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });

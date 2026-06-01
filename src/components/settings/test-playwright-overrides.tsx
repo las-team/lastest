@@ -24,10 +24,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Globe, ChevronDown, RotateCcw, Timer, AlertTriangle, Settings, MousePointer } from 'lucide-react';
+import { Globe, ChevronDown, RotateCcw, Timer, AlertTriangle, Settings, MousePointer, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { saveTestPlaywrightOverrides, resetTestPlaywrightOverrides } from '@/server/actions/test-overrides';
 import type { TestPlaywrightOverrides as TestPlaywrightOverridesType } from '@/lib/db/schema';
+import {
+  defaultCheckModes,
+  type CheckLayer,
+  type CheckMode,
+  type CheckModeMap,
+} from '@/lib/verify/check-modes';
 
 interface TestPlaywrightOverridesProps {
   testId: string;
@@ -45,10 +51,34 @@ interface TestPlaywrightOverridesProps {
     baseUrl: string;
     cursorPlaybackSpeed: number;
   };
+  /** Repo-level effective check modes, so the per-test "Inherit" choice
+   *  can label the inherited value (e.g. "Inherit (Enforce)"). Optional
+   *  — falls back to `defaultCheckModes()` when not provided. */
+  repoCheckModes?: CheckModeMap;
 }
 
-export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initialOverrides, defaults }: TestPlaywrightOverridesProps) {
+const MODE_LAYERS: { id: CheckLayer; name: string }[] = [
+  { id: 'visual',  name: 'Visual' },
+  { id: 'text',    name: 'Text' },
+  { id: 'dom',     name: 'DOM' },
+  { id: 'network', name: 'Network' },
+  { id: 'console', name: 'Console' },
+  { id: 'a11y',    name: 'A11y' },
+  { id: 'design',  name: 'Design' },
+  { id: 'perf',    name: 'Perf' },
+  { id: 'url',     name: 'URL' },
+];
+
+const MODE_OPTIONS: { id: CheckMode | null; label: string; hint: string }[] = [
+  { id: null,      label: 'Inherit', hint: 'Use the repo-level mode for this layer' },
+  { id: 'enforce', label: 'Enforce', hint: 'Run and fail the test on issues' },
+  { id: 'log',     label: 'Log',     hint: "Run, surface issues, never fail" },
+  { id: 'disable', label: 'Disable', hint: "Don't run this check for this test" },
+];
+
+export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initialOverrides, defaults, repoCheckModes }: TestPlaywrightOverridesProps) {
   const [overrides, setOverrides] = useState<TestPlaywrightOverridesType>(initialOverrides ?? {});
+  const effectiveRepoCheckModes = repoCheckModes ?? defaultCheckModes();
   const [isSaving, setIsSaving] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef<string>(JSON.stringify(initialOverrides ?? {}));
@@ -256,56 +286,82 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Error Handling */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['networkErrorMode', 'consoleErrorMode'].includes(k))}>
+        {/* Check Modes — per-layer 3-way mode override (enforce / log /
+            disable / inherit). Picking "Inherit" removes the key from the
+            override map so the test falls back to whatever Run Variables
+            on the repo says. Network/Console additionally write the legacy
+            *ErrorMode keys for back-compat with executor code that still
+            reads them. */}
+        <Collapsible defaultOpen={MODE_LAYERS.some(l => `${l.id}Mode` in overrides)}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="w-full justify-between p-2 h-auto">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Error Handling</span>
+                <ShieldCheck className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Check Modes</span>
               </div>
               <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
             </Button>
           </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-3 pt-2 pl-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['networkErrorMode']} />
-                <div className="space-y-0.5">
-                  <Label className="text-sm">Network Error Mode</Label>
-                  <p className="text-xs text-muted-foreground">How to handle network errors during tests</p>
+          <CollapsibleContent className="space-y-2 pt-2 pl-4">
+            <p className="text-xs text-muted-foreground">
+              Override the repo&apos;s check modes for this test only. &quot;Inherit&quot; clears the override.
+            </p>
+            {MODE_LAYERS.map((layer) => {
+              const overrideKey = `${layer.id}Mode` as keyof TestPlaywrightOverridesType;
+              const currentOverride = overrides[overrideKey] as CheckMode | undefined;
+              const isOverriddenLayer = overrideKey in overrides;
+              const repoMode = effectiveRepoCheckModes[layer.id];
+              return (
+                <div key={layer.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <OverrideIndicator keys={[overrideKey]} />
+                    <Label className="text-sm">{layer.name}</Label>
+                  </div>
+                  <Select
+                    value={isOverriddenLayer ? (currentOverride ?? 'inherit') : 'inherit'}
+                    onValueChange={(value) => {
+                      if (value === 'inherit') {
+                        // Strip both the new key and any legacy mirror so
+                        // the test no longer carries an opinion for this
+                        // layer.
+                        setOverrides((prev) => {
+                          const next = { ...prev };
+                          delete next[overrideKey];
+                          if (layer.id === 'network') delete next.networkErrorMode;
+                          if (layer.id === 'console') delete next.consoleErrorMode;
+                          return next;
+                        });
+                        return;
+                      }
+                      const mode = value as CheckMode;
+                      setOverrides((prev) => {
+                        const next = { ...prev, [overrideKey]: mode };
+                        // Mirror to the legacy executor-facing field for
+                        // the two gating layers so older code paths see
+                        // the same value.
+                        const err = mode === 'enforce' ? 'fail' : mode === 'log' ? 'warn' : 'ignore';
+                        if (layer.id === 'network') next.networkErrorMode = err;
+                        if (layer.id === 'console') next.consoleErrorMode = err;
+                        return next;
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MODE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.label} value={opt.id ?? 'inherit'} title={opt.hint}>
+                          {opt.id === null
+                            ? `Inherit (${repoMode})`
+                            : opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <Select value={getVal('networkErrorMode')} onValueChange={(value) => setVal('networkErrorMode', value as 'fail' | 'warn' | 'ignore')}>
-                <SelectTrigger className="w-24">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fail">Fail</SelectItem>
-                  <SelectItem value="warn">Warn</SelectItem>
-                  <SelectItem value="ignore">Ignore</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['consoleErrorMode']} />
-                <div className="space-y-0.5">
-                  <Label className="text-sm">Console Error Mode</Label>
-                  <p className="text-xs text-muted-foreground">How to handle console errors during tests</p>
-                </div>
-              </div>
-              <Select value={getVal('consoleErrorMode')} onValueChange={(value) => setVal('consoleErrorMode', value as 'fail' | 'warn' | 'ignore')}>
-                <SelectTrigger className="w-24">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fail">Fail</SelectItem>
-                  <SelectItem value="warn">Warn</SelectItem>
-                  <SelectItem value="ignore">Ignore</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              );
+            })}
           </CollapsibleContent>
         </Collapsible>
 
