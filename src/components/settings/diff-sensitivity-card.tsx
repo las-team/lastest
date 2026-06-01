@@ -77,9 +77,6 @@ export function DiffSensitivityCard({
   const [regionDetectionMode, setRegionDetectionMode] = useState<RegionDetectionMode>(
     (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode
   );
-  const [textDiffEnabled, setTextDiffEnabled] = useState(
-    settings.textDiffEnabled ?? DEFAULT_DIFF_THRESHOLDS.textDiffEnabled
-  );
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -94,7 +91,6 @@ export function DiffSensitivityCard({
     textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
     textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
     regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
-    textDiffEnabled: settings.textDiffEnabled ?? DEFAULT_DIFF_THRESHOLDS.textDiffEnabled,
   });
 
   const settingsKey = `${settings.id}-${settings.updatedAt?.getTime?.() ?? 0}`;
@@ -109,7 +105,6 @@ export function DiffSensitivityCard({
     setTextRegionPadding(settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
     setTextDetectionGranularity((settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
     setRegionDetectionMode((settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
-    setTextDiffEnabled(settings.textDiffEnabled ?? DEFAULT_DIFF_THRESHOLDS.textDiffEnabled);
 
     originalValues.current = {
       unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
@@ -122,7 +117,6 @@ export function DiffSensitivityCard({
       textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
       textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
       regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
-      textDiffEnabled: settings.textDiffEnabled ?? DEFAULT_DIFF_THRESHOLDS.textDiffEnabled,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey]);
@@ -141,11 +135,10 @@ export function DiffSensitivityCard({
         textRegionPadding,
         textDetectionGranularity,
         regionDetectionMode,
-        textDiffEnabled,
       });
       toast.success('Diff sensitivity settings saved');
     });
-  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode, textDiffEnabled]);
+  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode]);
 
   useEffect(() => {
     const orig = originalValues.current;
@@ -159,8 +152,7 @@ export function DiffSensitivityCard({
       textRegionThreshold !== orig.textRegionThreshold ||
       textRegionPadding !== orig.textRegionPadding ||
       textDetectionGranularity !== orig.textDetectionGranularity ||
-      regionDetectionMode !== orig.regionDetectionMode ||
-      textDiffEnabled !== orig.textDiffEnabled;
+      regionDetectionMode !== orig.regionDetectionMode;
 
     if (!hasChanges) return;
 
@@ -177,7 +169,7 @@ export function DiffSensitivityCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode, textDiffEnabled, doSave]);
+  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode, doSave]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -192,7 +184,6 @@ export function DiffSensitivityCard({
       setTextRegionPadding(DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
       setTextDetectionGranularity(DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
       setRegionDetectionMode(DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
-      setTextDiffEnabled(DEFAULT_DIFF_THRESHOLDS.textDiffEnabled);
       toast.success('Diff sensitivity reset to defaults');
     });
   };
@@ -523,45 +514,6 @@ export function DiffSensitivityCard({
               </div>
             </div>
           )}
-        </div>
-
-        {/* Page Text Diff */}
-        <div className="space-y-4 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm font-medium">Page Text Diff <span className="ml-1 text-[10px] font-semibold uppercase text-muted-foreground">Beta</span></Label>
-                <p className="text-xs text-muted-foreground">
-                  Capture each page&apos;s rendered text alongside the screenshot and surface a line-level text diff in the build report. Useful for catching copy changes that don&apos;t move pixels much.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={textDiffEnabled}
-              onCheckedChange={setTextDiffEnabled}
-            />
-          </div>
-        </div>
-
-        {/* DOM Diff */}
-        <div className="space-y-4 rounded-lg border p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm font-medium">DOM Diff</Label>
-                <p className="text-xs text-muted-foreground">
-                  Compare DOM snapshots and overlay added/removed/changed elements on screenshots.
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={domDiffEnabled}
-              onCheckedChange={handleDomDiffToggle}
-              disabled={isPending}
-            />
-          </div>
         </div>
 
         {/* Reset */}

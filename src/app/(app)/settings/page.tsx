@@ -395,7 +395,6 @@ export default async function SettingsPage({
         <DiffSensitivityCard
           settings={diffSensitivitySettings}
           repositoryId={selectedRepo?.id}
-          domDiffEnabled={playwrightSettings.enableDomDiff ?? false}
         />
       </div>
       {selectedRepo && (
