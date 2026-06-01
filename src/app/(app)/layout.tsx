@@ -26,28 +26,42 @@ export default async function AppLayout({
     redirect('/onboarding');
   }
 
-  const showConsentBanner = session?.user
-    ? !(await hasAcceptedTerms(session.user.id))
-    : false;
+  // Resolve every async server component used in this layout up-front so
+  // the JSX tree below contains only plain React elements. The previous
+  // shape had two `<SidebarServer />` JSX nodes (desktop rail + Sheet prop
+  // on the client-side MobileBottomNav) and a `<MobileTopBarServer />`
+  // sibling, each an independent async server-component boundary nested
+  // inside the client provider chain. Under React 19 / Next 16 streaming
+  // SSR, that pair of nested async resolutions could complete in an order
+  // that left the desktop `<aside>` hoisted to be a direct child of
+  // `<ActivityFeedProvider>`, mismatching the client tree that wraps it in
+  // `<div className="flex h-screen">`. Awaiting here also dedupes the
+  // sidebar's DB/GitHub calls that used to run twice.
+  const [showConsentBanner, sidebarEl, mobileTopBarEl] = await Promise.all([
+    session?.user ? hasAcceptedTerms(session.user.id).then((v) => !v) : Promise.resolve(false),
+    SidebarServer(),
+    MobileTopBarServer(),
+  ]);
 
   return (
     <JobPollingProvider>
       <ContextCollectorProvider>
         <ActivityFeedProvider>
           <div className="flex h-screen">
-            {/* Desktop sidebar — responsive class lives on the <aside> itself.
-             *  An outer wrapper `<div className="hidden md:flex">` around the
-             *  async <SidebarServer/> caused a server/client hydration tree
-             *  mismatch on mobile-hidden render; merging the class onto the
-             *  Sidebar's own root keeps the tree shallow and stable. */}
-            <SidebarServer className="hidden md:flex" />
+            {/* Desktop rail wrapper is a static <div> now — safe because the
+             *  async <SidebarServer /> has already been resolved above, so
+             *  the wrapper no longer creates a nested async boundary inside
+             *  the client provider chain (which was the SSR/client hydration
+             *  hazard the previous "merge class onto <aside>" hack was
+             *  working around). */}
+            <div className="hidden md:flex">{sidebarEl}</div>
             <div className="flex-1 flex flex-col overflow-hidden">
-              <MobileTopBarServer />
+              {mobileTopBarEl}
               {showConsentBanner && <ConsentBanner />}
               <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                 {children}
               </main>
-              <MobileBottomNav sidebar={<SidebarServer />} />
+              <MobileBottomNav sidebar={sidebarEl} />
             </div>
           </div>
           <BugReportWidget />

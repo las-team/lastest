@@ -1305,8 +1305,11 @@ export function RecordingClient({
       return (
         <div ref={recordingLayoutRef} className="flex-1 flex flex-col h-full overflow-hidden bg-muted/50">
           <div className="flex-1 flex min-h-0">
-            {/* Browser area — centers in remaining space */}
-            <div className="flex-1 relative flex items-center justify-center overflow-auto min-h-0">
+            {/* Browser area — fills remaining space; viewer renders 1:1 px and
+                handles its own scroll + edge shadows when the canvas exceeds
+                the visible area (centering an oversized canvas via
+                items-center would clip the top with no way to scroll back). */}
+            <div className="flex-1 relative min-h-0">
               <BrowserViewer
                 streamUrl={embeddedStreamUrl}
                 initialViewport={{
@@ -1314,6 +1317,8 @@ export function RecordingClient({
                   height: settings.viewportHeight ?? 720,
                 }}
                 hideControls
+                cropIndicators
+                className="h-full w-full"
               />
             </div>
 

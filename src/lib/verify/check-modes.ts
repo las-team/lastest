@@ -225,6 +225,31 @@ export function classifyEvidenceWithMode(
 }
 
 /**
+ * Tone class for a per-layer chip on the board view's case card.
+ *
+ *   - `regression` (red)   → evidence is high-signal AND mode is `enforce`
+ *   - `missed`     (amber) → either evidence is high-signal + mode is `log`,
+ *                            or evidence is medium-signal regardless of mode
+ *   - `done`       (green) → evidence is low-signal OR no evidence (matched)
+ *   - `unknown`    (mute)  → mode is `disable` — chip dimmed to show the
+ *                            layer was deliberately suppressed
+ *
+ * Keeps the board card's per-layer treatment in step with the focus
+ * toolbar's broken/warned/clean classification so a Network layer set to
+ * `log` reads as amber on both surfaces (was: always red on the board).
+ */
+export function chipToneForLayer(
+  mode: CheckMode,
+  signal: 'high' | 'medium' | 'low' | null | undefined,
+): 'regression' | 'missed' | 'done' | 'unknown' {
+  if (mode === 'disable') return 'unknown';
+  if (signal == null) return 'done';
+  if (signal === 'high') return mode === 'enforce' ? 'regression' : 'missed';
+  if (signal === 'medium') return 'missed';
+  return 'done';
+}
+
+/**
  * Pull only the per-layer mode override keys from a tests.playwrightOverrides
  * blob. Returns null when no override is present so callers can skip the
  * merge entirely. Reads new `*Mode` keys; falls back to the legacy

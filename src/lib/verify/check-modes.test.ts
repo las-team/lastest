@@ -4,6 +4,7 @@ import {
   defaultCheckModes,
   checkModesToSettingsPatch,
   classifyEvidenceWithMode,
+  chipToneForLayer,
   isAlwaysCaptured,
   pickTestModeOverrides,
   testModeOverridesToOverridesPatch,
@@ -223,6 +224,62 @@ describe('check-modes — executor gating', () => {
     expect(checkModesToSettingsPatch({ console: 'log' }).consoleErrorMode).toBe('warn');
     expect(checkModesToSettingsPatch({ network: 'disable' }).networkErrorMode).toBe('ignore');
     expect(checkModesToSettingsPatch({ console: 'enforce' }).consoleErrorMode).toBe('fail');
+  });
+});
+
+describe('check-modes — board chip tone', () => {
+  it('enforce + high signal → regression (red)', () => {
+    expect(chipToneForLayer('enforce', 'high')).toBe('regression');
+  });
+
+  it('log + high signal → missed (amber, never red)', () => {
+    expect(chipToneForLayer('log', 'high')).toBe('missed');
+  });
+
+  it('enforce + medium signal stays amber (not red)', () => {
+    // Medium signals are advisory regardless of mode — board card keeps
+    // them as `missed` so they read as "needs eyes" without overpowering
+    // the layer-set-to-Enforce-high signals on the same card.
+    expect(chipToneForLayer('enforce', 'medium')).toBe('missed');
+    expect(chipToneForLayer('log', 'medium')).toBe('missed');
+  });
+
+  it('disable + any signal → unknown (muted chip)', () => {
+    expect(chipToneForLayer('disable', 'high')).toBe('unknown');
+    expect(chipToneForLayer('disable', 'medium')).toBe('unknown');
+    expect(chipToneForLayer('disable', 'low')).toBe('unknown');
+    expect(chipToneForLayer('disable', null)).toBe('unknown');
+  });
+
+  it('low signal / no signal → done (green) when not disabled', () => {
+    expect(chipToneForLayer('enforce', 'low')).toBe('done');
+    expect(chipToneForLayer('log', 'low')).toBe('done');
+    expect(chipToneForLayer('enforce', null)).toBe('done');
+    expect(chipToneForLayer('log', undefined)).toBe('done');
+  });
+
+  it('mirrors the focus toolbar classification for high signals', () => {
+    // classifyEvidenceWithMode returns broken/warned/clean; chipToneForLayer
+    // returns regression/missed/done. They must agree on the broken-vs-
+    // warned-vs-clean axis for high signals or the two surfaces drift.
+    const layerMap = {
+      broken: 'regression',
+      warned: 'missed',
+      clean: 'done',
+    } as const;
+    for (const mode of ['enforce', 'log', 'disable'] as const) {
+      const focus = classifyEvidenceWithMode(mode, 'high');
+      const board = chipToneForLayer(mode, 'high');
+      if (mode === 'disable') {
+        // disable is special-cased on the board (drops to unknown) but
+        // classifies as `clean` in the focus toolbar — both surfaces hide
+        // the chip / pill so the meaning matches.
+        expect(focus).toBe('clean');
+        expect(board).toBe('unknown');
+      } else {
+        expect(board).toBe(layerMap[focus]);
+      }
+    }
   });
 });
 

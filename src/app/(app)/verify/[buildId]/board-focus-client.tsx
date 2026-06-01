@@ -883,6 +883,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           onDropCase={handleDropCase}
           onColumnAction={handleColumnAction}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
+          checkModes={checkModes}
+          checkModesByTestId={checkModesByTestId}
         />
       ) : (
         <FocusView
