@@ -668,12 +668,16 @@ export function RecordingClient({
       if (result.recommendedPriority) {
         setAppliedPriority({ value: result.recommendedPriority, nonce: Date.now() });
       }
-      const top = (result.topStrategies ?? []).map((s) => `${s.type} (${s.count})`).join(', ');
-      setAnalysisSummary(
-        top
-          ? `Prioritized by page content: ${top}. Selector config ${result.changed ? 'updated' : 'already optimal'}.`
-          : `Selector config ${result.changed ? 'updated' : 'already optimal'} for this page.`
-      );
+      const top = (result.topStrategies ?? [])
+        .map((s) => (s.count !== s.unique ? `${s.type} (${s.unique}/${s.count} unique)` : `${s.type} (${s.unique})`))
+        .join(', ');
+      const ambiguous = (result.ambiguousStrategies ?? [])
+        .map((s) => `${s.type} (×${s.count}, all the same value)`)
+        .join(', ');
+      const base = top
+        ? `Prioritized by page content: ${top}. Selector config ${result.changed ? 'updated' : 'already optimal'}.`
+        : `Selector config ${result.changed ? 'updated' : 'already optimal'} for this page.`;
+      setAnalysisSummary(ambiguous ? `${base} Downranked (ambiguous): ${ambiguous}.` : base);
       toast.success(result.changed ? 'Selector config tuned for this page' : 'Selector config already optimal');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to analyze URL');

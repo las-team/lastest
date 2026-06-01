@@ -4,9 +4,15 @@ import type { SelectorConfig, SelectorType } from '@/lib/db/schema';
  * Static selector analysis for the "Analyze before record" flow.
  *
  * Given the raw HTML served at a target URL, estimate how well each selector
- * strategy is represented on the page (how many candidate attributes/elements
- * exist) so the recorder can promote the strategies the app actually uses and
- * mute the ones it never does.
+ * strategy is represented on the page so the recorder can promote strategies
+ * the app actually uses and mute the ones it never does.
+ *
+ * Two numbers are tracked per strategy:
+ *  - `counts` — raw occurrences of the attribute / element.
+ *  - `uniqueCounts` — number of *distinct* values, which is what actually
+ *    determines whether a selector can uniquely identify an element. A page
+ *    with 50 buttons all labeled "Close" scores 50 on raw count but 1 on
+ *    uniqueness, so ranking is driven by `uniqueCounts`.
  *
  * This is a regex-based scan of the *initial* HTML — it does not execute JS, so
  * heavily client-rendered apps return a near-empty shell. {@link isMeaningful}
@@ -18,8 +24,16 @@ export interface SelectorCoverage {
   totalElements: number;
   /** Interactive elements (buttons, links, inputs, selects, textareas). */
   interactiveElements: number;
-  /** Per selector-type candidate counts. Higher = better represented. */
+  /** Per selector-type candidate counts (raw attribute/element occurrences). */
   counts: Record<SelectorType, number>;
+  /**
+   * Per selector-type *unique* candidate counts (distinct values). For
+   * attribute-backed strategies, this is the number of distinct attribute
+   * values; for text-backed strategies (text, label, heading-context), it's
+   * the number of distinct inner-text strings. Universal fallbacks
+   * (css-path, coords) mirror `counts`. Drives the ranking.
+   */
+  uniqueCounts: Record<SelectorType, number>;
 }
 
 // Selector types that are universal fallbacks — always usable regardless of
@@ -52,6 +66,56 @@ function countMatches(html: string, re: RegExp): number {
 }
 
 /**
+ * Extract the set of *values* for a given HTML attribute. Handles both
+ * single- and double-quoted forms. Empty values are kept (they still
+ * exist on the page and would still be matched by the recorder).
+ */
+function extractAttrValues(html: string, attrName: string): Set<string> {
+  const safe = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\s${safe}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'gi');
+  const values = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    values.add(m[2]);
+  }
+  return values;
+}
+
+/**
+ * Extract the inner text of every occurrence of a tag (e.g. `button`, `a`,
+ * `label`). Nested tags are stripped, whitespace is collapsed. Empty texts
+ * are dropped — an empty-labeled button is invisible to text-based selectors.
+ */
+function extractTagInnerTexts(html: string, tagName: string): Set<string> {
+  const re = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, 'gi');
+  const values = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const text = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (text) values.add(text);
+  }
+  return values;
+}
+
+/** Inner text of every `<h1>`–`<h6>`, with level-matched closing tag. */
+function extractHeadingInnerTexts(html: string): Set<string> {
+  const re = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
+  const values = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const text = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (text) values.add(text);
+  }
+  return values;
+}
+
+function unionSize(...sets: Set<string>[]): number {
+  const u = new Set<string>();
+  for (const s of sets) for (const v of s) u.add(v);
+  return u.size;
+}
+
+/**
  * Scan raw HTML and estimate per-strategy selector coverage.
  *
  * `customAttributeName` (e.g. `data-automation-id`) folds into the
@@ -73,19 +137,41 @@ export function analyzeHtmlForSelectors(
   const totalElements = countMatches(html, /<[a-zA-Z][\w-]*/g);
   const interactiveElements = buttons + links + inputs + selects + textareas;
 
-  const dataTestid = countMatches(html, /\sdata-testid\s*=/gi);
-  const customAttr = opts.customAttributeName?.trim()
+  const dataTestidRaw = countMatches(html, /\sdata-testid\s*=/gi);
+  const customAttrName = opts.customAttributeName?.trim();
+  const customAttrRaw = customAttrName
     ? countMatches(
         html,
-        // Escape regex metacharacters in the user-supplied attribute name.
-        new RegExp(`\\s${opts.customAttributeName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`, 'gi')
+        new RegExp(`\\s${customAttrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`, 'gi')
       )
     : 0;
 
+  // Unique value sets per attribute / element.
+  const uniqTestid = extractAttrValues(html, 'data-testid');
+  const uniqCustom = customAttrName ? extractAttrValues(html, customAttrName) : new Set<string>();
+  const uniqId = extractAttrValues(html, 'id');
+  const uniqRole = extractAttrValues(html, 'role');
+  const uniqAria = extractAttrValues(html, 'aria-label');
+  const uniqPlaceholder = extractAttrValues(html, 'placeholder');
+  const uniqName = extractAttrValues(html, 'name');
+  const uniqAlt = extractAttrValues(html, 'alt');
+  const uniqTitle = extractAttrValues(html, 'title');
+
+  const uniqButtonText = extractTagInnerTexts(html, 'button');
+  const uniqLinkText = extractTagInnerTexts(html, 'a');
+  const uniqLabelText = extractTagInnerTexts(html, 'label');
+  const uniqHeadingText = extractHeadingInnerTexts(html);
+
+  // role-name in Playwright = role + accessible name. We can't compute the
+  // accessible name without a DOM, but the dominant signal is unique inner
+  // text of buttons/links (most common roles) plus unique aria-labels (which
+  // override inner text when present). Explicit `role=` values widen the set
+  // for non-default roles.
+  const uniqRoleName = unionSize(uniqButtonText, uniqLinkText, uniqAria, uniqRole);
+
   const counts: Record<SelectorType, number> = {
-    'data-testid': dataTestid + customAttr,
+    'data-testid': dataTestidRaw + customAttrRaw,
     'id': countMatches(html, /\sid\s*=/gi),
-    // role-name covers explicit ARIA roles plus elements with implicit roles.
     'role-name': countMatches(html, /\srole\s*=/gi) + buttons + links + inputs + selects + textareas,
     'label': labels,
     'heading-context': headings,
@@ -100,7 +186,24 @@ export function analyzeHtmlForSelectors(
     'coords': totalElements,
   };
 
-  return { totalElements, interactiveElements, counts };
+  const uniqueCounts: Record<SelectorType, number> = {
+    'data-testid': unionSize(uniqTestid, uniqCustom),
+    'id': uniqId.size,
+    'role-name': uniqRoleName,
+    'label': uniqLabelText.size,
+    'heading-context': uniqHeadingText.size,
+    'aria-label': uniqAria.size,
+    'text': unionSize(uniqButtonText, uniqLinkText),
+    'placeholder': uniqPlaceholder.size,
+    'name': uniqName.size,
+    'alt-text': uniqAlt.size,
+    'title': uniqTitle.size,
+    'css-path': totalElements,
+    'ocr-text': 0,
+    'coords': totalElements,
+  };
+
+  return { totalElements, interactiveElements, counts, uniqueCounts };
 }
 
 /** Whether the scan found enough content to base recommendations on. */
@@ -110,9 +213,11 @@ export function isMeaningful(coverage: SelectorCoverage): boolean {
 
 /**
  * Produce a new selector priority list based on measured coverage:
- *  - Specific strategies with candidates on the page are enabled and ordered by
- *    coverage (most-represented first).
- *  - Specific strategies with zero candidates are disabled and sunk to the end.
+ *  - Specific strategies with *unique* candidates on the page are enabled and
+ *    ordered by uniqueness (most distinct values first; raw count as tiebreaker).
+ *  - Specific strategies with zero unique candidates are disabled and sunk to
+ *    the end. This covers both "attribute never appears" and the misleading
+ *    case "attribute appears N times but always with the same value".
  *  - Universal fallbacks (text/css-path/coords) stay enabled in a stable tail.
  *  - OCR keeps whatever enabled state it already had.
  *
@@ -129,13 +234,28 @@ export function recommendPriorityFromAnalysis(
 
   const byType = new Map(current.map((c) => [c.type, c]));
   const origPriority = (t: SelectorType) => byType.get(t)?.priority ?? 999;
+  // A strategy is useful iff it has at least 2 unique values, OR exactly 1
+  // unique value with only 1 occurrence (single-button page, unambiguous).
+  // A single unique value across many occurrences is the misleading case.
+  const isUseful = (t: SelectorType) => {
+    const u = coverage.uniqueCounts[t];
+    const c = coverage.counts[t];
+    if (u === 0) return false;
+    if (u === 1 && c > 1) return false;
+    return true;
+  };
 
   const specificsPresent = SPECIFIC.filter((t) => byType.has(t));
   const enabledSpecific = specificsPresent
-    .filter((t) => coverage.counts[t] > 0)
-    .sort((a, b) => coverage.counts[b] - coverage.counts[a] || origPriority(a) - origPriority(b));
+    .filter(isUseful)
+    .sort(
+      (a, b) =>
+        coverage.uniqueCounts[b] - coverage.uniqueCounts[a] ||
+        coverage.counts[b] - coverage.counts[a] ||
+        origPriority(a) - origPriority(b)
+    );
   const disabledSpecific = specificsPresent
-    .filter((t) => coverage.counts[t] === 0)
+    .filter((t) => !isUseful(t))
     .sort((a, b) => origPriority(a) - origPriority(b));
 
   // Fixed fallback tail, in the order they should be tried after specifics.
@@ -155,7 +275,7 @@ export function recommendPriorityFromAnalysis(
   const enabledFor = (t: SelectorType): boolean => {
     if (ALWAYS_ON.includes(t)) return true;
     if (PRESERVE.includes(t)) return byType.get(t)?.enabled ?? false;
-    if (SPECIFIC.includes(t)) return coverage.counts[t] > 0;
+    if (SPECIFIC.includes(t)) return isUseful(t);
     return byType.get(t)?.enabled ?? false;
   };
 

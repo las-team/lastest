@@ -200,8 +200,18 @@ export async function startRecording(
 
 export interface AnalyzeUrlSelectorsResult {
   recommendedPriority?: SelectorConfig[];
-  /** Per-strategy candidate counts found in the initial HTML, highest first. */
-  topStrategies?: Array<{ type: string; count: number }>;
+  /**
+   * Per-strategy candidate stats found in the initial HTML, ranked by
+   * distinct-value count (most uniquely-addressable strategies first).
+   * `count` is raw occurrences; `unique` is the number of distinct values.
+   */
+  topStrategies?: Array<{ type: string; count: number; unique: number }>;
+  /**
+   * Strategies that appear on the page but resolve to a single repeated
+   * value (e.g. 12 buttons all with the same aria-label) — flagged so the
+   * user can see why a seemingly-present strategy was downranked.
+   */
+  ambiguousStrategies?: Array<{ type: string; count: number }>;
   interactiveElements?: number;
   /** False when the page looks client-rendered — recommendation is the current config. */
   meaningful?: boolean;
@@ -260,17 +270,27 @@ export async function analyzeUrlForSelectors(
   const recommendedPriority = recommendPriorityFromAnalysis(current, coverage);
   const meaningful = isMeaningful(coverage);
 
-  const topStrategies = (Object.entries(coverage.counts) as Array<[string, number]>)
-    .filter(([type, count]) => count > 0 && !['css-path', 'coords', 'text'].includes(type))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([type, count]) => ({ type, count }));
+  const SUMMARY_SKIP = new Set(['css-path', 'coords', 'text', 'ocr-text']);
+  const topStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
+    .filter((type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] > 0)
+    .map((type) => ({ type, count: coverage.counts[type], unique: coverage.uniqueCounts[type] }))
+    .sort((a, b) => b.unique - a.unique || b.count - a.count)
+    .slice(0, 4);
+
+  // Strategies that are present but ambiguous (single repeated value across
+  // many occurrences) — the misleading case we explicitly downrank.
+  const ambiguousStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
+    .filter(
+      (type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] === 1 && coverage.counts[type] > 1
+    )
+    .map((type) => ({ type, count: coverage.counts[type] }));
 
   const changed = JSON.stringify(recommendedPriority) !== JSON.stringify(current);
 
   return {
     recommendedPriority,
     topStrategies,
+    ambiguousStrategies,
     interactiveElements: coverage.interactiveElements,
     meaningful,
     changed,
