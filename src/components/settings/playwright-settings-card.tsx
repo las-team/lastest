@@ -79,6 +79,12 @@ interface PlaywrightSettingsCardProps {
   repositoryId?: string | null;
   compact?: boolean;
   onSaveStatusChange?: (status: { isPending: boolean; showSaved: boolean }) => void;
+  /**
+   * Externally-computed selector priority to apply (e.g. from "Analyze URL").
+   * Bump `nonce` to re-apply the same value. Applying it flows through the
+   * normal debounced auto-save so the change is persisted.
+   */
+  applyPriority?: { value: SelectorConfig[]; nonce: number } | null;
 }
 
 export function PlaywrightSettingsCard({
@@ -86,6 +92,7 @@ export function PlaywrightSettingsCard({
   repositoryId,
   compact = false,
   onSaveStatusChange,
+  applyPriority,
 }: PlaywrightSettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [showSaved, setShowSaved] = useState(false);
@@ -265,6 +272,16 @@ export function PlaywrightSettingsCard({
     if (selectorStats.length === 0) return undefined;
     return calculateRecommendations(selectorPriority, selectorStats);
   }, [selectorPriority, selectorStats]);
+
+  // Apply an externally-supplied selector priority (e.g. from "Analyze URL").
+  // Setting state diverges from originalValues, so the auto-save effect persists it.
+  const lastAppliedNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!applyPriority) return;
+    if (lastAppliedNonce.current === applyPriority.nonce) return;
+    lastAppliedNonce.current = applyPriority.nonce;
+    setSelectorPriority(applyPriority.value);
+  }, [applyPriority]);
 
   // Derive settings source for UX indicator
   const settingsSource = useMemo(() => {
