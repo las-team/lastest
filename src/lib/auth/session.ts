@@ -1,6 +1,5 @@
 import { cache } from "react";
 import { headers } from "next/headers";
-import { auth } from "./auth";
 import * as queries from "@/lib/db/queries";
 import type { User, Team, UserRole, Repository } from "@/lib/db/schema";
 
@@ -10,21 +9,42 @@ export interface SessionData {
   team: Team | null;
 }
 
+function getAuthZoneUrl(): string {
+  return (process.env.AUTH_ZONE || "http://localhost:3001").replace(/\/$/, "");
+}
+
+/**
+ * Resolves the current session by calling the auth sub-zone's REST API.
+ * The main app no longer hosts the BetterAuth server instance.
+ */
 export const getCurrentSession = cache(
   async (): Promise<SessionData | null> => {
     const h = await headers();
-    const session = await auth.api.getSession({ headers: h });
-    if (session) {
-      const user = await queries.getUserById(session.user.id);
-      if (!user) return null;
 
-      const team = user.teamId ? await queries.getTeam(user.teamId) : null;
-
-      return {
-        user,
-        sessionId: session.session.id,
-        team: team ?? null,
-      };
+    // Try cookie-based session from auth sub-zone
+    const cookieHeader = h.get("cookie");
+    if (cookieHeader) {
+      try {
+        const res = await fetch(`${getAuthZoneUrl()}/api/auth/session`, {
+          headers: { cookie: cookieHeader },
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session) {
+            const user = await queries.getUserById(data.session.user.id);
+            if (!user) return null;
+            const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+            return {
+              user,
+              sessionId: data.session.sessionId,
+              team: team ?? null,
+            };
+          }
+        }
+      } catch {
+        // If auth zone is unreachable, fall through to bearer token
+      }
     }
 
     // Fallback: Bearer-token auth for programmatic API clients (VS Code ext,

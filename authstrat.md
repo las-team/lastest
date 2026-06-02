@@ -176,4 +176,4 @@ The current pattern (cloud-auth → main app via `fetch` with cookie forwarding)
 The auth sub-zone is the single source of truth for everything authentication and authorization, including the database tables. The main app calls REST APIs to get data if it needs to.
 
 NOTE: This is a long running refactor, record a memory of the todos, what's done etc. so another session can pick it up later.
-NOTE:
+NOTE: Stop at natural points and self-contained sections so I can review your changes and create a git commit, so your changes are not just one big blob.

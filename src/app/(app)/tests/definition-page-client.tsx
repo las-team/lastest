@@ -24,7 +24,7 @@ import {
 } from '@/components/tests/tests-table-view';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@lastest/shared/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import {
   Dialog,

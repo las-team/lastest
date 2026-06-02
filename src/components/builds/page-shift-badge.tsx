@@ -7,7 +7,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
+} from '@lastest/shared/components/ui/tooltip';
 import type { PageShiftInfo } from '@/lib/db/schema';
 
 interface PageShiftBadgeProps {

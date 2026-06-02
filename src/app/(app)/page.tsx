@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@lastest/shared/components/ui/tooltip';
 import { CheckCircle, XCircle, Clock, FileCode, Folder, AlertTriangle, Loader2, Shield, Activity, Zap } from 'lucide-react';
 import {
   getSelectedRepository,

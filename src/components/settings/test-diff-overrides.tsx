@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
+} from '@lastest/shared/components/ui/tooltip';
 import {
   Collapsible,
   CollapsibleContent,

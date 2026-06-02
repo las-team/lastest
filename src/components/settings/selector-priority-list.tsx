@@ -21,7 +21,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, AlertTriangle, Power, ArrowUp } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@lastest/shared/components/ui/tooltip';
 import type { SelectorConfig, SelectorType } from '@/lib/db/schema';
 import type { SelectorRecommendation } from '@/lib/selector-recommendations';
 

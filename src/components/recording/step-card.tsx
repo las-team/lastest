@@ -23,7 +23,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@lastest/shared/components/ui/tooltip';
 import { promoteSelector } from '@/server/actions/recording';
 import { toast } from 'sonner';
 

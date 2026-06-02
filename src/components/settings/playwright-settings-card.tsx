@@ -27,7 +27,7 @@ import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
 import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle, Palette } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@lastest/shared/components/ui/tooltip';
 import { toast } from 'sonner';
 import { calculateRecommendations } from '@/lib/selector-recommendations';
 import type { SelectorTypeStats } from '@/lib/db/queries';

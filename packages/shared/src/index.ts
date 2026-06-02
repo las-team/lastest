@@ -9,6 +9,7 @@ export * from "./ts-strip";
 export * from "./watermark";
 export * from "./RootLayout";
 export * from "./lib/utils";
+export * from "./lib/main-app-url";
 export * from "./lib/share/slug";
 export * from "./analytics/umami";
 export * from "./analytics/events";

@@ -113,14 +113,16 @@ export default function proxy(request: NextRequest) {
   // Auth check first — redirects skip CSP wiring entirely.
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   if (!isPublic) {
-    const session = getSessionCookie(request);
-    if (!session) {
-      const forwardedHost = request.headers.get('x-forwarded-host');
-      const forwardedProto = request.headers.get('x-forwarded-proto');
-      const base = forwardedHost
-        ? `${forwardedProto ?? 'https'}://${forwardedHost}`
-        : request.url;
-      return NextResponse.redirect(new URL('/login', base));
+    // Auth paths are rewritten to AUTH_ZONE by next.config.ts rewrites, so
+    // the middleware sees them here before the rewrite. Skip the session
+    // check for paths that will be proxied to the auth sub-zone.
+    const authPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/invite'];
+    const isAuthPath = authPaths.some((p) => pathname.startsWith(p));
+    if (!isAuthPath) {
+      const session = getSessionCookie(request);
+      if (!session) {
+        return NextResponse.redirect(new URL("/login", request.url));
+      }
     }
   }
 

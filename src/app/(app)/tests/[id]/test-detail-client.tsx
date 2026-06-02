@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@lastest/shared/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
 import { ReplayPlayer } from '@/components/replay-player';
 import { Play, Trash2, Copy, Edit2, Clock, CheckCircle, XCircle, X, Save, Wrench, Wand2, Loader2, History, RotateCcw, ChevronDown, ChevronRight, ChevronUp, Monitor, Video, AlertTriangle, Image, Bug, GitBranch, GitCommit, Tv2, Code2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
