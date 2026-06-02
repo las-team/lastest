@@ -31,11 +31,11 @@ const ALWAYS_CAPTURED: ReadonlySet<CheckLayer> = new Set(['visual', 'url', 'perf
 
 const DEFAULTS: CheckModeMap = {
   visual:  'enforce',
-  text:    'disable',
-  dom:     'disable',
+  text:    'log',
+  dom:     'log',
   network: 'enforce',
   console: 'enforce',
-  a11y:    'disable',
+  a11y:    'log',
   design:  'disable',
   perf:    'log',
   url:     'log',
@@ -93,13 +93,14 @@ export function deriveCheckModes(source: LegacySource | null | undefined): Check
 
   // --- text ---
   // textMode wins; legacy diffSensitivity.textDiffEnabled treats true→enforce,
-  // false/null→disable.
+  // unset (the DB default) → falls through to DEFAULTS.text so a default flip
+  // in this file reaches existing rows.
   out.text = normalizeMode(source.textMode)
-    ?? (source.textDiffEnabled === true ? 'enforce' : 'disable');
+    ?? (source.textDiffEnabled === true ? 'enforce' : DEFAULTS.text);
 
   // --- dom ---
   out.dom = normalizeMode(source.domMode)
-    ?? (source.enableDomDiff === true ? 'enforce' : 'disable');
+    ?? (source.enableDomDiff === true ? 'enforce' : DEFAULTS.dom);
 
   // --- network ---
   // Network is a two-axis legacy: enableNetworkInterception (capture) +
@@ -133,11 +134,11 @@ export function deriveCheckModes(source: LegacySource | null | undefined): Check
 
   // --- a11y ---
   out.a11y = normalizeMode(source.a11yMode)
-    ?? (source.enableA11y === true ? 'enforce' : 'disable');
+    ?? (source.enableA11y === true ? 'enforce' : DEFAULTS.a11y);
 
   // --- design ---
   out.design = normalizeMode(source.designMode)
-    ?? (source.enableDesignSystem === true ? 'enforce' : 'disable');
+    ?? (source.enableDesignSystem === true ? 'enforce' : DEFAULTS.design);
 
   // --- perf / url ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;

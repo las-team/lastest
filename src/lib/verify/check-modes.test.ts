@@ -17,11 +17,11 @@ describe('check-modes — derivation', () => {
     const modes = deriveCheckModes(null);
     expect(modes).toEqual({
       visual: 'enforce',
-      text: 'disable',
-      dom: 'disable',
+      text: 'log',
+      dom: 'log',
       network: 'enforce',
       console: 'enforce',
-      a11y: 'disable',
+      a11y: 'log',
       design: 'disable',
       perf: 'log',
       url: 'log',
@@ -33,24 +33,30 @@ describe('check-modes — derivation', () => {
     expect(modes.a11y).toBe('enforce');
   });
 
-  it('migrates legacy enableA11y=false → a11yMode=disable', () => {
+  it('legacy enableA11y=false falls through to the a11y default (log)', () => {
+    // Legacy boolean false is the DB default (cannot be distinguished from
+    // "never explicitly set"), so a false value falls through to DEFAULTS.a11y
+    // rather than locking the row to 'disable'.
     const modes = deriveCheckModes({ enableA11y: false });
-    expect(modes.a11y).toBe('disable');
+    expect(modes.a11y).toBe('log');
   });
 
   it('migrates legacy enableDesignSystem flag', () => {
     expect(deriveCheckModes({ enableDesignSystem: true }).design).toBe('enforce');
+    // false is the DB default → falls through to DEFAULTS.design ('disable').
     expect(deriveCheckModes({ enableDesignSystem: false }).design).toBe('disable');
   });
 
   it('migrates legacy enableDomDiff flag', () => {
     expect(deriveCheckModes({ enableDomDiff: true }).dom).toBe('enforce');
-    expect(deriveCheckModes({ enableDomDiff: false }).dom).toBe('disable');
+    // false is the DB default → falls through to DEFAULTS.dom ('log').
+    expect(deriveCheckModes({ enableDomDiff: false }).dom).toBe('log');
   });
 
   it('migrates legacy textDiffEnabled flag', () => {
     expect(deriveCheckModes({ textDiffEnabled: true }).text).toBe('enforce');
-    expect(deriveCheckModes({ textDiffEnabled: false }).text).toBe('disable');
+    // false is the DB default → falls through to DEFAULTS.text ('log').
+    expect(deriveCheckModes({ textDiffEnabled: false }).text).toBe('log');
   });
 
   it('collapses network capture + error mode into the network 3-way', () => {

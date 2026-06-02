@@ -2559,3 +2559,66 @@ User opted to **skip automated send and handle outreach manually via own channel
   - Zoho stores 'last viewed app' server-side per account. Prior runs that visited ToDo cause subsequent root-URL navigations to redirect there. Always direct-link to mail.zoho.eu/zm/#mail/folder/inbox (not bare /).
   - storage_state setupOverrides.extraSteps are silently dropped before reaching the EB (captureSetupForRemoteRunner exported but uncalled in the dispatcher). Inline cookies as base64 in test code + page.context().addCookies() at test start.
   - userAgentOverride field now accepted by prod (deployed mid-session). Chrome/130 UA prevents Zoho's HeadlessChrome fingerprint detection on the first nav.
+
+## 2026-06-01 — X-sourced batch of 10 (post-login demos)
+
+Source: X (x.com live search: "post your saas" / "just launched/shipped" / "I built" filter:links). All authed via self-registration; email verification handled through the logged-in Gmail (PW MCP) where gated; sessions replayed on EB via setupOverrides storage_state (path C) or inline auto-session (path A). No outreach sent — shares only (per request).
+
+| # | Product | Founder (X) | Auth path | Share |
+|---|---------|-------------|-----------|-------|
+| 1 | Moonshift | @harjjotsinghh | inline auto-session (password) | https://app.lastest.cloud/r/0g4ymCkb4Jo68ASQC8JZIA |
+| 2 | Plainly (tryplainly) | @BreeFlemings | supabase auto-session → button-nav state replay | https://app.lastest.cloud/r/U5ecMG73yzjljUjL3oacoQ |
+| 3 | Hoursmith | @nivesh_saharan | verify-link → state replay | https://app.lastest.cloud/r/XnAGcsr3Kfyzdn7PsVisig |
+| 4 | BetProps | @Cjj_truth | register→login → state replay | https://app.lastest.cloud/r/6x6pQQO-NvnX1dEFTfQOvQ |
+| 5 | Improve My Page | @improvemypage | email-only auto-session → state replay | https://app.lastest.cloud/r/FPg7CsNw6jxyRH0v3XrppA |
+| 6 | MaxAgents | @trey_smith | register+onboarding wizard → state replay | https://app.lastest.cloud/r/4hobth8k1OBFIgerAJxBdQ |
+| 7 | InsightsMzansi | (X dashboard post) | password auto-session → state replay | https://app.lastest.cloud/r/YKUhSRrQ6Xg8r0rShFeTCQ |
+| 8 | Soloist | (X "usesoloist") | supabase confirm→login → state replay | https://app.lastest.cloud/r/hmB3bqqLp8I0i6Jp9L8Tog |
+| 9 | SpeakCN | @__PaiDaXing_ | email OTP code (Gmail MCP) → state replay | https://app.lastest.cloud/r/NYdUZQMAaTJpjXDRJurGUw |
+| 10 | kokispace (billyboy) | @mel74 | lovable/supabase confirm→login → state replay | https://app.lastest.cloud/r/j8nHhZX4I929Jjyl0AIMjw |
+
+All verified to show post-login surfaces (dashboards / app interactions), not login/marketing pages.
+
+## 2026-06-01 — Batch 2 (in progress)
+
+X-sourced ~120 fresh candidates across 6 live-search sweeps. Cleanly convertible to post-login demos:
+- TortoiseAI (@Isaac_alowakin? / tortoiseai.xyz) — email+pwd auto-session → onboarding wizard. Share: https://app.lastest.cloud/r/vtSyXoWLqAI07Gn8GNy2Ng (6 shots, verified authed)
+- Ava Supernova (ava-supernova.com) — Supabase confirm→login. Share: https://app.lastest.cloud/r/N-PRQo4S3_BqYlZUav-d3Q (authed, but thin web surface — product is a VS Code extension)
+
+Blocked / non-automatable (representative): mindsuite (card-gated checkout), velin/workaapp (desktop/iOS), joinoffline/polymyth/getvoxa (waitlist/beta), likable/askwhiz/threadforge/v1design (Clerk — headless signup doesn't trigger code), resume.codisim (Clerk+Turnstile), menuboard (blocks +alias email), buildy.ai (paywall 404 dashboard), sureneeds (multi-step form), snapmiso/getmyresume/careerpolished (Google-only OAuth).
+
+### Batch 2 final (broadened sources: X + HN)
+| Product | Source | Auth | Share |
+|---|---|---|---|
+| TortoiseAI | X | email+pwd auto-session | https://app.lastest.cloud/r/vtSyXoWLqAI07Gn8GNy2Ng |
+| Ava Supernova | X | Supabase confirm→login (thin web surface) | https://app.lastest.cloud/r/N-PRQo4S3_BqYlZUav-d3Q |
+| FormProxy | HN Show | email+pwd auto-session → forms dashboard | https://app.lastest.cloud/r/jENXXIoKbUSO_UiNuyueXQ |
+| CurateKit | HN Show | Django allauth auto-session → onboarding | https://app.lastest.cloud/r/u2bGKIWV-B-5yygUN7_eOA |
+| Fluiq (getfluiq) | HN Show | email+pwd auto-session → observability dashboard | https://app.lastest.cloud/r/MKJUQueDyqjjHoqSDyIG_w |
+
+Constraint: ~120 X + ~150 HN/PH candidates examined; PH /r/ redirects don't resolve headless, Reddit JSON blocked, IndieAppCircle thin. Remaining fresh launches skew to paywall/desktop/mobile/waitlist/Clerk(headless-blocked)/captcha/OAuth-only. Net new this round: 5 (4 strong + Ava thin).
+
+### Batch 3 — public no-login product walkthroughs (HN-sourced)
+| Product | Why no-login | Share |
+|---|---|---|
+| Free AI Website Audit | enter URL → free GEO/AEO audit, no account | https://app.lastest.cloud/r/HPVcL6BNxLAmtZxttIz9ww |
+| Couch Pals | client-side game-night tracker, /app fully usable anon | https://app.lastest.cloud/r/3qn3Us-xcof7K_p3XWUU5A |
+| PostMicroTools | in-browser post-production calculators, no signup | https://app.lastest.cloud/r/qt3qfUTyee7jPTWFu1AOTQ |
+
+Dropped: analyticsgrid (1B-row DuckDB-WASM didn't render on the EB runner — 0 screenshots, share revoked). Excluded: humanforscale (artist portfolio), pictolab (WebGPU-only), nodecartel (has login), darebyte (thin).
+
+### Clerk auth — root cause + capture plan documented (not yet executed)
+See docs/gtm/clerk-capture-plan.md. Clerk signup blocked headless by invisible Cloudflare Turnstile; plan = headed-stealth xvfb prereg → capture HttpOnly __client → EB replay (verify empirically). Would unlock likable/askwhiz/threadforge/iterationmachine/v-1.design.
+
+### 2026-06-02 — Outreach sent (X reply on launch post; DM-fallback rule)
+Sent (7, replied on each founder's recent launch post): Moonshift @harjjotsinghh, Plainly @BreeFlemings, InsightsMzansi @TshumaLikhwa, Soloist @Redex12321, SpeakCN @__PaiDaXing_, kokispace @mel74, TortoiseAI @fayozbekimomali. Brief 2-clause + /r/ link each; verified on @HeroLastest/with_replies.
+NOT sent (4, HN-sourced): CurateKit, Fluiq, Free AI Website Audit, PostMicroTools — only reachable via their Show HN thread, and HN login is captcha-walled (no DM on HN). Dropped per channel-scope rule (no channel pivot) pending user decision.
+
+Skill update: SKILL.md failure-modes — banned hardcoded/guessed route lists (extraRoutes); added "double-check + skip any 404, never screenshot it". Prevents the phase-2 404 defects recurring.
+
+Phase 2 (to fix, per review): 404-route screenshots in hoursmith, betprops, improvemypage, maxagents, formproxy, ava; couchpals needs player-add + registration flow.
+
+### 2026-06-02 — Phase-2 fixes shipped + "send the rest"
+FormProxy v3 (onboarding country → real dashboard → Forms/Billing/Settings, 7 frames, no 404): https://app.lastest.cloud/r/yTh8bBRH8C1VkTHWGpuzAg (v1+v2 revoked).
+All 7 phase-2 demos re-shipped (guessed routes removed; soft-404 skip): hoursmith xvHBanQVgO2LPGgBEVJ7GQ, betprops v89Cg_hovb4lw0YyijE5PA, improvemypage aMyws0q8Tp92dd70tr4nhA, formproxy yTh8bBRH8C1VkTHWGpuzAg, maxagents AzKCIE5mk8KjrJEYejMWew, ava h7vZQebPhr08QhR51SyT9Q, couchpals hZJQfmqd8ppQEGVhwMNjYg. 7 old shares revoked.
+Outreach "the rest" (X reply on launch post): hoursmith @nivesh_saharan, betprops @Cjj_truth, improvemypage @improvemypage, ava @SyntaxScientist — sent. Dropped: maxagents @trey_smith (no launch post; DM composer message-gated), couchpals (X "Couch Pals" @sachoslks is a different split-screen product — name collision, real founder unidentified), curatekit/freeaudit/postmicrotools/formproxy (HN-only, no X). Session outreach total: 12 founders reached.
