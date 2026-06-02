@@ -72,7 +72,7 @@ import { RecordingSetupPicker, type ExtraStep } from '@/components/setup/recordi
 import { RecordingTutorialOverlay } from '@/components/recording-tutorial/recording-tutorial-overlay';
 import { StepCard } from '@/components/recording/step-card';
 import { TraceScrub } from '@/components/recording/trace-scrub';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@lastest/shared/components/ui/tooltip';
 import { track } from '@/lib/analytics/umami';
 import { Events } from '@/lib/analytics/events';
 
