@@ -11,7 +11,7 @@ function git(cmd: string): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  transpilePackages: ["@lastest/shared"],
+  transpilePackages: ["@lastest/shared", "cloud-auth"],
   outputFileTracingIncludes: {
     "/terms": ["./src/content/legal/terms.md"],
     "/privacy": ["./src/content/legal/privacy.md"],
@@ -94,6 +94,10 @@ const nextConfig: NextConfig = {
       rewrites.push({
         source: "/auth_static/:path+",
         destination: `${process.env.AUTH_ZONE}/auth_static/:path+`,
+      });
+      rewrites.push({
+        source: "/api/auth/:path*",
+        destination: `${process.env.AUTH_ZONE}/api/auth/:path*`,
       });
       rewrites.push({
         source: "/forgot-password/:path*",

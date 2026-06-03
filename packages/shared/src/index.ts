@@ -8,6 +8,7 @@ export * from "./test-helpers";
 export * from "./ts-strip";
 export * from "./watermark";
 export * from "./RootLayout";
+export * from "./getPublicUrlFromRequest";
 export * from "./lib/utils";
 export * from "./lib/main-app-url";
 export * from "./lib/share/slug";

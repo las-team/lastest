@@ -1,161 +1,197 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSessionCookie } from 'better-auth/cookies';
+import { NextRequest, NextResponse } from "next/server";
+import { isAuthenticated } from "@/lib/auth/session";
 
 const PUBLIC_PATHS = [
-  '/login',
-  '/register',
-  '/invite',
-  '/awards',     // "Prove your app is not AI slop" campaign landing
-  '/terms',      // Public legal pages (Google OAuth verification requires
-  '/privacy',    // these to be directly reachable as plain HTML, no auth)
-  '/cookies',
-  '/dpa',
-  '/r/',         // Public share pages
-  '/share/',     // Static share media (public/share/<slug>/...)
-  '/sitemap.xml', // Crawler discovery of /r/<slug> share pages
-  '/robots.txt',  // Crawler directives
-  '/oauth/',     // Launch OAuth authorize endpoint — the handler itself does
-                 // the auth check + /login?returnTo bounce (needs to run for
-                 // both authed token-mint and unauth redirect cases).
-  '/api/og/', // Public OG/Twitter card images for shared builds
-  '/api/badge/', // Public embeddable badge SVGs
-  '/api/auth/',
-  '/api/health',
-  '/api/webhooks/',
-  '/api/builds/',
-  '/api/runners/',
-  '/api/ws/runner',
-  '/api/embedded/register',
-  '/api/embedded/auto-register',
-  '/api/embedded/stream/ws',
-  '/api/config',
-  '/api/v1/',
-  '/api/media/',
-  '/screenshots/',
-  '/diffs/',
-  '/baselines/',
-  '/traces/',
-  '/videos/',
-  '/planned/',
-  '/bug-reports/',
-  '/_umami/',
+  "/login",
+  "/register",
+  "/invite",
+  "/awards", // "Prove your app is not AI slop" campaign landing
+  "/terms", // Public legal pages (Google OAuth verification requires
+  "/privacy", // these to be directly reachable as plain HTML, no auth)
+  "/cookies",
+  "/dpa",
+  "/r/", // Public share pages
+  "/share/", // Static share media (public/share/<slug>/...)
+  "/sitemap.xml", // Crawler discovery of /r/<slug> share pages
+  "/robots.txt", // Crawler directives
+  "/oauth/", // Launch OAuth authorize endpoint — the handler itself does
+  // the auth check + /login?returnTo bounce (needs to run for
+  // both authed token-mint and unauth redirect cases).
+  "/api/og/", // Public OG/Twitter card images for shared builds
+  "/api/badge/", // Public embeddable badge SVGs
+  "/api/auth/",
+  "/api/health",
+  "/api/webhooks/",
+  "/api/builds/",
+  "/api/runners/",
+  "/api/ws/runner",
+  "/api/embedded/register",
+  "/api/embedded/auto-register",
+  "/api/embedded/stream/ws",
+  "/api/config",
+  "/api/v1/",
+  "/api/media/",
+  "/screenshots/",
+  "/diffs/",
+  "/baselines/",
+  "/traces/",
+  "/videos/",
+  "/planned/",
+  "/bug-reports/",
+  "/_umami/",
 ];
 
-const isDev = process.env.NODE_ENV !== 'production';
+const CSPOptions: CPSOptions = {
+  styleSrc: ["'unsafe-inline'"],
+  imgSrc: [
+    "data:", // TODO: Potentially making image CSP pointless
+    "blob:", // TODO: Potentially making image CSP pointless
+    "https://avatars.githubusercontent.com",
+    "https://*.googleusercontent.com",
+    "https://*.gravatar.com",
+    "https://www.google.com",
+    "https://*.gstatic.com",
+  ],
+  formAction: ["https://github.com", "https://gitlab.com"], // Integration with GitHub/GitLab requires form POSTs to their domains for SSO and webhooks
+  workerSrc: ["blob:"], // umami's recorder.js spawns a Blob-URL Web Worker for replay compression
+  connectSrc: [
+    "ws:",
+    "wss:",
+    "https://github.com",
+    "https://api.github.com",
+    "https://gitlab.com",
+  ],
+  fontSrc: ["data:"], // Tailwind's font utilities emit data-URL fonts, do we need this in production?
+  frameSrc: ["https://trace.playwright.dev"], // Playwright Trace Viewer is embedded in an iframe for build trace viewing
+};
 
-// Per-request CSP nonce. Set on the response Content-Security-Policy header
-// and on the modified request headers (x-nonce) so server components can read
-// it via headers() and thread it onto next/script tags. Next.js applies the
-// same nonce to its own framework-emitted inline scripts.
-//
-// Edge runtime: Web Crypto only — Node's crypto.randomBytes is not available.
-function generateNonce(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes));
-}
-
-function buildCsp(nonce: string): string {
-  // 'unsafe-eval' is required in dev for HMR + source maps; never in prod.
-  const scriptSrc = isDev
-    ? `'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`
-    : `'self' 'nonce-${nonce}' 'strict-dynamic'`;
-
-  return [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    `script-src ${scriptSrc}`,
-    // style-src keeps 'unsafe-inline' — Next/RSC emit inline <style> tags
-    // and Tailwind v4 uses inline runtime styles. CSS-based XSS is theoretical.
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://avatars.githubusercontent.com https://*.googleusercontent.com https://*.gravatar.com https://www.google.com https://*.gstatic.com",
-    // worker-src: umami's recorder.js spawns a Blob-URL Web Worker for replay compression.
-    "worker-src 'self' blob:",
-    "connect-src 'self' ws: wss: https://github.com https://api.github.com https://gitlab.com",
-    "font-src 'self' data:",
-    "frame-src 'self' https://trace.playwright.dev",
-    "frame-ancestors 'none'",
-    "form-action 'self' https://github.com https://gitlab.com",
-  ].join('; ');
-}
-
-// CSP belongs on HTML responses, not API or rewritten-media responses. Same
-// path-prefix list we use for the auth bypass works as a CSP bypass too — the
-// API + static-asset surfaces don't serve scripts.
-const NON_HTML_PREFIXES = [
-  '/api/',
-  '/_umami/',
-  '/screenshots/',
-  '/diffs/',
-  '/baselines/',
-  '/traces/',
-  '/videos/',
-  '/planned/',
-  '/bug-reports/',
+const ASSET_EXTENSIONS = [
+  ".js",
+  ".css",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".ico",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".webmanifest",
 ];
 
-function shouldApplyCsp(pathname: string, request: NextRequest): boolean {
-  if (NON_HTML_PREFIXES.some((p) => pathname.startsWith(p))) return false;
-  // Skip prefetch responses — they carry RSC payloads, not full HTML, and
-  // recycling a fresh nonce on every prefetch invalidates cached layouts.
-  if (request.headers.get('next-router-prefetch') !== null) return false;
-  if (request.headers.get('purpose') === 'prefetch') return false;
-  return true;
-}
-
-export default function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const applyCsp = shouldApplyCsp(pathname, request);
-  const nonce = applyCsp ? generateNonce() : null;
-  const csp = nonce ? buildCsp(nonce) : null;
 
-  // Auth check first — redirects skip CSP wiring entirely.
-  const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
-  if (!isPublic) {
-    // Auth paths are rewritten to AUTH_ZONE by next.config.ts rewrites, so
-    // the middleware sees them here before the rewrite. Skip the session
-    // check for paths that will be proxied to the auth sub-zone.
-    const authPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/invite'];
-    const isAuthPath = authPaths.some((p) => pathname.startsWith(p));
-    if (!isAuthPath) {
-      const session = getSessionCookie(request);
-      if (!session) {
-        return NextResponse.redirect(new URL("/login", request.url));
-      }
-    }
+  const isPublicPath =
+    PUBLIC_PATHS.some((p) => pathname.startsWith(p)) ||
+    ASSET_EXTENSIONS.some((ext) => pathname.endsWith(ext));
+  const isLoggedIn = await isAuthenticated();
+
+  // Handle authentication
+  if (!isPublicPath && !isLoggedIn) {
+    const loginUrl = new URL("/login", request.url);
+    const returnToURL = new URL(request.url);
+    loginUrl.searchParams.set(
+      "returnTo",
+      returnToURL.pathname + returnToURL.search,
+    );
+
+    return NextResponse.redirect(loginUrl);
   }
 
-  if (!applyCsp || !nonce || !csp) {
-    return NextResponse.next();
-  }
-
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-nonce', nonce);
-  // Mirror the policy onto request headers so Next.js can apply the nonce to
-  // its own framework-emitted inline scripts during rendering.
-  requestHeaders.set('content-security-policy', csp);
-
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
-  response.headers.set('Content-Security-Policy', csp);
-  return response;
+  return nextResponseWithCSP(request, CSPOptions);
 }
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
-    // Media assets (rewritten to /api/media/*)
-    '/screenshots/:path*',
-    '/diffs/:path*',
-    '/baselines/:path*',
-    '/traces/:path*',
-    '/videos/:path*',
-    '/planned/:path*',
-    '/bug-reports/:path*',
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - rewritten media paths
+     * - sub-zone asset urls (auth_static)
+     */
+    {
+      source:
+        "/((?!api|_next/static|_next/image|favicon.ico|auth_static|screenshots|diffs|baselines|traces|videos|planned|bug-reports).*)", // TODO: Handle rewritten media paths separately for easier review
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
   ],
 };
+
+type CPSOptions = {
+  styleSrc?: string[];
+  imgSrc?: string[];
+  formAction?: string[];
+  workerSrc?: string[];
+  connectSrc?: string[];
+  fontSrc?: string[];
+  frameSrc?: string[];
+  scriptSrc?: string[];
+};
+
+function nextResponseWithCSP(request: NextRequest, options?: CPSOptions) {
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const isDev = process.env.NODE_ENV === "development";
+  const csp = [
+    ["default-src", ["'self'"].join(" ")].join(" "),
+    [
+      "script-src",
+      [
+        "'self'",
+        `'nonce-${nonce}'`,
+        "'strict-dynamic'", // TODO: Consider 'strict' once we can ensure all scripts are properly nonce'd.
+        ...(isDev ? ["'unsafe-eval'"] : []), // 'unsafe-eval' is required in dev for HMR, source map and React eval
+        ...(options?.scriptSrc || []),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    ].join(" "),
+    [
+      "style-src",
+      [
+        "'self'",
+        //`'nonce-${nonce}'`,  // TODO: This doesn't work with inline styles, purge inline styles if possible or hash them
+        ...(options?.styleSrc || []),
+      ].join(" "),
+    ].join(" "),
+    ["img-src", ["'self'", ...(options?.imgSrc || [])].join(" ")].join(" "),
+    ["font-src", ["'self'"].join(" ")].join(" "),
+    ["object-src", ["'none'"].join(" ")].join(" "),
+    ["base-uri", ["'self'"].join(" ")].join(" "),
+    ["form-action", ["'self'", ...(options?.formAction || [])].join(" ")].join(
+      " ",
+    ),
+    ["frame-ancestors", ["'none'"].join(" ")].join(" "),
+    ["frame-src", ["'self'", ...(options?.frameSrc || [])].join(" ")].join(" "),
+    ["worker-src", ["'self'", ...(options?.workerSrc || [])].join(" ")].join(
+      " ",
+    ),
+    ["connect-src", ["'self'", ...(options?.connectSrc || [])].join(" ")].join(
+      " ",
+    ),
+    isDev ? [] : ["upgrade-insecure-requests"],
+  ]
+    .join("; ")
+    .trim();
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
+  response.headers.set("Content-Security-Policy", csp);
+
+  return response;
+}

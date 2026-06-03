@@ -9,10 +9,6 @@ export interface SessionData {
   team: Team | null;
 }
 
-function getAuthZoneUrl(): string {
-  return (process.env.AUTH_ZONE || "http://localhost:3001").replace(/\/$/, "");
-}
-
 /**
  * Resolves the current session by calling the auth sub-zone's REST API.
  * The main app no longer hosts the BetterAuth server instance.
@@ -25,16 +21,22 @@ export const getCurrentSession = cache(
     const cookieHeader = h.get("cookie");
     if (cookieHeader) {
       try {
-        const res = await fetch(`${getAuthZoneUrl()}/api/auth/session`, {
-          headers: { cookie: cookieHeader },
-          cache: "no-store",
-        });
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/session`,
+          {
+            headers: { cookie: cookieHeader },
+            cache: "no-store",
+          },
+        );
+
         if (res.ok) {
           const data = await res.json();
           if (data.session) {
             const user = await queries.getUserById(data.session.user.id);
             if (!user) return null;
-            const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+            const team = user.teamId
+              ? await queries.getTeam(user.teamId)
+              : null;
             return {
               user,
               sessionId: data.session.sessionId,
@@ -42,8 +44,12 @@ export const getCurrentSession = cache(
             };
           }
         }
-      } catch {
+      } catch (e) {
         // If auth zone is unreachable, fall through to bearer token
+        console.log(
+          "Auth sub-zone unreachable, falling back to bearer token auth",
+          e,
+        );
       }
     }
 
@@ -57,7 +63,7 @@ export const getCurrentSession = cache(
     }
 
     return null;
-  }
+  },
 );
 
 export async function getCurrentUser(): Promise<User | null> {
@@ -92,12 +98,12 @@ export async function requireTeamAccess(): Promise<
 }
 
 export async function requireTeamRole(
-  roles: UserRole[]
+  roles: UserRole[],
 ): Promise<SessionData & { team: Team }> {
   const session = await requireTeamAccess();
   if (!roles.includes(session.user.role as UserRole)) {
     throw new Error(
-      `Forbidden: Requires one of these roles: ${roles.join(", ")}`
+      `Forbidden: Requires one of these roles: ${roles.join(", ")}`,
     );
   }
   return session;
@@ -110,7 +116,7 @@ export async function requireTeamAdmin(): Promise<
 }
 
 export async function requireRepoAccess(
-  repoId: string
+  repoId: string,
 ): Promise<SessionData & { team: Team; repo: Repository }> {
   const session = await requireTeamAccess();
   const repo = await queries.getRepository(repoId);

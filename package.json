@@ -49,6 +49,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@lastest/mcp-server": "workspace:*",
     "@lastest/shared": "workspace:*",
+    "cloud-auth": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@node-rs/argon2": "^2.0.2",
     "@radix-ui/react-avatar": "^1.1.11",

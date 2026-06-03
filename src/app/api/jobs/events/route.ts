@@ -5,9 +5,14 @@
  *
  * On connect: sends full snapshot of active jobs
  * Then streams individual job updates as they happen
+ *
+ * Auth: cookie session (normal) or ?token= query param (SSE / EventSource
+ * cannot send custom headers, so the client passes the raw session token
+ * as a query param. The main app forwards it to the cloud-auth sub-zone
+ * for verification — never validates against the DB directly.)
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import * as queries from '@/lib/db/queries';
 import { getCurrentSession } from '@/lib/auth';
 import { subscribeToJobEvents, type JobEvent } from '@/lib/ws/job-events';
@@ -15,6 +20,34 @@ import { cleanupStaleJobs } from '@/server/actions/jobs';
 import { processPoolQueue } from '@/server/actions/embedded-sessions';
 import { ensureSchedulerStarted } from '@/lib/scheduling/scheduler';
 import type { BackgroundJob } from '@/lib/db/schema';
+
+function getAuthZoneUrl(): string {
+  return (process.env.AUTH_ZONE || "http://localhost:3001").replace(/\/$/, "");
+}
+
+/**
+ * Verify a raw session token by forwarding it to the cloud-auth sub-zone.
+ * The sub-zone's /api/auth/session expects cookies, so we pass the token
+ * as a cookie header — same mechanism getCurrentSession uses internally.
+ */
+async function verifySessionToken(token: string) {
+  try {
+    const res = await fetch(`${getAuthZoneUrl()}/api/auth/session`, {
+      headers: { cookie: `better-auth.session_token=${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.session) return null;
+
+    const user = await queries.getUserById(data.session.user.id);
+    if (!user) return null;
+    const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+    return { user, sessionId: data.session.sessionId, team: team ?? null };
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -61,10 +94,18 @@ async function getEnrichedJobs(teamRepoIds: Set<string>): Promise<JobWithChildre
   });
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   ensureSchedulerStarted();
 
-  const session = await getCurrentSession();
+  // Accept session token via query param for SSE (EventSource can't send headers)
+  const token = request.nextUrl.searchParams.get('token');
+  let session = await getCurrentSession();
+
+  // Fallback: if no cookie session, verify token via cloud-auth sub-zone
+  if (!session && token) {
+    session = await verifySessionToken(token);
+  }
+
   if (!session?.team) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

@@ -1918,7 +1918,6 @@ export const googleSheetsAccounts = pgTable('google_sheets_accounts', {
 });
 
 export type GoogleSheetsAccount = typeof googleSheetsAccounts.$inferSelect;
-export type NewGoogleSheetsAccount = typeof googleSheetsAccounts.$inferInsert;
 
 // Cached cell data from a sheet range
 export interface SheetCellData {

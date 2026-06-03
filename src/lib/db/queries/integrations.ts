@@ -8,7 +8,6 @@ import {
 } from '../schema';
 import type {
   NewSpecImport,
-  NewGoogleSheetsAccount,
   NewGoogleSheetsDataSource,
   NewComposeConfig,
   NewAgentSession,
@@ -75,52 +74,6 @@ export async function getGoogleSheetsAccount(teamId?: string | null) {
     .from(googleSheetsAccounts)
     .where(eq(googleSheetsAccounts.teamId, teamId));
   return row || null;
-}
-
-export async function upsertGoogleSheetsAccount(data: {
-  teamId: string;
-  googleUserId: string;
-  googleEmail: string;
-  googleName?: string | null;
-  accessToken: string;
-  refreshToken?: string | null;
-  tokenExpiresAt?: Date | null;
-}) {
-  const [existing] = await db
-    .select()
-    .from(googleSheetsAccounts)
-    .where(eq(googleSheetsAccounts.teamId, data.teamId));
-
-  if (existing) {
-    await db
-      .update(googleSheetsAccounts)
-      .set({
-        googleUserId: data.googleUserId,
-        googleEmail: data.googleEmail,
-        googleName: data.googleName,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || existing.refreshToken,
-        tokenExpiresAt: data.tokenExpiresAt,
-      })
-      .where(eq(googleSheetsAccounts.id, existing.id));
-    return { ...existing, ...data };
-  }
-
-  const id = uuid();
-  const newAccount: NewGoogleSheetsAccount = {
-    id,
-    teamId: data.teamId,
-    googleUserId: data.googleUserId,
-    googleEmail: data.googleEmail,
-    googleName: data.googleName,
-    accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
-    tokenExpiresAt: data.tokenExpiresAt,
-    createdAt: new Date(),
-  };
-
-  await db.insert(googleSheetsAccounts).values(newAccount);
-  return newAccount;
 }
 
 export async function updateGoogleSheetsAccountTokens(

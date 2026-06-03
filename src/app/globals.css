@@ -1,6 +1,6 @@
 @import "@lastest/shared/globals.css";
 
-/* Scan cloud-auth source files */
+/* Scan local source files */
 @source "../";
 
 /* Scan shared package component files (resolved via the pnpm workspace symlink) */
