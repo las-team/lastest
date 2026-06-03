@@ -4,3 +4,25 @@ packages:
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+overrides:
+  "esbuild": ">=0.25.0"
+  "ajv": ">=6.14.0"
+  "brace-expansion": ">=2.0.3"
+  "defu": ">=6.1.5"
+  "hono": ">=4.12.18"
+  "@hono/node-server": ">=1.19.13"
+  "fast-uri": ">=3.1.2"
+  "kysely": ">=0.28.17"
+  "postcss": ">=8.5.10"
+  "ip-address": ">=10.1.1"
+  "ws": ">=8.20.1"
+  "uuid": ">=11.1.1"
+  "mailparser": ">=3.9.3"
+  "nodemailer": ">=8.0.5"
+  "vite": ">=7.3.2"
+  "@xmldom/xmldom": ">=0.8.13"
+  "qs": ">=6.15.2"
+  "flatted": ">=3.4.2"
+  "minimatch": ">=3.1.4"
+  "picomatch": ">=2.3.2"
+  "rollup": ">=4.59.0"

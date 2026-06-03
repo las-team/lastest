@@ -15,7 +15,7 @@
     "@lastest/shared": "workspace:*",
     "playwright": "1.57.0",
     "sucrase": "^3.35.0",
-    "ws": "^8.16.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
