@@ -28,9 +28,12 @@ import type {
   StepIssueState,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
+import type { StepVerdict } from '@/lib/db/schema';
 import {
   chipToneForLayer,
   defaultCheckModes,
+  effectiveVerdict,
+  mergeWithTestOverrides,
   type CheckLayer,
   type CheckMode,
   type CheckModeMap,
@@ -55,7 +58,7 @@ export type ExecutionKind = 'errored' | 'changed' | 'flaky' | 'passed';
 
 function deriveExecutionKind(
   result: TestResultLite | null,
-  step: StepComparison,
+  verdict: StepVerdict,
   visual: VisualDiffLite | null,
 ): ExecutionKind {
   // Hard executor/test failures dominate — even if the diff scorer didn't
@@ -67,7 +70,10 @@ function deriveExecutionKind(
   if (result?.isFlaky || result?.retryOf || visual?.classification === 'flaky') return 'flaky';
 
   // Any non-green verdict OR a visual classified as `changed` is "changed".
-  if (step.verdict !== 'green' || visual?.classification === 'changed') return 'changed';
+  // `verdict` is the mode-aware effective verdict (not the stored mode-blind
+  // one), so a high-signal layer the user set to `log`/`disable` doesn't flag
+  // the case as Changed when no chip is amber/red.
+  if (verdict !== 'green' || visual?.classification === 'changed') return 'changed';
 
   return 'passed';
 }
@@ -153,23 +159,32 @@ export function BoardView(props: BoardViewProps) {
       if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
       fbByStep.get(f.stepComparisonId)!.push(f);
     }
+    const repoModes = props.checkModes ?? defaultCheckModes();
     return props.steps.map((step) => {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      // Mode-aware effective verdict — the stored step.verdict is mode-blind,
+      // so reduce evidence through the repo + per-test modes the chips use.
+      const modes = mergeWithTestOverrides(
+        repoModes,
+        test?.id ? props.checkModesByTestId?.[test.id] : null,
+      );
+      const verdict = effectiveVerdict(step.evidence, modes);
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: verdict,
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
-      const kind = deriveExecutionKind(result, step, visual);
+      const kind = deriveExecutionKind(result, verdict, visual);
       return { step, test, area, status, kind, feedback: stepFb, visual, result };
     });
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
+  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById, props.checkModes, props.checkModesByTestId]);
 
   // Local execution-quality filter — orthogonal to the reviewer-status
   // filter in the header. Click a token to narrow the board to just those

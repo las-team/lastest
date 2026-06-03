@@ -2622,3 +2622,22 @@ Phase 2 (to fix, per review): 404-route screenshots in hoursmith, betprops, impr
 FormProxy v3 (onboarding country → real dashboard → Forms/Billing/Settings, 7 frames, no 404): https://app.lastest.cloud/r/yTh8bBRH8C1VkTHWGpuzAg (v1+v2 revoked).
 All 7 phase-2 demos re-shipped (guessed routes removed; soft-404 skip): hoursmith xvHBanQVgO2LPGgBEVJ7GQ, betprops v89Cg_hovb4lw0YyijE5PA, improvemypage aMyws0q8Tp92dd70tr4nhA, formproxy yTh8bBRH8C1VkTHWGpuzAg, maxagents AzKCIE5mk8KjrJEYejMWew, ava h7vZQebPhr08QhR51SyT9Q, couchpals hZJQfmqd8ppQEGVhwMNjYg. 7 old shares revoked.
 Outreach "the rest" (X reply on launch post): hoursmith @nivesh_saharan, betprops @Cjj_truth, improvemypage @improvemypage, ava @SyntaxScientist — sent. Dropped: maxagents @trey_smith (no launch post; DM composer message-gated), couchpals (X "Couch Pals" @sachoslks is a different split-screen product — name collision, real founder unidentified), curatekit/freeaudit/postmicrotools/formproxy (HN-only, no X). Session outreach total: 12 founders reached.
+
+## 2026-06-03 — X "Drop your SaaS" batch (10 post-login demos)
+
+Sourced from fresh X "post/drop your SaaS" launch threads (anupamrjp, khushiirl, CricTalk29, roast-my-saas live). All 10 registered + email-verified via shared lastestcloud@gmail.com (Gmail MCP), then logged in fresh each EB run (hybrid pattern). Each demo walks ≥3 post-login authenticated surfaces.
+
+| # | Product | Founder/handle | Site | Auth | Share |
+|---|---------|----------------|------|------|-------|
+| 1 | MindFuel | @MINDFUEL_NIRAJ | getmindfuel.vercel.app | supabase verify-link | https://app.lastest.cloud/r/rKtCpSl5TvLGllYvc_5U8g |
+| 2 | AuditGuard | @auditguardorg | auditguard.org | email+pw auto-session | https://app.lastest.cloud/r/DruTY8YMQl1AvJfrFw-DkA |
+| 3 | Cre8Virals | @Ritesh_Yadav_14 | cre8virals.com | email+pw verify-link | https://app.lastest.cloud/r/vTNWutnp-o5u_WOO6IRszw |
+| 4 | DealMyApp | @JamesAuble | dealmyapp.com | email+pw verify (Laravel) | https://app.lastest.cloud/r/b1O16txWeCEtp2PRLF46BQ |
+| 5 | FillFeedback | @Kunal_098 | fillfeedback.com | email+pw + 6-digit OTP | https://app.lastest.cloud/r/rZ-PWAHE9O8xNiY3fojjrQ |
+| 6 | Dealsletter | @KdogBuilds | dealsletter.io | supabase verify-link | https://app.lastest.cloud/r/DZbifk8YjV9QHYiMmnAcEw |
+| 7 | Swyftreach | @growthkab | swyftreach.com | email+pw + 6-digit OTP | https://app.lastest.cloud/r/6NJBtmIw327lzzz5cZdCPg |
+| 8 | Docsiv | @NEER4J__ | docsiv.com | supabase verify-link | https://app.lastest.cloud/r/XH7qEO0A8A3B6svP4M8irw |
+| 9 | Debtfreeo | @rv_RAJvishnu | debtfreeo.com | inline signup (auto-session) | https://app.lastest.cloud/r/S2A-flAeWiBN9wFjFmesqg |
+| 10 | Fintrack | @RichardZampieri | fintrackai.app | supabase verify-link | https://app.lastest.cloud/r/C6bxRlDQ6VFOzzwMIVpv5g |
+
+Shared creds: lastestcloud+<slug>@gmail.com / LastestDemo9! (verified once). Outreach: X reply/DM to each founder handle (pending user approval).

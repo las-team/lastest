@@ -9,8 +9,10 @@ import {
   pickTestModeOverrides,
   testModeOverridesToOverridesPatch,
   mergeWithTestOverrides,
+  effectiveVerdict,
   type CheckModeMap,
 } from './check-modes';
+import type { EvidenceItem } from '@/lib/db/schema';
 
 describe('check-modes — derivation', () => {
   it('returns defaults for an empty settings row', () => {
@@ -378,5 +380,56 @@ describe('check-modes — capture invariants', () => {
     expect(isAlwaysCaptured('dom')).toBe(false);
     expect(isAlwaysCaptured('text')).toBe(false);
     expect(isAlwaysCaptured('network')).toBe(false);
+  });
+});
+
+describe('check-modes — effectiveVerdict (mode-aware roll-up)', () => {
+  const ev = (layer: EvidenceItem['layer'], signal: EvidenceItem['signal']): EvidenceItem =>
+    ({ layer, signal, summary: '' });
+
+  it('no evidence → green', () => {
+    expect(effectiveVerdict([], defaultCheckModes())).toBe('green');
+    expect(effectiveVerdict(null, defaultCheckModes())).toBe('green');
+  });
+
+  it('high-signal layer in enforce → red', () => {
+    const modes = { ...defaultCheckModes(), network: 'enforce' as const };
+    expect(effectiveVerdict([ev('network', 'high')], modes)).toBe('red');
+  });
+
+  it('high-signal layer in log → yellow, not red (the Broken-without-red bug)', () => {
+    // perf defaults to `log`; a newly-breached budget scores high-signal.
+    const modes = { ...defaultCheckModes(), perf: 'log' as const };
+    expect(effectiveVerdict([ev('perf', 'high')], modes)).toBe('yellow');
+  });
+
+  it('high-signal layer in disable → ignored (green)', () => {
+    const modes = { ...defaultCheckModes(), network: 'disable' as const };
+    expect(effectiveVerdict([ev('network', 'high')], modes)).toBe('green');
+  });
+
+  it('medium-signal → yellow regardless of enforce/log', () => {
+    expect(effectiveVerdict([ev('visual', 'medium')], defaultCheckModes())).toBe('yellow');
+  });
+
+  it('low-signal → green', () => {
+    const modes = { ...defaultCheckModes(), network: 'enforce' as const };
+    expect(effectiveVerdict([ev('network', 'low')], modes)).toBe('green');
+  });
+
+  it('red dominates yellow when both present', () => {
+    const modes = { ...defaultCheckModes(), console: 'enforce' as const, perf: 'log' as const };
+    expect(effectiveVerdict([ev('perf', 'high'), ev('console', 'high')], modes)).toBe('red');
+  });
+
+  it('variable layer has no mode → treated as enforce (high → red)', () => {
+    expect(effectiveVerdict([ev('variable', 'high')], defaultCheckModes())).toBe('red');
+  });
+
+  it('matches chipToneForLayer: red iff some chip is regression', () => {
+    // perf log-high renders amber chip → no regression chip → not red.
+    const modes = { ...defaultCheckModes(), perf: 'log' as const };
+    expect(chipToneForLayer(modes.perf, 'high')).toBe('missed');
+    expect(effectiveVerdict([ev('perf', 'high')], modes)).not.toBe('red');
   });
 });

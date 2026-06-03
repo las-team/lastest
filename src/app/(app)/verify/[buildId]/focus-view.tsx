@@ -44,6 +44,8 @@ import {
 import { CheckModesDialog } from '@/components/verify/check-modes-dialog';
 import {
   classifyEvidenceWithMode,
+  effectiveVerdict,
+  mergeWithTestOverrides,
   type CheckMode,
   type CheckModeMap,
   type CheckLayer,
@@ -256,11 +258,16 @@ export function FocusView(props: FocusViewProps) {
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      const modes = mergeWithTestOverrides(
+        props.checkModes,
+        test?.id ? props.checkModesByTestId[test.id] : null,
+      );
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: effectiveVerdict(step.evidence, modes),
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
@@ -284,7 +291,7 @@ export function FocusView(props: FocusViewProps) {
       return collator.compare(a.step.stepLabel ?? '', b.step.stepLabel ?? '');
     });
     return rows;
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
+  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById, props.checkModes, props.checkModesByTestId]);
 
   const visibleCases = useMemo(() => {
     if (props.statusFilter.size === 0) return cases;

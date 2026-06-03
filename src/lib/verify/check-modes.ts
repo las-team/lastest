@@ -8,7 +8,7 @@
  *   disable → check does not run; layer is "absent" in the focus view
  */
 
-import type { PlaywrightSettings } from '@/lib/db/schema';
+import type { PlaywrightSettings, EvidenceItem, StepVerdict } from '@/lib/db/schema';
 
 export type CheckMode = 'enforce' | 'log' | 'disable';
 
@@ -248,6 +248,47 @@ export function chipToneForLayer(
   if (signal === 'high') return mode === 'enforce' ? 'regression' : 'missed';
   if (signal === 'medium') return 'missed';
   return 'done';
+}
+
+/**
+ * Mode-aware roll-up of a step's evidence into a green/yellow/red verdict —
+ * the read-time analogue of the stored `step_comparisons.verdict`.
+ *
+ * The persisted verdict is a *pre-verdict*: the scorer computes it mode-blind
+ * (any high-signal layer → red) because it doesn't know each layer's mode.
+ * This function re-derives the verdict honoring the per-layer mode, so the
+ * Broken/Missed columns and the build-status gate agree with the per-layer
+ * chips (`chipToneForLayer`). Without it a high-signal layer in `log` mode
+ * (e.g. perf, which defaults to `log`) reddens the whole step while every
+ * chip renders amber — a card lands in Broken with nothing red.
+ *
+ *   red    ← any layer is `enforce` AND high-signal     (≥1 red chip)
+ *   yellow ← any non-disabled layer is high (`log`) or medium-signal
+ *   green  ← otherwise
+ *
+ * `disable` layers are ignored entirely. The `variable` layer has no
+ * configurable mode today, so it's treated as `enforce` (its high-signal
+ * structural-break still gates) — matching the board card's legacy mapping.
+ */
+export function effectiveVerdict(
+  evidence: ReadonlyArray<Pick<EvidenceItem, 'layer' | 'signal'>> | null | undefined,
+  modes: CheckModeMap,
+): StepVerdict {
+  let hasRed = false;
+  let hasAmber = false;
+  for (const e of evidence ?? []) {
+    const mode: CheckMode = e.layer === 'variable'
+      ? 'enforce'
+      : modes[e.layer as CheckLayer] ?? 'enforce';
+    if (mode === 'disable') continue;
+    if (e.signal === 'high') {
+      if (mode === 'enforce') hasRed = true;
+      else hasAmber = true; // log → surfaced amber, never reddens
+    } else if (e.signal === 'medium') {
+      hasAmber = true;
+    }
+  }
+  return hasRed ? 'red' : hasAmber ? 'yellow' : 'green';
 }
 
 /**

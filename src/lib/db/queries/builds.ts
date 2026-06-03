@@ -19,6 +19,15 @@ import type {
   LayerFeedbackStatus,
 } from '../schema';
 import { getWcagLevel } from '@/lib/a11y/wcag-score';
+import { getPlaywrightSettings, getDiffSensitivitySettings } from './settings';
+import { getPlaywrightOverridesByTestIds } from './tests';
+import {
+  deriveCheckModes,
+  pickTestModeOverrides,
+  mergeWithTestOverrides,
+  effectiveVerdict,
+  type CheckModeMap,
+} from '@/lib/verify/check-modes';
 import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
@@ -328,6 +337,37 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     .where(eq(stepComparisons.buildId, buildId));
   const nonQuarantinedSteps = stepRows.filter(s => !quarantinedTestIds.has(s.testId));
 
+  // Mode-aware verdict: the stored step.verdict is computed mode-blind by the
+  // scorer (any high-signal layer → red). Re-derive it through the repo + per
+  // -test check modes so the build gate matches the verify board's columns and
+  // chips — a high-signal layer the user set to `log`/`disable` must NOT keep
+  // the build in review_required when nothing renders red.
+  const [repoRow] = await db
+    .select({ repositoryId: testRuns.repositoryId })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(eq(builds.id, buildId));
+  const repoId = repoRow?.repositoryId ?? null;
+  const [pwSettings, diffSettings] = await Promise.all([
+    getPlaywrightSettings(repoId).catch(() => null),
+    getDiffSensitivitySettings(repoId).catch(() => null),
+  ]);
+  const repoModes = deriveCheckModes({
+    ...(pwSettings ?? {}),
+    textDiffEnabled: diffSettings?.textDiffEnabled ?? null,
+  });
+  const stepTestIds = Array.from(new Set(nonQuarantinedSteps.map(s => s.testId).filter((id): id is string => !!id)));
+  const overrideRows = stepTestIds.length > 0
+    ? await getPlaywrightOverridesByTestIds(stepTestIds).catch(() => [])
+    : [];
+  const modesByTestId = new Map<string, Partial<CheckModeMap>>();
+  for (const t of overrideRows) {
+    const partial = pickTestModeOverrides(t.playwrightOverrides ?? null);
+    if (partial) modesByTestId.set(t.id, partial);
+  }
+  const stepEffectiveVerdict = (step: typeof nonQuarantinedSteps[number]) =>
+    effectiveVerdict(step.evidence, mergeWithTestOverrides(repoModes, modesByTestId.get(step.testId) ?? null));
+
   const SETTLED: LayerFeedbackStatus[] = ['approved', 'auto_approved', 'snoozed'];
   const fbByStep = new Map<string, Set<string>>();
   for (const f of feedbackRows) {
@@ -344,7 +384,7 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     return evLayers.every(l => settled.has(l));
   };
 
-  const hasRedStep = nonQuarantinedSteps.some(s => s.verdict === 'red' && !stepIsVerified(s));
+  const hasRedStep = nonQuarantinedSteps.some(s => stepEffectiveVerdict(s) === 'red' && !stepIsVerified(s));
   if (hasRedStep) return 'review_required';
 
   if (hasPending) return 'review_required';

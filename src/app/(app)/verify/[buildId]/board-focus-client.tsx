@@ -17,6 +17,7 @@ import type {
   StepLayerFeedback,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
+import { effectiveVerdict, mergeWithTestOverrides } from '@/lib/verify/check-modes';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import { BoardView, type CaseStatus } from './board-view';
 import { FocusView } from './focus-view';
@@ -458,16 +459,21 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       const test = testById.get(step.testId);
       const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
+      const modes = mergeWithTestOverrides(
+        checkModes,
+        test?.id ? checkModesByTestId[test.id] : null,
+      );
       const status = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: effectiveVerdict(step.evidence, modes),
       });
       if (status !== 'unknown') n++;
     }
     return n;
-  }, [layerFeedback, filteredSteps, testById, changedAreaIds, testResultById]);
+  }, [layerFeedback, filteredSteps, testById, changedAreaIds, testResultById, checkModes, checkModesByTestId]);
 
   const handleRefresh = () => {
     if (!props.repositoryId) return;
