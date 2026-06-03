@@ -656,14 +656,12 @@ export function DefinitionPageClient({
       if (data) {
         setOpenTestData(data.test);
         setOpenTestDetailData(data);
-      }
-    } catch (err) {
-      // A stale ?test=<id> in the URL (e.g. after switching teams, or after a
-      // failed AI/agent test creation that never persisted) bubbles up here as
-      // `Forbidden: Test not found`. Clear the param and surface a toast so the
-      // user lands on the test list instead of a 500.
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.startsWith('Forbidden:')) {
+      } else {
+        // `null` = not found / cross-team / no longer accessible — e.g. a stale
+        // ?test=<id> after switching teams or a failed AI/agent test creation.
+        // Clear the param and toast so the user lands on the list, not an error.
+        // (The server action used to throw `Forbidden:` here; we can't read that
+        // message in a production client build, so it now returns null instead.)
         setOpenTestId(null);
         setOpenTestData(null);
         setOpenTestDetailData(null);
@@ -671,9 +669,11 @@ export function DefinitionPageClient({
         url.searchParams.delete('test');
         window.history.replaceState({}, '', url.pathname + url.search);
         toast.error('Test not found or no longer accessible.');
-      } else {
-        toast.error(msg || 'Could not open test.');
       }
+    } catch {
+      // Unexpected server error. In production Next.js replaces the message with
+      // an opaque digest string, so never echo it — show a stable generic line.
+      toast.error('Could not open test. Please try again.');
     } finally {
       setIsLoadingTestDetail(false);
     }
@@ -1158,13 +1158,15 @@ export function DefinitionPageClient({
                         if (data) {
                           setOpenTestData(data.test);
                           setOpenTestDetailData(data);
+                        } else {
+                          // null = test removed / no longer accessible.
+                          toast.error('Test was removed.');
                         }
                         // Also refresh server page props (tree + test list) so a
                         // renamed/edited test updates outside the detail panel.
                         router.refresh();
-                      } catch (err) {
-                        const msg = err instanceof Error ? err.message : '';
-                        toast.error(msg.startsWith('Forbidden:') ? 'Test was removed.' : msg || 'Refresh failed.');
+                      } catch {
+                        toast.error('Refresh failed.');
                       }
                     }}
                   />

@@ -403,7 +403,21 @@ export async function getTest(id: string) {
 }
 
 export async function getTestDetailData(testId: string, repositoryId?: string | null) {
-  const { session, test } = await requireTestOwnership(testId);
+  // requireTestOwnership throws `Forbidden: …` for a stale / deleted / cross-team
+  // testId (e.g. a leftover ?test=<id> in the URL after switching teams, or a
+  // freshly-claimed test the session can't yet see). Convert that EXPECTED case
+  // to a `null` return. A thrown server-action error reaches the browser as the
+  // opaque production digest string ("An error occurred in the Server Components
+  // render…") because Next.js strips real messages from client-bound errors — so
+  // the client can't reliably branch on `err.message`. Deciding here, where the
+  // message is still intact, lets callers treat `null` as "not accessible".
+  // Genuinely unexpected errors still propagate.
+  const ownership = await requireTestOwnership(testId).catch((err) => {
+    if (err instanceof Error && err.message.startsWith('Forbidden:')) return null;
+    throw err;
+  });
+  if (!ownership) return null;
+  const { session, test } = ownership;
 
   const repoId = test.repositoryId || repositoryId;
   const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, googleSheetsAccount, playwrightSettings, diffSettings, envConfig, testSpec, aiSettings] = await Promise.all([
