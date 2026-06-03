@@ -2641,3 +2641,16 @@ Sourced from fresh X "post/drop your SaaS" launch threads (anupamrjp, khushiirl,
 | 10 | Fintrack | @RichardZampieri | fintrackai.app | supabase verify-link | https://app.lastest.cloud/r/C6bxRlDQ6VFOzzwMIVpv5g |
 
 Shared creds: lastestcloud+<slug>@gmail.com / LastestDemo9! (verified once). Outreach: X reply/DM to each founder handle (pending user approval).
+
+### Outreach sent 2026-06-03 (X) — channel: public reply preferred, DM where open
+- Dealsletter @KdogBuilds — **DM** (open DMs)
+- Swyftreach @growthkab — **DM** (open DMs)
+- AuditGuard @auditguardorg — reply to launch tweet 2053988974633640141
+- Cre8Virals @Ritesh_Yadav_14 — reply to pinned 2043359742723264664
+- DealMyApp @JamesAuble — reply to 2056146348760777109 ("change one thing about DealMyApp")
+- FillFeedback @Kunal_098 — reply to launch 2042915980855382023
+- Docsiv @NEER4J__ — reply to 2058947968712233006
+- Debtfreeo @rv_RAJvishnu — reply to 2023798142572130610 (incl. broken-login heads-up)
+- MindFuel @MINDFUEL_NIRAJ — reply to 2062082601238831367
+- Fintrack @RichardZampieri — reply to 2061938559519723871
+All posts confirmed (composer→/home redirect). No DM-pin gate encountered. Each message: 1 specific compliment + the /r/ share link.
