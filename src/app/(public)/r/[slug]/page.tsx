@@ -271,11 +271,16 @@ export default async function PublicSharePage({ params }: PageProps) {
           /public static asset, not a bundled module import. */}
       {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link rel="stylesheet" href="/share-slider.css" precedence="default" />
-      {/* Browsers strip the `nonce` attribute from the DOM after CSP
+      {/* `async` (not `defer`): React only special-cases async external
+          scripts — it hoists them to <head>, dedupes, and actually executes
+          them on client renders. A `defer` script is treated as inert markup
+          ("Scripts inside React components are never executed"). Load order
+          doesn't matter here: share-slider.js uses document-level delegation.
+          Browsers strip the `nonce` attribute from the DOM after CSP
           evaluation as a side-channel mitigation, so the client sees
           nonce="" during hydration. The script has already loaded
           correctly under the original nonce; suppress the cosmetic mismatch. */}
-      <script src="/share-slider.js" defer nonce={nonce} suppressHydrationWarning />
+      <script src="/share-slider.js" async nonce={nonce} suppressHydrationWarning />
       {videoSchema && (
         <script
           type="application/ld+json"
