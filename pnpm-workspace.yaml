@@ -10,7 +10,6 @@ onlyBuiltDependencies:
   - "tesseract.js"
 overrides:
   "esbuild": ">=0.25.0"
-  "ajv": "6.15.0"
   "brace-expansion": ">=2.0.3"
   "defu": ">=6.1.5"
   "hono": ">=4.12.18"
