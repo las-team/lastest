@@ -1,7 +1,10 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element -- screenshots are auth-protected dynamic
+   media; next/image's optimizer can't forward the session cookie (Next >=16.2) and
+   would lossily recompress pixel-accurate diff images. */
+
 import { useState, useRef, useCallback } from 'react';
-import NextImage from 'next/image';
 import type { AlignmentSegment } from '@/lib/db/schema';
 
 type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare';
@@ -486,25 +489,23 @@ export function SliderComparison({
           </div>
           {/* Aligned baseline with diff overlay */}
           <div className="relative">
-            <NextImage src={alignedBaselineImage} alt="Aligned baseline" className="w-full" fill />
+            <img src={alignedBaselineImage} alt="Aligned baseline" className="w-full" />
             {alignedDiffImage && (
-              <NextImage
+              <img
                 src={alignedDiffImage}
                 alt="Diff overlay"
                 className="absolute inset-0 w-full h-full opacity-50 mix-blend-multiply pointer-events-none"
-                fill
               />
             )}
           </div>
           {/* Aligned current with diff overlay */}
           <div className="relative">
-            <NextImage src={alignedCurrentImage} alt="Aligned current" className="w-full" fill />
+            <img src={alignedCurrentImage} alt="Aligned current" className="w-full" />
             {alignedDiffImage && (
-              <NextImage
+              <img
                 src={alignedDiffImage}
                 alt="Diff overlay"
                 className="absolute inset-0 w-full h-full opacity-50 mix-blend-multiply pointer-events-none"
-                fill
               />
             )}
           </div>
@@ -538,14 +539,14 @@ export function SliderComparison({
           <div className="relative">
             <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
             <div className="relative">
-              <NextImage src={baselineImage} alt={leftLabel} className="w-full border rounded" onLoad={handleImageLoad} fill />
+              <img src={baselineImage} alt={leftLabel} className="w-full border rounded" onLoad={handleImageLoad} />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
             </div>
           </div>
           <div className="relative">
             <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
             <div className="relative">
-              <NextImage src={currentImage} alt={rightLabel} className="w-full border rounded" fill />
+              <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
               <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
               <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
@@ -564,21 +565,21 @@ export function SliderComparison({
         <div className="grid grid-cols-3 gap-4">
           <div>
             <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
-            <NextImage src={baselineImage} alt={leftLabel} className="w-full border rounded" fill />
+            <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
           </div>
           <div>
             <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
-            <NextImage src={currentImage} alt={rightLabel} className="w-full border rounded" fill />
+            <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
           </div>
           <div>
             <div className="text-sm text-primary mb-2 font-medium">Planned (Design)</div>
-            <NextImage src={plannedImage} alt="Planned" className="w-full border-2 border-primary/30 rounded" fill />
+            <img src={plannedImage} alt="Planned" className="w-full border-2 border-primary/30 rounded" />
           </div>
         </div>
         {plannedDiffImage && (
           <div className="mt-4">
             <div className="text-sm text-primary mb-2 font-medium">Planned vs Current Diff</div>
-            <NextImage src={plannedDiffImage} alt="Planned Diff" className="w-full border border-primary/30 rounded" fill />
+            <img src={plannedDiffImage} alt="Planned Diff" className="w-full border border-primary/30 rounded" />
           </div>
         )}
       </div>
@@ -600,7 +601,7 @@ export function SliderComparison({
         >
           {/* Planned (left side) */}
           <div className="relative">
-            <NextImage src={plannedImage} alt="Planned" className="w-full" draggable={false} fill/>
+            <img src={plannedImage} alt="Planned" className="w-full" draggable={false} />
           </div>
 
           {/* Current (right side, clipped) */}
@@ -608,7 +609,7 @@ export function SliderComparison({
             className="absolute inset-0 overflow-hidden"
             style={{ clipPath: `inset(0 0 0 ${sliderPosition}%)` }}
           >
-            <NextImage src={currentImage} alt="Current" className="w-full" draggable={false} fill/>
+            <img src={currentImage} alt="Current" className="w-full" draggable={false} />
           </div>
 
           {/* Slider handle */}
@@ -643,12 +644,11 @@ export function SliderComparison({
       <div className={className}>
         {viewModeButtons}
         <div className="relative">
-          <NextImage src={currentImage} alt="Current" className="w-full border rounded" onLoad={handleImageLoad} fill/>
-          <NextImage
+          <img src={currentImage} alt="Current" className="w-full border rounded" onLoad={handleImageLoad} />
+          <img
             src={diffImage}
             alt="Diff"
             className="absolute inset-0 w-full h-full opacity-70 mix-blend-multiply"
-            fill
           />
           <RegionOverlay dims={imageDims} regions={visibleRegions} />
           <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
@@ -666,7 +666,7 @@ export function SliderComparison({
       <div className={className}>
         {viewModeButtons}
         <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
-        <NextImage src={currentImage} alt={rightLabel} className="w-full border rounded" fill />
+        <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
       </div>
     );
   }
@@ -685,7 +685,7 @@ export function SliderComparison({
       >
         {/* Baseline (left side) */}
         <div className="relative">
-          <NextImage src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} fill />
+          <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
         </div>
 
         {/* Current (right side, clipped — fully revealed while drawing regions) */}
@@ -693,7 +693,7 @@ export function SliderComparison({
           className="absolute inset-0 overflow-hidden"
           style={{ clipPath: `inset(0 0 0 ${drawFocusMode || drawIgnoreMode ? 0 : sliderPosition}%)` }}
         >
-          <NextImage src={currentImage} alt={rightLabel} className="w-full" draggable={false} fill />
+          <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
         </div>
 
         {/* Region overlays */}
