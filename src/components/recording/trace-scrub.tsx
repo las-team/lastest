@@ -136,7 +136,7 @@ export function TraceScrub({
                 <div
                   role="button"
                   tabIndex={0}
-                  key={`${event.sequence}-${i}`}
+                  key={event.sequence}
                   data-scrub-idx={i}
                   onClick={() => setFocusIdx(i)}
                   onKeyDown={(e) => {

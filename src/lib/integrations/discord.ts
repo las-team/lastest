@@ -195,7 +195,6 @@ export async function sendDiscordShareNotification(
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
     { name: 'Target', value: notification.targetDomain || '—', inline: true },
     { name: 'Repo', value: notification.repoName, inline: true },
-    { name: 'Published by', value: notification.publishedByEmail, inline: true },
     { name: 'Team', value: notification.teamName, inline: true },
   ];
   if (notification.scopedTestName) {

@@ -43,6 +43,14 @@ interface BrowserViewerProps {
   interactive?: boolean;
   inspectMode?: boolean;
   fit?: boolean;
+  /** Render the canvas at 1:1 pixels inside a scrollable viewport with edge
+   *  shadows that fade as the user scrolls to each boundary. Opt-in because
+   *  the underlying layout requires the parent to constrain BrowserViewer's
+   *  height (e.g. via `className="h-full w-full"`) — without that, the
+   *  scroll viewport collapses to 0 px. The default non-fit branch keeps the
+   *  classic intrinsic-height behavior so unconstrained-parent callers
+   *  (max-h, no height) still grow to the canvas naturally. */
+  cropIndicators?: boolean;
   onInspectResult?: (result: InspectElementResult | null) => void;
   onDomSnapshot?: (result: DomSnapshotResult) => void;
   onViewportChange?: (viewport: { width: number; height: number }) => void;
@@ -53,13 +61,32 @@ export interface BrowserViewerHandle {
   sendInspectMode: (enabled: boolean) => void;
 }
 
-export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideToolbar, hideStatusBar, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, onInspectResult, onDomSnapshot, onViewportChange }, ref) {
+export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideToolbar, hideStatusBar, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, cropIndicators, onInspectResult, onDomSnapshot, onViewportChange }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
+
+  // Edge-shadow state for the 1:1 scroll container (fit=false only). Each flag
+  // is true when the canvas extends past that edge of the viewport, i.e. the
+  // user can still scroll in that direction.
+  const [edges, setEdges] = useState({ top: false, bottom: false, left: false, right: false });
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollTop > 0;
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 0.5;
+    const left = el.scrollLeft > 0;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 0.5;
+    setEdges((prev) =>
+      prev.top === top && prev.bottom === bottom && prev.left === left && prev.right === right
+        ? prev
+        : { top, bottom, left, right }
+    );
+  }, []);
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [viewport, setViewport] = useState(initialViewport ?? { width: 1280, height: 720 });
@@ -133,6 +160,22 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     };
     img.src = `data:image/jpeg;base64,${base64Data}`;
   }, []);
+
+  // Recompute edge-shadow flags whenever the scroll-container or canvas
+  // resize (viewport change, container reflow, frame size drift). Only
+  // active in the cropIndicators branch — other branches don't render the
+  // scroll wrapper, so scrollRef.current is null and observing would no-op.
+  useEffect(() => {
+    if (fit || !cropIndicators) return;
+    const scrollEl = scrollRef.current;
+    const canvasEl = canvasRef.current;
+    if (!scrollEl) return;
+    updateEdges();
+    const ro = new ResizeObserver(updateEdges);
+    ro.observe(scrollEl);
+    if (canvasEl) ro.observe(canvasEl);
+    return () => ro.disconnect();
+  }, [fit, cropIndicators, updateEdges, viewport.width, viewport.height]);
 
   // At 1:1 rendering, canvas pixels map directly to viewport pixels
 
@@ -713,8 +756,14 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         />
       )}
 
-      {/* Canvas container — 1:1 pixel rendering (scrollable) or fit-to-container (centered) */}
-      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} ${hideToolbar && hideStatusBar ? '' : 'bg-black'} ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : 'overflow-auto'}`}>
+      {/* Canvas container. Three render modes:
+           • fit:            scale canvas to fit, centered.
+           • cropIndicators: 1:1 pixels in a fixed-size scroll viewport with
+                             edge shadows; requires parent to constrain
+                             BrowserViewer's height (else viewport = 0px).
+           • default:        1:1 pixels with intrinsic-height container —
+                             scrolls only when parent imposes a height. */}
+      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} ${hideToolbar && hideStatusBar ? '' : 'bg-black'} ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : cropIndicators ? 'flex-1 min-h-0 overflow-hidden' : 'overflow-auto'}`}>
         {connectionStatus !== 'connected' && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
             {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
@@ -752,30 +801,77 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           </div>
         )}
 
-        <canvas
-          ref={canvasRef}
-          className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
-          style={
-            fit
-              ? {
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  width: 'auto',
-                  height: 'auto',
-                  aspectRatio: `${viewport.width} / ${viewport.height}`,
-                  objectFit: 'contain',
-                }
-              : {
-                  width: viewport.width,
-                  height: viewport.height,
-                }
-          }
-          onMouseMove={(e) => handleMouseEvent(e, 'move')}
-          onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
-          onMouseUp={(e) => handleMouseEvent(e, 'up')}
-          onWheel={handleWheel}
-          onContextMenu={(e) => e.preventDefault()}
-        />
+        {fit ? (
+          <canvas
+            ref={canvasRef}
+            className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
+              aspectRatio: `${viewport.width} / ${viewport.height}`,
+              objectFit: 'contain',
+            }}
+            onMouseMove={(e) => handleMouseEvent(e, 'move')}
+            onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
+            onMouseUp={(e) => handleMouseEvent(e, 'up')}
+            onWheel={handleWheel}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+        ) : cropIndicators ? (
+          <>
+            {/* `safe center` centers the canvas when it fits; when it overflows
+                 it anchors to the start edge so the scrollbar can reach the
+                 rest (plain `center` would trap overflowing content above the
+                 scroll origin and become unreachable). */}
+            <div
+              ref={scrollRef}
+              onScroll={updateEdges}
+              className="absolute inset-0 overflow-auto flex"
+              style={{ alignItems: 'safe center', justifyContent: 'safe center' }}
+            >
+              <canvas
+                ref={canvasRef}
+                className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+                style={{ width: viewport.width, height: viewport.height, display: 'block', flexShrink: 0 }}
+                onMouseMove={(e) => handleMouseEvent(e, 'move')}
+                onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
+                onMouseUp={(e) => handleMouseEvent(e, 'up')}
+                onWheel={handleWheel}
+                onContextMenu={(e) => e.preventDefault()}
+              />
+            </div>
+            {/* Edge shadows — opacity-driven so they fade as the user scrolls to each boundary. */}
+            <div
+              aria-hidden
+              className={`pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-150 ${edges.top ? 'opacity-100' : 'opacity-0'}`}
+            />
+            <div
+              aria-hidden
+              className={`pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/70 to-transparent transition-opacity duration-150 ${edges.bottom ? 'opacity-100' : 'opacity-0'}`}
+            />
+            <div
+              aria-hidden
+              className={`pointer-events-none absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-black/70 to-transparent transition-opacity duration-150 ${edges.left ? 'opacity-100' : 'opacity-0'}`}
+            />
+            <div
+              aria-hidden
+              className={`pointer-events-none absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-black/70 to-transparent transition-opacity duration-150 ${edges.right ? 'opacity-100' : 'opacity-0'}`}
+            />
+          </>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+            style={{ width: viewport.width, height: viewport.height }}
+            onMouseMove={(e) => handleMouseEvent(e, 'move')}
+            onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
+            onMouseUp={(e) => handleMouseEvent(e, 'up')}
+            onWheel={handleWheel}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+        )}
         {/* Hidden textarea for IME/composition support — canvas can't receive composition events.
             pointer-events:none keeps mouse events going to the canvas; focus is set programmatically. */}
         {interactive && (

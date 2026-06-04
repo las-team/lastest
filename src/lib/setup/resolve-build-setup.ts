@@ -45,7 +45,7 @@ export async function resolveBuildSetup(args: ResolveBuildSetupArgs): Promise<Re
   const tag = logTag ?? '[setup-resolve]';
   const setupContext: ResolvedBuildSetup['setupContext'] = { variables: {} };
 
-  // 1. Pre-load first matching storage_state step into setupContext
+  // 1a. Pre-load first matching storage_state from repo-level default_setup_steps.
   if (repositoryId) {
     const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
     for (const step of defaultSteps) {
@@ -57,6 +57,31 @@ export async function resolveBuildSetup(args: ResolveBuildSetupArgs): Promise<Re
           break;
         }
       }
+    }
+  }
+
+  // 1b. Per-test override: load a storage_state attached via the test's own
+  // `setupOverrides.extraSteps`. This is how the saas-demo skill + MCP wire auth
+  // (`{stepType:'storage_state', storageStateId}`). Without this scan, an
+  // override-attached state never reaches the EB command — the remote/EB
+  // dispatch resolves setup ONLY through this function, and step 1a sees just
+  // repo-level defaults — so the test cold-starts at the target's login page.
+  // Mirrors setup-orchestrator's defaults-then-extras ordering: an extra
+  // storage_state overrides any repo-default loaded above. Broadcast model is
+  // single-state, so the first test carrying one wins (demo runs are 1 test).
+  for (const test of tests) {
+    const extras = test.setupOverrides?.extraSteps;
+    if (!extras?.length) continue;
+    const ssStep = extras.find(
+      (s): s is typeof s & { storageStateId: string } =>
+        s.stepType === 'storage_state' && !!s.storageStateId,
+    );
+    if (!ssStep) continue;
+    const ss = await queries.getStorageState(ssStep.storageStateId);
+    if (ss) {
+      setupContext.storageState = ss.storageStateJson;
+      console.log(`${tag} Pre-loaded storage state "${ss.name}" from per-test override (test "${test.name}")`);
+      break;
     }
   }
 

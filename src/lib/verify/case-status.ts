@@ -14,6 +14,7 @@
 import type {
   StepComparison,
   StepLayerFeedback,
+  StepVerdict,
 } from '@/lib/db/schema';
 
 export type CaseStatus = 'regression' | 'done' | 'missed' | 'unknown';
@@ -30,10 +31,17 @@ interface DeriveInput {
    *  score as green = done. Hard failures dominate any verdict and force the
    *  case into Broken until every evidence layer is explicitly approved. */
   testFailed?: boolean;
+  /** Mode-aware verdict re-derived from step.evidence + the active per-layer
+   *  modes (see effectiveVerdict). When provided it supersedes the stored
+   *  step.verdict — the persisted verdict is mode-blind, so the board columns
+   *  must use the mode-aware value or a `log`-mode high-signal layer lands the
+   *  card in Broken with no red chip. Omitted callers fall back to step.verdict. */
+  verdictOverride?: StepVerdict;
 }
 
 export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   const { step, feedback, isInChangedArea, testFailed } = input;
+  const verdict = input.verdictOverride ?? step.verdict;
 
   const anyRejected = feedback.some((f) => f.status === 'rejected');
   if (anyRejected) return 'regression';
@@ -78,11 +86,11 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
     return explicitFullyApproved ? 'done' : 'regression';
   }
 
-  if (step.verdict === 'red') {
+  if (verdict === 'red') {
     return fullyApproved ? 'done' : 'regression';
   }
 
-  if (step.verdict === 'yellow') {
+  if (verdict === 'yellow') {
     if (fullyApproved) return 'done';
     return isInChangedArea ? 'missed' : 'unknown';
   }

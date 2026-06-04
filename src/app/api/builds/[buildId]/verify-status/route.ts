@@ -3,6 +3,11 @@ import { getCurrentSession } from '@/lib/auth';
 import * as queries from '@/lib/db/queries';
 import { ensureStepComparisonsForBuild } from '@/lib/verify/backfill-step-comparisons';
 import { computeChangeMap } from '@/server/actions/change-map';
+import {
+  deriveCheckModes,
+  pickTestModeOverrides,
+  type CheckModeMap,
+} from '@/lib/verify/check-modes';
 
 export async function GET(
   request: Request,
@@ -44,6 +49,7 @@ export async function GET(
     runningTestRows,
     cachedChangeMap,
     pwSettings,
+    diffSettings,
   ] = await Promise.all([
     queries.getStepComparisonsByBuild(buildId).catch(() => []),
     queries.getLayerFeedbackByBuild(buildId).catch(() => []),
@@ -56,7 +62,11 @@ export async function GET(
     // hint pills in the focus view. Per-test overrides exist but are rare;
     // the focus view is OK with the repo-level value here.
     queries.getPlaywrightSettings(repoId).catch(() => null),
-  ]);
+    // text-diff capture toggle lives on the diff_sensitivity_settings table
+    // (legacy textDiffEnabled). Pulled here so the cogwheel modal hydrates
+    // the Text layer's mode without a second fetch from the client.
+    queries.getDiffSensitivitySettings(repoId).catch(() => null),
+  ] as const);
 
   let stepComparisons = initialStepComparisons;
   if (
@@ -127,30 +137,30 @@ export async function GET(
     .filter((r) => r.status === 'running')
     .map((r) => ({ testId: r.testId, name: r.testId }));
 
-  // Error-mode toggles drive the focus view's network/console tab "broken vs
-  // warn vs ignore" treatment so the red X pill matches what the runner
-  // actually does when it sees a network 4xx / console error.
+  // Per-check 3-way modes drive the focus toolbar's broken/warn/clean pills
+  // for every layer (visual, text, dom, network, console, a11y, design,
+  // perf, url). Derived from the repo's playwright_settings + diff
+  // sensitivity settings so the panel agrees with whatever the executor
+  // saw at run time.
   //
-  // Per-test playwrightOverrides take precedence over the repo defaults — the
-  // executor already uses them at run time, so the UI must match or the panel
-  // will mislabel passing/failing layers for tests that opted out.
+  // Per-test playwrightOverrides take precedence for any layer they touch —
+  // the executor already uses them at run time, so the UI must match or
+  // the panel will mislabel passing/failing layers for tests that opted
+  // out.
+  const checkModes: CheckModeMap = deriveCheckModes({
+    ...(pwSettings ?? {}),
+    textDiffEnabled: diffSettings?.textDiffEnabled ?? null,
+  });
+
   const distinctTestIds = Array.from(new Set(runningTestRows.map((r) => r.testId).filter((id): id is string => !!id)));
   const perTestOverrides = distinctTestIds.length > 0
     ? await queries.getPlaywrightOverridesByTestIds(distinctTestIds).catch(() => [])
     : [];
-  const byTestId: Record<string, { network?: 'fail' | 'warn' | 'ignore'; console?: 'fail' | 'warn' | 'ignore' }> = {};
+  const checkModesByTestId: Record<string, Partial<CheckModeMap>> = {};
   for (const t of perTestOverrides) {
-    const o = t.playwrightOverrides;
-    if (!o) continue;
-    const network = o.networkErrorMode;
-    const cons = o.consoleErrorMode;
-    if (network || cons) byTestId[t.id] = { network, console: cons };
+    const partial = pickTestModeOverrides(t.playwrightOverrides ?? null);
+    if (partial) checkModesByTestId[t.id] = partial;
   }
-  const errorModes = {
-    network: (pwSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-    console: (pwSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-    byTestId,
-  };
 
   return NextResponse.json(
     {
@@ -167,7 +177,12 @@ export async function GET(
       testResults: slimResults,
       runningTests,
       changeMap,
-      errorModes,
+      // Per-layer mode shape consumed by the Verify cogwheel modal +
+      // toolbar pills. `checkModes` is the repo-level default; `byTestId`
+      // carries per-test overrides (sparse — only the layers the test
+      // chose to override).
+      checkModes,
+      checkModesByTestId,
     },
     {
       headers: {

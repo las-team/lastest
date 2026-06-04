@@ -129,9 +129,9 @@ function SortableItem({ item, onToggle, compact = false, recommendation }: Sorta
           <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
             #{item.priority}
           </span>
-          {!compact && recommendation && <RecommendationBadge recommendation={recommendation} />}
+          {recommendation && <RecommendationBadge recommendation={recommendation} />}
         </div>
-        {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
+        <p className={`text-gray-500 truncate ${compact ? 'text-[11px]' : 'text-xs'}`}>{label.description}</p>
       </div>
 
       <Switch
@@ -218,9 +218,9 @@ export function SelectorPriorityList({ value, onChange, compact = false, recomme
                     <span className={`bg-gray-100 rounded text-gray-500 ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs px-1.5 py-0.5'}`}>
                       #{item.priority}
                     </span>
-                    {!compact && recommendation && <RecommendationBadge recommendation={recommendation} />}
+                    {recommendation && <RecommendationBadge recommendation={recommendation} />}
                   </div>
-                  {!compact && <p className="text-xs text-gray-500 truncate">{label.description}</p>}
+                  <p className={`text-gray-500 truncate ${compact ? 'text-[11px]' : 'text-xs'}`}>{label.description}</p>
                 </div>
                 <Switch checked={item.enabled} disabled className={compact ? 'scale-90' : ''} />
               </div>

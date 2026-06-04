@@ -17,6 +17,7 @@ import {
   SplitSquareHorizontal,
   ShieldCheck,
   GitCommit,
+  Wrench,
 } from 'lucide-react';
 import Image from 'next/image';
 import { RepoSelector, CreateLocalRepoButton, type RepositoryWithTestCount } from './repo-selector';
@@ -61,6 +62,7 @@ const EARLY_ADOPTER_ITEMS = new Set(['Compose', 'Compare', 'Impact', 'URL Diff']
 
 const definitionNav = [
   { name: 'Tests', href: '/tests', icon: FileCode },
+  { name: 'Setup', href: '/setup', icon: Wrench },
   { name: 'Compose', href: '/compose', icon: Layers },
 ];
 
@@ -172,7 +174,7 @@ export function Sidebar({ repos, selectedRepo, currentUser, team, baseUrl, repos
         </ul>
 
         <div>
-          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Tests</p>
+          <p className="px-3 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">Definition</p>
           <ul className="space-y-1">
             {filteredDefinitionNav.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href);

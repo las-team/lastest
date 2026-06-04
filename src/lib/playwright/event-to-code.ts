@@ -176,10 +176,14 @@ export function eventsToCodeLines(
         if (lastAction === 'click') {
           lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         }
+      } else if (lastEmittedEventType === 'action' && lastAction === 'click') {
+        // Click caused this navigation — assert the resulting URL instead of re-navigating.
+        // Re-issuing page.goto on a click-triggered nav double-loads (and can 404 on
+        // SPA/intermediate URLs that resolve in-app but not via a cold HTTP fetch).
+        lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
+        lines.push(`${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
+        lastNavigatedPath = relativePath;
       } else if (!lastAction.includes('goto')) {
-        if (lastEmittedEventType === 'action' && lastAction === 'click') {
-          lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
-        }
         lines.push(`${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
         lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
         lastNavigatedPath = relativePath;

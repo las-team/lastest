@@ -17,6 +17,7 @@ import type {
   StepLayerFeedback,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
+import { effectiveVerdict, mergeWithTestOverrides } from '@/lib/verify/check-modes';
 import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
 import { BoardView, type CaseStatus } from './board-view';
 import { FocusView } from './focus-view';
@@ -223,20 +224,25 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [completedAt, setCompletedAt] = useState<string | null>(
     props.build.completedAt ? props.build.completedAt.toISOString() : null,
   );
-  // Error-mode toggles hydrated from verify-status on first poll. Repo
-  // defaults at `network`/`console`; `byTestId` is the per-test override map
-  // populated when a test has a playwrightOverrides row. Default 'warn'
-  // matches the server-side default in the playwright settings schema, so
-  // the focus view shows the same "warn only" treatment until the first
-  // poll lands.
-  type ErrorModeMap = {
-    network: 'fail' | 'warn' | 'ignore';
-    console: 'fail' | 'warn' | 'ignore';
-    byTestId: Record<string, { network?: 'fail' | 'warn' | 'ignore'; console?: 'fail' | 'warn' | 'ignore' }>;
+  // Per-check 3-way modes driving the cogwheel modal + toolbar pills for
+  // all 9 layers. Default mirrors deriveCheckModes() on an empty settings
+  // row so the toolbar reads identically to "nothing configured yet"
+  // until the first poll lands.
+  type CheckModeT = 'enforce' | 'log' | 'disable';
+  type CheckModeMapT = {
+    visual: CheckModeT; text: CheckModeT; dom: CheckModeT;
+    network: CheckModeT; console: CheckModeT; a11y: CheckModeT;
+    design: CheckModeT; perf: CheckModeT; url: CheckModeT;
   };
-  const [errorModes, setErrorModes] = useState<ErrorModeMap>(
-    { network: 'warn', console: 'warn', byTestId: {} },
-  );
+  const DEFAULT_CHECK_MODES: CheckModeMapT = {
+    visual: 'enforce', text: 'disable', dom: 'disable',
+    network: 'enforce', console: 'enforce', a11y: 'disable',
+    design: 'disable', perf: 'log', url: 'log',
+  };
+  const [checkModes, setCheckModes] = useState<CheckModeMapT>(DEFAULT_CHECK_MODES);
+  const [checkModesByTestId, setCheckModesByTestId] = useState<
+    Record<string, Partial<CheckModeMapT>>
+  >({});
   const [runningTests, setRunningTests] = useState<Array<{ testId: string; name: string }>>([]);
   const [liveCounts, setLiveCounts] = useState<{ totalTests: number; passed: number; failed: number }>({
     totalTests: props.build.totalTests ?? 0,
@@ -268,7 +274,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         testResults: TestResultLite[];
         runningTests: Array<{ testId: string; name: string }>;
         changeMap: ChangeMap | null;
-        errorModes?: ErrorModeMap;
+        checkModes?: CheckModeMapT;
+        checkModesByTestId?: Record<string, Partial<CheckModeMapT>>;
       };
       setStepComparisons(data.stepComparisons);
       // Merge-not-replace: keep any local `optimistic-*` rows whose step has
@@ -287,7 +294,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       setRunningTests(data.runningTests);
       setLiveCounts({ totalTests: data.totalTests, passed: data.passedCount, failed: data.failedCount });
       if (data.changeMap) setChangeMap(data.changeMap);
-      if (data.errorModes) setErrorModes(data.errorModes);
+      if (data.checkModes) setCheckModes(data.checkModes);
+      if (data.checkModesByTestId) setCheckModesByTestId(data.checkModesByTestId);
       if (data.completedAt && !completedAt) {
         setCompletedAt(data.completedAt);
       }
@@ -451,16 +459,21 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       const test = testById.get(step.testId);
       const isInChangedArea = !!(test?.functionalAreaId && changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? testResultById.get(step.testResultId) ?? null : null;
+      const modes = mergeWithTestOverrides(
+        checkModes,
+        test?.id ? checkModesByTestId[test.id] : null,
+      );
       const status = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: effectiveVerdict(step.evidence, modes),
       });
       if (status !== 'unknown') n++;
     }
     return n;
-  }, [layerFeedback, filteredSteps, testById, changedAreaIds, testResultById]);
+  }, [layerFeedback, filteredSteps, testById, changedAreaIds, testResultById, checkModes, checkModesByTestId]);
 
   const handleRefresh = () => {
     if (!props.repositoryId) return;
@@ -876,6 +889,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           onDropCase={handleDropCase}
           onColumnAction={handleColumnAction}
           onOpenIssuePicker={(stepId) => setIssuePickerStepId(stepId)}
+          checkModes={checkModes}
+          checkModesByTestId={checkModesByTestId}
         />
       ) : (
         <FocusView
@@ -887,7 +902,9 @@ function BoardFocusInner(props: BoardFocusClientProps) {
           changedAreaIds={changedAreaIds}
           visualByStepKey={visualByStepKey}
           testResultById={testResultById}
-          errorModes={errorModes}
+          checkModes={checkModes}
+          checkModesByTestId={checkModesByTestId}
+          repositoryId={props.repositoryId}
           statusFilter={filters.statuses}
           selectedStepId={selectedStepId}
           onSelect={setSelectedStepId}

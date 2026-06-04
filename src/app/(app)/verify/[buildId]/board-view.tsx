@@ -28,6 +28,16 @@ import type {
   StepIssueState,
 } from '@/lib/db/schema';
 import { deriveCaseStatus } from '@/lib/verify/case-status';
+import type { StepVerdict } from '@/lib/db/schema';
+import {
+  chipToneForLayer,
+  defaultCheckModes,
+  effectiveVerdict,
+  mergeWithTestOverrides,
+  type CheckLayer,
+  type CheckMode,
+  type CheckModeMap,
+} from '@/lib/verify/check-modes';
 import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 
 export type CaseStatus = 'regression' | 'done' | 'missed' | 'unknown';
@@ -48,7 +58,7 @@ export type ExecutionKind = 'errored' | 'changed' | 'flaky' | 'passed';
 
 function deriveExecutionKind(
   result: TestResultLite | null,
-  step: StepComparison,
+  verdict: StepVerdict,
   visual: VisualDiffLite | null,
 ): ExecutionKind {
   // Hard executor/test failures dominate — even if the diff scorer didn't
@@ -60,7 +70,10 @@ function deriveExecutionKind(
   if (result?.isFlaky || result?.retryOf || visual?.classification === 'flaky') return 'flaky';
 
   // Any non-green verdict OR a visual classified as `changed` is "changed".
-  if (step.verdict !== 'green' || visual?.classification === 'changed') return 'changed';
+  // `verdict` is the mode-aware effective verdict (not the stored mode-blind
+  // one), so a high-signal layer the user set to `log`/`disable` doesn't flag
+  // the case as Changed when no chip is amber/red.
+  if (verdict !== 'green' || visual?.classification === 'changed') return 'changed';
 
   return 'passed';
 }
@@ -108,6 +121,14 @@ interface BoardViewProps {
   onColumnAction: (column: CaseStatus, action: 'verify' | 'report') => void;
   /** Open the GH issue picker dialog for a specific case. */
   onOpenIssuePicker: (stepId: string) => void;
+  /** Repo-level 3-way check modes governing the chip tone (enforce →
+   *  regression, log → missed, disable → muted). Defaults are applied
+   *  when omitted so the board still renders meaningfully before the
+   *  first verify-status fetch lands. */
+  checkModes?: CheckModeMap;
+  /** Sparse per-test overrides — any layer a test opted out of takes
+   *  precedence over the repo-level mode for its case card. */
+  checkModesByTestId?: Record<string, Partial<CheckModeMap>>;
 }
 
 // Columns flow left → right: needs decision → expected-but-missing → broken → resolved.
@@ -138,23 +159,32 @@ export function BoardView(props: BoardViewProps) {
       if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
       fbByStep.get(f.stepComparisonId)!.push(f);
     }
+    const repoModes = props.checkModes ?? defaultCheckModes();
     return props.steps.map((step) => {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      // Mode-aware effective verdict — the stored step.verdict is mode-blind,
+      // so reduce evidence through the repo + per-test modes the chips use.
+      const modes = mergeWithTestOverrides(
+        repoModes,
+        test?.id ? props.checkModesByTestId?.[test.id] : null,
+      );
+      const verdict = effectiveVerdict(step.evidence, modes);
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: verdict,
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
-      const kind = deriveExecutionKind(result, step, visual);
+      const kind = deriveExecutionKind(result, verdict, visual);
       return { step, test, area, status, kind, feedback: stepFb, visual, result };
     });
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
+  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById, props.checkModes, props.checkModesByTestId]);
 
   // Local execution-quality filter — orthogonal to the reviewer-status
   // filter in the header. Click a token to narrow the board to just those
@@ -328,6 +358,8 @@ export function BoardView(props: BoardViewProps) {
               testById={props.testById}
               isDragSource={sourceStatus === col.status}
               isDragValid={sourceStatus !== null && sourceStatus !== col.status}
+              checkModes={props.checkModes ?? defaultCheckModes()}
+              checkModesByTestId={props.checkModesByTestId ?? {}}
             />
           ))}
         </div>
@@ -356,7 +388,14 @@ export function BoardView(props: BoardViewProps) {
       <DragOverlay dropAnimation={null}>
         {activeDragCase ? (
           <div style={{ width: 280, opacity: 0.95 }}>
-            <CaseCard data={activeDragCase} colStatus={activeDragCase.status} onOpen={() => {}} dragging />
+            <CaseCard
+              data={activeDragCase}
+              colStatus={activeDragCase.status}
+              onOpen={() => {}}
+              dragging
+              checkModes={props.checkModes ?? defaultCheckModes()}
+              checkModesByTestId={props.checkModesByTestId ?? {}}
+            />
           </div>
         ) : null}
       </DragOverlay>
@@ -440,9 +479,12 @@ interface KColProps {
   isDragSource: boolean;
   /** True while a card is being dragged AND this column is a valid drop target. */
   isDragValid: boolean;
+  /** Repo-level + per-test 3-way modes governing the chip tone on each card. */
+  checkModes: CheckModeMap;
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>;
 }
 
-function KCol({ label, dropLabel, accent, status, cases, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker, onColumnAction, cardsLoaded, runningTests, testById, isDragSource, isDragValid }: KColProps) {
+function KCol({ label, dropLabel, accent, status, cases, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker, onColumnAction, cardsLoaded, runningTests, testById, isDragSource, isDragValid, checkModes, checkModesByTestId }: KColProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const visible = cases.slice(0, 30);
   const showDropAffordance = isDragValid;
@@ -525,7 +567,7 @@ function KCol({ label, dropLabel, accent, status, cases, areaTotals, areaSettled
             Areas with any flagged case (linked issue, reviewer note in future)
             still expand inline. Other columns just render flat. */}
         {status === 'done'
-          ? renderVerifiedGrouped(visible, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker)
+          ? renderVerifiedGrouped(visible, areaTotals, areaSettled, onOpenCase, onOpenIssuePicker, checkModes, checkModesByTestId)
           : visible.map((c) => (
               <DraggableCaseCard
                 key={c.step.id}
@@ -533,6 +575,8 @@ function KCol({ label, dropLabel, accent, status, cases, areaTotals, areaSettled
                 onOpen={() => onOpenCase(c.step.id)}
                 onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
                 colStatus={status}
+                checkModes={checkModes}
+                checkModesByTestId={checkModesByTestId}
               />
             ))}
         {cases.length > visible.length && (
@@ -620,6 +664,8 @@ function renderVerifiedGrouped(
   areaSettled: Map<string, number>,
   onOpenCase: (id: string) => void,
   onOpenIssuePicker: (id: string) => void,
+  checkModes: CheckModeMap,
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>,
 ): React.ReactNode {
   const byArea = new Map<string, { area: CaseCardData['area']; rows: CaseCardData[] }>();
   for (const c of cases) {
@@ -673,6 +719,8 @@ function renderVerifiedGrouped(
                 onOpen={() => onOpenCase(c.step.id)}
                 onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
                 colStatus="done"
+                checkModes={checkModes}
+                checkModesByTestId={checkModesByTestId}
               />
             ))}
           </div>
@@ -687,6 +735,8 @@ function renderVerifiedGrouped(
         onOpen={() => onOpenCase(c.step.id)}
         onOpenIssuePicker={() => onOpenIssuePicker(c.step.id)}
         colStatus="done"
+        checkModes={checkModes}
+        checkModesByTestId={checkModesByTestId}
       />
     ));
   });
@@ -781,9 +831,11 @@ interface DraggableProps {
   colStatus: CaseStatus;
   onOpen: () => void;
   onOpenIssuePicker: () => void;
+  checkModes: CheckModeMap;
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>;
 }
 
-function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker }: DraggableProps) {
+function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker, checkModes, checkModesByTestId }: DraggableProps) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({ id: data.step.id });
   // While dragging, the source slot fades out — DragOverlay portals the
   // visual preview above all columns so it never gets clipped.
@@ -800,7 +852,15 @@ function DraggableCaseCard({ data, colStatus, onOpen, onOpenIssuePicker }: Dragg
   };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <CaseCard data={data} colStatus={colStatus} onOpen={onOpen} onOpenIssuePicker={onOpenIssuePicker} dragging={false} />
+      <CaseCard
+        data={data}
+        colStatus={colStatus}
+        onOpen={onOpen}
+        onOpenIssuePicker={onOpenIssuePicker}
+        dragging={false}
+        checkModes={checkModes}
+        checkModesByTestId={checkModesByTestId}
+      />
     </div>
   );
 }
@@ -811,12 +871,14 @@ interface CardProps {
   onOpen: () => void;
   onOpenIssuePicker?: () => void;
   dragging?: boolean;
+  checkModes: CheckModeMap;
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>;
 }
 
-function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging }: CardProps) {
+function CaseCard({ data, colStatus, onOpen, onOpenIssuePicker, dragging, checkModes, checkModesByTestId }: CardProps) {
   const layerSummaries = useMemo(
-    () => summarizeLayersForCard(data.step, data.result, data.visual),
-    [data.step, data.result, data.visual],
+    () => summarizeLayersForCard(data.step, data.result, data.visual, checkModes, checkModesByTestId[data.test?.id ?? ''] ?? null),
+    [data.step, data.result, data.visual, checkModes, checkModesByTestId, data.test?.id],
   );
   // Thin left-border colored by execution kind — "this ran red" (errored)
   // vs "this changed but may be intentional" (changed) at a glance, without
@@ -921,18 +983,38 @@ interface LayerCardSummary {
 }
 
 const ALL_LAYERS: ReadonlyArray<EvidenceLayer> = [
-  'visual', 'dom', 'network', 'console', 'a11y', 'perf', 'url', 'variable',
+  'visual', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url', 'variable',
 ];
+
+/** EvidenceLayer subset that maps to a `*Mode` column in `playwright_settings`.
+ *  `variable` doesn't have a configurable mode today — it always renders by
+ *  the raw signal. */
+function modeForLayer(
+  layer: EvidenceLayer,
+  modes: CheckModeMap,
+  perTest: Partial<CheckModeMap> | null,
+): CheckMode | null {
+  if (layer === 'variable') return null;
+  const key = layer as CheckLayer;
+  return perTest?.[key] ?? modes[key] ?? null;
+}
 
 /** Per-layer summary chip data for a board card.
  *
  *  Includes BOTH evidence-bearing layers AND layers that were captured but
  *  matched baseline (no evidence row) — those render as green "match" chips
- *  so reviewers can see what was actually verified, not just what failed. */
+ *  so reviewers can see what was actually verified, not just what failed.
+ *
+ *  Chip tone honors the per-check 3-way mode (enforce / log / disable). A
+ *  high-signal evidence on a `log` layer still renders as amber `missed`
+ *  rather than red `regression`; a `disable` layer drops out entirely so
+ *  the card doesn't surface a check the user opted out of. */
 function summarizeLayersForCard(
   step: StepComparison,
   result: TestResultLite | null,
   visual: VisualDiffLite | null,
+  checkModes: CheckModeMap,
+  perTestModes: Partial<CheckModeMap> | null,
 ): LayerCardSummary[] {
   const evidenceByLayer = new Map<EvidenceLayer, StepComparison['evidence'][number]>();
   for (const e of step.evidence) {
@@ -944,12 +1026,22 @@ function summarizeLayersForCard(
     const ev = evidenceByLayer.get(layer);
     const captured = wasLayerCaptured(layer, result, visual);
     if (!ev && !captured) continue;
+
+    const mode = modeForLayer(layer, checkModes, perTestModes);
+    // A `disable` layer has been opted out — hide the chip entirely so the
+    // card matches the focus toolbar's "absent" treatment instead of
+    // claiming a verified-clean state the user didn't sign up for.
+    if (mode === 'disable') continue;
+
     if (ev) {
       out.push({
         layer,
         delta: deltaForLayer(step, layer),
         summary: ev.summary,
-        tone: ev.signal === 'high' ? 'regression' : ev.signal === 'medium' ? 'missed' : 'done',
+        tone: mode != null
+          ? chipToneForLayer(mode, ev.signal)
+          // `variable` (no mode) keeps the legacy signal-only mapping.
+          : ev.signal === 'high' ? 'regression' : ev.signal === 'medium' ? 'missed' : 'done',
       });
     } else {
       // Layer was captured + scored, no diff → "match" chip so the reviewer
@@ -1029,6 +1121,11 @@ function deltaForLayer(step: StepComparison, layer: string): string {
       const a = layers?.a11y;
       if (!a) return '';
       return a.newViolations.length > 0 ? `+${a.newViolations.length}` : `−${a.disappeared.length}`;
+    }
+    case 'design': {
+      const d = layers?.designSystem;
+      if (!d) return '';
+      return d.newViolations.length > 0 ? `+${d.newViolations.length}` : `−${d.disappeared.length}`;
     }
     case 'perf': {
       const p = layers?.perf;

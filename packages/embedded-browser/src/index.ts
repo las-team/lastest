@@ -739,9 +739,13 @@ async function startup(): Promise<void> {
             (setupId) => (testExecutor ? testExecutor.getRetainedSetupContext(setupId) : null),
           );
 
-          // Attach screencast + input to the recording page
+          // Attach screencast + input to the recording page. Feed each frame to
+          // the recorder too so per-click element thumbnails can be cropped from
+          // the live stream instead of taking a separate screenshot (which would
+          // glitch the screencast and flicker the viewer).
           await screencast?.start(recordingPage, (frame) => {
             streamServer!.broadcastFrame(frame.data, frame.width, frame.height, frame.timestamp);
+            recorder?.setLatestFrame(frame.data, frame.width, frame.height);
           });
           await inputHandler?.attach(recordingPage);
           isRecording = true;

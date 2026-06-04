@@ -5,6 +5,8 @@ import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
 import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript, getRepository, getStorageState, getDefaultSetupSteps } from '@/lib/db/queries';
 import { requireCapability, requireRepoCapability } from '@/lib/auth';
 import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
+import type { SelectorConfig } from '@/lib/db/schema';
+import { analyzeHtmlForSelectors, recommendPriorityFromAnalysis, isMeaningful } from '@/lib/playwright/selector-analysis';
 import { v4 as uuid } from 'uuid';
 import { revalidatePath } from 'next/cache';
 import { createMessage } from '@/lib/ws/protocol';
@@ -194,6 +196,105 @@ export async function startRecording(
 
   console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
   return { sessionId, resolvedRunnerId: runnerId };
+}
+
+export interface AnalyzeUrlSelectorsResult {
+  recommendedPriority?: SelectorConfig[];
+  /**
+   * Per-strategy candidate stats found in the initial HTML, ranked by
+   * distinct-value count (most uniquely-addressable strategies first).
+   * `count` is raw occurrences; `unique` is the number of distinct values.
+   */
+  topStrategies?: Array<{ type: string; count: number; unique: number }>;
+  /**
+   * Strategies that appear on the page but resolve to a single repeated
+   * value (e.g. 12 buttons all with the same aria-label) — flagged so the
+   * user can see why a seemingly-present strategy was downranked.
+   */
+  ambiguousStrategies?: Array<{ type: string; count: number }>;
+  interactiveElements?: number;
+  /** False when the page looks client-rendered — recommendation is the current config. */
+  meaningful?: boolean;
+  changed?: boolean;
+  error?: string;
+}
+
+/**
+ * Fetch the target URL and recommend a selector priority based on what the
+ * page actually exposes (data-testid coverage, aria-labels, ids, roles, …).
+ *
+ * Read-only: it returns a recommendation; persisting it is the caller's job
+ * (the recording UI applies it to the Playwright settings, which auto-saves).
+ */
+export async function analyzeUrlForSelectors(
+  url: string,
+  repositoryId?: string | null
+): Promise<AnalyzeUrlSelectorsResult> {
+  await requireCapability('recording:write');
+
+  try {
+    new URL(url);
+  } catch {
+    return { error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com)' };
+  }
+
+  const settings = await getPlaywrightSettings(repositoryId);
+  const current = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+
+  let html: string;
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        // Present as a real browser so servers return the full document.
+        'user-agent':
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    if (!res.ok) {
+      return { error: `Could not load page (HTTP ${res.status}). Check the URL and try again.` };
+    }
+    const contentType = res.headers.get('content-type') ?? '';
+    if (contentType && !/(text\/html|application\/xhtml)/i.test(contentType)) {
+      return { error: `Page is not HTML (${contentType.split(';')[0]}). Selector analysis needs an HTML page.` };
+    }
+    html = await res.text();
+  } catch (err) {
+    const reason = err instanceof Error && err.name === 'TimeoutError' ? 'timed out' : 'failed';
+    return { error: `Request to the URL ${reason}. The page may be unreachable from the server.` };
+  }
+
+  const coverage = analyzeHtmlForSelectors(html, { customAttributeName: settings.customAttributeName });
+  const recommendedPriority = recommendPriorityFromAnalysis(current, coverage);
+  const meaningful = isMeaningful(coverage);
+
+  const SUMMARY_SKIP = new Set(['css-path', 'coords', 'text', 'ocr-text']);
+  const topStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
+    .filter((type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] > 0)
+    .map((type) => ({ type, count: coverage.counts[type], unique: coverage.uniqueCounts[type] }))
+    .sort((a, b) => b.unique - a.unique || b.count - a.count)
+    .slice(0, 4);
+
+  // Strategies that are present but ambiguous (single repeated value across
+  // many occurrences) — the misleading case we explicitly downrank.
+  const ambiguousStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
+    .filter(
+      (type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] === 1 && coverage.counts[type] > 1
+    )
+    .map((type) => ({ type, count: coverage.counts[type] }));
+
+  const changed = JSON.stringify(recommendedPriority) !== JSON.stringify(current);
+
+  return {
+    recommendedPriority,
+    topStrategies,
+    ambiguousStrategies,
+    interactiveElements: coverage.interactiveElements,
+    meaningful,
+    changed,
+  };
 }
 
 export async function stopRecording(repositoryId?: string | null) {

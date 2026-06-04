@@ -40,6 +40,7 @@ import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/d
 import { TestStabilizationOverrides } from '@/components/settings/test-stabilization-overrides';
 import { TestDiffOverrides as TestDiffOverridesComponent } from '@/components/settings/test-diff-overrides';
 import { TestPlaywrightOverrides as TestPlaywrightOverridesComponent } from '@/components/settings/test-playwright-overrides';
+import { deriveCheckModes } from '@/lib/verify/check-modes';
 import { TestDesignSystemOverrides } from '@/components/settings/test-design-system-overrides';
 import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
 import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
@@ -1318,6 +1319,10 @@ export function TestDetailClient({ test, results, repositoryId, screenshotGroups
                   cursorPlaybackSpeed: playwrightDefaults?.cursorPlaybackSpeed ?? 1,
                   baseUrl: envBaseUrl ?? 'http://localhost:3000',
                 }}
+                repoCheckModes={deriveCheckModes({
+                  ...(playwrightDefaults ?? {}),
+                  textDiffEnabled: diffDefaults?.textDiffEnabled ?? null,
+                })}
               />
             )}
           </TabsContent>

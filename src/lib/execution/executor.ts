@@ -7,6 +7,12 @@
 import type { TestRunResult } from '@/lib/playwright/types';
 import type { Test, EnvironmentConfig, PlaywrightSettings, StabilizationSettings, NetworkRequest, DownloadRecord } from '@/lib/db/schema';
 import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import {
+  deriveCheckModes,
+  mergeWithTestOverrides,
+  pickTestModeOverrides,
+  type CheckMode,
+} from '@/lib/verify/check-modes';
 import type {
   RunTestCommand,
   RunSetupCommand,
@@ -462,11 +468,21 @@ async function executeViaRunner(
   // Resolve the diff-sensitivity text-diff toggle once per run. The EB pod
   // can't reach the host's settings DB, so each `command:run_test` payload
   // carries the boolean inline.
+  //
+  // Source of truth is the per-check 3-way mode (textMode). When it's
+  // explicitly set the cogwheel modal owns the value; otherwise we fall
+  // back to the legacy textDiffEnabled boolean on diff_sensitivity_settings
+  // for repos that predate the migration.
   let textCaptureEnabled = false;
+  let repoCheckModes = deriveCheckModes(options.playwrightSettings ?? null);
   try {
     const { getDiffSensitivitySettings } = await import('@/lib/db/queries');
     const diffSettings = await getDiffSensitivitySettings(options.repositoryId ?? null);
-    textCaptureEnabled = diffSettings?.textDiffEnabled ?? false;
+    repoCheckModes = deriveCheckModes({
+      ...(options.playwrightSettings ?? {}),
+      textDiffEnabled: diffSettings?.textDiffEnabled ?? null,
+    });
+    textCaptureEnabled = repoCheckModes.text !== 'disable';
   } catch (err) {
     console.warn('[executor] Failed to load diff-sensitivity settings for text capture:', err);
   }
@@ -669,8 +685,20 @@ async function executeViaRunner(
       // #1 cause of "Design tab: not captured" support reports. Without
       // this log there's no way to tell from the dev server output whether
       // the EB was even told to run.
+      // Effective per-test check modes: repo modes overridden by sparse
+      // per-test mode keys (`visualMode`, `textMode`, …). Reads the new
+      // `*Mode` fields first; falls back to the legacy
+      // `networkErrorMode`/`consoleErrorMode` for rows written before the
+      // per-test migration.
+      const perTestCheckModes = mergeWithTestOverrides(
+        repoCheckModes,
+        pickTestModeOverrides(pwOverrides ?? null),
+      );
+      const checkModeToErr = (m: CheckMode): 'fail' | 'warn' | 'ignore' =>
+        m === 'enforce' ? 'fail' : m === 'log' ? 'warn' : 'ignore';
+
       const designSystemPayload = (() => {
-        if (!options.playwrightSettings?.enableDesignSystem) return undefined;
+        if (perTestCheckModes.design === 'disable') return undefined;
         const effective = mergeDesignSystemConfig(
           options.playwrightSettings?.designSystem ?? null,
           test.designSystemOverrides ?? null,
@@ -710,10 +738,10 @@ async function executeViaRunner(
         setupVariables: options.setupContext?.variables,
         cursorPlaybackSpeed: options.cursorPlaybackSpeedOverride ?? pwOverrides?.cursorPlaybackSpeed ?? options.playwrightSettings?.cursorPlaybackSpeed ?? 1,
         stabilization: buildStabilizationPayload(options.playwrightSettings, test.stabilizationOverrides),
-        consoleErrorMode: pwOverrides?.consoleErrorMode ?? (options.playwrightSettings?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-        networkErrorMode: pwOverrides?.networkErrorMode ?? (options.playwrightSettings?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+        consoleErrorMode: checkModeToErr(perTestCheckModes.console),
+        networkErrorMode: checkModeToErr(perTestCheckModes.network),
         ignoreExternalNetworkErrors: options.playwrightSettings?.ignoreExternalNetworkErrors ?? true,
-        enableNetworkInterception: options.playwrightSettings?.enableNetworkInterception ?? false,
+        enableNetworkInterception: perTestCheckModes.network !== 'disable',
         // Repo-level allowlist for documented 3rd-party noise hosts. Null on the row
         // means "use the EB default" (DEFAULT_CONSOLE_ERROR_IGNORE_HOSTS); the EB
         // applies the filter BEFORE the consoleErrorMode fail gate.
@@ -721,10 +749,10 @@ async function executeViaRunner(
         // UA override — when set, EB passes to newContext({ userAgent }) so Chromium
         // sends a stable Chrome string instead of HeadlessChrome.
         userAgentOverride: options.playwrightSettings?.userAgentOverride || undefined,
-        // Without this, the runner never invokes axe-core even when the user
-        // toggled "Accessibility checks" on — a11yViolations / a11yPassesCount
-        // stay null and the verify A11y tab shows "not captured".
-        enableA11y: options.playwrightSettings?.enableA11y ?? false,
+        // Without this, the runner never invokes axe-core. Gated on the
+        // per-check 3-way mode — both `enforce` and `log` enable capture;
+        // `disable` skips the axe run.
+        enableA11y: perTestCheckModes.a11y !== 'disable',
         // Design-system token compliance payload computed above so the
         // host-side log fires before the command is queued.
         designSystem: designSystemPayload,

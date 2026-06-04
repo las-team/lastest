@@ -125,6 +125,17 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     enableA11y: false,
     enableDesignSystem: false,
     designSystem: null,
+    // Per-check 3-way modes — null on a fresh repo, derived from legacy
+    // booleans by deriveCheckModes() in src/lib/verify/check-modes.ts.
+    visualMode: null as string | null,
+    textMode: null as string | null,
+    domMode: null as string | null,
+    networkMode: null as string | null,
+    consoleMode: null as string | null,
+    a11yMode: null as string | null,
+    designMode: null as string | null,
+    perfMode: null as string | null,
+    urlMode: null as string | null,
     createdAt: null,
     updatedAt: null,
   };

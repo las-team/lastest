@@ -39,6 +39,20 @@ export async function GET(request: NextRequest) {
 
   const stream = new ReadableStream({
     start(controller) {
+      // Flush an SSE comment immediately, BEFORE the initial DB read below.
+      // Under heavy origin load (e.g. a mass-EB build) that `db.select()` can
+      // take tens of seconds; Cloudflare gives the origin 100s to send the
+      // first byte or it returns 524. A 524 on this stream surfaces as a
+      // console error on every page that mounts the runner-status subscriber
+      // (the /run page) and — because the executor fails a test on any console
+      // error — reddens otherwise-passing self-tests. Emitting a byte now keeps
+      // the response well under the 524 window regardless of DB latency.
+      try {
+        controller.enqueue(encoder.encode(': connected\n\n'));
+      } catch {
+        // Controller already closed (client bailed before we got here).
+      }
+
       // Send initial runner states
       (async () => {
         try {

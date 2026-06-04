@@ -41,7 +41,15 @@ import {
   type FocusRegionRect,
   type IgnoreRegionRect,
 } from '@/components/diff/slider-comparison';
-import { IssuePickerDialog } from '@/components/verify/issue-picker-dialog';
+import { CheckModesDialog } from '@/components/verify/check-modes-dialog';
+import {
+  classifyEvidenceWithMode,
+  effectiveVerdict,
+  mergeWithTestOverrides,
+  type CheckMode,
+  type CheckModeMap,
+  type CheckLayer,
+} from '@/lib/verify/check-modes';
 import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
 import { A11yViolationsCard } from '@/components/builds/a11y-violations-card';
 import { DesignSystemComplianceCard } from '@/components/builds/design-system-compliance-card';
@@ -60,8 +68,6 @@ import type { VisualDiffLite, TestResultLite } from './board-focus-client';
 interface AreaLite { id: string; name: string }
 interface TestLite { id: string; name: string; functionalAreaId: string | null }
 
-type ErrorMode = 'fail' | 'warn' | 'ignore';
-
 interface FocusViewProps {
   buildId: string;
   steps: StepComparison[];
@@ -71,17 +77,16 @@ interface FocusViewProps {
   changedAreaIds: Set<string>;
   visualByStepKey: Map<string, VisualDiffLite>;
   testResultById: Map<string, TestResultLite>;
-  /** Error mode toggles. `network`/`console` are repo-level defaults; `byTestId`
-   *  carries per-test playwrightOverrides so a test that opted into "warn" for
-   *  console still renders amber even when the repo defaults to "fail". Drives
-   *  how the Network and Console layer tabs render their high-signal evidence:
-   *  `fail` → red X (test-failing), `warn` → amber ⚠ (logged, not failing),
-   *  `ignore` → nothing. */
-  errorModes: {
-    network: ErrorMode;
-    console: ErrorMode;
-    byTestId: Record<string, { network?: ErrorMode; console?: ErrorMode }>;
-  };
+  /** Per-layer 3-way mode (Verify cogwheel modal). `checkModes` is the
+   *  repo-level default; `checkModesByTestId` carries sparse per-test
+   *  overrides — only the layers a test chose to override. Owned by
+   *  BoardFocusClient so the cogwheel modal can save + refresh in one
+   *  round trip. */
+  checkModes: CheckModeMap;
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>;
+  /** Repo whose playwright_settings row gets written by the cogwheel modal.
+   *  null when no repo is bound (settings persist to the global row). */
+  repositoryId: string | null;
   statusFilter: Set<CaseStatus>;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
@@ -236,6 +241,9 @@ export function FocusView(props: FocusViewProps) {
   // Issue panel is hidden by default — only opens when the reviewer takes a
   // negative action (Needs Improvement / Reject) or explicitly toggles it.
   const [intentOpen, setIntentOpen] = useState(false);
+  // Cogwheel modal — when open, lets the reviewer pick a 3-way mode for
+  // each of the 9 layers without leaving Verify.
+  const [checkModesOpen, setCheckModesOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -250,11 +258,16 @@ export function FocusView(props: FocusViewProps) {
       const test = props.testById.get(step.testId) ?? null;
       const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
       const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      const modes = mergeWithTestOverrides(
+        props.checkModes,
+        test?.id ? props.checkModesByTestId[test.id] : null,
+      );
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
         isInChangedArea,
         testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        verdictOverride: effectiveVerdict(step.evidence, modes),
       });
       const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
       const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
@@ -278,7 +291,7 @@ export function FocusView(props: FocusViewProps) {
       return collator.compare(a.step.stepLabel ?? '', b.step.stepLabel ?? '');
     });
     return rows;
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById]);
+  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById, props.checkModes, props.checkModesByTestId]);
 
   const visibleCases = useMemo(() => {
     if (props.statusFilter.size === 0) return cases;
@@ -646,43 +659,48 @@ export function FocusView(props: FocusViewProps) {
                   ? layerDelta(activeCase.step, k.id)
                   : null;
             // "Broken" vs "warned" depends on (1) the evidence signal, and
-            // (2) the repo's error-mode toggle for network/console (those two
-            // layers are configurable to "warn only" or "ignore", in which
-            // case high-signal evidence shouldn't read as test-failing).
-            // Other layers use the legacy `signal === 'high'` rule.
+            // (2) the per-layer 3-way mode. Per-test overrides win for any
+            // layer the test opted out of; layers the test didn't touch
+            // fall through to the repo default. Run is special: the
+            // test_result.status === 'failed' is the source of truth,
+            // regardless of layer modes.
             //
-            //   fail  → red X  (broken: a real regression that failed the test)
-            //   warn  → amber ⚠ (logged, but the runner didn't fail on it)
-            //   ignore → no pill (deliberately suppressed at runner level)
-            //
-            // Run is special: the test_result.status === 'failed' is the
-            // source of truth, regardless of layer toggles.
-            // Per-test override wins; falls back to repo-level default.
+            //   enforce → red X  (broken: a real regression that failed the test)
+            //   log     → amber ⚠ (logged, but the runner didn't fail on it)
+            //   disable → no pill (deliberately suppressed)
             const tid = activeCase?.test?.id;
-            const perTest = tid ? props.errorModes.byTestId[tid] : undefined;
-            const layerMode: ErrorMode | null =
-              k.id === 'network' ? (perTest?.network ?? props.errorModes.network)
-              : k.id === 'console' ? (perTest?.console ?? props.errorModes.console)
-              : null;
+            const perTestMode = tid ? props.checkModesByTestId[tid] : undefined;
+            const layerKey = k.id as CheckLayer;
+            const layerMode: CheckMode | null =
+              k.id === 'run' || k.id === 'text'
+                ? null
+                : (perTestMode?.[layerKey] ?? props.checkModes[layerKey]);
             let broken = false;
             let warned = false;
             if (k.id === 'run') {
               broken = activeCase?.result?.status === 'failed';
-            } else if (evidenceItem?.signal === 'high') {
-              if (layerMode === 'ignore') { /* suppressed */ }
-              else if (layerMode === 'warn') warned = true;
-              else broken = true; // layerMode === 'fail' OR non-configurable layer
+            } else if (k.id === 'text') {
+              // Text uses the visual diff summary as its signal (existing
+              // behavior). Mode === 'log' downgrades to amber.
+              const summary = activeCase?.visual?.textDiffSummary;
+              const hasDiff = summary && (summary.added > 0 || summary.removed > 0);
+              if (hasDiff) {
+                const tMode = perTestMode?.text ?? props.checkModes.text;
+                if (tMode === 'enforce') broken = true;
+                else if (tMode === 'log') warned = true;
+              }
+            } else if (evidenceItem?.signal === 'high' && layerMode) {
+              const verdict = classifyEvidenceWithMode(layerMode, 'high');
+              broken = verdict === 'broken';
+              warned = verdict === 'warned';
             }
-            // Reason text rendered as the title attribute on the broken pill
-            // (and on the whole button as a fallback). Falls back to the
-            // delta text when no structured summary exists.
-            const modeSource = perTest?.[k.id === 'network' ? 'network' : k.id === 'console' ? 'console' : 'network']
+            const modeSource = perTestMode?.[layerKey]
               ? 'per-test override'
-              : 'configured in Playwright settings';
+              : 'configured in Run Variables';
             const modeNote = layerMode && (broken || warned)
               ? (broken
-                  ? ` · ${k.name} Error Mode is "Fail" (${modeSource})`
-                  : ` · ${k.name} Error Mode is "Warn only" so the runner logged this without failing the test (${modeSource})`)
+                  ? ` · ${k.name} is set to Enforce (${modeSource})`
+                  : ` · ${k.name} is set to Log only so the runner surfaced this without failing the test (${modeSource})`)
               : '';
             const reason = k.id === 'run'
               ? ((activeCase?.result?.errorMessage ?? '').trim() || 'Test failed')
@@ -702,13 +720,6 @@ export function FocusView(props: FocusViewProps) {
             const tabColor = isActive
               ? '#1F7B66'
               : layerState === 'absent' ? 'var(--fg-4)' : 'var(--fg-2)';
-            // Settings link target: Network and Console both live under the
-            // Playwright settings card's Errors & Network section. Other
-            // layers don't have a per-layer toggle, so we don't surface a
-            // link for them.
-            const settingsTarget = (k.id === 'network' || k.id === 'console')
-              ? '/settings?highlight=playwright'
-              : null;
             return (
               <span key={k.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               <button
@@ -802,30 +813,32 @@ export function FocusView(props: FocusViewProps) {
                   </span>
                 )}
               </button>
-              {/* Settings link as a separate button (NOT nested inside the tab
-                  button — nested interactives fail a11y and the inline link
-                  also failed target-size at 15px). Only attached to
-                  Network/Console when the layer is broken/warned, so the
-                  reviewer can flip the error mode without leaving Verify. */}
-              {settingsTarget && (broken || warned) && (
-                <a
-                  href={settingsTarget}
-                  title={`Open Playwright settings to change ${k.name} Error Mode`}
-                  aria-label={`Open Playwright settings to change ${k.name} Error Mode`}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 28, height: 28, borderRadius: 6,
-                    color: 'var(--fg-2)', textDecoration: 'none',
-                    border: '1px solid var(--border)',
-                    background: 'var(--c-white)',
-                  }}
-                >
-                  <Settings size={13} />
-                </a>
-              )}
               </span>
             );
           })}
+          {/* Cogwheel: single per-toolbar entry-point into the Run Variables
+              check-modes modal. Replaces the older per-tab Network/Console
+              settings links — the modal covers all 9 layers and writes a
+              repo-level patch instead of bouncing the reviewer to /settings. */}
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            data-testid="check-modes-cogwheel"
+            onClick={() => setCheckModesOpen(true)}
+            title="Configure how each check signals failures (Enforce / Log / Disable)"
+            aria-label="Configure check modes"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 32, height: 32, borderRadius: 6,
+              color: 'var(--fg-2)',
+              border: '1px solid var(--border)',
+              background: 'var(--c-white)',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <Settings size={14} />
+          </button>
         </div>
 
         {/* Compare pane */}
@@ -930,6 +943,13 @@ export function FocusView(props: FocusViewProps) {
         onOpenPicker={handleOpenPicker}
         onCloseIssue={handleCloseIssue}
         onAfterCreate={props.onRefresh}
+      />
+      <CheckModesDialog
+        open={checkModesOpen}
+        onClose={() => setCheckModesOpen(false)}
+        repositoryId={props.repositoryId}
+        initial={props.checkModes}
+        onSaved={props.onRefresh}
       />
     </div>
   );

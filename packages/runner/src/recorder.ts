@@ -5,6 +5,7 @@
  */
 
 import { chromium, firefox, webkit, Browser, Page, BrowserContext } from 'playwright';
+import type { CDPSession } from 'playwright';
 import type { StartRecordingCommandPayload, RecordingEventData } from './protocol.js';
 import { browserRecordingScript } from './browser-script.js';
 
@@ -20,6 +21,12 @@ export class RemoteRecorder {
   private eventBatchInterval: ReturnType<typeof setInterval> | null = null;
   private pendingEvents: RecordingEventData[] = [];
   private onEvent: ((events: RecordingEventData[]) => void) | null = null;
+  // Dedicated CDP session for element thumbnails (Chromium only). Lets us grab
+  // the thumbnail via raw Page.captureScreenshot (fromSurface, no
+  // captureBeyondViewport resize) instead of page.screenshot(), which avoids
+  // the surface-resize reflow that visibly flickers the headed window on click.
+  private thumbnailCdp: CDPSession | null = null;
+  private isChromium = true;
 
   async start(
     payload: StartRecordingCommandPayload,
@@ -34,6 +41,7 @@ export class RemoteRecorder {
     this.pendingEvents = [];
 
     const browserType = payload.browser ?? 'chromium';
+    this.isChromium = browserType === 'chromium';
     const launcher = browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
 
     console.log(`  [Recorder] Launching ${browserType} browser (headed)...`);
@@ -258,18 +266,39 @@ export class RemoteRecorder {
     try {
       const padding = 8;
       const maxSide = 240;
+      const viewport = this.page.viewportSize() ?? { width: 1280, height: 720 };
       const x = Math.max(0, boundingBox.x - padding);
       const y = Math.max(0, boundingBox.y - padding);
-      const width = Math.max(1, Math.min(boundingBox.width + padding * 2, maxSide));
-      const height = Math.max(1, Math.min(boundingBox.height + padding * 2, maxSide));
-      const buf = await this.page.screenshot({
-        clip: { x, y, width, height },
-        animations: 'disabled',
-        timeout: 500,
-      });
+      const width = Math.max(1, Math.min(boundingBox.width + padding * 2, maxSide, viewport.width - x));
+      const height = Math.max(1, Math.min(boundingBox.height + padding * 2, maxSide, viewport.height - y));
+
+      let dataUrl: string;
+      if (this.isChromium) {
+        // Raw CDP capture: fromSurface reads the already-composited frame and
+        // captureBeyondViewport:false keeps Chromium from resizing the surface
+        // to full-content height. That resize+restore is what flickered the
+        // headed window on every click; this path is a visual no-op.
+        if (!this.thumbnailCdp) {
+          this.thumbnailCdp = await this.page.context().newCDPSession(this.page);
+        }
+        const result = await this.thumbnailCdp.send('Page.captureScreenshot', {
+          format: 'jpeg',
+          quality: 70,
+          clip: { x, y, width, height, scale: 1 },
+          fromSurface: true,
+          captureBeyondViewport: false,
+        });
+        dataUrl = `data:image/jpeg;base64,${result.data}`;
+      } else {
+        // Firefox/WebKit have no CDP — fall back to a plain clipped screenshot
+        // (no animations:'disabled', which itself caused flicker on Chromium).
+        const buf = await this.page.screenshot({ clip: { x, y, width, height }, timeout: 500 });
+        dataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+      }
+
       const event = this.events.find(e => e.data.actionId === actionId);
       if (!event) return;
-      event.data.thumbnailPath = `data:image/png;base64,${buf.toString('base64')}`;
+      event.data.thumbnailPath = dataUrl;
       if (!this.pendingEvents.includes(event)) {
         this.pendingEvents.push(event);
       }
@@ -328,6 +357,8 @@ export class RemoteRecorder {
   }
 
   private async cleanup(): Promise<void> {
+    if (this.thumbnailCdp) await this.thumbnailCdp.detach().catch(() => {});
+    this.thumbnailCdp = null;
     if (this.page) await this.page.close().catch(() => {});
     if (this.context) await this.context.close().catch(() => {});
     if (this.browser) await this.browser.close().catch(() => {});

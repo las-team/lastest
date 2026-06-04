@@ -89,9 +89,32 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
     };
     const interval = setInterval(tick, 5000);
 
-    const es = new EventSource('/api/runners/status');
-    es.onmessage = () => { refetch(); };
-    es.onerror = () => { /* EventSource auto-reconnects */ };
+    // Managed EventSource with exponential backoff. EventSource's built-in
+    // reconnect fires immediately on every error, so a transiently degraded
+    // origin (e.g. /api/runners/status returning 524 under a heavy build)
+    // turns into a tight reconnect loop that spams the console. We close on
+    // error and reconnect with backoff instead, resetting once a connection
+    // opens. The 5s poll above keeps the EB indicator fresh meanwhile.
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const MIN_BACKOFF = 1000;
+    const MAX_BACKOFF = 30000;
+    let backoff = MIN_BACKOFF;
+
+    const connect = () => {
+      if (cancelled) return;
+      es = new EventSource('/api/runners/status');
+      es.onopen = () => { backoff = MIN_BACKOFF; };
+      es.onmessage = () => { refetch(); };
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (cancelled) return;
+        reconnectTimer = setTimeout(connect, backoff);
+        backoff = Math.min(backoff * 2, MAX_BACKOFF);
+      };
+    };
+    connect();
 
     const onVisibility = () => { if (document.visibilityState === 'visible') refetch(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -99,7 +122,8 @@ export function SidebarQuickActions({ baseUrl: initialBaseUrl = '', repositoryId
     return () => {
       cancelled = true;
       clearInterval(interval);
-      es.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);

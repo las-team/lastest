@@ -3,6 +3,7 @@
 import * as queries from '@/lib/db/queries';
 import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
 import type { SelectorConfig, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
+import type { CheckMode } from '@/lib/verify/check-modes';
 import { revalidatePath } from 'next/cache';
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
@@ -46,12 +47,33 @@ export async function savePlaywrightSettings(data: {
   lockViewportToRecording?: boolean;
   browsers?: string[];
   customAttributeName?: string | null;
+  // Per-check 3-way mode columns (Verify cogwheel modal). When any of
+  // these are passed, they are persisted alongside their legacy mirrors so
+  // executor / runner code that still reads enable*/networkErrorMode keeps
+  // seeing matching values.
+  visualMode?: CheckMode;
+  textMode?: CheckMode;
+  domMode?: CheckMode;
+  networkMode?: CheckMode;
+  consoleMode?: CheckMode;
+  a11yMode?: CheckMode;
+  designMode?: CheckMode;
+  perfMode?: CheckMode;
+  urlMode?: CheckMode;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
 
   await queries.upsertPlaywrightSettings(repositoryId || null, settingsData);
+
+  // textMode lives on the diff_sensitivity_settings table (textDiffEnabled).
+  // Mirror it so the executor's textCaptureEnabled lookup stays in sync.
+  if (data.textMode !== undefined) {
+    await queries.upsertDiffSensitivitySettings(repositoryId || null, {
+      textDiffEnabled: data.textMode !== 'disable',
+    });
+  }
 
   revalidatePath('/settings');
 

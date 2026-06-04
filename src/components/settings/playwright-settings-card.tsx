@@ -25,7 +25,7 @@ import { savePlaywrightSettings, resetPlaywrightSettings, getSelectorStatsAction
 import { listStorageStates, removeStorageState } from '@/server/actions/storage-states';
 import { DEFAULT_SELECTOR_PRIORITY, DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
 import type { SelectorConfig, PlaywrightSettings, HeadlessMode, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
-import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Accessibility, Lock, AlertTriangle, Palette } from 'lucide-react';
+import { Loader2, RotateCcw, List, Video, MousePointer, Pause, Clock, ChevronDown, Shield, ShieldCheck, Hourglass, Ban, Eye, Camera, EyeOff, Info, ClipboardCopy, Download, Globe, Cookie, Trash2, Lock, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -79,6 +79,19 @@ interface PlaywrightSettingsCardProps {
   repositoryId?: string | null;
   compact?: boolean;
   onSaveStatusChange?: (status: { isPending: boolean; showSaved: boolean }) => void;
+  /**
+   * Externally-computed selector priority to apply (e.g. from "Analyze URL").
+   * Bump `nonce` to re-apply the same value. Applying it flows through the
+   * normal debounced auto-save so the change is persisted.
+   */
+  applyPriority?: { value: SelectorConfig[]; nonce: number } | null;
+  /**
+   * Hide the Selector Priority drag-to-reorder list. The list is owned by the
+   * Record page (which is where users tune selectors), so the settings page
+   * passes this to suppress the duplicate. The "Custom test-id attribute"
+   * input stays visible because it's a global selector config.
+   */
+  hideSelectorPriority?: boolean;
 }
 
 export function PlaywrightSettingsCard({
@@ -86,6 +99,8 @@ export function PlaywrightSettingsCard({
   repositoryId,
   compact = false,
   onSaveStatusChange,
+  applyPriority,
+  hideSelectorPriority = false,
 }: PlaywrightSettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [showSaved, setShowSaved] = useState(false);
@@ -266,6 +281,16 @@ export function PlaywrightSettingsCard({
     return calculateRecommendations(selectorPriority, selectorStats);
   }, [selectorPriority, selectorStats]);
 
+  // Apply an externally-supplied selector priority (e.g. from "Analyze URL").
+  // Setting state diverges from originalValues, so the auto-save effect persists it.
+  const lastAppliedNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!applyPriority) return;
+    if (lastAppliedNonce.current === applyPriority.nonce) return;
+    lastAppliedNonce.current = applyPriority.nonce;
+    setSelectorPriority(applyPriority.value);
+  }, [applyPriority]);
+
   // Derive settings source for UX indicator
   const settingsSource = useMemo(() => {
     if (!repositoryId) return 'global' as const;
@@ -422,18 +447,22 @@ export function PlaywrightSettingsCard({
       {/* Selectors */}
       <CollapsibleSection title="Selectors" icon={List} enabled={!compact}>
       <div className={compact ? 'space-y-1' : 'space-y-2'}>
-        {compact && (
-          <div className="flex items-center gap-2">
-            <List className="w-4 h-4 text-muted-foreground" />
-            <Label className="text-sm font-medium">Selector Priority</Label>
-          </div>
+        {!hideSelectorPriority && (
+          <>
+            {compact && (
+              <div className="flex items-center gap-2">
+                <List className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Selector Priority</Label>
+              </div>
+            )}
+            <SelectorPriorityList
+              value={selectorPriority}
+              onChange={setSelectorPriority}
+              compact={compact}
+              recommendations={recommendations}
+            />
+          </>
         )}
-        <SelectorPriorityList
-          value={selectorPriority}
-          onChange={setSelectorPriority}
-          compact={compact}
-          recommendations={recommendations}
-        />
         {/* Custom test-id attribute (e.g. data-automation-id). When set, the
             recorder, fallback locator, and AI test-gen prompt prefer this
             attribute. Position it in the priority list above by adding a
@@ -1087,59 +1116,11 @@ export function PlaywrightSettingsCard({
             <Switch checked={enableVideoRecording} onCheckedChange={setEnableVideoRecording} />
           </div>
 
-          {/* Accessibility Checks */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Accessibility className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Accessibility Checks</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Run WCAG 2.2 AA compliance checks with axe-core
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableA11y} onCheckedChange={setEnableA11y} />
-          </div>
-
-          {/* Design System Checks — toggle only. Token upload lives on
-              the Setup tab → API Configurations section so the file
-              browser stays out of the settings page. */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Design System Checks</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Compare computed colors, radii, fonts, and spacing against the repo&apos;s token bundle.{' '}
-                    {designSystem
-                      ? <span className="text-foreground/80">{Object.values(designSystem.tokens ?? {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0)} tokens loaded.</span>
-                      : <span className="text-warning-foreground/80">No tokens yet — upload a bundle on the Setup tab.</span>
-                    }
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableDesignSystem} onCheckedChange={setEnableDesignSystem} />
-          </div>
-
-          {/* Network Capture */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-muted-foreground" />
-              <div className="space-y-0.5">
-                <Label className="text-sm">Network Capture</Label>
-                {!compact && (
-                  <p className="text-xs text-muted-foreground">
-                    Record every HTTP request and response during the test for inspection (Wireshark-style monitoring)
-                  </p>
-                )}
-              </div>
-            </div>
-            <Switch checked={enableNetworkInterception} onCheckedChange={setEnableNetworkInterception} />
-          </div>
+          {/* Accessibility / Design System / Network Capture used to live
+              here as standalone switches. They now live in the Verify focus
+              view's Run Variables cogwheel modal as 3-way modes (enforce /
+              log / disable). The repo's design-system token bundle still
+              gets uploaded on the Setup tab. */}
         </div>
       </CollapsibleSection>
 
@@ -1199,20 +1180,12 @@ export function PlaywrightSettingsCard({
       {/* Errors & Network */}
       <CollapsibleSection title="Errors & Network" icon={AlertTriangle} enabled={!compact}>
         <div className={compact ? 'space-y-2' : 'space-y-4'}>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Network Error Mode</Label>
-            <Select value={networkErrorMode} onValueChange={setNetworkErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on HTTP 4xx/5xx</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore network errors</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+          {/* Network Error Mode + Console Error Mode used to live here as
+              fail/warn/ignore selects. They are now per-layer 3-way modes
+              configured from the Verify focus view's Run Variables cogwheel
+              modal. The remaining controls below (ignore-list, UA override)
+              are not exposed in the modal because they apply across all
+              tests rather than per-layer. */}
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">Ignore External Network Errors</Label>
@@ -1221,20 +1194,6 @@ export function PlaywrightSettingsCard({
               </p>
             </div>
             <Switch checked={ignoreExternalNetworkErrors} onCheckedChange={setIgnoreExternalNetworkErrors} />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Console Error Mode</Label>
-            <Select value={consoleErrorMode} onValueChange={setConsoleErrorMode}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fail">Fail test on console errors</SelectItem>
-                <SelectItem value="warn">Warn only (log, don&apos;t fail)</SelectItem>
-                <SelectItem value="ignore">Ignore console errors</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="space-y-1.5">
