@@ -1749,20 +1749,6 @@ export async function hasAvailableRunner(teamId: string): Promise<boolean> {
 }
 
 /**
- * Get an available system runner (isSystem=true, any team).
- * System EBs are host-provided and available to all teams.
- */
-async function getAvailableSystemRunner() {
-  const [dbRunner] = await db
-    .select()
-    .from(runners)
-    .where(and(eq(runners.isSystem, true), eq(runners.status, 'online')))
-    .limit(1);
-
-  return dbRunner;
-}
-
-/**
  * Get a specific system runner by ID if it's online.
  */
 async function getAvailableSystemRunnerById(runnerId: string) {

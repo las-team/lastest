@@ -31,14 +31,6 @@ interface DesignSystemReviewPanelProps {
   violations: BuildDesignSystemViolationRow[];
 }
 
-const CATEGORY_LABEL: Record<DesignTokenCategory, string> = {
-  color: 'Colors',
-  'border-radius': 'Radii',
-  'font-family': 'Fonts',
-  'font-size': 'Type scale',
-  spacing: 'Spacing',
-};
-
 function isDark(hex: string): boolean {
   const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
   if (!m) return false;
@@ -53,7 +45,7 @@ export function DesignSystemReviewPanel({
   tokenUsage,
   violations,
 }: DesignSystemReviewPanelProps) {
-  const groups = config.groups ?? {};
+  const groups = useMemo(() => config.groups ?? {}, [config.groups]);
 
   // Group violations by category so each section renders its own extras.
   const violationsByCategory = useMemo(() => {

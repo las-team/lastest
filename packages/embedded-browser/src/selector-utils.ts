@@ -111,21 +111,6 @@ export async function inspectElementAtPoint(
         'combobox', 'listitem',
       ]);
 
-      const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
-
-      function findBestTarget(el: HTMLElement): HTMLElement {
-        let current: HTMLElement | null = el;
-        while (current && current !== document.body && current !== document.documentElement) {
-          const role = current.getAttribute('role');
-          if (role && INTERACTIVE_ROLES.has(role)) return current;
-          if (INTERACTIVE_TAGS.has(current.tagName)) return current;
-          if (current.dataset.testid) return current;
-          if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
-          current = current.parentElement;
-        }
-        return el;
-      }
-
       function generateAllSelectors(element: HTMLElement): Array<{ type: string; value: string }> {
         const allSelectors: Map<string, string> = new Map();
 

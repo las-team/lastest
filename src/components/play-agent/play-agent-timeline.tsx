@@ -185,7 +185,7 @@ function getDotIcon(step: AgentStepState) {
 // ============================================
 
 export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
-  const { session, loading, isActive, isTerminal, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner, skipSettings } =
+  const { session, loading, isActive, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner, skipSettings } =
     usePlayAgent(repositoryId);
 
   const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(null);
