@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
 import { UmamiScript } from "@/components/analytics/umami-script";
 import { CookieNotice } from "@/components/layout/cookie-notice-client";
+import Script from "next/script";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -67,9 +68,9 @@ export default async function RootLayout({
           // performance.measure() without the endTime>startTime guard its siblings have,
           // and async-server-component error paths (e.g. Next's redirect()) can produce
           // negative durations. Drop only that specific DOMException.
-          <script
+          <Script
+            id="performance-measure-fix"
             nonce={nonce}
-            suppressHydrationWarning
             dangerouslySetInnerHTML={{
               __html: `(()=>{const o=performance.measure.bind(performance);performance.measure=function(){try{return o.apply(performance,arguments)}catch(e){if(e&&typeof e.message==='string'&&e.message.indexOf('negative time stamp')!==-1)return;throw e}};})();`,
             }}
