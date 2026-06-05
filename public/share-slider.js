@@ -76,7 +76,7 @@
       activate(fig, stage, e.clientX);
       try {
         stage.setPointerCapture(e.pointerId);
-      } catch (err) {}
+      } catch {}
     },
     true
   );
@@ -87,7 +87,7 @@
       if (!activeStage) return;
       try {
         activeStage.releasePointerCapture(e.pointerId);
-      } catch (err) {}
+      } catch {}
     },
     true
   );

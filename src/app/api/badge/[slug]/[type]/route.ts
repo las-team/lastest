@@ -53,7 +53,7 @@ export async function GET(
     return new NextResponse(renderPendingBadge(size, dark), { headers, status: 200 });
   }
 
-  const { award, repo } = ctx;
+  const { award } = ctx;
   const cats = award.categories;
 
   let svg: string;

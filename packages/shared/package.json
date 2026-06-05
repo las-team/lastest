@@ -8,5 +8,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./selector-stats": "./src/selector-stats.ts"
+  },
+  "dependencies": {
+    "sucrase": "^3.35.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "vitest": "^4.1.0"
   }
 }

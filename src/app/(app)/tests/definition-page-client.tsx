@@ -143,7 +143,6 @@ export function DefinitionPageClient({
   repositoryId,
   selectedBranch,
   banAiMode,
-  earlyAdopterMode = false,
   areas,
   tests,
   routes,

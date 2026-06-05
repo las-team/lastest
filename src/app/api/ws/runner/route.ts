@@ -32,7 +32,7 @@ import {
 // so `instrumentation.ts` can boot the loop without depending on /api/ws/runner
 // traffic. The route still calls `startCleanupLoop()` defensively for paths
 // that bypass instrumentation (e.g. `next dev` without instrumentation).
-import { activeRunnerSessions, SESSION_TIMEOUT_MS, startCleanupLoop } from '@/lib/eb/cleanup-loop';
+import { activeRunnerSessions, startCleanupLoop } from '@/lib/eb/cleanup-loop';
 
 // ============================================
 // Security Validation Functions

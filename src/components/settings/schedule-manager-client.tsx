@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -43,7 +43,7 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
   const [customCron, setCustomCron] = useState('');
   const [gitBranch, setGitBranch] = useState('');
 
-  const loadSchedules = async () => {
+  const loadSchedules = useCallback(async () => {
     try {
       const data = await getSchedulesAction(repositoryId);
       setSchedules(data as ScheduleWithDescription[]);
@@ -52,11 +52,11 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
     } finally {
       setLoading(false);
     }
-  };
+  }, [repositoryId]);
 
   useEffect(() => {
     loadSchedules();
-  }, [repositoryId]);
+  }, [loadSchedules, repositoryId]);
 
   const handleCreate = async () => {
     try {

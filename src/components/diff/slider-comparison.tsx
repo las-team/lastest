@@ -1,5 +1,9 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element -- screenshots are auth-protected dynamic
+   media; next/image's optimizer can't forward the session cookie (Next >=16.2) and
+   would lossily recompress pixel-accurate diff images. */
+
 import { useState, useRef, useCallback } from 'react';
 import type { AlignmentSegment } from '@/lib/db/schema';
 

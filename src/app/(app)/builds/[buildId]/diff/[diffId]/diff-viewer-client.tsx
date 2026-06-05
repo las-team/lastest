@@ -200,7 +200,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     } finally {
       setIsProcessing(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router, buildDiffUrl]);
 
   const handleAddTodo = useCallback(async () => {
@@ -222,7 +222,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
     } finally {
       setIsProcessing(false);
     }
-  }, [diff.id, diff.status, isProcessing, todoDescription, router]);
+  }, [diff.id, diff.status, isProcessing, todoDescription, buildId, router]);
 
   const handleShowTodoInput = useCallback(() => {
     setShowTodoInput(true);
@@ -952,8 +952,7 @@ function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(it
 function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
   const [expanded, setExpanded] = useState(false);
   const dedupedAdded = useMemo(() => dedupeNested(domDiff.added), [domDiff.added]);
-  const dedupedRemoved = useMemo(() => dedupeNested(domDiff.removed), [domDiff.removed]);
-  const totalChanges = dedupedAdded.items.length + dedupedRemoved.items.length + domDiff.changed.length;
+  const dedupedRemoved = useMemo(() => dedupeNested(domDiff.removed), [domDiff.removed]);  
 
   return (
     <details
