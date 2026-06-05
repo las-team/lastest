@@ -5,10 +5,10 @@
  * and forwards input events back to the browser.
  */
 
-import { WebSocketServer, WebSocket } from 'ws';
-import type { IncomingMessage } from 'http';
-import type { ScreencastManager } from './screencast.js';
-import type { InputHandler, InputEvent } from './input-handler.js';
+import { WebSocketServer, WebSocket } from "ws";
+import type { IncomingMessage } from "http";
+import type { ScreencastManager } from "./screencast.js";
+import type { InputHandler, InputEvent } from "./input-handler.js";
 
 export interface StreamServerOptions {
   port: number;
@@ -59,60 +59,76 @@ export class StreamServer {
         }
 
         // Check token from query string or header
-        const url = new URL(info.req.url ?? '', `http://localhost:${this.options.port}`);
-        const token = url.searchParams.get('token') ?? info.req.headers['x-stream-token'];
+        const url = new URL(
+          info.req.url ?? "",
+          `http://localhost:${this.options.port}`,
+        );
+        const token =
+          url.searchParams.get("token") ?? info.req.headers["x-stream-token"];
 
         if (token === this.authToken) {
           callback(true);
         } else {
-          callback(false, 401, 'Unauthorized');
+          callback(false, 401, "Unauthorized");
         }
       },
     });
 
-    this.wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
+    this.wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
       const clientId = crypto.randomUUID();
-      const client: StreamClient = { ws, id: clientId, connectedAt: Date.now(), alive: true };
+      const client: StreamClient = {
+        ws,
+        id: clientId,
+        connectedAt: Date.now(),
+        alive: true,
+      };
       this.clients.set(clientId, client);
 
-      console.log(`[StreamServer] Client connected: ${clientId} (total: ${this.clients.size})`);
+      console.log(
+        `[StreamServer] Client connected: ${clientId} (total: ${this.clients.size})`,
+      );
 
       // Send current status
       this.sendToClient(ws, {
-        type: 'stream:status',
+        type: "stream:status",
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         payload: {
-          status: 'connected',
+          status: "connected",
         },
       });
 
       // Mark alive on pong response
-      ws.on('pong', () => {
+      ws.on("pong", () => {
         client.alive = true;
       });
 
-      ws.on('message', (data: Buffer) => {
+      ws.on("message", (data: Buffer) => {
         try {
           const message = JSON.parse(data.toString());
           this.handleClientMessage(clientId, message);
         } catch (error) {
-          console.error(`[StreamServer] Invalid message from ${clientId}:`, error);
+          console.error(
+            `[StreamServer] Invalid message from ${clientId}:`,
+            error,
+          );
         }
       });
 
-      ws.on('close', () => {
+      ws.on("close", () => {
         this.clients.delete(clientId);
-        console.log(`[StreamServer] Client disconnected: ${clientId} (total: ${this.clients.size})`);
+        console.log(
+          `[StreamServer] Client disconnected: ${clientId} (total: ${this.clients.size})`,
+        );
         // Reset inspect mode when all clients disconnect to prevent stuck state
         if (this.clients.size === 0 && this.inspectMode) {
           this.inspectMode = false;
           this.onInspectModeChange?.(false);
-          console.log('[StreamServer] Inspect mode auto-reset (no clients)');
+          console.log("[StreamServer] Inspect mode auto-reset (no clients)");
         }
       });
 
-      ws.on('error', (error) => {
+      ws.on("error", (error) => {
         console.error(`[StreamServer] Client error (${clientId}):`, error);
         this.clients.delete(clientId);
       });
@@ -122,7 +138,9 @@ export class StreamServer {
     this.pingInterval = setInterval(() => {
       for (const [clientId, client] of this.clients) {
         if (!client.alive) {
-          console.log(`[StreamServer] Terminating unresponsive client: ${clientId}`);
+          console.log(
+            `[StreamServer] Terminating unresponsive client: ${clientId}`,
+          );
           client.ws.terminate();
           this.clients.delete(clientId);
           continue;
@@ -137,7 +155,7 @@ export class StreamServer {
     this.keepaliveInterval = setInterval(() => {
       if (this.clients.size === 0) return;
       if (Date.now() - this.lastBroadcastTime < 3000) return;
-      this.broadcastStatus('idle');
+      this.broadcastStatus("idle");
     }, 5000);
 
     console.log(`[StreamServer] Listening on port ${this.options.port}`);
@@ -152,10 +170,15 @@ export class StreamServer {
   }
 
   /** Broadcast a frame to all connected clients */
-  broadcastFrame(data: string, width: number, height: number, timestamp: number): void {
+  broadcastFrame(
+    data: string,
+    width: number,
+    height: number,
+    timestamp: number,
+  ): void {
     this.lastBroadcastTime = Date.now();
     const message = JSON.stringify({
-      type: 'stream:frame',
+      type: "stream:frame",
       id: crypto.randomUUID(),
       timestamp: Date.now(),
       payload: { data, width, height, timestamp },
@@ -171,9 +194,14 @@ export class StreamServer {
   }
 
   /** Broadcast a status update to all connected clients */
-  broadcastStatus(status: string, currentUrl?: string, viewport?: { width: number; height: number }, fileChooserPending?: boolean): void {
+  broadcastStatus(
+    status: string,
+    currentUrl?: string,
+    viewport?: { width: number; height: number },
+    fileChooserPending?: boolean,
+  ): void {
     const message = JSON.stringify({
-      type: 'stream:status',
+      type: "stream:status",
       id: crypto.randomUUID(),
       timestamp: Date.now(),
       payload: { status, currentUrl, viewport, fileChooserPending },
@@ -188,45 +216,55 @@ export class StreamServer {
     }
   }
 
-  private handleClientMessage(clientId: string, message: { type: string; payload?: unknown }): void {
+  private handleClientMessage(
+    clientId: string,
+    message: { type: string; payload?: unknown },
+  ): void {
     switch (message.type) {
-      case 'stream:input': {
+      case "stream:input": {
         const payload = (message as { payload: InputEvent }).payload;
         if (!payload) break;
         // In inspect mode, only forward mouse moves (for CDP overlay highlighting)
-        if (this.inspectMode && (payload.type !== 'mouse' || (payload as { action?: string }).action !== 'move')) break;
+        if (
+          this.inspectMode &&
+          (payload.type !== "mouse" ||
+            (payload as { action?: string }).action !== "move")
+        )
+          break;
         if (this.inputHandler) {
           this.inputHandler.handleInput(payload);
         }
         break;
       }
 
-      case 'stream:inspect_mode': {
+      case "stream:inspect_mode": {
         const modePayload = message.payload as { enabled: boolean } | undefined;
         if (modePayload) {
           this.inspectMode = modePayload.enabled;
-          console.log(`[StreamServer] Inspect mode: ${this.inspectMode ? 'ON' : 'OFF'}`);
+          console.log(
+            `[StreamServer] Inspect mode: ${this.inspectMode ? "ON" : "OFF"}`,
+          );
           this.onInspectModeChange?.(modePayload.enabled);
         }
         break;
       }
 
-      case 'stream:inspect_element_request': {
+      case "stream:inspect_element_request": {
         const payload = message.payload as { x: number; y: number } | undefined;
         if (payload && this.onInspectElement) {
           this.onInspectElement(payload.x, payload.y)
-            .then(element => {
+            .then((element) => {
               this.sendToClientById(clientId, {
-                type: 'stream:inspect_element_response',
+                type: "stream:inspect_element_response",
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
                 payload: { element },
               });
             })
-            .catch(err => {
+            .catch((err) => {
               console.error(`[StreamServer] Inspect element error:`, err);
               this.sendToClientById(clientId, {
-                type: 'stream:inspect_element_response',
+                type: "stream:inspect_element_response",
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
                 payload: { element: null },
@@ -236,52 +274,61 @@ export class StreamServer {
         break;
       }
 
-      case 'stream:dom_snapshot_request': {
+      case "stream:dom_snapshot_request": {
         if (this.onDomSnapshot) {
           this.onDomSnapshot()
-            .then(snapshot => {
+            .then((snapshot) => {
               this.sendToClientById(clientId, {
-                type: 'stream:dom_snapshot_response',
+                type: "stream:dom_snapshot_response",
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
                 payload: snapshot,
               });
             })
-            .catch(err => {
+            .catch((err) => {
               console.error(`[StreamServer] DOM snapshot error:`, err);
               this.sendToClientById(clientId, {
-                type: 'stream:dom_snapshot_response',
+                type: "stream:dom_snapshot_response",
                 id: crypto.randomUUID(),
                 timestamp: Date.now(),
-                payload: { elements: [], url: '', timestamp: Date.now() },
+                payload: { elements: [], url: "", timestamp: Date.now() },
               });
             });
         }
         break;
       }
 
-      case 'stream:session': {
-        const payload = message.payload as { action: string; url?: string; viewport?: { width: number; height: number } };
-        if (payload?.action === 'navigate' && payload.url && this.onNavigate) {
-          this.onNavigate(payload.url).catch(err => {
+      case "stream:session": {
+        const payload = message.payload as {
+          action: string;
+          url?: string;
+          viewport?: { width: number; height: number };
+        };
+        if (payload?.action === "navigate" && payload.url && this.onNavigate) {
+          this.onNavigate(payload.url).catch((err) => {
             console.error(`[StreamServer] Navigate error:`, err);
           });
         }
-        if (payload?.action === 'resize' && payload.viewport) {
+        if (payload?.action === "resize" && payload.viewport) {
           if (this.onResize) {
-            this.onResize(payload.viewport).catch(err => {
+            this.onResize(payload.viewport).catch((err) => {
               console.error(`[StreamServer] Resize error:`, err);
             });
           }
           if (this.screencast) {
-            this.screencast.updateViewport(payload.viewport.width, payload.viewport.height);
+            this.screencast.updateViewport(
+              payload.viewport.width,
+              payload.viewport.height,
+            );
           }
         }
         break;
       }
 
       default:
-        console.warn(`[StreamServer] Unknown message type from ${clientId}: ${message.type}`);
+        console.warn(
+          `[StreamServer] Unknown message type from ${clientId}: ${message.type}`,
+        );
     }
   }
 
@@ -316,7 +363,7 @@ export class StreamServer {
 
     // Close all clients
     for (const [, client] of this.clients) {
-      client.ws.close(1001, 'Server shutting down');
+      client.ws.close(1001, "Server shutting down");
     }
     this.clients.clear();
 
@@ -328,6 +375,6 @@ export class StreamServer {
       this.wss = null;
     }
 
-    console.log('[StreamServer] Stopped');
+    console.log("[StreamServer] Stopped");
   }
 }

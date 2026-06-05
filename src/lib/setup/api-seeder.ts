@@ -1,4 +1,11 @@
-import type { SetupScript, SetupConfig, SetupContext, SetupResult, ApiScriptDefinition, SetupAuthConfig } from './types';
+import type {
+  SetupScript,
+  SetupConfig,
+  SetupContext,
+  SetupResult,
+  ApiScriptDefinition,
+  SetupAuthConfig,
+} from "./types";
 
 /**
  * Run an API-based setup script.
@@ -7,12 +14,12 @@ import type { SetupScript, SetupConfig, SetupContext, SetupResult, ApiScriptDefi
 export async function runApiSetup(
   config: SetupConfig,
   script: SetupScript,
-  context: SetupContext
+  context: SetupContext,
 ): Promise<SetupResult> {
   const startTime = Date.now();
 
   try {
-    if (script.type !== 'api') {
+    if (script.type !== "api") {
       return {
         success: false,
         error: `Expected api script but got ${script.type}`,
@@ -27,7 +34,7 @@ export async function runApiSetup(
     } catch {
       return {
         success: false,
-        error: 'Invalid API script format - expected JSON',
+        error: "Invalid API script format - expected JSON",
         duration: Date.now() - startTime,
       };
     }
@@ -37,7 +44,7 @@ export async function runApiSetup(
 
     // Build headers with auth
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...apiDef.headers,
     };
 
@@ -45,7 +52,9 @@ export async function runApiSetup(
     applyAuth(headers, config.authType, config.authConfig);
 
     // Interpolate variables in body
-    const body = apiDef.body ? interpolateVariables(apiDef.body, context.variables) : undefined;
+    const body = apiDef.body
+      ? interpolateVariables(apiDef.body, context.variables)
+      : undefined;
 
     // Make the request
     const response = await fetch(url, {
@@ -65,8 +74,8 @@ export async function runApiSetup(
 
     // Parse response
     let responseData: unknown;
-    const contentType = response.headers.get('content-type');
-    if (contentType?.includes('application/json')) {
+    const contentType = response.headers.get("content-type");
+    if (contentType?.includes("application/json")) {
       responseData = await response.json();
     } else {
       responseData = await response.text();
@@ -74,7 +83,11 @@ export async function runApiSetup(
 
     // Extract variables from response
     const extractedVariables: Record<string, unknown> = {};
-    if (apiDef.extractVariables && typeof responseData === 'object' && responseData !== null) {
+    if (
+      apiDef.extractVariables &&
+      typeof responseData === "object" &&
+      responseData !== null
+    ) {
       for (const [varName, path] of Object.entries(apiDef.extractVariables)) {
         extractedVariables[varName] = getValueByPath(responseData, path);
       }
@@ -100,23 +113,25 @@ export async function runApiSetup(
 function applyAuth(
   headers: Record<string, string>,
   authType: string,
-  authConfig: SetupAuthConfig | null
+  authConfig: SetupAuthConfig | null,
 ): void {
   if (!authConfig) return;
 
   switch (authType) {
-    case 'bearer':
+    case "bearer":
       if (authConfig.token) {
-        headers['Authorization'] = `Bearer ${authConfig.token}`;
+        headers["Authorization"] = `Bearer ${authConfig.token}`;
       }
       break;
-    case 'basic':
+    case "basic":
       if (authConfig.username && authConfig.password) {
-        const credentials = Buffer.from(`${authConfig.username}:${authConfig.password}`).toString('base64');
-        headers['Authorization'] = `Basic ${credentials}`;
+        const credentials = Buffer.from(
+          `${authConfig.username}:${authConfig.password}`,
+        ).toString("base64");
+        headers["Authorization"] = `Basic ${credentials}`;
       }
       break;
-    case 'custom':
+    case "custom":
       if (authConfig.headers) {
         Object.assign(headers, authConfig.headers);
       }
@@ -130,14 +145,14 @@ function applyAuth(
  * Supports both dot notation (response.data.id) and array access (response.users.0.id)
  */
 function getValueByPath(obj: unknown, path: string): unknown {
-  const parts = path.split('.');
+  const parts = path.split(".");
   let current: unknown = obj;
 
   for (const part of parts) {
     if (current === null || current === undefined) {
       return undefined;
     }
-    if (typeof current !== 'object') {
+    if (typeof current !== "object") {
       return undefined;
     }
     current = (current as Record<string, unknown>)[part];
@@ -152,21 +167,21 @@ function getValueByPath(obj: unknown, path: string): unknown {
  */
 function interpolateVariables(
   data: unknown,
-  variables: Record<string, unknown>
+  variables: Record<string, unknown>,
 ): unknown {
-  if (typeof data === 'string') {
+  if (typeof data === "string") {
     return data.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
       const trimmedKey = key.trim();
 
       // Handle faker placeholders
-      if (trimmedKey.startsWith('faker.')) {
+      if (trimmedKey.startsWith("faker.")) {
         return generateFakerValue(trimmedKey.slice(6));
       }
 
       // Handle context variables
       if (trimmedKey in variables) {
         const value = variables[trimmedKey];
-        return typeof value === 'string' ? value : JSON.stringify(value);
+        return typeof value === "string" ? value : JSON.stringify(value);
       }
 
       // Return original if not found
@@ -175,10 +190,10 @@ function interpolateVariables(
   }
 
   if (Array.isArray(data)) {
-    return data.map(item => interpolateVariables(item, variables));
+    return data.map((item) => interpolateVariables(item, variables));
   }
 
-  if (typeof data === 'object' && data !== null) {
+  if (typeof data === "object" && data !== null) {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       result[key] = interpolateVariables(value, variables);
@@ -198,21 +213,21 @@ function generateFakerValue(type: string): string {
   const random = Math.random().toString(36).substring(2, 10);
 
   switch (type) {
-    case 'email':
+    case "email":
       return `test-${random}@example.com`;
-    case 'uuid':
+    case "uuid":
       return crypto.randomUUID();
-    case 'name':
+    case "name":
       return `Test User ${random}`;
-    case 'firstName':
+    case "firstName":
       return `Test${random.substring(0, 4)}`;
-    case 'lastName':
+    case "lastName":
       return `User${random.substring(0, 4)}`;
-    case 'number':
+    case "number":
       return Math.floor(Math.random() * 10000).toString();
-    case 'timestamp':
+    case "timestamp":
       return timestamp.toString();
-    case 'isoDate':
+    case "isoDate":
       return new Date().toISOString();
     default:
       return random;
@@ -222,28 +237,31 @@ function generateFakerValue(type: string): string {
 /**
  * Validate an API script definition
  */
-export function validateApiScript(code: string): { valid: boolean; error?: string } {
+export function validateApiScript(code: string): {
+  valid: boolean;
+  error?: string;
+} {
   try {
     const parsed = JSON.parse(code);
 
     if (!parsed.method) {
-      return { valid: false, error: 'Missing required field: method' };
+      return { valid: false, error: "Missing required field: method" };
     }
-    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(parsed.method)) {
+    if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(parsed.method)) {
       return { valid: false, error: `Invalid method: ${parsed.method}` };
     }
     if (!parsed.endpoint) {
-      return { valid: false, error: 'Missing required field: endpoint' };
+      return { valid: false, error: "Missing required field: endpoint" };
     }
-    if (typeof parsed.endpoint !== 'string') {
-      return { valid: false, error: 'endpoint must be a string' };
+    if (typeof parsed.endpoint !== "string") {
+      return { valid: false, error: "endpoint must be a string" };
     }
-    if (!parsed.endpoint.startsWith('/')) {
-      return { valid: false, error: 'endpoint must start with /' };
+    if (!parsed.endpoint.startsWith("/")) {
+      return { valid: false, error: "endpoint must start with /" };
     }
 
     return { valid: true };
   } catch {
-    return { valid: false, error: 'Invalid JSON format' };
+    return { valid: false, error: "Invalid JSON format" };
   }
 }

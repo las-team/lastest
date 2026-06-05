@@ -1,17 +1,26 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tv2 } from 'lucide-react';
-import type { EmbeddedSession, Runner } from '@/lib/db/schema';
-import { formatDistanceToNow } from 'date-fns';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tv2 } from "lucide-react";
+import type { EmbeddedSession, Runner } from "@/lib/db/schema";
+import { formatDistanceToNow } from "date-fns";
 
 interface BrowserPoolCardProps {
   sessions: EmbeddedSession[];
   systemRunners: Runner[];
 }
 
-export function BrowserPoolCard({ sessions, systemRunners }: BrowserPoolCardProps) {
-  const readyCount = sessions.filter((s) => s.status === 'ready').length;
-  const busyCount = sessions.filter((s) => s.status === 'busy').length;
+export function BrowserPoolCard({
+  sessions,
+  systemRunners,
+}: BrowserPoolCardProps) {
+  const readyCount = sessions.filter((s) => s.status === "ready").length;
+  const busyCount = sessions.filter((s) => s.status === "busy").length;
   const total = sessions.length;
 
   return (
@@ -49,16 +58,24 @@ export function BrowserPoolCard({ sessions, systemRunners }: BrowserPoolCardProp
                 className="flex items-center justify-between p-3 rounded-lg border bg-card"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    session.status === 'ready' ? 'bg-green-500/10' :
-                    session.status === 'busy' ? 'bg-yellow-500/10' :
-                    'bg-muted'
-                  }`}>
-                    <Tv2 className={`w-4 h-4 ${
-                      session.status === 'ready' ? 'text-green-500' :
-                      session.status === 'busy' ? 'text-yellow-500' :
-                      'text-muted-foreground'
-                    }`} />
+                  <div
+                    className={`p-2 rounded-lg ${
+                      session.status === "ready"
+                        ? "bg-green-500/10"
+                        : session.status === "busy"
+                          ? "bg-yellow-500/10"
+                          : "bg-muted"
+                    }`}
+                  >
+                    <Tv2
+                      className={`w-4 h-4 ${
+                        session.status === "ready"
+                          ? "text-green-500"
+                          : session.status === "busy"
+                            ? "text-yellow-500"
+                            : "text-muted-foreground"
+                      }`}
+                    />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -73,15 +90,23 @@ export function BrowserPoolCard({ sessions, systemRunners }: BrowserPoolCardProp
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {session.status === 'busy' && session.busySince && (
-                        <span>Busy for {formatDistanceToNow(session.busySince)}</span>
+                      {session.status === "busy" && session.busySince && (
+                        <span>
+                          Busy for {formatDistanceToNow(session.busySince)}
+                        </span>
                       )}
-                      {session.status === 'ready' && session.lastActivityAt && (
-                        <span>Idle since {formatDistanceToNow(session.lastActivityAt, { addSuffix: true })}</span>
+                      {session.status === "ready" && session.lastActivityAt && (
+                        <span>
+                          Idle since{" "}
+                          {formatDistanceToNow(session.lastActivityAt, {
+                            addSuffix: true,
+                          })}
+                        </span>
                       )}
-                      {session.status !== 'ready' && session.status !== 'busy' && (
-                        <span>{session.status}</span>
-                      )}
+                      {session.status !== "ready" &&
+                        session.status !== "busy" && (
+                          <span>{session.status}</span>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -96,13 +121,38 @@ export function BrowserPoolCard({ sessions, systemRunners }: BrowserPoolCardProp
 
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
-    case 'ready':
-      return <Badge variant="default" className="bg-green-500 text-[10px] px-1.5 py-0">Ready</Badge>;
-    case 'busy':
-      return <Badge variant="default" className="bg-yellow-500 text-[10px] px-1.5 py-0">Busy</Badge>;
-    case 'starting':
-      return <Badge variant="default" className="bg-blue-500 text-[10px] px-1.5 py-0">Starting</Badge>;
+    case "ready":
+      return (
+        <Badge
+          variant="default"
+          className="bg-green-500 text-[10px] px-1.5 py-0"
+        >
+          Ready
+        </Badge>
+      );
+    case "busy":
+      return (
+        <Badge
+          variant="default"
+          className="bg-yellow-500 text-[10px] px-1.5 py-0"
+        >
+          Busy
+        </Badge>
+      );
+    case "starting":
+      return (
+        <Badge
+          variant="default"
+          className="bg-blue-500 text-[10px] px-1.5 py-0"
+        >
+          Starting
+        </Badge>
+      );
     default:
-      return <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{status}</Badge>;
+      return (
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          {status}
+        </Badge>
+      );
   }
 }

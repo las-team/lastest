@@ -1,16 +1,16 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   runners,
   runnerCommands,
   runnerCommandResults,
   tests,
-} from '../schema';
+} from "../schema";
 import type {
   NewRunnerCommand,
   NewRunnerCommandResult,
   RunnerCommandStatus,
-} from '../schema';
-import { eq, and, inArray, lt, or, isNull, notExists, sql } from 'drizzle-orm';
+} from "../schema";
+import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
 
 // Time the server waits for an EB `response:command_ack` after dispatching a
 // command before redelivering on the next heartbeat. EB sends the ack as the
@@ -52,28 +52,33 @@ export async function createRunnerCommand(cmd: NewRunnerCommand) {
  *
  * @param limit Max commands to dispatch (prevents bulk execution after crash-loop). Defaults to all.
  */
-export async function dispatchPendingCommands(runnerId: string, limit?: number) {
+export async function dispatchPendingCommands(
+  runnerId: string,
+  limit?: number,
+) {
   const now = new Date();
   const redispatchCutoff = new Date(now.getTime() - REDISPATCH_TTL_MS);
 
   const query = db
     .select()
     .from(runnerCommands)
-    .where(and(
-      eq(runnerCommands.runnerId, runnerId),
-      eq(runnerCommands.status, 'pending'),
-      or(
-        isNull(runnerCommands.dispatchedAt),
-        lt(runnerCommands.dispatchedAt, redispatchCutoff),
+    .where(
+      and(
+        eq(runnerCommands.runnerId, runnerId),
+        eq(runnerCommands.status, "pending"),
+        or(
+          isNull(runnerCommands.dispatchedAt),
+          lt(runnerCommands.dispatchedAt, redispatchCutoff),
+        ),
       ),
-    ))
+    )
     .orderBy(runnerCommands.createdAt);
 
   const eligible = limit ? await query.limit(limit) : await query;
 
   if (eligible.length === 0) return [];
 
-  const ids = eligible.map(c => c.id);
+  const ids = eligible.map((c) => c.id);
   await db
     .update(runnerCommands)
     .set({ dispatchedAt: now })
@@ -91,19 +96,20 @@ export async function dispatchPendingCommands(runnerId: string, limit?: number) 
 export async function ackDispatchedCommand(commandId: string) {
   await db
     .update(runnerCommands)
-    .set({ status: 'claimed' as RunnerCommandStatus, claimedAt: new Date() })
-    .where(and(
-      eq(runnerCommands.id, commandId),
-      eq(runnerCommands.status, 'pending'),
-    ));
+    .set({ status: "claimed" as RunnerCommandStatus, claimedAt: new Date() })
+    .where(
+      and(
+        eq(runnerCommands.id, commandId),
+        eq(runnerCommands.status, "pending"),
+      ),
+    );
 }
 
 export async function getCommandsByTestRun(testRunId: string) {
   return db
     .select()
     .from(runnerCommands)
-    .where(eq(runnerCommands.testRunId, testRunId))
-    ;
+    .where(eq(runnerCommands.testRunId, testRunId));
 }
 
 /**
@@ -118,11 +124,13 @@ export async function getRunningTestNamesForTestRun(
     .select({ testId: tests.id, name: tests.name })
     .from(runnerCommands)
     .innerJoin(tests, eq(tests.id, runnerCommands.testId))
-    .where(and(
-      eq(runnerCommands.testRunId, testRunId),
-      eq(runnerCommands.status, 'claimed' as RunnerCommandStatus),
-      eq(runnerCommands.type, 'command:run_test'),
-    ))
+    .where(
+      and(
+        eq(runnerCommands.testRunId, testRunId),
+        eq(runnerCommands.status, "claimed" as RunnerCommandStatus),
+        eq(runnerCommands.type, "command:run_test"),
+      ),
+    )
     .orderBy(runnerCommands.claimedAt);
   return rows;
 }
@@ -133,7 +141,10 @@ export async function getRunnerCommandById(commandId: string) {
   });
 }
 
-export async function completeRunnerCommand(commandId: string, status: 'completed' | 'failed') {
+export async function completeRunnerCommand(
+  commandId: string,
+  status: "completed" | "failed",
+) {
   await db
     .update(runnerCommands)
     .set({ status, completedAt: new Date() })
@@ -143,18 +154,31 @@ export async function completeRunnerCommand(commandId: string, status: 'complete
 export async function failActiveCommandsForRunner(runnerId: string) {
   await db
     .update(runnerCommands)
-    .set({ status: 'failed' as RunnerCommandStatus, completedAt: new Date() })
-    .where(and(
-      eq(runnerCommands.runnerId, runnerId),
-      inArray(runnerCommands.status, ['pending', 'claimed'] as RunnerCommandStatus[])
-    ));
+    .set({ status: "failed" as RunnerCommandStatus, completedAt: new Date() })
+    .where(
+      and(
+        eq(runnerCommands.runnerId, runnerId),
+        inArray(runnerCommands.status, [
+          "pending",
+          "claimed",
+        ] as RunnerCommandStatus[]),
+      ),
+    );
 }
 
 export async function cancelPendingCommandsByTestRun(testRunId: string) {
   await db
     .update(runnerCommands)
-    .set({ status: 'cancelled' as RunnerCommandStatus, completedAt: new Date() })
-    .where(and(eq(runnerCommands.testRunId, testRunId), eq(runnerCommands.status, 'pending')));
+    .set({
+      status: "cancelled" as RunnerCommandStatus,
+      completedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runnerCommands.testRunId, testRunId),
+        eq(runnerCommands.status, "pending"),
+      ),
+    );
 }
 
 export async function insertCommandResult(result: NewRunnerCommandResult) {
@@ -181,7 +205,12 @@ export async function insertCommandResult(result: NewRunnerCommandResult) {
 export async function upsertStepEventBeacon(
   commandId: string,
   runnerId: string,
-  payload: { testRunId?: string; stepIndex: number; totalSteps: number; status: string },
+  payload: {
+    testRunId?: string;
+    stepIndex: number;
+    totalSteps: number;
+    status: string;
+  },
 ): Promise<void> {
   const id = `${commandId}:step-beacon`;
   await db
@@ -190,7 +219,7 @@ export async function upsertStepEventBeacon(
       id,
       commandId,
       runnerId,
-      type: 'response:step_event',
+      type: "response:step_event",
       acknowledged: true,
       payload: payload as unknown as Record<string, unknown>,
     })
@@ -207,8 +236,12 @@ export async function getUnacknowledgedResults(commandIds: string[]) {
   return db
     .select()
     .from(runnerCommandResults)
-    .where(and(inArray(runnerCommandResults.commandId, commandIds), eq(runnerCommandResults.acknowledged, false)))
-    ;
+    .where(
+      and(
+        inArray(runnerCommandResults.commandId, commandIds),
+        eq(runnerCommandResults.acknowledged, false),
+      ),
+    );
 }
 
 export async function acknowledgeResults(resultIds: string[]) {
@@ -222,17 +255,30 @@ export async function acknowledgeResults(resultIds: string[]) {
 export async function cleanupOldCommands(olderThanMs: number) {
   const cutoff = new Date(Date.now() - olderThanMs);
   // Delete results first (FK constraint)
-  const oldCommandIds = (await db
-    .select({ id: runnerCommands.id })
-    .from(runnerCommands)
-    .where(and(
-      inArray(runnerCommands.status, ['completed', 'failed', 'cancelled', 'timeout']),
-      lt(runnerCommands.createdAt, cutoff)
-    ))).map(c => c.id);
+  const oldCommandIds = (
+    await db
+      .select({ id: runnerCommands.id })
+      .from(runnerCommands)
+      .where(
+        and(
+          inArray(runnerCommands.status, [
+            "completed",
+            "failed",
+            "cancelled",
+            "timeout",
+          ]),
+          lt(runnerCommands.createdAt, cutoff),
+        ),
+      )
+  ).map((c) => c.id);
 
   if (oldCommandIds.length > 0) {
-    await db.delete(runnerCommandResults).where(inArray(runnerCommandResults.commandId, oldCommandIds));
-    await db.delete(runnerCommands).where(inArray(runnerCommands.id, oldCommandIds));
+    await db
+      .delete(runnerCommandResults)
+      .where(inArray(runnerCommandResults.commandId, oldCommandIds));
+    await db
+      .delete(runnerCommands)
+      .where(inArray(runnerCommands.id, oldCommandIds));
   }
   return oldCommandIds.length;
 }
@@ -252,7 +298,10 @@ export async function cleanupOldCommands(olderThanMs: number) {
  *      *some* results) is genuinely stuck inside test code — flag as
  *      timeout the same as before.
  */
-export async function timeoutStaleCommands(maxPendingAgeMs: number, maxClaimedAgeMs: number) {
+export async function timeoutStaleCommands(
+  maxPendingAgeMs: number,
+  maxClaimedAgeMs: number,
+) {
   const now = Date.now();
   const pendingCutoff = new Date(now - maxPendingAgeMs);
   const claimedCutoff = new Date(now - maxClaimedAgeMs);
@@ -261,8 +310,13 @@ export async function timeoutStaleCommands(maxPendingAgeMs: number, maxClaimedAg
   // 1. Timeout pending commands older than maxPendingAgeMs
   await db
     .update(runnerCommands)
-    .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })
-    .where(and(eq(runnerCommands.status, 'pending'), lt(runnerCommands.createdAt, pendingCutoff)));
+    .set({ status: "timeout" as RunnerCommandStatus, completedAt: new Date() })
+    .where(
+      and(
+        eq(runnerCommands.status, "pending"),
+        lt(runnerCommands.createdAt, pendingCutoff),
+      ),
+    );
 
   // 2. Reclaim orphaned `claimed` rows — EB ack'd but never produced any
   //    runner_command_results within MAX_CLAIMED_NO_RESULT_MS. Most often a
@@ -271,22 +325,34 @@ export async function timeoutStaleCommands(maxPendingAgeMs: number, maxClaimedAg
   //    it twice if it's just slow.
   await db
     .update(runnerCommands)
-    .set({ status: 'pending' as RunnerCommandStatus, claimedAt: null, dispatchedAt: null })
-    .where(and(
-      eq(runnerCommands.status, 'claimed'),
-      lt(runnerCommands.claimedAt, noResultCutoff),
-      notExists(
-        db.select({ x: sql`1` })
-          .from(runnerCommandResults)
-          .where(eq(runnerCommandResults.commandId, runnerCommands.id)),
+    .set({
+      status: "pending" as RunnerCommandStatus,
+      claimedAt: null,
+      dispatchedAt: null,
+    })
+    .where(
+      and(
+        eq(runnerCommands.status, "claimed"),
+        lt(runnerCommands.claimedAt, noResultCutoff),
+        notExists(
+          db
+            .select({ x: sql`1` })
+            .from(runnerCommandResults)
+            .where(eq(runnerCommandResults.commandId, runnerCommands.id)),
+        ),
       ),
-    ));
+    );
 
   // 3. Timeout claimed commands older than maxClaimedAgeMs (i.e. EB acked,
   //    produced partial results, but never reached terminal status — stuck
   //    inside test code, retry won't help).
   await db
     .update(runnerCommands)
-    .set({ status: 'timeout' as RunnerCommandStatus, completedAt: new Date() })
-    .where(and(eq(runnerCommands.status, 'claimed'), lt(runnerCommands.claimedAt, claimedCutoff)));
+    .set({ status: "timeout" as RunnerCommandStatus, completedAt: new Date() })
+    .where(
+      and(
+        eq(runnerCommands.status, "claimed"),
+        lt(runnerCommands.claimedAt, claimedCutoff),
+      ),
+    );
 }

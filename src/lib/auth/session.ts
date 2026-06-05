@@ -37,7 +37,7 @@ export const getCurrentSession = cache(
     }
 
     return null;
-  }
+  },
 );
 
 export async function getCurrentUser(): Promise<User | null> {
@@ -72,12 +72,12 @@ export async function requireTeamAccess(): Promise<
 }
 
 export async function requireTeamRole(
-  roles: UserRole[]
+  roles: UserRole[],
 ): Promise<SessionData & { team: Team }> {
   const session = await requireTeamAccess();
   if (!roles.includes(session.user.role as UserRole)) {
     throw new Error(
-      `Forbidden: Requires one of these roles: ${roles.join(", ")}`
+      `Forbidden: Requires one of these roles: ${roles.join(", ")}`,
     );
   }
   return session;
@@ -90,7 +90,7 @@ export async function requireTeamAdmin(): Promise<
 }
 
 export async function requireRepoAccess(
-  repoId: string
+  repoId: string,
 ): Promise<SessionData & { team: Team; repo: Repository }> {
   const session = await requireTeamAccess();
   const repo = await queries.getRepository(repoId);

@@ -1,9 +1,9 @@
-'use server';
+"use server";
 
-import { requireRepoAccess } from '@/lib/auth';
-import * as queries from '@/lib/db/queries';
-import { syncGithubIssues } from '@/lib/integrations/github-issues-sync';
-import { revalidatePath } from 'next/cache';
+import { requireRepoAccess } from "@/lib/auth";
+import * as queries from "@/lib/db/queries";
+import { syncGithubIssues } from "@/lib/integrations/github-issues-sync";
+import { revalidatePath } from "next/cache";
 
 export async function getImpactTimelineData(
   repositoryId: string,
@@ -17,7 +17,7 @@ export async function getImpactTimelineData(
     try {
       await syncGithubIssues(repositoryId, githubAccount.accessToken);
     } catch (error) {
-      console.error('[analytics] Failed to sync GitHub issues:', error);
+      console.error("[analytics] Failed to sync GitHub issues:", error);
     }
   }
 
@@ -36,10 +36,14 @@ export async function syncIssuesManual(repositoryId: string) {
 
   const githubAccount = await queries.getGithubAccountByTeam(session.team.id);
   if (!githubAccount) {
-    throw new Error('No GitHub account connected');
+    throw new Error("No GitHub account connected");
   }
 
-  const result = await syncGithubIssues(repositoryId, githubAccount.accessToken, true);
-  revalidatePath('/analytics/impact');
+  const result = await syncGithubIssues(
+    repositoryId,
+    githubAccount.accessToken,
+    true,
+  );
+  revalidatePath("/analytics/impact");
   return result;
 }

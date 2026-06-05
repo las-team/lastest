@@ -1,30 +1,45 @@
-'use client';
+"use client";
 
-import { useState, useTransition } from 'react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Trophy, Zap } from 'lucide-react';
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Trophy, Zap } from "lucide-react";
 import {
   startNewSeason,
   endCurrentSeason,
   startBugBlitz,
   endBugBlitz,
-} from '@/server/actions/gamification';
+} from "@/server/actions/gamification";
 
 interface Props {
   enabled: boolean;
   activeSeasonName: string | null;
-  activeBlitz: { id: string; name: string; endsAt: Date; multiplier: number } | null;
+  activeBlitz: {
+    id: string;
+    name: string;
+    endsAt: Date;
+    multiplier: number;
+  } | null;
 }
 
-export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }: Props) {
+export function GamificationAdminCard({
+  enabled,
+  activeSeasonName,
+  activeBlitz,
+}: Props) {
   const [isPending, startTransition] = useTransition();
-  const [seasonName, setSeasonName] = useState('Season 1');
-  const [blitzName, setBlitzName] = useState('Friday Bug Hunt');
+  const [seasonName, setSeasonName] = useState("Season 1");
+  const [blitzName, setBlitzName] = useState("Friday Bug Hunt");
   const [blitzHours, setBlitzHours] = useState(2);
   const [blitzMultiplier, setBlitzMultiplier] = useState(2);
 
@@ -52,7 +67,8 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
           Gamification — Admin Controls
         </CardTitle>
         <CardDescription>
-          Start and end seasons. Run Bug Blitz multipliers for time-boxed events.
+          Start and end seasons. Run Bug Blitz multipliers for time-boxed
+          events.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -68,7 +84,9 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
           </div>
           <div className="flex items-end gap-2">
             <div className="flex-1 space-y-1">
-              <Label htmlFor="season-name" className="text-xs">New season name</Label>
+              <Label htmlFor="season-name" className="text-xs">
+                New season name
+              </Label>
               <Input
                 id="season-name"
                 value={seasonName}
@@ -84,7 +102,11 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                     await startNewSeason(seasonName.trim());
                     toast.success(`Season "${seasonName}" started ★`);
                   } catch (err) {
-                    toast.error(err instanceof Error ? err.message : 'Failed to start season');
+                    toast.error(
+                      err instanceof Error
+                        ? err.message
+                        : "Failed to start season",
+                    );
                   }
                 });
               }}
@@ -96,13 +118,22 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                 variant="outline"
                 disabled={isPending}
                 onClick={() => {
-                  if (!confirm(`End "${activeSeasonName}"? Scores will be frozen.`)) return;
+                  if (
+                    !confirm(
+                      `End "${activeSeasonName}"? Scores will be frozen.`,
+                    )
+                  )
+                    return;
                   startTransition(async () => {
                     try {
                       await endCurrentSeason();
-                      toast.success('Season ended');
+                      toast.success("Season ended");
                     } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Failed to end season');
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to end season",
+                      );
                     }
                   });
                 }}
@@ -142,9 +173,11 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                   startTransition(async () => {
                     try {
                       await endBugBlitz(activeBlitz.id);
-                      toast.success('Bug Blitz ended');
+                      toast.success("Bug Blitz ended");
                     } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Failed');
+                      toast.error(
+                        err instanceof Error ? err.message : "Failed",
+                      );
                     }
                   });
                 }}
@@ -155,11 +188,19 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="space-y-1 sm:col-span-1">
-                <Label htmlFor="blitz-name" className="text-xs">Name</Label>
-                <Input id="blitz-name" value={blitzName} onChange={(e) => setBlitzName(e.target.value)} />
+                <Label htmlFor="blitz-name" className="text-xs">
+                  Name
+                </Label>
+                <Input
+                  id="blitz-name"
+                  value={blitzName}
+                  onChange={(e) => setBlitzName(e.target.value)}
+                />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="blitz-hours" className="text-xs">Hours</Label>
+                <Label htmlFor="blitz-hours" className="text-xs">
+                  Hours
+                </Label>
                 <Input
                   id="blitz-hours"
                   type="number"
@@ -170,7 +211,9 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="blitz-mult" className="text-xs">Multiplier</Label>
+                <Label htmlFor="blitz-mult" className="text-xs">
+                  Multiplier
+                </Label>
                 <Input
                   id="blitz-mult"
                   type="number"
@@ -178,7 +221,9 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                   min={1}
                   max={5}
                   value={blitzMultiplier}
-                  onChange={(e) => setBlitzMultiplier(Number(e.target.value) || 2)}
+                  onChange={(e) =>
+                    setBlitzMultiplier(Number(e.target.value) || 2)
+                  }
                 />
               </div>
               <Button
@@ -194,7 +239,11 @@ export function GamificationAdminCard({ enabled, activeSeasonName, activeBlitz }
                       });
                       toast.success(`🐛 Bug Blitz "${blitzName}" started!`);
                     } catch (err) {
-                      toast.error(err instanceof Error ? err.message : 'Failed to start blitz');
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to start blitz",
+                      );
                     }
                   });
                 }}

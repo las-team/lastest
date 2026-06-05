@@ -5,10 +5,10 @@
  * to SSE connections. Uses globalThis to persist across module reloads.
  */
 
-import type { BackgroundJobStatus, BackgroundJobType } from '@/lib/db/schema';
+import type { BackgroundJobStatus, BackgroundJobType } from "@/lib/db/schema";
 
 export interface JobUpdateEvent {
-  type: 'job:update';
+  type: "job:update";
   jobId: string;
   jobType: BackgroundJobType;
   status: BackgroundJobStatus;
@@ -28,7 +28,7 @@ export interface JobUpdateEvent {
 }
 
 export interface JobDeleteEvent {
-  type: 'job:delete';
+  type: "job:delete";
   jobId: string;
   // Used by the SSE route to scope deletes to the owning team. May be null
   // for repo-less jobs, which the SSE route already filters out.
@@ -66,7 +66,7 @@ export function emitJobEvent(event: JobEvent): void {
     try {
       listener(event);
     } catch (error) {
-      console.error('[JobEvents] Listener error:', error);
+      console.error("[JobEvents] Listener error:", error);
     }
   }
 }

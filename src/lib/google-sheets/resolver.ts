@@ -4,8 +4,8 @@
  * using cached data from GoogleSheetsDataSources.
  */
 
-import { findSheetReferences } from './api';
-import type { GoogleSheetsDataSource } from '@/lib/db/schema';
+import { findSheetReferences } from "./api";
+import type { GoogleSheetsDataSource } from "@/lib/db/schema";
 
 export interface ResolvedReference {
   fullMatch: string;
@@ -25,7 +25,7 @@ export interface ResolveResult {
  */
 export function resolveSheetReferences(
   code: string,
-  dataSources: GoogleSheetsDataSource[]
+  dataSources: GoogleSheetsDataSource[],
 ): ResolveResult {
   const refs = findSheetReferences(code);
   const resolved: ResolvedReference[] = [];
@@ -53,7 +53,7 @@ export function resolveSheetReferences(
     try {
       let value: string;
 
-      if (reference.type === 'cell') {
+      if (reference.type === "cell") {
         // Direct cell reference like A1
         const cellRef = reference.cellRef!;
         const colMatch = cellRef.match(/^([A-Z]+)(\d+)$/);
@@ -73,31 +73,33 @@ export function resolveSheetReferences(
 
         // Row 1 = headers, Row 2+ = data
         if (rowNum === (source.headerRow || 1)) {
-          value = headers[colIndex] || '';
+          value = headers[colIndex] || "";
         } else {
           const dataRowIdx = rowNum - (source.headerRow || 1) - 1;
           if (dataRowIdx < 0 || dataRowIdx >= data.length) {
             throw new Error(`Row ${rowNum} out of range`);
           }
-          value = data[dataRowIdx]?.[colIndex] || '';
+          value = data[dataRowIdx]?.[colIndex] || "";
         }
-      } else if (reference.type === 'row') {
+      } else if (reference.type === "row") {
         // Entire row as JSON object
         const rowIdx = reference.rowIndex!;
         if (rowIdx < 0 || rowIdx >= data.length) {
-          throw new Error(`Row index ${rowIdx} out of range (have ${data.length} rows)`);
+          throw new Error(
+            `Row index ${rowIdx} out of range (have ${data.length} rows)`,
+          );
         }
         const row = data[rowIdx];
         const obj: Record<string, string> = {};
         for (let i = 0; i < headers.length; i++) {
-          obj[headers[i]] = row[i] || '';
+          obj[headers[i]] = row[i] || "";
         }
         value = JSON.stringify(obj);
       } else {
         // Column reference
         const colName = reference.column!;
         const colIndex = headers.findIndex(
-          (h) => h.toLowerCase() === colName.toLowerCase()
+          (h) => h.toLowerCase() === colName.toLowerCase(),
         );
 
         if (colIndex === -1) {
@@ -114,13 +116,13 @@ export function resolveSheetReferences(
               if (reference.rowIndex < 0 || reference.rowIndex >= data.length) {
                 throw new Error(`Row index ${reference.rowIndex} out of range`);
               }
-              value = data[reference.rowIndex]?.[idx] || '';
+              value = data[reference.rowIndex]?.[idx] || "";
             } else {
-              value = JSON.stringify(data.map((row) => row[idx] || ''));
+              value = JSON.stringify(data.map((row) => row[idx] || ""));
             }
           } else {
             throw new Error(
-              `Column "${colName}" not found. Available: ${headers.join(', ')}`
+              `Column "${colName}" not found. Available: ${headers.join(", ")}`,
             );
           }
         } else {
@@ -128,10 +130,10 @@ export function resolveSheetReferences(
             if (reference.rowIndex < 0 || reference.rowIndex >= data.length) {
               throw new Error(`Row index ${reference.rowIndex} out of range`);
             }
-            value = data[reference.rowIndex]?.[colIndex] || '';
+            value = data[reference.rowIndex]?.[colIndex] || "";
           } else {
             // All values from column
-            value = JSON.stringify(data.map((row) => row[colIndex] || ''));
+            value = JSON.stringify(data.map((row) => row[colIndex] || ""));
           }
         }
       }
@@ -154,14 +156,14 @@ export function resolveSheetReferences(
  */
 export function previewSheetReferences(
   code: string,
-  dataSources: GoogleSheetsDataSource[]
+  dataSources: GoogleSheetsDataSource[],
 ): Array<{
   fullMatch: string;
   alias: string;
   column?: string;
   rowIndex?: number;
   cellRef?: string;
-  type: 'column' | 'cell' | 'row';
+  type: "column" | "cell" | "row";
   previewValue?: string;
   error?: string;
   source?: {

@@ -1,19 +1,19 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { CheckCircle, Circle, Plus, Loader2, ExternalLink } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { CheckCircle, Circle, Plus, Loader2, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
 import {
   convertPlanToPlaceholders,
   createPlaceholderTestCase,
   generateSpecsFromTests,
   generatePlanFromTests,
-} from '@/server/actions/specs';
-import { useRouter } from 'next/navigation';
-import { Wand2, FileCode2 } from 'lucide-react';
+} from "@/server/actions/specs";
+import { useRouter } from "next/navigation";
+import { Wand2, FileCode2 } from "lucide-react";
 
 interface AreaTestCase {
   id: string;
@@ -31,11 +31,17 @@ interface AreaTestCasesPanelProps {
   onOpenTest?: (testId: string) => void;
 }
 
-export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, onOpenTest }: AreaTestCasesPanelProps) {
+export function AreaTestCasesPanel({
+  areaId,
+  repositoryId,
+  tests,
+  hasAgentPlan,
+  onOpenTest,
+}: AreaTestCasesPanelProps) {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDescription, setNewDescription] = useState('');
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [convertingPlan, setConvertingPlan] = useState(false);
   const [fromTests, setFromTests] = useState(false);
@@ -50,13 +56,13 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
         newName.trim(),
         newDescription.trim() || null,
       );
-      setNewName('');
-      setNewDescription('');
+      setNewName("");
+      setNewDescription("");
       setShowAdd(false);
-      toast.success('Test case created');
+      toast.success("Test case created");
       router.refresh();
     } catch {
-      toast.error('Failed to create test case');
+      toast.error("Failed to create test case");
     } finally {
       setSaving(false);
     }
@@ -67,13 +73,15 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
     try {
       const result = await convertPlanToPlaceholders(areaId, repositoryId);
       if (result.created > 0) {
-        toast.success(`Created ${result.created} test case${result.created !== 1 ? 's' : ''} from plan`);
+        toast.success(
+          `Created ${result.created} test case${result.created !== 1 ? "s" : ""} from plan`,
+        );
         router.refresh();
       } else {
-        toast.info('No new test cases to create from plan');
+        toast.info("No new test cases to create from plan");
       }
     } catch {
-      toast.error('Failed to convert plan');
+      toast.error("Failed to convert plan");
     } finally {
       setConvertingPlan(false);
     }
@@ -86,13 +94,13 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
       const planResult = await generatePlanFromTests(areaId, repositoryId);
 
       if (planResult.success) {
-        toast.success('Plan generated from existing tests');
+        toast.success("Plan generated from existing tests");
         router.refresh();
       } else {
-        toast.info('No tests to generate a plan from');
+        toast.info("No tests to generate a plan from");
       }
     } catch {
-      toast.error('Failed to generate from tests');
+      toast.error("Failed to generate from tests");
     } finally {
       setFromTests(false);
     }
@@ -101,21 +109,50 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
   return (
     <div className="mt-4 space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Test Cases ({tests.length})</h4>
+        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Test Cases ({tests.length})
+        </h4>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
           {hasAgentPlan && (
-            <Button variant="ghost" size="sm" onClick={handleConvertPlan} disabled={convertingPlan} className="h-7 text-xs" title="Create placeholder test cases from the plan">
-              {convertingPlan ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Wand2 className="h-3 w-3 mr-1" />}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleConvertPlan}
+              disabled={convertingPlan}
+              className="h-7 text-xs"
+              title="Create placeholder test cases from the plan"
+            >
+              {convertingPlan ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Wand2 className="h-3 w-3 mr-1" />
+              )}
               From Plan
             </Button>
           )}
           {tests.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={handleGenerateFromTests} disabled={fromTests} className="h-7 text-xs" title="Generate a plan from these test cases">
-              {fromTests ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileCode2 className="h-3 w-3 mr-1" />}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleGenerateFromTests}
+              disabled={fromTests}
+              className="h-7 text-xs"
+              title="Generate a plan from these test cases"
+            >
+              {fromTests ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <FileCode2 className="h-3 w-3 mr-1" />
+              )}
               From Tests
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={() => setShowAdd(true)} className="h-7 text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAdd(true)}
+            className="h-7 text-xs"
+          >
             <Plus className="h-3 w-3 mr-1" />
             Add Test Case
           </Button>
@@ -123,26 +160,40 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
       </div>
 
       {tests.length === 0 && !showAdd && (
-        <p className="text-xs text-muted-foreground py-2">No test cases yet. Add one or generate from the plan above.</p>
+        <p className="text-xs text-muted-foreground py-2">
+          No test cases yet. Add one or generate from the plan above.
+        </p>
       )}
 
       {tests.map((test) => (
-        <div key={test.id} className="flex items-start gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 group">
-          {test.isPlaceholder
-            ? <Circle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-            : <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-          }
+        <div
+          key={test.id}
+          className="flex items-start gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 group"
+        >
+          {test.isPlaceholder ? (
+            <Circle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          ) : (
+            <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+          )}
           <div className="flex-1 min-w-0">
-            <span className="text-sm font-medium truncate block">{test.name}</span>
+            <span className="text-sm font-medium truncate block">
+              {test.name}
+            </span>
             {test.specTitle && test.specTitle !== test.name && (
-              <p className="text-xs text-muted-foreground truncate mt-0.5">{test.specTitle}</p>
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                {test.specTitle}
+              </p>
             )}
           </div>
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onOpenTest ? onOpenTest(test.id) : router.push(`/tests?test=${encodeURIComponent(test.id)}`)}
+              onClick={() =>
+                onOpenTest
+                  ? onOpenTest(test.id)
+                  : router.push(`/tests?test=${encodeURIComponent(test.id)}`)
+              }
               className="h-6 text-xs px-2"
             >
               <ExternalLink className="h-3 w-3" />
@@ -168,11 +219,27 @@ export function AreaTestCasesPanel({ areaId, repositoryId, tests, hasAgentPlan, 
             rows={3}
           />
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleAddTestCase} disabled={saving || !newName.trim()} className="h-7 text-xs">
-              {saving ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+            <Button
+              size="sm"
+              onClick={handleAddTestCase}
+              disabled={saving || !newName.trim()}
+              className="h-7 text-xs"
+            >
+              {saving ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : null}
               Save
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => { setShowAdd(false); setNewName(''); setNewDescription(''); }} className="h-7 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setShowAdd(false);
+                setNewName("");
+                setNewDescription("");
+              }}
+              className="h-7 text-xs"
+            >
               Cancel
             </Button>
           </div>

@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   teams,
   users,
@@ -11,7 +11,7 @@ import {
   repositories,
   githubAccounts,
   tests,
-} from '../schema';
+} from "../schema";
 import type {
   NewTeam,
   NewUser,
@@ -20,19 +20,31 @@ import type {
   Team,
   UserRole,
   ConsentType,
-} from '../schema';
-import { eq, desc, and, gte, lt, isNull, count, getTableColumns } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import {
+  eq,
+  desc,
+  and,
+  gte,
+  lt,
+  isNull,
+  count,
+  getTableColumns,
+} from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 function generateSlug(name: string): string {
   return name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
     .substring(0, 50);
 }
 
-export async function createTeam(data: { name: string; slug?: string }): Promise<Team> {
+export async function createTeam(data: {
+  name: string;
+  slug?: string;
+}): Promise<Team> {
   const id = uuid();
   const now = new Date();
   let slug = data.slug || generateSlug(data.name);
@@ -55,7 +67,7 @@ export async function createTeam(data: { name: string; slug?: string }): Promise
   });
 
   const team = await getTeam(id);
-  if (!team) throw new Error('Failed to create team');
+  if (!team) throw new Error("Failed to create team");
   return team;
 }
 
@@ -70,7 +82,10 @@ export async function getTeamBySlug(slug: string) {
 }
 
 export async function updateTeam(id: string, data: Partial<NewTeam>) {
-  await db.update(teams).set({ ...data, updatedAt: new Date() }).where(eq(teams.id, id));
+  await db
+    .update(teams)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(teams.id, id));
 }
 
 export async function deleteTeam(id: string) {
@@ -78,7 +93,11 @@ export async function deleteTeam(id: string) {
 }
 
 export async function getTeamMembers(teamId: string) {
-  return db.select().from(users).where(eq(users.teamId, teamId)).orderBy(desc(users.createdAt));
+  return db
+    .select()
+    .from(users)
+    .where(eq(users.teamId, teamId))
+    .orderBy(desc(users.createdAt));
 }
 
 export async function getUsersByTeam(teamId: string) {
@@ -86,12 +105,19 @@ export async function getUsersByTeam(teamId: string) {
 }
 
 export async function removeUserFromTeam(userId: string) {
-  await db.update(users).set({ teamId: null, updatedAt: new Date() }).where(eq(users.id, userId));
+  await db
+    .update(users)
+    .set({ teamId: null, updatedAt: new Date() })
+    .where(eq(users.id, userId));
 }
 
 // Team-scoped repositories
 export async function getRepositoriesByTeam(teamId: string) {
-  return db.select().from(repositories).where(eq(repositories.teamId, teamId)).orderBy(desc(repositories.createdAt));
+  return db
+    .select()
+    .from(repositories)
+    .where(eq(repositories.teamId, teamId))
+    .orderBy(desc(repositories.createdAt));
 }
 
 // Team-scoped repositories with non-deleted test counts (for repo selector)
@@ -102,7 +128,10 @@ export async function getRepositoriesByTeamWithTestCounts(teamId: string) {
       testCount: count(tests.id),
     })
     .from(repositories)
-    .leftJoin(tests, and(eq(tests.repositoryId, repositories.id), isNull(tests.deletedAt)))
+    .leftJoin(
+      tests,
+      and(eq(tests.repositoryId, repositories.id), isNull(tests.deletedAt)),
+    )
     .where(eq(repositories.teamId, teamId))
     .groupBy(repositories.id)
     .orderBy(desc(repositories.createdAt));
@@ -110,7 +139,10 @@ export async function getRepositoriesByTeamWithTestCounts(teamId: string) {
 
 // Team-scoped GitHub account
 export async function getGithubAccountByTeam(teamId: string) {
-  const [row] = await db.select().from(githubAccounts).where(eq(githubAccounts.teamId, teamId));
+  const [row] = await db
+    .select()
+    .from(githubAccounts)
+    .where(eq(githubAccounts.teamId, teamId));
   return row;
 }
 
@@ -120,7 +152,13 @@ export async function getPendingInvitationsByTeam(teamId: string) {
   return db
     .select()
     .from(userInvitations)
-    .where(and(eq(userInvitations.teamId, teamId), isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
+    .where(
+      and(
+        eq(userInvitations.teamId, teamId),
+        isNull(userInvitations.acceptedAt),
+        gte(userInvitations.expiresAt, now),
+      ),
+    )
     .orderBy(desc(userInvitations.createdAt));
 }
 
@@ -138,7 +176,10 @@ export async function getUserById(id: string) {
 }
 
 export async function getUserByEmail(email: string) {
-  const [row] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email.toLowerCase()));
   return row;
 }
 
@@ -147,7 +188,9 @@ export async function getUserCount() {
   return result.length;
 }
 
-export async function createUser(data: Omit<NewUser, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
+export async function createUser(
+  data: Omit<NewUser, "id" | "createdAt" | "updatedAt">,
+): Promise<User> {
   const id = uuid();
   const now = new Date();
   await db.insert(users).values({
@@ -160,13 +203,16 @@ export async function createUser(data: Omit<NewUser, 'id' | 'createdAt' | 'updat
   // Fetch the created user to get a properly typed User object
   const user = await getUserById(id);
   if (!user) {
-    throw new Error('Failed to create user');
+    throw new Error("Failed to create user");
   }
   return user;
 }
 
 export async function updateUser(id: string, data: Partial<NewUser>) {
-  await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, id));
+  await db
+    .update(users)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(users.id, id));
 }
 
 export async function deleteUser(id: string) {
@@ -174,7 +220,10 @@ export async function deleteUser(id: string) {
 }
 
 export async function updateUserRole(id: string, role: UserRole) {
-  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+  await db
+    .update(users)
+    .set({ role, updatedAt: new Date() })
+    .where(eq(users.id, id));
 }
 
 // ============================================
@@ -182,7 +231,10 @@ export async function updateUserRole(id: string, role: UserRole) {
 // ============================================
 
 export async function getSessionByToken(token: string) {
-  const [row] = await db.select().from(sessions).where(eq(sessions.token, token));
+  const [row] = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.token, token));
   return row;
 }
 
@@ -225,11 +277,16 @@ export async function listApiTokensByUser(userId: string) {
       expiresAt: sessions.expiresAt,
     })
     .from(sessions)
-    .where(and(eq(sessions.userId, userId), eq(sessions.kind, 'api')))
+    .where(and(eq(sessions.userId, userId), eq(sessions.kind, "api")))
     .orderBy(desc(sessions.createdAt));
 }
 
-export async function createApiToken(data: { userId: string; label: string; token: string; expiresAt: Date }) {
+export async function createApiToken(data: {
+  userId: string;
+  label: string;
+  token: string;
+  expiresAt: Date;
+}) {
   const id = uuid();
   const now = new Date();
   await db.insert(sessions).values({
@@ -237,7 +294,7 @@ export async function createApiToken(data: { userId: string; label: string; toke
     userId: data.userId,
     token: data.token,
     expiresAt: data.expiresAt,
-    kind: 'api',
+    kind: "api",
     label: data.label,
     createdAt: now,
     updatedAt: now,
@@ -246,7 +303,15 @@ export async function createApiToken(data: { userId: string; label: string; toke
 }
 
 export async function deleteApiToken(id: string, userId: string) {
-  await db.delete(sessions).where(and(eq(sessions.id, id), eq(sessions.userId, userId), eq(sessions.kind, 'api')));
+  await db
+    .delete(sessions)
+    .where(
+      and(
+        eq(sessions.id, id),
+        eq(sessions.userId, userId),
+        eq(sessions.kind, "api"),
+      ),
+    );
 }
 
 // ============================================
@@ -272,7 +337,7 @@ export async function createLaunchToken(data: {
     userId: data.userId,
     token: data.token,
     expiresAt: data.expiresAt,
-    kind: 'launch',
+    kind: "launch",
     scope: data.scope,
     createdAt: now,
     updatedAt: now,
@@ -284,31 +349,42 @@ export async function createLaunchToken(data: {
 // OAuth Accounts
 // ============================================
 
-export async function getOAuthAccount(provider: string, providerAccountId: string) {
+export async function getOAuthAccount(
+  provider: string,
+  providerAccountId: string,
+) {
   const [row] = await db
     .select()
     .from(oauthAccounts)
     .where(
       and(
         eq(oauthAccounts.provider, provider),
-        eq(oauthAccounts.providerAccountId, providerAccountId)
-      )
+        eq(oauthAccounts.providerAccountId, providerAccountId),
+      ),
     );
   return row;
 }
 
 export async function getOAuthAccountsByUser(userId: string) {
-  return db.select().from(oauthAccounts).where(eq(oauthAccounts.userId, userId));
+  return db
+    .select()
+    .from(oauthAccounts)
+    .where(eq(oauthAccounts.userId, userId));
 }
 
-export async function createOAuthAccount(data: Omit<NewOAuthAccount, 'id' | 'createdAt'>) {
+export async function createOAuthAccount(
+  data: Omit<NewOAuthAccount, "id" | "createdAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(oauthAccounts).values({ ...data, id, createdAt: now });
   return { id, ...data, createdAt: now };
 }
 
-export async function updateOAuthAccount(id: string, data: Partial<NewOAuthAccount>) {
+export async function updateOAuthAccount(
+  id: string,
+  data: Partial<NewOAuthAccount>,
+) {
   await db.update(oauthAccounts).set(data).where(eq(oauthAccounts.id, id));
 }
 
@@ -321,18 +397,25 @@ export async function deleteOAuthAccount(id: string) {
 // ============================================
 
 export async function getPasswordResetToken(token: string) {
-  const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+  const [row] = await db
+    .select()
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.token, token));
   return row;
 }
 
-export async function createPasswordResetToken(userId: string): Promise<string> {
+export async function createPasswordResetToken(
+  userId: string,
+): Promise<string> {
   const id = uuid();
   const token = uuid();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour
 
   // Delete any existing tokens for this user
-  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+  await db
+    .delete(passwordResetTokens)
+    .where(eq(passwordResetTokens.userId, userId));
 
   await db.insert(passwordResetTokens).values({
     id,
@@ -353,7 +436,9 @@ export async function markPasswordResetTokenUsed(token: string) {
 
 export async function deleteExpiredPasswordResetTokens() {
   const now = new Date();
-  await db.delete(passwordResetTokens).where(lt(passwordResetTokens.expiresAt, now));
+  await db
+    .delete(passwordResetTokens)
+    .where(lt(passwordResetTokens.expiresAt, now));
 }
 
 // ============================================
@@ -361,18 +446,25 @@ export async function deleteExpiredPasswordResetTokens() {
 // ============================================
 
 export async function getEmailVerificationToken(token: string) {
-  const [row] = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.token, token));
+  const [row] = await db
+    .select()
+    .from(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.token, token));
   return row;
 }
 
-export async function createEmailVerificationToken(userId: string): Promise<string> {
+export async function createEmailVerificationToken(
+  userId: string,
+): Promise<string> {
   const id = uuid();
   const token = uuid();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
 
   // Delete any existing tokens for this user
-  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId));
+  await db
+    .delete(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.userId, userId));
 
   await db.insert(emailVerificationTokens).values({
     id,
@@ -385,7 +477,9 @@ export async function createEmailVerificationToken(userId: string): Promise<stri
 }
 
 export async function deleteEmailVerificationToken(token: string) {
-  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.token, token));
+  await db
+    .delete(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.token, token));
 }
 
 // ============================================
@@ -393,7 +487,10 @@ export async function deleteEmailVerificationToken(token: string) {
 // ============================================
 
 export async function getInvitations() {
-  return db.select().from(userInvitations).orderBy(desc(userInvitations.createdAt));
+  return db
+    .select()
+    .from(userInvitations)
+    .orderBy(desc(userInvitations.createdAt));
 }
 
 export async function getPendingInvitations() {
@@ -401,26 +498,45 @@ export async function getPendingInvitations() {
   return db
     .select()
     .from(userInvitations)
-    .where(and(isNull(userInvitations.acceptedAt), gte(userInvitations.expiresAt, now)))
+    .where(
+      and(
+        isNull(userInvitations.acceptedAt),
+        gte(userInvitations.expiresAt, now),
+      ),
+    )
     .orderBy(desc(userInvitations.createdAt));
 }
 
 export async function getInvitationById(id: string) {
-  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.id, id));
+  const [row] = await db
+    .select()
+    .from(userInvitations)
+    .where(eq(userInvitations.id, id));
   return row;
 }
 
 export async function getInvitationByToken(token: string) {
-  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.token, token));
+  const [row] = await db
+    .select()
+    .from(userInvitations)
+    .where(eq(userInvitations.token, token));
   return row;
 }
 
 export async function getInvitationByEmail(email: string) {
-  const [row] = await db.select().from(userInvitations).where(eq(userInvitations.email, email.toLowerCase()));
+  const [row] = await db
+    .select()
+    .from(userInvitations)
+    .where(eq(userInvitations.email, email.toLowerCase()));
   return row;
 }
 
-export async function createInvitation(data: { email: string; teamId: string; invitedById?: string; role?: UserRole }): Promise<string> {
+export async function createInvitation(data: {
+  email: string;
+  teamId: string;
+  invitedById?: string;
+  role?: UserRole;
+}): Promise<string> {
   const id = uuid();
   const token = uuid();
   const now = new Date();
@@ -432,7 +548,7 @@ export async function createInvitation(data: { email: string; teamId: string; in
     email: data.email.toLowerCase(),
     invitedById: data.invitedById ?? null,
     token,
-    role: data.role ?? 'member',
+    role: data.role ?? "member",
     expiresAt,
     createdAt: now,
   });
@@ -496,10 +612,10 @@ export async function hasAcceptedTerms(userId: string): Promise<boolean> {
     .where(
       and(
         eq(userConsents.userId, userId),
-        eq(userConsents.consentType, 'terms_of_service'),
+        eq(userConsents.consentType, "terms_of_service"),
         eq(userConsents.granted, true),
-        isNull(userConsents.revokedAt)
-      )
+        isNull(userConsents.revokedAt),
+      ),
     )
     .limit(1);
   return !!row;
@@ -513,7 +629,7 @@ export async function revokeConsent(userId: string, consentType: ConsentType) {
       and(
         eq(userConsents.userId, userId),
         eq(userConsents.consentType, consentType),
-        isNull(userConsents.revokedAt)
-      )
+        isNull(userConsents.revokedAt),
+      ),
     );
 }

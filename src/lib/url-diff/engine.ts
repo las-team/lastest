@@ -3,19 +3,29 @@
  * network, a11y) over two captures and returns a single result blob.
  */
 
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import path from "node:path";
+import { promises as fs } from "node:fs";
 
-import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
-import { generateDiff, type DiffResult } from '@/lib/diff/generator';
-import { computeDomDiff, summarizeDomDiff } from '@/lib/diff/dom-diff';
-import type { DomDiffResult, DomSnapshotData } from '@/lib/db/schema';
-import { computeNetworkDiff, type NetworkDiffResult } from '@/lib/diff/network-diff';
-import { computeA11yDiff, type A11yDiffResult } from '@/lib/diff/a11y-diff';
-import { computePageTextDiff, type PageTextDiff } from '@/lib/diff/page-text-diff';
-import type { UrlCapture } from './capture';
+import { STORAGE_DIRS, toRelativePath } from "@/lib/storage/paths";
+import { generateDiff, type DiffResult } from "@/lib/diff/generator";
+import { computeDomDiff, summarizeDomDiff } from "@/lib/diff/dom-diff";
+import type { DomDiffResult, DomSnapshotData } from "@/lib/db/schema";
+import {
+  computeNetworkDiff,
+  type NetworkDiffResult,
+} from "@/lib/diff/network-diff";
+import { computeA11yDiff, type A11yDiffResult } from "@/lib/diff/a11y-diff";
+import {
+  computePageTextDiff,
+  type PageTextDiff,
+} from "@/lib/diff/page-text-diff";
+import type { UrlCapture } from "./capture";
 
-export type VisualEngineKey = 'pixelmatch' | 'pixelmatch-shift' | 'ssim' | 'butteraugli';
+export type VisualEngineKey =
+  | "pixelmatch"
+  | "pixelmatch-shift"
+  | "ssim"
+  | "butteraugli";
 
 export interface VisualVariant {
   key: VisualEngineKey;
@@ -37,7 +47,7 @@ export interface UrlDiffResult {
     diffRelPath: string;
     pixelDifference: number;
     percentageDifference: number;
-    metadata: DiffResult['metadata'];
+    metadata: DiffResult["metadata"];
   };
   dom: DomDiffResult & { summary: string };
   network: NetworkDiffResult;
@@ -51,7 +61,7 @@ export interface UrlDiffResult {
 
 const EMPTY_DOM: DomSnapshotData = {
   elements: [],
-  url: '',
+  url: "",
   timestamp: 0,
 };
 
@@ -60,7 +70,7 @@ export async function buildUrlDiff(
   captureB: UrlCapture,
   jobId: string,
 ): Promise<UrlDiffResult> {
-  const diffOutDir = path.join(STORAGE_DIRS['url-diffs'], jobId, 'diff');
+  const diffOutDir = path.join(STORAGE_DIRS["url-diffs"], jobId, "diff");
   await fs.mkdir(diffOutDir, { recursive: true });
 
   // Run all 4 visual engines so the UI can let users compare diffs side-by-side.
@@ -70,15 +80,33 @@ export async function buildUrlDiff(
   const visualConfigs: Array<{
     key: VisualEngineKey;
     label: string;
-    engine: 'pixelmatch' | 'ssim' | 'butteraugli';
+    engine: "pixelmatch" | "ssim" | "butteraugli";
     ignorePageShift: boolean;
   }> = [
-    { key: 'pixelmatch', label: 'Pixelmatch', engine: 'pixelmatch', ignorePageShift: false },
-    { key: 'pixelmatch-shift', label: 'Pixelmatch · page-shift aware', engine: 'pixelmatch', ignorePageShift: true },
-    { key: 'ssim', label: 'SSIM', engine: 'ssim', ignorePageShift: false },
-    { key: 'butteraugli', label: 'Butteraugli', engine: 'butteraugli', ignorePageShift: false },
+    {
+      key: "pixelmatch",
+      label: "Pixelmatch",
+      engine: "pixelmatch",
+      ignorePageShift: false,
+    },
+    {
+      key: "pixelmatch-shift",
+      label: "Pixelmatch · page-shift aware",
+      engine: "pixelmatch",
+      ignorePageShift: true,
+    },
+    { key: "ssim", label: "SSIM", engine: "ssim", ignorePageShift: false },
+    {
+      key: "butteraugli",
+      label: "Butteraugli",
+      engine: "butteraugli",
+      ignorePageShift: false,
+    },
   ];
-  const visualRuns: Array<{ cfg: typeof visualConfigs[number]; result: DiffResult }> = [];
+  const visualRuns: Array<{
+    cfg: (typeof visualConfigs)[number];
+    result: DiffResult;
+  }> = [];
   for (const cfg of visualConfigs) {
     const subDir = path.join(diffOutDir, cfg.key);
     await fs.mkdir(subDir, { recursive: true });
@@ -99,7 +127,7 @@ export async function buildUrlDiff(
     }
   }
   if (visualRuns.length === 0) {
-    throw new Error('All visual diff engines failed');
+    throw new Error("All visual diff engines failed");
   }
   const primary = visualRuns[0]!;
   const variants: VisualVariant[] = visualRuns.map(({ cfg, result }) => ({

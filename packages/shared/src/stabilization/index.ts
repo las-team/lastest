@@ -1,4 +1,4 @@
-export type { CoreStabilizationSettings, StabilizationPage } from './types';
+export type { CoreStabilizationSettings, StabilizationPage } from "./types";
 
 export {
   FREEZE_ANIMATIONS_CSS,
@@ -11,9 +11,9 @@ export {
   DETERMINISTIC_RENDERING_CSS,
   PLACEHOLDER_IMAGE_BASE64,
   PLACEHOLDER_IMAGE_BUFFER,
-} from './constants';
+} from "./constants";
 
-export { getFreezeRandomScript, getFreezeTimestampsScript } from './scripts';
+export { getFreezeRandomScript, getFreezeTimestampsScript } from "./scripts";
 
 export {
   waitForSpinnersToDisappear,
@@ -22,7 +22,7 @@ export {
   waitForDomStable,
   waitForCanvasStable,
   injectCSS,
-} from './page-helpers';
+} from "./page-helpers";
 
-export { setupFreezeScripts } from './setup-freeze-scripts';
-export { applyCoreStabilization } from './apply-stabilization';
+export { setupFreezeScripts } from "./setup-freeze-scripts";
+export { applyCoreStabilization } from "./apply-stabilization";

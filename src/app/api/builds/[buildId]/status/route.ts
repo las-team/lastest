@@ -1,27 +1,27 @@
-import { NextResponse } from 'next/server';
-import { buildBuildSummary } from '@/server/actions/builds';
-import { getCurrentSession } from '@/lib/auth';
-import { validateRunnerToken } from '@/server/actions/runners';
-import * as queries from '@/lib/db/queries';
+import { NextResponse } from "next/server";
+import { buildBuildSummary } from "@/server/actions/builds";
+import { getCurrentSession } from "@/lib/auth";
+import { validateRunnerToken } from "@/server/actions/runners";
+import * as queries from "@/lib/db/queries";
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ buildId: string }> }
+  { params }: { params: Promise<{ buildId: string }> },
 ) {
   // Auth: Session OR runner Bearer token
   let teamId: string | null = null;
 
-  const authHeader = request.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
     const runner = await validateRunnerToken(authHeader.slice(7));
     if (!runner) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
     teamId = runner.teamId;
   } else {
     const session = await getCurrentSession();
     if (!session?.team) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     teamId = session.team.id;
   }
@@ -32,45 +32,48 @@ export async function GET(
   // loading the summary (buildBuildSummary skips auth, so the route owns it).
   const buildRecord = await queries.getBuild(buildId);
   if (!buildRecord) {
-    return NextResponse.json({ error: 'Build not found' }, { status: 404 });
+    return NextResponse.json({ error: "Build not found" }, { status: 404 });
   }
   if (buildRecord.testRunId) {
     const run = await queries.getTestRun(buildRecord.testRunId);
     if (run?.repositoryId) {
       const repo = await queries.getRepository(run.repositoryId);
       if (repo && repo.teamId !== teamId) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
   }
 
   const build = await buildBuildSummary(buildId);
   if (!build) {
-    return NextResponse.json({ error: 'Build not found' }, { status: 404 });
+    return NextResponse.json({ error: "Build not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
-    id: build.id,
-    overallStatus: build.overallStatus,
-    totalTests: build.totalTests,
-    passedCount: build.passedCount,
-    failedCount: build.failedCount,
-    changesDetected: build.changesDetected,
-    flakyCount: build.flakyCount,
-    completedAt: build.completedAt,
-    elapsedMs: build.elapsedMs,
-    comparisonMode: build.comparisonMode,
-    codeChangeTestIds: build.codeChangeTestIds,
-    isMainBranch: build.isMainBranch,
-    diffs: build.diffs,
-    errorMessage: build.errorMessage,
-    runningTests: build.runningTests,
-  }, {
-    headers: {
-      // Defeat browser HTTP cache: this endpoint is polled every 2s during
-      // a running build; without this, browsers may serve the first response
-      // from cache for the whole build duration, freezing the progress UI.
-      'Cache-Control': 'no-store, no-cache, must-revalidate',
+  return NextResponse.json(
+    {
+      id: build.id,
+      overallStatus: build.overallStatus,
+      totalTests: build.totalTests,
+      passedCount: build.passedCount,
+      failedCount: build.failedCount,
+      changesDetected: build.changesDetected,
+      flakyCount: build.flakyCount,
+      completedAt: build.completedAt,
+      elapsedMs: build.elapsedMs,
+      comparisonMode: build.comparisonMode,
+      codeChangeTestIds: build.codeChangeTestIds,
+      isMainBranch: build.isMainBranch,
+      diffs: build.diffs,
+      errorMessage: build.errorMessage,
+      runningTests: build.runningTests,
     },
-  });
+    {
+      headers: {
+        // Defeat browser HTTP cache: this endpoint is polled every 2s during
+        // a running build; without this, browsers may serve the first response
+        // from cache for the whole build duration, freezing the progress UI.
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    },
+  );
 }

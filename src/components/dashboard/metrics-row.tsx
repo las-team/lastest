@@ -1,33 +1,51 @@
-'use client';
+"use client";
 
-import { FileCheck2, AlertTriangle, XCircle, Clock, RefreshCw, CheckCircle, Sparkles, Flag, GitBranch, Shield, Layers, Bug, ListTree } from 'lucide-react';
-import type { FilterType } from '@/app/(app)/builds/[buildId]/build-detail-client';
-import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
-import { cn } from '@/lib/utils';
+import {
+  FileCheck2,
+  AlertTriangle,
+  XCircle,
+  Clock,
+  RefreshCw,
+  CheckCircle,
+  Sparkles,
+  Flag,
+  GitBranch,
+  Shield,
+  Layers,
+  Bug,
+  ListTree,
+} from "lucide-react";
+import type { FilterType } from "@/app/(app)/builds/[buildId]/build-detail-client";
+import type { VisualDiffWithTestStatus } from "@/lib/db/schema";
+import { cn } from "@/lib/utils";
 
-type TileStatus = 'passed' | 'failed' | 'changed' | 'pending';
+type TileStatus = "passed" | "failed" | "changed" | "pending";
 
 function deriveTestTileStatus(diffs: VisualDiffWithTestStatus[]): TileStatus {
   const hasFailed = diffs.some(
-    (d) => d.testResultStatus === 'failed' || d.status === 'rejected' || !!d.errorMessage,
+    (d) =>
+      d.testResultStatus === "failed" ||
+      d.status === "rejected" ||
+      !!d.errorMessage,
   );
-  if (hasFailed) return 'failed';
+  if (hasFailed) return "failed";
   const hasChanged = diffs.some(
     (d) =>
-      d.classification === 'changed' ||
-      (d.status === 'pending' && (d.pixelDifference ?? 0) > 0),
+      d.classification === "changed" ||
+      (d.status === "pending" && (d.pixelDifference ?? 0) > 0),
   );
-  if (hasChanged) return 'changed';
+  if (hasChanged) return "changed";
   const allResolved = diffs.every(
     (d) =>
-      d.status === 'approved' ||
-      d.status === 'auto_approved' ||
-      d.classification === 'unchanged' ||
+      d.status === "approved" ||
+      d.status === "auto_approved" ||
+      d.classification === "unchanged" ||
       (d.pixelDifference ?? 0) === 0,
   );
-  if (allResolved && diffs.some((d) => d.testResultStatus === 'passed')) return 'passed';
-  if (allResolved) return 'passed';
-  return 'pending';
+  if (allResolved && diffs.some((d) => d.testResultStatus === "passed"))
+    return "passed";
+  if (allResolved) return "passed";
+  return "pending";
 }
 
 interface MetricsRowProps {
@@ -45,8 +63,8 @@ interface MetricsRowProps {
   aiSafeCount?: number;
   aiReviewCount?: number;
   aiFlagCount?: number;
-  viewMode?: 'branch' | 'main';
-  onViewModeChange?: (mode: 'branch' | 'main') => void;
+  viewMode?: "branch" | "main";
+  onViewModeChange?: (mode: "branch" | "main") => void;
   groupByArea?: boolean;
   onGroupByAreaChange?: (v: boolean) => void;
   groupByTest?: boolean;
@@ -85,13 +103,14 @@ export function MetricsRow({
   activeRunningTests = [],
 }: MetricsRowProps) {
   const formatTime = (ms: number | null) => {
-    if (!ms) return '-';
+    if (!ms) return "-";
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
     return `${(ms / 60000).toFixed(1)}m`;
   };
 
-  const passRate = totalTests > 0 ? Math.round((passedCount / totalTests) * 100) : 0;
+  const passRate =
+    totalTests > 0 ? Math.round((passedCount / totalTests) * 100) : 0;
 
   const hasAIMetrics = aiSafeCount + aiReviewCount + aiFlagCount > 0;
 
@@ -105,51 +124,51 @@ export function MetricsRow({
     isTime?: boolean;
   }[] = [
     {
-      label: 'Passed',
+      label: "Passed",
       value: passedCount,
       icon: CheckCircle,
-      color: passedCount > 0 ? 'text-success' : 'text-muted-foreground/50',
-      bgColor: passedCount > 0 ? 'bg-success/10' : 'bg-muted',
-      filterKey: 'passed',
+      color: passedCount > 0 ? "text-success" : "text-muted-foreground/50",
+      bgColor: passedCount > 0 ? "bg-success/10" : "bg-muted",
+      filterKey: "passed",
     },
     {
-      label: 'Failed',
+      label: "Failed",
       value: failedCount,
       icon: XCircle,
-      color: failedCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
-      bgColor: failedCount > 0 ? 'bg-destructive/10' : 'bg-muted',
-      filterKey: 'failed',
+      color: failedCount > 0 ? "text-destructive" : "text-muted-foreground/50",
+      bgColor: failedCount > 0 ? "bg-destructive/10" : "bg-muted",
+      filterKey: "failed",
     },
     {
-      label: 'Errors',
+      label: "Errors",
       value: errorsCount,
       icon: Bug,
-      color: errorsCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
-      bgColor: errorsCount > 0 ? 'bg-destructive/10' : 'bg-muted',
-      filterKey: 'errors',
+      color: errorsCount > 0 ? "text-destructive" : "text-muted-foreground/50",
+      bgColor: errorsCount > 0 ? "bg-destructive/10" : "bg-muted",
+      filterKey: "errors",
     },
     {
-      label: 'Changed',
+      label: "Changed",
       value: changesDetected,
       icon: AlertTriangle,
-      color: changesDetected > 0 ? 'text-warning' : 'text-muted-foreground/50',
-      bgColor: changesDetected > 0 ? 'bg-warning/10' : 'bg-muted',
-      filterKey: 'changed',
+      color: changesDetected > 0 ? "text-warning" : "text-muted-foreground/50",
+      bgColor: changesDetected > 0 ? "bg-warning/10" : "bg-muted",
+      filterKey: "changed",
     },
     {
-      label: 'Flaky',
+      label: "Flaky",
       value: flakyCount,
       icon: RefreshCw,
-      color: flakyCount > 0 ? 'text-warning' : 'text-muted-foreground/50',
-      bgColor: flakyCount > 0 ? 'bg-warning/10' : 'bg-muted',
-      filterKey: 'flaky',
+      color: flakyCount > 0 ? "text-warning" : "text-muted-foreground/50",
+      bgColor: flakyCount > 0 ? "bg-warning/10" : "bg-muted",
+      filterKey: "flaky",
     },
     {
-      label: 'Time',
+      label: "Time",
       value: formatTime(elapsedMs),
       icon: Clock,
-      color: 'text-muted-foreground',
-      bgColor: 'bg-muted',
+      color: "text-muted-foreground",
+      bgColor: "bg-muted",
       filterKey: null,
       isTime: true,
     },
@@ -164,28 +183,28 @@ export function MetricsRow({
     filterKey: FilterType;
   }[] = [
     {
-      label: 'AI Safe',
+      label: "AI Safe",
       value: aiSafeCount,
       icon: Sparkles,
-      color: aiSafeCount > 0 ? 'text-success' : 'text-muted-foreground/50',
-      bgColor: aiSafeCount > 0 ? 'bg-success/10' : 'bg-muted',
-      filterKey: 'ai-approve',
+      color: aiSafeCount > 0 ? "text-success" : "text-muted-foreground/50",
+      bgColor: aiSafeCount > 0 ? "bg-success/10" : "bg-muted",
+      filterKey: "ai-approve",
     },
     {
-      label: 'AI Review',
+      label: "AI Review",
       value: aiReviewCount,
       icon: AlertTriangle,
-      color: aiReviewCount > 0 ? 'text-warning' : 'text-muted-foreground/50',
-      bgColor: aiReviewCount > 0 ? 'bg-warning/10' : 'bg-muted',
-      filterKey: 'ai-review',
+      color: aiReviewCount > 0 ? "text-warning" : "text-muted-foreground/50",
+      bgColor: aiReviewCount > 0 ? "bg-warning/10" : "bg-muted",
+      filterKey: "ai-review",
     },
     {
-      label: 'AI Flag',
+      label: "AI Flag",
       value: aiFlagCount,
       icon: Flag,
-      color: aiFlagCount > 0 ? 'text-destructive' : 'text-muted-foreground/50',
-      bgColor: aiFlagCount > 0 ? 'bg-destructive/10' : 'bg-muted',
-      filterKey: 'ai-flag',
+      color: aiFlagCount > 0 ? "text-destructive" : "text-muted-foreground/50",
+      bgColor: aiFlagCount > 0 ? "bg-destructive/10" : "bg-muted",
+      filterKey: "ai-flag",
     },
   ];
 
@@ -205,17 +224,17 @@ export function MetricsRow({
         key={metric.label}
         onClick={() => handleClick(metric.filterKey)}
         className={cn(
-          'p-4 rounded-lg flex flex-col items-center transition-all',
+          "p-4 rounded-lg flex flex-col items-center transition-all",
           metric.bgColor,
-          isClickable && 'cursor-pointer hover:scale-105 hover:shadow-md',
-          isActive && 'ring-2 ring-offset-2 ring-primary'
+          isClickable && "cursor-pointer hover:scale-105 hover:shadow-md",
+          isActive && "ring-2 ring-offset-2 ring-primary",
         )}
-        role={isClickable ? 'button' : undefined}
+        role={isClickable ? "button" : undefined}
         tabIndex={isClickable ? 0 : undefined}
         onKeyDown={
           isClickable
             ? (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   handleClick(metric.filterKey);
                 }
@@ -246,21 +265,25 @@ export function MetricsRow({
             byTest.set(d.testId, arr);
           }
           const testIdsInOrder = Array.from(byTest.keys());
-          const testTiles: { testId: string; name: string; status: TileStatus }[] = testIdsInOrder.map((tid) => {
+          const testTiles: {
+            testId: string;
+            name: string;
+            status: TileStatus;
+          }[] = testIdsInOrder.map((tid) => {
             const group = byTest.get(tid)!;
             return {
               testId: tid,
-              name: group[0]?.testName ?? 'unnamed test',
+              name: group[0]?.testName ?? "unnamed test",
               status: deriveTestTileStatus(group),
             };
           });
           const pendingTiles = Math.max(0, totalTests - testTiles.length);
 
           const tileBg: Record<TileStatus, string> = {
-            passed: 'bg-success',
-            failed: 'bg-destructive',
-            changed: 'bg-warning',
-            pending: 'bg-muted',
+            passed: "bg-success",
+            failed: "bg-destructive",
+            changed: "bg-warning",
+            pending: "bg-muted",
           };
 
           // Prefer the authoritative list from runner_commands (claimed but not
@@ -275,7 +298,11 @@ export function MetricsRow({
                   const group = byTest.get(t.testId) ?? [];
                   const recent = group
                     .filter((d) => d.createdAt)
-                    .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())[0];
+                    .sort(
+                      (a, b) =>
+                        new Date(b.createdAt!).getTime() -
+                        new Date(a.createdAt!).getTime(),
+                    )[0];
                   return {
                     testId: t.testId,
                     name: t.name,
@@ -286,7 +313,9 @@ export function MetricsRow({
                   .filter((t) => {
                     const group = byTest.get(t.testId) ?? [];
                     const hasFinalResult = group.some(
-                      (d) => d.testResultStatus === 'passed' || d.testResultStatus === 'failed',
+                      (d) =>
+                        d.testResultStatus === "passed" ||
+                        d.testResultStatus === "failed",
                     );
                     return !hasFinalResult;
                   })
@@ -294,7 +323,11 @@ export function MetricsRow({
                     const group = byTest.get(t.testId) ?? [];
                     const recent = group
                       .filter((d) => d.createdAt)
-                      .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())[0];
+                      .sort(
+                        (a, b) =>
+                          new Date(b.createdAt!).getTime() -
+                          new Date(a.createdAt!).getTime(),
+                      )[0];
                     return {
                       testId: t.testId,
                       name: t.name,
@@ -306,21 +339,30 @@ export function MetricsRow({
           const visibleRunning = runningTests.slice(0, VISIBLE_LIMIT);
           const overflow = Math.max(0, runningTests.length - VISIBLE_LIMIT);
 
-          const headerLabel = isRunning ? 'Progress' : 'Result';
-          const headerValue = isRunning ? `${completedTests}/${totalTests}` : `${passRate}%`;
+          const headerLabel = isRunning ? "Progress" : "Result";
+          const headerValue = isRunning
+            ? `${completedTests}/${totalTests}`
+            : `${passRate}%`;
           const headerValueClass = isRunning
-            ? 'text-primary'
+            ? "text-primary"
             : passRate === 100
-              ? 'text-success'
+              ? "text-success"
               : passRate >= 80
-                ? 'text-warning'
-                : 'text-destructive';
+                ? "text-warning"
+                : "text-destructive";
 
           return (
             <>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">{headerLabel}</span>
-                <span className={cn('text-lg font-bold tabular-nums', headerValueClass)}>
+                <span className="text-sm font-medium text-foreground">
+                  {headerLabel}
+                </span>
+                <span
+                  className={cn(
+                    "text-lg font-bold tabular-nums",
+                    headerValueClass,
+                  )}
+                >
                   {headerValue}
                 </span>
               </div>
@@ -331,7 +373,7 @@ export function MetricsRow({
                     key={`tile-${t.testId}-${i}`}
                     title={`${t.name} · ${t.status}`}
                     className={cn(
-                      'flex-1 min-w-[2px] border-r border-background last:border-r-0',
+                      "flex-1 min-w-[2px] border-r border-background last:border-r-0",
                       tileBg[t.status],
                     )}
                   />
@@ -359,12 +401,16 @@ export function MetricsRow({
                     <span className="font-medium text-foreground">
                       now running
                       {runningTests.length > 1 && (
-                        <span className="ml-1 text-muted-foreground tabular-nums">({runningTests.length})</span>
+                        <span className="ml-1 text-muted-foreground tabular-nums">
+                          ({runningTests.length})
+                        </span>
                       )}
                     </span>
                   </div>
                   {visibleRunning.length === 0 ? (
-                    <div className="font-mono text-xs text-muted-foreground mt-1 ml-3.5">running…</div>
+                    <div className="font-mono text-xs text-muted-foreground mt-1 ml-3.5">
+                      running…
+                    </div>
                   ) : (
                     <ul className="mt-1 space-y-0.5">
                       {visibleRunning.map((r) => (
@@ -374,9 +420,15 @@ export function MetricsRow({
                         >
                           <span className="text-foreground">{r.name}</span>
                           {r.stepLabel && (
-                            <span className="text-muted-foreground/70"> · {r.stepLabel}</span>
+                            <span className="text-muted-foreground/70">
+                              {" "}
+                              · {r.stepLabel}
+                            </span>
                           )}
-                          <span className="text-muted-foreground/70"> · capturing…</span>
+                          <span className="text-muted-foreground/70">
+                            {" "}
+                            · capturing…
+                          </span>
                         </li>
                       ))}
                       {overflow > 0 && (
@@ -397,7 +449,9 @@ export function MetricsRow({
       <div className="flex items-start gap-4">
         {/* Tests section */}
         <div>
-          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Tests</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">
+            Tests
+          </div>
           <div className="grid grid-cols-2 gap-4">
             {metrics.slice(0, 2).map(renderCard)}
           </div>
@@ -408,7 +462,9 @@ export function MetricsRow({
 
         {/* Cases section */}
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Cases</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">
+            Cases
+          </div>
           <div className="grid grid-cols-4 gap-4">
             {metrics.slice(2).map(renderCard)}
           </div>
@@ -427,13 +483,13 @@ export function MetricsRow({
                 key={metric.label}
                 onClick={() => handleClick(metric.filterKey)}
                 className={cn(
-                  'p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-white/80',
-                  isActive && 'ring-2 ring-offset-2 ring-purple-500'
+                  "p-3 rounded-lg flex flex-col items-center transition-all cursor-pointer hover:scale-105 hover:shadow-md bg-white/80",
+                  isActive && "ring-2 ring-offset-2 ring-purple-500",
                 )}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     handleClick(metric.filterKey);
                   }
@@ -453,30 +509,32 @@ export function MetricsRow({
       )}
 
       {/* Controls Row */}
-      {(viewMode && onViewModeChange || onGroupByAreaChange || onGroupByTestChange) && (
+      {((viewMode && onViewModeChange) ||
+        onGroupByAreaChange ||
+        onGroupByTestChange) && (
         <div className="flex items-center gap-3">
           {/* Comparison Mode Toggle — segmented control */}
           {viewMode && onViewModeChange && (
             <div className="inline-flex rounded-lg border bg-muted p-1">
               <button
-                onClick={() => onViewModeChange('branch')}
+                onClick={() => onViewModeChange("branch")}
                 className={cn(
-                  'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-                  viewMode === 'branch'
-                    ? 'bg-accent text-accent-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                  "inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  viewMode === "branch"
+                    ? "bg-accent text-accent-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <GitBranch className="w-4 h-4" />
                 Branch
               </button>
               <button
-                onClick={() => onViewModeChange('main')}
+                onClick={() => onViewModeChange("main")}
                 className={cn(
-                  'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors',
-                  viewMode === 'main'
-                    ? 'bg-accent text-accent-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
+                  "inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                  viewMode === "main"
+                    ? "bg-accent text-accent-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <Shield className="w-4 h-4" />
@@ -490,10 +548,10 @@ export function MetricsRow({
             <button
               onClick={() => onGroupByTestChange(!groupByTest)}
               className={cn(
-                'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
+                "inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors",
                 groupByTest
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
+                  ? "bg-accent text-accent-foreground border-accent"
+                  : "bg-muted text-muted-foreground border-transparent hover:text-foreground",
               )}
             >
               <ListTree className="w-4 h-4" />
@@ -506,10 +564,10 @@ export function MetricsRow({
             <button
               onClick={() => onGroupByAreaChange(!groupByArea)}
               className={cn(
-                'inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors',
+                "inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors",
                 groupByArea
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
+                  ? "bg-accent text-accent-foreground border-accent"
+                  : "bg-muted text-muted-foreground border-transparent hover:text-foreground",
               )}
             >
               <Layers className="w-4 h-4" />

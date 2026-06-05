@@ -3,7 +3,7 @@
  * Computes a 0–100 score from axe-core violations with severity weighting.
  */
 
-import type { A11yViolation, WcagScoreSummary } from '@/lib/db/schema';
+import type { A11yViolation, WcagScoreSummary } from "@/lib/db/schema";
 
 const SEVERITY_WEIGHTS: Record<string, number> = {
   critical: 10,
@@ -21,11 +21,17 @@ const LEVEL_MULTIPLIERS: Record<string, number> = {
 /**
  * Derive WCAG conformance level from axe-core tags.
  */
-export function getWcagLevel(tags?: string[]): 'A' | 'AA' | 'AAA' | undefined {
+export function getWcagLevel(tags?: string[]): "A" | "AA" | "AAA" | undefined {
   if (!tags) return undefined;
-  if (tags.some(t => t.startsWith('wcag2aaa') || t === 'wcag22aaa')) return 'AAA';
-  if (tags.some(t => t.startsWith('wcag2aa') || t === 'wcag22aa' || t === 'wcag21aa')) return 'AA';
-  if (tags.some(t => t.startsWith('wcag2a') || t === 'wcag21a')) return 'A';
+  if (tags.some((t) => t.startsWith("wcag2aaa") || t === "wcag22aaa"))
+    return "AAA";
+  if (
+    tags.some(
+      (t) => t.startsWith("wcag2aa") || t === "wcag22aa" || t === "wcag21aa",
+    )
+  )
+    return "AA";
+  if (tags.some((t) => t.startsWith("wcag2a") || t === "wcag21a")) return "A";
   return undefined;
 }
 
@@ -46,7 +52,7 @@ export function calculateWcagScore(
   let totalDeduction = 0;
 
   for (const v of violations) {
-    const severity = v.impact ?? 'moderate';
+    const severity = v.impact ?? "moderate";
     bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
 
     const weight = SEVERITY_WEIGHTS[severity] ?? 2;
@@ -58,11 +64,11 @@ export function calculateWcagScore(
     const rawNodes = v.nodes as unknown;
     const nodeCount = Array.isArray(rawNodes)
       ? rawNodes.length
-      : typeof rawNodes === 'number' && Number.isFinite(rawNodes)
-      ? rawNodes
-      : 1;
+      : typeof rawNodes === "number" && Number.isFinite(rawNodes)
+        ? rawNodes
+        : 1;
     const nodeMultiplier = Math.min(nodeCount, 3);
-    const level = v.wcagLevel ?? getWcagLevel(v.tags) ?? 'AA';
+    const level = v.wcagLevel ?? getWcagLevel(v.tags) ?? "AA";
     const levelMultiplier = LEVEL_MULTIPLIERS[level] ?? 1.0;
 
     totalDeduction += weight * nodeMultiplier * levelMultiplier;
@@ -86,7 +92,10 @@ export function calculateWcagScore(
  * Aggregate a11y data across multiple test results for build-level scoring.
  */
 export function aggregateA11yForBuild(
-  results: Array<{ a11yViolations?: A11yViolation[] | null; a11yPassesCount?: number | null }>,
+  results: Array<{
+    a11yViolations?: A11yViolation[] | null;
+    a11yPassesCount?: number | null;
+  }>,
 ): {
   score: number;
   violationCount: number;
@@ -106,7 +115,8 @@ export function aggregateA11yForBuild(
   }
 
   const summary = calculateWcagScore(allViolations, totalPasses);
-  const criticalCount = summary.bySeverity.critical + summary.bySeverity.serious;
+  const criticalCount =
+    summary.bySeverity.critical + summary.bySeverity.serious;
 
   return {
     score: summary.score,

@@ -3,8 +3,8 @@
  * Delegates to @lastest/shared for all stabilization logic.
  */
 
-import type { Page } from 'playwright';
-import type { StabilizationPayload } from './protocol.js';
+import type { Page } from "playwright";
+import type { StabilizationPayload } from "./protocol.js";
 import {
   CROSS_OS_CHROMIUM_ARGS,
   FREEZE_ANIMATIONS_SCRIPT,
@@ -12,9 +12,14 @@ import {
   applyCoreStabilization,
   getFreezeRandomScript,
   getFreezeTimestampsScript,
-} from '@lastest/shared';
+} from "@lastest/shared";
 
-export { CROSS_OS_CHROMIUM_ARGS, FREEZE_ANIMATIONS_SCRIPT, getFreezeRandomScript, getFreezeTimestampsScript };
+export {
+  CROSS_OS_CHROMIUM_ARGS,
+  FREEZE_ANIMATIONS_SCRIPT,
+  getFreezeRandomScript,
+  getFreezeTimestampsScript,
+};
 
 /**
  * Setup init scripts to freeze timestamps and random values.
@@ -22,7 +27,7 @@ export { CROSS_OS_CHROMIUM_ARGS, FREEZE_ANIMATIONS_SCRIPT, getFreezeRandomScript
  */
 export async function setupFreezeScripts(
   page: Page,
-  settings?: StabilizationPayload
+  settings?: StabilizationPayload,
 ): Promise<void> {
   if (!settings) return;
   await sharedSetupFreezeScripts(page, settings);
@@ -33,7 +38,7 @@ export async function setupFreezeScripts(
  */
 export async function applyPreScreenshotStabilization(
   page: Page,
-  settings?: StabilizationPayload
+  settings?: StabilizationPayload,
 ): Promise<void> {
   if (!settings) return;
   await applyCoreStabilization(page, settings);

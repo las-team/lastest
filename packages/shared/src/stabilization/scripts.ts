@@ -6,7 +6,10 @@
  * Excalidraw for element IDs) use it instead of Math.random(). Non-deterministic
  * IDs can affect rendering order, React reconciliation, and canvas compositing.
  */
-export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): string {
+export function getFreezeRandomScript(
+  seed: number,
+  reseedOnInput?: boolean,
+): string {
   return `
     (function() {
       var baseSeed = ${seed};
@@ -51,7 +54,9 @@ export function getFreezeRandomScript(seed: number, reseedOnInput?: boolean): st
       // __resetMathRandom removed: resetting mathState mid-session caused roughjs
       // to re-render existing elements with different strokes, making them invisible.
       // addInitScript already resets mathState on each navigation.
-${reseedOnInput ? `
+${
+  reseedOnInput
+    ? `
       // Reseed LCG on user input events so element creation gets a seed
       // determined by the triggering event, not async RNG drift.
       function __hashInputEvent(e) {
@@ -70,7 +75,9 @@ ${reseedOnInput ? `
           cryptoState = (Math.imul(h, 2654435761) >>> 0) || 1;
         }, true);
       });
-` : ''}
+`
+    : ""
+}
     })();
   `;
 }

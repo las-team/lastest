@@ -1,6 +1,12 @@
-import type { AwardCategories, AwardTier } from '@/lib/db/schema';
+import type { AwardCategories, AwardTier } from "@/lib/db/schema";
 
-export const TIER_ORDER: AwardTier[] = ['none', 'starter', 'bronze', 'silver', 'gold'];
+export const TIER_ORDER: AwardTier[] = [
+  "none",
+  "starter",
+  "bronze",
+  "silver",
+  "gold",
+];
 
 export function tierRank(t: AwardTier): number {
   return TIER_ORDER.indexOf(t);
@@ -11,7 +17,7 @@ export function maxTier(a: AwardTier, b: AwardTier): AwardTier {
 }
 
 /**
- * Snapshot metrics for a single completed build. All fields are required , 
+ * Snapshot metrics for a single completed build. All fields are required ,
  * null fields from the DB should be coerced to 0 by the caller.
  */
 export interface BuildMetrics {
@@ -51,21 +57,24 @@ export interface RecomputeInput {
  */
 export function computeTier(input: RecomputeInput): AwardTier {
   const { testCount, latestBuild, recentBuilds } = input;
-  if (!latestBuild) return 'none';
+  if (!latestBuild) return "none";
 
-  const passRate = latestBuild.totalTests > 0
-    ? latestBuild.passedCount / latestBuild.totalTests
-    : 0;
+  const passRate =
+    latestBuild.totalTests > 0
+      ? latestBuild.passedCount / latestBuild.totalTests
+      : 0;
 
   // Gold: ≥20 tests, last 5 builds all clean-pass, a11yScore ≥90, 0 critical a11y.
-  const last5Clean = recentBuilds.length >= 5 && recentBuilds.slice(0, 5).every(b => b.cleanPass);
+  const last5Clean =
+    recentBuilds.length >= 5 &&
+    recentBuilds.slice(0, 5).every((b) => b.cleanPass);
   if (
     testCount >= 20 &&
     last5Clean &&
     latestBuild.a11yScore >= 90 &&
     latestBuild.a11yCriticalCount === 0
   ) {
-    return 'gold';
+    return "gold";
   }
 
   // Silver: ≥10 tests, last build pass rate ≥95%, a11yScore ≥80, 0 critical.
@@ -75,22 +84,22 @@ export function computeTier(input: RecomputeInput): AwardTier {
     latestBuild.a11yScore >= 80 &&
     latestBuild.a11yCriticalCount === 0
   ) {
-    return 'silver';
+    return "silver";
   }
 
   // Bronze: ≥5 tests, pass rate ≥80%, a11yScore ≥60.
   if (testCount >= 5 && passRate >= 0.8 && latestBuild.a11yScore >= 60) {
-    return 'bronze';
+    return "bronze";
   }
 
   // Starter: at least one test passing in the latest build. Deliberately
   // generous to encourage early sharing, this is the moment a developer can
   // first embed a Lastest badge and feel proud about it.
   if (testCount >= 1 && latestBuild.passedCount >= 1) {
-    return 'starter';
+    return "starter";
   }
 
-  return 'none';
+  return "none";
 }
 
 export function computeCategories(input: RecomputeInput): AwardCategories {
@@ -100,7 +109,10 @@ export function computeCategories(input: RecomputeInput): AwardCategories {
   }
   return {
     a11y: latestBuild.a11yScore >= 90 && latestBuild.a11yCriticalCount === 0,
-    allPassing: latestBuild.failedCount === 0 && latestBuild.changesDetected === 0 && latestBuild.totalTests > 0,
+    allPassing:
+      latestBuild.failedCount === 0 &&
+      latestBuild.changesDetected === 0 &&
+      latestBuild.totalTests > 0,
     zeroDrift: rejectedDiffsLast30Days === 0,
   };
 }

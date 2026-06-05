@@ -1,7 +1,7 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
 
 interface RemoteRepo {
   id: string;
@@ -21,9 +21,9 @@ interface ImportResult {
 
 export async function fetchRemoteRepositories(
   remoteUrl: string,
-  apiKey: string
+  apiKey: string,
 ): Promise<{ repos?: RemoteRepo[]; error?: string }> {
-  const url = remoteUrl.replace(/\/+$/, '');
+  const url = remoteUrl.replace(/\/+$/, "");
 
   try {
     const res = await fetch(`${url}/api/v1/repos`, {
@@ -31,7 +31,7 @@ export async function fetchRemoteRepositories(
     });
 
     if (res.status === 401) {
-      return { error: 'Invalid API key or unauthorized' };
+      return { error: "Invalid API key or unauthorized" };
     }
 
     if (!res.ok) {
@@ -39,14 +39,14 @@ export async function fetchRemoteRepositories(
     }
 
     const data = await res.json();
-    const repos: RemoteRepo[] = (Array.isArray(data) ? data : data.repos ?? []).map(
-      (r: Record<string, unknown>) => ({
-        id: r.id as string,
-        fullName: (r.fullName as string) || `${r.owner}/${r.name}`,
-        name: r.name as string,
-        owner: r.owner as string,
-      })
-    );
+    const repos: RemoteRepo[] = (
+      Array.isArray(data) ? data : (data.repos ?? [])
+    ).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      fullName: (r.fullName as string) || `${r.owner}/${r.name}`,
+      name: r.name as string,
+      owner: r.owner as string,
+    }));
 
     return { repos };
   } catch (err) {
@@ -58,11 +58,11 @@ export async function migrateTests(
   repositoryId: string,
   remoteUrl: string,
   apiKey: string,
-  remoteRepoId: string
+  remoteRepoId: string,
 ): Promise<ImportResult> {
   await requireRepoAccess(repositoryId);
 
-  const url = remoteUrl.replace(/\/+$/, '');
+  const url = remoteUrl.replace(/\/+$/, "");
 
   // Fetch local data
   const [areas, tests] = await Promise.all([
@@ -92,12 +92,12 @@ export async function migrateTests(
     tests: tests.map((t) => ({
       name: t.name,
       functionalAreaName: t.functionalAreaId
-        ? areaIdToName.get(t.functionalAreaId) ?? null
+        ? (areaIdToName.get(t.functionalAreaId) ?? null)
         : null,
       code: t.code,
       targetUrl: t.targetUrl,
       assertions: t.assertions,
-      executionMode: t.executionMode ?? 'procedural',
+      executionMode: t.executionMode ?? "procedural",
       setupOverrides: t.setupOverrides,
       teardownOverrides: t.teardownOverrides,
       stabilizationOverrides: t.stabilizationOverrides,
@@ -112,10 +112,10 @@ export async function migrateTests(
 
   try {
     const res = await fetch(`${url}/api/v1/repos/${remoteRepoId}/import`, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
@@ -127,7 +127,7 @@ export async function migrateTests(
         areasUpdated: 0,
         testsCreated: 0,
         testsUpdated: 0,
-        errors: ['Invalid API key or unauthorized on remote'],
+        errors: ["Invalid API key or unauthorized on remote"],
       };
     }
 

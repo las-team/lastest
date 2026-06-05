@@ -7,12 +7,17 @@
  * Run: pnpm tsx scripts/seed-lastest-tests.ts
  */
 
-import { db } from '../src/lib/db';
-import { tests, testVersions, repositories, functionalAreas } from '../src/lib/db/schema';
-import { eq } from 'drizzle-orm';
-import { randomUUID as uuid } from 'crypto';
+import { db } from "../src/lib/db";
+import {
+  tests,
+  testVersions,
+  repositories,
+  functionalAreas,
+} from "../src/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { randomUUID as uuid } from "crypto";
 
-const SOURCE_REPO_NAME = 'las-team/lastest';
+const SOURCE_REPO_NAME = "las-team/lastest";
 
 // Will be set dynamically
 let REPO_ID: string;
@@ -36,7 +41,8 @@ const TEST_DEFINITIONS: Array<{
     name: "SETUP: Login",
     targetUrl: "http://localhost:3000",
     functionalArea: "Logins",
-    setupOverrides: '{"skippedDefaultStepIds":["89d5548a-3ff1-4e68-b704-193caebca383","0f281033-f62f-41d1-b6fa-057265c28883"],"extraSteps":[]}',
+    setupOverrides:
+      '{"skippedDefaultStepIds":["89d5548a-3ff1-4e68-b704-193caebca383","0f281033-f62f-41d1-b6fa-057265c28883"],"extraSteps":[]}',
     code: `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
   // Navigate to the login page
   stepLogger.log('Navigating to login page');
@@ -71,7 +77,8 @@ const TEST_DEFINITIONS: Array<{
   {
     name: "Dashboard",
     targetUrl: "http://localhost:3000",
-    requiredCapabilities: '{"fileUpload":false,"clipboard":false,"networkInterception":false,"downloads":false}',
+    requiredCapabilities:
+      '{"fileUpload":false,"clipboard":false,"networkInterception":false,"downloads":false}',
     code: `import { Page } from 'playwright';
 
 export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
@@ -148,7 +155,8 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
     name: "Google login",
     targetUrl: "http://localhost:3000",
     functionalArea: "Logins",
-    setupOverrides: '{"skippedDefaultStepIds":["0f281033-f62f-41d1-b6fa-057265c28883"],"extraSteps":[]}',
+    setupOverrides:
+      '{"skippedDefaultStepIds":["0f281033-f62f-41d1-b6fa-057265c28883"],"extraSteps":[]}',
     code: `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   stepLogger.log('Navigate to home page');
   await page.goto(\`\${baseUrl}/\`, { waitUntil: 'domcontentloaded' });
@@ -528,7 +536,9 @@ async function seed() {
     .where(eq(repositories.fullName, SOURCE_REPO_NAME));
 
   if (!repo) {
-    console.error(`Repository "${SOURCE_REPO_NAME}" not found. Please create it first.`);
+    console.error(
+      `Repository "${SOURCE_REPO_NAME}" not found. Please create it first.`,
+    );
     process.exit(1);
   }
 
@@ -543,13 +553,15 @@ async function seed() {
       id: faId,
       repositoryId: REPO_ID,
       name: faDef.name,
-      parentId: faDef.parent ? faMap.get(faDef.parent) ?? null : null,
+      parentId: faDef.parent ? (faMap.get(faDef.parent) ?? null) : null,
     });
     faMap.set(faDef.name, faId);
-    console.log(`Created functional area: ${faDef.name}${faDef.parent ? ` (child of ${faDef.parent})` : ''}`);
+    console.log(
+      `Created functional area: ${faDef.name}${faDef.parent ? ` (child of ${faDef.parent})` : ""}`,
+    );
   }
 
-  console.log('Seeding lastest self-tests...\n');
+  console.log("Seeding lastest self-tests...\n");
 
   const now = new Date();
 
@@ -559,7 +571,9 @@ async function seed() {
     await db.insert(tests).values({
       id: testId,
       repositoryId: REPO_ID,
-      functionalAreaId: def.functionalArea ? faMap.get(def.functionalArea) ?? null : null,
+      functionalAreaId: def.functionalArea
+        ? (faMap.get(def.functionalArea) ?? null)
+        : null,
       name: def.name,
       code: def.code,
       targetUrl: def.targetUrl,
@@ -577,7 +591,7 @@ async function seed() {
       code: def.code,
       name: def.name,
       targetUrl: def.targetUrl,
-      changeReason: 'initial',
+      changeReason: "initial",
       createdAt: now,
     });
 
@@ -588,6 +602,6 @@ async function seed() {
 }
 
 seed().catch((err) => {
-  console.error('Seed failed:', err);
+  console.error("Seed failed:", err);
   process.exit(1);
 });

@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
-import * as queries from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { cleanupStaleJobs } from '@/server/actions/jobs';
-import { processPoolQueue } from '@/server/actions/embedded-sessions';
-import { ensureSchedulerStarted } from '@/lib/scheduling/scheduler';
-import type { BackgroundJob } from '@/lib/db/schema';
+import { NextResponse } from "next/server";
+import * as queries from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { cleanupStaleJobs } from "@/server/actions/jobs";
+import { processPoolQueue } from "@/server/actions/embedded-sessions";
+import { ensureSchedulerStarted } from "@/lib/scheduling/scheduler";
+import type { BackgroundJob } from "@/lib/db/schema";
 
 // Track last cleanup time to avoid running too frequently
 let lastCleanupTime = 0;
@@ -12,7 +12,13 @@ const CLEANUP_INTERVAL_MS = 60000; // Run cleanup at most once per minute
 
 export type JobWithChildren = BackgroundJob & {
   _children?: BackgroundJob[];
-  _childSummary?: { total: number; completed: number; failed: number; running: number; pending: number };
+  _childSummary?: {
+    total: number;
+    completed: number;
+    failed: number;
+    running: number;
+    pending: number;
+  };
 };
 
 export async function GET() {
@@ -21,7 +27,7 @@ export async function GET() {
 
   const session = await getCurrentSession();
   if (!session?.team) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // Periodically clean up stale jobs (5 min timeout) and reset stuck runners
@@ -35,18 +41,20 @@ export async function GET() {
 
   // Get team's repos to filter jobs
   const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
 
   const allJobs = await queries.getRecentBackgroundJobs(10000);
   // Only the team's own repo-bound jobs. Repo-less ("global") jobs have no
   // team binding on the row, so we deliberately drop them here instead of
   // broadcasting them to every team.
-  const teamJobs = allJobs.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
+  const teamJobs = allJobs.filter(
+    (j) => j.repositoryId !== null && teamRepoIds.has(j.repositoryId),
+  );
 
   // Batch-fetch children for active parent jobs (single query instead of N+1)
   const activeParentIds = teamJobs
-    .filter(j => j.status === 'running' || j.status === 'pending')
-    .map(j => j.id);
+    .filter((j) => j.status === "running" || j.status === "pending")
+    .map((j) => j.id);
   const allChildren = await queries.getChildJobsByParentIds(activeParentIds);
   const childrenByParent = new Map<string, typeof allChildren>();
   for (const child of allChildren) {
@@ -60,10 +68,10 @@ export async function GET() {
     if (children && children.length > 0) {
       const summary = {
         total: children.length,
-        completed: children.filter(c => c.status === 'completed').length,
-        failed: children.filter(c => c.status === 'failed').length,
-        running: children.filter(c => c.status === 'running').length,
-        pending: children.filter(c => c.status === 'pending').length,
+        completed: children.filter((c) => c.status === "completed").length,
+        failed: children.filter((c) => c.status === "failed").length,
+        running: children.filter((c) => c.status === "running").length,
+        pending: children.filter((c) => c.status === "pending").length,
       };
       return { ...job, _children: children, _childSummary: summary };
     }

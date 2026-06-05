@@ -1,4 +1,4 @@
-import net from 'node:net';
+import net from "node:net";
 
 /**
  * Convert a direct ws:// streamUrl to a proxy path so the browser connects
@@ -11,8 +11,8 @@ export function toProxyStreamUrl(streamUrl: string | null): string | null {
   if (!streamUrl) return null;
   try {
     const url = new URL(streamUrl);
-    if (url.protocol === 'ws:' || url.protocol === 'wss:') {
-      const target = `${url.hostname}:${url.port || '9223'}`;
+    if (url.protocol === "ws:" || url.protocol === "wss:") {
+      const target = `${url.hostname}:${url.port || "9223"}`;
       return `/api/embedded/stream/ws?target=${encodeURIComponent(target)}`;
     }
   } catch {
@@ -34,15 +34,18 @@ export function toProxyStreamUrl(streamUrl: string | null): string | null {
  * `false` on connect refused / timeout / DNS failure. Default timeout is short
  * so the recording-client's 500 ms poll loop doesn't bloat noticeably.
  */
-export async function probeStreamUrlAlive(rawStreamUrl: string | null, timeoutMs = 250): Promise<boolean> {
+export async function probeStreamUrlAlive(
+  rawStreamUrl: string | null,
+  timeoutMs = 250,
+): Promise<boolean> {
   if (!rawStreamUrl) return false;
   let host: string;
   let port: number;
   try {
     const url = new URL(rawStreamUrl);
-    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return true;
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") return true;
     host = url.hostname;
-    port = parseInt(url.port || '9223', 10);
+    port = parseInt(url.port || "9223", 10);
   } catch {
     return false;
   }
@@ -53,12 +56,16 @@ export async function probeStreamUrlAlive(rawStreamUrl: string | null, timeoutMs
     const finish = (ok: boolean) => {
       if (done) return;
       done = true;
-      try { socket.destroy(); } catch { /* ignore */ }
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
       resolve(ok);
     };
     socket.setTimeout(timeoutMs);
-    socket.once('connect', () => finish(true));
-    socket.once('timeout', () => finish(false));
-    socket.once('error', () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
   });
 }

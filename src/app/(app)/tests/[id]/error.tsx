@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import Link from 'next/link';
-import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useEffect } from "react";
+import Link from "next/link";
+import { AlertTriangle, Home, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function TestError({
   error,
@@ -13,7 +13,7 @@ export default function TestError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('Test page error:', error);
+    console.error("Test page error:", error);
   }, [error]);
 
   return (

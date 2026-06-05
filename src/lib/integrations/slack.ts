@@ -1,4 +1,4 @@
-import type { BuildStatus } from '@/lib/db/schema';
+import type { BuildStatus } from "@/lib/db/schema";
 
 export interface SlackBuildNotification {
   buildId: string;
@@ -18,62 +18,62 @@ export interface SlackBuildNotification {
  */
 export async function sendSlackNotification(
   webhookUrl: string,
-  notification: SlackBuildNotification
+  notification: SlackBuildNotification,
 ): Promise<{ success: boolean; error?: string }> {
   const statusEmoji = getStatusEmoji(notification.status);
   const statusText = getStatusText(notification.status);
 
   const blocks = [
     {
-      type: 'header',
+      type: "header",
       text: {
-        type: 'plain_text',
+        type: "plain_text",
         text: `${statusEmoji} Visual Test Build ${statusText}`,
         emoji: true,
       },
     },
     {
-      type: 'section',
+      type: "section",
       fields: [
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Branch:*\n\`${notification.gitBranch}\``,
         },
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Commit:*\n\`${notification.gitCommit}\``,
         },
       ],
     },
     {
-      type: 'section',
+      type: "section",
       fields: [
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Total Tests:*\n${notification.totalTests}`,
         },
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Passed:*\n${notification.passedCount}`,
         },
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Changes:*\n${notification.changesDetected}`,
         },
         {
-          type: 'mrkdwn',
+          type: "mrkdwn",
           text: `*Failed:*\n${notification.failedCount}`,
         },
       ],
     },
     {
-      type: 'actions',
+      type: "actions",
       elements: [
         {
-          type: 'button',
+          type: "button",
           text: {
-            type: 'plain_text',
-            text: 'View Build',
+            type: "plain_text",
+            text: "View Build",
             emoji: true,
           },
           url: notification.buildUrl,
@@ -84,8 +84,8 @@ export async function sendSlackNotification(
 
   try {
     const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         text: `Visual Test Build ${statusText}: ${notification.passedCount}/${notification.totalTests} passed, ${notification.changesDetected} changes detected`,
         blocks,
@@ -94,40 +94,46 @@ export async function sendSlackNotification(
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Slack webhook failed: ${response.status} ${text}` };
+      return {
+        success: false,
+        error: `Slack webhook failed: ${response.status} ${text}`,
+      };
     }
 
     return { success: true };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error sending Slack notification',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error sending Slack notification",
     };
   }
 }
 
 function getStatusEmoji(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return '✅';
-    case 'review_required':
-      return '⚠️';
-    case 'blocked':
-      return '❌';
+    case "safe_to_merge":
+      return "✅";
+    case "review_required":
+      return "⚠️";
+    case "blocked":
+      return "❌";
     default:
-      return '📋';
+      return "📋";
   }
 }
 
 function getStatusText(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return 'Passed';
-    case 'review_required':
-      return 'Review Required';
-    case 'blocked':
-      return 'Blocked';
+    case "safe_to_merge":
+      return "Passed";
+    case "review_required":
+      return "Review Required";
+    case "blocked":
+      return "Blocked";
     default:
-      return 'Complete';
+      return "Complete";
   }
 }

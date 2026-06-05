@@ -27,9 +27,9 @@ Settings → API Tokens section:
 
 ## Key Files
 
-| Path | Role |
-|------|------|
-| `src/server/actions/api-tokens.ts` | `createApiToken()`, `listApiTokens()`, `revokeApiToken()` |
-| `src/lib/auth/api-key.ts` | `verifyBearerToken()` — validates token against sessions table |
-| `src/components/api-tokens/api-tokens-section.tsx` | Token management UI |
-| `src/app/api/v1/[...slug]/route.ts` | Auth middleware checking session or Bearer token |
+| Path                                               | Role                                                           |
+| -------------------------------------------------- | -------------------------------------------------------------- |
+| `src/server/actions/api-tokens.ts`                 | `createApiToken()`, `listApiTokens()`, `revokeApiToken()`      |
+| `src/lib/auth/api-key.ts`                          | `verifyBearerToken()` — validates token against sessions table |
+| `src/components/api-tokens/api-tokens-section.tsx` | Token management UI                                            |
+| `src/app/api/v1/[...slug]/route.ts`                | Auth middleware checking session or Bearer token               |

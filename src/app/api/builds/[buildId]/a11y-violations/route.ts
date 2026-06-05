@@ -11,17 +11,17 @@
  *                            and a `text/csv` Content-Disposition so
  *                            curl -OJ writes a sane filename.
  */
-import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
-import { verifyBearerToken } from '@/lib/auth/api-key';
-import * as queries from '@/lib/db/queries';
-import { downloadBuildA11yViolationsCsv } from '@/server/actions/builds';
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentSession } from "@/lib/auth";
+import { verifyBearerToken } from "@/lib/auth/api-key";
+import * as queries from "@/lib/db/queries";
+import { downloadBuildA11yViolationsCsv } from "@/server/actions/builds";
 
 async function verifyAuth(request: NextRequest) {
   const session = await getCurrentSession();
   if (session) return session;
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
     return verifyBearerToken(authHeader.slice(7));
   }
   return null;
@@ -33,38 +33,41 @@ export async function GET(
 ) {
   const session = await verifyAuth(request);
   if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!session.team) {
-    return NextResponse.json({ error: 'No team' }, { status: 403 });
+    return NextResponse.json({ error: "No team" }, { status: 403 });
   }
 
   const { buildId } = await params;
   const build = await queries.getBuild(buildId);
   if (!build) {
-    return NextResponse.json({ error: 'Build not found' }, { status: 404 });
+    return NextResponse.json({ error: "Build not found" }, { status: 404 });
   }
   if (!build.testRunId) {
-    return NextResponse.json({ error: 'Build has no run' }, { status: 404 });
+    return NextResponse.json({ error: "Build has no run" }, { status: 404 });
   }
   const run = await queries.getTestRun(build.testRunId);
   if (!run?.repositoryId) {
-    return NextResponse.json({ error: 'Build has no repo binding' }, { status: 404 });
+    return NextResponse.json(
+      { error: "Build has no repo binding" },
+      { status: 404 },
+    );
   }
   const repo = await queries.getRepository(run.repositoryId);
   if (!repo || repo.teamId !== session.team.id) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const format = new URL(request.url).searchParams.get('format');
-  if (format === 'csv') {
+  const format = new URL(request.url).searchParams.get("format");
+  if (format === "csv") {
     const csv = await downloadBuildA11yViolationsCsv(buildId);
     return new NextResponse(csv, {
       status: 200,
       headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="build-${buildId}-a11y-violations.csv"`,
-        'Cache-Control': 'no-store',
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="build-${buildId}-a11y-violations.csv"`,
+        "Cache-Control": "no-store",
       },
     });
   }

@@ -10,12 +10,12 @@
  * - build:complete - Build completed with final status
  */
 
-import { NextRequest } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
-import { verifyBearerToken } from '@/lib/auth/api-key';
-import { subscribeToTestEvents, type TestEvent } from '@/lib/ws/test-events';
+import { NextRequest } from "next/server";
+import { getCurrentSession } from "@/lib/auth";
+import { verifyBearerToken } from "@/lib/auth/api-key";
+import { subscribeToTestEvents, type TestEvent } from "@/lib/ws/test-events";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 // Helper to verify API auth (session or Bearer token)
 async function verifyAuth(request: NextRequest) {
@@ -26,8 +26,8 @@ async function verifyAuth(request: NextRequest) {
   }
 
   // Try API token auth (Bearer token)
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
     return verifyBearerToken(token);
   }
@@ -39,12 +39,12 @@ export async function GET(request: NextRequest) {
   const session = await verifyAuth(request);
 
   if (!session) {
-    return new Response('Unauthorized', { status: 401 });
+    return new Response("Unauthorized", { status: 401 });
   }
 
   const teamId = session.team?.id;
   if (!teamId) {
-    return new Response('No team', { status: 403 });
+    return new Response("No team", { status: 403 });
   }
 
   // Create SSE stream
@@ -55,10 +55,12 @@ export async function GET(request: NextRequest) {
     start(controller) {
       // Send connected event
       const connectedData = {
-        type: 'connected',
+        type: "connected",
         timestamp: Date.now(),
       };
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(connectedData)}\n\n`));
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify(connectedData)}\n\n`),
+      );
 
       // Subscribe to test events
       unsubscribe = subscribeToTestEvents((event: TestEvent) => {
@@ -66,10 +68,12 @@ export async function GET(request: NextRequest) {
         if (event.teamId !== teamId) return;
 
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+          );
         } catch (error) {
           // Stream might be closed
-          console.error('[SSE] Failed to send event:', error);
+          console.error("[SSE] Failed to send event:", error);
         }
       });
 
@@ -77,7 +81,7 @@ export async function GET(request: NextRequest) {
       // and under any 30s intermediary idle limit).
       const keepalive = setInterval(() => {
         try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
           clearInterval(keepalive);
         }
@@ -86,7 +90,11 @@ export async function GET(request: NextRequest) {
       // Cloudflare 524 prevention — close at 90s; EventSource auto-reconnects.
       const lifetimeCap = setTimeout(() => {
         try {
-          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.enqueue(
+            encoder.encode(
+              'event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n',
+            ),
+          );
           controller.close();
         } catch {
           // already closed
@@ -94,7 +102,7 @@ export async function GET(request: NextRequest) {
       }, 90_000);
 
       // Cleanup on close
-      request.signal.addEventListener('abort', () => {
+      request.signal.addEventListener("abort", () => {
         clearInterval(keepalive);
         clearTimeout(lifetimeCap);
         if (unsubscribe) {
@@ -113,9 +121,9 @@ export async function GET(request: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
     },
   });
 }

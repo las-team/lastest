@@ -22,31 +22,31 @@ These are essential and strictly necessary for the correct functioning of a web 
 
 **Cookies by sender**:
 
-Cookie name: better-auth.session\_token
+Cookie name: better-auth.session_token
 Sender website: lastest.cloud (first-party)
 Type of cookie: Technical / Strictly necessary
 Retention period: 30 days (refreshed daily)
 Description: Keeps you signed in across pages. httpOnly, SameSite=Lax, Secure in production. Issued by better-auth.
 
-Cookie name: \_\_Secure-better-auth.session\_token
+Cookie name: \_\_Secure-better-auth.session_token
 Sender website: lastest.cloud (first-party)
 Type of cookie: Technical / Strictly necessary
 Retention period: 30 days (refreshed daily)
 Description: Secure-prefixed variant of the session cookie used over HTTPS in production.
 
-Cookie name: github\_oauth\_state
+Cookie name: github_oauth_state
 Sender website: lastest.cloud (first-party)
 Type of cookie: Technical / Strictly necessary
 Retention period: 10 minutes
 Description: CSRF/state value for the GitHub repository-connect flow. Deleted on callback.
 
-Cookie name: gitlab\_oauth\_state
+Cookie name: gitlab_oauth_state
 Sender website: lastest.cloud (first-party)
 Type of cookie: Technical / Strictly necessary
 Retention period: 10 minutes
 Description: CSRF/state value for the GitLab repository-connect flow. Deleted on callback.
 
-Cookie name: google\_sheets\_oauth\_state
+Cookie name: google_sheets_oauth_state
 Sender website: lastest.cloud (first-party)
 Type of cookie: Technical / Strictly necessary
 Retention period: 10 minutes
@@ -68,11 +68,11 @@ You can also disable or delete similar data used by browser add-ons, such as "Fl
 
 For instance, you can find out how to manage your cookie preferences in the most common browsers via the following links:
 
-* [Firefox](https://support.mozilla.org/en-US/kb/enable-and-disable-cookies-website-preferences?redirect=no)
-* [Chrome](https://support.google.com/chrome/answer/95647?hl=en&co=GENIE.Platform%3DDesktop)
-* [Explorer](https://support.microsoft.com/en-us/windows/delete-and-manage-cookies-168dab11-0753-043d-7c16-ede5947fc64d)
-* [Safari](https://support.apple.com/et-ee/guide/safari/sfri11471/mac)
-* [Opera](https://blogs.opera.com/news/2015/08/how-to-manage-cookies-in-opera/)
+- [Firefox](https://support.mozilla.org/en-US/kb/enable-and-disable-cookies-website-preferences?redirect=no)
+- [Chrome](https://support.google.com/chrome/answer/95647?hl=en&co=GENIE.Platform%3DDesktop)
+- [Explorer](https://support.microsoft.com/en-us/windows/delete-and-manage-cookies-168dab11-0753-043d-7c16-ede5947fc64d)
+- [Safari](https://support.apple.com/et-ee/guide/safari/sfri11471/mac)
+- [Opera](https://blogs.opera.com/news/2015/08/how-to-manage-cookies-in-opera/)
 
 If you use a different browser, see the documentation for your browser.
 

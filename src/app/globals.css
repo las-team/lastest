@@ -9,42 +9,42 @@
      (docs/design/colors_and_type.css). Red `#E03E36` is reserved for the
      brand mark + regression states; teal `#36A88E` drives primary action;
      soft `#F6F6F4` is the standard app surface. */
-  --background: #F6F6F4;
-  --foreground: #1F2A33;
-  --card: #FFFFFF;
-  --card-foreground: #1F2A33;
-  --popover: #FFFFFF;
-  --popover-foreground: #1F2A33;
+  --background: #f6f6f4;
+  --foreground: #1f2a33;
+  --card: #ffffff;
+  --card-foreground: #1f2a33;
+  --popover: #ffffff;
+  --popover-foreground: #1f2a33;
   /* Brand teal — anchored to the design system (docs/design/colors_and_type.css).
    * For UI states that need AA-text contrast on light surfaces, components reach
    * for the darker `--success` / `--c-teal-text` variants below, NOT the brand
    * primary. The brand teal stays exact so visual identity matches the kit. */
-  --primary: #36A88E;
-  --primary-foreground: #FFFFFF;
-  --secondary: #EFEFEC;
-  --secondary-foreground: #1F2A33;
-  --muted: #F1F1EE;
+  --primary: #36a88e;
+  --primary-foreground: #ffffff;
+  --secondary: #efefec;
+  --secondary-foreground: #1f2a33;
+  --muted: #f1f1ee;
   --muted-foreground: rgba(31, 42, 51, 0.55);
   --accent: rgba(54, 168, 142, 0.12);
-  --accent-foreground: #1F2A33;
-  --destructive: #E03E36;
+  --accent-foreground: #1f2a33;
+  --destructive: #e03e36;
   --border: rgba(31, 42, 51, 0.08);
   --input: rgba(31, 42, 51, 0.08);
   --ring: rgba(224, 152, 54, 0.6);
 
   /* Chart palette — anchored on the brand 5-stop wheel */
-  --chart-1: #36A88E;
-  --chart-2: #3674A8;
-  --chart-3: #E09836;
-  --chart-4: #E03E36;
-  --chart-5: #1F2A33;
+  --chart-1: #36a88e;
+  --chart-2: #3674a8;
+  --chart-3: #e09836;
+  --chart-4: #e03e36;
+  --chart-5: #1f2a33;
 
-  --sidebar: #F1F1EE;
-  --sidebar-foreground: #1F2A33;
-  --sidebar-primary: #36A88E;
-  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar: #f1f1ee;
+  --sidebar-foreground: #1f2a33;
+  --sidebar-primary: #36a88e;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: rgba(31, 42, 51, 0.05);
-  --sidebar-accent-foreground: #1F2A33;
+  --sidebar-accent-foreground: #1f2a33;
   --sidebar-border: rgba(31, 42, 51, 0.08);
   --sidebar-ring: rgba(224, 152, 54, 0.6);
 
@@ -68,23 +68,23 @@
   /* ---------- DESIGN-SYSTEM TOKENS (docs/design/colors_and_type.css) ----------
      Available for direct CSS usage in bespoke components. Shadcn primitives
      consume the semantic tokens above; new code can reach for these directly. */
-  --c-red: #E03E36;
-  --c-amber: #E09836;
-  --c-teal: #36A88E;
-  --c-blue: #3674A8;
-  --c-ink: #1F2A33;
+  --c-red: #e03e36;
+  --c-amber: #e09836;
+  --c-teal: #36a88e;
+  --c-blue: #3674a8;
+  --c-ink: #1f2a33;
 
-  --c-white: #FFFFFF;
-  --c-soft: #F6F6F4;
-  --c-paper: #F6F4EF;
-  --c-soft-2: #EFEFEC;
+  --c-white: #ffffff;
+  --c-soft: #f6f6f4;
+  --c-paper: #f6f4ef;
+  --c-soft-2: #efefec;
   --c-line: rgba(31, 42, 51, 0.08);
   --c-line-strong: rgba(31, 42, 51, 0.16);
 
   --action: var(--c-teal);
-  --action-hover: #2E957D;
+  --action-hover: #2e957d;
   --action-secondary: var(--c-blue);
-  --action-secondary-hover: #2E6594;
+  --action-secondary-hover: #2e6594;
   --brand: var(--c-red);
 
   /* Brand semantic colors — straight from the Lastest design system.
@@ -99,10 +99,10 @@
    * 4.5:1 — chip labels, link-like accents, "primary" CTA labels on tinted
    * backgrounds. NEVER substitute these for the brand stops on backgrounds,
    * icons, or charts — that breaks visual identity. */
-  --c-teal-text: #1F7B66;
-  --c-amber-text: #8C5C19;
-  --c-blue-text: #2E5E8C;
-  --c-red-text: #B12F29;
+  --c-teal-text: #1f7b66;
+  --c-amber-text: #8c5c19;
+  --c-blue-text: #2e5e8c;
+  --c-red-text: #b12f29;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -121,42 +121,42 @@
 }
 
 .dark {
-  --background: #1F2A33;
-  --foreground: #FFFFFF;
-  --card: #2A3640;
-  --card-foreground: #FFFFFF;
-  --popover: #2A3640;
-  --popover-foreground: #FFFFFF;
-  --primary: #36A88E;
-  --primary-foreground: #FFFFFF;
+  --background: #1f2a33;
+  --foreground: #ffffff;
+  --card: #2a3640;
+  --card-foreground: #ffffff;
+  --popover: #2a3640;
+  --popover-foreground: #ffffff;
+  --primary: #36a88e;
+  --primary-foreground: #ffffff;
   --secondary: rgba(255, 255, 255, 0.06);
-  --secondary-foreground: #FFFFFF;
+  --secondary-foreground: #ffffff;
   --muted: rgba(255, 255, 255, 0.04);
   --muted-foreground: rgba(255, 255, 255, 0.55);
   --accent: rgba(54, 168, 142, 0.18);
-  --accent-foreground: #FFFFFF;
-  --destructive: #E03E36;
-  --border: rgba(255, 255, 255, 0.10);
-  --input: rgba(255, 255, 255, 0.10);
+  --accent-foreground: #ffffff;
+  --destructive: #e03e36;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: rgba(224, 152, 54, 0.5);
 
-  --chart-1: #36A88E;
-  --chart-2: #3674A8;
-  --chart-3: #E09836;
-  --chart-4: #E03E36;
-  --chart-5: #FFFFFF;
+  --chart-1: #36a88e;
+  --chart-2: #3674a8;
+  --chart-3: #e09836;
+  --chart-4: #e03e36;
+  --chart-5: #ffffff;
 
-  --sidebar: #1F2A33;
-  --sidebar-foreground: #FFFFFF;
-  --sidebar-primary: #36A88E;
-  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar: #1f2a33;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #36a88e;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: rgba(255, 255, 255, 0.06);
-  --sidebar-accent-foreground: #FFFFFF;
-  --sidebar-border: rgba(255, 255, 255, 0.10);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: rgba(224, 152, 54, 0.5);
 
   --shadow-2xs: 0px 1px 1px rgba(0, 0, 0, 0.18);
-  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, 0.20);
+  --shadow-xs: 0px 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-sm: 0px 2px 4px rgba(0, 0, 0, 0.22);
   --shadow: 0px 2px 4px rgba(0, 0, 0, 0.22);
   --shadow-md: 0px 4px 12px rgba(0, 0, 0, 0.28);
@@ -263,11 +263,16 @@
    rather than `border-color` for the visible ring. The pulse is large enough
    to read on a Card-sized child without overflowing into adjacent rows. */
 @keyframes settings-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(224, 152, 54, 0.55), 0 0 0 0 rgba(224, 152, 54, 0);
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(224, 152, 54, 0.55),
+      0 0 0 0 rgba(224, 152, 54, 0);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(224, 152, 54, 0.35), 0 0 18px 4px rgba(224, 152, 54, 0.25);
+    box-shadow:
+      0 0 0 6px rgba(224, 152, 54, 0.35),
+      0 0 18px 4px rgba(224, 152, 54, 0.25);
   }
 }
 
@@ -293,7 +298,8 @@
 }
 
 @keyframes step-active-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 0 oklch(from var(--color-primary) l c h / 0.45);
   }
   50% {
@@ -302,7 +308,8 @@
 }
 
 @keyframes step-active-row-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       inset 0 0 0 1px oklch(from var(--color-primary) l c h / 0.55),
       0 0 0 0 oklch(from var(--color-primary) l c h / 0.35);
@@ -342,6 +349,12 @@
                         when the cookie notice is showing. Ties with Radix
                         portals at z-50; portals mount later in the DOM so
                         modals/dropdowns still paint above the pill. */
-.layer-canvas-overlay { z-index: 10; }
-.layer-playback-timeline { z-index: 20; }
-.layer-playback-controls { z-index: 50; }
+.layer-canvas-overlay {
+  z-index: 10;
+}
+.layer-playback-timeline {
+  z-index: 20;
+}
+.layer-playback-controls {
+  z-index: 50;
+}

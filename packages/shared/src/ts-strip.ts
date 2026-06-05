@@ -12,12 +12,12 @@
  * than killing the test run.
  */
 
-import { transform } from 'sucrase';
+import { transform } from "sucrase";
 
 export function stripTypeAnnotations(code: string): string {
   try {
     const { code: js } = transform(code, {
-      transforms: ['typescript'],
+      transforms: ["typescript"],
       disableESTransforms: true,
       preserveDynamicImport: true,
       production: true,
@@ -35,11 +35,17 @@ export function stripTypeAnnotations(code: string): string {
  */
 export function legacyStripTypeAnnotations(code: string): string {
   let result = code;
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
+  result = result.replace(
+    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
+    "$1 $2$3",
+  );
+  result = result.replace(
+    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
+    "$1 $2$3",
+  );
+  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ")");
+  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, "$1");
+  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, "");
   return result;
 }
 
@@ -49,16 +55,21 @@ export function legacyStripTypeAnnotations(code: string): string {
  * of swallowing it. Use this before persisting AI output so a syntactically
  * broken script doesn't reach the runner.
  */
-export function validateTestCode(code: string): { valid: true } | { valid: false; error: string } {
+export function validateTestCode(
+  code: string,
+): { valid: true } | { valid: false; error: string } {
   try {
     transform(code, {
-      transforms: ['typescript'],
+      transforms: ["typescript"],
       disableESTransforms: true,
       preserveDynamicImport: true,
       production: true,
     });
     return { valid: true };
   } catch (err) {
-    return { valid: false, error: err instanceof Error ? err.message : String(err) };
+    return {
+      valid: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }

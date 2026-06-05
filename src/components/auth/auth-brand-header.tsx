@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from "next/link";
 
 export function AuthBrandHeader({
   title,
@@ -9,7 +9,11 @@ export function AuthBrandHeader({
 }) {
   return (
     <div className="flex flex-col items-center space-y-4 text-center">
-      <Link href="/" aria-label="Lastest home" className="inline-flex items-center gap-2">
+      <Link
+        href="/"
+        aria-label="Lastest home"
+        className="inline-flex items-center gap-2"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/icon-light.svg"

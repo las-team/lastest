@@ -11,9 +11,9 @@
  * Ignore-paths use simple glob-like patterns: "user.id", "session.*", "**.timestamp".
  */
 
-import type { VariableDiffSummary } from '@/lib/db/schema';
+import type { VariableDiffSummary } from "@/lib/db/schema";
 
-type DiffTier = VariableDiffSummary['changes'][number]['tier'];
+type DiffTier = VariableDiffSummary["changes"][number]["tier"];
 
 interface VariableDiffOptions {
   /** Glob-like patterns; matched against dot-paths. `*` = single segment, `**` = any depth. */
@@ -22,25 +22,29 @@ interface VariableDiffOptions {
 
 function matchPath(path: string, pattern: string): boolean {
   // Escape regex meta-chars EXCEPT `*` so we can convert globs ourselves.
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(
-    '^' + escaped
-      .replace(/\*\*/g, '__DOUBLESTAR__')
-      .replace(/\*/g, '[^.]+')
-      .replace(/__DOUBLESTAR__/g, '.+')
-      + '$',
+    "^" +
+      escaped
+        .replace(/\*\*/g, "__DOUBLESTAR__")
+        .replace(/\*/g, "[^.]+")
+        .replace(/__DOUBLESTAR__/g, ".+") +
+      "$",
   );
   return re.test(path);
 }
 
-function shouldIgnore(path: string, ignorePaths: string[] | undefined): boolean {
+function shouldIgnore(
+  path: string,
+  ignorePaths: string[] | undefined,
+): boolean {
   if (!ignorePaths || ignorePaths.length === 0) return false;
-  return ignorePaths.some(p => matchPath(path, p));
+  return ignorePaths.some((p) => matchPath(path, p));
 }
 
 function typeOf(v: unknown): string {
-  if (v === null) return 'null';
-  if (Array.isArray(v)) return 'array';
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
   return typeof v;
 }
 
@@ -48,26 +52,28 @@ function classifyChange(baseline: unknown, current: unknown): DiffTier | null {
   // Object/array key sets differ => structural-break (handled by recursion below)
   const bt = typeOf(baseline);
   const ct = typeOf(current);
-  if (bt !== ct) return 'type-change';
-  if (bt === 'object' || bt === 'array') return null; // recurse
+  if (bt !== ct) return "type-change";
+  if (bt === "object" || bt === "array") return null; // recurse
   if (baseline === current) return null;
-  if (bt === 'number') return 'value-change-numeric';
-  return 'value-change-string';
+  if (bt === "number") return "value-change-numeric";
+  return "value-change-string";
 }
 
 function diffRecursive(
   baseline: unknown,
   current: unknown,
   path: string,
-  changes: VariableDiffSummary['changes'],
+  changes: VariableDiffSummary["changes"],
   ignorePaths: string[] | undefined,
 ): void {
   if (shouldIgnore(path, ignorePaths)) return;
 
   // Both objects (non-array) — diff key by key
   if (
-    baseline && current &&
-    typeOf(baseline) === 'object' && typeOf(current) === 'object'
+    baseline &&
+    current &&
+    typeOf(baseline) === "object" &&
+    typeOf(current) === "object"
   ) {
     const baseObj = baseline as Record<string, unknown>;
     const currObj = current as Record<string, unknown>;
@@ -78,11 +84,19 @@ function diffRecursive(
       const cHas = k in currObj;
       if (bHas && !cHas) {
         if (!shouldIgnore(subPath, ignorePaths)) {
-          changes.push({ path: subPath, tier: 'structural-break', baseline: baseObj[k] });
+          changes.push({
+            path: subPath,
+            tier: "structural-break",
+            baseline: baseObj[k],
+          });
         }
       } else if (!bHas && cHas) {
         if (!shouldIgnore(subPath, ignorePaths)) {
-          changes.push({ path: subPath, tier: 'structural-break', current: currObj[k] });
+          changes.push({
+            path: subPath,
+            tier: "structural-break",
+            current: currObj[k],
+          });
         }
       } else {
         diffRecursive(baseObj[k], currObj[k], subPath, changes, ignorePaths);
@@ -98,11 +112,19 @@ function diffRecursive(
       const subPath = `${path}[${i}]`;
       if (i >= baseline.length) {
         if (!shouldIgnore(subPath, ignorePaths)) {
-          changes.push({ path: subPath, tier: 'structural-break', current: current[i] });
+          changes.push({
+            path: subPath,
+            tier: "structural-break",
+            current: current[i],
+          });
         }
       } else if (i >= current.length) {
         if (!shouldIgnore(subPath, ignorePaths)) {
-          changes.push({ path: subPath, tier: 'structural-break', baseline: baseline[i] });
+          changes.push({
+            path: subPath,
+            tier: "structural-break",
+            baseline: baseline[i],
+          });
         }
       } else {
         diffRecursive(baseline[i], current[i], subPath, changes, ignorePaths);
@@ -113,7 +135,7 @@ function diffRecursive(
 
   // Primitives or mismatched type
   const tier = classifyChange(baseline, current);
-  if (tier) changes.push({ path: path || '$', tier, baseline, current });
+  if (tier) changes.push({ path: path || "$", tier, baseline, current });
 }
 
 export function computeVariableDiff(
@@ -121,29 +143,41 @@ export function computeVariableDiff(
   current: Record<string, unknown> | null | undefined,
   options: VariableDiffOptions = {},
 ): VariableDiffSummary {
-  const changes: VariableDiffSummary['changes'] = [];
-  diffRecursive(baseline ?? {}, current ?? {}, '', changes, options.ignorePaths);
+  const changes: VariableDiffSummary["changes"] = [];
+  diffRecursive(
+    baseline ?? {},
+    current ?? {},
+    "",
+    changes,
+    options.ignorePaths,
+  );
   // Sort by tier severity: structural-break > type-change > numeric > string
   const tierRank: Record<DiffTier, number> = {
-    'structural-break': 0,
-    'type-change': 1,
-    'value-change-numeric': 2,
-    'value-change-string': 3,
+    "structural-break": 0,
+    "type-change": 1,
+    "value-change-numeric": 2,
+    "value-change-string": 3,
   };
   changes.sort((a, b) => tierRank[a.tier] - tierRank[b.tier]);
   return { changes };
 }
 
 export function summarizeVariableDiff(d: VariableDiffSummary): string {
-  if (d.changes.length === 0) return 'No variable changes';
+  if (d.changes.length === 0) return "No variable changes";
   const counts: Record<DiffTier, number> = {
-    'structural-break': 0, 'type-change': 0, 'value-change-numeric': 0, 'value-change-string': 0,
+    "structural-break": 0,
+    "type-change": 0,
+    "value-change-numeric": 0,
+    "value-change-string": 0,
   };
   for (const c of d.changes) counts[c.tier]++;
   const parts: string[] = [];
-  if (counts['structural-break']) parts.push(`${counts['structural-break']} structural`);
-  if (counts['type-change']) parts.push(`${counts['type-change']} type`);
-  if (counts['value-change-numeric']) parts.push(`${counts['value-change-numeric']} numeric`);
-  if (counts['value-change-string']) parts.push(`${counts['value-change-string']} string`);
-  return parts.join(', ');
+  if (counts["structural-break"])
+    parts.push(`${counts["structural-break"]} structural`);
+  if (counts["type-change"]) parts.push(`${counts["type-change"]} type`);
+  if (counts["value-change-numeric"])
+    parts.push(`${counts["value-change-numeric"]} numeric`);
+  if (counts["value-change-string"])
+    parts.push(`${counts["value-change-string"]} string`);
+  return parts.join(", ");
 }

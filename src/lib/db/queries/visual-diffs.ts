@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   visualDiffs,
   baselines,
@@ -12,16 +12,16 @@ import {
   routes,
   routeTestSuggestions,
   functionalAreas,
-} from '../schema';
+} from "../schema";
 import type {
   NewVisualDiff,
   NewBaseline,
   NewIgnoreRegion,
   NewFocusRegion,
   NewPlannedScreenshot,
-} from '../schema';
-import { eq, desc, and, or, inArray, isNull, sql } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { eq, desc, and, or, inArray, isNull, sql } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // Visual Diffs
 export async function getVisualDiffsByBuild(buildId: string) {
@@ -86,14 +86,15 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
     .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
     .leftJoin(tests, eq(visualDiffs.testId, tests.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
-    .where(eq(visualDiffs.buildId, buildId))
-    ;
-
+    .where(eq(visualDiffs.buildId, buildId));
   return diffs;
 }
 
 export async function getVisualDiff(id: string) {
-  const [row] = await db.select().from(visualDiffs).where(eq(visualDiffs.id, id));
+  const [row] = await db
+    .select()
+    .from(visualDiffs)
+    .where(eq(visualDiffs.id, id));
   return row;
 }
 
@@ -101,26 +102,40 @@ export async function getPendingDiffsByBuild(buildId: string) {
   return db
     .select()
     .from(visualDiffs)
-    .where(and(eq(visualDiffs.buildId, buildId), eq(visualDiffs.status, 'pending')))
-    ;
+    .where(
+      and(eq(visualDiffs.buildId, buildId), eq(visualDiffs.status, "pending")),
+    );
 }
 
-export async function createVisualDiff(data: Omit<NewVisualDiff, 'id'>) {
+export async function createVisualDiff(data: Omit<NewVisualDiff, "id">) {
   const id = uuid();
   await db.insert(visualDiffs).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
 }
 
-export async function updateVisualDiff(id: string, data: Partial<NewVisualDiff>) {
+export async function updateVisualDiff(
+  id: string,
+  data: Partial<NewVisualDiff>,
+) {
   await db.update(visualDiffs).set(data).where(eq(visualDiffs.id, id));
 }
 
-export async function batchUpdateVisualDiffs(ids: string[], data: Partial<NewVisualDiff>) {
+export async function batchUpdateVisualDiffs(
+  ids: string[],
+  data: Partial<NewVisualDiff>,
+) {
   await db.update(visualDiffs).set(data).where(inArray(visualDiffs.id, ids));
 }
 
-export async function setDiffIssue(id: string, issueUrl: string, issueProvider: string) {
-  await db.update(visualDiffs).set({ issueUrl, issueProvider }).where(eq(visualDiffs.id, id));
+export async function setDiffIssue(
+  id: string,
+  issueUrl: string,
+  issueProvider: string,
+) {
+  await db
+    .update(visualDiffs)
+    .set({ issueUrl, issueProvider })
+    .where(eq(visualDiffs.id, id));
 }
 
 export async function getAIDiffSummaryForBuild(buildId: string) {
@@ -132,21 +147,24 @@ export async function getAIDiffSummaryForBuild(buildId: string) {
       classification: visualDiffs.classification,
     })
     .from(visualDiffs)
-    .where(eq(visualDiffs.buildId, buildId))
-    ;
-
+    .where(eq(visualDiffs.buildId, buildId));
   // Only count non-unchanged diffs (AI analysis only runs on changed diffs)
-  const analyzable = diffs.filter(d => d.classification !== 'unchanged');
+  const analyzable = diffs.filter((d) => d.classification !== "unchanged");
 
   return {
-    approveCount: analyzable.filter(d => d.aiRecommendation === 'approve').length,
-    reviewCount: analyzable.filter(d => d.aiRecommendation === 'review').length,
-    flagCount: analyzable.filter(d => d.aiRecommendation === 'flag').length,
-    pendingAnalysis: analyzable.filter(d =>
-      d.aiAnalysisStatus === 'pending' || d.aiAnalysisStatus === 'running'
+    approveCount: analyzable.filter((d) => d.aiRecommendation === "approve")
+      .length,
+    reviewCount: analyzable.filter((d) => d.aiRecommendation === "review")
+      .length,
+    flagCount: analyzable.filter((d) => d.aiRecommendation === "flag").length,
+    pendingAnalysis: analyzable.filter(
+      (d) =>
+        d.aiAnalysisStatus === "pending" || d.aiAnalysisStatus === "running",
     ).length,
     totalAnalyzable: analyzable.length,
-    completedAnalysis: analyzable.filter(d => d.aiAnalysisStatus === 'completed').length,
+    completedAnalysis: analyzable.filter(
+      (d) => d.aiAnalysisStatus === "completed",
+    ).length,
   };
 }
 
@@ -157,11 +175,10 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
     .where(
       and(
         eq(visualDiffs.buildId, buildId),
-        eq(visualDiffs.status, 'pending'),
-        eq(visualDiffs.aiRecommendation, 'approve')
-      )
-    )
-    ;
+        eq(visualDiffs.status, "pending"),
+        eq(visualDiffs.aiRecommendation, "approve"),
+      ),
+    );
 }
 
 // Baselines
@@ -172,7 +189,13 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
  * 2. Default branch baseline (if defaultBranch provided)
  * 3. Any active baseline (legacy fallback)
  */
-export async function getActiveBaseline(testId: string, stepLabel?: string | null, branch?: string, defaultBranch?: string, browser: string = 'chromium') {
+export async function getActiveBaseline(
+  testId: string,
+  stepLabel?: string | null,
+  branch?: string,
+  defaultBranch?: string,
+  browser: string = "chromium",
+) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
@@ -182,13 +205,15 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
     const [branchBaseline] = await db
       .select()
       .from(baselines)
-      .where(and(
-        eq(baselines.testId, testId),
-        eq(baselines.isActive, true),
-        eq(baselines.branch, branch),
-        eq(baselines.browser, browser),
-        ...stepConditions,
-      ))
+      .where(
+        and(
+          eq(baselines.testId, testId),
+          eq(baselines.isActive, true),
+          eq(baselines.branch, branch),
+          eq(baselines.browser, browser),
+          ...stepConditions,
+        ),
+      )
       .orderBy(desc(baselines.createdAt));
     if (branchBaseline) return branchBaseline;
   }
@@ -198,13 +223,15 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
     const [mainBaseline] = await db
       .select()
       .from(baselines)
-      .where(and(
-        eq(baselines.testId, testId),
-        eq(baselines.isActive, true),
-        eq(baselines.branch, defaultBranch),
-        eq(baselines.browser, browser),
-        ...stepConditions,
-      ))
+      .where(
+        and(
+          eq(baselines.testId, testId),
+          eq(baselines.isActive, true),
+          eq(baselines.branch, defaultBranch),
+          eq(baselines.browser, browser),
+          ...stepConditions,
+        ),
+      )
       .orderBy(desc(baselines.createdAt));
     if (mainBaseline) return mainBaseline;
   }
@@ -213,12 +240,14 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
   const [fallback] = await db
     .select()
     .from(baselines)
-    .where(and(
-      eq(baselines.testId, testId),
-      eq(baselines.isActive, true),
-      eq(baselines.browser, browser),
-      ...stepConditions,
-    ))
+    .where(
+      and(
+        eq(baselines.testId, testId),
+        eq(baselines.isActive, true),
+        eq(baselines.browser, browser),
+        ...stepConditions,
+      ),
+    )
     .orderBy(desc(baselines.createdAt));
   return fallback;
 }
@@ -226,7 +255,12 @@ export async function getActiveBaseline(testId: string, stepLabel?: string | nul
 /**
  * Get baseline for a specific branch only (no fallback)
  */
-export async function getBranchBaseline(testId: string, stepLabel: string | null | undefined, branch: string, browser: string = 'chromium') {
+export async function getBranchBaseline(
+  testId: string,
+  stepLabel: string | null | undefined,
+  branch: string,
+  browser: string = "chromium",
+) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
@@ -234,13 +268,15 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
   const [row] = await db
     .select()
     .from(baselines)
-    .where(and(
-      eq(baselines.testId, testId),
-      eq(baselines.isActive, true),
-      eq(baselines.branch, branch),
-      eq(baselines.browser, browser),
-      ...stepConditions,
-    ))
+    .where(
+      and(
+        eq(baselines.testId, testId),
+        eq(baselines.isActive, true),
+        eq(baselines.branch, branch),
+        eq(baselines.browser, browser),
+        ...stepConditions,
+      ),
+    )
     .orderBy(desc(baselines.createdAt));
   return row;
 }
@@ -255,7 +291,7 @@ export async function getBranchBaseline(testId: string, stepLabel: string | null
 export async function getAnyActiveBaseline(
   testId: string,
   stepLabel: string | null | undefined,
-  browser: string = 'chromium',
+  browser: string = "chromium",
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
@@ -263,12 +299,14 @@ export async function getAnyActiveBaseline(
   const [row] = await db
     .select()
     .from(baselines)
-    .where(and(
-      eq(baselines.testId, testId),
-      eq(baselines.isActive, true),
-      eq(baselines.browser, browser),
-      ...stepConditions,
-    ))
+    .where(
+      and(
+        eq(baselines.testId, testId),
+        eq(baselines.isActive, true),
+        eq(baselines.browser, browser),
+        ...stepConditions,
+      ),
+    )
     .orderBy(desc(baselines.createdAt))
     .limit(1);
   return row;
@@ -277,19 +315,31 @@ export async function getAnyActiveBaseline(
 /**
  * Get all active baselines for a branch in a repository
  */
-export async function getBaselinesByBranch(repositoryId: string, branch: string) {
+export async function getBaselinesByBranch(
+  repositoryId: string,
+  branch: string,
+) {
   return db
     .select()
     .from(baselines)
-    .where(and(
-      or(eq(baselines.repositoryId, repositoryId), isNull(baselines.repositoryId)),
-      eq(baselines.branch, branch),
-      eq(baselines.isActive, true),
-    ))
-    ;
+    .where(
+      and(
+        or(
+          eq(baselines.repositoryId, repositoryId),
+          isNull(baselines.repositoryId),
+        ),
+        eq(baselines.branch, branch),
+        eq(baselines.isActive, true),
+      ),
+    );
 }
 
-export async function getBaselineByHash(testId: string, imageHash: string, stepLabel?: string | null, browser: string = 'chromium') {
+export async function getBaselineByHash(
+  testId: string,
+  imageHash: string,
+  stepLabel?: string | null,
+  browser: string = "chromium",
+) {
   const conditions = [
     eq(baselines.testId, testId),
     eq(baselines.imageHash, imageHash),
@@ -308,7 +358,7 @@ export async function getBaselineByHash(testId: string, imageHash: string, stepL
   return row;
 }
 
-export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
+export async function createBaseline(data: Omit<NewBaseline, "id">) {
   const id = uuid();
   await db.insert(baselines).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
@@ -317,7 +367,12 @@ export async function createBaseline(data: Omit<NewBaseline, 'id'>) {
 /**
  * Deactivate baselines. If branch is provided, only deactivates for that branch.
  */
-export async function deactivateBaselines(testId: string, stepLabel?: string | null, branch?: string, browser?: string) {
+export async function deactivateBaselines(
+  testId: string,
+  stepLabel?: string | null,
+  branch?: string,
+  browser?: string,
+) {
   const conditions = [eq(baselines.testId, testId)];
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
@@ -339,7 +394,12 @@ export async function deactivateBaselines(testId: string, stepLabel?: string | n
 /**
  * Get previous run's screenshot for a test on the same branch (for vs_previous mode)
  */
-export async function getPreviousRunScreenshot(testId: string, buildId: string, branch: string, stepLabel?: string | null) {
+export async function getPreviousRunScreenshot(
+  testId: string,
+  buildId: string,
+  branch: string,
+  stepLabel?: string | null,
+) {
   // Find the most recent visual diff for this test on this branch that's not from the current build
   const stepConditions = stepLabel
     ? [eq(visualDiffs.stepLabel, stepLabel)]
@@ -352,13 +412,15 @@ export async function getPreviousRunScreenshot(testId: string, buildId: string, 
     .from(visualDiffs)
     .innerJoin(builds, eq(visualDiffs.buildId, builds.id))
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(
-      eq(visualDiffs.testId, testId),
-      eq(testRuns.gitBranch, branch),
-      // Exclude current build
-      sql`${visualDiffs.buildId} != ${buildId}`,
-      ...stepConditions,
-    ))
+    .where(
+      and(
+        eq(visualDiffs.testId, testId),
+        eq(testRuns.gitBranch, branch),
+        // Exclude current build
+        sql`${visualDiffs.buildId} != ${buildId}`,
+        ...stepConditions,
+      ),
+    )
     .orderBy(desc(visualDiffs.createdAt))
     .limit(1);
 
@@ -373,31 +435,32 @@ export async function getStepLabelsForTest(testId: string): Promise<string[]> {
   const rows = await db
     .selectDistinct({ stepLabel: baselines.stepLabel })
     .from(baselines)
-    .where(and(
-      eq(baselines.testId, testId),
-      eq(baselines.isActive, true),
-    ))
-    ;
+    .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
   return rows
-    .map(r => r.stepLabel)
+    .map((r) => r.stepLabel)
     .filter((label): label is string => label !== null)
     .sort();
 }
 
 // Ignore Regions (per-screenshot mask, mirrors focusRegions)
-export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
+export async function getIgnoreRegions(
+  testId: string,
+  stepLabel: string | null,
+) {
   return db
     .select()
     .from(ignoreRegions)
     .where(
       and(
         eq(ignoreRegions.testId, testId),
-        stepLabel === null ? isNull(ignoreRegions.stepLabel) : eq(ignoreRegions.stepLabel, stepLabel),
+        stepLabel === null
+          ? isNull(ignoreRegions.stepLabel)
+          : eq(ignoreRegions.stepLabel, stepLabel),
       ),
     );
 }
 
-export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, 'id'>) {
+export async function createIgnoreRegion(data: Omit<NewIgnoreRegion, "id">) {
   const id = uuid();
   await db.insert(ignoreRegions).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
@@ -408,24 +471,34 @@ export async function deleteIgnoreRegion(id: string) {
 }
 
 export async function getIgnoreRegionById(id: string) {
-  const [row] = await db.select().from(ignoreRegions).where(eq(ignoreRegions.id, id));
+  const [row] = await db
+    .select()
+    .from(ignoreRegions)
+    .where(eq(ignoreRegions.id, id));
   return row;
 }
 
 // Focus Regions (per-screenshot positive mask)
-export async function getFocusRegions(testId: string, stepLabel: string | null) {
+export async function getFocusRegions(
+  testId: string,
+  stepLabel: string | null,
+) {
   return db
     .select()
     .from(focusRegions)
     .where(
       and(
         eq(focusRegions.testId, testId),
-        stepLabel === null ? isNull(focusRegions.stepLabel) : eq(focusRegions.stepLabel, stepLabel),
+        stepLabel === null
+          ? isNull(focusRegions.stepLabel)
+          : eq(focusRegions.stepLabel, stepLabel),
       ),
     );
 }
 
-export async function createFocusRegion(data: Omit<NewFocusRegion, 'id' | 'createdAt'>) {
+export async function createFocusRegion(
+  data: Omit<NewFocusRegion, "id" | "createdAt">,
+) {
   const id = uuid();
   const createdAt = new Date();
   await db.insert(focusRegions).values({ ...data, id, createdAt });
@@ -437,7 +510,10 @@ export async function deleteFocusRegion(id: string) {
 }
 
 export async function getFocusRegionById(id: string) {
-  const [row] = await db.select().from(focusRegions).where(eq(focusRegions.id, id));
+  const [row] = await db
+    .select()
+    .from(focusRegions)
+    .where(eq(focusRegions.id, id));
   return row;
 }
 
@@ -447,14 +523,19 @@ export async function getFocusRegionsByTest(testId: string) {
 
 // Get visual diffs for a specific test result (step-level diffs)
 export async function getVisualDiffsByTestResult(testResultId: string) {
-  return db.select().from(visualDiffs).where(eq(visualDiffs.testResultId, testResultId));
+  return db
+    .select()
+    .from(visualDiffs)
+    .where(eq(visualDiffs.testResultId, testResultId));
 }
 
 // ============================================
 // Planned Screenshots
 // ============================================
 
-export async function createPlannedScreenshot(data: Omit<NewPlannedScreenshot, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createPlannedScreenshot(
+  data: Omit<NewPlannedScreenshot, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(plannedScreenshots).values({
@@ -467,11 +548,17 @@ export async function createPlannedScreenshot(data: Omit<NewPlannedScreenshot, '
 }
 
 export async function getPlannedScreenshot(id: string) {
-  const [row] = await db.select().from(plannedScreenshots).where(eq(plannedScreenshots.id, id));
+  const [row] = await db
+    .select()
+    .from(plannedScreenshots)
+    .where(eq(plannedScreenshots.id, id));
   return row;
 }
 
-export async function getPlannedScreenshotByTest(testId: string, stepLabel?: string | null) {
+export async function getPlannedScreenshotByTest(
+  testId: string,
+  stepLabel?: string | null,
+) {
   const conditions = [
     eq(plannedScreenshots.testId, testId),
     eq(plannedScreenshots.isActive, true),
@@ -492,7 +579,12 @@ export async function getPlannedScreenshotByRoute(routeId: string) {
   const [row] = await db
     .select()
     .from(plannedScreenshots)
-    .where(and(eq(plannedScreenshots.routeId, routeId), eq(plannedScreenshots.isActive, true)));
+    .where(
+      and(
+        eq(plannedScreenshots.routeId, routeId),
+        eq(plannedScreenshots.isActive, true),
+      ),
+    );
   return row;
 }
 
@@ -500,27 +592,44 @@ export async function getPlannedScreenshotsByRepo(repositoryId: string) {
   return db
     .select()
     .from(plannedScreenshots)
-    .where(and(eq(plannedScreenshots.repositoryId, repositoryId), eq(plannedScreenshots.isActive, true)))
-    .orderBy(desc(plannedScreenshots.createdAt))
-    ;
+    .where(
+      and(
+        eq(plannedScreenshots.repositoryId, repositoryId),
+        eq(plannedScreenshots.isActive, true),
+      ),
+    )
+    .orderBy(desc(plannedScreenshots.createdAt));
 }
 
 export async function getPlannedScreenshotsByTest(testId: string) {
   return db
     .select()
     .from(plannedScreenshots)
-    .where(and(eq(plannedScreenshots.testId, testId), eq(plannedScreenshots.isActive, true)))
-    .orderBy(plannedScreenshots.stepLabel)
-    ;
+    .where(
+      and(
+        eq(plannedScreenshots.testId, testId),
+        eq(plannedScreenshots.isActive, true),
+      ),
+    )
+    .orderBy(plannedScreenshots.stepLabel);
 }
 
-export async function updatePlannedScreenshot(id: string, data: Partial<NewPlannedScreenshot>) {
-  await db.update(plannedScreenshots).set({ ...data, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+export async function updatePlannedScreenshot(
+  id: string,
+  data: Partial<NewPlannedScreenshot>,
+) {
+  await db
+    .update(plannedScreenshots)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(plannedScreenshots.id, id));
 }
 
 export async function deletePlannedScreenshot(id: string) {
   // Soft delete - mark as inactive
-  await db.update(plannedScreenshots).set({ isActive: false, updatedAt: new Date() }).where(eq(plannedScreenshots.id, id));
+  await db
+    .update(plannedScreenshots)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(eq(plannedScreenshots.id, id));
 }
 
 export async function hardDeletePlannedScreenshot(id: string) {
@@ -542,7 +651,9 @@ export interface RouteWithContext {
   testSuggestions: string[];
 }
 
-export async function getRouteWithContext(routeId: string): Promise<RouteWithContext | null> {
+export async function getRouteWithContext(
+  routeId: string,
+): Promise<RouteWithContext | null> {
   const [route] = await db
     .select({
       id: routes.id,
@@ -566,11 +677,9 @@ export async function getRouteWithContext(routeId: string): Promise<RouteWithCon
   const suggestions = await db
     .select({ suggestion: routeTestSuggestions.suggestion })
     .from(routeTestSuggestions)
-    .where(eq(routeTestSuggestions.routeId, routeId))
-    ;
-
+    .where(eq(routeTestSuggestions.routeId, routeId));
   return {
     ...route,
-    testSuggestions: suggestions.map(s => s.suggestion),
+    testSuggestions: suggestions.map((s) => s.suggestion),
   };
 }

@@ -1,19 +1,24 @@
-import type { Metadata } from 'next';
-import Link from 'next/link';
-import { CardBadge, Pill, SplitShield, Wordmark } from '@/components/awards/badges';
-import { DeltaMark } from '@/components/awards/delta-mark';
-import { EmbedCodeBlock } from '@/components/awards/embed-code-block';
+import type { Metadata } from "next";
+import Link from "next/link";
+import {
+  CardBadge,
+  Pill,
+  SplitShield,
+  Wordmark,
+} from "@/components/awards/badges";
+import { DeltaMark } from "@/components/awards/delta-mark";
+import { EmbedCodeBlock } from "@/components/awards/embed-code-block";
 
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: 'Prove your app is not AI slop · Lastest awards',
+  title: "Prove your app is not AI slop · Lastest awards",
   description:
-    'Earn a Lastest testing badge. Visual regression tested, accessibility checked, drift-free. Embed proof on your site.',
+    "Earn a Lastest testing badge. Visual regression tested, accessibility checked, drift-free. Embed proof on your site.",
   robots: { index: true, follow: true },
 };
 
-const EXAMPLE_SLUG = 'EXAMPLE'.padEnd(22, '0');
+const EXAMPLE_SLUG = "EXAMPLE".padEnd(22, "0");
 
 export default function AwardsLandingPage() {
   return (
@@ -41,20 +46,35 @@ function Hero() {
         Lastest awards · live program
       </div>
       <h1 className="text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.05]">
-        Prove your app is{' '}
+        Prove your app is{" "}
         <span className="relative inline-block">
-          <span className="line-through decoration-[#E03E36] decoration-[3px] text-foreground/40">AI slop</span>
+          <span className="line-through decoration-[#E03E36] decoration-[3px] text-foreground/40">
+            AI slop
+          </span>
         </span>
         <span className="block sm:inline">.</span>
       </h1>
       <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-        Most apps shipped today look polished and break on the first real interaction. A Lastest badge
-        is sourced proof: real visual regression coverage, accessibility checked, no drift over time.
+        Most apps shipped today look polished and break on the first real
+        interaction. A Lastest badge is sourced proof: real visual regression
+        coverage, accessibility checked, no drift over time.
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
         <SplitShield label="LASTEST" value="gold" tone="teal" size="lg" mark />
-        <SplitShield label="a11y" value="WCAG AA" tone="teal" size="lg" mark={false} />
-        <SplitShield label="regressions" value="0" tone="ink" size="lg" mark={false} />
+        <SplitShield
+          label="a11y"
+          value="WCAG AA"
+          tone="teal"
+          size="lg"
+          mark={false}
+        />
+        <SplitShield
+          label="regressions"
+          value="0"
+          tone="ink"
+          size="lg"
+          mark={false}
+        />
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
         <Link
@@ -77,19 +97,19 @@ function Hero() {
 function HowItWorks() {
   const steps = [
     {
-      n: '01',
-      title: 'Sign up & connect your app',
-      body: 'Point Lastest at your live URL. Record a couple of flows or let the Play Agent crawl your routes.',
+      n: "01",
+      title: "Sign up & connect your app",
+      body: "Point Lastest at your live URL. Record a couple of flows or let the Play Agent crawl your routes.",
     },
     {
-      n: '02',
-      title: 'Run tests, review baselines',
-      body: 'Lastest captures screenshots, runs accessibility checks, and detects visual drift on every commit.',
+      n: "02",
+      title: "Run tests, review baselines",
+      body: "Lastest captures screenshots, runs accessibility checks, and detects visual drift on every commit.",
     },
     {
-      n: '03',
-      title: 'Embed your badge',
-      body: 'Once your tier is earned, copy the markdown or HTML embed onto your site, README, or docs.',
+      n: "03",
+      title: "Embed your badge",
+      body: "Once your tier is earned, copy the markdown or HTML embed onto your site, README, or docs.",
     },
   ];
   return (
@@ -105,7 +125,9 @@ function HowItWorks() {
               Step {s.n}
             </div>
             <div className="text-base font-medium">{s.title}</div>
-            <div className="text-sm text-muted-foreground leading-relaxed">{s.body}</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              {s.body}
+            </div>
           </li>
         ))}
       </ol>
@@ -116,43 +138,43 @@ function HowItWorks() {
 function TierCriteria() {
   const tiers = [
     {
-      tier: 'starter' as const,
-      value: 'starter',
-      tone: 'slate' as const,
+      tier: "starter" as const,
+      value: "starter",
+      tone: "slate" as const,
       criteria: [
-        '≥ 1 passing test',
-        'Awarded on your first green build',
-        'Encourages early sharing, no a11y bar',
+        "≥ 1 passing test",
+        "Awarded on your first green build",
+        "Encourages early sharing, no a11y bar",
       ],
     },
     {
-      tier: 'bronze' as const,
-      value: 'bronze',
-      tone: 'amber' as const,
+      tier: "bronze" as const,
+      value: "bronze",
+      tone: "amber" as const,
       criteria: [
-        '≥ 5 tests',
-        '≥ 80% pass rate on last build',
-        'a11y score ≥ 60',
+        "≥ 5 tests",
+        "≥ 80% pass rate on last build",
+        "a11y score ≥ 60",
       ],
     },
     {
-      tier: 'silver' as const,
-      value: 'silver',
-      tone: 'blue' as const,
+      tier: "silver" as const,
+      value: "silver",
+      tone: "blue" as const,
       criteria: [
-        '≥ 10 tests',
-        '≥ 95% pass rate on last build',
-        'a11y score ≥ 80, 0 critical violations',
+        "≥ 10 tests",
+        "≥ 95% pass rate on last build",
+        "a11y score ≥ 80, 0 critical violations",
       ],
     },
     {
-      tier: 'gold' as const,
-      value: 'gold',
-      tone: 'teal' as const,
+      tier: "gold" as const,
+      value: "gold",
+      tone: "teal" as const,
       criteria: [
-        '≥ 20 tests',
-        'Last 5 builds all clean (no regressions, no flakes)',
-        'a11y score ≥ 90, 0 critical violations',
+        "≥ 20 tests",
+        "Last 5 builds all clean (no regressions, no flakes)",
+        "a11y score ≥ 90, 0 critical violations",
       ],
     },
   ];
@@ -161,15 +183,24 @@ function TierCriteria() {
     <section id="criteria" className="space-y-6">
       <h2 className="text-2xl font-semibold tracking-tight">Tier criteria</h2>
       <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-        Tiers ratchet upward. They only downgrade on a{' '}
+        Tiers ratchet upward. They only downgrade on a{" "}
         <em>confirmed regression</em>: a baseline you explicitly rejected, or
         two consecutive builds with non-flaky failures. Flakes alone don&apos;t
         downgrade you.
       </p>
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {tiers.map((t) => (
-          <div key={t.tier} className="rounded-sm border border-border/60 bg-card p-5 space-y-4">
-            <SplitShield label="LASTEST" value={t.value} tone={t.tone} size="lg" mark />
+          <div
+            key={t.tier}
+            className="rounded-sm border border-border/60 bg-card p-5 space-y-4"
+          >
+            <SplitShield
+              label="LASTEST"
+              value={t.value}
+              tone={t.tone}
+              size="lg"
+              mark
+            />
             <ul className="space-y-1.5 text-sm">
               {t.criteria.map((c) => (
                 <li key={c} className="flex gap-2">
@@ -188,19 +219,43 @@ function TierCriteria() {
 function Categories() {
   const cats = [
     {
-      title: 'A11y',
-      preview: <SplitShield label="a11y" value="WCAG AA" tone="teal" size="md" mark={false} />,
-      body: 'a11y score ≥ 90 and zero critical WCAG violations on your latest build.',
+      title: "A11y",
+      preview: (
+        <SplitShield
+          label="a11y"
+          value="WCAG AA"
+          tone="teal"
+          size="md"
+          mark={false}
+        />
+      ),
+      body: "a11y score ≥ 90 and zero critical WCAG violations on your latest build.",
     },
     {
-      title: 'All passing',
-      preview: <SplitShield label="tests" value="all passing" tone="teal" size="md" mark={false} />,
-      body: 'No failed tests and no unresolved visual changes on your latest build.',
+      title: "All passing",
+      preview: (
+        <SplitShield
+          label="tests"
+          value="all passing"
+          tone="teal"
+          size="md"
+          mark={false}
+        />
+      ),
+      body: "No failed tests and no unresolved visual changes on your latest build.",
     },
     {
-      title: 'Zero drift',
-      preview: <SplitShield label="regressions" value="0" tone="ink" size="md" mark={false} />,
-      body: 'No confirmed regressions in the last 30 days. Tracks rejected baselines.',
+      title: "Zero drift",
+      preview: (
+        <SplitShield
+          label="regressions"
+          value="0"
+          tone="ink"
+          size="md"
+          mark={false}
+        />
+      ),
+      body: "No confirmed regressions in the last 30 days. Tracks rejected baselines.",
     },
   ];
 
@@ -208,14 +263,20 @@ function Categories() {
     <section className="space-y-6">
       <h2 className="text-2xl font-semibold tracking-tight">Category badges</h2>
       <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
-        Earn alongside your tier. Pick which to embed; they are independent of each other and update live.
+        Earn alongside your tier. Pick which to embed; they are independent of
+        each other and update live.
       </p>
       <div className="grid sm:grid-cols-3 gap-4">
         {cats.map((c) => (
-          <div key={c.title} className="rounded-sm border border-border/60 bg-card p-5 space-y-3">
+          <div
+            key={c.title}
+            className="rounded-sm border border-border/60 bg-card p-5 space-y-3"
+          >
             <div>{c.preview}</div>
             <div className="text-sm font-medium">{c.title}</div>
-            <div className="text-sm text-muted-foreground leading-relaxed">{c.body}</div>
+            <div className="text-sm text-muted-foreground leading-relaxed">
+              {c.body}
+            </div>
           </div>
         ))}
       </div>
@@ -234,10 +295,12 @@ function EmbedShowcase() {
 
   return (
     <section className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight">Embed three ways</h2>
+      <h2 className="text-2xl font-semibold tracking-tight">
+        Embed three ways
+      </h2>
       <p className="text-sm text-muted-foreground leading-relaxed max-w-2xl">
         Each badge is an SVG endpoint. Pull from any host. The image stays live
-        and ratchets with your build state. Themed for light or dark sites via{' '}
+        and ratchets with your build state. Themed for light or dark sites via{" "}
         <code className="font-mono text-xs">?theme=light|dark</code>.
       </p>
 
@@ -251,14 +314,35 @@ function EmbedShowcase() {
           </div>
           <div className="flex flex-wrap gap-2">
             <SplitShield label="LASTEST" value="gold" tone="teal" size="sm" />
-            <SplitShield label="tests" value="247/247" tone="teal" size="sm" mark={false} />
-            <SplitShield label="a11y" value="WCAG AA" tone="teal" size="sm" mark={false} />
-            <SplitShield label="last run" value="12m ago" tone="ink" size="sm" mark={false} />
+            <SplitShield
+              label="tests"
+              value="247/247"
+              tone="teal"
+              size="sm"
+              mark={false}
+            />
+            <SplitShield
+              label="a11y"
+              value="WCAG AA"
+              tone="teal"
+              size="sm"
+              mark={false}
+            />
+            <SplitShield
+              label="last run"
+              value="12m ago"
+              tone="ink"
+              size="sm"
+              mark={false}
+            />
           </div>
           <EmbedCodeBlock label="Markdown" code={markdown} />
         </div>
 
-        <div className="space-y-3 rounded-sm border border-border/60 p-5" style={{ background: '#1F2A33', color: '#fff' }}>
+        <div
+          className="space-y-3 rounded-sm border border-border/60 p-5"
+          style={{ background: "#1F2A33", color: "#fff" }}
+        >
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">Docs · dark site</div>
             <Pill tone="soft" size="sm" mark={false} dark dot="pass">
@@ -266,9 +350,29 @@ function EmbedShowcase() {
             </Pill>
           </div>
           <div className="flex flex-wrap gap-2">
-            <SplitShield label="LASTEST" value="gold" tone="teal" size="sm" dark />
-            <SplitShield label="regressions" value="0" tone="ink" size="sm" mark={false} dark />
-            <SplitShield label="last run" value="12m ago" tone="ink" size="sm" mark={false} dark />
+            <SplitShield
+              label="LASTEST"
+              value="gold"
+              tone="teal"
+              size="sm"
+              dark
+            />
+            <SplitShield
+              label="regressions"
+              value="0"
+              tone="ink"
+              size="sm"
+              mark={false}
+              dark
+            />
+            <SplitShield
+              label="last run"
+              value="12m ago"
+              tone="ink"
+              size="sm"
+              mark={false}
+              dark
+            />
           </div>
           <EmbedCodeBlock label="HTML" code={html} />
         </div>
@@ -289,20 +393,20 @@ function EmbedShowcase() {
 function FAQ() {
   const faqs = [
     {
-      q: 'Does my badge break if a test fails?',
+      q: "Does my badge break if a test fails?",
       a: "No. Flakes don't downgrade your tier. The badge only drops when a regression is *confirmed*, either you explicitly rejected a baseline diff, or two consecutive builds both had real (non-flaky) failures.",
     },
     {
-      q: 'Where does the badge SVG come from?',
-      a: 'A public endpoint on lastest.cloud serves it. The SVG is self-contained, cache-friendly (5min CDN), and embeds anywhere. The image stays live: republish your share to point at a fresh proof.',
+      q: "Where does the badge SVG come from?",
+      a: "A public endpoint on lastest.cloud serves it. The SVG is self-contained, cache-friendly (5min CDN), and embeds anywhere. The image stays live: republish your share to point at a fresh proof.",
     },
     {
-      q: 'Is the badge actually verifiable?',
-      a: 'Yes, clicking it opens your public share, which shows every screenshot, every diff, every accessibility check. The badge is just a link to evidence anyone can audit.',
+      q: "Is the badge actually verifiable?",
+      a: "Yes, clicking it opens your public share, which shows every screenshot, every diff, every accessibility check. The badge is just a link to evidence anyone can audit.",
     },
     {
-      q: 'Is this free?',
-      a: 'Lastest is open-source and self-hostable. The hosted version has a generous free tier, enough to earn and maintain a Silver or Gold badge for most indie projects.',
+      q: "Is this free?",
+      a: "Lastest is open-source and self-hostable. The hosted version has a generous free tier, enough to earn and maintain a Silver or Gold badge for most indie projects.",
     },
   ];
 
@@ -311,14 +415,19 @@ function FAQ() {
       <h2 className="text-2xl font-semibold tracking-tight">FAQ</h2>
       <div className="space-y-3">
         {faqs.map((f) => (
-          <details key={f.q} className="rounded-sm border border-border/60 bg-card p-4 group">
+          <details
+            key={f.q}
+            className="rounded-sm border border-border/60 bg-card p-4 group"
+          >
             <summary className="cursor-pointer text-sm font-medium list-none flex justify-between items-center">
               <span>{f.q}</span>
               <span className="font-mono text-xs text-muted-foreground group-open:rotate-45 transition-transform">
                 +
               </span>
             </summary>
-            <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{f.a}</p>
+            <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
+              {f.a}
+            </p>
           </details>
         ))}
       </div>
@@ -336,8 +445,8 @@ function FinalCTA() {
         Ship green. Embed proof. Look serious.
       </h2>
       <p className="text-sm text-muted-foreground max-w-xl mx-auto leading-relaxed">
-        Be the indie project on Reddit, Product Hunt, or Hacker News whose
-        badge is sourced, not vibes.
+        Be the indie project on Reddit, Product Hunt, or Hacker News whose badge
+        is sourced, not vibes.
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
         <Link

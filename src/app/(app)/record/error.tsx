@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import Link from 'next/link';
-import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useEffect } from "react";
+import Link from "next/link";
+import { AlertTriangle, Home, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function RecordError({
   error,
@@ -13,7 +13,7 @@ export default function RecordError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('Record page error:', error);
+    console.error("Record page error:", error);
   }, [error]);
 
   return (

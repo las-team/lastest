@@ -8,20 +8,36 @@
  * Generated from Zima production database dump (2026-03-30).
  */
 
-import { db } from '@/lib/db';
-import { tests, testVersions, functionalAreas } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
-import { randomUUID as uuid } from 'crypto';
+import { db } from "@/lib/db";
+import { tests, testVersions, functionalAreas } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { randomUUID as uuid } from "crypto";
 
-export const EXCALIDRAW_REPO_FULL_NAME = 'dexilion-team/excalidraw';
-export const EXCALIDRAW_REPO_OWNER = 'dexilion-team';
-export const EXCALIDRAW_REPO_NAME = 'excalidraw';
+export const EXCALIDRAW_REPO_FULL_NAME = "dexilion-team/excalidraw";
+export const EXCALIDRAW_REPO_OWNER = "dexilion-team";
+export const EXCALIDRAW_REPO_NAME = "excalidraw";
 
 // Functional area definitions (with hierarchy)
-export const FUNCTIONAL_AREA_DEFINITIONS: Array<{ name: string; description?: string; parent?: string }> = [
-  { name: "Arrow Binding", description: "As a user, I want to connect arrows to shapes and add labels to arrows, so that I can create connected diagrams and flowcharts with annotations" },
-  { name: "Arrows binding to bindables", description: "Arrows' ability to bind and follow bindable shapes.", parent: "Arrow Binding" },
-  { name: "Binding focus point", description: "The modifiable focus point handling tests.", parent: "Arrow Binding" },
+export const FUNCTIONAL_AREA_DEFINITIONS: Array<{
+  name: string;
+  description?: string;
+  parent?: string;
+}> = [
+  {
+    name: "Arrow Binding",
+    description:
+      "As a user, I want to connect arrows to shapes and add labels to arrows, so that I can create connected diagrams and flowcharts with annotations",
+  },
+  {
+    name: "Arrows binding to bindables",
+    description: "Arrows' ability to bind and follow bindable shapes.",
+    parent: "Arrow Binding",
+  },
+  {
+    name: "Binding focus point",
+    description: "The modifiable focus point handling tests.",
+    parent: "Arrow Binding",
+  },
   { name: "Generic", description: "based on unit tests" },
 ];
 
@@ -4926,7 +4942,11 @@ export async function seedExcalidrawTests(
 ): Promise<number> {
   const log = opts.log ?? (() => {});
 
-  const existing = await db.select({ id: tests.id }).from(tests).where(eq(tests.repositoryId, repositoryId)).limit(1);
+  const existing = await db
+    .select({ id: tests.id })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId))
+    .limit(1);
   if (existing.length > 0 && !opts.force) {
     log(`Repo ${repositoryId} already has tests, skipping seed`);
     return 0;
@@ -4934,14 +4954,16 @@ export async function seedExcalidrawTests(
 
   if (opts.force) {
     await db.delete(tests).where(eq(tests.repositoryId, repositoryId));
-    await db.delete(functionalAreas).where(eq(functionalAreas.repositoryId, repositoryId));
-    log('Cleared existing data');
+    await db
+      .delete(functionalAreas)
+      .where(eq(functionalAreas.repositoryId, repositoryId));
+    log("Cleared existing data");
   }
 
   const faMap = new Map<string, string>();
   for (const faDef of FUNCTIONAL_AREA_DEFINITIONS) {
     const id = uuid();
-    const parentId = faDef.parent ? faMap.get(faDef.parent) ?? null : null;
+    const parentId = faDef.parent ? (faMap.get(faDef.parent) ?? null) : null;
     // Note: functional_areas.description was dropped in v1.12 — descriptive
     // text now lives in agentPlan. The seed only sets agentPlan when the
     // upstream definition has a description so we don't fabricate plans.
@@ -4971,7 +4993,9 @@ export async function seedExcalidrawTests(
   const now = new Date();
   for (const testDef of TEST_DEFINITIONS) {
     const testId = uuid();
-    const faId = testDef.functionalArea ? faMap.get(testDef.functionalArea) ?? null : null;
+    const faId = testDef.functionalArea
+      ? (faMap.get(testDef.functionalArea) ?? null)
+      : null;
     // Note: tests.description was dropped in v1.12 (moved to test_specs). The
     // canned seed only carries names/code today, so we don't materialize a
     // spec row — demo users can create one through the UI if they want.
@@ -4982,7 +5006,7 @@ export async function seedExcalidrawTests(
       name: testDef.name,
       code: testDef.code,
       targetUrl: testDef.targetUrl,
-      executionMode: testDef.executionMode ?? 'procedural',
+      executionMode: testDef.executionMode ?? "procedural",
       setupOverrides: parseOverride(testDef.setupOverrides),
       teardownOverrides: parseOverride(testDef.teardownOverrides),
       viewportOverride: parseOverride(testDef.viewportOverride),
@@ -5000,13 +5024,15 @@ export async function seedExcalidrawTests(
       code: testDef.code,
       name: testDef.name,
       targetUrl: testDef.targetUrl,
-      changeReason: 'manual_edit',
+      changeReason: "manual_edit",
       createdAt: now,
     });
 
     log(`  Created test: ${testDef.name}`);
   }
 
-  log(`Seeded ${TEST_DEFINITIONS.length} tests and ${FUNCTIONAL_AREA_DEFINITIONS.length} functional areas`);
+  log(
+    `Seeded ${TEST_DEFINITIONS.length} tests and ${FUNCTIONAL_AREA_DEFINITIONS.length} functional areas`,
+  );
   return TEST_DEFINITIONS.length;
 }

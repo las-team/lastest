@@ -4,26 +4,26 @@
  */
 
 export type MessageType =
-  | 'command:run_test'
-  | 'command:run_setup'
-  | 'command:cancel_test'
-  | 'command:start_recording'
-  | 'command:stop_recording'
-  | 'command:ping'
-  | 'command:shutdown'
-  | 'response:test_result'
-  | 'response:test_progress'
-  | 'response:step_event'
-  | 'response:setup_result'
-  | 'response:recording_event'
-  | 'response:screenshot'
-  | 'response:screenshot_ack'
-  | 'response:recording_stopped'
-  | 'response:error'
-  | 'response:pong'
-  | 'status:heartbeat'
-  | 'connection:established'
-  | 'command:capture_screenshot';
+  | "command:run_test"
+  | "command:run_setup"
+  | "command:cancel_test"
+  | "command:start_recording"
+  | "command:stop_recording"
+  | "command:ping"
+  | "command:shutdown"
+  | "response:test_result"
+  | "response:test_progress"
+  | "response:step_event"
+  | "response:setup_result"
+  | "response:recording_event"
+  | "response:screenshot"
+  | "response:screenshot_ack"
+  | "response:recording_stopped"
+  | "response:error"
+  | "response:pong"
+  | "status:heartbeat"
+  | "connection:established"
+  | "command:capture_screenshot";
 
 export interface BaseMessage {
   id: string;
@@ -38,7 +38,11 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type { CoreStabilizationSettings, SelectorOutcome, SelectorStatRow } from '@lastest/shared';
+import type {
+  CoreStabilizationSettings,
+  SelectorOutcome,
+  SelectorStatRow,
+} from "@lastest/shared";
 
 export type StabilizationPayload = CoreStabilizationSettings;
 export type { SelectorOutcome, SelectorStatRow };
@@ -53,7 +57,7 @@ export interface RunTestCommandPayload {
   timeout: number;
   repositoryId?: string; // For screenshot storage location
   viewport?: { width: number; height: number };
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: "chromium" | "firefox" | "webkit";
   serverConfig?: ServerConfig;
   storageState?: string; // Serialized JSON from page.context().storageState() — carries auth session
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
@@ -82,7 +86,15 @@ export interface RunTestCommandPayload {
     label: string;
     lineStart: number;
     lineEnd: number;
-    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+    type:
+      | "action"
+      | "navigation"
+      | "assertion"
+      | "screenshot"
+      | "wait"
+      | "variable"
+      | "log"
+      | "other";
   }>;
   /** Parsed assertions from the host. Used by the runner's
    *  `instrumentAssertionTracking` to wrap each `expect(...)` line with a
@@ -103,7 +115,7 @@ export interface RunTestCommandPayload {
 }
 
 export interface RunTestCommand extends BaseMessage {
-  type: 'command:run_test';
+  type: "command:run_test";
   payload: RunTestCommandPayload;
 }
 
@@ -114,7 +126,7 @@ export interface RunSetupCommandPayload {
   targetUrl: string;
   timeout: number;
   viewport?: { width: number; height: number };
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: "chromium" | "firefox" | "webkit";
   stabilization?: StabilizationPayload;
   // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
   // the setup page so the user can watch setup execute live.
@@ -125,13 +137,13 @@ export interface RunSetupCommandPayload {
 }
 
 export interface RunSetupCommand extends BaseMessage {
-  type: 'command:run_setup';
+  type: "command:run_setup";
   payload: RunSetupCommandPayload;
 }
 
 export interface SetupResultPayload {
   correlationId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  status: "passed" | "failed" | "error" | "timeout";
   storageState?: string;
   variables?: Record<string, unknown>;
   durationMs: number;
@@ -140,12 +152,12 @@ export interface SetupResultPayload {
 }
 
 export interface SetupResultResponse extends BaseMessage {
-  type: 'response:setup_result';
+  type: "response:setup_result";
   payload: SetupResultPayload;
 }
 
 export interface PingCommand extends BaseMessage {
-  type: 'command:ping';
+  type: "command:ping";
   payload: Record<string, never>;
 }
 
@@ -155,7 +167,7 @@ export interface CancelTestCommandPayload {
 }
 
 export interface CancelTestCommand extends BaseMessage {
-  type: 'command:cancel_test';
+  type: "command:cancel_test";
   payload: CancelTestCommandPayload;
 }
 
@@ -164,7 +176,7 @@ export interface ShutdownCommandPayload {
 }
 
 export interface ShutdownCommand extends BaseMessage {
-  type: 'command:shutdown';
+  type: "command:shutdown";
   payload: ShutdownCommandPayload;
 }
 
@@ -172,8 +184,12 @@ export interface StartRecordingCommandPayload {
   sessionId: string;
   targetUrl: string;
   viewport?: { width: number; height: number };
-  browser?: 'chromium' | 'firefox' | 'webkit';
-  selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+  browser?: "chromium" | "firefox" | "webkit";
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
   ocrEnabled?: boolean;
   pointerGestures?: boolean;
   cursorFPS?: number;
@@ -181,7 +197,7 @@ export interface StartRecordingCommandPayload {
 }
 
 export interface StartRecordingCommand extends BaseMessage {
-  type: 'command:start_recording';
+  type: "command:start_recording";
   payload: StartRecordingCommandPayload;
 }
 
@@ -190,12 +206,12 @@ export interface StopRecordingCommandPayload {
 }
 
 export interface StopRecordingCommand extends BaseMessage {
-  type: 'command:stop_recording';
+  type: "command:stop_recording";
   payload: StopRecordingCommandPayload;
 }
 
 export interface CaptureScreenshotCommand extends BaseMessage {
-  type: 'command:capture_screenshot';
+  type: "command:capture_screenshot";
   payload: { sessionId: string };
 }
 
@@ -209,7 +225,7 @@ export interface RecordingEventData {
   type: string;
   timestamp: number;
   sequence: number;
-  status: 'preview' | 'committed';
+  status: "preview" | "committed";
   verification?: {
     syntaxValid: boolean;
     domVerified?: boolean;
@@ -221,7 +237,12 @@ export interface RecordingEventData {
   data: {
     action?: string;
     selector?: string;
-    selectors?: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+    selectors?: Array<{
+      type: string;
+      value: string;
+      enabled?: boolean;
+      priority?: number;
+    }>;
     value?: string;
     url?: string;
     relativePath?: string;
@@ -239,11 +260,21 @@ export interface RecordingEventData {
       textContent?: string;
       potentialAction?: string;
       potentialSelector?: string;
-      selectors?: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+      selectors?: Array<{
+        type: string;
+        value: string;
+        enabled?: boolean;
+        priority?: number;
+      }>;
     };
     elementAssertion?: {
       type: string;
-      selectors: Array<{ type: string; value: string; enabled?: boolean; priority?: number }>;
+      selectors: Array<{
+        type: string;
+        value: string;
+        enabled?: boolean;
+        priority?: number;
+      }>;
       expectedValue?: string;
       attributeName?: string;
       attributeValue?: string;
@@ -258,7 +289,7 @@ export interface RecordingEventPayload {
 }
 
 export interface RecordingEventResponse extends BaseMessage {
-  type: 'response:recording_event';
+  type: "response:recording_event";
   payload: RecordingEventPayload;
 }
 
@@ -269,13 +300,13 @@ export interface RecordingStoppedPayload {
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {
-  type: 'response:recording_stopped';
+  type: "response:recording_stopped";
   payload: RecordingStoppedPayload;
 }
 
 export interface LogEntry {
   timestamp: number;
-  level: 'info' | 'warn' | 'error';
+  level: "info" | "warn" | "error";
   message: string;
 }
 
@@ -297,7 +328,7 @@ export interface TestResultPayload {
   correlationId: string;
   testId: string;
   testRunId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
+  status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
   screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
   error?: {
@@ -313,7 +344,7 @@ export interface TestResultPayload {
    *  test when a user-pinned assertion failed. */
   assertionResults?: Array<{
     assertionId: string;
-    status: 'passed' | 'failed' | 'skipped';
+    status: "passed" | "failed" | "skipped";
     actualValue?: string;
     errorMessage?: string;
     durationMs?: number;
@@ -330,7 +361,7 @@ export interface TestResultPayload {
 }
 
 export interface TestResultResponse extends BaseMessage {
-  type: 'response:test_result';
+  type: "response:test_result";
   payload: TestResultPayload;
 }
 
@@ -341,7 +372,7 @@ export interface TestProgressPayload {
 }
 
 export interface TestProgressResponse extends BaseMessage {
-  type: 'response:test_progress';
+  type: "response:test_progress";
   payload: TestProgressPayload;
 }
 
@@ -350,15 +381,23 @@ export interface StepEventPayload {
   testRunId: string;
   stepIndex: number;
   totalSteps: number;
-  status: 'started' | 'passed' | 'failed';
+  status: "started" | "passed" | "failed";
   label?: string;
-  stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  stepType?:
+    | "action"
+    | "navigation"
+    | "assertion"
+    | "screenshot"
+    | "wait"
+    | "variable"
+    | "log"
+    | "other";
   durationMs?: number;
   error?: string;
 }
 
 export interface StepEventResponse extends BaseMessage {
-  type: 'response:step_event';
+  type: "response:step_event";
   payload: StepEventPayload;
 }
 
@@ -374,19 +413,19 @@ export interface ScreenshotUploadPayload {
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {
-  type: 'response:screenshot';
+  type: "response:screenshot";
   payload: ScreenshotUploadPayload;
 }
 
 export type ErrorCode =
-  | 'BROWSER_LAUNCH_FAILED'
-  | 'TEST_TIMEOUT'
-  | 'NAVIGATION_FAILED'
-  | 'SELECTOR_NOT_FOUND'
-  | 'SERVER_START_FAILED'
-  | 'SCREENSHOT_FAILED'
-  | 'UNKNOWN_COMMAND'
-  | 'INTERNAL_ERROR';
+  | "BROWSER_LAUNCH_FAILED"
+  | "TEST_TIMEOUT"
+  | "NAVIGATION_FAILED"
+  | "SELECTOR_NOT_FOUND"
+  | "SERVER_START_FAILED"
+  | "SCREENSHOT_FAILED"
+  | "UNKNOWN_COMMAND"
+  | "INTERNAL_ERROR";
 
 export interface ErrorPayload {
   correlationId?: string;
@@ -396,12 +435,12 @@ export interface ErrorPayload {
 }
 
 export interface ErrorResponse extends BaseMessage {
-  type: 'response:error';
+  type: "response:error";
   payload: ErrorPayload;
 }
 
 export interface PongResponse extends BaseMessage {
-  type: 'response:pong';
+  type: "response:pong";
   payload: { correlationId: string };
 }
 
@@ -412,14 +451,14 @@ export interface SystemInfo {
 }
 
 export interface HeartbeatPayload {
-  status: 'idle' | 'busy' | 'recording';
+  status: "idle" | "busy" | "recording";
   currentTask?: string;
   systemInfo: SystemInfo;
   disconnect?: boolean; // Signal graceful shutdown
 }
 
 export interface HeartbeatMessage extends BaseMessage {
-  type: 'status:heartbeat';
+  type: "status:heartbeat";
   payload: HeartbeatPayload;
 }
 
@@ -433,7 +472,7 @@ export interface ConnectionEstablishedPayload {
 }
 
 export interface ConnectionEstablishedMessage extends BaseMessage {
-  type: 'connection:established';
+  type: "connection:established";
   payload: ConnectionEstablishedPayload;
 }
 
@@ -459,8 +498,8 @@ export type Message =
   | ConnectionEstablishedMessage;
 
 export function createMessage<T extends BaseMessage>(
-  type: T['type'],
-  payload: T extends BaseMessage & { payload: infer P } ? P : never
+  type: T["type"],
+  payload: T extends BaseMessage & { payload: infer P } ? P : never,
 ): T {
   return {
     id: crypto.randomUUID(),

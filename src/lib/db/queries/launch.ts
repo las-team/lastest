@@ -1,10 +1,10 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   launchCohorts,
   launchProfiles,
   launchVotes,
   launchMonthlyWinners,
-} from '../schema';
+} from "../schema";
 import type {
   NewLaunchCohort,
   LaunchCohort,
@@ -12,10 +12,10 @@ import type {
   NewLaunchProfile,
   LaunchProfile,
   LaunchMonthlyWinner,
-} from '../schema';
-import { DEFAULT_LAUNCH } from '../schema';
-import { eq, and, desc, asc, gte, inArray, sql, count } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { DEFAULT_LAUNCH } from "../schema";
+import { eq, and, desc, asc, gte, inArray, sql, count } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // ============================================
 // Cohorts
@@ -29,7 +29,7 @@ export async function getCurrentCohort(): Promise<LaunchCohort | undefined> {
   const [live] = await db
     .select()
     .from(launchCohorts)
-    .where(eq(launchCohorts.state, 'voting'))
+    .where(eq(launchCohorts.state, "voting"))
     .orderBy(desc(launchCohorts.weekStartAt))
     .limit(1);
   if (live) return live;
@@ -37,18 +37,25 @@ export async function getCurrentCohort(): Promise<LaunchCohort | undefined> {
   const [open] = await db
     .select()
     .from(launchCohorts)
-    .where(eq(launchCohorts.state, 'open'))
+    .where(eq(launchCohorts.state, "open"))
     .orderBy(asc(launchCohorts.weekStartAt))
     .limit(1);
   return open;
 }
 
-export async function getCohortById(id: string): Promise<LaunchCohort | undefined> {
-  const [row] = await db.select().from(launchCohorts).where(eq(launchCohorts.id, id));
+export async function getCohortById(
+  id: string,
+): Promise<LaunchCohort | undefined> {
+  const [row] = await db
+    .select()
+    .from(launchCohorts)
+    .where(eq(launchCohorts.id, id));
   return row;
 }
 
-export async function getCohortByWeekStart(weekStartAt: Date): Promise<LaunchCohort | undefined> {
+export async function getCohortByWeekStart(
+  weekStartAt: Date,
+): Promise<LaunchCohort | undefined> {
   const [row] = await db
     .select()
     .from(launchCohorts)
@@ -56,7 +63,9 @@ export async function getCohortByWeekStart(weekStartAt: Date): Promise<LaunchCoh
   return row;
 }
 
-export async function getCohortsByState(states: LaunchCohortState[]): Promise<LaunchCohort[]> {
+export async function getCohortsByState(
+  states: LaunchCohortState[],
+): Promise<LaunchCohort[]> {
   if (states.length === 0) return [];
   return db
     .select()
@@ -66,31 +75,44 @@ export async function getCohortsByState(states: LaunchCohortState[]): Promise<La
 }
 
 export async function createCohort(
-  data: Omit<NewLaunchCohort, 'id' | 'createdAt' | 'updatedAt'>,
+  data: Omit<NewLaunchCohort, "id" | "createdAt" | "updatedAt">,
 ): Promise<LaunchCohort> {
   const id = uuid();
   const now = new Date();
-  await db.insert(launchCohorts).values({ ...data, id, createdAt: now, updatedAt: now });
-  const [row] = await db.select().from(launchCohorts).where(eq(launchCohorts.id, id));
+  await db
+    .insert(launchCohorts)
+    .values({ ...data, id, createdAt: now, updatedAt: now });
+  const [row] = await db
+    .select()
+    .from(launchCohorts)
+    .where(eq(launchCohorts.id, id));
   return row;
 }
 
-export async function setCohortState(id: string, state: LaunchCohortState): Promise<void> {
+export async function setCohortState(
+  id: string,
+  state: LaunchCohortState,
+): Promise<void> {
   await db
     .update(launchCohorts)
     .set({ state, updatedAt: new Date() })
     .where(eq(launchCohorts.id, id));
 }
 
-export async function lockCohortWinner(id: string, winnerSlug: string | null): Promise<void> {
+export async function lockCohortWinner(
+  id: string,
+  winnerSlug: string | null,
+): Promise<void> {
   await db
     .update(launchCohorts)
-    .set({ state: 'locked', winnerSlug, updatedAt: new Date() })
+    .set({ state: "locked", winnerSlug, updatedAt: new Date() })
     .where(eq(launchCohorts.id, id));
 }
 
 /** All cohorts in a state, oldest first — used by the state engine to advance due ones. */
-export async function listCohortsByStateAsc(states: LaunchCohortState[]): Promise<LaunchCohort[]> {
+export async function listCohortsByStateAsc(
+  states: LaunchCohortState[],
+): Promise<LaunchCohort[]> {
   if (states.length === 0) return [];
   return db
     .select()
@@ -104,34 +126,50 @@ export async function listCohortsByStateAsc(states: LaunchCohortState[]): Promis
 // ============================================
 
 function slugifyName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .substring(0, 50) || 'launch';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 50) || "launch"
+  );
 }
 
 /** Normalize a website URL to its bare host (lowercase, no www/port) for dup detection. */
 export function normalizeDomain(websiteUrl: string): string | null {
   try {
-    const url = new URL(websiteUrl.includes('://') ? websiteUrl : `https://${websiteUrl}`);
-    return url.hostname.toLowerCase().replace(/^www\./, '');
+    const url = new URL(
+      websiteUrl.includes("://") ? websiteUrl : `https://${websiteUrl}`,
+    );
+    return url.hostname.toLowerCase().replace(/^www\./, "");
   } catch {
     return null;
   }
 }
 
-export async function getProfileBySlug(slug: string): Promise<LaunchProfile | undefined> {
-  const [row] = await db.select().from(launchProfiles).where(eq(launchProfiles.slug, slug));
+export async function getProfileBySlug(
+  slug: string,
+): Promise<LaunchProfile | undefined> {
+  const [row] = await db
+    .select()
+    .from(launchProfiles)
+    .where(eq(launchProfiles.slug, slug));
   return row;
 }
 
-export async function findProfileByDomain(domain: string): Promise<LaunchProfile | undefined> {
-  const [row] = await db.select().from(launchProfiles).where(eq(launchProfiles.domain, domain));
+export async function findProfileByDomain(
+  domain: string,
+): Promise<LaunchProfile | undefined> {
+  const [row] = await db
+    .select()
+    .from(launchProfiles)
+    .where(eq(launchProfiles.domain, domain));
   return row;
 }
 
-export async function listProfilesByCohort(cohortId: string): Promise<LaunchProfile[]> {
+export async function listProfilesByCohort(
+  cohortId: string,
+): Promise<LaunchProfile[]> {
   return db
     .select()
     .from(launchProfiles)
@@ -140,16 +178,25 @@ export async function listProfilesByCohort(cohortId: string): Promise<LaunchProf
 }
 
 /** Only featured (live) entries for a cohort — what the public leaderboard shows. */
-export async function listFeaturedProfilesByCohort(cohortId: string): Promise<LaunchProfile[]> {
+export async function listFeaturedProfilesByCohort(
+  cohortId: string,
+): Promise<LaunchProfile[]> {
   return db
     .select()
     .from(launchProfiles)
-    .where(and(eq(launchProfiles.cohortId, cohortId), eq(launchProfiles.status, 'featured')))
+    .where(
+      and(
+        eq(launchProfiles.cohortId, cohortId),
+        eq(launchProfiles.status, "featured"),
+      ),
+    )
     .orderBy(desc(launchProfiles.upvoteCount));
 }
 
 export async function createProfile(
-  data: Omit<NewLaunchProfile, 'id' | 'slug' | 'createdAt' | 'updatedAt'> & { slug?: string },
+  data: Omit<NewLaunchProfile, "id" | "slug" | "createdAt" | "updatedAt"> & {
+    slug?: string;
+  },
 ): Promise<LaunchProfile> {
   const id = uuid();
   const now = new Date();
@@ -164,14 +211,19 @@ export async function createProfile(
     counter++;
   }
 
-  await db.insert(launchProfiles).values({ ...data, id, slug, createdAt: now, updatedAt: now });
-  const [row] = await db.select().from(launchProfiles).where(eq(launchProfiles.id, id));
+  await db
+    .insert(launchProfiles)
+    .values({ ...data, id, slug, createdAt: now, updatedAt: now });
+  const [row] = await db
+    .select()
+    .from(launchProfiles)
+    .where(eq(launchProfiles.id, id));
   return row;
 }
 
 export async function updateProfile(
   slug: string,
-  patch: Partial<Omit<NewLaunchProfile, 'id' | 'slug'>>,
+  patch: Partial<Omit<NewLaunchProfile, "id" | "slug">>,
 ): Promise<LaunchProfile | undefined> {
   await db
     .update(launchProfiles)
@@ -186,8 +238,8 @@ export async function updateProfile(
 
 export class DuplicateVoteError extends Error {
   constructor() {
-    super('already-voted');
-    this.name = 'DuplicateVoteError';
+    super("already-voted");
+    this.name = "DuplicateVoteError";
   }
 }
 
@@ -195,10 +247,17 @@ export class DuplicateVoteError extends Error {
 // PostgresError (with `.code`) off `.cause`. Check both levels.
 function isUniqueViolation(err: unknown): boolean {
   for (let cur: unknown = err, depth = 0; cur && depth < 3; depth++) {
-    if (typeof cur === 'object' && 'code' in cur && (cur as { code?: string }).code === '23505') {
+    if (
+      typeof cur === "object" &&
+      "code" in cur &&
+      (cur as { code?: string }).code === "23505"
+    ) {
       return true;
     }
-    cur = typeof cur === 'object' && 'cause' in cur ? (cur as { cause?: unknown }).cause : undefined;
+    cur =
+      typeof cur === "object" && "cause" in cur
+        ? (cur as { cause?: unknown }).cause
+        : undefined;
   }
   return false;
 }
@@ -228,17 +287,33 @@ export async function createVote(data: {
   }
 }
 
-export async function deleteVote(profileId: string, voterUserId: string): Promise<void> {
+export async function deleteVote(
+  profileId: string,
+  voterUserId: string,
+): Promise<void> {
   await db
     .delete(launchVotes)
-    .where(and(eq(launchVotes.profileId, profileId), eq(launchVotes.voterUserId, voterUserId)));
+    .where(
+      and(
+        eq(launchVotes.profileId, profileId),
+        eq(launchVotes.voterUserId, voterUserId),
+      ),
+    );
 }
 
-export async function hasUserVoted(profileId: string, voterUserId: string): Promise<boolean> {
+export async function hasUserVoted(
+  profileId: string,
+  voterUserId: string,
+): Promise<boolean> {
   const [row] = await db
     .select({ id: launchVotes.id })
     .from(launchVotes)
-    .where(and(eq(launchVotes.profileId, profileId), eq(launchVotes.voterUserId, voterUserId)))
+    .where(
+      and(
+        eq(launchVotes.profileId, profileId),
+        eq(launchVotes.voterUserId, voterUserId),
+      ),
+    )
     .limit(1);
   return Boolean(row);
 }
@@ -252,31 +327,60 @@ export async function getUserVotedProfileIds(
   const rows = await db
     .select({ profileId: launchVotes.profileId })
     .from(launchVotes)
-    .where(and(eq(launchVotes.voterUserId, voterUserId), inArray(launchVotes.profileId, profileIds)));
+    .where(
+      and(
+        eq(launchVotes.voterUserId, voterUserId),
+        inArray(launchVotes.profileId, profileIds),
+      ),
+    );
   return new Set(rows.map((r) => r.profileId));
 }
 
-export async function countVotesByUserSince(voterUserId: string, since: Date): Promise<number> {
+export async function countVotesByUserSince(
+  voterUserId: string,
+  since: Date,
+): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(launchVotes)
-    .where(and(eq(launchVotes.voterUserId, voterUserId), gte(launchVotes.createdAt, since)));
+    .where(
+      and(
+        eq(launchVotes.voterUserId, voterUserId),
+        gte(launchVotes.createdAt, since),
+      ),
+    );
   return row?.n ?? 0;
 }
 
-export async function countVotesByIpSince(ipAddress: string, since: Date): Promise<number> {
+export async function countVotesByIpSince(
+  ipAddress: string,
+  since: Date,
+): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(launchVotes)
-    .where(and(eq(launchVotes.ipAddress, ipAddress), gte(launchVotes.createdAt, since)));
+    .where(
+      and(
+        eq(launchVotes.ipAddress, ipAddress),
+        gte(launchVotes.createdAt, since),
+      ),
+    );
   return row?.n ?? 0;
 }
 
-export async function countSubmissionsByUserSince(submittedByUserId: string, since: Date): Promise<number> {
+export async function countSubmissionsByUserSince(
+  submittedByUserId: string,
+  since: Date,
+): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(launchProfiles)
-    .where(and(eq(launchProfiles.submittedByUserId, submittedByUserId), gte(launchProfiles.createdAt, since)));
+    .where(
+      and(
+        eq(launchProfiles.submittedByUserId, submittedByUserId),
+        gte(launchProfiles.createdAt, since),
+      ),
+    );
   return row?.n ?? 0;
 }
 
@@ -285,7 +389,9 @@ export async function recomputeUpvoteCount(profileId: string): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(launchVotes)
-    .where(and(eq(launchVotes.profileId, profileId), eq(launchVotes.cleared, false)));
+    .where(
+      and(eq(launchVotes.profileId, profileId), eq(launchVotes.cleared, false)),
+    );
   const n = row?.n ?? 0;
   await db
     .update(launchProfiles)
@@ -309,7 +415,12 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
   const clusters = await db
     .select({ ip: launchVotes.ipAddress, n: count() })
     .from(launchVotes)
-    .where(and(inArray(launchVotes.profileId, profileIds), eq(launchVotes.cleared, false)))
+    .where(
+      and(
+        inArray(launchVotes.profileId, profileIds),
+        eq(launchVotes.cleared, false),
+      ),
+    )
     .groupBy(launchVotes.ipAddress)
     .having(sql`count(*) > ${DEFAULT_LAUNCH.suspiciousIpClusterThreshold}`);
 
@@ -321,7 +432,12 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
   const cleared = await db
     .update(launchVotes)
     .set({ cleared: true })
-    .where(and(inArray(launchVotes.profileId, profileIds), inArray(launchVotes.ipAddress, suspiciousIps)))
+    .where(
+      and(
+        inArray(launchVotes.profileId, profileIds),
+        inArray(launchVotes.ipAddress, suspiciousIps),
+      ),
+    )
     .returning({ id: launchVotes.id });
 
   for (const id of profileIds) {
@@ -335,10 +451,16 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
 // ============================================
 
 export async function getMonthlyWinners(): Promise<LaunchMonthlyWinner[]> {
-  return db.select().from(launchMonthlyWinners).orderBy(desc(launchMonthlyWinners.month));
+  return db
+    .select()
+    .from(launchMonthlyWinners)
+    .orderBy(desc(launchMonthlyWinners.month));
 }
 
-export async function setMonthlyWinner(month: string, profileSlug: string): Promise<void> {
+export async function setMonthlyWinner(
+  month: string,
+  profileSlug: string,
+): Promise<void> {
   const existing = await db
     .select({ id: launchMonthlyWinners.id })
     .from(launchMonthlyWinners)

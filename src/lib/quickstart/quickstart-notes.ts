@@ -4,9 +4,9 @@
  * invent observations.
  */
 
-import * as queries from '@/lib/db/queries';
-import { generateWithAI } from '@/lib/ai';
-import { getAIConfig } from '@/lib/playwright/agent-context';
+import * as queries from "@/lib/db/queries";
+import { generateWithAI } from "@/lib/ai";
+import { getAIConfig } from "@/lib/playwright/agent-context";
 import type {
   DemoNotes,
   DemoNoteItem,
@@ -14,7 +14,7 @@ import type {
   QuickstartPublicScout,
   QuickstartAuthedScout,
   QuickstartAuthSetupMeta,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 export interface QuickstartRunFacts {
   passedCount: number;
@@ -69,9 +69,9 @@ function asNoteItems(value: unknown): DemoNoteItem[] {
   if (!Array.isArray(value)) return [];
   const out: DemoNoteItem[] = [];
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue;
+    if (!raw || typeof raw !== "object") continue;
     const obj = raw as Record<string, unknown>;
-    if (typeof obj.label !== 'string' || typeof obj.note !== 'string') continue;
+    if (typeof obj.label !== "string" || typeof obj.note !== "string") continue;
     out.push({ label: obj.label, note: obj.note });
   }
   return out;
@@ -81,9 +81,10 @@ function asSkippedRoutes(value: unknown): DemoNoteSkippedRoute[] {
   if (!Array.isArray(value)) return [];
   const out: DemoNoteSkippedRoute[] = [];
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue;
+    if (!raw || typeof raw !== "object") continue;
     const obj = raw as Record<string, unknown>;
-    if (typeof obj.path !== 'string' || typeof obj.reason !== 'string') continue;
+    if (typeof obj.path !== "string" || typeof obj.reason !== "string")
+      continue;
     out.push({ path: obj.path, reason: obj.reason });
   }
   return out;
@@ -96,12 +97,12 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     tagline: input.publicScout.tagline ?? null,
     authClassification: input.publicScout.classification,
     authAutomatable: input.publicScout.authAutomatable,
-    publicNavRoutes: input.publicScout.navLinks.map(n => n.path),
+    publicNavRoutes: input.publicScout.navLinks.map((n) => n.path),
     cookieBannerSeen: !!input.publicScout.cookieBannerSelectorHint,
     publicFriction: input.publicScout.friction ?? [],
-    authedNavRoutes: input.authedScout?.inAppNavLinks.map(n => n.path) ?? [],
+    authedNavRoutes: input.authedScout?.inAppNavLinks.map((n) => n.path) ?? [],
     authedObservedRoutes: input.authedScout?.observedRoutes ?? [],
-    safeCtas: input.authedScout?.safeCtaCandidates.map(c => c.label) ?? [],
+    safeCtas: input.authedScout?.safeCtaCandidates.map((c) => c.label) ?? [],
     authedFriction: input.authedScout?.friction ?? [],
     authSetupCaptured: input.authSetup?.captured ?? false,
     authSetupFailureReason: input.authSetup?.failureReason ?? null,
@@ -137,43 +138,59 @@ Produce the demo notes JSON.`;
   try {
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
       repositoryId: input.repositoryId,
-      actionType: 'agent_discover',
+      actionType: "agent_discover",
       onLogCreated: options?.onLogCreated,
-      responseFormat: 'json_object',
+      responseFormat: "json_object",
     });
     const fence = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const json = JSON.parse((fence?.[1] ?? response).trim());
-    if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
-    modelId = config.openrouterModel ?? config.anthropicModel ?? config.openaiModel ?? config.provider;
+    if (json && typeof json === "object")
+      parsed = json as Record<string, unknown>;
+    modelId =
+      config.openrouterModel ??
+      config.anthropicModel ??
+      config.openaiModel ??
+      config.provider;
   } catch {
     // Defensive: keep going with what we have so the build still gets notes.
   }
 
   const fallbackTesting: DemoNoteItem[] = [];
-  if (input.authSetup && !input.authSetup.captured && input.authSetup.failureReason) {
+  if (
+    input.authSetup &&
+    !input.authSetup.captured &&
+    input.authSetup.failureReason
+  ) {
     fallbackTesting.push({
-      label: 'Auth setup blocked',
+      label: "Auth setup blocked",
       note: input.authSetup.failureReason,
     });
   }
-  if (!input.publicScout.authAutomatable && input.publicScout.classification !== 'no_public_register') {
+  if (
+    !input.publicScout.authAutomatable &&
+    input.publicScout.classification !== "no_public_register"
+  ) {
     fallbackTesting.push({
-      label: `Sign-up flow: ${input.publicScout.classification.replace(/_/g, ' ')}`,
-      note: 'Walkthrough ran in public-only mode — no in-app surface captured.',
+      label: `Sign-up flow: ${input.publicScout.classification.replace(/_/g, " ")}`,
+      note: "Walkthrough ran in public-only mode — no in-app surface captured.",
     });
   }
 
-  const summary = typeof parsed.uxSummary === 'string' && parsed.uxSummary.length > 0
-    ? parsed.uxSummary
-    : input.publicScout.concept
-      ? `${input.productName}: ${input.publicScout.concept}`
-      : `${input.productName}: ${input.runFacts.passedCount} test${input.runFacts.passedCount === 1 ? '' : 's'} passed, ${input.runFacts.changesDetected} screenshots captured.`;
+  const summary =
+    typeof parsed.uxSummary === "string" && parsed.uxSummary.length > 0
+      ? parsed.uxSummary
+      : input.publicScout.concept
+        ? `${input.productName}: ${input.publicScout.concept}`
+        : `${input.productName}: ${input.runFacts.passedCount} test${input.runFacts.passedCount === 1 ? "" : "s"} passed, ${input.runFacts.changesDetected} screenshots captured.`;
 
   return {
     uxSummary: summary,
     highlights: dedupeItems(asNoteItems(parsed.highlights)).slice(0, 4),
     frictionPoints: dedupeItems(asNoteItems(parsed.frictionPoints)).slice(0, 4),
-    testingStruggles: dedupeItems([...asNoteItems(parsed.testingStruggles), ...fallbackTesting]).slice(0, 4),
+    testingStruggles: dedupeItems([
+      ...asNoteItems(parsed.testingStruggles),
+      ...fallbackTesting,
+    ]).slice(0, 4),
     skippedRoutes: asSkippedRoutes(parsed.skippedRoutes).slice(0, 6),
     generatedAt: new Date().toISOString(),
     modelId,

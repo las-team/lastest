@@ -1,13 +1,19 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
   Bot,
   Check,
@@ -20,21 +26,26 @@ import {
   ArrowRight,
   X,
   Gitlab,
-} from 'lucide-react';
-import { authClient } from '@/lib/auth/auth-client';
-import { toast } from 'sonner';
-import { DiscordIcon } from '@/components/icons/discord-icon';
-import { DISCORD_INVITE_URL } from '@/lib/brand';
+} from "lucide-react";
+import { authClient } from "@/lib/auth/auth-client";
+import { toast } from "sonner";
+import { DiscordIcon } from "@/components/icons/discord-icon";
+import { DISCORD_INVITE_URL } from "@/lib/brand";
 import {
   setOnboardingPath,
   setBaseUrl,
   completeOnboarding,
   kickoffPlayAgent,
-} from '@/server/actions/onboarding';
-import { selectRepo, createLocalRepo, fetchAndSyncRepos, fetchAndSyncGitlabRepos } from '@/server/actions/repos';
-import type { OnboardingPath } from '@/lib/db/schema';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+} from "@/server/actions/onboarding";
+import {
+  selectRepo,
+  createLocalRepo,
+  fetchAndSyncRepos,
+  fetchAndSyncGitlabRepos,
+} from "@/server/actions/repos";
+import type { OnboardingPath } from "@/lib/db/schema";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 type RepoLite = {
   id: string;
@@ -67,31 +78,43 @@ const PATHS: Array<{
   Icon: typeof Hand;
 }> = [
   {
-    id: 'manual',
-    name: 'Manual',
-    tagline: 'Record by clicking, own the code.',
-    time: '~3 min setup',
-    bullets: ['No AI keys needed', 'Point-and-click recorder', 'Edit code by hand'],
-    bestFor: 'Air-gapped · simple flows',
+    id: "manual",
+    name: "Manual",
+    tagline: "Record by clicking, own the code.",
+    time: "~3 min setup",
+    bullets: [
+      "No AI keys needed",
+      "Point-and-click recorder",
+      "Edit code by hand",
+    ],
+    bestFor: "Air-gapped · simple flows",
     Icon: Hand,
   },
   {
-    id: 'ai',
-    name: 'AI-assisted',
-    tagline: 'You drive, AI helps.',
-    time: '~5 min setup',
+    id: "ai",
+    name: "AI-assisted",
+    tagline: "You drive, AI helps.",
+    time: "~5 min setup",
     recommended: true,
-    bullets: ['AI generates from URL', 'AI fixes broken tests', 'You review + approve'],
-    bestFor: 'Day-to-day dev',
+    bullets: [
+      "AI generates from URL",
+      "AI fixes broken tests",
+      "You review + approve",
+    ],
+    bestFor: "Day-to-day dev",
     Icon: Sparkles,
   },
   {
-    id: 'agent',
-    name: 'Play agent',
-    tagline: 'One click → full coverage.',
-    time: '~20 min (mostly waiting)',
-    bullets: ['11-step pipeline', 'Scans + plans + generates', 'Asks when stuck'],
-    bestFor: 'New projects · full coverage',
+    id: "agent",
+    name: "Play agent",
+    tagline: "One click → full coverage.",
+    time: "~20 min (mostly waiting)",
+    bullets: [
+      "11-step pipeline",
+      "Scans + plans + generates",
+      "Asks when stuck",
+    ],
+    bestFor: "New projects · full coverage",
     Icon: Bot,
   },
 ];
@@ -108,7 +131,7 @@ export function OnboardingClient({
 }: OnboardingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState(initialStep);
-  const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? 'ai');
+  const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? "ai");
   const [pending, startTransition] = useTransition();
   // Captured from createLocalRepo when the sandbox flow picks a known template
   // so Step 5 can deep-link to the seeded test instead of /tests/new?ai=true.
@@ -116,7 +139,7 @@ export function OnboardingClient({
 
   // For manual path, step 4 (AI) is skipped entirely.
   const visibleSteps = useMemo(() => {
-    if (path === 'manual') return [1, 2, 3, 5];
+    if (path === "manual") return [1, 2, 3, 5];
     return [1, 2, 3, 4, 5];
   }, [path]);
 
@@ -139,12 +162,12 @@ export function OnboardingClient({
   // Allow Esc to skip the current step (steps 2, 3, 4 only).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && step > 1 && step < 5) {
+      if (e.key === "Escape" && step > 1 && step < 5) {
         next();
       }
     }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [step, next]);
 
   const finish = useCallback(
@@ -168,7 +191,9 @@ export function OnboardingClient({
   );
 
   const currentIndex = visibleSteps.indexOf(step);
-  const progressPct = Math.round(((currentIndex + 1) / visibleSteps.length) * 100);
+  const progressPct = Math.round(
+    ((currentIndex + 1) / visibleSteps.length) * 100,
+  );
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-4 py-8">
@@ -218,21 +243,29 @@ export function OnboardingClient({
             onSelectRepo={(repoId) =>
               startTransition(async () => {
                 await selectRepo(repoId);
-                track(Events.repo_linked, { source: 'remote', repoId });
+                track(Events.repo_linked, { source: "remote", repoId });
                 router.refresh();
               })
             }
             onCreateSandbox={(name, baseUrl, templateId) =>
               startTransition(async () => {
                 try {
-                  const created = await createLocalRepo(name, baseUrl, templateId);
+                  const created = await createLocalRepo(
+                    name,
+                    baseUrl,
+                    templateId,
+                  );
                   setSeededTestId(created.seededTestId ?? null);
-                  track(Events.repo_linked, { source: 'sandbox' });
+                  track(Events.repo_linked, { source: "sandbox" });
                 } catch (err) {
                   // Without surfacing this, a silent createLocalRepo failure
                   // leaves the user on Step 2 with no recent-repos entry —
                   // they keep clicking "Create sandbox" with no feedback.
-                  toast.error(err instanceof Error ? err.message : 'Could not create sandbox');
+                  toast.error(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not create sandbox",
+                  );
                   return;
                 }
                 // Wait for the server to re-render Step 2 (with the new repo
@@ -250,7 +283,7 @@ export function OnboardingClient({
                   toast.success(`Synced ${result.count} repos`);
                   router.refresh();
                 } else {
-                  toast.error('No repos found');
+                  toast.error("No repos found");
                 }
               })
             }
@@ -261,7 +294,7 @@ export function OnboardingClient({
                   toast.success(`Synced ${result.count} projects`);
                   router.refresh();
                 } else {
-                  toast.error('No projects found');
+                  toast.error("No projects found");
                 }
               })
             }
@@ -291,12 +324,12 @@ export function OnboardingClient({
           />
         )}
 
-        {step === 4 && path !== 'manual' && (
+        {step === 4 && path !== "manual" && (
           <Step4Ai
             path={path}
             pending={pending}
             onContinue={() => next()}
-            onUseOwnKey={() => router.push('/settings?highlight=ai')}
+            onUseOwnKey={() => router.push("/settings?highlight=ai")}
             onBack={back}
             onSkip={next}
           />
@@ -304,23 +337,29 @@ export function OnboardingClient({
 
         {step === 5 && (
           <Step5Launch
-            path={path ?? 'ai'}
+            path={path ?? "ai"}
             selectedRepoId={selectedRepoId}
             selectedRepoBaseUrl={selectedRepoBaseUrl}
             seededTestId={seededTestId}
             pending={pending}
             onLaunch={async (target) => {
-              if (path === 'agent' && selectedRepoId) {
+              if (path === "agent" && selectedRepoId) {
                 try {
                   await kickoffPlayAgent(selectedRepoId);
-                  toast.success('Play agent started — watch it work in the activity feed.');
+                  toast.success(
+                    "Play agent started — watch it work in the activity feed.",
+                  );
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : 'Could not start play agent');
+                  toast.error(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not start play agent",
+                  );
                 }
               }
               await finish(target);
             }}
-            onSkipToDashboard={() => finish('/')}
+            onSkipToDashboard={() => finish("/")}
             onBack={back}
           />
         )}
@@ -330,7 +369,7 @@ export function OnboardingClient({
       <div className="mt-8 flex items-center justify-center gap-3 text-xs text-muted-foreground">
         <button
           type="button"
-          onClick={() => finish('/')}
+          onClick={() => finish("/")}
           className="underline-offset-4 hover:text-foreground hover:underline"
         >
           Skip setup, take me to the dashboard
@@ -386,8 +425,8 @@ function Step1Fork({
               onClick={() => onSelect(p.id)}
               className={`relative rounded-lg border-2 p-4 text-left transition-all ${
                 active
-                  ? 'border-primary bg-primary/5 shadow-sm'
-                  : 'border-border bg-card hover:border-muted-foreground/40'
+                  ? "border-primary bg-primary/5 shadow-sm"
+                  : "border-border bg-card hover:border-muted-foreground/40"
               }`}
             >
               {p.recommended && (
@@ -455,26 +494,27 @@ type SandboxTemplate = {
 
 const SANDBOX_TEMPLATES: SandboxTemplate[] = [
   {
-    id: 'todomvc',
-    name: 'TodoMVC',
-    url: 'https://demo.playwright.dev/todomvc/',
+    id: "todomvc",
+    name: "TodoMVC",
+    url: "https://demo.playwright.dev/todomvc/",
     description: "Playwright's classic todo demo — perfect for first tests.",
   },
   {
-    id: 'the-internet',
-    name: 'The Internet',
-    url: 'https://the-internet.herokuapp.com/',
-    description: 'A QA testing playground with logins, drag-drop, frames, and more.',
+    id: "the-internet",
+    name: "The Internet",
+    url: "https://the-internet.herokuapp.com/",
+    description:
+      "A QA testing playground with logins, drag-drop, frames, and more.",
   },
   {
-    id: 'playwright-docs',
-    name: 'Playwright Docs',
-    url: 'https://playwright.dev',
-    description: 'A real public docs site with rich navigation and content.',
+    id: "playwright-docs",
+    name: "Playwright Docs",
+    url: "https://playwright.dev",
+    description: "A real public docs site with rich navigation and content.",
   },
   {
-    id: 'blank',
-    name: 'Blank',
+    id: "blank",
+    name: "Blank",
     url: null,
     description: "Start empty — you'll set the URL in the next step.",
   },
@@ -500,7 +540,11 @@ function Step2Repo({
   selectedRepoId: string | null;
   pending: boolean;
   onSelectRepo: (id: string) => void;
-  onCreateSandbox: (name: string, baseUrl?: string, templateId?: string) => void;
+  onCreateSandbox: (
+    name: string,
+    baseUrl?: string,
+    templateId?: string,
+  ) => void;
   onSyncGithub: () => void;
   onSyncGitlab: () => void;
   onNext: () => void;
@@ -511,13 +555,15 @@ function Step2Repo({
   const hasSelected = !!selectedRepoId;
 
   const [showSandbox, setShowSandbox] = useState(false);
-  const [sandboxName, setSandboxName] = useState('My First Project');
-  const [sandboxTemplateId, setSandboxTemplateId] = useState<string>('todomvc');
+  const [sandboxName, setSandboxName] = useState("My First Project");
+  const [sandboxTemplateId, setSandboxTemplateId] = useState<string>("todomvc");
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Connect your code</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Connect your code
+        </h1>
         <p className="text-sm text-muted-foreground">
           Pick how you want Lastest to find your app. You can change this later.
         </p>
@@ -538,13 +584,13 @@ function Step2Repo({
                   onClick={() => onSelectRepo(r.id)}
                   disabled={pending}
                   className={`flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm transition-colors ${
-                    active ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                    active ? "bg-primary/10 text-primary" : "hover:bg-muted"
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    {r.provider === 'gitlab' ? (
+                    {r.provider === "gitlab" ? (
                       <Gitlab className="h-3.5 w-3.5 text-muted-foreground" />
-                    ) : r.provider === 'local' ? (
+                    ) : r.provider === "local" ? (
                       <Rocket className="h-3.5 w-3.5 text-muted-foreground" />
                     ) : (
                       <Github className="h-3.5 w-3.5 text-muted-foreground" />
@@ -566,18 +612,20 @@ function Step2Repo({
         <ConnectionCard
           icon={Github}
           title="GitHub"
-          subtitle={githubAccount ? `@${githubAccount.username}` : 'Connect a repo'}
+          subtitle={
+            githubAccount ? `@${githubAccount.username}` : "Connect a repo"
+          }
           connected={!!githubAccount}
-          pros={['Route scanning', 'PR checks & comments', 'Branch tracking']}
-          cons={['Needs OAuth permission']}
-          actionLabel={githubAccount ? 'Sync repos' : 'Connect GitHub'}
+          pros={["Route scanning", "PR checks & comments", "Branch tracking"]}
+          cons={["Needs OAuth permission"]}
+          actionLabel={githubAccount ? "Sync repos" : "Connect GitHub"}
           onAction={() => {
             if (githubAccount) {
               onSyncGithub();
             } else {
               authClient.signIn.social({
-                provider: 'github',
-                callbackURL: '/onboarding?step=2',
+                provider: "github",
+                callbackURL: "/onboarding?step=2",
               });
             }
           }}
@@ -586,16 +634,18 @@ function Step2Repo({
         <ConnectionCard
           icon={Gitlab}
           title="GitLab"
-          subtitle={gitlabAccount ? `@${gitlabAccount.username}` : 'Connect a project'}
+          subtitle={
+            gitlabAccount ? `@${gitlabAccount.username}` : "Connect a project"
+          }
           connected={!!gitlabAccount}
-          pros={['Route scanning', 'MR checks & comments', 'Branch tracking']}
-          cons={['Needs OAuth permission']}
-          actionLabel={gitlabAccount ? 'Sync projects' : 'Connect GitLab'}
+          pros={["Route scanning", "MR checks & comments", "Branch tracking"]}
+          cons={["Needs OAuth permission"]}
+          actionLabel={gitlabAccount ? "Sync projects" : "Connect GitLab"}
           onAction={() => {
             if (gitlabAccount) {
               onSyncGitlab();
             } else {
-              window.location.href = '/api/connect/gitlab';
+              window.location.href = "/api/connect/gitlab";
             }
           }}
           pending={pending}
@@ -605,9 +655,13 @@ function Step2Repo({
           title="Sandbox"
           subtitle="No repo, just a demo URL"
           connected={false}
-          pros={['Instant — no install', 'Pick from templates', 'Great for trying it out']}
-          cons={['No PR comments or route scanning']}
-          actionLabel={showSandbox ? 'Editing below…' : 'Use a sandbox'}
+          pros={[
+            "Instant — no install",
+            "Pick from templates",
+            "Great for trying it out",
+          ]}
+          cons={["No PR comments or route scanning"]}
+          actionLabel={showSandbox ? "Editing below…" : "Use a sandbox"}
           onAction={() => setShowSandbox(true)}
           pending={pending}
           highlighted={showSandbox}
@@ -662,13 +716,15 @@ function Step2Repo({
                       onClick={() => setSandboxTemplateId(t.id)}
                       className={`rounded-md border p-3 text-left transition-colors ${
                         active
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border bg-card hover:border-muted-foreground/40'
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-card hover:border-muted-foreground/40"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-sm font-medium">{t.name}</div>
-                        {active && <Check className="h-3.5 w-3.5 text-primary" />}
+                        {active && (
+                          <Check className="h-3.5 w-3.5 text-primary" />
+                        )}
                       </div>
                       <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
                         {t.description}
@@ -687,15 +743,19 @@ function Step2Repo({
             <div className="flex justify-end">
               <Button
                 onClick={() => {
-                  const tpl = SANDBOX_TEMPLATES.find((t) => t.id === sandboxTemplateId);
-                  const name = sandboxName.trim() || 'My First Project';
+                  const tpl = SANDBOX_TEMPLATES.find(
+                    (t) => t.id === sandboxTemplateId,
+                  );
+                  const name = sandboxName.trim() || "My First Project";
                   onCreateSandbox(name, tpl?.url ?? undefined, tpl?.id);
                   setShowSandbox(false);
                 }}
                 disabled={pending || !sandboxName.trim()}
                 size="sm"
               >
-                {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
+                {pending ? (
+                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                ) : null}
                 Create sandbox
               </Button>
             </div>
@@ -712,7 +772,7 @@ function Step2Repo({
             I&apos;ll pick later
           </Button>
           <Button onClick={onNext} disabled={pending} size="lg">
-            {hasSelected ? 'Continue' : 'Continue without a repo'}
+            {hasSelected ? "Continue" : "Continue without a repo"}
             <ChevronRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
@@ -747,7 +807,7 @@ function ConnectionCard({
   return (
     <Card
       className={`flex h-full flex-col gap-0 bg-white py-0 dark:bg-card ${
-        highlighted ? 'border-primary/40 ring-1 ring-primary/30' : ''
+        highlighted ? "border-primary/40 ring-1 ring-primary/30" : ""
       }`}
     >
       <CardContent className="flex flex-1 flex-col gap-3 p-4">
@@ -772,7 +832,10 @@ function ConnectionCard({
             </li>
           ))}
           {cons.map((c) => (
-            <li key={c} className="flex items-start gap-1.5 text-muted-foreground">
+            <li
+              key={c}
+              className="flex items-start gap-1.5 text-muted-foreground"
+            >
               <X className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/70" />
               <span>{c}</span>
             </li>
@@ -781,7 +844,7 @@ function ConnectionCard({
 
         <div className="mt-auto pt-2">
           <Button
-            variant={connected ? 'outline' : 'default'}
+            variant={connected ? "outline" : "default"}
             size="sm"
             className="w-full"
             onClick={onAction}
@@ -813,7 +876,7 @@ function Step3Url({
   onBack: () => void;
   onSkip: () => void;
 }) {
-  const [url, setUrl] = useState(currentBaseUrl ?? '');
+  const [url, setUrl] = useState(currentBaseUrl ?? "");
   // Sync the input when the parent's `currentBaseUrl` arrives late — e.g. the
   // sandbox repo was just created and `router.refresh()` hadn't propagated by
   // the time this component first mounted. Using the React-recommended
@@ -822,22 +885,26 @@ function Step3Url({
   const [prevBaseUrl, setPrevBaseUrl] = useState(currentBaseUrl);
   if (prevBaseUrl !== currentBaseUrl) {
     setPrevBaseUrl(currentBaseUrl);
-    setUrl(currentBaseUrl ?? '');
+    setUrl(currentBaseUrl ?? "");
   }
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Where does your app live?</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Where does your app live?
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Lastest needs a URL to point the browser at. You can change it per branch later.
+          Lastest needs a URL to point the browser at. You can change it per
+          branch later.
         </p>
       </div>
 
       {!selectedRepoId && (
         <Card>
           <CardContent className="py-3 text-xs text-muted-foreground">
-            No repo selected — we&apos;ll remember your URL once you pick one in Settings.
+            No repo selected — we&apos;ll remember your URL once you pick one in
+            Settings.
           </CardContent>
         </Card>
       )}
@@ -857,7 +924,7 @@ function Step3Url({
             variant="outline"
             size="sm"
             type="button"
-            onClick={() => setUrl('http://localhost:3000')}
+            onClick={() => setUrl("http://localhost:3000")}
           >
             http://localhost:3000
           </Button>
@@ -865,7 +932,7 @@ function Step3Url({
             variant="outline"
             size="sm"
             type="button"
-            onClick={() => setUrl('https://playwright.dev')}
+            onClick={() => setUrl("https://playwright.dev")}
           >
             I don&apos;t have one — use a demo
           </Button>
@@ -912,12 +979,12 @@ function Step4Ai({
   onBack: () => void;
   onSkip: () => void;
 }) {
-  const isAgent = path === 'agent';
+  const isAgent = path === "agent";
   return (
     <div className="space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">
-          {isAgent ? 'Ready to fire up the agent?' : 'AI is on by default'}
+          {isAgent ? "Ready to fire up the agent?" : "AI is on by default"}
         </h1>
         <p className="text-sm text-muted-foreground">
           {isAgent
@@ -954,7 +1021,7 @@ function Step4Ai({
           </Button>
           <Button onClick={onContinue} disabled={pending} size="lg">
             {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isAgent ? 'Continue' : 'Yes, continue'}
+            {isAgent ? "Continue" : "Yes, continue"}
             <ChevronRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
@@ -986,49 +1053,51 @@ function Step5Launch({
 }) {
   const urlQuery = selectedRepoBaseUrl
     ? `&url=${encodeURIComponent(selectedRepoBaseUrl)}`
-    : '';
-  const repoQuery = selectedRepoId ? `?repoId=${selectedRepoId}` : '';
+    : "";
+  const repoQuery = selectedRepoId ? `?repoId=${selectedRepoId}` : "";
 
   const config = (() => {
-    if (path === 'manual') {
+    if (path === "manual") {
       return {
         title: "Let's record your first test",
-        body: 'The recorder watches you click through your app and writes a Playwright test. Takes about 90 seconds.',
-        cta: 'Open recorder',
-        target: `/record${repoQuery}${urlQuery ? '&' + urlQuery.slice(1) : ''}`,
+        body: "The recorder watches you click through your app and writes a Playwright test. Takes about 90 seconds.",
+        cta: "Open recorder",
+        target: `/record${repoQuery}${urlQuery ? "&" + urlQuery.slice(1) : ""}`,
       };
     }
-    if (path === 'ai') {
+    if (path === "ai") {
       // If the sandbox flow already seeded a real test, skip /tests/new
       // (which kicks off AI generation against an MCP it may not reach) and
       // drop the user straight into a ready-to-run test.
       if (seededTestId) {
         return {
-          title: 'Your first test is ready',
-          body: 'We seeded a real Playwright test against the sandbox template. Open it, hit run, and watch the diff.',
-          cta: 'Open the test',
+          title: "Your first test is ready",
+          body: "We seeded a real Playwright test against the sandbox template. Open it, hit run, and watch the diff.",
+          cta: "Open the test",
           target: `/tests?test=${encodeURIComponent(seededTestId)}`,
         };
       }
       return {
         title: "Let's generate your first test",
-        body: 'Tell the AI what to test and it writes a draft you can run, review, and approve.',
-        cta: 'Open generator',
-        target: `/tests/new${repoQuery ? `${repoQuery}&ai=true` : '?ai=true'}${urlQuery}`,
+        body: "Tell the AI what to test and it writes a draft you can run, review, and approve.",
+        cta: "Open generator",
+        target: `/tests/new${repoQuery ? `${repoQuery}&ai=true` : "?ai=true"}${urlQuery}`,
       };
     }
     return {
-      title: 'Agent is running',
+      title: "Agent is running",
       body: "The play agent is scanning your app, planning tests, and writing them now. Watch the live timeline on your dashboard — we'll keep you posted.",
-      cta: 'Open activity feed',
-      target: '/?focusActivity=1',
+      cta: "Open activity feed",
+      target: "/?focusActivity=1",
     };
   })();
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">{config.title}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          {config.title}
+        </h1>
         <p className="text-sm text-muted-foreground">{config.body}</p>
       </div>
 
@@ -1041,7 +1110,7 @@ function Step5Launch({
               <div className="text-xs text-muted-foreground">
                 {selectedRepoBaseUrl
                   ? `Target: ${selectedRepoBaseUrl}`
-                  : 'No URL set — you can add one in Settings.'}
+                  : "No URL set — you can add one in Settings."}
               </div>
             </div>
           </div>
@@ -1053,10 +1122,19 @@ function Step5Launch({
           Back
         </Button>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onSkipToDashboard} disabled={pending}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSkipToDashboard}
+            disabled={pending}
+          >
             Just take me to the dashboard
           </Button>
-          <Button onClick={() => onLaunch(config.target)} disabled={pending} size="lg">
+          <Button
+            onClick={() => onLaunch(config.target)}
+            disabled={pending}
+            size="lg"
+          >
             {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {config.cta}
             <ChevronRight className="ml-1 h-4 w-4" />

@@ -1,8 +1,11 @@
-import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
-import { requireAuth } from '@/lib/auth';
-import { listEmbeddedSessions, listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
-import { toProxyStreamUrl, probeStreamUrlAlive } from '@/lib/eb/stream-url';
+import { NextResponse } from "next/server";
+import { headers } from "next/headers";
+import { requireAuth } from "@/lib/auth";
+import {
+  listEmbeddedSessions,
+  listSystemEmbeddedSessions,
+} from "@/server/actions/embedded-sessions";
+import { toProxyStreamUrl, probeStreamUrlAlive } from "@/lib/eb/stream-url";
 
 /**
  * GET /api/embedded/stream
@@ -18,12 +21,12 @@ export async function GET() {
     // both) so 403/401 incidents on /record can be triaged from a build's
     // consoleErrors instead of needing a server log dive.
     const h = await headers();
-    const hasCookie = Boolean(h.get('cookie'));
-    const hasBearer = h.get('authorization')?.startsWith('Bearer ');
+    const hasCookie = Boolean(h.get("cookie"));
+    const hasBearer = h.get("authorization")?.startsWith("Bearer ");
     console.warn(
-      `[stream] 401 Unauthorized — cookie=${hasCookie ? 'present' : 'missing'} bearer=${hasBearer ? 'present' : 'missing'} ua=${h.get('user-agent')?.slice(0, 80) || 'unknown'}`,
+      `[stream] 401 Unauthorized — cookie=${hasCookie ? "present" : "missing"} bearer=${hasBearer ? "present" : "missing"} ua=${h.get("user-agent")?.slice(0, 80) || "unknown"}`,
     );
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -49,7 +52,7 @@ export async function GET() {
     // silent flip to Disconnected.
     const aliveByIndex = await Promise.all(
       allSessions.map((s) => {
-        const isLive = s.status !== 'stopped' && s.status !== 'stopping';
+        const isLive = s.status !== "stopped" && s.status !== "stopping";
         if (!isLive || !s.streamUrl) return Promise.resolve(false);
         return probeStreamUrlAlive(s.streamUrl);
       }),
@@ -57,18 +60,19 @@ export async function GET() {
 
     return NextResponse.json({
       sessions: allSessions.map((s, i) => {
-        const isLive = s.status !== 'stopped' && s.status !== 'stopping';
+        const isLive = s.status !== "stopped" && s.status !== "stopping";
         const probedAlive = aliveByIndex[i];
         if (isLive && !probedAlive && s.streamUrl) {
           console.warn(
-            `[stream] EB unreachable, hiding streamUrl runner=${s.runnerId?.slice(0, 8) ?? 'none'} session=${s.id.slice(0, 8)} status=${s.status} url=${s.streamUrl}`,
+            `[stream] EB unreachable, hiding streamUrl runner=${s.runnerId?.slice(0, 8) ?? "none"} session=${s.id.slice(0, 8)} status=${s.status} url=${s.streamUrl}`,
           );
         }
         return {
           id: s.id,
           runnerId: s.runnerId,
           status: s.status,
-          streamUrl: isLive && probedAlive ? toProxyStreamUrl(s.streamUrl) : null,
+          streamUrl:
+            isLive && probedAlive ? toProxyStreamUrl(s.streamUrl) : null,
           viewport: s.viewport,
           currentUrl: s.currentUrl,
           userId: s.userId,
@@ -80,8 +84,8 @@ export async function GET() {
     });
   } catch {
     return NextResponse.json(
-      { error: 'Failed to list sessions' },
-      { status: 500 }
+      { error: "Failed to list sessions" },
+      { status: 500 },
     );
   }
 }

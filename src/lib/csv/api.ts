@@ -13,7 +13,7 @@ export interface ParsedCsv {
   delimiter: string;
 }
 
-export type CsvReferenceType = 'cell' | 'row' | 'column';
+export type CsvReferenceType = "cell" | "row" | "column";
 
 export interface CsvReference {
   type: CsvReferenceType;
@@ -23,10 +23,10 @@ export interface CsvReference {
   cellRef?: string;
 }
 
-const DELIMITER_CANDIDATES = [',', ';', '\t'];
+const DELIMITER_CANDIDATES = [",", ";", "\t"];
 
 function detectDelimiter(firstLine: string): string {
-  let best = ',';
+  let best = ",";
   let bestCount = -1;
   for (const candidate of DELIMITER_CANDIDATES) {
     // Count occurrences outside of quoted regions
@@ -54,7 +54,7 @@ function detectDelimiter(firstLine: string): string {
 
 export function parseCsv(text: string): ParsedCsv {
   // Normalize line endings, drop BOM
-  const normalized = text.replace(/^﻿/, '');
+  const normalized = text.replace(/^﻿/, "");
 
   // Find first physical line (outside quotes) for delimiter detection
   let firstLineEnd = 0;
@@ -69,13 +69,13 @@ export function parseCsv(text: string): ParsedCsv {
       inQuotes = !inQuotes;
       continue;
     }
-    if (!inQuotes && (ch === '\n' || ch === '\r')) break;
+    if (!inQuotes && (ch === "\n" || ch === "\r")) break;
   }
   const firstLine = normalized.slice(0, firstLineEnd);
   const delimiter = detectDelimiter(firstLine);
 
   const records: string[][] = [];
-  let field = '';
+  let field = "";
   let row: string[] = [];
   inQuotes = false;
 
@@ -102,23 +102,23 @@ export function parseCsv(text: string): ParsedCsv {
     }
     if (ch === delimiter) {
       row.push(field);
-      field = '';
+      field = "";
       continue;
     }
-    if (ch === '\r') {
+    if (ch === "\r") {
       // swallow \r — handled when \n hits or as a record terminator
-      if (normalized[i + 1] === '\n') i++;
+      if (normalized[i + 1] === "\n") i++;
       row.push(field);
       records.push(row);
       row = [];
-      field = '';
+      field = "";
       continue;
     }
-    if (ch === '\n') {
+    if (ch === "\n") {
       row.push(field);
       records.push(row);
       row = [];
-      field = '';
+      field = "";
       continue;
     }
     field += ch;
@@ -132,37 +132,42 @@ export function parseCsv(text: string): ParsedCsv {
   // Strip a final empty record from a trailing newline
   if (records.length > 0) {
     const last = records[records.length - 1];
-    if (last.length === 1 && last[0] === '') records.pop();
+    if (last.length === 1 && last[0] === "") records.pop();
   }
 
   if (records.length === 0) {
     return { headers: [], rows: [], rowCount: 0, delimiter };
   }
 
-  const headers = records[0].map(h => h.trim());
+  const headers = records[0].map((h) => h.trim());
   const rows = records.slice(1);
 
   // Pad/truncate rows to header length
-  const normalizedRows = rows.map(r => {
+  const normalizedRows = rows.map((r) => {
     const out = r.slice(0, headers.length);
-    while (out.length < headers.length) out.push('');
+    while (out.length < headers.length) out.push("");
     return out;
   });
 
-  return { headers, rows: normalizedRows, rowCount: normalizedRows.length, delimiter };
+  return {
+    headers,
+    rows: normalizedRows,
+    rowCount: normalizedRows.length,
+    delimiter,
+  };
 }
 
 export function parseCsvBuffer(buf: Buffer): ParsedCsv {
-  return parseCsv(buf.toString('utf8'));
+  return parseCsv(buf.toString("utf8"));
 }
 
 /** Parse a single {{csv:alias.accessor}} reference token. */
 export function parseCsvReference(ref: string): CsvReference | null {
-  const cleaned = ref.replace(/^\{\{/, '').replace(/\}\}$/, '').trim();
-  if (!cleaned.startsWith('csv:')) return null;
+  const cleaned = ref.replace(/^\{\{/, "").replace(/\}\}$/, "").trim();
+  if (!cleaned.startsWith("csv:")) return null;
 
   const body = cleaned.slice(4);
-  const dotIndex = body.indexOf('.');
+  const dotIndex = body.indexOf(".");
   if (dotIndex === -1) return null;
 
   const alias = body.slice(0, dotIndex);
@@ -171,28 +176,30 @@ export function parseCsvReference(ref: string): CsvReference | null {
 
   const rowMatch = accessor.match(/^row\[(\d+)\]$/);
   if (rowMatch) {
-    return { type: 'row', alias, rowIndex: parseInt(rowMatch[1], 10) };
+    return { type: "row", alias, rowIndex: parseInt(rowMatch[1], 10) };
   }
 
   const cellMatch = accessor.match(/^([A-Z]+)(\d+)$/);
   if (cellMatch) {
-    return { type: 'cell', alias, cellRef: accessor };
+    return { type: "cell", alias, cellRef: accessor };
   }
 
   const colIdxMatch = accessor.match(/^(.+)\[(\d+)\]$/);
   if (colIdxMatch) {
     return {
-      type: 'column',
+      type: "column",
       alias,
       column: colIdxMatch[1],
       rowIndex: parseInt(colIdxMatch[2], 10),
     };
   }
 
-  return { type: 'column', alias, column: accessor };
+  return { type: "column", alias, column: accessor };
 }
 
-export function findCsvReferences(code: string): Array<{ fullMatch: string; reference: CsvReference }> {
+export function findCsvReferences(
+  code: string,
+): Array<{ fullMatch: string; reference: CsvReference }> {
   const regex = /\{\{csv:[^}]+\}\}/g;
   const results: Array<{ fullMatch: string; reference: CsvReference }> = [];
   let match: RegExpExecArray | null;

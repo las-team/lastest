@@ -1,4 +1,7 @@
-import type { TestGenerationContext, CodebaseIntelligenceContext } from './types';
+import type {
+  TestGenerationContext,
+  CodebaseIntelligenceContext,
+} from "./types";
 
 export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any)`;
 
@@ -169,7 +172,9 @@ export function createTestPrompt(context: TestGenerationContext): string {
   const parts: string[] = [];
 
   if (context.useMCP) {
-    parts.push('Use MCP tools to explore the page, then generate standard Playwright test code.');
+    parts.push(
+      "Use MCP tools to explore the page, then generate standard Playwright test code.",
+    );
 
     if (context.userPrompt) {
       parts.push(`\nTest objective: ${context.userPrompt}`);
@@ -186,7 +191,9 @@ export function createTestPrompt(context: TestGenerationContext): string {
         parts.push(`3. Navigate to discovered URL with real parameters`);
 
         if (context.siblingRoutes?.length) {
-          parts.push(`\nRelated routes that may help find real data: ${context.siblingRoutes.join(', ')}`);
+          parts.push(
+            `\nRelated routes that may help find real data: ${context.siblingRoutes.join(", ")}`,
+          );
         }
       }
     }
@@ -198,14 +205,18 @@ export function createTestPrompt(context: TestGenerationContext): string {
 
     // Add codebase intelligence if available
     if (context.codebaseIntelligence) {
-      parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
+      parts.push(
+        buildCodebaseIntelligenceSection(context.codebaseIntelligence),
+      );
     }
 
-    parts.push(`\nWorkflow: navigate → snapshot → explore → OUTPUT Playwright test code with discovered selectors`);
-    return parts.join('\n');
+    parts.push(
+      `\nWorkflow: navigate → snapshot → explore → OUTPUT Playwright test code with discovered selectors`,
+    );
+    return parts.join("\n");
   }
 
-  parts.push('Generate a Playwright visual regression test.');
+  parts.push("Generate a Playwright visual regression test.");
 
   if (context.userPrompt) {
     parts.push(`\nTest objective: ${context.userPrompt}`);
@@ -216,15 +227,21 @@ export function createTestPrompt(context: TestGenerationContext): string {
     parts.push(`\nTarget: ${route}`);
 
     if (context.isDynamicRoute) {
-      parts.push(`\nIMPORTANT: This is a dynamic route. Before testing it directly:`);
-      parts.push(`1. Navigate to the parent list page first (e.g., for /users/[id], go to /users)`);
+      parts.push(
+        `\nIMPORTANT: This is a dynamic route. Before testing it directly:`,
+      );
+      parts.push(
+        `1. Navigate to the parent list page first (e.g., for /users/[id], go to /users)`,
+      );
       parts.push(`2. Wait for the list to load and find a valid link`);
-      parts.push(`3. If the list is empty, take a screenshot of the empty state and return gracefully`);
+      parts.push(
+        `3. If the list is empty, take a screenshot of the empty state and return gracefully`,
+      );
       parts.push(`4. Click the link or extract the href to get a real ID`);
       parts.push(`5. Then test the actual page with real data`);
 
       if (context.siblingRoutes?.length) {
-        parts.push(`\nRelated routes: ${context.siblingRoutes.join(', ')}`);
+        parts.push(`\nRelated routes: ${context.siblingRoutes.join(", ")}`);
       }
     }
   }
@@ -241,9 +258,13 @@ export function createTestPrompt(context: TestGenerationContext): string {
 
   if (context.availableRoutes?.length) {
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
-    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
-    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`If the test objective refers to a page not in this list, navigate to the closest matching route. For features without a dedicated route, use "/" (home).`);
+    parts.push(context.availableRoutes.map((r) => `- ${r}`).join("\n"));
+    parts.push(
+      `\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`,
+    );
+    parts.push(
+      `If the test objective refers to a page not in this list, navigate to the closest matching route. For features without a dedicated route, use "/" (home).`,
+    );
   }
 
   // Add guidelines and requirements sections
@@ -271,24 +292,31 @@ BEFORE writing page.goto(), verify the URL is in the available routes list above
 
 Return ONLY the code block, no explanations.`);
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
-function buildScanContextSection(scanContext: import('./types').ScanContext): string {
-  const lines: string[] = ['\n--- Discovery Context ---'];
+function buildScanContextSection(
+  scanContext: import("./types").ScanContext,
+): string {
+  const lines: string[] = ["\n--- Discovery Context ---"];
 
   // Add source-specific context
-  if (scanContext.discoverySource === 'nav-link' && scanContext.navLabel) {
-    lines.push(`This route appears in navigation as "${scanContext.navLabel}".`);
-    lines.push('Verify the page matches its navigation label purpose.');
+  if (scanContext.discoverySource === "nav-link" && scanContext.navLabel) {
+    lines.push(
+      `This route appears in navigation as "${scanContext.navLabel}".`,
+    );
+    lines.push("Verify the page matches its navigation label purpose.");
   }
 
   if (scanContext.specDescription) {
     lines.push(`From specification: ${scanContext.specDescription}`);
-    lines.push('Test the documented behavior.');
+    lines.push("Test the documented behavior.");
   }
 
-  if (scanContext.discoverySource === 'file-scan' && scanContext.sourceFilePath) {
+  if (
+    scanContext.discoverySource === "file-scan" &&
+    scanContext.sourceFilePath
+  ) {
     lines.push(`Source file: ${scanContext.sourceFilePath}`);
   }
 
@@ -304,7 +332,7 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
 
   // Add test suggestions as scenarios to consider
   if (scanContext.testSuggestions && scanContext.testSuggestions.length > 0) {
-    lines.push('\nSuggested scenarios to consider:');
+    lines.push("\nSuggested scenarios to consider:");
     for (const suggestion of scanContext.testSuggestions) {
       lines.push(`- ${suggestion}`);
     }
@@ -318,34 +346,41 @@ function buildScanContextSection(scanContext: import('./types').ScanContext): st
     }
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
-function buildCodebaseIntelligenceSection(intel: CodebaseIntelligenceContext): string {
-  const lines: string[] = ['\n--- Project Intelligence ---'];
+function buildCodebaseIntelligenceSection(
+  intel: CodebaseIntelligenceContext,
+): string {
+  const lines: string[] = ["\n--- Project Intelligence ---"];
 
   if (intel.framework) lines.push(`Framework: ${intel.framework}`);
   if (intel.cssFramework) lines.push(`CSS: ${intel.cssFramework}`);
-  if (intel.selectorStrategy) lines.push(`Selector strategy: ${intel.selectorStrategy}`);
-  if (intel.authMechanism && intel.authMechanism !== 'none detected') {
-    lines.push(`Auth: ${intel.authMechanism} — protected routes may redirect to login`);
+  if (intel.selectorStrategy)
+    lines.push(`Selector strategy: ${intel.selectorStrategy}`);
+  if (intel.authMechanism && intel.authMechanism !== "none detected") {
+    lines.push(
+      `Auth: ${intel.authMechanism} — protected routes may redirect to login`,
+    );
   }
-  if (intel.stateManagement) lines.push(`State management: ${intel.stateManagement}`);
+  if (intel.stateManagement)
+    lines.push(`State management: ${intel.stateManagement}`);
   if (intel.apiLayer) lines.push(`API layer: ${intel.apiLayer}`);
   if (intel.projectDescription) lines.push(`App: ${intel.projectDescription}`);
 
   if (intel.testingRecommendations && intel.testingRecommendations.length > 0) {
-    lines.push('\nTesting recommendations:');
+    lines.push("\nTesting recommendations:");
     for (const rec of intel.testingRecommendations.slice(0, 8)) {
       lines.push(`- ${rec}`);
     }
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 export function createFixPrompt(context: TestGenerationContext): string {
-  const parts: string[] = [`Fix this failing Playwright test. Return ONLY the complete fixed code in a code block — NO explanations, NO analysis, NO commentary.
+  const parts: string[] = [
+    `Fix this failing Playwright test. Return ONLY the complete fixed code in a code block — NO explanations, NO analysis, NO commentary.
 
 Original test code:
 \`\`\`javascript
@@ -353,7 +388,8 @@ ${context.existingCode}
 \`\`\`
 
 Error message:
-${context.errorMessage}`];
+${context.errorMessage}`,
+  ];
 
   if (context.codebaseIntelligence) {
     parts.push(buildCodebaseIntelligenceSection(context.codebaseIntelligence));
@@ -361,8 +397,10 @@ ${context.errorMessage}`];
 
   if (context.availableRoutes?.length) {
     parts.push(`\nAvailable Routes (ONLY use these in page.goto()):`);
-    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
-    parts.push(`If the current page.goto() URL is not in this list, change it to the closest matching route.`);
+    parts.push(context.availableRoutes.map((r) => `- ${r}`).join("\n"));
+    parts.push(
+      `If the current page.goto() URL is not in this list, change it to the closest matching route.`,
+    );
   }
 
   parts.push(`
@@ -412,13 +450,13 @@ BEFORE RETURNING — verify your output:
 
 Return ONLY the fixed code, no explanations.`);
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 export function createMcpFixPrompt(context: TestGenerationContext): string {
   const routeSection = context.availableRoutes?.length
-    ? `\nAvailable Routes (ONLY use these in page.goto()):\n${context.availableRoutes.map(r => `- ${r}`).join('\n')}\n`
-    : '';
+    ? `\nAvailable Routes (ONLY use these in page.goto()):\n${context.availableRoutes.map((r) => `- ${r}`).join("\n")}\n`
+    : "";
 
   return `Fix this failing Playwright test by exploring the live page with MCP tools. Return ONLY the complete fixed code in a code block — NO explanations.
 
@@ -430,7 +468,7 @@ ${context.existingCode}
 Error message:
 ${context.errorMessage}
 
-Target URL: ${context.targetUrl || 'unknown'}
+Target URL: ${context.targetUrl || "unknown"}
 ${routeSection}
 IMPORTANT: If the "original test code" is NOT valid JavaScript (e.g., it's explanation text), IGNORE it and write a NEW test from scratch.
 
@@ -490,12 +528,18 @@ Rules:
 
 Return ONLY the enhanced code in a code block, no explanations.`);
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
-export function createRouteScanPrompt(codebaseContext: string, repoFullName?: string, intelligence?: CodebaseIntelligenceContext): string {
-  const repoLine = repoFullName ? `\nRepository: ${repoFullName}\n` : '';
-  const intelSection = intelligence ? buildCodebaseIntelligenceSection(intelligence) : '';
+export function createRouteScanPrompt(
+  codebaseContext: string,
+  repoFullName?: string,
+  intelligence?: CodebaseIntelligenceContext,
+): string {
+  const repoLine = repoFullName ? `\nRepository: ${repoFullName}\n` : "";
+  const intelSection = intelligence
+    ? buildCodebaseIntelligenceSection(intelligence)
+    : "";
   return `Analyze this codebase structure and identify all testable routes/pages.
 ${repoLine}${intelSection}
 Codebase context:
@@ -541,9 +585,9 @@ export function createCodeDiffScanPrompt(
   changedFilesContext: string,
   baseBranch: string,
   headBranch: string,
-  repoFullName?: string
+  repoFullName?: string,
 ): string {
-  const repoNote = repoFullName ? `\nRepository: ${repoFullName}` : '';
+  const repoNote = repoFullName ? `\nRepository: ${repoFullName}` : "";
   return `You are analyzing code changes between two git branches to identify what visual regression tests should be created to cover the specific changes.
 ${repoNote}
 Base branch: ${baseBranch}
@@ -592,11 +636,18 @@ Guidelines:
 Return ONLY the JSON object, no explanations or markdown formatting.`;
 }
 
-export function createMCPExploreRoutesPrompt(baseURL: string, existingRoutes: string[], intelligence?: CodebaseIntelligenceContext): string {
-  const seedSection = existingRoutes.length > 0
-    ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map(r => `- ${r}`).join('\n')}`
-    : '';
-  const intelSection = intelligence ? buildCodebaseIntelligenceSection(intelligence) : '';
+export function createMCPExploreRoutesPrompt(
+  baseURL: string,
+  existingRoutes: string[],
+  intelligence?: CodebaseIntelligenceContext,
+): string {
+  const seedSection =
+    existingRoutes.length > 0
+      ? `\nAlready known routes (use as seed starting points to explore deeper):\n${existingRoutes.map((r) => `- ${r}`).join("\n")}`
+      : "";
+  const intelSection = intelligence
+    ? buildCodebaseIntelligenceSection(intelligence)
+    : "";
 
   return `You are exploring a live web application to discover all available routes/pages.
 
@@ -709,9 +760,13 @@ Test Name: ${context.testName}`);
       parts.push(`- ${file}`);
     }
     if (context.branchChanges.fileDiffs) {
-      parts.push(`\nRelevant code changes:\n${context.branchChanges.fileDiffs}`);
+      parts.push(
+        `\nRelevant code changes:\n${context.branchChanges.fileDiffs}`,
+      );
     }
-    parts.push(`\nUse this context to write more accurate selectors and assertions based on the actual code changes.`);
+    parts.push(
+      `\nUse this context to write more accurate selectors and assertions based on the actual code changes.`,
+    );
   }
 
   if (context.codebaseIntelligence) {
@@ -720,10 +775,16 @@ Test Name: ${context.testName}`);
 
   if (context.availableRoutes?.length) {
     parts.push(`\n--- Available Routes (ONLY navigate to these) ---`);
-    parts.push(context.availableRoutes.map(r => `- ${r}`).join('\n'));
-    parts.push(`\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`);
-    parts.push(`Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`);
-    parts.push(`Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`);
+    parts.push(context.availableRoutes.map((r) => `- ${r}`).join("\n"));
+    parts.push(
+      `\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`,
+    );
+    parts.push(
+      `Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`,
+    );
+    parts.push(
+      `Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`,
+    );
   }
 
   parts.push(`
@@ -784,7 +845,7 @@ BEFORE writing page.goto(), verify the URL is in the available routes list above
 
 Return ONLY the code block, no explanations.`);
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 export function extractCodeFromResponse(response: string): string {
@@ -792,22 +853,29 @@ export function extractCodeFromResponse(response: string): string {
   const codeBlockMatch = response.match(/```(?:\w*)?\n([\s\S]*?)```/);
   if (codeBlockMatch) {
     // Strip import statements that AI sometimes adds despite instructions
-    return codeBlockMatch[1].replace(/^\s*import\s+.*$/gm, '').trim();
+    return codeBlockMatch[1].replace(/^\s*import\s+.*$/gm, "").trim();
   }
 
   // If no code block, check if response starts with import or export
-  if (response.trim().startsWith('import') || response.trim().startsWith('export')) {
+  if (
+    response.trim().startsWith("import") ||
+    response.trim().startsWith("export")
+  ) {
     return response.trim();
   }
 
   // Look for export async function anywhere in the response (AI may have added explanation before code)
-  const funcMatch = response.match(/(export\s+async\s+function\s+test\s*\([\s\S]*)/);
+  const funcMatch = response.match(
+    /(export\s+async\s+function\s+test\s*\([\s\S]*)/,
+  );
   if (funcMatch) {
     return funcMatch[1].trim();
   }
 
   // Look for import statement followed by code anywhere in the response
-  const importMatch = response.match(/(import\s+[\s\S]*export\s+async\s+function[\s\S]*)/);
+  const importMatch = response.match(
+    /(import\s+[\s\S]*export\s+async\s+function[\s\S]*)/,
+  );
   if (importMatch) {
     return importMatch[1].trim();
   }
@@ -815,9 +883,12 @@ export function extractCodeFromResponse(response: string): string {
   // If no code patterns found, the response is likely explanatory text, not code.
   // Check for actual code patterns (not just mentions of words in prose)
   const trimmed = response.trim();
-  const hasCodePattern = /(?:^|\n)\s*(?:export\s+|async\s+function|const\s+\w+\s*=|let\s+\w+\s*=|await\s+page\.|page\.goto|page\.locator|stepLogger\.log)/.test(trimmed);
+  const hasCodePattern =
+    /(?:^|\n)\s*(?:export\s+|async\s+function|const\s+\w+\s*=|let\s+\w+\s*=|await\s+page\.|page\.goto|page\.locator|stepLogger\.log)/.test(
+      trimmed,
+    );
   if (!hasCodePattern) {
-    return '';
+    return "";
   }
 
   // Return as-is if we can't extract but it looks code-like

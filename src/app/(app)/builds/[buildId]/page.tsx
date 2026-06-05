@@ -1,17 +1,20 @@
-import { notFound } from 'next/navigation';
-import { getBuildSummary, getRecentBuildsByRepo } from '@/server/actions/builds';
-import { getSelectedRepository } from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { RecentHistory } from '@/components/dashboard/recent-history';
-import { BuildActionsClient } from './build-actions-client';
-import { BuildPollingWrapper } from './build-polling-wrapper';
-import { PublishShareDialog, type ShareRecord } from './publish-share-dialog';
-import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
-import { buildShareUrl } from '@/lib/share/slug';
-import * as queries from '@/lib/db/queries';
-import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
-import Link from 'next/link';
-import { ShieldCheck, ArrowRight } from 'lucide-react';
+import { notFound } from "next/navigation";
+import {
+  getBuildSummary,
+  getRecentBuildsByRepo,
+} from "@/server/actions/builds";
+import { getSelectedRepository } from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { RecentHistory } from "@/components/dashboard/recent-history";
+import { BuildActionsClient } from "./build-actions-client";
+import { BuildPollingWrapper } from "./build-polling-wrapper";
+import { PublishShareDialog, type ShareRecord } from "./publish-share-dialog";
+import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
+import { buildShareUrl } from "@/lib/share/slug";
+import * as queries from "@/lib/db/queries";
+import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
+import Link from "next/link";
+import { ShieldCheck, ArrowRight } from "lucide-react";
 
 interface PageProps {
   params: Promise<{ buildId: string }>;
@@ -54,10 +57,15 @@ export default async function BuildPage({ params }: PageProps) {
   // Comparison pair lookup
   let comparisonPairBuild: { id: string; role: string } | null = null;
   if (buildRecord?.comparisonPairId) {
-    const pairBuilds = await queries.getBuildsByComparisonPairId(buildRecord.comparisonPairId);
-    const sibling = pairBuilds.find(b => b.id !== buildId);
+    const pairBuilds = await queries.getBuildsByComparisonPairId(
+      buildRecord.comparisonPairId,
+    );
+    const sibling = pairBuilds.find((b) => b.id !== buildId);
     if (sibling) {
-      comparisonPairBuild = { id: sibling.id, role: sibling.comparisonRole || 'unknown' };
+      comparisonPairBuild = {
+        id: sibling.id,
+        role: sibling.comparisonRole || "unknown",
+      };
     }
   }
 
@@ -67,20 +75,27 @@ export default async function BuildPage({ params }: PageProps) {
   // `violations` is the per-rule drill-in surfaced by A11yViolationsCard
   // just below it. Both are server-fetched once so the page renders
   // without a client-side waterfall.
-  const a11yData = buildRecord ? {
-    score: buildRecord.a11yScore ?? null,
-    violationCount: buildRecord.a11yViolationCount ?? null,
-    criticalCount: buildRecord.a11yCriticalCount ?? null,
-    totalRulesChecked: buildRecord.a11yTotalRulesChecked ?? null,
-    trend: selectedRepo ? await queries.getA11yScoreTrend(selectedRepo.id) : [],
-    violations: (buildRecord.a11yViolationCount ?? 0) > 0
-      ? await queries.getBuildA11yViolations(buildId)
-      : [],
-  } : undefined;
-  const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
-  const aiApproveCount = banAiMode ? 0 : build.diffs.filter(
-    (d) => d.aiRecommendation === 'approve' && d.status === 'pending'
-  ).length;
+  const a11yData = buildRecord
+    ? {
+        score: buildRecord.a11yScore ?? null,
+        violationCount: buildRecord.a11yViolationCount ?? null,
+        criticalCount: buildRecord.a11yCriticalCount ?? null,
+        totalRulesChecked: buildRecord.a11yTotalRulesChecked ?? null,
+        trend: selectedRepo
+          ? await queries.getA11yScoreTrend(selectedRepo.id)
+          : [],
+        violations:
+          (buildRecord.a11yViolationCount ?? 0) > 0
+            ? await queries.getBuildA11yViolations(buildId)
+            : [],
+      }
+    : undefined;
+  const pendingDiffs = build.diffs.filter((d) => d.status === "pending");
+  const aiApproveCount = banAiMode
+    ? 0
+    : build.diffs.filter(
+        (d) => d.aiRecommendation === "approve" && d.status === "pending",
+      ).length;
 
   // Load existing public shares for this build (only when repo access is known)
   let shareRecords: ShareRecord[] = [];
@@ -111,7 +126,10 @@ export default async function BuildPage({ params }: PageProps) {
             className="flex items-center gap-2 px-3 py-2 rounded-md border bg-primary/5 hover:bg-primary/10 text-sm transition-colors"
           >
             <ShieldCheck className="h-4 w-4 text-primary" />
-            <span>Verify this build — run the regression + intent gates with per-layer feedback.</span>
+            <span>
+              Verify this build — run the regression + intent gates with
+              per-layer feedback.
+            </span>
             <ArrowRight className="h-3 w-3 ml-auto" />
           </Link>
         )}
@@ -119,7 +137,9 @@ export default async function BuildPage({ params }: PageProps) {
         {buildRecord?.comparisonRole && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
             <span className="font-medium">
-              {buildRecord.comparisonRole === 'baseline' ? 'Baseline build' : 'Feature build'}
+              {buildRecord.comparisonRole === "baseline"
+                ? "Baseline build"
+                : "Feature build"}
             </span>
             <span className="text-blue-600">of a comparison run.</span>
             {comparisonPairBuild && (
@@ -127,7 +147,11 @@ export default async function BuildPage({ params }: PageProps) {
                 href={`/builds/${comparisonPairBuild.id}`}
                 className="ml-auto text-blue-700 hover:text-blue-900 underline text-xs"
               >
-                View {comparisonPairBuild.role === 'baseline' ? 'baseline' : 'feature'} build &rarr;
+                View{" "}
+                {comparisonPairBuild.role === "baseline"
+                  ? "baseline"
+                  : "feature"}{" "}
+                build &rarr;
               </a>
             )}
           </div>
@@ -164,13 +188,18 @@ export default async function BuildPage({ params }: PageProps) {
             {build.pullRequestId && (
               <>
                 <span>·</span>
-                <span className="text-primary font-medium">PR #{build.pullRequestId}</span>
+                <span className="text-primary font-medium">
+                  PR #{build.pullRequestId}
+                </span>
               </>
             )}
           </div>
           <div className="ml-auto flex items-center gap-2">
             {session && (
-              <PublishShareDialog buildId={buildId} initialShares={shareRecords} />
+              <PublishShareDialog
+                buildId={buildId}
+                initialShares={shareRecords}
+              />
             )}
             <BuildActionsClient
               buildId={buildId}

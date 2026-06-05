@@ -1,5 +1,5 @@
-import * as queries from '@/lib/db/queries';
-import type { TestChangeReason } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import type { TestChangeReason } from "@/lib/db/schema";
 
 /**
  * @internal — Called from webhook handlers and build actions only.
@@ -13,16 +13,22 @@ import type { TestChangeReason } from '@/lib/db/schema';
 export async function forkBaselinesForBranch(
   repositoryId: string,
   fromBranch: string,
-  toBranch: string
+  toBranch: string,
 ): Promise<{ forked: number; skipped: boolean }> {
   // Check if target branch already has baselines
-  const existingBaselines = await queries.getBaselinesByBranch(repositoryId, toBranch);
+  const existingBaselines = await queries.getBaselinesByBranch(
+    repositoryId,
+    toBranch,
+  );
   if (existingBaselines.length > 0) {
     return { forked: 0, skipped: true };
   }
 
   // Get all active baselines from source branch
-  const sourceBaselines = await queries.getBaselinesByBranch(repositoryId, fromBranch);
+  const sourceBaselines = await queries.getBaselinesByBranch(
+    repositoryId,
+    fromBranch,
+  );
   if (sourceBaselines.length === 0) {
     return { forked: 0, skipped: false };
   }
@@ -56,15 +62,21 @@ export async function forkBaselinesForBranch(
 export async function mergeBaselinesFromBranch(
   repositoryId: string,
   fromBranch: string,
-  toBranch: string
+  toBranch: string,
 ): Promise<{ promoted: number; unchanged: number }> {
-  const sourceBaselines = await queries.getBaselinesByBranch(repositoryId, fromBranch);
-  const targetBaselines = await queries.getBaselinesByBranch(repositoryId, toBranch);
+  const sourceBaselines = await queries.getBaselinesByBranch(
+    repositoryId,
+    fromBranch,
+  );
+  const targetBaselines = await queries.getBaselinesByBranch(
+    repositoryId,
+    toBranch,
+  );
 
   // Build a lookup map for target baselines: key = testId:stepLabel:browser
-  const targetMap = new Map<string, typeof targetBaselines[0]>();
+  const targetMap = new Map<string, (typeof targetBaselines)[0]>();
   for (const b of targetBaselines) {
-    const key = `${b.testId}:${b.stepLabel || ''}:${b.browser || 'chromium'}`;
+    const key = `${b.testId}:${b.stepLabel || ""}:${b.browser || "chromium"}`;
     targetMap.set(key, b);
   }
 
@@ -72,7 +84,7 @@ export async function mergeBaselinesFromBranch(
   let unchanged = 0;
 
   for (const source of sourceBaselines) {
-    const key = `${source.testId}:${source.stepLabel || ''}:${source.browser || 'chromium'}`;
+    const key = `${source.testId}:${source.stepLabel || ""}:${source.browser || "chromium"}`;
     const existing = targetMap.get(key);
 
     if (existing && existing.imageHash === source.imageHash) {
@@ -82,7 +94,12 @@ export async function mergeBaselinesFromBranch(
     }
 
     // Deactivate old target baseline and create new one (browser-scoped)
-    await queries.deactivateBaselines(source.testId, source.stepLabel, toBranch, source.browser || undefined);
+    await queries.deactivateBaselines(
+      source.testId,
+      source.stepLabel,
+      toBranch,
+      source.browser || undefined,
+    );
     await queries.createBaseline({
       repositoryId: source.repositoryId,
       testId: source.testId,
@@ -107,12 +124,19 @@ export async function mergeBaselinesFromBranch(
  */
 export async function cleanupBranchBaselines(
   repositoryId: string,
-  branch: string
+  branch: string,
 ): Promise<{ deactivated: number }> {
-  const branchBaselines = await queries.getBaselinesByBranch(repositoryId, branch);
+  const branchBaselines = await queries.getBaselinesByBranch(
+    repositoryId,
+    branch,
+  );
 
   for (const baseline of branchBaselines) {
-    await queries.deactivateBaselines(baseline.testId, baseline.stepLabel, branch);
+    await queries.deactivateBaselines(
+      baseline.testId,
+      baseline.stepLabel,
+      branch,
+    );
   }
 
   return { deactivated: branchBaselines.length };
@@ -127,9 +151,12 @@ export async function cleanupBranchBaselines(
  */
 export async function promoteTestVersionsFromBranch(
   repositoryId: string,
-  fromBranch: string
+  fromBranch: string,
 ): Promise<{ promoted: number; unchanged: number }> {
-  const branchVersions = await queries.getLatestBranchVersions(repositoryId, fromBranch);
+  const branchVersions = await queries.getLatestBranchVersions(
+    repositoryId,
+    fromBranch,
+  );
 
   let promoted = 0;
   let unchanged = 0;
@@ -141,9 +168,13 @@ export async function promoteTestVersionsFromBranch(
     if (version.code !== test.code) {
       await queries.updateTestWithVersion(
         testId,
-        { code: version.code, name: version.name, targetUrl: version.targetUrl },
-        'branch_merge' as TestChangeReason,
-        fromBranch
+        {
+          code: version.code,
+          name: version.name,
+          targetUrl: version.targetUrl,
+        },
+        "branch_merge" as TestChangeReason,
+        fromBranch,
       );
       promoted++;
     } else {

@@ -1,10 +1,13 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { validateUrlAsync, assertHttpScheme } from '@/lib/security/url-validation';
-import type { EnvironmentMode } from '@/lib/db/schema';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import {
+  validateUrlAsync,
+  assertHttpScheme,
+} from "@/lib/security/url-validation";
+import type { EnvironmentMode } from "@/lib/db/schema";
 
 export interface EnvironmentConfigInput {
   repositoryId: string;
@@ -38,14 +41,14 @@ export async function saveEnvironmentConfig(data: EnvironmentConfigInput) {
   }
   const result = await queries.upsertEnvironmentConfig(data.repositoryId, {
     mode: data.mode,
-    baseUrl: data.baseUrl.replace(/\/+$/, ''),
+    baseUrl: data.baseUrl.replace(/\/+$/, ""),
     startCommand: data.startCommand,
     healthCheckUrl: data.healthCheckUrl,
     healthCheckTimeout: data.healthCheckTimeout ?? 60000,
     reuseExistingServer: data.reuseExistingServer ?? true,
   });
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return result;
 }
 
@@ -74,7 +77,7 @@ export async function testServerConnection(url: string): Promise<{
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const response = await fetch(url, {
-      method: 'GET',
+      method: "GET",
       signal: controller.signal,
     });
 
@@ -90,7 +93,7 @@ export async function testServerConnection(url: string): Promise<{
     const responseTime = Date.now() - startTime;
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Connection failed',
+      error: error instanceof Error ? error.message : "Connection failed",
       responseTime,
     };
   }
@@ -99,16 +102,20 @@ export async function testServerConnection(url: string): Promise<{
 /**
  * Save a branch-specific base URL on the repository
  */
-export async function saveBranchBaseUrl(repositoryId: string, branch: string, baseUrl: string) {
+export async function saveBranchBaseUrl(
+  repositoryId: string,
+  branch: string,
+  baseUrl: string,
+) {
   await requireRepoAccess(repositoryId);
   const schemeErr = assertHttpScheme(baseUrl);
   if (schemeErr) throw new Error(`baseUrl rejected: ${schemeErr}`);
   const repo = await queries.getRepository(repositoryId);
-  if (!repo) throw new Error('Repository not found');
+  if (!repo) throw new Error("Repository not found");
   const urls = (repo.branchBaseUrls as Record<string, string>) ?? {};
-  urls[branch] = baseUrl.replace(/\/+$/, '');
+  urls[branch] = baseUrl.replace(/\/+$/, "");
   await queries.updateRepository(repositoryId, { branchBaseUrls: urls });
-  revalidatePath('/run');
+  revalidatePath("/run");
 }
 
 /**
@@ -119,7 +126,7 @@ export async function getServerStatus(repositoryId?: string | null) {
   else await requireTeamAccess();
   const config = await queries.getEnvironmentConfig(repositoryId);
   return {
-    mode: config?.mode || 'manual',
-    baseUrl: config?.baseUrl || 'http://localhost:3000',
+    mode: config?.mode || "manual",
+    baseUrl: config?.baseUrl || "http://localhost:3000",
   };
 }

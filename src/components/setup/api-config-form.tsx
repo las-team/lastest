@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,21 +8,36 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Plus, Trash2, Loader2, Play, CheckCircle, XCircle } from 'lucide-react';
-import { createSetupConfig, updateSetupConfig, testSetupConfig } from '@/server/actions/setup-configs';
-import { toast } from 'sonner';
-import type { SetupConfig, SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import {
+  Plus,
+  Trash2,
+  Loader2,
+  Play,
+  CheckCircle,
+  XCircle,
+} from "lucide-react";
+import {
+  createSetupConfig,
+  updateSetupConfig,
+  testSetupConfig,
+} from "@/server/actions/setup-configs";
+import { toast } from "sonner";
+import type {
+  SetupConfig,
+  SetupAuthType,
+  SetupAuthConfig,
+} from "@/lib/db/schema";
 
 interface ApiConfigFormProps {
   open: boolean;
@@ -39,18 +54,21 @@ export function ApiConfigForm({
   repositoryId,
   editConfig,
 }: ApiConfigFormProps) {
-  const [name, setName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [authType, setAuthType] = useState<SetupAuthType>('none');
-  const [token, setToken] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [customHeaders, setCustomHeaders] = useState<{ key: string; value: string }[]>([
-    { key: '', value: '' },
-  ]);
+  const [name, setName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [authType, setAuthType] = useState<SetupAuthType>("none");
+  const [token, setToken] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [customHeaders, setCustomHeaders] = useState<
+    { key: string; value: string }[]
+  >([{ key: "", value: "" }]);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    error?: string;
+  } | null>(null);
 
   // Reset form when dialog opens/closes or edit target changes
   useEffect(() => {
@@ -60,23 +78,27 @@ export function ApiConfigForm({
         setBaseUrl(editConfig.baseUrl);
         setAuthType(editConfig.authType as SetupAuthType);
         const config = editConfig.authConfig as SetupAuthConfig | null;
-        setToken(config?.token || '');
-        setUsername(config?.username || '');
-        setPassword(config?.password || '');
+        setToken(config?.token || "");
+        setUsername(config?.username || "");
+        setPassword(config?.password || "");
         if (config?.headers) {
           const entries = Object.entries(config.headers);
-          setCustomHeaders(entries.length > 0 ? entries.map(([key, value]) => ({ key, value })) : [{ key: '', value: '' }]);
+          setCustomHeaders(
+            entries.length > 0
+              ? entries.map(([key, value]) => ({ key, value }))
+              : [{ key: "", value: "" }],
+          );
         } else {
-          setCustomHeaders([{ key: '', value: '' }]);
+          setCustomHeaders([{ key: "", value: "" }]);
         }
       } else {
-        setName('');
-        setBaseUrl('');
-        setAuthType('none');
-        setToken('');
-        setUsername('');
-        setPassword('');
-        setCustomHeaders([{ key: '', value: '' }]);
+        setName("");
+        setBaseUrl("");
+        setAuthType("none");
+        setToken("");
+        setUsername("");
+        setPassword("");
+        setCustomHeaders([{ key: "", value: "" }]);
       }
       setTestResult(null);
     }
@@ -84,11 +106,11 @@ export function ApiConfigForm({
 
   const buildAuthConfig = (): SetupAuthConfig | undefined => {
     switch (authType) {
-      case 'bearer':
+      case "bearer":
         return { token };
-      case 'basic':
+      case "basic":
         return { username, password };
-      case 'custom':
+      case "custom":
         const headers: Record<string, string> = {};
         customHeaders.forEach(({ key, value }) => {
           if (key.trim() && value.trim()) {
@@ -103,11 +125,11 @@ export function ApiConfigForm({
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast.error('Name is required');
+      toast.error("Name is required");
       return;
     }
     if (!baseUrl.trim()) {
-      toast.error('Base URL is required');
+      toast.error("Base URL is required");
       return;
     }
 
@@ -122,7 +144,7 @@ export function ApiConfigForm({
           authType,
           authConfig,
         });
-        toast.success('API config updated');
+        toast.success("API config updated");
       } else {
         await createSetupConfig({
           repositoryId,
@@ -131,11 +153,13 @@ export function ApiConfigForm({
           authType,
           authConfig,
         });
-        toast.success('API config created');
+        toast.success("API config created");
       }
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save config');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save config",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -143,7 +167,7 @@ export function ApiConfigForm({
 
   const handleTest = async () => {
     if (!editConfig) {
-      toast.error('Save the config first to test it');
+      toast.error("Save the config first to test it");
       return;
     }
 
@@ -153,26 +177,32 @@ export function ApiConfigForm({
       const result = await testSetupConfig(editConfig.id);
       setTestResult(result);
       if (result.success) {
-        toast.success('Connection successful');
+        toast.success("Connection successful");
       } else {
-        toast.error(result.error || 'Connection failed');
+        toast.error(result.error || "Connection failed");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to test connection');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to test connection",
+      );
     } finally {
       setIsTesting(false);
     }
   };
 
   const addHeader = () => {
-    setCustomHeaders([...customHeaders, { key: '', value: '' }]);
+    setCustomHeaders([...customHeaders, { key: "", value: "" }]);
   };
 
   const removeHeader = (index: number) => {
     setCustomHeaders(customHeaders.filter((_, i) => i !== index));
   };
 
-  const updateHeader = (index: number, field: 'key' | 'value', value: string) => {
+  const updateHeader = (
+    index: number,
+    field: "key" | "value",
+    value: string,
+  ) => {
     const updated = [...customHeaders];
     updated[index][field] = value;
     setCustomHeaders(updated);
@@ -183,7 +213,7 @@ export function ApiConfigForm({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {editConfig ? 'Edit API Configuration' : 'Create API Configuration'}
+            {editConfig ? "Edit API Configuration" : "Create API Configuration"}
           </DialogTitle>
           <DialogDescription>
             Configure an API endpoint for data seeding.
@@ -213,7 +243,10 @@ export function ApiConfigForm({
 
           <div className="space-y-2">
             <Label htmlFor="authType">Authentication</Label>
-            <Select value={authType} onValueChange={(v) => setAuthType(v as SetupAuthType)}>
+            <Select
+              value={authType}
+              onValueChange={(v) => setAuthType(v as SetupAuthType)}
+            >
               <SelectTrigger id="authType">
                 <SelectValue />
               </SelectTrigger>
@@ -227,7 +260,7 @@ export function ApiConfigForm({
           </div>
 
           {/* Conditional auth fields */}
-          {authType === 'bearer' && (
+          {authType === "bearer" && (
             <div className="space-y-2">
               <Label htmlFor="token">Token</Label>
               <Input
@@ -240,7 +273,7 @@ export function ApiConfigForm({
             </div>
           )}
 
-          {authType === 'basic' && (
+          {authType === "basic" && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
@@ -264,7 +297,7 @@ export function ApiConfigForm({
             </div>
           )}
 
-          {authType === 'custom' && (
+          {authType === "custom" && (
             <div className="space-y-2">
               <Label>Custom Headers</Label>
               <div className="space-y-2">
@@ -272,13 +305,17 @@ export function ApiConfigForm({
                   <div key={index} className="flex gap-2">
                     <Input
                       value={header.key}
-                      onChange={(e) => updateHeader(index, 'key', e.target.value)}
+                      onChange={(e) =>
+                        updateHeader(index, "key", e.target.value)
+                      }
                       placeholder="Header name"
                       className="flex-1"
                     />
                     <Input
                       value={header.value}
-                      onChange={(e) => updateHeader(index, 'value', e.target.value)}
+                      onChange={(e) =>
+                        updateHeader(index, "value", e.target.value)
+                      }
                       placeholder="Value"
                       className="flex-1"
                     />
@@ -306,8 +343,8 @@ export function ApiConfigForm({
             <div
               className={`p-3 rounded-lg border ${
                 testResult.success
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
+                  ? "bg-green-50 border-green-200"
+                  : "bg-red-50 border-red-200"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -318,10 +355,12 @@ export function ApiConfigForm({
                 )}
                 <span
                   className={`font-medium ${
-                    testResult.success ? 'text-green-700' : 'text-red-700'
+                    testResult.success ? "text-green-700" : "text-red-700"
                   }`}
                 >
-                  {testResult.success ? 'Connection Successful' : 'Connection Failed'}
+                  {testResult.success
+                    ? "Connection Successful"
+                    : "Connection Failed"}
                 </span>
               </div>
               {testResult.error && (
@@ -347,7 +386,7 @@ export function ApiConfigForm({
           </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {editConfig ? 'Update' : 'Create'}
+            {editConfig ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

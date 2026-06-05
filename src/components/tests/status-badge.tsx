@@ -1,8 +1,8 @@
-import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Badge } from "@/components/ui/badge";
+import { CheckCircle2, XCircle, Clock } from "lucide-react";
 
 export function StatusBadge({ status }: { status: string | null }) {
-  if (status === 'passed') {
+  if (status === "passed") {
     return (
       <Badge className="bg-success/10 text-success border-success/20 hover:bg-success/20">
         <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -10,7 +10,7 @@ export function StatusBadge({ status }: { status: string | null }) {
       </Badge>
     );
   }
-  if (status === 'failed') {
+  if (status === "failed") {
     return (
       <Badge className="bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/20">
         <XCircle className="h-3 w-3 mr-1" />

@@ -11,7 +11,7 @@
  * Multipliers (during Bug Blitz) are applied in awardScore at write time.
  */
 
-import type { ScoreEventKind } from '@/lib/db/schema';
+import type { ScoreEventKind } from "@/lib/db/schema";
 
 export interface ScoreRule {
   /** Base point delta (pre-multiplier). Negative = penalty. */
@@ -21,36 +21,36 @@ export interface ScoreRule {
   /** If set, at most `dailyCap` points of this kind can be earned per actor per day (abs value). */
   dailyCap?: number;
   /** Achievement code to unlock on first occurrence, if any. */
-  firstTimeAchievement?: 'first_test' | 'first_regression';
+  firstTimeAchievement?: "first_test" | "first_regression";
 }
 
 export const SCORE_RULES: Record<ScoreEventKind, ScoreRule> = {
   test_created: {
     base: 10,
-    reason: 'Created a test',
-    firstTimeAchievement: 'first_test',
+    reason: "Created a test",
+    firstTimeAchievement: "first_test",
   },
   diff_approved_as_change: {
     base: 15,
-    reason: 'Approved a real visual change',
+    reason: "Approved a real visual change",
   },
   regression_caught: {
     base: 100,
-    reason: 'Your test caught a real regression',
-    firstTimeAchievement: 'first_regression',
+    reason: "Your test caught a real regression",
+    firstTimeAchievement: "first_regression",
   },
   triage_resolved: {
     base: 5,
-    reason: 'Resolved a review todo',
+    reason: "Resolved a review todo",
   },
   flake_penalty: {
     base: -5,
-    reason: 'Flaky diff attributed to your test',
+    reason: "Flaky diff attributed to your test",
     dailyCap: 25, // max 25 points of penalty per actor per day
   },
   achievement_bonus: {
     base: 25,
-    reason: 'Achievement unlocked',
+    reason: "Achievement unlocked",
   },
 } as const;
 
@@ -64,6 +64,10 @@ export function applyMultiplier(base: number, multiplier: number): number {
 
 /** Threshold points-over-bot for the beat-the-bot achievement tiers. */
 export const BEAT_BOT_TIERS = [
-  { code: 'beat_bot_first' as const, minMargin: 1, label: 'First blood' },
-  { code: 'beat_bot_by_100' as const, minMargin: 100, label: 'Crushed the bot' },
+  { code: "beat_bot_first" as const, minMargin: 1, label: "First blood" },
+  {
+    code: "beat_bot_by_100" as const,
+    minMargin: 100,
+    label: "Crushed the bot",
+  },
 ] as const;

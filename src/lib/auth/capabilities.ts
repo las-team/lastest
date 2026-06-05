@@ -14,59 +14,61 @@
  * helpers; capabilities answer "is this kind of write allowed at all"
  * before ownership is checked.
  */
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess } from './session';
-import type { SessionData } from './session';
-import type { Team, Repository } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess } from "./session";
+import type { SessionData } from "./session";
+import type { Team, Repository } from "@/lib/db/schema";
 
 export type Capability =
   // Test definitions: create / edit / delete / clone.
-  | 'tests:write'
+  | "tests:write"
   // Anything that drives a recording session (start/stop/screenshot/assertion).
-  | 'recording:write'
+  | "recording:write"
   // Functional area CRUD.
-  | 'areas:write'
+  | "areas:write"
   // Connect / sync / create repositories.
-  | 'repos:manage'
+  | "repos:manage"
   // Per-repo settings (baselines, branch selection, comparison config).
-  | 'repos:settings'
+  | "repos:settings"
   // Manage team members, invitations, billing.
-  | 'team:admin';
+  | "team:admin";
 
-type SessionForCaps = Pick<SessionData, 'user' | 'team'>;
+type SessionForCaps = Pick<SessionData, "user" | "team">;
 
 /**
  * Static (role, plan, status) → capability set. Pure function, no I/O,
  * safe to call from anywhere including UI components that already have
  * the session in props.
  */
-export function capabilitiesFor(session: SessionForCaps): ReadonlySet<Capability> {
+export function capabilitiesFor(
+  session: SessionForCaps,
+): ReadonlySet<Capability> {
   const caps = new Set<Capability>();
   const team = session.team;
   if (!team) return caps;
 
   // Suspended teams are fully read-only until reactivated.
-  if (team.status === 'suspended') return caps;
+  if (team.status === "suspended") return caps;
 
   // Demo plan: shared sandbox, read-only regardless of role.
-  if (team.plan === 'demo') return caps;
+  if (team.plan === "demo") return caps;
 
   // Viewer role: read-only on any plan (defense-in-depth so demo users
   // who somehow end up off the demo plan still can't write).
-  if (session.user.role === 'viewer') return caps;
+  if (session.user.role === "viewer") return caps;
 
   // Member-and-up writes on any non-demo, non-suspended plan.
-  caps.add('tests:write');
-  caps.add('recording:write');
-  caps.add('areas:write');
-  caps.add('repos:settings');
+  caps.add("tests:write");
+  caps.add("recording:write");
+  caps.add("areas:write");
+  caps.add("repos:settings");
   // Repo provisioning (sync/connect/create-local) is currently open to
   // any non-viewer member — preserved so we don't break existing flows.
   // Tighten to admin/owner only by moving this into the role branch below.
-  caps.add('repos:manage');
+  caps.add("repos:manage");
 
-  if (session.user.role === 'admin' || session.user.role === 'owner') {
-    caps.add('team:admin');
+  if (session.user.role === "admin" || session.user.role === "owner") {
+    caps.add("team:admin");
   }
 
   return caps;
@@ -84,7 +86,7 @@ export function hasCapability(
  * Equivalent to `tests:write` since every interactive write path needs it.
  */
 export function isReadOnlySession(session: SessionForCaps): boolean {
-  return !hasCapability(session, 'tests:write');
+  return !hasCapability(session, "tests:write");
 }
 
 function deny(capability: Capability): never {
@@ -115,7 +117,7 @@ export async function requireRepoCapability(
   if (!hasCapability(session, capability)) deny(capability);
   const repo = await queries.getRepository(repoId);
   if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Repository does not belong to your team');
+    throw new Error("Forbidden: Repository does not belong to your team");
   }
   return { ...session, repo };
 }

@@ -17,8 +17,12 @@
  *      toBeEnabled / toBeDisabled / toBeChecked).
  */
 
-import { describe, it, expect } from 'vitest';
-import { createExpect, extractTestBody, stripTypeAnnotations } from '@lastest/shared';
+import { describe, it, expect } from "vitest";
+import {
+  createExpect,
+  extractTestBody,
+  stripTypeAnnotations,
+} from "@lastest/shared";
 
 const exp = createExpect({ timeout: 50 });
 
@@ -35,14 +39,17 @@ function fakeLocator(opts: {
     click: async () => {},
     fill: async () => {},
     waitFor: async ({ state, timeout }: { state: string; timeout: number }) => {
-      const target = state === 'visible' || state === 'attached' ? opts.visible !== false : opts.visible === false;
+      const target =
+        state === "visible" || state === "attached"
+          ? opts.visible !== false
+          : opts.visible === false;
       if (!target) {
         await new Promise((r) => setTimeout(r, timeout));
         throw new Error(`waitFor ${state} timed out`);
       }
     },
-    textContent: async () => '',
-    inputValue: async () => opts.value ?? '',
+    textContent: async () => "",
+    inputValue: async () => opts.value ?? "",
     getAttribute: async (n: string) => (opts.attrs ?? {})[n] ?? null,
     count: async () => opts.count ?? 0,
     isEnabled: async () => opts.isEnabled ?? false,
@@ -53,12 +60,12 @@ function fakeLocator(opts: {
   };
 }
 
-describe('matcher parity — every matcher both shims used to ship works', () => {
-  it('locator.toBeVisible / toBeHidden / toHaveText / toContainText', async () => {
+describe("matcher parity — every matcher both shims used to ship works", () => {
+  it("locator.toBeVisible / toBeHidden / toHaveText / toContainText", async () => {
     await exp(fakeLocator({ visible: true })).toBeVisible();
     await exp(fakeLocator({ visible: false })).toBeHidden();
   });
-  it('generic toBe / toEqual / toBeTruthy / toBeFalsy / toContain / toHaveLength', () => {
+  it("generic toBe / toEqual / toBeTruthy / toBeFalsy / toContain / toHaveLength", () => {
     exp(1).toBe(1);
     exp({ a: 1 }).toEqual({ a: 1 });
     exp(1).toBeTruthy();
@@ -66,39 +73,45 @@ describe('matcher parity — every matcher both shims used to ship works', () =>
     exp([1, 2]).toContain(1);
     exp([1, 2, 3]).toHaveLength(3);
   });
-  it('toBeGreaterThan + toBeGreaterThanOrEqual (one was missing per runner)', () => {
+  it("toBeGreaterThan + toBeGreaterThanOrEqual (one was missing per runner)", () => {
     exp(2).toBeGreaterThan(1);
     exp(2).toBeGreaterThanOrEqual(2);
   });
-  it('.not for generic matchers (sync, matches prior shim)', () => {
+  it(".not for generic matchers (sync, matches prior shim)", () => {
     exp(1).not.toBe(2);
     exp([1, 2]).not.toContain(9);
   });
 });
 
-describe('matcher parity — added matchers the assertion-parser already recognises', () => {
-  it('locator.toBeAttached', async () => {
+describe("matcher parity — added matchers the assertion-parser already recognises", () => {
+  it("locator.toBeAttached", async () => {
     await exp(fakeLocator({ visible: true })).toBeAttached();
   });
-  it('locator.toBeEnabled / toBeDisabled / toBeChecked', async () => {
+  it("locator.toBeEnabled / toBeDisabled / toBeChecked", async () => {
     await exp(fakeLocator({ isEnabled: true })).toBeEnabled();
     await exp(fakeLocator({ isDisabled: true })).toBeDisabled();
     await exp(fakeLocator({ isChecked: true })).toBeChecked();
   });
-  it('locator.toHaveValue (string + regex)', async () => {
-    await exp(fakeLocator({ value: 'abc' })).toHaveValue('abc');
-    await exp(fakeLocator({ value: 'foo-bar' })).toHaveValue(/foo/);
+  it("locator.toHaveValue (string + regex)", async () => {
+    await exp(fakeLocator({ value: "abc" })).toHaveValue("abc");
+    await exp(fakeLocator({ value: "foo-bar" })).toHaveValue(/foo/);
   });
-  it('locator.toHaveAttribute (string + regex)', async () => {
-    await exp(fakeLocator({ attrs: { href: '/home' } })).toHaveAttribute('href', '/home');
-    await exp(fakeLocator({ attrs: { href: '/profile/x' } })).toHaveAttribute('href', /profile/);
+  it("locator.toHaveAttribute (string + regex)", async () => {
+    await exp(fakeLocator({ attrs: { href: "/home" } })).toHaveAttribute(
+      "href",
+      "/home",
+    );
+    await exp(fakeLocator({ attrs: { href: "/profile/x" } })).toHaveAttribute(
+      "href",
+      /profile/,
+    );
   });
-  it('locator.toHaveCount', async () => {
+  it("locator.toHaveCount", async () => {
     await exp(fakeLocator({ count: 3 })).toHaveCount(3);
   });
 });
 
-describe('extractor parity — both runners use the same three-tier extractor', () => {
+describe("extractor parity — both runners use the same three-tier extractor", () => {
   const legacy = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   await page.goto(baseUrl);
   await expect(page.locator('h1')).toBeVisible();
@@ -113,22 +126,26 @@ test('homepage', async ({ page }) => {
   const wholeCode = `await page.goto('/');
 await expect(page).toHaveTitle(/x/);`;
 
-  it('legacy shape extracts and produces a valid AsyncFunction body', () => {
+  it("legacy shape extracts and produces a valid AsyncFunction body", () => {
     const r = extractTestBody(legacy);
-    expect(r.shape).toBe('legacy-export');
+    expect(r.shape).toBe("legacy-export");
     const body = stripTypeAnnotations(r.body);
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    expect(() => new AsyncFunction('page', 'expect', body)).not.toThrow();
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
+    expect(() => new AsyncFunction("page", "expect", body)).not.toThrow();
   });
-  it('framework shape extracts and produces a valid AsyncFunction body', () => {
+  it("framework shape extracts and produces a valid AsyncFunction body", () => {
     const r = extractTestBody(framework);
-    expect(r.shape).toBe('framework-test');
+    expect(r.shape).toBe("framework-test");
     const body = stripTypeAnnotations(r.body);
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    expect(() => new AsyncFunction('page', 'expect', body)).not.toThrow();
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
+    expect(() => new AsyncFunction("page", "expect", body)).not.toThrow();
   });
-  it('whole-code fallback still works', () => {
+  it("whole-code fallback still works", () => {
     const r = extractTestBody(wholeCode);
-    expect(r.shape).toBe('whole-code');
+    expect(r.shape).toBe("whole-code");
   });
 });

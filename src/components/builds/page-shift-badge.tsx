@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { ArrowDown, ArrowUp, MoveVertical } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { ArrowDown, ArrowUp, MoveVertical } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
-import type { PageShiftInfo } from '@/lib/db/schema';
+} from "@/components/ui/tooltip";
+import type { PageShiftInfo } from "@/lib/db/schema";
 
 interface PageShiftBadgeProps {
   pageShift: PageShiftInfo;
@@ -43,14 +43,15 @@ export function PageShiftBadge({ pageShift }: PageShiftBadgeProps) {
               Vertical Page Shift Detected
             </p>
             <p>
-              Content appears to have shifted {isShiftDown ? 'down' : 'up'} by approximately{' '}
-              <strong>{shiftAmount}px</strong>.
+              Content appears to have shifted {isShiftDown ? "down" : "up"} by
+              approximately <strong>{shiftAmount}px</strong>.
             </p>
             <p className="text-muted-foreground text-xs">
               Confidence: {confidencePercent}%
             </p>
             <p className="text-xs text-muted-foreground">
-              This may be caused by added/removed content like banners, notifications, or dynamic elements.
+              This may be caused by added/removed content like banners,
+              notifications, or dynamic elements.
             </p>
           </div>
         </TooltipContent>

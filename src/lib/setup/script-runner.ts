@@ -1,7 +1,18 @@
-import type { Page, Locator } from 'playwright';
-import { stripTypeAnnotations, hashSelectors, sortSelectorsByStats, selectorTimeoutFor, type SelectorRef, type SelectorStatRow } from '@lastest/shared';
-import { getSelectorStatsForTest, recordSelectorSuccess, recordSelectorFailure } from '@/lib/db/queries/misc';
-import type { SetupScript, SetupContext, SetupResult } from './types';
+import type { Page, Locator } from "playwright";
+import {
+  stripTypeAnnotations,
+  hashSelectors,
+  sortSelectorsByStats,
+  selectorTimeoutFor,
+  type SelectorRef,
+  type SelectorStatRow,
+} from "@lastest/shared";
+import {
+  getSelectorStatsForTest,
+  recordSelectorSuccess,
+  recordSelectorFailure,
+} from "@/lib/db/queries/misc";
+import type { SetupScript, SetupContext, SetupResult } from "./types";
 
 /**
  * Simple expect implementation for setup scripts.
@@ -9,35 +20,54 @@ import type { SetupScript, SetupContext, SetupResult } from './types';
  */
 function createExpect(timeout = 5000) {
   return function expect(target: Page | Locator) {
-    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
+    const isPage =
+      typeof (target as unknown as { goto?: unknown }).goto === "function";
 
     if (isPage) {
       const page = target as Page;
       return {
-        async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
+        async toHaveURL(
+          expected: string | RegExp,
+          options?: { timeout?: number },
+        ) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
           while (Date.now() - start < t) {
             const url = page.url();
-            if (typeof expected === 'string' ? url === expected : expected.test(url)) {
+            if (
+              typeof expected === "string"
+                ? url === expected
+                : expected.test(url)
+            ) {
               return;
             }
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise((r) => setTimeout(r, 100));
           }
-          throw new Error(`Expected URL to match ${expected}, but got ${page.url()}`);
+          throw new Error(
+            `Expected URL to match ${expected}, but got ${page.url()}`,
+          );
         },
-        async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
+        async toHaveTitle(
+          expected: string | RegExp,
+          options?: { timeout?: number },
+        ) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
           while (Date.now() - start < t) {
             const title = await page.title();
-            if (typeof expected === 'string' ? title === expected : expected.test(title)) {
+            if (
+              typeof expected === "string"
+                ? title === expected
+                : expected.test(title)
+            ) {
               return;
             }
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise((r) => setTimeout(r, 100));
           }
           const title = await page.title();
-          throw new Error(`Expected title to match ${expected}, but got ${title}`);
+          throw new Error(
+            `Expected title to match ${expected}, but got ${title}`,
+          );
         },
       };
     }
@@ -45,20 +75,33 @@ function createExpect(timeout = 5000) {
     const locator = target as Locator;
     return {
       async toBeVisible(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "visible",
+          timeout: options?.timeout ?? timeout,
+        });
       },
       async toBeHidden(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "hidden",
+          timeout: options?.timeout ?? timeout,
+        });
       },
-      async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
+      async toHaveText(
+        expected: string | RegExp,
+        options?: { timeout?: number },
+      ) {
         const t = options?.timeout ?? timeout;
         const start = Date.now();
         while (Date.now() - start < t) {
           const text = await locator.textContent();
-          if (typeof expected === 'string' ? text === expected : expected.test(text || '')) {
+          if (
+            typeof expected === "string"
+              ? text === expected
+              : expected.test(text || "")
+          ) {
             return;
           }
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         const text = await locator.textContent();
         throw new Error(`Expected text to match ${expected}, but got ${text}`);
@@ -71,10 +114,12 @@ function createExpect(timeout = 5000) {
           if (text?.includes(expected)) {
             return;
           }
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         const text = await locator.textContent();
-        throw new Error(`Expected text to contain "${expected}", but got "${text}"`);
+        throw new Error(
+          `Expected text to contain "${expected}", but got "${text}"`,
+        );
       },
       async toHaveValue(expected: string, options?: { timeout?: number }) {
         const t = options?.timeout ?? timeout;
@@ -84,7 +129,7 @@ function createExpect(timeout = 5000) {
           if (value === expected) {
             return;
           }
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         const value = await locator.inputValue();
         throw new Error(`Expected value "${expected}", but got "${value}"`);
@@ -94,7 +139,7 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isEnabled()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be enabled`);
       },
@@ -103,7 +148,7 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isDisabled()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be disabled`);
       },
@@ -112,12 +157,15 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isChecked()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be checked`);
       },
       async toBeAttached(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'attached', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "attached",
+          timeout: options?.timeout ?? timeout,
+        });
       },
     };
   };
@@ -131,20 +179,27 @@ function createAppState(page: Page) {
     get: async (path: string): Promise<unknown> => {
       return page.evaluate((p) => {
         /* eslint-disable @typescript-eslint/no-explicit-any */
-        const state = (window as any).__APP_STATE__ ||
-                      (window as any).store?.getState?.() ||
-                      (window as any).__EXCALIDRAW_STATE__ ||
-                      (window as any).app?.state;
+        const state =
+          (window as any).__APP_STATE__ ||
+          (window as any).store?.getState?.() ||
+          (window as any).__EXCALIDRAW_STATE__ ||
+          (window as any).app?.state;
         /* eslint-enable @typescript-eslint/no-explicit-any */
         if (!state) return undefined;
-        return p.split('.').reduce((obj: Record<string, unknown>, key: string) => obj?.[key] as Record<string, unknown>, state);
+        return p
+          .split(".")
+          .reduce(
+            (obj: Record<string, unknown>, key: string) =>
+              obj?.[key] as Record<string, unknown>,
+            state,
+          );
       }, path);
     },
     getHistoryLength: async (): Promise<number> => -1,
     getAll: async (): Promise<unknown> => null,
     evaluate: async <T>(accessor: string): Promise<T> => {
       return page.evaluate((fn) => {
-        const func = new Function('window', `return ${fn}`);
+        const func = new Function("window", `return ${fn}`);
         return func(window);
       }, accessor);
     },
@@ -165,7 +220,11 @@ function createAppState(page: Page) {
  * candidates so we don't burn the full budget on selectors that are
  * historically dead weight.
  */
-function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs = 3000) {
+function createLocateWithFallback(
+  _page: Page,
+  testId?: string,
+  defaultTimeoutMs = 3000,
+) {
   // Per-call sort cache: hash → sorted selectors. Reused across actions so a
   // test that locates the same array repeatedly only pays the DB read once.
   const sortCache = new Map<string, { type: string; value: string }[]>();
@@ -175,7 +234,9 @@ function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs
   const getAllStats = (): Promise<SelectorStatRow[]> => {
     if (!testId) return Promise.resolve([]);
     if (!allStatsPromise) {
-      allStatsPromise = getSelectorStatsForTest(testId).catch(() => [] as SelectorStatRow[]);
+      allStatsPromise = getSelectorStatsForTest(testId).catch(
+        () => [] as SelectorStatRow[],
+      );
     }
     return allStatsPromise;
   };
@@ -185,18 +246,24 @@ function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs
     selectors: { type: string; value: string }[],
     action: string,
     value?: string | null,
-    coords?: { x: number; y: number } | null
+    coords?: { x: number; y: number } | null,
   ) => {
-    const validSelectors = selectors.filter(s => s.value && s.value.trim() && !s.value.includes('undefined'));
+    const validSelectors = selectors.filter(
+      (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
+    );
 
     const hash = hashSelectors(validSelectors as SelectorRef[]);
 
     const allStats = await getAllStats();
     let ordered = sortCache.get(hash);
     if (!ordered) {
-      ordered = allStats.length > 0
-        ? sortSelectorsByStats(validSelectors, allStats.filter(r => r.hash === hash))
-        : validSelectors;
+      ordered =
+        allStats.length > 0
+          ? sortSelectorsByStats(
+              validSelectors,
+              allStats.filter((r) => r.hash === hash),
+            )
+          : validSelectors;
       sortCache.set(hash, ordered);
     }
 
@@ -204,41 +271,56 @@ function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs
       const attemptStart = Date.now();
       try {
         let locator: Locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+        if (sel.type === "ocr-text") {
+          const text = sel.value.replace(/^ocr-text="/, "").replace(/"$/, "");
           locator = pg.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
+        } else if (sel.type === "role-name") {
           const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
-          if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+          if (match)
+            locator = pg.getByRole(match[1] as "button" | "link" | "heading", {
+              name: match[2],
+            });
           else locator = pg.locator(sel.value);
         } else {
           locator = pg.locator(sel.value);
         }
         const target = locator.first();
-        const stat = allStats.find(r => r.hash === hash && r.type === sel.type && r.value === sel.value);
+        const stat = allStats.find(
+          (r) =>
+            r.hash === hash && r.type === sel.type && r.value === sel.value,
+        );
         const candidateTimeout = selectorTimeoutFor(stat, defaultTimeoutMs);
         await target.waitFor({ timeout: candidateTimeout });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
+        if (action === "click") await target.click();
+        else if (action === "fill") await target.fill(value || "");
+        else if (action === "selectOption")
+          await target.selectOption(value || "");
         if (testId) {
           const elapsed = Date.now() - attemptStart;
-          recordSelectorSuccess(testId, hash, sel.type, sel.value, elapsed).catch(() => {});
+          recordSelectorSuccess(
+            testId,
+            hash,
+            sel.type,
+            sel.value,
+            elapsed,
+          ).catch(() => {});
         }
         return;
       } catch {
         if (testId) {
-          recordSelectorFailure(testId, hash, sel.type, sel.value).catch(() => {});
+          recordSelectorFailure(testId, hash, sel.type, sel.value).catch(
+            () => {},
+          );
         }
         continue;
       }
     }
     // Coordinate fallback
-    if (action === 'click' && coords) {
+    if (action === "click" && coords) {
       await pg.mouse.click(coords.x, coords.y);
       return;
     }
-    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+    throw new Error("No selector matched: " + JSON.stringify(validSelectors));
   };
 }
 
@@ -252,12 +334,12 @@ function createLocateWithFallback(_page: Page, testId?: string, defaultTimeoutMs
 export async function runPlaywrightSetup(
   page: Page,
   script: SetupScript,
-  context: SetupContext
+  context: SetupContext,
 ): Promise<SetupResult> {
   const startTime = Date.now();
 
   try {
-    if (script.type !== 'playwright') {
+    if (script.type !== "playwright") {
       return {
         success: false,
         error: `Expected playwright script but got ${script.type}`,
@@ -269,13 +351,18 @@ export async function runPlaywrightSetup(
     if (!code) {
       return {
         success: false,
-        error: 'No setup code',
+        error: "No setup code",
         duration: Date.now() - startTime,
       };
     }
 
     // Execute the setup code
-    const extractedVariables = await executeSetupCode(page, code, context, false);
+    const extractedVariables = await executeSetupCode(
+      page,
+      code,
+      context,
+      false,
+    );
 
     return {
       success: true,
@@ -306,13 +393,19 @@ export async function runTestAsSetup(
     if (!testCode) {
       return {
         success: false,
-        error: 'No test code',
+        error: "No test code",
         duration: Date.now() - startTime,
       };
     }
 
     // Execute the test code but intercept screenshot calls
-    const extractedVariables = await executeSetupCode(page, testCode, context, true, testId);
+    const extractedVariables = await executeSetupCode(
+      page,
+      testCode,
+      context,
+      true,
+      testId,
+    );
 
     return {
       success: true,
@@ -343,12 +436,12 @@ async function executeSetupCode(
 
   // Check for setup function format
   const setupMatch = processedCode.match(
-    /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+    /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/,
   );
 
   // Also support test function format (when using test as setup)
   const testMatch = processedCode.match(
-    /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/
+    /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/,
   );
 
   const funcMatch = setupMatch || testMatch;
@@ -362,7 +455,11 @@ async function executeSetupCode(
     // Create helper functions that tests expect
     const expectFn = createExpect(5000);
     const appStateFn = createAppState(page);
-    const locateWithFallbackFn = createLocateWithFallback(page, testId, context.selectorTimeoutMs ?? 3000);
+    const locateWithFallbackFn = createLocateWithFallback(
+      page,
+      testId,
+      context.selectorTimeoutMs ?? 3000,
+    );
 
     // Create a stepLogger that logs to console for debugging
     const stepLogger = {
@@ -372,32 +469,45 @@ async function executeSetupCode(
     };
 
     // Create a dummy screenshot path (won't be used since we skip screenshots)
-    const screenshotPath = '/tmp/setup-screenshot.png';
+    const screenshotPath = "/tmp/setup-screenshot.png";
 
     // Remove the test's local locateWithFallback function declaration so the parameter is used
-    if (body.includes('async function locateWithFallback(')) {
-      const startMatch = body.match(/async function locateWithFallback\s*\([^)]*\)\s*\{/);
+    if (body.includes("async function locateWithFallback(")) {
+      const startMatch = body.match(
+        /async function locateWithFallback\s*\([^)]*\)\s*\{/,
+      );
       if (startMatch && startMatch.index !== undefined) {
         const startIdx = startMatch.index;
-        const braceStart = body.indexOf('{', startIdx);
+        const braceStart = body.indexOf("{", startIdx);
         let depth = 1;
         let endIdx = braceStart + 1;
         while (depth > 0 && endIdx < body.length) {
-          if (body[endIdx] === '{') depth++;
-          else if (body[endIdx] === '}') depth--;
+          if (body[endIdx] === "{") depth++;
+          else if (body[endIdx] === "}") depth--;
           endIdx++;
         }
-        body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+        body =
+          body.slice(0, startIdx) +
+          "/* locateWithFallback provided by runner */" +
+          body.slice(endIdx);
       }
     }
 
     // Fix legacy page.keyboard.selectAll() → keyboard.press('Control+a')
-    body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+    body = body.replace(
+      /page\.keyboard\.selectAll\(\)/g,
+      "page.keyboard.press('Control+a')",
+    );
 
     // File upload helper — always available (mirrors runner.ts)
-    const fileUploadHelper = async (selector: string, filePaths: string | string[]) => {
+    const fileUploadHelper = async (
+      selector: string,
+      filePaths: string | string[],
+    ) => {
       const locator = page.locator(selector);
-      await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+      await locator.setInputFiles(
+        Array.isArray(filePaths) ? filePaths : [filePaths],
+      );
     };
 
     // Clipboard helper — stub (setup runs without clipboard permissions by default)
@@ -411,20 +521,22 @@ async function executeSetupCode(
 
     // Build and execute the function with all expected parameters
     // Must match the runner's 11-parameter signature so test-as-setup works
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
     const setupFn = new AsyncFunction(
-      'page',
-      'baseUrl',
-      'screenshotPath',
-      'stepLogger',
-      'expect',
-      'appState',
-      'locateWithFallback',
-      'fileUpload',
-      'clipboard',
-      'downloads',
-      'network',
-      body
+      "page",
+      "baseUrl",
+      "screenshotPath",
+      "stepLogger",
+      "expect",
+      "appState",
+      "locateWithFallback",
+      "fileUpload",
+      "clipboard",
+      "downloads",
+      "network",
+      body,
     );
 
     const result = await setupFn(
@@ -438,11 +550,11 @@ async function executeSetupCode(
       fileUploadHelper,
       clipboardHelper,
       downloadsHelper,
-      networkHelper
+      networkHelper,
     );
 
     // If the setup returns an object, treat it as extracted variables
-    if (result && typeof result === 'object') {
+    if (result && typeof result === "object") {
       return result;
     }
 
@@ -450,9 +562,9 @@ async function executeSetupCode(
   }
 
   // Try to execute as raw commands (legacy format)
-  const lines = processedCode.split('\n').filter(line =>
-    line.trim().startsWith('await page.')
-  );
+  const lines = processedCode
+    .split("\n")
+    .filter((line) => line.trim().startsWith("await page."));
 
   const pageProxy = createSetupPageProxy(page, context.baseUrl);
 
@@ -469,33 +581,44 @@ async function executeSetupCode(
 function createSetupPageProxy(page: Page, baseUrl: string): Page {
   return new Proxy(page, {
     get: (target, prop) => {
-      if (prop === 'screenshot') {
+      if (prop === "screenshot") {
         // Return a no-op function for screenshots
         return async () => Buffer.alloc(0);
       }
-      if (prop === 'goto') {
+      if (prop === "goto") {
         // Intercept goto to handle relative URLs
-        return async (url: string | URL, options?: Parameters<Page['goto']>[1]) => {
-          const urlStr = typeof url === 'string' ? url : url.toString();
+        return async (
+          url: string | URL,
+          options?: Parameters<Page["goto"]>[1],
+        ) => {
+          const urlStr = typeof url === "string" ? url : url.toString();
           let resolvedUrl = urlStr;
           // Handle relative URLs
-          if (urlStr.startsWith('/')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}${urlStr}`;
-          } else if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${urlStr}`;
+          if (urlStr.startsWith("/")) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, "")}${urlStr}`;
+          } else if (
+            !urlStr.startsWith("http://") &&
+            !urlStr.startsWith("https://")
+          ) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, "")}/${urlStr}`;
           }
           return target.goto(resolvedUrl, options);
         };
       }
-      if (prop === 'waitForURL') {
+      if (prop === "waitForURL") {
         // Wrap predicates so scripts using url.includes() work
         // (Playwright passes a URL object, not a string)
-        return (predicate: string | RegExp | ((url: URL) => boolean), options?: { timeout?: number }) => {
-          if (typeof predicate === 'function') {
+        return (
+          predicate: string | RegExp | ((url: URL) => boolean),
+          options?: { timeout?: number },
+        ) => {
+          if (typeof predicate === "function") {
             const origFn = predicate;
             const wrappedFn = (url: URL) => {
               // Monkey-patch .includes on the URL object so legacy scripts work
-              const patched = url as URL & { includes?: (s: string) => boolean };
+              const patched = url as URL & {
+                includes?: (s: string) => boolean;
+              };
               if (!patched.includes) {
                 patched.includes = (s: string) => url.href.includes(s);
               }
@@ -507,31 +630,37 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
         };
       }
       const value = target[prop as keyof Page];
-      if (typeof value === 'function') {
+      if (typeof value === "function") {
         return (value as (...args: unknown[]) => unknown).bind(target);
       }
       return value;
-    }
+    },
   });
 }
 
 /**
  * Execute a single line of Playwright code
  */
-async function executeLine(page: Page, line: string, baseUrl: string): Promise<void> {
-  if (line.startsWith('await page.goto(')) {
+async function executeLine(
+  page: Page,
+  line: string,
+  baseUrl: string,
+): Promise<void> {
+  if (line.startsWith("await page.goto(")) {
     const urlMatch = line.match(/goto\(['"]([^'"]+)['"]\)/);
     if (urlMatch) {
       let url = urlMatch[1];
       // Handle relative URLs
-      if (url.startsWith('/')) {
+      if (url.startsWith("/")) {
         url = `${baseUrl}${url}`;
       }
       await page.goto(url, { timeout: 30000 });
     }
-  } else if (line.startsWith('await page.locator(')) {
+  } else if (line.startsWith("await page.locator(")) {
     const locatorMatch = line.match(/locator\(['"]([^'"]+)['"]\)/);
-    const actionMatch = line.match(/\.(click|fill|selectOption)\(['"]?([^'")]*)?['"]?\)/);
+    const actionMatch = line.match(
+      /\.(click|fill|selectOption)\(['"]?([^'")]*)?['"]?\)/,
+    );
 
     if (locatorMatch && actionMatch) {
       const selector = locatorMatch[1];
@@ -541,33 +670,33 @@ async function executeLine(page: Page, line: string, baseUrl: string): Promise<v
       const locator = page.locator(selector);
 
       switch (action) {
-        case 'click':
+        case "click":
           await locator.click();
           break;
-        case 'fill':
-          await locator.fill(value || '');
+        case "fill":
+          await locator.fill(value || "");
           break;
-        case 'selectOption':
-          await locator.selectOption(value || '');
+        case "selectOption":
+          await locator.selectOption(value || "");
           break;
       }
     }
-  } else if (line.startsWith('await page.fill(')) {
+  } else if (line.startsWith("await page.fill(")) {
     const match = line.match(/fill\(['"]([^'"]+)['"],\s*['"]([^'"]*)['"]\)/);
     if (match) {
       await page.fill(match[1], match[2]);
     }
-  } else if (line.startsWith('await page.click(')) {
+  } else if (line.startsWith("await page.click(")) {
     const match = line.match(/click\(['"]([^'"]+)['"]\)/);
     if (match) {
       await page.click(match[1]);
     }
-  } else if (line.startsWith('await page.waitForSelector(')) {
+  } else if (line.startsWith("await page.waitForSelector(")) {
     const match = line.match(/waitForSelector\(['"]([^'"]+)['"]\)/);
     if (match) {
       await page.waitForSelector(match[1]);
     }
-  } else if (line.startsWith('await page.waitForTimeout(')) {
+  } else if (line.startsWith("await page.waitForTimeout(")) {
     const match = line.match(/waitForTimeout\((\d+)\)/);
     if (match) {
       await page.waitForTimeout(parseInt(match[1], 10));

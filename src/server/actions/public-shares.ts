@@ -1,19 +1,19 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import path from 'path';
-import { promises as fs } from 'fs';
-import * as queries from '@/lib/db/queries';
-import { requireAuth, requireRepoAccess, requireTeamAccess } from '@/lib/auth';
-import { generateShareSlug, buildShareUrl } from '@/lib/share/slug';
-import { STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
-import { sendDiscordShareNotification } from '@/lib/integrations/discord';
-import type { PublicShare } from '@/lib/db/schema';
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import path from "path";
+import { promises as fs } from "fs";
+import * as queries from "@/lib/db/queries";
+import { requireAuth, requireRepoAccess, requireTeamAccess } from "@/lib/auth";
+import { generateShareSlug, buildShareUrl } from "@/lib/share/slug";
+import { STORAGE_DIRS, toRelativePath } from "@/lib/storage/paths";
+import { sendDiscordShareNotification } from "@/lib/integrations/discord";
+import type { PublicShare } from "@/lib/db/schema";
 
 const INTERNAL_SHARE_DISCORD_WEBHOOK_URL =
   process.env.LASTEST_SHARE_DISCORD_WEBHOOK_URL ||
-  'https://discord.com/api/webhooks/1506995703593828434/8mwqS7FH7dk9SxqBok4QEMPv2sZ9f1w5J5DD1PR5Wajqtp2mHvNf0C99ggZobDo6V_If';
+  "https://discord.com/api/webhooks/1506995703593828434/8mwqS7FH7dk9SxqBok4QEMPv2sZ9f1w5J5DD1PR5Wajqtp2mHvNf0C99ggZobDo6V_If";
 
 export interface PublishShareResult {
   shareId: string;
@@ -21,7 +21,9 @@ export interface PublishShareResult {
   url: string;
 }
 
-function deriveTargetDomain(targetUrl: string | null | undefined): string | null {
+function deriveTargetDomain(
+  targetUrl: string | null | undefined,
+): string | null {
   if (!targetUrl) return null;
   try {
     return new URL(targetUrl).hostname;
@@ -35,11 +37,13 @@ export async function publishBuildShare(
   options: { scopedTestId?: string | null } = {},
 ): Promise<PublishShareResult> {
   const build = await queries.getBuild(buildId);
-  if (!build) throw new Error('Build not found');
+  if (!build) throw new Error("Build not found");
 
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) throw new Error('Build has no repository');
+  if (!repoId) throw new Error("Build has no repository");
 
   const session = await requireRepoAccess(repoId);
 
@@ -52,7 +56,9 @@ export async function publishBuildShare(
   if (!domainTest && build.testRunId) {
     const results = await queries.getTestResultsByRun(build.testRunId);
     const firstResult = results[0];
-    domainTest = firstResult?.testId ? (await queries.getTest(firstResult.testId)) ?? null : null;
+    domainTest = firstResult?.testId
+      ? ((await queries.getTest(firstResult.testId)) ?? null)
+      : null;
   }
 
   const targetDomain = deriveTargetDomain(domainTest?.targetUrl);
@@ -65,7 +71,7 @@ export async function publishBuildShare(
     repositoryId: repoId,
     ownerTeamId: session.team.id,
     publishedByUserId: session.user.id,
-    status: 'public',
+    status: "public",
     targetDomain,
   });
 
@@ -75,12 +81,12 @@ export async function publishBuildShare(
       shareUrl,
       slug: share.slug,
       targetDomain,
-      repoName: session.repo.name || session.repo.fullName || 'unknown',
+      repoName: session.repo.name || session.repo.fullName || "unknown",
       publishedByEmail: session.user.email,
       teamName: session.team.name,
       scopedTestName: scopedTest?.name ?? null,
     }).catch((e) => {
-      console.error('[publicShare] discord ping failed', e);
+      console.error("[publicShare] discord ping failed", e);
     });
   }
 
@@ -88,10 +94,12 @@ export async function publishBuildShare(
   return { shareId: share.id, slug: share.slug, url: shareUrl };
 }
 
-export async function publishLatestTestShare(testId: string): Promise<PublishShareResult> {
+export async function publishLatestTestShare(
+  testId: string,
+): Promise<PublishShareResult> {
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
-  if (!test.repositoryId) throw new Error('Test has no repository');
+  if (!test) throw new Error("Test not found");
+  if (!test.repositoryId) throw new Error("Test has no repository");
 
   await requireRepoAccess(test.repositoryId);
 
@@ -99,7 +107,7 @@ export async function publishLatestTestShare(testId: string): Promise<PublishSha
   const mostRecent = results.find((r) => r.testRunId);
   if (!mostRecent?.testRunId) {
     throw new Error(
-      'No test runs found. Run this test at least once before publishing a share.',
+      "No test runs found. Run this test at least once before publishing a share.",
     );
   }
 
@@ -111,18 +119,18 @@ export async function publishLatestTestShare(testId: string): Promise<PublishSha
   let build = await queries.getBuildByTestRun(mostRecent.testRunId);
   if (!build) {
     const runResults = await queries.getTestResultsByRun(mostRecent.testRunId);
-    const passed = runResults.filter((r) => r.status === 'passed').length;
-    const failed = runResults.filter((r) => r.status === 'failed').length;
+    const passed = runResults.filter((r) => r.status === "passed").length;
+    const failed = runResults.filter((r) => r.status === "failed").length;
     build = await queries.createBuild({
       testRunId: mostRecent.testRunId,
-      triggerType: 'manual',
-      overallStatus: failed > 0 ? 'blocked' : 'review_required',
+      triggerType: "manual",
+      overallStatus: failed > 0 ? "blocked" : "review_required",
       totalTests: runResults.length,
       passedCount: passed,
       failedCount: failed,
       changesDetected: 0,
       flakyCount: 0,
-      comparisonMode: 'vs_both',
+      comparisonMode: "vs_both",
       completedAt: new Date(),
     });
   }
@@ -139,8 +147,8 @@ export async function listTestShares(testId: string): Promise<PublicShare[]> {
 
 export async function revokePublicShare(shareId: string): Promise<void> {
   const share = await queries.getPublicShareById(shareId);
-  if (!share) throw new Error('Share not found');
-  if (!share.repositoryId) throw new Error('Share has no repository');
+  if (!share) throw new Error("Share not found");
+  if (!share.repositoryId) throw new Error("Share has no repository");
   await requireRepoAccess(share.repositoryId);
 
   await queries.revokePublicShareById(shareId);
@@ -151,7 +159,9 @@ export async function revokePublicShare(shareId: string): Promise<void> {
 export async function listBuildShares(buildId: string): Promise<PublicShare[]> {
   const build = await queries.getBuild(buildId);
   if (!build) return [];
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   if (!testRun?.repositoryId) return [];
   await requireRepoAccess(testRun.repositoryId);
   return queries.listPublicSharesForBuild(buildId);
@@ -165,11 +175,17 @@ async function copyBaselineFiles(
   const pathMap = new Map<string, string>();
   for (const b of sourceBaselines) {
     if (!b.imagePath) continue;
-    const relative = b.imagePath.replace(/^\/+/, '');
-    const segments = relative.split('/');
-    if (segments[0] !== 'screenshots') continue;
-    const sourceAbs = path.join(STORAGE_DIRS.screenshots, segments.slice(1).join('/'));
-    const newRelativeUnder = segments.slice(1).join('/').replace(sourceRepoId, targetRepoId);
+    const relative = b.imagePath.replace(/^\/+/, "");
+    const segments = relative.split("/");
+    if (segments[0] !== "screenshots") continue;
+    const sourceAbs = path.join(
+      STORAGE_DIRS.screenshots,
+      segments.slice(1).join("/"),
+    );
+    const newRelativeUnder = segments
+      .slice(1)
+      .join("/")
+      .replace(sourceRepoId, targetRepoId);
     const targetAbs = path.join(STORAGE_DIRS.screenshots, newRelativeUnder);
     try {
       await fs.mkdir(path.dirname(targetAbs), { recursive: true });
@@ -198,22 +214,26 @@ export interface ClaimShareResult {
  * in the build's run and returns newTestId = null so the caller can land
  * on the repo's test list rather than a single test.
  */
-export async function claimPublicShare(slug: string): Promise<ClaimShareResult> {
+export async function claimPublicShare(
+  slug: string,
+): Promise<ClaimShareResult> {
   const session = await requireTeamAccess();
   const ctx = await queries.getPublicShareContext(slug);
-  if (!ctx) throw new Error('Share not found or revoked');
+  if (!ctx) throw new Error("Share not found or revoked");
 
   const sourceTests = ctx.test
     ? [ctx.test]
     : ctx.build.testRunId
       ? await loadTestsFromRun(ctx.build.testRunId)
       : [];
-  if (sourceTests.length === 0) throw new Error('Share has no tests to claim');
+  if (sourceTests.length === 0) throw new Error("Share has no tests to claim");
 
   // Idempotency: if this team already has a repo named after the share, reuse it.
   const existingRepos = await queries.getRepositoriesByTeam(session.team.id);
   const repoName = ctx.share.targetDomain || `claimed-${slug.slice(0, 8)}`;
-  const existing = existingRepos.find((r) => r.name === repoName && r.provider === 'local');
+  const existing = existingRepos.find(
+    (r) => r.name === repoName && r.provider === "local",
+  );
 
   let targetRepoId: string;
   if (existing) {
@@ -221,11 +241,11 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
   } else {
     const repo = await queries.createRepository({
       teamId: session.team.id,
-      provider: 'local',
+      provider: "local",
       owner: session.team.slug,
       name: repoName,
       fullName: `${session.team.slug}/${repoName}`,
-      defaultBranch: 'main',
+      defaultBranch: "main",
     });
     targetRepoId = repo.id;
   }
@@ -234,7 +254,9 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
   const clonedTestIds: string[] = [];
 
   for (const sourceTest of sourceTests) {
-    const prior = priorTests.find((t) => t.name === sourceTest.name && t.code === sourceTest.code);
+    const prior = priorTests.find(
+      (t) => t.name === sourceTest.name && t.code === sourceTest.code,
+    );
     if (prior) {
       clonedTestIds.push(prior.id);
       continue;
@@ -246,15 +268,21 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
       name: sourceTest.name,
       code: sourceTest.code,
       targetUrl: sourceTest.targetUrl,
-      executionMode: sourceTest.executionMode ?? 'procedural',
+      executionMode: sourceTest.executionMode ?? "procedural",
       createdByUserId: session.user.id,
       createdByBotId: null,
     });
     clonedTestIds.push(newTest.id);
 
     if (ctx.share.repositoryId) {
-      const activeBaselines = await queries.getActiveBaselinesForTest(sourceTest.id);
-      const pathMap = await copyBaselineFiles(activeBaselines, ctx.share.repositoryId, targetRepoId);
+      const activeBaselines = await queries.getActiveBaselinesForTest(
+        sourceTest.id,
+      );
+      const pathMap = await copyBaselineFiles(
+        activeBaselines,
+        ctx.share.repositoryId,
+        targetRepoId,
+      );
       for (const b of activeBaselines) {
         if (!b.imagePath) continue;
         const newPath = pathMap.get(b.imagePath);
@@ -267,20 +295,22 @@ export async function claimPublicShare(slug: string): Promise<ClaimShareResult> 
           imageHash: b.imageHash,
           branch: b.branch,
           isActive: true,
-          browser: b.browser ?? 'chromium',
+          browser: b.browser ?? "chromium",
         });
       }
     }
   }
 
   // Land the claimer in the new repo so /tests shows what they just claimed.
-  await queries.updateUser(session.user.id, { selectedRepositoryId: targetRepoId });
+  await queries.updateUser(session.user.id, {
+    selectedRepositoryId: targetRepoId,
+  });
 
   await queries.markPublicShareClaimed(slug, session.team.id, session.user.id);
   revalidatePath(`/r/${slug}`);
   return {
     newRepositoryId: targetRepoId,
-    newTestId: ctx.test ? clonedTestIds[0] ?? null : null,
+    newTestId: ctx.test ? (clonedTestIds[0] ?? null) : null,
   };
 }
 
@@ -303,5 +333,5 @@ async function loadTestsFromRun(testRunId: string) {
 export async function claimAndRedirect(slug: string): Promise<never> {
   await requireAuth();
   const result = await claimPublicShare(slug);
-  redirect(result.newTestId ? `/tests/${result.newTestId}` : '/tests');
+  redirect(result.newTestId ? `/tests/${result.newTestId}` : "/tests");
 }

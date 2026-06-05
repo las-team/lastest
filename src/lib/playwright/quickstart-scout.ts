@@ -12,16 +12,16 @@
  * Test 1 (auth setup) gets built at all.
  */
 
-import * as queries from '@/lib/db/queries';
-import { generateWithAI, type GenerateWithAIOptions } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
-import type { MCPServerConfig } from '@/lib/ai/mcp-bridge';
-import { getAIConfig } from './agent-context';
+import * as queries from "@/lib/db/queries";
+import { generateWithAI, type GenerateWithAIOptions } from "@/lib/ai";
+import type { AIProviderConfig } from "@/lib/ai/types";
+import type { MCPServerConfig } from "@/lib/ai/mcp-bridge";
+import { getAIConfig } from "./agent-context";
 import type {
   QuickstartPublicScout,
   QuickstartAuthedScout,
   QuickstartBusinessInteraction,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 /**
  * Apply the EB-aware MCP wiring used by healer/generator. When a CDP endpoint
@@ -35,17 +35,23 @@ import type {
 function applyScoutMcpWiring(
   config: AIProviderConfig,
   cdpEndpoint: string | undefined,
-): Pick<GenerateWithAIOptions, 'useMCP' | 'mcpConfig'> {
+): Pick<GenerateWithAIOptions, "useMCP" | "mcpConfig"> {
   const mcpArgs = cdpEndpoint
-    ? ['@playwright/mcp@latest', '--cdp-endpoint', cdpEndpoint, '--headless']
-    : ['@playwright/mcp@latest', '--headless'];
-  const playwrightServer: MCPServerConfig = { command: 'npx', args: mcpArgs };
+    ? ["@playwright/mcp@latest", "--cdp-endpoint", cdpEndpoint, "--headless"]
+    : ["@playwright/mcp@latest", "--headless"];
+  const playwrightServer: MCPServerConfig = { command: "npx", args: mcpArgs };
 
-  if (config.provider === 'claude-agent-sdk') {
+  if (config.provider === "claude-agent-sdk") {
     config.agentSdkStrictMcpConfig = true;
     config.agentSdkMcpServers = { playwright: playwrightServer };
-    config.agentSdkAllowedTools = ['mcp__playwright__*'];
-    config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch'];
+    config.agentSdkAllowedTools = ["mcp__playwright__*"];
+    config.agentSdkDisallowedTools = [
+      "Bash",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+    ];
     // SDK path consumes the mcpServers above; bridge path is unused.
     return { useMCP: false };
   }
@@ -126,7 +132,10 @@ function extractJson(response: string): unknown {
   return JSON.parse(raw);
 }
 
-function safeArray<T>(value: unknown, mapper: (item: unknown) => T | null): T[] {
+function safeArray<T>(
+  value: unknown,
+  mapper: (item: unknown) => T | null,
+): T[] {
   if (!Array.isArray(value)) return [];
   const out: T[] = [];
   for (const item of value) {
@@ -137,60 +146,69 @@ function safeArray<T>(value: unknown, mapper: (item: unknown) => T | null): T[] 
 }
 
 function asNavLink(item: unknown): { path: string; label: string } | null {
-  if (!item || typeof item !== 'object') return null;
+  if (!item || typeof item !== "object") return null;
   const obj = item as Record<string, unknown>;
-  const path = typeof obj.path === 'string' ? obj.path : null;
-  const label = typeof obj.label === 'string' ? obj.label : '';
-  if (!path || !path.startsWith('/')) return null;
+  const path = typeof obj.path === "string" ? obj.path : null;
+  const label = typeof obj.label === "string" ? obj.label : "";
+  if (!path || !path.startsWith("/")) return null;
   return { path, label };
 }
 
 function asFriction(item: unknown): { kind: string; note: string } | null {
-  if (!item || typeof item !== 'object') return null;
+  if (!item || typeof item !== "object") return null;
   const obj = item as Record<string, unknown>;
-  if (typeof obj.kind !== 'string' || typeof obj.note !== 'string') return null;
+  if (typeof obj.kind !== "string" || typeof obj.note !== "string") return null;
   return { kind: obj.kind, note: obj.note };
 }
 
 function asCta(item: unknown): { label: string; selectorHint?: string } | null {
-  if (!item || typeof item !== 'object') return null;
+  if (!item || typeof item !== "object") return null;
   const obj = item as Record<string, unknown>;
-  if (typeof obj.label !== 'string') return null;
+  if (typeof obj.label !== "string") return null;
   return {
     label: obj.label,
-    selectorHint: typeof obj.selectorHint === 'string' ? obj.selectorHint : undefined,
+    selectorHint:
+      typeof obj.selectorHint === "string" ? obj.selectorHint : undefined,
   };
 }
 
-function asBusinessInteraction(value: unknown): QuickstartBusinessInteraction | undefined {
-  if (!value || typeof value !== 'object') return undefined;
+function asBusinessInteraction(
+  value: unknown,
+): QuickstartBusinessInteraction | undefined {
+  if (!value || typeof value !== "object") return undefined;
   const obj = value as Record<string, unknown>;
   const out: QuickstartBusinessInteraction = {};
-  if (typeof obj.primaryInputLabel === 'string' && obj.primaryInputLabel.length > 0) {
+  if (
+    typeof obj.primaryInputLabel === "string" &&
+    obj.primaryInputLabel.length > 0
+  ) {
     out.primaryInputLabel = obj.primaryInputLabel.slice(0, 200);
   }
-  if (typeof obj.primaryCtaLabel === 'string' && obj.primaryCtaLabel.length > 0) {
+  if (
+    typeof obj.primaryCtaLabel === "string" &&
+    obj.primaryCtaLabel.length > 0
+  ) {
     out.primaryCtaLabel = obj.primaryCtaLabel.slice(0, 200);
   }
-  if (typeof obj.demoInputValue === 'string' && obj.demoInputValue.length > 0) {
+  if (typeof obj.demoInputValue === "string" && obj.demoInputValue.length > 0) {
     out.demoInputValue = obj.demoInputValue.slice(0, 500);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function classify(value: unknown): QuickstartPublicScout['classification'] {
+function classify(value: unknown): QuickstartPublicScout["classification"] {
   const allowed = [
-    'email_password',
-    'magic_link_only',
-    'oauth_only',
-    'captcha_gated',
-    'otp',
-    'no_public_register',
-    'unknown',
+    "email_password",
+    "magic_link_only",
+    "oauth_only",
+    "captcha_gated",
+    "otp",
+    "no_public_register",
+    "unknown",
   ] as const;
   return (allowed as readonly string[]).includes(value as string)
-    ? (value as QuickstartPublicScout['classification'])
-    : 'unknown';
+    ? (value as QuickstartPublicScout["classification"])
+    : "unknown";
 }
 
 export interface QuickstartScoutPublicResult {
@@ -215,38 +233,59 @@ export async function runQuickstartScoutPublic(
   const prompt = `Reconnoiter ${baseUrl}. Follow the workflow in the system prompt and return strict JSON.`;
 
   let promptLogId: string | undefined;
-  const response = await generateWithAI(config, prompt, PUBLIC_SCOUT_SYSTEM_PROMPT, {
-    ...mcpOpts,
-    repositoryId,
-    actionType: 'agent_discover',
-    onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
-    responseFormat: 'json_object',
-  });
+  const response = await generateWithAI(
+    config,
+    prompt,
+    PUBLIC_SCOUT_SYSTEM_PROMPT,
+    {
+      ...mcpOpts,
+      repositoryId,
+      actionType: "agent_discover",
+      onLogCreated: (id) => {
+        promptLogId = id;
+        options?.onLogCreated?.(id);
+      },
+      responseFormat: "json_object",
+    },
+  );
 
   let parsed: Record<string, unknown> | null = null;
   let parseError: string | undefined;
   try {
     const json = extractJson(response);
-    if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
+    if (json && typeof json === "object")
+      parsed = json as Record<string, unknown>;
   } catch (err) {
     parseError = err instanceof Error ? err.message : String(err);
-    console.warn('[QuickStartScout] non-JSON response on first try:', response.slice(0, 400));
+    console.warn(
+      "[QuickStartScout] non-JSON response on first try:",
+      response.slice(0, 400),
+    );
   }
 
   // One retry with an explicit "JSON only" reminder when the first response wasn't JSON.
   // Catches the "Playwright MCP browser locked → LLM returned prose" failure mode.
   if (!parsed) {
     const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON. Browse the site with MCP tools and return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
-    const retryResponse = await generateWithAI(config, retryPrompt, PUBLIC_SCOUT_SYSTEM_PROMPT, {
-      ...mcpOpts,
-      repositoryId,
-      actionType: 'agent_discover',
-      onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
-      responseFormat: 'json_object',
-    });
+    const retryResponse = await generateWithAI(
+      config,
+      retryPrompt,
+      PUBLIC_SCOUT_SYSTEM_PROMPT,
+      {
+        ...mcpOpts,
+        repositoryId,
+        actionType: "agent_discover",
+        onLogCreated: (id) => {
+          promptLogId = id;
+          options?.onLogCreated?.(id);
+        },
+        responseFormat: "json_object",
+      },
+    );
     try {
       const json = extractJson(retryResponse);
-      if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
+      if (json && typeof json === "object")
+        parsed = json as Record<string, unknown>;
     } catch (err) {
       parseError = err instanceof Error ? err.message : String(err);
     }
@@ -254,13 +293,15 @@ export async function runQuickstartScoutPublic(
 
   if (!parsed) {
     throw new Error(
-      `Public scout returned non-JSON on both attempts: ${parseError ?? 'unknown error'}. Likely a browser MCP failure, see prompt log ${promptLogId ?? '(none)'}.`,
+      `Public scout returned non-JSON on both attempts: ${parseError ?? "unknown error"}. Likely a browser MCP failure, see prompt log ${promptLogId ?? "(none)"}.`,
     );
   }
 
   const rawClassification = classify(parsed.classification);
-  const tagline = typeof parsed.tagline === 'string' ? parsed.tagline : undefined;
-  const concept = typeof parsed.concept === 'string' ? parsed.concept : undefined;
+  const tagline =
+    typeof parsed.tagline === "string" ? parsed.tagline : undefined;
+  const concept =
+    typeof parsed.concept === "string" ? parsed.concept : undefined;
   const navLinks = safeArray(parsed.navLinks, asNavLink);
 
   // Validation gate: if the model claimed "no_public_register" but produced no
@@ -268,14 +309,15 @@ export async function runQuickstartScoutPublic(
   // Downgrade to 'unknown' so the agent treats it as a scout failure rather
   // than confidently mislabelling the app.
   const wroteAnything =
-    (tagline !== undefined && tagline.length > 0)
-    || (concept !== undefined && concept.length > 0)
-    || navLinks.length > 0;
-  const classification: QuickstartPublicScout['classification'] =
-    rawClassification === 'no_public_register' && !wroteAnything
-      ? 'unknown'
+    (tagline !== undefined && tagline.length > 0) ||
+    (concept !== undefined && concept.length > 0) ||
+    navLinks.length > 0;
+  const classification: QuickstartPublicScout["classification"] =
+    rawClassification === "no_public_register" && !wroteAnything
+      ? "unknown"
       : rawClassification;
-  const automatable = parsed.authAutomatable === true && classification === 'email_password';
+  const automatable =
+    parsed.authAutomatable === true && classification === "email_password";
 
   const data: QuickstartPublicScout = {
     classification,
@@ -283,9 +325,12 @@ export async function runQuickstartScoutPublic(
     tagline,
     concept,
     navLinks,
-    registerPath: typeof parsed.registerPath === 'string' ? parsed.registerPath : null,
+    registerPath:
+      typeof parsed.registerPath === "string" ? parsed.registerPath : null,
     cookieBannerSelectorHint:
-      typeof parsed.cookieBannerSelectorHint === 'string' ? parsed.cookieBannerSelectorHint : undefined,
+      typeof parsed.cookieBannerSelectorHint === "string"
+        ? parsed.cookieBannerSelectorHint
+        : undefined,
     businessInteraction: asBusinessInteraction(parsed.businessInteraction),
     friction: safeArray(parsed.friction, asFriction),
   };
@@ -313,18 +358,27 @@ ${authSetupCode}
 After the seed completes successfully, navigate to ${baseUrl} and proceed with the workflow in the system prompt. Return strict JSON.`;
 
   let promptLogId: string | undefined;
-  const response = await generateWithAI(config, prompt, AUTHED_SCOUT_SYSTEM_PROMPT, {
-    ...mcpOpts,
-    repositoryId,
-    actionType: 'agent_discover',
-    onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
-    responseFormat: 'json_object',
-  });
+  const response = await generateWithAI(
+    config,
+    prompt,
+    AUTHED_SCOUT_SYSTEM_PROMPT,
+    {
+      ...mcpOpts,
+      repositoryId,
+      actionType: "agent_discover",
+      onLogCreated: (id) => {
+        promptLogId = id;
+        options?.onLogCreated?.(id);
+      },
+      responseFormat: "json_object",
+    },
+  );
 
   let parsed: Record<string, unknown> = {};
   try {
     const json = extractJson(response);
-    if (json && typeof json === 'object') parsed = json as Record<string, unknown>;
+    if (json && typeof json === "object")
+      parsed = json as Record<string, unknown>;
   } catch {
     // fall through
   }
@@ -333,7 +387,7 @@ After the seed completes successfully, navigate to ${baseUrl} and proceed with t
     inAppNavLinks: safeArray(parsed.inAppNavLinks, asNavLink),
     safeCtaCandidates: safeArray(parsed.safeCtaCandidates, asCta),
     observedRoutes: Array.isArray(parsed.observedRoutes)
-      ? parsed.observedRoutes.filter((r): r is string => typeof r === 'string')
+      ? parsed.observedRoutes.filter((r): r is string => typeof r === "string")
       : [],
     friction: safeArray(parsed.friction, asFriction),
   };

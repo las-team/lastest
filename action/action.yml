@@ -1,55 +1,55 @@
-name: 'Lastest Visual Regression'
-description: 'Run visual regression tests on pull requests via Lastest remote runner. Lightweight — no browsers needed in CI.'
-author: 'Dexilion'
+name: "Lastest Visual Regression"
+description: "Run visual regression tests on pull requests via Lastest remote runner. Lightweight — no browsers needed in CI."
+author: "Dexilion"
 
 branding:
-  icon: 'image'
-  color: 'purple'
+  icon: "image"
+  color: "purple"
 
 inputs:
   server-url:
-    description: 'Lastest server URL (e.g., https://your-lastest-instance.com)'
+    description: "Lastest server URL (e.g., https://your-lastest-instance.com)"
     required: true
   runner-token:
-    description: 'Runner authentication token from Lastest'
+    description: "Runner authentication token from Lastest"
     required: true
   repo:
     description: 'Repository full name (e.g., "owner/repo"). Defaults to $GITHUB_REPOSITORY.'
     required: false
   target-url:
-    description: 'Override base URL for test execution'
+    description: "Override base URL for test execution"
     required: false
   timeout:
-    description: 'Timeout for build completion in milliseconds'
+    description: "Timeout for build completion in milliseconds"
     required: false
-    default: '300000'
+    default: "300000"
   fail-on-changes:
-    description: 'Fail the action when visual changes are detected (review_required status)'
+    description: "Fail the action when visual changes are detected (review_required status)"
     required: false
-    default: 'false'
+    default: "false"
 
 outputs:
   status:
-    description: 'Build status (passed, failed, review_required, safe_to_merge, blocked)'
+    description: "Build status (passed, failed, review_required, safe_to_merge, blocked)"
     value: ${{ steps.run.outputs.status }}
   build-url:
-    description: 'Link to build results in Lastest'
+    description: "Link to build results in Lastest"
     value: ${{ steps.run.outputs.build-url }}
   changed-count:
-    description: 'Number of visual changes detected'
+    description: "Number of visual changes detected"
     value: ${{ steps.run.outputs.changed-count }}
   passed-count:
-    description: 'Number of passed tests'
+    description: "Number of passed tests"
     value: ${{ steps.run.outputs.passed-count }}
   failed-count:
-    description: 'Number of failed tests'
+    description: "Number of failed tests"
     value: ${{ steps.run.outputs.failed-count }}
   total-tests:
-    description: 'Total number of tests run'
+    description: "Total number of tests run"
     value: ${{ steps.run.outputs.total-tests }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Run visual regression tests
       id: run

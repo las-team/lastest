@@ -1,6 +1,9 @@
-import type { CoreStabilizationSettings, StabilizationPage } from './types';
-import { DETERMINISTIC_RENDERING_CSS, FREEZE_ANIMATIONS_SCRIPT } from './constants';
-import { getFreezeTimestampsScript, getFreezeRandomScript } from './scripts';
+import type { CoreStabilizationSettings, StabilizationPage } from "./types";
+import {
+  DETERMINISTIC_RENDERING_CSS,
+  FREEZE_ANIMATIONS_SCRIPT,
+} from "./constants";
+import { getFreezeTimestampsScript, getFreezeRandomScript } from "./scripts";
 
 /**
  * Setup init scripts to freeze timestamps and random values.
@@ -10,11 +13,13 @@ import { getFreezeTimestampsScript, getFreezeRandomScript } from './scripts';
  */
 export async function setupFreezeScripts(
   page: StabilizationPage,
-  settings: CoreStabilizationSettings
+  settings: CoreStabilizationSettings,
 ): Promise<void> {
   // Freeze Date/Date.now() via init script (does NOT affect timers/RAF)
   if (settings.freezeTimestamps) {
-    await page.addInitScript(getFreezeTimestampsScript(settings.frozenTimestamp));
+    await page.addInitScript(
+      getFreezeTimestampsScript(settings.frozenTimestamp),
+    );
     // Override performance.now() so we can freeze/unfreeze it ourselves
     // via the __perfNowFrozen mechanism used during RAF flushing.
     await page.addInitScript(`
@@ -30,7 +35,9 @@ export async function setupFreezeScripts(
 
   // Freeze random values
   if (settings.freezeRandomValues) {
-    await page.addInitScript(getFreezeRandomScript(settings.randomSeed, settings.reseedRandomOnInput));
+    await page.addInitScript(
+      getFreezeRandomScript(settings.randomSeed, settings.reseedRandomOnInput),
+    );
   }
 
   // Freeze animations
@@ -90,9 +97,13 @@ export async function setupFreezeScripts(
 
   // Canvas determinism: force willReadFrequently for CPU-backed canvas (avoids GPU readback
   // non-determinism) and optionally disable imageSmoothingEnabled.
-  const needsDeterministicCanvas = settings.crossOsConsistency || settings.freezeAnimations || settings.disableImageSmoothing;
+  const needsDeterministicCanvas =
+    settings.crossOsConsistency ||
+    settings.freezeAnimations ||
+    settings.disableImageSmoothing;
   if (needsDeterministicCanvas) {
-    const forceWillReadFrequently = settings.crossOsConsistency || settings.freezeAnimations;
+    const forceWillReadFrequently =
+      settings.crossOsConsistency || settings.freezeAnimations;
     const disableSmoothing = settings.disableImageSmoothing;
     await page.addInitScript(`
       (function() {

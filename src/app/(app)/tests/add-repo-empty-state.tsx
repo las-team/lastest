@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Github, HardDrive, Plus } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { createLocalRepo } from '@/server/actions/repos';
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Github, HardDrive, Plus } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { createLocalRepo } from "@/server/actions/repos";
 
 interface AddRepoEmptyStateProps {
   hasRepos: boolean;
@@ -15,7 +15,7 @@ interface AddRepoEmptyStateProps {
 
 export function AddRepoEmptyState({ hasRepos }: AddRepoEmptyStateProps) {
   const router = useRouter();
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const handleCreate = () => {
@@ -24,10 +24,12 @@ export function AddRepoEmptyState({ hasRepos }: AddRepoEmptyStateProps) {
     startTransition(async () => {
       try {
         await createLocalRepo(trimmed);
-        setName('');
+        setName("");
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Could not create repository');
+        toast.error(
+          err instanceof Error ? err.message : "Could not create repository",
+        );
       }
     });
   };
@@ -41,29 +43,31 @@ export function AddRepoEmptyState({ hasRepos }: AddRepoEmptyStateProps) {
           </div>
           <div>
             <h2 className="text-base font-semibold">
-              {hasRepos ? 'No repository selected' : 'Add a repository'}
+              {hasRepos ? "No repository selected" : "Add a repository"}
             </h2>
             <p className="text-sm text-muted-foreground">
               {hasRepos
-                ? 'Pick one from the sidebar, or create a new local repo below.'
-                : 'Start by creating a local repo or connecting a Git provider.'}
+                ? "Pick one from the sidebar, or create a new local repo below."
+                : "Start by creating a local repo or connecting a Git provider."}
             </p>
           </div>
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">New local repository</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            New local repository
+          </label>
           <div className="flex gap-2">
             <Input
               placeholder="e.g. my-app"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               autoFocus
             />
             <Button onClick={handleCreate} disabled={!name.trim() || isPending}>
               <Plus className="h-4 w-4" />
-              {isPending ? 'Creating…' : 'Create'}
+              {isPending ? "Creating…" : "Create"}
             </Button>
           </div>
         </div>

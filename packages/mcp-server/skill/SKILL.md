@@ -94,23 +94,23 @@ Always verify connectivity before mutating state.
 
 ## Tool reference (via @lastest/mcp-server)
 
-| Purpose          | Tools                                                                 |
-| ---------------- | --------------------------------------------------------------------- |
-| Health           | `lastest_health_check`                                                |
-| Repositories     | `list_repos`, `get_repo`                                              |
+| Purpose          | Tools                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| Health           | `lastest_health_check`                                                             |
+| Repositories     | `list_repos`, `get_repo`                                                           |
 | Tests            | `list_tests`, `get_test`, `create_test`, `update_test`, `delete_test`, `heal_test` |
-| Functional areas | `list_areas`, `create_area`, `list_tests_by_area`                     |
-| Builds & runs    | `create_build`, `get_build`, `list_builds`, `get_run`                 |
-| Diffs            | `get_diff`, `approve_diff`, `reject_diff`, `approve_all_diffs`        |
-| Jobs             | `get_active_jobs`, `get_job`                                          |
-| Coverage         | `get_coverage`                                                        |
+| Functional areas | `list_areas`, `create_area`, `list_tests_by_area`                                  |
+| Builds & runs    | `create_build`, `get_build`, `list_builds`, `get_run`                              |
+| Diffs            | `get_diff`, `approve_diff`, `reject_diff`, `approve_all_diffs`                     |
+| Jobs             | `get_active_jobs`, `get_job`                                                       |
+| Coverage         | `get_coverage`                                                                     |
 
 Full docs: [Lastest MCP Server wiki](https://github.com/las-team/lastest/wiki/MCP-Server).
 
 ## Troubleshooting
 
-| Symptom                       | Guide the user to...                                                         |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| `Failed to connect to Lastest` | Verify the URL is reachable and the API key hasn't been revoked.             |
-| `Lastest API error 401`        | Regenerate the key at Settings → Runners & API Access.                       |
-| No repositories returned       | Confirm the key belongs to a team with at least one connected repository.    |
+| Symptom                        | Guide the user to...                                                      |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| `Failed to connect to Lastest` | Verify the URL is reachable and the API key hasn't been revoked.          |
+| `Lastest API error 401`        | Regenerate the key at Settings → Runners & API Access.                    |
+| No repositories returned       | Confirm the key belongs to a team with at least one connected repository. |

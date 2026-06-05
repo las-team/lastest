@@ -7,10 +7,22 @@
  * one-line summary; the `scorer` rolls them up into a green/yellow/red
  * verdict per test step.
  */
-export { computeNetworkDiff, normalizeRequestUrl, summarizeNetworkDiff } from './network-diff';
-export { computeConsoleDiff, fingerprintConsoleMessage, summarizeConsoleDiff } from './console-diff';
-export { computeUrlTrajectoryDiff, normalizeTrajectoryUrl, summarizeUrlTrajectoryDiff } from './url-trajectory-diff';
-export { computeA11yDiff, summarizeA11yDiff } from './a11y-diff';
-export { computeVariableDiff, summarizeVariableDiff } from './variable-diff';
-export { computePerfDiff, summarizePerfDiff } from './perf-diff';
-export { scoreMultiLayer, type MultiLayerVerdict } from './scorer';
+export {
+  computeNetworkDiff,
+  normalizeRequestUrl,
+  summarizeNetworkDiff,
+} from "./network-diff";
+export {
+  computeConsoleDiff,
+  fingerprintConsoleMessage,
+  summarizeConsoleDiff,
+} from "./console-diff";
+export {
+  computeUrlTrajectoryDiff,
+  normalizeTrajectoryUrl,
+  summarizeUrlTrajectoryDiff,
+} from "./url-trajectory-diff";
+export { computeA11yDiff, summarizeA11yDiff } from "./a11y-diff";
+export { computeVariableDiff, summarizeVariableDiff } from "./variable-diff";
+export { computePerfDiff, summarizePerfDiff } from "./perf-diff";
+export { scoreMultiLayer, type MultiLayerVerdict } from "./scorer";

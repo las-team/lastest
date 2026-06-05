@@ -14,23 +14,25 @@
  * own `/api/v1/*` endpoints over HTTP — slight loopback overhead, but keeps
  * a single source of truth for tool definitions and auth.
  */
-import { NextRequest } from 'next/server';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { createServer, LastestClient } from '@lastest/mcp-server';
-import { verifyBearerToken } from '@/lib/auth/api-key';
+import { NextRequest } from "next/server";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { createServer, LastestClient } from "@lastest/mcp-server";
+import { verifyBearerToken } from "@/lib/auth/api-key";
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 async function handle(req: NextRequest): Promise<Response> {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.toLowerCase().startsWith('bearer ')) {
-    return unauthorized('Missing Bearer token. Create an API key in Settings → Runners & API Access.');
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+    return unauthorized(
+      "Missing Bearer token. Create an API key in Settings → Runners & API Access.",
+    );
   }
   const token = authHeader.slice(7).trim();
   const session = await verifyBearerToken(token);
   if (!session) {
-    return unauthorized('Invalid or expired API key.');
+    return unauthorized("Invalid or expired API key.");
   }
 
   // Use this request's own origin so the MCP tools call the same instance
@@ -52,15 +54,15 @@ async function handle(req: NextRequest): Promise<Response> {
 function unauthorized(detail: string): Response {
   return new Response(
     JSON.stringify({
-      jsonrpc: '2.0',
-      error: { code: -32001, message: 'Unauthorized', data: { detail } },
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Unauthorized", data: { detail } },
       id: null,
     }),
     {
       status: 401,
       headers: {
-        'content-type': 'application/json',
-        'www-authenticate': 'Bearer realm="lastest"',
+        "content-type": "application/json",
+        "www-authenticate": 'Bearer realm="lastest"',
       },
     },
   );

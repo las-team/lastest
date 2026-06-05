@@ -1,9 +1,9 @@
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-type LegalSlug = 'terms' | 'privacy' | 'cookies' | 'dpa';
+type LegalSlug = "terms" | "privacy" | "cookies" | "dpa";
 
 interface LegalDocProps {
   slug: LegalSlug;
@@ -12,8 +12,8 @@ interface LegalDocProps {
 }
 
 export async function LegalDoc({ slug, title, version }: LegalDocProps) {
-  const filePath = path.join(process.cwd(), 'src/content/legal', `${slug}.md`);
-  const content = await readFile(filePath, 'utf8');
+  const filePath = path.join(process.cwd(), "src/content/legal", `${slug}.md`);
+  const content = await readFile(filePath, "utf8");
 
   return (
     <article className="prose prose-neutral dark:prose-invert max-w-none">

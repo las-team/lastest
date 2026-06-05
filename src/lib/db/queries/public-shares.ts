@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   publicShares,
   builds,
@@ -8,7 +8,7 @@ import {
   visualDiffs,
   testResults,
   stepComparisons,
-} from '../schema';
+} from "../schema";
 import type {
   NewPublicShare,
   PublicShare,
@@ -16,31 +16,46 @@ import type {
   CapturedScreenshot,
   StepComparisonEvidence,
   StepVerdict,
-} from '../schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { eq, and, desc, sql } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 export async function createPublicShare(
-  data: Omit<NewPublicShare, 'id' | 'createdAt'>,
+  data: Omit<NewPublicShare, "id" | "createdAt">,
 ): Promise<PublicShare> {
   const id = uuid();
   const createdAt = new Date();
   await db.insert(publicShares).values({ ...data, id, createdAt });
-  const [row] = await db.select().from(publicShares).where(eq(publicShares.id, id));
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(eq(publicShares.id, id));
   return row;
 }
 
-export async function getPublicShareBySlug(slug: string): Promise<PublicShare | undefined> {
-  const [row] = await db.select().from(publicShares).where(eq(publicShares.slug, slug));
+export async function getPublicShareBySlug(
+  slug: string,
+): Promise<PublicShare | undefined> {
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(eq(publicShares.slug, slug));
   return row;
 }
 
-export async function getPublicShareById(id: string): Promise<PublicShare | undefined> {
-  const [row] = await db.select().from(publicShares).where(eq(publicShares.id, id));
+export async function getPublicShareById(
+  id: string,
+): Promise<PublicShare | undefined> {
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(eq(publicShares.id, id));
   return row;
 }
 
-export async function listPublicSharesForBuild(buildId: string): Promise<PublicShare[]> {
+export async function listPublicSharesForBuild(
+  buildId: string,
+): Promise<PublicShare[]> {
   return db
     .select()
     .from(publicShares)
@@ -48,7 +63,9 @@ export async function listPublicSharesForBuild(buildId: string): Promise<PublicS
     .orderBy(desc(publicShares.createdAt));
 }
 
-export async function listPublicSharesForTest(testId: string): Promise<PublicShare[]> {
+export async function listPublicSharesForTest(
+  testId: string,
+): Promise<PublicShare[]> {
   return db
     .select()
     .from(publicShares)
@@ -60,9 +77,9 @@ export async function listPublicSharesForTest(testId: string): Promise<PublicSha
 // Limited at the call site (sitemap.ts) to keep the XML under Google's 50k-URL
 // cap; the share table is currently far below that ceiling but the limit makes
 // the contract explicit.
-export async function listPublicSharesForSitemap(limit = 5000): Promise<
-  Array<{ slug: string; updatedAt: Date | null }>
-> {
+export async function listPublicSharesForSitemap(
+  limit = 5000,
+): Promise<Array<{ slug: string; updatedAt: Date | null }>> {
   const rows = await db
     .select({
       slug: publicShares.slug,
@@ -72,19 +89,20 @@ export async function listPublicSharesForSitemap(limit = 5000): Promise<
     })
     .from(publicShares)
     .leftJoin(builds, eq(publicShares.buildId, builds.id))
-    .where(eq(publicShares.status, 'public'))
+    .where(eq(publicShares.status, "public"))
     .orderBy(desc(publicShares.createdAt))
     .limit(limit);
   return rows.map((r) => ({
     slug: r.slug,
-    updatedAt: r.buildCompletedAt ?? r.buildCreatedAt ?? r.shareCreatedAt ?? null,
+    updatedAt:
+      r.buildCompletedAt ?? r.buildCreatedAt ?? r.shareCreatedAt ?? null,
   }));
 }
 
 export async function revokePublicShareById(id: string): Promise<void> {
   await db
     .update(publicShares)
-    .set({ status: 'revoked', revokedAt: new Date() })
+    .set({ status: "revoked", revokedAt: new Date() })
     .where(eq(publicShares.id, id));
 }
 
@@ -96,7 +114,12 @@ export async function markPublicShareClaimed(
   await db
     .update(publicShares)
     .set({ claimedByTeamId, claimedByUserId, claimedAt: new Date() })
-    .where(and(eq(publicShares.slug, slug), sql`${publicShares.claimedByTeamId} IS NULL`));
+    .where(
+      and(
+        eq(publicShares.slug, slug),
+        sql`${publicShares.claimedByTeamId} IS NULL`,
+      ),
+    );
 }
 
 export async function incrementPublicShareView(slug: string): Promise<void> {
@@ -116,26 +139,36 @@ export interface PublicShareContext {
   testRun: typeof testRuns.$inferSelect | null;
 }
 
-export async function getActiveBaselinesForTest(testId: string): Promise<Baseline[]> {
+export async function getActiveBaselinesForTest(
+  testId: string,
+): Promise<Baseline[]> {
   return db
     .select()
     .from(baselines)
     .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
 }
 
-export async function getPublicShareContext(slug: string): Promise<PublicShareContext | null> {
+export async function getPublicShareContext(
+  slug: string,
+): Promise<PublicShareContext | null> {
   const share = await getPublicShareBySlug(slug);
-  if (!share || share.status !== 'public') return null;
+  if (!share || share.status !== "public") return null;
 
-  const [build] = await db.select().from(builds).where(eq(builds.id, share.buildId));
+  const [build] = await db
+    .select()
+    .from(builds)
+    .where(eq(builds.id, share.buildId));
   if (!build) return null;
 
   const test = share.testId
-    ? (await db.select().from(tests).where(eq(tests.id, share.testId)))[0] ?? null
+    ? ((await db.select().from(tests).where(eq(tests.id, share.testId)))[0] ??
+      null)
     : null;
 
   const testRun = build.testRunId
-    ? (await db.select().from(testRuns).where(eq(testRuns.id, build.testRunId)))[0] ?? null
+    ? ((
+        await db.select().from(testRuns).where(eq(testRuns.id, build.testRunId))
+      )[0] ?? null)
     : null;
 
   return { share, build, test, testRun };
@@ -193,13 +226,18 @@ export interface ShareData extends PublicShareContext {
   stepComparisons: ShareStepComparison[];
 }
 
-export async function getShareDataBySlug(slug: string): Promise<ShareData | null> {
+export async function getShareDataBySlug(
+  slug: string,
+): Promise<ShareData | null> {
   const ctx = await getPublicShareContext(slug);
   if (!ctx) return null;
   const { share, build } = ctx;
 
   const diffsWhere = share.testId
-    ? and(eq(visualDiffs.buildId, build.id), eq(visualDiffs.testId, share.testId))
+    ? and(
+        eq(visualDiffs.buildId, build.id),
+        eq(visualDiffs.testId, share.testId),
+      )
     : eq(visualDiffs.buildId, build.id);
 
   const diffsQuery = db
@@ -242,13 +280,19 @@ export async function getShareDataBySlug(slug: string): Promise<ShareData | null
         .from(testResults)
         .where(
           share.testId
-            ? and(eq(testResults.testRunId, testRunId), eq(testResults.testId, share.testId))
+            ? and(
+                eq(testResults.testRunId, testRunId),
+                eq(testResults.testId, share.testId),
+              )
             : eq(testResults.testRunId, testRunId),
         )
     : Promise.resolve([]);
 
   const stepCmpWhere = share.testId
-    ? and(eq(stepComparisons.buildId, build.id), eq(stepComparisons.testId, share.testId))
+    ? and(
+        eq(stepComparisons.buildId, build.id),
+        eq(stepComparisons.testId, share.testId),
+      )
     : eq(stepComparisons.buildId, build.id);
 
   const stepCmpQuery = db

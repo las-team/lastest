@@ -7,8 +7,8 @@ import {
   getFileContent,
   pathExists,
   type TreeEntry,
-} from '@/lib/github/content';
-import type { RouteInfo, ScanProgress, ScanResult } from './types';
+} from "@/lib/github/content";
+import type { RouteInfo, ScanProgress, ScanResult } from "./types";
 
 export interface RemoteScannerConfig {
   accessToken: string;
@@ -19,26 +19,26 @@ export interface RemoteScannerConfig {
 
 export class RemoteRouteScanner {
   private tree: TreeEntry[] = [];
-  private resolvedBasePath: string = '';
+  private resolvedBasePath: string = "";
 
   constructor(
     private config: RemoteScannerConfig,
-    private onProgress?: (progress: ScanProgress) => void
+    private onProgress?: (progress: ScanProgress) => void,
   ) {}
 
   async scan(): Promise<ScanResult> {
-    this.emitProgress('detecting', 0, 0);
+    this.emitProgress("detecting", 0, 0);
 
     // Fetch repo tree
     const repoTree = await getRepoTree(
       this.config.accessToken,
       this.config.owner,
       this.config.repo,
-      this.config.branch
+      this.config.branch,
     );
 
     if (!repoTree || repoTree.tree.length === 0) {
-      return { routes: [], framework: 'unknown' };
+      return { routes: [], framework: "unknown" };
     }
 
     this.tree = repoTree.tree;
@@ -49,19 +49,19 @@ export class RemoteRouteScanner {
     const projectType = await this.detectProjectType();
     const routes: RouteInfo[] = [];
 
-    this.emitProgress('scanning', 10, 0);
+    this.emitProgress("scanning", 10, 0);
 
     switch (projectType) {
-      case 'nextjs-app':
+      case "nextjs-app":
         routes.push(...(await this.scanNextJsApp()));
         break;
-      case 'nextjs-pages':
+      case "nextjs-pages":
         routes.push(...(await this.scanNextJsPages()));
         break;
-      case 'react-router':
+      case "react-router":
         routes.push(...(await this.scanReactRouter()));
         break;
-      case 'vue':
+      case "vue":
         routes.push(...(await this.scanVueRouter()));
         break;
       default:
@@ -73,7 +73,7 @@ export class RemoteRouteScanner {
 
     // Merge nav labels into routes
     for (const route of routes) {
-      const navLink = navLinks.find(n => n.path === route.path);
+      const navLink = navLinks.find((n) => n.path === route.path);
       if (navLink) {
         route.label = navLink.label;
         route.navSource = navLink.navSource;
@@ -82,18 +82,21 @@ export class RemoteRouteScanner {
 
     // Add any nav links that weren't found as file routes
     for (const navLink of navLinks) {
-      if (!routes.find(r => r.path === navLink.path)) {
+      if (!routes.find((r) => r.path === navLink.path)) {
         routes.push({
           path: navLink.path,
-          type: navLink.path.includes('[') || navLink.path.includes(':') ? 'dynamic' : 'static',
+          type:
+            navLink.path.includes("[") || navLink.path.includes(":")
+              ? "dynamic"
+              : "static",
           label: navLink.label,
           navSource: navLink.navSource,
-          framework: projectType as RouteInfo['framework'],
+          framework: projectType as RouteInfo["framework"],
         });
       }
     }
 
-    this.emitProgress('complete', 100, routes.length);
+    this.emitProgress("complete", 100, routes.length);
 
     return { routes, framework: projectType };
   }
@@ -103,17 +106,19 @@ export class RemoteRouteScanner {
    */
   private async resolveMonorepoPath(): Promise<string> {
     // Check if there's a package.json at root
-    if (this.tree.some(e => e.path === 'package.json')) {
+    if (this.tree.some((e) => e.path === "package.json")) {
       // Check if this is a monorepo — if so, we need to find the frontend package
-      const isMonorepo = this.tree.some(e => e.path === 'pnpm-workspace.yaml');
+      const isMonorepo = this.tree.some(
+        (e) => e.path === "pnpm-workspace.yaml",
+      );
       if (!isMonorepo) {
         // Check root package.json for npm/yarn workspaces field
         const rootPkgContent = await getFileContent(
           this.config.accessToken,
           this.config.owner,
           this.config.repo,
-          'package.json',
-          this.config.branch
+          "package.json",
+          this.config.branch,
         );
         if (rootPkgContent) {
           try {
@@ -121,13 +126,13 @@ export class RemoteRouteScanner {
             if (rootPkg.workspaces) {
               // Has workspaces field — it's a monorepo, continue to frontendDirs
             } else {
-              return ''; // Simple single-package repo, use root
+              return ""; // Simple single-package repo, use root
             }
           } catch {
-            return ''; // Invalid JSON, fall back to root
+            return ""; // Invalid JSON, fall back to root
           }
         } else {
-          return ''; // Can't read package.json, fall back to root
+          return ""; // Can't read package.json, fall back to root
         }
       }
       // Monorepo detected — fall through to frontendDirs search
@@ -135,25 +140,25 @@ export class RemoteRouteScanner {
 
     // Common frontend directory names in monorepos
     const frontendDirs = [
-      'frontend',
-      'client',
-      'web',
-      'app',
-      'packages/frontend',
-      'packages/web',
-      'packages/client',
+      "frontend",
+      "client",
+      "web",
+      "app",
+      "packages/frontend",
+      "packages/web",
+      "packages/client",
     ];
 
     for (const dir of frontendDirs) {
       const pkgPath = `${dir}/package.json`;
-      if (!this.tree.some(e => e.path === pkgPath)) continue;
+      if (!this.tree.some((e) => e.path === pkgPath)) continue;
 
       const content = await getFileContent(
         this.config.accessToken,
         this.config.owner,
         this.config.repo,
         pkgPath,
-        this.config.branch
+        this.config.branch,
       );
 
       if (!content) continue;
@@ -170,59 +175,62 @@ export class RemoteRouteScanner {
       }
     }
 
-    return ''; // Fall back to root
+    return ""; // Fall back to root
   }
 
   private emitProgress(
-    phase: ScanProgress['phase'],
+    phase: ScanProgress["phase"],
     progress: number,
     routesFound: number,
-    currentFile?: string
+    currentFile?: string,
   ) {
     this.onProgress?.({ phase, progress, routesFound, currentFile });
   }
 
   private async detectProjectType(): Promise<string> {
     const basePath = this.resolvedBasePath;
-    const pkgPath = basePath ? `${basePath}/package.json` : 'package.json';
+    const pkgPath = basePath ? `${basePath}/package.json` : "package.json";
 
     const content = await getFileContent(
       this.config.accessToken,
       this.config.owner,
       this.config.repo,
       pkgPath,
-      this.config.branch
+      this.config.branch,
     );
 
-    if (!content) return 'unknown';
+    if (!content) return "unknown";
 
     try {
       const packageJson = JSON.parse(content);
-      const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+      const deps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
 
       if (deps.next) {
         // Check for app directory
-        const appDir = basePath ? `${basePath}/app` : 'app';
-        const srcAppDir = basePath ? `${basePath}/src/app` : 'src/app';
+        const appDir = basePath ? `${basePath}/app` : "app";
+        const srcAppDir = basePath ? `${basePath}/src/app` : "src/app";
 
         if (pathExists(this.tree, appDir) || pathExists(this.tree, srcAppDir)) {
-          return 'nextjs-app';
+          return "nextjs-app";
         }
-        return 'nextjs-pages';
+        return "nextjs-pages";
       }
 
-      if (deps['react-router'] || deps['react-router-dom']) {
-        return 'react-router';
+      if (deps["react-router"] || deps["react-router-dom"]) {
+        return "react-router";
       }
 
-      if (deps.vue && deps['vue-router']) {
-        return 'vue';
+      if (deps.vue && deps["vue-router"]) {
+        return "vue";
       }
     } catch {
       // Invalid JSON
     }
 
-    return 'unknown';
+    return "unknown";
   }
 
   private getBasePath(subDir: string): string {
@@ -235,74 +243,85 @@ export class RemoteRouteScanner {
   /**
    * Scan for navigation/sidebar components and extract Link elements with labels
    */
-  private async scanNavigationLinks(): Promise<Array<{ path: string; label: string; navSource: string }>> {
-    const navLinks: Array<{ path: string; label: string; navSource: string }> = [];
+  private async scanNavigationLinks(): Promise<
+    Array<{ path: string; label: string; navSource: string }>
+  > {
+    const navLinks: Array<{ path: string; label: string; navSource: string }> =
+      [];
 
     // Find potential navigation files
     const _navPatterns = [
-      '**/sidebar*.tsx',
-      '**/sidebar*.jsx',
-      '**/nav*.tsx',
-      '**/nav*.jsx',
-      '**/navigation*.tsx',
-      '**/navigation*.jsx',
-      '**/menu*.tsx',
-      '**/menu*.jsx',
-      '**/header*.tsx',
-      '**/header*.jsx',
-      '**/components/ui/**/*.tsx',
-      '**/components/layout/**/*.tsx',
+      "**/sidebar*.tsx",
+      "**/sidebar*.jsx",
+      "**/nav*.tsx",
+      "**/nav*.jsx",
+      "**/navigation*.tsx",
+      "**/navigation*.jsx",
+      "**/menu*.tsx",
+      "**/menu*.jsx",
+      "**/header*.tsx",
+      "**/header*.jsx",
+      "**/components/ui/**/*.tsx",
+      "**/components/layout/**/*.tsx",
     ];
 
     const basePath = this.resolvedBasePath;
-    const srcPath = basePath ? `${basePath}/src` : 'src';
+    const srcPath = basePath ? `${basePath}/src` : "src";
 
     // Filter tree entries for potential nav files
-    const navFiles = this.tree.filter(entry => {
-      if (entry.type !== 'blob') return false;
+    const navFiles = this.tree.filter((entry) => {
+      if (entry.type !== "blob") return false;
       const path = entry.path;
-      if (!path.startsWith(srcPath) && !(basePath && path.startsWith(basePath))) return false;
-      if (path.includes('node_modules')) return false;
+      if (!path.startsWith(srcPath) && !(basePath && path.startsWith(basePath)))
+        return false;
+      if (path.includes("node_modules")) return false;
 
-      const fileName = path.split('/').pop()?.toLowerCase() || '';
+      const fileName = path.split("/").pop()?.toLowerCase() || "";
       return (
-        fileName.includes('sidebar') ||
-        fileName.includes('nav') ||
-        fileName.includes('navigation') ||
-        fileName.includes('menu') ||
-        fileName.includes('header')
-      ) && (fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.ts') || fileName.endsWith('.js'));
+        (fileName.includes("sidebar") ||
+          fileName.includes("nav") ||
+          fileName.includes("navigation") ||
+          fileName.includes("menu") ||
+          fileName.includes("header")) &&
+        (fileName.endsWith(".tsx") ||
+          fileName.endsWith(".jsx") ||
+          fileName.endsWith(".ts") ||
+          fileName.endsWith(".js"))
+      );
     });
 
-    for (const file of navFiles.slice(0, 10)) { // Limit to 10 files to avoid rate limits
+    for (const file of navFiles.slice(0, 10)) {
+      // Limit to 10 files to avoid rate limits
       const content = await getFileContent(
         this.config.accessToken,
         this.config.owner,
         this.config.repo,
         file.path,
-        this.config.branch
+        this.config.branch,
       );
 
       if (!content) continue;
 
       // Skip if no Link imports
-      if (!content.includes('Link') && !content.includes('href')) continue;
+      if (!content.includes("Link") && !content.includes("href")) continue;
 
       // Pattern 1: NavItem arrays like { label: 'Dashboard', href: '/dashboard' }
-      const navItemPattern = /\{\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`],\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`]/g;
+      const navItemPattern =
+        /\{\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`],\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`]/g;
       let match;
       while ((match = navItemPattern.exec(content)) !== null) {
         const [, label, href] = match;
-        if (href.startsWith('/') && !href.includes('http')) {
+        if (href.startsWith("/") && !href.includes("http")) {
           navLinks.push({ path: href, label, navSource: file.path });
         }
       }
 
       // Pattern 2: Reversed order { href: '/dashboard', label: 'Dashboard' }
-      const navItemReversedPattern = /\{\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`],\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`]/g;
+      const navItemReversedPattern =
+        /\{\s*(?:href|to|path):\s*['"`]([^'"`]+)['"`],\s*(?:label|name|title):\s*['"`]([^'"`]+)['"`]/g;
       while ((match = navItemReversedPattern.exec(content)) !== null) {
         const [, href, label] = match;
-        if (href.startsWith('/') && !href.includes('http')) {
+        if (href.startsWith("/") && !href.includes("http")) {
           navLinks.push({ path: href, label, navSource: file.path });
         }
       }
@@ -311,15 +330,19 @@ export class RemoteRouteScanner {
       const jsxLinkPattern = /<Link[^>]*href=["']([^"']+)["'][^>]*>([^<]+)</g;
       while ((match = jsxLinkPattern.exec(content)) !== null) {
         const [, href, label] = match;
-        if (href.startsWith('/') && !href.includes('http') && label.trim()) {
-          navLinks.push({ path: href, label: label.trim(), navSource: file.path });
+        if (href.startsWith("/") && !href.includes("http") && label.trim()) {
+          navLinks.push({
+            path: href,
+            label: label.trim(),
+            navSource: file.path,
+          });
         }
       }
     }
 
     // Deduplicate by path, keeping first occurrence
     const seen = new Set<string>();
-    return navLinks.filter(link => {
+    return navLinks.filter((link) => {
       if (seen.has(link.path)) return false;
       seen.add(link.path);
       return true;
@@ -330,9 +353,9 @@ export class RemoteRouteScanner {
     const routes: RouteInfo[] = [];
 
     // Check both /app and /src/app
-    let appDir = this.getBasePath('app');
+    let appDir = this.getBasePath("app");
     if (!pathExists(this.tree, appDir)) {
-      appDir = this.getBasePath('src/app');
+      appDir = this.getBasePath("src/app");
     }
 
     if (!pathExists(this.tree, appDir)) {
@@ -341,10 +364,10 @@ export class RemoteRouteScanner {
 
     // Find all page.{js,jsx,ts,tsx} files
     const pageFiles = this.tree.filter(
-      entry =>
-        entry.type === 'blob' &&
+      (entry) =>
+        entry.type === "blob" &&
         entry.path.startsWith(appDir) &&
-        /\/page\.(js|jsx|ts|tsx)$/.test(entry.path)
+        /\/page\.(js|jsx|ts|tsx)$/.test(entry.path),
     );
 
     const total = pageFiles.length;
@@ -352,30 +375,35 @@ export class RemoteRouteScanner {
 
     for (const file of pageFiles) {
       const relativePath = file.path
-        .replace(appDir, '')
-        .replace(/\/page\.(js|jsx|ts|tsx)$/, '');
+        .replace(appDir, "")
+        .replace(/\/page\.(js|jsx|ts|tsx)$/, "");
 
-      let route = relativePath || '/';
+      let route = relativePath || "/";
 
       // Remove route groups like (marketing)
-      route = route.replace(/\/\([^)]+\)/g, '');
+      route = route.replace(/\/\([^)]+\)/g, "");
 
       // Normalize double slashes
-      route = route.replace(/\/+/g, '/');
-      if (route !== '/' && route.endsWith('/')) {
+      route = route.replace(/\/+/g, "/");
+      if (route !== "/" && route.endsWith("/")) {
         route = route.slice(0, -1);
       }
 
       routes.push({
-        path: route || '/',
-        type: route.includes('[') ? 'dynamic' : 'static',
+        path: route || "/",
+        type: route.includes("[") ? "dynamic" : "static",
         filePath: file.path,
-        component: file.path.split('/').pop(),
-        framework: 'nextjs-app',
+        component: file.path.split("/").pop(),
+        framework: "nextjs-app",
       });
 
       processed++;
-      this.emitProgress('scanning', 10 + Math.floor((processed / total) * 80), routes.length, file.path);
+      this.emitProgress(
+        "scanning",
+        10 + Math.floor((processed / total) * 80),
+        routes.length,
+        file.path,
+      );
     }
 
     return routes;
@@ -385,9 +413,9 @@ export class RemoteRouteScanner {
     const routes: RouteInfo[] = [];
 
     // Check both /pages and /src/pages
-    let pagesDir = this.getBasePath('pages');
+    let pagesDir = this.getBasePath("pages");
     if (!pathExists(this.tree, pagesDir)) {
-      pagesDir = this.getBasePath('src/pages');
+      pagesDir = this.getBasePath("src/pages");
     }
 
     if (!pathExists(this.tree, pagesDir)) {
@@ -395,16 +423,16 @@ export class RemoteRouteScanner {
     }
 
     // Find all page files, excluding _* and api/**
-    const pageFiles = this.tree.filter(entry => {
-      if (entry.type !== 'blob') return false;
+    const pageFiles = this.tree.filter((entry) => {
+      if (entry.type !== "blob") return false;
       if (!entry.path.startsWith(pagesDir)) return false;
       if (!entry.path.match(/\.(js|jsx|ts|tsx)$/)) return false;
 
-      const fileName = entry.path.split('/').pop() || '';
-      if (fileName.startsWith('_')) return false;
+      const fileName = entry.path.split("/").pop() || "";
+      if (fileName.startsWith("_")) return false;
 
-      const relativePath = entry.path.replace(pagesDir + '/', '');
-      if (relativePath.startsWith('api/')) return false;
+      const relativePath = entry.path.replace(pagesDir + "/", "");
+      if (relativePath.startsWith("api/")) return false;
 
       return true;
     });
@@ -414,25 +442,30 @@ export class RemoteRouteScanner {
 
     for (const file of pageFiles) {
       const relativePath = file.path
-        .replace(pagesDir + '/', '')
-        .replace(/\.(js|jsx|ts|tsx)$/, '');
+        .replace(pagesDir + "/", "")
+        .replace(/\.(js|jsx|ts|tsx)$/, "");
 
-      let route = '/' + relativePath;
+      let route = "/" + relativePath;
 
-      if (route.endsWith('/index')) {
-        route = route.replace('/index', '') || '/';
+      if (route.endsWith("/index")) {
+        route = route.replace("/index", "") || "/";
       }
 
       routes.push({
         path: route,
-        type: route.includes('[') ? 'dynamic' : 'static',
+        type: route.includes("[") ? "dynamic" : "static",
         filePath: file.path,
-        component: file.path.split('/').pop(),
-        framework: 'nextjs-pages',
+        component: file.path.split("/").pop(),
+        framework: "nextjs-pages",
       });
 
       processed++;
-      this.emitProgress('scanning', 10 + Math.floor((processed / total) * 80), routes.length, file.path);
+      this.emitProgress(
+        "scanning",
+        10 + Math.floor((processed / total) * 80),
+        routes.length,
+        file.path,
+      );
     }
 
     return routes;
@@ -440,27 +473,31 @@ export class RemoteRouteScanner {
 
   private async scanReactRouter(): Promise<RouteInfo[]> {
     const routes: RouteInfo[] = [];
-    const srcPath = this.getBasePath('src');
+    const srcPath = this.getBasePath("src");
 
     // Find route config files
-    const routeFiles = this.tree.filter(entry => {
-      if (entry.type !== 'blob') return false;
+    const routeFiles = this.tree.filter((entry) => {
+      if (entry.type !== "blob") return false;
       if (!entry.path.startsWith(srcPath)) return false;
 
-      const fileName = entry.path.split('/').pop()?.toLowerCase() || '';
+      const fileName = entry.path.split("/").pop()?.toLowerCase() || "";
       return (
-        (fileName.includes('routes') || fileName.includes('router') || fileName === 'app.tsx' || fileName === 'app.jsx') &&
+        (fileName.includes("routes") ||
+          fileName.includes("router") ||
+          fileName === "app.tsx" ||
+          fileName === "app.jsx") &&
         entry.path.match(/\.(js|jsx|ts|tsx)$/)
       );
     });
 
-    for (const file of routeFiles.slice(0, 5)) { // Limit to avoid rate limits
+    for (const file of routeFiles.slice(0, 5)) {
+      // Limit to avoid rate limits
       const content = await getFileContent(
         this.config.accessToken,
         this.config.owner,
         this.config.repo,
         file.path,
-        this.config.branch
+        this.config.branch,
       );
 
       if (!content) continue;
@@ -471,9 +508,9 @@ export class RemoteRouteScanner {
       for (const match of routeMatches) {
         routes.push({
           path: match[1],
-          type: match[1].includes(':') ? 'dynamic' : 'static',
+          type: match[1].includes(":") ? "dynamic" : "static",
           filePath: file.path,
-          framework: 'react-router',
+          framework: "react-router",
           routerType,
         });
       }
@@ -482,35 +519,46 @@ export class RemoteRouteScanner {
     return routes;
   }
 
-  private detectReactRouterType(content: string): 'hash' | 'browser' | undefined {
-    if (content.includes('createHashRouter') || content.includes('<HashRouter') || content.includes('HashRouter>')) {
-      return 'hash';
+  private detectReactRouterType(
+    content: string,
+  ): "hash" | "browser" | undefined {
+    if (
+      content.includes("createHashRouter") ||
+      content.includes("<HashRouter") ||
+      content.includes("HashRouter>")
+    ) {
+      return "hash";
     }
-    if (content.includes('createBrowserRouter') || content.includes('<BrowserRouter') || content.includes('BrowserRouter>')) {
-      return 'browser';
+    if (
+      content.includes("createBrowserRouter") ||
+      content.includes("<BrowserRouter") ||
+      content.includes("BrowserRouter>")
+    ) {
+      return "browser";
     }
     return undefined;
   }
 
   private async scanVueRouter(): Promise<RouteInfo[]> {
     const routes: RouteInfo[] = [];
-    const srcPath = this.getBasePath('src');
+    const srcPath = this.getBasePath("src");
 
     // Find router config files
-    const routerFiles = this.tree.filter(entry => {
-      if (entry.type !== 'blob') return false;
+    const routerFiles = this.tree.filter((entry) => {
+      if (entry.type !== "blob") return false;
       if (!entry.path.startsWith(srcPath)) return false;
 
-      return entry.path.includes('/router/') && entry.path.match(/\.(js|ts)$/);
+      return entry.path.includes("/router/") && entry.path.match(/\.(js|ts)$/);
     });
 
-    for (const file of routerFiles.slice(0, 5)) { // Limit to avoid rate limits
+    for (const file of routerFiles.slice(0, 5)) {
+      // Limit to avoid rate limits
       const content = await getFileContent(
         this.config.accessToken,
         this.config.owner,
         this.config.repo,
         file.path,
-        this.config.branch
+        this.config.branch,
       );
 
       if (!content) continue;
@@ -520,9 +568,9 @@ export class RemoteRouteScanner {
       for (const match of routeMatches) {
         routes.push({
           path: match[1],
-          type: match[1].includes(':') ? 'dynamic' : 'static',
+          type: match[1].includes(":") ? "dynamic" : "static",
           filePath: file.path,
-          framework: 'vue',
+          framework: "vue",
         });
       }
     }
@@ -533,12 +581,12 @@ export class RemoteRouteScanner {
   private scanGeneric(): RouteInfo[] {
     return [
       {
-        path: '/',
-        type: 'static',
-        framework: 'unknown',
+        path: "/",
+        type: "static",
+        framework: "unknown",
       },
     ];
   }
 }
 
-export type { RouteInfo, ScanProgress, ScanResult } from './types';
+export type { RouteInfo, ScanProgress, ScanResult } from "./types";

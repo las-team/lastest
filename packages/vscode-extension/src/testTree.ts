@@ -1,17 +1,17 @@
-import * as vscode from 'vscode';
-import type { LastestApi } from './api';
-import type { Repository, FunctionalArea, Test } from './types';
+import * as vscode from "vscode";
+import type { LastestApi } from "./api";
+import type { Repository, FunctionalArea, Test } from "./types";
 
 type TreeNode = RepositoryNode | FunctionalAreaNode | TestNode;
 
 class RepositoryNode extends vscode.TreeItem {
   constructor(
     public readonly repo: Repository,
-    public children: FunctionalAreaNode[] = []
+    public children: FunctionalAreaNode[] = [],
   ) {
     super(repo.name, vscode.TreeItemCollapsibleState.Expanded);
-    this.contextValue = 'repository';
-    this.iconPath = new vscode.ThemeIcon('repo');
+    this.contextValue = "repository";
+    this.iconPath = new vscode.ThemeIcon("repo");
     this.tooltip = repo.fullName;
   }
 }
@@ -20,39 +20,45 @@ class FunctionalAreaNode extends vscode.TreeItem {
   constructor(
     public readonly area: FunctionalArea,
     public readonly repoId: number,
-    public children: TestNode[] = []
+    public children: TestNode[] = [],
   ) {
     super(area.name, vscode.TreeItemCollapsibleState.Expanded);
-    this.contextValue = 'functionalArea';
-    this.iconPath = new vscode.ThemeIcon('folder');
+    this.contextValue = "functionalArea";
+    this.iconPath = new vscode.ThemeIcon("folder");
   }
 
   updateStatus() {
     if (this.children.length === 0) return;
 
-    const hasRunning = this.children.some(t => t.status === 'running');
-    const hasFailed = this.children.some(t => t.status === 'failed');
-    const allPassed = this.children.every(t => t.status === 'passed');
+    const hasRunning = this.children.some((t) => t.status === "running");
+    const hasFailed = this.children.some((t) => t.status === "failed");
+    const allPassed = this.children.every((t) => t.status === "passed");
 
     if (hasRunning) {
-      this.iconPath = new vscode.ThemeIcon('loading~spin');
+      this.iconPath = new vscode.ThemeIcon("loading~spin");
     } else if (hasFailed) {
-      this.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor('testing.iconFailed'));
+      this.iconPath = new vscode.ThemeIcon(
+        "folder",
+        new vscode.ThemeColor("testing.iconFailed"),
+      );
     } else if (allPassed) {
-      this.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor('testing.iconPassed'));
+      this.iconPath = new vscode.ThemeIcon(
+        "folder",
+        new vscode.ThemeColor("testing.iconPassed"),
+      );
     } else {
-      this.iconPath = new vscode.ThemeIcon('folder');
+      this.iconPath = new vscode.ThemeIcon("folder");
     }
   }
 }
 
 class TestNode extends vscode.TreeItem {
-  status: 'passed' | 'failed' | 'running' | null;
+  status: "passed" | "failed" | "running" | null;
   lastRunAt: string | null;
 
   constructor(public readonly test: Test) {
     super(test.name, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'test';
+    this.contextValue = "test";
     this.status = test.lastRunStatus;
     this.lastRunAt = test.lastRunAt;
     this.updateDisplay();
@@ -60,24 +66,30 @@ class TestNode extends vscode.TreeItem {
 
   updateDisplay() {
     switch (this.status) {
-      case 'passed':
-        this.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+      case "passed":
+        this.iconPath = new vscode.ThemeIcon(
+          "pass",
+          new vscode.ThemeColor("testing.iconPassed"),
+        );
         break;
-      case 'failed':
-        this.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+      case "failed":
+        this.iconPath = new vscode.ThemeIcon(
+          "error",
+          new vscode.ThemeColor("testing.iconFailed"),
+        );
         break;
-      case 'running':
-        this.iconPath = new vscode.ThemeIcon('loading~spin');
+      case "running":
+        this.iconPath = new vscode.ThemeIcon("loading~spin");
         break;
       default:
-        this.iconPath = new vscode.ThemeIcon('circle-outline');
+        this.iconPath = new vscode.ThemeIcon("circle-outline");
     }
 
     if (this.lastRunAt) {
       const ago = this.formatTimeAgo(new Date(this.lastRunAt));
       this.description = ago;
     } else {
-      this.description = 'never run';
+      this.description = "never run";
     }
 
     this.tooltip = new vscode.MarkdownString();
@@ -99,7 +111,9 @@ class TestNode extends vscode.TreeItem {
 }
 
 export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
-  private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+    TreeNode | undefined | void
+  >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private repositories: RepositoryNode[] = [];
@@ -177,11 +191,11 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
 
         for (const area of areas) {
           const areaNode = new FunctionalAreaNode(area, repo.id);
-          const areaTests = tests.filter(t => t.functionalAreaId === area.id);
+          const areaTests = tests.filter((t) => t.functionalAreaId === area.id);
 
           if (areaTests.length === 0) continue;
 
-          areaNode.children = areaTests.map(t => {
+          areaNode.children = areaTests.map((t) => {
             const testNode = new TestNode(t);
             nextTestNodeMap.set(t.id, testNode);
             return testNode;
@@ -216,7 +230,7 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     for (const repo of this.repositories) {
       for (const area of repo.children) {
         if (area.area.id === areaId) {
-          return area.children.map(t => t.test.id);
+          return area.children.map((t) => t.test.id);
         }
       }
     }
@@ -226,7 +240,9 @@ export class TestTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   getTestIdsByRepository(repoId: number): number[] {
     for (const repo of this.repositories) {
       if (repo.repo.id === repoId) {
-        return repo.children.flatMap(area => area.children.map(t => t.test.id));
+        return repo.children.flatMap((area) =>
+          area.children.map((t) => t.test.id),
+        );
       }
     }
     return [];

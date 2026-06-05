@@ -1,36 +1,43 @@
-import path from 'path';
-import type { AIProvider, AIProviderConfig, AIProviderType } from './types';
-import { ClaudeCLIProvider } from './claude-cli';
-import { createOpenRouterProvider } from './openrouter';
-import { createOllamaProvider } from './ollama';
-import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
-import { createOpenAIProvider } from './openai';
-import { createAnthropicDirectProvider } from './anthropic-direct';
-import { MCPBridge, createPlaywrightMCPBridge } from './mcp-bridge';
-import type { MCPServerConfig } from './mcp-bridge';
-import { createAIPromptLog, updateAIPromptLog } from '@/lib/db/queries';
-import type { AIActionType, AILogStatus } from '@/lib/db/schema';
+import path from "path";
+import type { AIProvider, AIProviderConfig, AIProviderType } from "./types";
+import { ClaudeCLIProvider } from "./claude-cli";
+import { createOpenRouterProvider } from "./openrouter";
+import { createOllamaProvider } from "./ollama";
+import { ClaudeAgentSDKProvider } from "./claude-agent-sdk";
+import { createOpenAIProvider } from "./openai";
+import { createAnthropicDirectProvider } from "./anthropic-direct";
+import { MCPBridge, createPlaywrightMCPBridge } from "./mcp-bridge";
+import type { MCPServerConfig } from "./mcp-bridge";
+import { createAIPromptLog, updateAIPromptLog } from "@/lib/db/queries";
+import type { AIActionType, AILogStatus } from "@/lib/db/schema";
 
-export * from './types';
-export * from './prompts';
-export { gatherCodebaseIntelligence } from './codebase-intelligence';
-export type { CodebaseIntelligence, DependencyInsight } from './codebase-intelligence';
+export * from "./types";
+export * from "./prompts";
+export { gatherCodebaseIntelligence } from "./codebase-intelligence";
+export type {
+  CodebaseIntelligence,
+  DependencyInsight,
+} from "./codebase-intelligence";
 
 /** Providers that support tool/function calling via their API */
-const TOOL_CALLING_PROVIDERS: AIProviderType[] = ['openrouter', 'openai', 'anthropic'];
+const TOOL_CALLING_PROVIDERS: AIProviderType[] = [
+  "openrouter",
+  "openai",
+  "anthropic",
+];
 
 export function getAIProvider(config: AIProviderConfig): AIProvider {
-  if (config.provider === 'openrouter') {
+  if (config.provider === "openrouter") {
     if (!config.openrouterApiKey) {
-      throw new Error('OpenRouter API key is required');
+      throw new Error("OpenRouter API key is required");
     }
     return createOpenRouterProvider({
       apiKey: config.openrouterApiKey,
-      model: config.openrouterModel || 'anthropic/claude-sonnet-4',
+      model: config.openrouterModel || "anthropic/claude-sonnet-4",
     });
   }
 
-  if (config.provider === 'claude-agent-sdk') {
+  if (config.provider === "claude-agent-sdk") {
     return new ClaudeAgentSDKProvider({
       permissionMode: config.agentSdkPermissionMode,
       model: config.agentSdkModel || undefined,
@@ -42,33 +49,33 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
     });
   }
 
-  if (config.provider === 'ollama') {
+  if (config.provider === "ollama") {
     if (!config.ollamaModel) {
-      throw new Error('Ollama model is required');
+      throw new Error("Ollama model is required");
     }
     return createOllamaProvider({
-      baseUrl: config.ollamaBaseUrl || 'http://localhost:11434',
+      baseUrl: config.ollamaBaseUrl || "http://localhost:11434",
       model: config.ollamaModel,
     });
   }
 
-  if (config.provider === 'openai') {
+  if (config.provider === "openai") {
     if (!config.openaiApiKey) {
-      throw new Error('OpenAI API key is required');
+      throw new Error("OpenAI API key is required");
     }
     return createOpenAIProvider({
       apiKey: config.openaiApiKey,
-      model: config.openaiModel || 'gpt-4o',
+      model: config.openaiModel || "gpt-4o",
     });
   }
 
-  if (config.provider === 'anthropic') {
+  if (config.provider === "anthropic") {
     if (!config.anthropicApiKey) {
-      throw new Error('Anthropic API key is required');
+      throw new Error("Anthropic API key is required");
     }
     return createAnthropicDirectProvider({
       apiKey: config.anthropicApiKey,
-      model: config.anthropicModel || 'claude-sonnet-4-5-20250929',
+      model: config.anthropicModel || "claude-sonnet-4-5-20250929",
     });
   }
 
@@ -94,51 +101,54 @@ export interface GenerateWithAIOptions {
   onLogCreated?: (logId: string) => void;
   /** Request structured JSON output. Forwarded to providers that support
    *  `response_format: { type: 'json_object' }` (OpenRouter, OpenAI). Ignored elsewhere. */
-  responseFormat?: 'json_object';
+  responseFormat?: "json_object";
 }
 
 export async function generateWithAI(
   config: AIProviderConfig,
   prompt: string,
   systemPrompt?: string,
-  options?: GenerateWithAIOptions
+  options?: GenerateWithAIOptions,
 ): Promise<string> {
   // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
   // Note: generator-agent.ts configures MCP servers directly on config for CDP support.
   // This fallback handles other callers that pass useMCP: true (planner, healer, ai-routes, etc.)
   const effectiveConfig = { ...config };
-  if (options?.useMCP && config.provider === 'claude-agent-sdk') {
-    const playwrightCli = path.join(path.dirname(require.resolve('playwright')), 'cli.js');
+  if (options?.useMCP && config.provider === "claude-agent-sdk") {
+    const playwrightCli = path.join(
+      path.dirname(require.resolve("playwright")),
+      "cli.js",
+    );
     effectiveConfig.agentSdkMcpServers = {
       ...effectiveConfig.agentSdkMcpServers,
-      'playwright-test': {
-        command: 'node',
-        args: [
-          playwrightCli,
-          'run-test-mcp-server',
-          '--headless',
-        ],
+      "playwright-test": {
+        command: "node",
+        args: [playwrightCli, "run-test-mcp-server", "--headless"],
       },
     };
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
-      'mcp__playwright-test__*',
+      "mcp__playwright-test__*",
     ];
     effectiveConfig.agentSdkDisallowedTools = [
       ...(effectiveConfig.agentSdkDisallowedTools || []),
-      'Bash', 'Write', 'Edit', 'NotebookEdit',
+      "Bash",
+      "Write",
+      "Edit",
+      "NotebookEdit",
     ];
   }
 
   // For non-SDK providers with tool calling support, use MCP bridge
-  const useToolCallingBridge = options?.useMCP
-    && config.provider !== 'claude-agent-sdk'
-    && TOOL_CALLING_PROVIDERS.includes(config.provider);
+  const useToolCallingBridge =
+    options?.useMCP &&
+    config.provider !== "claude-agent-sdk" &&
+    TOOL_CALLING_PROVIDERS.includes(config.provider);
 
   const provider = getAIProvider(effectiveConfig);
   const startTime = Date.now();
 
-  let finalSystemPrompt = systemPrompt || '';
+  let finalSystemPrompt = systemPrompt || "";
   if (config.customInstructions) {
     finalSystemPrompt = finalSystemPrompt
       ? `${finalSystemPrompt}\n\nAdditional instructions:\n${config.customInstructions}`
@@ -154,18 +164,19 @@ export async function generateWithAI(
       repositoryId,
       actionType,
       provider: config.provider,
-      model: config.provider === 'openrouter'
-        ? config.openrouterModel
-        : config.provider === 'ollama'
-          ? config.ollamaModel
-          : config.provider === 'openai'
-            ? config.openaiModel
-            : config.provider === 'anthropic'
-              ? config.anthropicModel
-              : undefined,
+      model:
+        config.provider === "openrouter"
+          ? config.openrouterModel
+          : config.provider === "ollama"
+            ? config.ollamaModel
+            : config.provider === "openai"
+              ? config.openaiModel
+              : config.provider === "anthropic"
+                ? config.anthropicModel
+                : undefined,
       systemPrompt: finalSystemPrompt || undefined,
       userPrompt: prompt,
-      status: 'pending' as AILogStatus,
+      status: "pending" as AILogStatus,
     });
     logId = log.id;
     options?.onLogCreated?.(logId);
@@ -197,7 +208,7 @@ export async function generateWithAI(
     if (logId) {
       const durationMs = Date.now() - startTime;
       await updateAIPromptLog(logId, {
-        status: 'success' as AILogStatus,
+        status: "success" as AILogStatus,
         response,
         durationMs,
       });
@@ -209,7 +220,7 @@ export async function generateWithAI(
     if (logId) {
       const durationMs = Date.now() - startTime;
       await updateAIPromptLog(logId, {
-        status: 'error' as AILogStatus,
+        status: "error" as AILogStatus,
         errorMessage: error instanceof Error ? error.message : String(error),
         durationMs,
       });
@@ -230,11 +241,11 @@ async function generateWithMCPBridge(
     signal?: AbortSignal;
     cdpEndpoint?: string;
     customServers?: Record<string, MCPServerConfig>;
-    responseFormat?: 'json_object';
+    responseFormat?: "json_object";
   },
 ): Promise<string> {
   if (!provider.generateWithTools) {
-    throw new Error('Provider does not support tool calling');
+    throw new Error("Provider does not support tool calling");
   }
 
   // Determine which MCP bridges to create
@@ -247,19 +258,23 @@ async function generateWithMCPBridge(
     }
   } else {
     // Default: Playwright MCP
-    bridges.push(createPlaywrightMCPBridge({
-      cdpEndpoint: options.cdpEndpoint,
-      headless: true,
-    }));
+    bridges.push(
+      createPlaywrightMCPBridge({
+        cdpEndpoint: options.cdpEndpoint,
+        headless: true,
+      }),
+    );
   }
 
   try {
     // Connect all bridges and collect tools
-    await Promise.all(bridges.map(b => b.connect()));
-    const allTools = (await Promise.all(bridges.map(b => b.listTools()))).flat();
+    await Promise.all(bridges.map((b) => b.connect()));
+    const allTools = (
+      await Promise.all(bridges.map((b) => b.listTools()))
+    ).flat();
 
     if (allTools.length === 0) {
-      throw new Error('MCP bridge: no tools available from MCP server(s)');
+      throw new Error("MCP bridge: no tools available from MCP server(s)");
     }
 
     // Build a lookup for routing tool calls to the right bridge
@@ -280,13 +295,17 @@ async function generateWithMCPBridge(
       onToolCall: async (call) => {
         const bridge = toolToBridge.get(call.name);
         if (!bridge) {
-          return { toolCallId: call.id, content: `Unknown tool: ${call.name}`, isError: true };
+          return {
+            toolCallId: call.id,
+            content: `Unknown tool: ${call.name}`,
+            isError: true,
+          };
         }
         return bridge.callTool(call);
       },
     });
   } finally {
     // Always clean up MCP subprocesses
-    await Promise.all(bridges.map(b => b.close().catch(() => {})));
+    await Promise.all(bridges.map((b) => b.close().catch(() => {})));
   }
 }

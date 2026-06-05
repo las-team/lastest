@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,13 +8,13 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { AICodePreview } from './ai-code-preview';
-import { aiFixTest, updateTestCode } from '@/server/actions/ai';
-import { Loader2, Wrench, Save, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { AICodePreview } from "./ai-code-preview";
+import { aiFixTest, updateTestCode } from "@/server/actions/ai";
+import { Loader2, Wrench, Save, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 interface AIFixTestDialogProps {
   open: boolean;
@@ -39,7 +39,7 @@ export function AIFixTestDialog({
 }: AIFixTestDialogProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [fixedCode, setFixedCode] = useState('');
+  const [fixedCode, setFixedCode] = useState("");
   const [hasGenerated, setHasGenerated] = useState(false);
   const [editableError, setEditableError] = useState(errorMessage);
 
@@ -51,12 +51,12 @@ export function AIFixTestDialog({
       if (result.success && result.code) {
         setFixedCode(result.code);
         setHasGenerated(true);
-        toast.success('Fix generated successfully');
+        toast.success("Fix generated successfully");
       } else {
-        toast.error(result.error || 'Failed to generate fix');
+        toast.error(result.error || "Failed to generate fix");
       }
     } catch (_error) {
-      toast.error('Failed to generate fix');
+      toast.error("Failed to generate fix");
     } finally {
       setIsGenerating(false);
     }
@@ -68,21 +68,21 @@ export function AIFixTestDialog({
       const result = await updateTestCode(testId, fixedCode);
 
       if (result.success) {
-        toast.success('Test code updated');
+        toast.success("Test code updated");
         onFixed?.();
         handleClose();
       } else {
-        toast.error(result.error || 'Failed to save fix');
+        toast.error(result.error || "Failed to save fix");
       }
     } catch (_error) {
-      toast.error('Failed to save fix');
+      toast.error("Failed to save fix");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleClose = () => {
-    setFixedCode('');
+    setFixedCode("");
     setHasGenerated(false);
     setEditableError(errorMessage);
     onOpenChange(false);
@@ -97,7 +97,8 @@ export function AIFixTestDialog({
             Fix Test with AI
           </DialogTitle>
           <DialogDescription>
-            AI will analyze the error and generate a fixed version of &quot;{testName}&quot;
+            AI will analyze the error and generate a fixed version of &quot;
+            {testName}&quot;
           </DialogDescription>
         </DialogHeader>
 

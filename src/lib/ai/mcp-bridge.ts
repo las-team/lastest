@@ -4,9 +4,9 @@
  * providers that support function calling (OpenRouter, Anthropic Direct, OpenAI).
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { ToolDefinition, ToolCall, ToolResult } from './types';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { ToolDefinition, ToolCall, ToolResult } from "./types";
 
 export interface MCPServerConfig {
   command: string;
@@ -20,12 +20,12 @@ export class MCPBridge {
   private connected = false;
 
   constructor(private serverConfig: MCPServerConfig) {
-    this.client = new Client({ name: 'lastest-mcp-bridge', version: '1.0.0' });
+    this.client = new Client({ name: "lastest-mcp-bridge", version: "1.0.0" });
     this.transport = new StdioClientTransport({
       command: serverConfig.command,
       args: serverConfig.args,
       env: serverConfig.env,
-      stderr: 'pipe',
+      stderr: "pipe",
     });
   }
 
@@ -43,10 +43,13 @@ export class MCPBridge {
     if (!this.connected) await this.connect();
 
     const result = await this.client.listTools();
-    return result.tools.map(tool => ({
+    return result.tools.map((tool) => ({
       name: tool.name,
-      description: tool.description || '',
-      inputSchema: (tool.inputSchema as Record<string, unknown>) || { type: 'object', properties: {} },
+      description: tool.description || "",
+      inputSchema: (tool.inputSchema as Record<string, unknown>) || {
+        type: "object",
+        properties: {},
+      },
     }));
   }
 
@@ -66,13 +69,13 @@ export class MCPBridge {
       // MCP returns content as an array of content blocks
       const content = Array.isArray(result.content)
         ? result.content
-            .map(block => {
-              if (block.type === 'text') return block.text;
-              if (block.type === 'image') return `[image: ${block.mimeType}]`;
+            .map((block) => {
+              if (block.type === "text") return block.text;
+              if (block.type === "image") return `[image: ${block.mimeType}]`;
               return JSON.stringify(block);
             })
-            .join('\n')
-        : String(result.content ?? '');
+            .join("\n")
+        : String(result.content ?? "");
 
       return {
         toolCallId: call.id,
@@ -107,12 +110,12 @@ export function createPlaywrightMCPBridge(options?: {
   cdpEndpoint?: string;
   headless?: boolean;
 }): MCPBridge {
-  const args = ['@playwright/mcp@latest'];
+  const args = ["@playwright/mcp@latest"];
   if (options?.cdpEndpoint) {
-    args.push('--cdp-endpoint', options.cdpEndpoint);
+    args.push("--cdp-endpoint", options.cdpEndpoint);
   }
   if (options?.headless !== false) {
-    args.push('--headless');
+    args.push("--headless");
   }
-  return new MCPBridge({ command: 'npx', args });
+  return new MCPBridge({ command: "npx", args });
 }

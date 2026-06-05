@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,25 +8,29 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Play, Loader2, CheckCircle, XCircle } from 'lucide-react';
-import { createSetupScript, updateSetupScript, testSetupScript } from '@/server/actions/setup-scripts';
-import { toast } from 'sonner';
-import type { SetupScript, SetupScriptType } from '@/lib/db/schema';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Play, Loader2, CheckCircle, XCircle } from "lucide-react";
+import {
+  createSetupScript,
+  updateSetupScript,
+  testSetupScript,
+} from "@/server/actions/setup-scripts";
+import { toast } from "sonner";
+import type { SetupScript, SetupScriptType } from "@/lib/db/schema";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 interface SetupScriptEditorProps {
   open: boolean;
@@ -70,10 +74,10 @@ export function SetupScriptEditor({
   repositoryId,
   editScript,
 }: SetupScriptEditorProps) {
-  const [name, setName] = useState('');
-  const [type, setType] = useState<SetupScriptType>('playwright');
+  const [name, setName] = useState("");
+  const [type, setType] = useState<SetupScriptType>("playwright");
   const [code, setCode] = useState(PLAYWRIGHT_TEMPLATE);
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -90,12 +94,12 @@ export function SetupScriptEditor({
         setName(editScript.name);
         setType(editScript.type as SetupScriptType);
         setCode(editScript.code);
-        setDescription(editScript.description || '');
+        setDescription(editScript.description || "");
       } else {
-        setName('');
-        setType('playwright');
+        setName("");
+        setType("playwright");
         setCode(PLAYWRIGHT_TEMPLATE);
-        setDescription('');
+        setDescription("");
       }
       setTestResult(null);
     }
@@ -104,17 +108,17 @@ export function SetupScriptEditor({
   // Update template when type changes (only for new scripts)
   useEffect(() => {
     if (!editScript) {
-      setCode(type === 'playwright' ? PLAYWRIGHT_TEMPLATE : API_TEMPLATE);
+      setCode(type === "playwright" ? PLAYWRIGHT_TEMPLATE : API_TEMPLATE);
     }
   }, [type, editScript]);
 
   const handleSave = async () => {
     if (!name.trim()) {
-      toast.error('Name is required');
+      toast.error("Name is required");
       return;
     }
     if (!code.trim()) {
-      toast.error('Code is required');
+      toast.error("Code is required");
       return;
     }
 
@@ -127,8 +131,12 @@ export function SetupScriptEditor({
           code,
           description: description.trim() || undefined,
         });
-        track(Events.setup_script_saved, { repoId: repositoryId, type, action: 'update' });
-        toast.success('Script updated');
+        track(Events.setup_script_saved, {
+          repoId: repositoryId,
+          type,
+          action: "update",
+        });
+        toast.success("Script updated");
       } else {
         await createSetupScript({
           repositoryId,
@@ -137,12 +145,18 @@ export function SetupScriptEditor({
           code,
           description: description.trim() || undefined,
         });
-        track(Events.setup_script_saved, { repoId: repositoryId, type, action: 'create' });
-        toast.success('Script created');
+        track(Events.setup_script_saved, {
+          repoId: repositoryId,
+          type,
+          action: "create",
+        });
+        toast.success("Script created");
       }
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save script');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save script",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -150,22 +164,27 @@ export function SetupScriptEditor({
 
   const handleTest = async () => {
     if (!editScript) {
-      toast.error('Save the script first to test it');
+      toast.error("Save the script first to test it");
       return;
     }
 
     setIsTesting(true);
     setTestResult(null);
     try {
-      const result = await testSetupScript(editScript.id, 'http://localhost:3000');
+      const result = await testSetupScript(
+        editScript.id,
+        "http://localhost:3000",
+      );
       setTestResult(result);
       if (result.success) {
         toast.success(`Script ran successfully (${result.duration}ms)`);
       } else {
-        toast.error(result.error || 'Script failed');
+        toast.error(result.error || "Script failed");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to test script');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to test script",
+      );
     } finally {
       setIsTesting(false);
     }
@@ -176,7 +195,7 @@ export function SetupScriptEditor({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {editScript ? 'Edit Setup Script' : 'Create Setup Script'}
+            {editScript ? "Edit Setup Script" : "Create Setup Script"}
           </DialogTitle>
           <DialogDescription>
             Setup scripts run before tests to prepare the environment.
@@ -196,7 +215,10 @@ export function SetupScriptEditor({
             </div>
             <div className="space-y-2">
               <Label htmlFor="type">Type</Label>
-              <Select value={type} onValueChange={(v) => setType(v as SetupScriptType)}>
+              <Select
+                value={type}
+                onValueChange={(v) => setType(v as SetupScriptType)}
+              >
                 <SelectTrigger id="type">
                   <SelectValue />
                 </SelectTrigger>
@@ -221,12 +243,12 @@ export function SetupScriptEditor({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="code">Code</Label>
-              {type === 'playwright' && (
+              {type === "playwright" && (
                 <Badge variant="secondary" className="text-xs">
                   async (page, baseUrl, context) =&gt; ...
                 </Badge>
               )}
-              {type === 'api' && (
+              {type === "api" && (
                 <Badge variant="secondary" className="text-xs">
                   JSON schema
                 </Badge>
@@ -237,7 +259,9 @@ export function SetupScriptEditor({
               value={code}
               onChange={(e) => setCode(e.target.value)}
               className="font-mono text-sm min-h-[250px]"
-              placeholder={type === 'playwright' ? PLAYWRIGHT_TEMPLATE : API_TEMPLATE}
+              placeholder={
+                type === "playwright" ? PLAYWRIGHT_TEMPLATE : API_TEMPLATE
+              }
             />
           </div>
 
@@ -246,8 +270,8 @@ export function SetupScriptEditor({
             <div
               className={`p-3 rounded-lg border ${
                 testResult.success
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
+                  ? "bg-green-50 border-green-200"
+                  : "bg-red-50 border-red-200"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -258,10 +282,10 @@ export function SetupScriptEditor({
                 )}
                 <span
                   className={`font-medium ${
-                    testResult.success ? 'text-green-700' : 'text-red-700'
+                    testResult.success ? "text-green-700" : "text-red-700"
                   }`}
                 >
-                  {testResult.success ? 'Success' : 'Failed'}
+                  {testResult.success ? "Success" : "Failed"}
                 </span>
                 <span className="text-sm text-muted-foreground">
                   ({testResult.duration}ms)
@@ -272,20 +296,21 @@ export function SetupScriptEditor({
                   {testResult.error}
                 </pre>
               )}
-              {testResult.variables && Object.keys(testResult.variables).length > 0 && (
-                <div className="mt-2">
-                  <span className="text-xs font-medium">Variables:</span>
-                  <pre className="mt-1 text-xs text-muted-foreground">
-                    {JSON.stringify(testResult.variables, null, 2)}
-                  </pre>
-                </div>
-              )}
+              {testResult.variables &&
+                Object.keys(testResult.variables).length > 0 && (
+                  <div className="mt-2">
+                    <span className="text-xs font-medium">Variables:</span>
+                    <pre className="mt-1 text-xs text-muted-foreground">
+                      {JSON.stringify(testResult.variables, null, 2)}
+                    </pre>
+                  </div>
+                )}
             </div>
           )}
         </div>
 
         <DialogFooter className="gap-2">
-          {editScript && type === 'playwright' && (
+          {editScript && type === "playwright" && (
             <Button variant="outline" onClick={handleTest} disabled={isTesting}>
               {isTesting ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -300,7 +325,7 @@ export function SetupScriptEditor({
           </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {editScript ? 'Update' : 'Create'}
+            {editScript ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

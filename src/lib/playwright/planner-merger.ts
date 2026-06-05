@@ -6,13 +6,17 @@
  * no structured areas, the merger attempts to salvage useful content from it.
  */
 
-import type { PlannerArea, PlannerResult, PlannerSource } from './planner-types';
+import type {
+  PlannerArea,
+  PlannerResult,
+  PlannerSource,
+} from "./planner-types";
 
 const SOURCE_LABELS: Record<PlannerSource, string> = {
-  browser: 'Browser Exploration',
-  code: 'Codebase Scan',
-  spec: 'Spec Analysis',
-  routes: 'Known Routes',
+  browser: "Browser Exploration",
+  code: "Codebase Scan",
+  spec: "Spec Analysis",
+  routes: "Known Routes",
 };
 
 // Priority: browser plans are richest, then spec, code, routes
@@ -31,9 +35,9 @@ function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .trim()
-    .replace(/[-_]/g, ' ')
-    .replace(/\s+(test|tests|testing|area|section)$/i, '')
-    .replace(/\s+/g, ' ');
+    .replace(/[-_]/g, " ")
+    .replace(/\s+(test|tests|testing|area|section)$/i, "")
+    .replace(/\s+/g, " ");
 }
 
 function jaccardSimilarity(a: string[], b: string[]): number {
@@ -52,18 +56,63 @@ function jaccardSimilarity(a: string[], b: string[]): number {
 function isSubTopic(nameA: string, nameB: string): boolean {
   // Common parent-child relationships
   const PARENT_CHILDREN: Record<string, string[]> = {
-    'auth': ['login', 'logout', 'register', 'signup', 'sign up', 'sign in', 'reset password', 'forgot password', 'password reset', 'session', 'oauth', 'sso', 'two factor', '2fa', 'mfa'],
-    'authentication': ['login', 'logout', 'register', 'signup', 'sign up', 'sign in', 'reset password', 'forgot password', 'password reset', 'session', 'oauth', 'sso', 'two factor', '2fa', 'mfa'],
-    'user management': ['profile', 'settings', 'account', 'preferences', 'avatar', 'password', 'reset password'],
-    'navigation': ['header', 'footer', 'sidebar', 'menu', 'navbar', 'breadcrumb'],
-    'settings': ['profile settings', 'account settings', 'notification settings', 'preferences'],
+    auth: [
+      "login",
+      "logout",
+      "register",
+      "signup",
+      "sign up",
+      "sign in",
+      "reset password",
+      "forgot password",
+      "password reset",
+      "session",
+      "oauth",
+      "sso",
+      "two factor",
+      "2fa",
+      "mfa",
+    ],
+    authentication: [
+      "login",
+      "logout",
+      "register",
+      "signup",
+      "sign up",
+      "sign in",
+      "reset password",
+      "forgot password",
+      "password reset",
+      "session",
+      "oauth",
+      "sso",
+      "two factor",
+      "2fa",
+      "mfa",
+    ],
+    "user management": [
+      "profile",
+      "settings",
+      "account",
+      "preferences",
+      "avatar",
+      "password",
+      "reset password",
+    ],
+    navigation: ["header", "footer", "sidebar", "menu", "navbar", "breadcrumb"],
+    settings: [
+      "profile settings",
+      "account settings",
+      "notification settings",
+      "preferences",
+    ],
   };
 
   const normB = nameB.toLowerCase();
   for (const [parent, children] of Object.entries(PARENT_CHILDREN)) {
     if (normB.includes(parent)) {
       const normA = nameA.toLowerCase();
-      if (children.some(child => normA.includes(child))) return true;
+      if (children.some((child) => normA.includes(child))) return true;
     }
   }
   return false;
@@ -73,7 +122,7 @@ function isSubTopic(nameA: string, nameB: string): boolean {
 function isRouteSubset(smaller: string[], larger: string[]): boolean {
   if (smaller.length === 0) return false;
   const largerSet = new Set(larger);
-  const matchCount = smaller.filter(r => largerSet.has(r)).length;
+  const matchCount = smaller.filter((r) => largerSet.has(r)).length;
   return matchCount >= Math.ceil(smaller.length * 0.6);
 }
 
@@ -85,28 +134,34 @@ function findGroupIndex(
   const areaName = normalizeName(area.name);
 
   for (let i = 0; i < groups.length; i++) {
-    const groupName = normalizedNames.get(i) || '';
+    const groupName = normalizedNames.get(i) || "";
 
     // Check exact name match
     if (groupName === areaName) return i;
 
     // Check route overlap (Jaccard > 0.5)
-    const groupRoutes = groups[i].flatMap(a => a.routes);
+    const groupRoutes = groups[i].flatMap((a) => a.routes);
     if (area.routes.length > 0 && groupRoutes.length > 0) {
       if (jaccardSimilarity(area.routes, groupRoutes) > 0.5) return i;
     }
 
     // Check sub-topic relationship (e.g. "Reset Password" → "Authentication")
-    if (isSubTopic(areaName, groupName) || isSubTopic(groupName, areaName)) return i;
+    if (isSubTopic(areaName, groupName) || isSubTopic(groupName, areaName))
+      return i;
 
     // Check route subset (smaller area's routes contained in larger area)
     if (area.routes.length > 0 && groupRoutes.length > 0) {
-      if (isRouteSubset(area.routes, groupRoutes) || isRouteSubset(groupRoutes, area.routes)) return i;
+      if (
+        isRouteSubset(area.routes, groupRoutes) ||
+        isRouteSubset(groupRoutes, area.routes)
+      )
+        return i;
     }
 
     // Check if one name contains the other as a substring
     if (areaName.length >= 3 && groupName.length >= 3) {
-      if (groupName.includes(areaName) || areaName.includes(groupName)) return i;
+      if (groupName.includes(areaName) || areaName.includes(groupName))
+        return i;
     }
   }
 
@@ -115,14 +170,24 @@ function findGroupIndex(
 
 function mergeGroup(group: TaggedArea[]): PlannerArea {
   // Sort by source priority (highest first) for plan ordering
-  const sorted = [...group].sort((a, b) => SOURCE_PRIORITY[b.source] - SOURCE_PRIORITY[a.source]);
+  const sorted = [...group].sort(
+    (a, b) => SOURCE_PRIORITY[b.source] - SOURCE_PRIORITY[a.source],
+  );
 
   // Pick the longest name
-  const name = sorted.reduce((best, a) => a.name.length > best.length ? a.name : best, sorted[0].name);
+  const name = sorted.reduce(
+    (best, a) => (a.name.length > best.length ? a.name : best),
+    sorted[0].name,
+  );
 
   // Pick the longest description
-  const descriptions = sorted.map(a => a.description).filter(Boolean) as string[];
-  const description = descriptions.reduce((best, d) => d.length > best.length ? d : best, descriptions[0] || '');
+  const descriptions = sorted
+    .map((a) => a.description)
+    .filter(Boolean) as string[];
+  const description = descriptions.reduce(
+    (best, d) => (d.length > best.length ? d : best),
+    descriptions[0] || "",
+  );
 
   // Union routes (deduplicate by path)
   const routeSet = new Set<string>();
@@ -138,14 +203,16 @@ function mergeGroup(group: TaggedArea[]): PlannerArea {
     if (!area.testPlan?.trim()) continue;
     if (seenSources.has(area.source)) {
       // Append to existing source section
-      const lastIdx = planParts.findIndex(p => p.startsWith(`### Source: ${SOURCE_LABELS[area.source]}`));
+      const lastIdx = planParts.findIndex((p) =>
+        p.startsWith(`### Source: ${SOURCE_LABELS[area.source]}`),
+      );
       if (lastIdx !== -1) {
         planParts.splice(lastIdx + 1, 0, area.testPlan.trim());
         continue;
       }
     }
     seenSources.add(area.source);
-    if (sorted.length > 1 && new Set(sorted.map(a => a.source)).size > 1) {
+    if (sorted.length > 1 && new Set(sorted.map((a) => a.source)).size > 1) {
       planParts.push(`### Source: ${SOURCE_LABELS[area.source]}`);
     }
     planParts.push(area.testPlan.trim());
@@ -155,7 +222,7 @@ function mergeGroup(group: TaggedArea[]): PlannerArea {
     name,
     description: description || undefined,
     routes: Array.from(routeSet),
-    testPlan: planParts.join('\n\n'),
+    testPlan: planParts.join("\n\n"),
   };
 }
 
@@ -168,12 +235,18 @@ function mergeGroup(group: TaggedArea[]): PlannerArea {
  * Handles: markdown headings with test steps, JSON fragments, code blocks,
  * or just chunks of text that can serve as a test plan.
  */
-function salvageAreasFromRawOutput(raw: string, source: PlannerSource): TaggedArea[] {
+function salvageAreasFromRawOutput(
+  raw: string,
+  source: PlannerSource,
+): TaggedArea[] {
   const areas: TaggedArea[] = [];
 
   // Strategy 1: Try JSON extraction (planner may have returned valid JSON wrapped in text)
   try {
-    const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, null];
+    const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [
+      null,
+      null,
+    ];
     const jsonStr = jsonMatch[1]?.trim();
     if (jsonStr) {
       const parsed = JSON.parse(jsonStr);
@@ -185,7 +258,7 @@ function salvageAreasFromRawOutput(raw: string, source: PlannerSource): TaggedAr
               name: String(a.name),
               description: a.description ? String(a.description) : undefined,
               routes: Array.isArray(a.routes) ? a.routes.map(String) : [],
-              testPlan: a.testPlan ? String(a.testPlan) : '',
+              testPlan: a.testPlan ? String(a.testPlan) : "",
               source,
             });
           }
@@ -193,20 +266,24 @@ function salvageAreasFromRawOutput(raw: string, source: PlannerSource): TaggedAr
         if (areas.length > 0) return areas;
       }
     }
-  } catch { /* not JSON, continue */ }
+  } catch {
+    /* not JSON, continue */
+  }
 
   // Strategy 2: Split by markdown H2/H3 headings into areas
-  const headingBlocks = raw.split(/(?=^#{2,3}\s)/m).filter(b => b.trim().length > 50);
+  const headingBlocks = raw
+    .split(/(?=^#{2,3}\s)/m)
+    .filter((b) => b.trim().length > 50);
   if (headingBlocks.length > 1) {
     for (const block of headingBlocks) {
       const nameMatch = block.match(/^#{2,3}\s+(.+)/m);
       if (!nameMatch) continue;
-      const name = nameMatch[1].trim().replace(/[*_`]/g, '');
+      const name = nameMatch[1].trim().replace(/[*_`]/g, "");
       if (name.length < 3 || name.length > 100) continue;
 
       // Extract routes from the block
       const blockRoutes: string[] = [];
-      for (const line of block.split('\n')) {
+      for (const line of block.split("\n")) {
         const routeMatch = line.match(/^\s*[-*]\s*(\/\S+)/);
         if (routeMatch) blockRoutes.push(routeMatch[1]);
       }
@@ -227,14 +304,17 @@ function salvageAreasFromRawOutput(raw: string, source: PlannerSource): TaggedAr
     // Try to extract a meaningful name from the first heading or line
     const firstHeading = raw.match(/^#{1,3}\s+(.+)/m);
     const name = firstHeading
-      ? firstHeading[1].trim().replace(/[*_`]/g, '').slice(0, 80)
+      ? firstHeading[1].trim().replace(/[*_`]/g, "").slice(0, 80)
       : `${SOURCE_LABELS[source]} Output`;
 
     // Extract any routes mentioned
     const allRoutes: string[] = [];
-    for (const line of raw.split('\n')) {
-      const routeMatch = line.match(/["'`]\/([\w\-/[\]:]+)["'`]|^\s*[-*]\s*(\/[\w\-/[\]:]+)/);
-      if (routeMatch) allRoutes.push(routeMatch[1] ? `/${routeMatch[1]}` : routeMatch[2]);
+    for (const line of raw.split("\n")) {
+      const routeMatch = line.match(
+        /["'`]\/([\w\-/[\]:]+)["'`]|^\s*[-*]\s*(\/[\w\-/[\]:]+)/,
+      );
+      if (routeMatch)
+        allRoutes.push(routeMatch[1] ? `/${routeMatch[1]}` : routeMatch[2]);
     }
 
     areas.push({
@@ -270,7 +350,10 @@ export function mergePlannerResults(results: PlannerResult[]): PlannerArea[] {
       }
     } else if (result.rawOutput) {
       // Planner failed structured parsing — try to salvage from raw output
-      const salvaged = salvageAreasFromRawOutput(result.rawOutput, result.source);
+      const salvaged = salvageAreasFromRawOutput(
+        result.rawOutput,
+        result.source,
+      );
       tagged.push(...salvaged);
     }
   }

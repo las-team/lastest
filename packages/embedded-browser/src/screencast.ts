@@ -5,10 +5,10 @@
  * Handles start/stop/ack lifecycle and frame broadcasting.
  */
 
-import type { CDPSession, Page } from 'playwright';
+import type { CDPSession, Page } from "playwright";
 
 export interface ScreencastOptions {
-  format?: 'jpeg' | 'png';
+  format?: "jpeg" | "png";
   quality?: number;
   maxWidth?: number;
   maxHeight?: number;
@@ -29,7 +29,12 @@ export interface ScreencastFrame {
   sessionId: number;
 }
 
-type FrameCallback = (frame: { data: string; width: number; height: number; timestamp: number }) => void;
+type FrameCallback = (frame: {
+  data: string;
+  width: number;
+  height: number;
+  timestamp: number;
+}) => void;
 
 export class ScreencastManager {
   private cdpSession: CDPSession | null = null;
@@ -39,9 +44,7 @@ export class ScreencastManager {
   private height: number;
   private ackFailCount = 0;
 
-  constructor(
-    private options: ScreencastOptions = {}
-  ) {
+  constructor(private options: ScreencastOptions = {}) {
     this.width = options.maxWidth ?? 1280;
     this.height = options.maxHeight ?? 720;
   }
@@ -49,7 +52,7 @@ export class ScreencastManager {
   async start(page: Page, onFrame: FrameCallback): Promise<void> {
     // If already running, stop first (prevents "already running" deadlock)
     if (this.running) {
-      console.warn('[Screencast] Already running — stopping before restart');
+      console.warn("[Screencast] Already running — stopping before restart");
       await this.stop();
     }
 
@@ -58,7 +61,7 @@ export class ScreencastManager {
     this.cdpSession = await page.context().newCDPSession(page);
     this.running = true;
 
-    this.cdpSession.on('Page.screencastFrame', (frame: ScreencastFrame) => {
+    this.cdpSession.on("Page.screencastFrame", (frame: ScreencastFrame) => {
       if (!this.running) return;
 
       // Relay frame to callback
@@ -70,28 +73,34 @@ export class ScreencastManager {
       });
 
       // MUST acknowledge to receive next frame
-      this.cdpSession?.send('Page.screencastFrameAck', {
-        sessionId: frame.sessionId,
-      }).catch(() => {
-        // Track consecutive ack failures — if CDP session is broken,
-        // Chrome stops sending frames and the stream silently dies
-        this.ackFailCount++;
-        if (this.ackFailCount >= 3) {
-          console.error('[Screencast] Multiple frame ack failures — CDP session likely broken');
-          this.running = false;
-        }
-      });
+      this.cdpSession
+        ?.send("Page.screencastFrameAck", {
+          sessionId: frame.sessionId,
+        })
+        .catch(() => {
+          // Track consecutive ack failures — if CDP session is broken,
+          // Chrome stops sending frames and the stream silently dies
+          this.ackFailCount++;
+          if (this.ackFailCount >= 3) {
+            console.error(
+              "[Screencast] Multiple frame ack failures — CDP session likely broken",
+            );
+            this.running = false;
+          }
+        });
     });
 
-    await this.cdpSession.send('Page.startScreencast', {
-      format: this.options.format ?? 'jpeg',
+    await this.cdpSession.send("Page.startScreencast", {
+      format: this.options.format ?? "jpeg",
       quality: this.options.quality ?? 80,
       maxWidth: this.width,
       maxHeight: this.height,
       everyNthFrame: this.options.everyNthFrame ?? 1,
     });
 
-    console.log(`[Screencast] Started (${this.width}x${this.height}, ${this.options.format ?? 'jpeg'} q${this.options.quality ?? 80})`);
+    console.log(
+      `[Screencast] Started (${this.width}x${this.height}, ${this.options.format ?? "jpeg"} q${this.options.quality ?? 80})`,
+    );
   }
 
   async stop(): Promise<void> {
@@ -101,14 +110,14 @@ export class ScreencastManager {
     this.frameCallback = null;
 
     try {
-      await this.cdpSession.send('Page.stopScreencast');
+      await this.cdpSession.send("Page.stopScreencast");
       await this.cdpSession.detach();
     } catch {
       // Ignore errors during cleanup
     }
 
     this.cdpSession = null;
-    console.log('[Screencast] Stopped');
+    console.log("[Screencast] Stopped");
   }
 
   isRunning(): boolean {
@@ -122,16 +131,16 @@ export class ScreencastManager {
     if (this.running && this.cdpSession) {
       // Restart screencast with new dimensions
       try {
-        await this.cdpSession.send('Page.stopScreencast');
-        await this.cdpSession.send('Page.startScreencast', {
-          format: this.options.format ?? 'jpeg',
+        await this.cdpSession.send("Page.stopScreencast");
+        await this.cdpSession.send("Page.startScreencast", {
+          format: this.options.format ?? "jpeg",
           quality: this.options.quality ?? 80,
           maxWidth: this.width,
           maxHeight: this.height,
           everyNthFrame: this.options.everyNthFrame ?? 1,
         });
       } catch (error) {
-        console.error('[Screencast] Failed to update viewport:', error);
+        console.error("[Screencast] Failed to update viewport:", error);
       }
     }
   }

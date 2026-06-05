@@ -1,11 +1,19 @@
-'use server';
+"use server";
 
-import { db } from '@/lib/db';
-import { embeddedSessions, runners, runnerCommands, runnerCommandResults, backgroundJobs, type EmbeddedSession, type EmbeddedSessionStatus } from '@/lib/db/schema';
-import { eq, and, ne, desc, isNull } from 'drizzle-orm';
-import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
-import { revalidatePath } from 'next/cache';
-import { emitRunnerStatusChange } from '@/lib/ws/runner-events';
+import { db } from "@/lib/db";
+import {
+  embeddedSessions,
+  runners,
+  runnerCommands,
+  runnerCommandResults,
+  backgroundJobs,
+  type EmbeddedSession,
+  type EmbeddedSessionStatus,
+} from "@/lib/db/schema";
+import { eq, and, ne, desc, isNull } from "drizzle-orm";
+import { requireTeamAccess, requireTeamAdmin } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { emitRunnerStatusChange } from "@/lib/ws/runner-events";
 import {
   isKubernetesMode,
   launchEBJob,
@@ -18,9 +26,9 @@ import {
   currentPoolSize,
   incInFlightProvisions,
   decInFlightProvisions,
-} from '@/lib/eb/provisioner';
-import { toProxyStreamUrl } from '@/lib/eb/stream-url';
-import { stopDevPortForward } from '@/lib/eb/dev-port-forward';
+} from "@/lib/eb/provisioner";
+import { toProxyStreamUrl } from "@/lib/eb/stream-url";
+import { stopDevPortForward } from "@/lib/eb/dev-port-forward";
 
 /**
  * List all embedded sessions for the current team
@@ -44,7 +52,7 @@ export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
   const systemRunnerIds = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(and(eq(runners.isSystem, true), ne(runners.status, 'offline')));
+    .where(and(eq(runners.isSystem, true), ne(runners.status, "offline")));
 
   if (systemRunnerIds.length === 0) return [];
 
@@ -62,12 +70,19 @@ export async function listSystemEmbeddedSessions(): Promise<EmbeddedSession[]> {
 /**
  * Get a specific embedded session
  */
-export async function getEmbeddedSession(sessionId: string): Promise<EmbeddedSession | null> {
+export async function getEmbeddedSession(
+  sessionId: string,
+): Promise<EmbeddedSession | null> {
   const session = await requireTeamAccess();
   const [result] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
+    .where(
+      and(
+        eq(embeddedSessions.id, sessionId),
+        eq(embeddedSessions.teamId, session.team.id),
+      ),
+    );
   return result ?? null;
 }
 
@@ -79,10 +94,12 @@ export async function getAvailableEmbeddedSession(): Promise<EmbeddedSession | n
   const [result] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(
-      eq(embeddedSessions.teamId, session.team.id),
-      eq(embeddedSessions.status, 'ready'),
-    ))
+    .where(
+      and(
+        eq(embeddedSessions.teamId, session.team.id),
+        eq(embeddedSessions.status, "ready"),
+      ),
+    )
     .limit(1);
   return result ?? null;
 }
@@ -91,33 +108,38 @@ export async function getAvailableEmbeddedSession(): Promise<EmbeddedSession | n
  * Claim an embedded session (set to busy, assign userId)
  */
 export async function claimEmbeddedSession(
-  sessionId: string
+  sessionId: string,
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAccess();
 
   const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
+    .where(
+      and(
+        eq(embeddedSessions.id, sessionId),
+        eq(embeddedSessions.teamId, session.team.id),
+      ),
+    );
 
   if (!existing) {
-    return { error: 'Session not found' };
+    return { error: "Session not found" };
   }
 
-  if (existing.status !== 'ready') {
+  if (existing.status !== "ready") {
     return { error: `Session is not available (status: ${existing.status})` };
   }
 
   await db
     .update(embeddedSessions)
     .set({
-      status: 'busy',
+      status: "busy",
       userId: session.user.id,
       lastActivityAt: new Date(),
     })
     .where(eq(embeddedSessions.id, sessionId));
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { success: true };
 }
 
@@ -125,36 +147,43 @@ export async function claimEmbeddedSession(
  * Release an embedded session (back to ready, clear userId)
  */
 export async function releaseEmbeddedSession(
-  sessionId: string
+  sessionId: string,
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAccess();
 
   const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
+    .where(
+      and(
+        eq(embeddedSessions.id, sessionId),
+        eq(embeddedSessions.teamId, session.team.id),
+      ),
+    );
 
   if (!existing) {
-    return { error: 'Session not found' };
+    return { error: "Session not found" };
   }
 
   await db
     .update(embeddedSessions)
     .set({
-      status: 'ready',
+      status: "ready",
       userId: null,
       lastActivityAt: new Date(),
     })
     .where(eq(embeddedSessions.id, sessionId));
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { success: true };
 }
 
 // Drizzle's transaction callback arg has the same DB-op methods as `db` but
 // without `.transaction`. Use a narrow union so callers can pass either the
 // top-level `db` or a `tx` from inside a transaction.
-type DBExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DBExecutor =
+  | typeof db
+  | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Upsert an embedded session for a runner — ensures exactly 1 session per runner.
@@ -165,14 +194,17 @@ type DBExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0
  * race where `claimPoolEB` sees `runner.status='online'` before the session
  * row exists and claims into a half-registered state.
  */
-export async function upsertEmbeddedSession(params: {
-  teamId: string;
-  runnerId: string;
-  streamUrl: string;
-  cdpUrl?: string;
-  containerUrl: string;
-  viewport?: { width: number; height: number };
-}, tx?: DBExecutor): Promise<EmbeddedSession> {
+export async function upsertEmbeddedSession(
+  params: {
+    teamId: string;
+    runnerId: string;
+    streamUrl: string;
+    cdpUrl?: string;
+    containerUrl: string;
+    viewport?: { width: number; height: number };
+  },
+  tx?: DBExecutor,
+): Promise<EmbeddedSession> {
   // Note: this is `'use server'` so it's RPC-callable, but the system EB
   // pool is intentionally cross-team — the executor + auto-register flow
   // both need to write rows where `teamId=__system__` regardless of the
@@ -194,7 +226,7 @@ export async function upsertEmbeddedSession(params: {
     // to `ready` defeats the session-busy safeguard in `updateRunnerStatus` and
     // lets `claimPoolEB` hand the same EB to a second worker concurrently
     // (observed in production as `Target … has been closed`).
-    const preserveBusy = existing.status === 'busy';
+    const preserveBusy = existing.status === "busy";
     await exec
       .update(embeddedSessions)
       .set({
@@ -202,7 +234,7 @@ export async function upsertEmbeddedSession(params: {
         cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
         viewport: params.viewport ?? { width: 1280, height: 720 },
-        ...(preserveBusy ? {} : { status: 'ready', userId: null }),
+        ...(preserveBusy ? {} : { status: "ready", userId: null }),
         lastActivityAt: now,
         expiresAt,
       })
@@ -211,7 +243,12 @@ export async function upsertEmbeddedSession(params: {
     // Delete any accumulated duplicates
     await exec
       .delete(embeddedSessions)
-      .where(and(eq(embeddedSessions.runnerId, params.runnerId), ne(embeddedSessions.id, existing.id)));
+      .where(
+        and(
+          eq(embeddedSessions.runnerId, params.runnerId),
+          ne(embeddedSessions.id, existing.id),
+        ),
+      );
 
     const [updated] = await exec
       .select()
@@ -227,14 +264,17 @@ export async function upsertEmbeddedSession(params: {
 /**
  * Create an embedded session (internal — called by registration endpoint)
  */
-export async function createEmbeddedSession(params: {
-  teamId: string;
-  runnerId: string;
-  streamUrl: string;
-  cdpUrl?: string;
-  containerUrl: string;
-  viewport?: { width: number; height: number };
-}, tx?: DBExecutor): Promise<EmbeddedSession> {
+export async function createEmbeddedSession(
+  params: {
+    teamId: string;
+    runnerId: string;
+    streamUrl: string;
+    cdpUrl?: string;
+    containerUrl: string;
+    viewport?: { width: number; height: number };
+  },
+  tx?: DBExecutor,
+): Promise<EmbeddedSession> {
   // See upsertEmbeddedSession — system EB pool is cross-team by design,
   // so we don't gate row writes on session.team here.
   const exec = tx ?? db;
@@ -246,7 +286,7 @@ export async function createEmbeddedSession(params: {
     id,
     teamId: params.teamId,
     runnerId: params.runnerId,
-    status: 'ready',
+    status: "ready",
     streamUrl: params.streamUrl,
     cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
@@ -268,22 +308,27 @@ export async function createEmbeddedSession(params: {
  * Destroy an embedded session (admin only)
  */
 export async function destroyEmbeddedSession(
-  sessionId: string
+  sessionId: string,
 ): Promise<{ success: boolean } | { error: string }> {
   const session = await requireTeamAdmin();
 
   const [existing] = await db
     .select()
     .from(embeddedSessions)
-    .where(and(eq(embeddedSessions.id, sessionId), eq(embeddedSessions.teamId, session.team.id)));
+    .where(
+      and(
+        eq(embeddedSessions.id, sessionId),
+        eq(embeddedSessions.teamId, session.team.id),
+      ),
+    );
 
   if (!existing) {
-    return { error: 'Session not found' };
+    return { error: "Session not found" };
   }
 
   await db.delete(embeddedSessions).where(eq(embeddedSessions.id, sessionId));
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { success: true };
 }
 
@@ -293,7 +338,7 @@ export async function destroyEmbeddedSession(
 export async function updateEmbeddedSessionStatus(
   sessionId: string,
   status: EmbeddedSessionStatus,
-  updates?: { currentUrl?: string; lastActivityAt?: Date }
+  updates?: { currentUrl?: string; lastActivityAt?: Date },
 ): Promise<void> {
   // System EBs carry teamId=__system__; the executor (running inside a
   // user's session) needs to flip them busy/ready/stopped during a
@@ -313,7 +358,9 @@ export async function updateEmbeddedSessionStatus(
 /**
  * Get embedded session by runner ID
  */
-export async function getEmbeddedSessionForRunner(runnerId: string): Promise<EmbeddedSession | null> {
+export async function getEmbeddedSessionForRunner(
+  runnerId: string,
+): Promise<EmbeddedSession | null> {
   // System EBs carry teamId=__system__ but are claimed by any team's users
   // through the pool. Don't filter by session.team here or the executor's
   // streamUrl/cdpUrl lookup returns null mid-recording.
@@ -352,14 +399,14 @@ export async function cleanupExpiredSessions(): Promise<number> {
   const expired = await db
     .select()
     .from(embeddedSessions)
-    .where(eq(embeddedSessions.status, 'ready'));
+    .where(eq(embeddedSessions.status, "ready"));
 
   let cleaned = 0;
   for (const session of expired) {
     if (session.expiresAt && session.expiresAt < now) {
       await db
         .update(embeddedSessions)
-        .set({ status: 'stopped' })
+        .set({ status: "stopped" })
         .where(eq(embeddedSessions.id, session.id));
       cleaned++;
     }
@@ -380,11 +427,13 @@ export async function isPoolBusy(): Promise<boolean> {
   const [available] = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(and(
-      eq(runners.isSystem, true),
-      eq(runners.status, 'online'),
-      eq(runners.type, 'embedded'),
-    ))
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.status, "online"),
+        eq(runners.type, "embedded"),
+      ),
+    )
     .limit(1);
   if (available) return false;
 
@@ -394,7 +443,7 @@ export async function isPoolBusy(): Promise<boolean> {
   // spin up a fresh EB.
   if (!isKubernetesMode()) return true;
   const size = await currentPoolSize();
-  return size >= await poolMax();
+  return size >= (await poolMax());
 }
 
 /**
@@ -427,31 +476,40 @@ export async function claimPoolEB(): Promise<{
     // claim instead of flipping `runner.status='busy'` while the session stays
     // `ready` (the UI-green-while-active bug).
     const [candidate] = await tx
-      .select({ id: runners.id, teamId: runners.teamId, sessionId: embeddedSessions.id })
+      .select({
+        id: runners.id,
+        teamId: runners.teamId,
+        sessionId: embeddedSessions.id,
+      })
       .from(runners)
-      .innerJoin(embeddedSessions, and(
-        eq(embeddedSessions.runnerId, runners.id),
-        eq(embeddedSessions.status, 'ready'),
-      ))
-      .where(and(
-        eq(runners.isSystem, true),
-        eq(runners.status, 'online'),
-        eq(runners.type, 'embedded'),
-      ))
+      .innerJoin(
+        embeddedSessions,
+        and(
+          eq(embeddedSessions.runnerId, runners.id),
+          eq(embeddedSessions.status, "ready"),
+        ),
+      )
+      .where(
+        and(
+          eq(runners.isSystem, true),
+          eq(runners.status, "online"),
+          eq(runners.type, "embedded"),
+        ),
+      )
       .limit(1)
-      .for('update', { skipLocked: true });
+      .for("update", { skipLocked: true });
 
     if (!candidate) return null;
 
     await tx
       .update(runners)
-      .set({ status: 'busy' as const, lastSeen: new Date() })
+      .set({ status: "busy" as const, lastSeen: new Date() })
       .where(eq(runners.id, candidate.id));
 
     await tx
       .update(embeddedSessions)
       .set({
-        status: 'busy',
+        status: "busy",
         busySince: new Date(),
         lastActivityAt: new Date(),
       })
@@ -460,8 +518,8 @@ export async function claimPoolEB(): Promise<{
     emitRunnerStatusChange({
       runnerId: candidate.id,
       teamId: candidate.teamId,
-      status: 'busy',
-      previousStatus: 'online',
+      status: "busy",
+      previousStatus: "online",
       timestamp: Date.now(),
     });
 
@@ -479,7 +537,13 @@ export async function claimPoolEB(): Promise<{
  */
 export async function releasePoolEB(runnerId: string): Promise<void> {
   const [runner] = await db
-    .select({ status: runners.status, teamId: runners.teamId, isSystem: runners.isSystem, type: runners.type, name: runners.name })
+    .select({
+      status: runners.status,
+      teamId: runners.teamId,
+      isSystem: runners.isSystem,
+      type: runners.type,
+      name: runners.name,
+    })
     .from(runners)
     .where(eq(runners.id, runnerId));
   if (!runner) return;
@@ -493,12 +557,15 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
   // tests, producing blank-white screenshots from CDP/screencast races.
   // claimOrProvisionPoolEB launches fresh EBs on demand, and warm-pool
   // refill is handled by ensureWarmPool, so we don't need to recycle here.
-  const isPoolEB = isKubernetesMode() && runner.isSystem === true && runner.type === 'embedded';
+  const isPoolEB =
+    isKubernetesMode() &&
+    runner.isSystem === true &&
+    runner.type === "embedded";
   if (isPoolEB) {
     const previousStatus = runner.status;
     await db
       .update(runners)
-      .set({ status: 'offline', lastSeen: new Date() })
+      .set({ status: "offline", lastSeen: new Date() })
       .where(eq(runners.id, runnerId));
     // Null out connection URLs so a stale `embedded_sessions` row can't hand a
     // dead pod IP to a browser that re-fetches by sessionId after the Job is
@@ -507,7 +574,7 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
     await db
       .update(embeddedSessions)
       .set({
-        status: 'stopped',
+        status: "stopped",
         userId: null,
         busySince: null,
         streamUrl: null,
@@ -517,19 +584,24 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
       })
       .where(eq(embeddedSessions.runnerId, runnerId));
 
-    if (previousStatus === 'busy' || previousStatus === 'online') {
+    if (previousStatus === "busy" || previousStatus === "online") {
       emitRunnerStatusChange({
         runnerId,
         teamId: runner.teamId,
-        status: 'offline',
+        status: "offline",
         previousStatus,
         timestamp: Date.now(),
       });
     }
 
-    console.log(`[Pool] Released EB ${runnerId.slice(0, 8)} → terminating (1-job-1-EB)`);
+    console.log(
+      `[Pool] Released EB ${runnerId.slice(0, 8)} → terminating (1-job-1-EB)`,
+    );
     teardownPoolEB(runnerId, runner.name).catch((err) => {
-      console.error(`[Pool] Tear-down failed for ${runnerId.slice(0, 8)}:`, err);
+      console.error(
+        `[Pool] Tear-down failed for ${runnerId.slice(0, 8)}:`,
+        err,
+      );
     });
     processPoolQueue().catch((err) => {
       console.error(`[Pool] Error processing queue after release:`, err);
@@ -539,33 +611,33 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
     // loaded by an EB heartbeat — but if the pool drains to 0, no heartbeats
     // fire and the loop never starts. Pulling the refill here breaks that
     // dead state without depending on any external timer.
-    const { ensureWarmPool } = await import('@/lib/eb/provisioner');
+    const { ensureWarmPool } = await import("@/lib/eb/provisioner");
     ensureWarmPool().catch((err) => {
-      console.error('[Pool] ensureWarmPool after release failed:', err);
+      console.error("[Pool] ensureWarmPool after release failed:", err);
     });
     return;
   }
 
   // Non-k8s (compose / dev): pool is fixed-size and we can't dynamically
   // provision replacements — recycle the runner so the next test reuses it.
-  if (runner.status === 'busy') {
+  if (runner.status === "busy") {
     await db
       .update(runners)
-      .set({ status: 'online', lastSeen: new Date() })
+      .set({ status: "online", lastSeen: new Date() })
       .where(eq(runners.id, runnerId));
 
     emitRunnerStatusChange({
       runnerId,
       teamId: runner.teamId,
-      status: 'online',
-      previousStatus: 'busy',
+      status: "online",
+      previousStatus: "busy",
       timestamp: Date.now(),
     });
   }
   await db
     .update(embeddedSessions)
     .set({
-      status: 'ready',
+      status: "ready",
       userId: null,
       busySince: null,
       lastActivityAt: new Date(),
@@ -589,41 +661,49 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
  * uploads, wait up to EB_SHUTDOWN_GRACE_MS for in-flight commands to settle,
  * then DELETE the Job as a fallback if the EB hasn't exited cleanly.
  */
-async function teardownPoolEB(runnerId: string, runnerName: string): Promise<void> {
+async function teardownPoolEB(
+  runnerId: string,
+  runnerName: string,
+): Promise<void> {
   const jobName = jobNameForRunnerName(runnerName);
   if (!jobName) return; // not a provisioner-created runner
 
-  const { createRunnerCommand } = await import('@/lib/db/queries');
-  const { notifyCommandQueued } = await import('@/lib/ws/runner-events');
+  const { createRunnerCommand } = await import("@/lib/db/queries");
+  const { notifyCommandQueued } = await import("@/lib/ws/runner-events");
   try {
     const cmdId = crypto.randomUUID();
     await createRunnerCommand({
       id: cmdId,
       runnerId,
-      type: 'command:shutdown',
-      status: 'pending',
-      payload: { reason: 'pool-release' },
+      type: "command:shutdown",
+      status: "pending",
+      payload: { reason: "pool-release" },
       createdAt: new Date(),
     });
     notifyCommandQueued(runnerId);
   } catch (err) {
-    console.warn(`[Pool] Failed to enqueue shutdown for ${runnerId.slice(0, 8)}:`, err);
+    console.warn(
+      `[Pool] Failed to enqueue shutdown for ${runnerId.slice(0, 8)}:`,
+      err,
+    );
   }
 
-  const graceMs = parseInt(process.env.EB_SHUTDOWN_GRACE_MS || '30000', 10);
+  const graceMs = parseInt(process.env.EB_SHUTDOWN_GRACE_MS || "30000", 10);
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
     const pendingOrClaimed = await db
       .select({ id: runnerCommands.id })
       .from(runnerCommands)
-      .where(and(
-        eq(runnerCommands.runnerId, runnerId),
-        ne(runnerCommands.status, 'completed'),
-        ne(runnerCommands.status, 'failed'),
-        ne(runnerCommands.status, 'timeout'),
-        ne(runnerCommands.status, 'cancelled'),
-      ));
+      .where(
+        and(
+          eq(runnerCommands.runnerId, runnerId),
+          ne(runnerCommands.status, "completed"),
+          ne(runnerCommands.status, "failed"),
+          ne(runnerCommands.status, "timeout"),
+          ne(runnerCommands.status, "cancelled"),
+        ),
+      );
     if (pendingOrClaimed.length === 0) break;
   }
 
@@ -650,24 +730,28 @@ export async function processPoolQueue(): Promise<void> {
     .from(backgroundJobs)
     .where(
       and(
-        eq(backgroundJobs.status, 'pending'),
+        eq(backgroundJobs.status, "pending"),
         isNull(backgroundJobs.targetRunnerId),
-      )
+      ),
     )
     .limit(1);
 
   if (!pendingJob) return;
 
-  console.log(`[Pool] Processing queued job ${pendingJob.id} (${pendingJob.type})`);
+  console.log(
+    `[Pool] Processing queued job ${pendingJob.id} (${pendingJob.type})`,
+  );
 
   // Route to the appropriate processor — they call runTests/createAndRunBuild
   // which go through executeFallbackChain → claimPoolEB naturally
   try {
-    if (pendingJob.type === 'test_run') {
-      const { processNextQueuedTestRun } = await import('@/server/actions/runs');
+    if (pendingJob.type === "test_run") {
+      const { processNextQueuedTestRun } =
+        await import("@/server/actions/runs");
       await processNextQueuedTestRun(pendingJob.repositoryId);
-    } else if (pendingJob.type === 'build_run') {
-      const { processNextQueuedBuild } = await import('@/server/actions/builds');
+    } else if (pendingJob.type === "build_run") {
+      const { processNextQueuedBuild } =
+        await import("@/server/actions/builds");
       await processNextQueuedBuild(pendingJob.repositoryId);
     }
   } catch (err) {
@@ -692,7 +776,7 @@ export async function processPoolQueue(): Promise<void> {
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
-  opts: { waitTimeoutMs?: number; purpose?: 'build' | 'interactive' } = {},
+  opts: { waitTimeoutMs?: number; purpose?: "build" | "interactive" } = {},
 ): Promise<{ runnerId: string; sessionId: string | null } | null> {
   // Fast path: an idle EB is already online. Claiming an existing EB doesn't
   // change pool size so reservation does not apply here — interactive callers
@@ -709,7 +793,7 @@ export async function claimOrProvisionPoolEB(
   // to leave provisioning headroom for recording/debug.
   const size = await currentPoolSize();
   const cap = await poolMax();
-  const reserved = opts.purpose === 'build' ? interactiveReservedSlots() : 0;
+  const reserved = opts.purpose === "build" ? interactiveReservedSlots() : 0;
   const effectiveCap = Math.max(0, cap - reserved);
   if (size >= effectiveCap) {
     if (reserved > 0) {
@@ -717,7 +801,9 @@ export async function claimOrProvisionPoolEB(
         `[Pool] At build cap (${size}/${effectiveCap}, hard cap ${cap}, reserved ${reserved} for interactive) — cannot provision new EB for build`,
       );
     } else {
-      console.warn(`[Pool] At capacity (${size}/${cap}) — cannot provision new EB`);
+      console.warn(
+        `[Pool] At capacity (${size}/${cap}) — cannot provision new EB`,
+      );
     }
     return null;
   }
@@ -739,7 +825,7 @@ export async function claimOrProvisionPoolEB(
   try {
     jobInfo = await launchEBJob();
   } catch (err) {
-    console.error('[Pool] launchEBJob failed:', err);
+    console.error("[Pool] launchEBJob failed:", err);
     releaseReservation();
     return null;
   }
@@ -757,9 +843,15 @@ export async function claimOrProvisionPoolEB(
     // Log provisioning latency every ~10s so slow Olares cold starts are visible
     // without needing to add per-poll noise. Catches startup-window race symptoms.
     const elapsedSec = Math.round((Date.now() - provisionStart) / 1000);
-    if (elapsedSec > 0 && elapsedSec % 10 === 0 && elapsedSec !== lastLoggedSecond) {
+    if (
+      elapsedSec > 0 &&
+      elapsedSec % 10 === 0 &&
+      elapsedSec !== lastLoggedSecond
+    ) {
       lastLoggedSecond = elapsedSec;
-      console.log(`[Pool] Waiting for ${expectedRunnerName} to register: ${elapsedSec}s elapsed (timeout ${waitTimeoutMs / 1000}s)`);
+      console.log(
+        `[Pool] Waiting for ${expectedRunnerName} to register: ${elapsedSec}s elapsed (timeout ${waitTimeoutMs / 1000}s)`,
+      );
     }
 
     // Transactional claim with row-level lock (SKIP LOCKED) — same pattern as
@@ -778,28 +870,37 @@ export async function claimOrProvisionPoolEB(
           sessionId: embeddedSessions.id,
         })
         .from(runners)
-        .innerJoin(embeddedSessions, and(
-          eq(embeddedSessions.runnerId, runners.id),
-          eq(embeddedSessions.status, 'ready'),
-        ))
-        .where(and(
-          eq(runners.name, expectedRunnerName),
-          eq(runners.isSystem, true),
-          eq(runners.status, 'online'),
-        ))
+        .innerJoin(
+          embeddedSessions,
+          and(
+            eq(embeddedSessions.runnerId, runners.id),
+            eq(embeddedSessions.status, "ready"),
+          ),
+        )
+        .where(
+          and(
+            eq(runners.name, expectedRunnerName),
+            eq(runners.isSystem, true),
+            eq(runners.status, "online"),
+          ),
+        )
         .limit(1)
-        .for('update', { skipLocked: true });
+        .for("update", { skipLocked: true });
 
       if (!row) return null;
 
       await tx
         .update(runners)
-        .set({ status: 'busy' as const, lastSeen: new Date() })
+        .set({ status: "busy" as const, lastSeen: new Date() })
         .where(eq(runners.id, row.id));
 
       await tx
         .update(embeddedSessions)
-        .set({ status: 'busy', busySince: new Date(), lastActivityAt: new Date() })
+        .set({
+          status: "busy",
+          busySince: new Date(),
+          lastActivityAt: new Date(),
+        })
         .where(eq(embeddedSessions.id, row.sessionId));
 
       return { runnerId: row.id, teamId: row.teamId, sessionId: row.sessionId };
@@ -820,19 +921,23 @@ export async function claimOrProvisionPoolEB(
     emitRunnerStatusChange({
       runnerId: claimResult.runnerId,
       teamId: claimResult.teamId,
-      status: 'busy',
-      previousStatus: 'online',
+      status: "busy",
+      previousStatus: "online",
       timestamp: Date.now(),
     });
 
-    console.log(`[Pool] Provisioned + claimed new EB ${claimResult.runnerId.slice(0, 8)} (${jobInfo.jobName})`);
+    console.log(
+      `[Pool] Provisioned + claimed new EB ${claimResult.runnerId.slice(0, 8)} (${jobInfo.jobName})`,
+    );
     // Runner row now exists; currentPoolSize() will see it normally.
     releaseReservation();
     return { runnerId: claimResult.runnerId, sessionId: claimResult.sessionId };
   }
 
   // Timed out waiting for registration — tear the Job back down to free the slot
-  console.warn(`[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`);
+  console.warn(
+    `[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`,
+  );
   terminateEBJob(jobInfo.jobName).catch(() => {});
   stopDevPortForward(jobInfo.jobName);
   releaseReservation();
@@ -871,13 +976,15 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
     })
     .from(runners)
     .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
-    .where(and(eq(runners.isSystem, true), eq(runners.type, 'embedded')));
+    .where(and(eq(runners.isSystem, true), eq(runners.type, "embedded")));
 
   let terminated = 0;
   let onlineReaped = 0;
   for (const row of candidates) {
-    const isOffline = row.status === 'offline';
-    const isIdle = row.status === 'online' && (!row.lastActivityAt || row.lastActivityAt < cutoff);
+    const isOffline = row.status === "offline";
+    const isIdle =
+      row.status === "online" &&
+      (!row.lastActivityAt || row.lastActivityAt < cutoff);
     if (!isOffline && !isIdle) continue;
 
     // Protect warm pool: only reap an idle-online row if doing so would still
@@ -890,9 +997,15 @@ export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
     try {
       // FK-order-respecting cleanup: children before parent.
       await db.transaction(async (tx) => {
-        await tx.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
-        await tx.delete(runnerCommandResults).where(eq(runnerCommandResults.runnerId, row.id));
-        await tx.delete(runnerCommands).where(eq(runnerCommands.runnerId, row.id));
+        await tx
+          .delete(embeddedSessions)
+          .where(eq(embeddedSessions.runnerId, row.id));
+        await tx
+          .delete(runnerCommandResults)
+          .where(eq(runnerCommandResults.runnerId, row.id));
+        await tx
+          .delete(runnerCommands)
+          .where(eq(runnerCommands.runnerId, row.id));
         await tx.delete(runners).where(eq(runners.id, row.id));
       });
       await terminateEBJob(jobName);
@@ -924,15 +1037,20 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
   const orphaned = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(and(eq(runners.isSystem, true), eq(runners.status, 'busy')))
-    .for('update');
+    .where(and(eq(runners.isSystem, true), eq(runners.status, "busy")))
+    .for("update");
 
   if (orphaned.length > 0) {
     // Flip sessions to ready first (independent of per-runner release below).
     await db
       .update(embeddedSessions)
-      .set({ status: 'ready', busySince: null, userId: null, lastActivityAt: new Date() })
-      .where(eq(embeddedSessions.status, 'busy'));
+      .set({
+        status: "ready",
+        busySince: null,
+        userId: null,
+        lastActivityAt: new Date(),
+      })
+      .where(eq(embeddedSessions.status, "busy"));
 
     // Step 2: for each orphan, go through releasePoolEB so the Job is torn
     // down (1-job-1-EB: every release terminates the EB; ensureWarmPool
@@ -941,16 +1059,21 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
     for (const row of orphaned) {
       await db
         .update(runners)
-        .set({ status: 'busy', lastSeen: new Date() })
+        .set({ status: "busy", lastSeen: new Date() })
         .where(eq(runners.id, row.id));
       try {
         await releasePoolEB(row.id);
       } catch (err) {
-        console.error(`[Boot] releasePoolEB failed for ${row.id.slice(0, 8)}:`, err);
+        console.error(
+          `[Boot] releasePoolEB failed for ${row.id.slice(0, 8)}:`,
+          err,
+        );
       }
     }
 
-    console.log(`[Boot] Reconciled ${orphaned.length} orphaned busy EB(s) via releasePoolEB`);
+    console.log(
+      `[Boot] Reconciled ${orphaned.length} orphaned busy EB(s) via releasePoolEB`,
+    );
   }
 
   // Step 3: prune phantom rows — system EB runners in the DB whose backing
@@ -965,11 +1088,13 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
       const poolRows = await db
         .select({ id: runners.id, name: runners.name })
         .from(runners)
-        .where(and(
-          eq(runners.isSystem, true),
-          eq(runners.type, 'embedded'),
-          ne(runners.status, 'offline'),
-        ));
+        .where(
+          and(
+            eq(runners.isSystem, true),
+            eq(runners.type, "embedded"),
+            ne(runners.status, "offline"),
+          ),
+        );
 
       for (const row of poolRows) {
         const jobName = jobNameForRunnerName(row.name);
@@ -978,16 +1103,24 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
         if (liveJobs.has(jobName)) continue;
 
         await db.transaction(async (tx) => {
-          await tx.delete(embeddedSessions).where(eq(embeddedSessions.runnerId, row.id));
-          await tx.delete(runnerCommandResults).where(eq(runnerCommandResults.runnerId, row.id));
-          await tx.delete(runnerCommands).where(eq(runnerCommands.runnerId, row.id));
+          await tx
+            .delete(embeddedSessions)
+            .where(eq(embeddedSessions.runnerId, row.id));
+          await tx
+            .delete(runnerCommandResults)
+            .where(eq(runnerCommandResults.runnerId, row.id));
+          await tx
+            .delete(runnerCommands)
+            .where(eq(runnerCommands.runnerId, row.id));
           await tx.delete(runners).where(eq(runners.id, row.id));
         });
         phantoms++;
-        console.log(`[Boot] Pruned phantom EB runner ${row.name} (no matching k8s Job)`);
+        console.log(
+          `[Boot] Pruned phantom EB runner ${row.name} (no matching k8s Job)`,
+        );
       }
     } catch (err) {
-      console.error('[Boot] phantom reconciliation failed:', err);
+      console.error("[Boot] phantom reconciliation failed:", err);
     }
   }
 
@@ -1001,7 +1134,9 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
  * timeouts are enforced separately by the executor.
  * Wire this into the periodic cleanup interval (alongside markStaleRunnersOffline).
  */
-export async function reapStalePoolEBs(heartbeatTimeoutMs = 90_000): Promise<number> {
+export async function reapStalePoolEBs(
+  heartbeatTimeoutMs = 90_000,
+): Promise<number> {
   const heartbeatCutoff = new Date(Date.now() - heartbeatTimeoutMs);
 
   const stale = await db
@@ -1013,21 +1148,25 @@ export async function reapStalePoolEBs(heartbeatTimeoutMs = 90_000): Promise<num
     })
     .from(embeddedSessions)
     .innerJoin(runners, eq(embeddedSessions.runnerId, runners.id))
-    .where(and(
-      eq(runners.isSystem, true),
-      eq(embeddedSessions.status, 'busy'),
-    ));
+    .where(
+      and(eq(runners.isSystem, true), eq(embeddedSessions.status, "busy")),
+    );
 
   let reaped = 0;
   for (const row of stale) {
     if (!row.lastSeen || row.lastSeen < heartbeatCutoff) {
-      await db.update(runners).set({ status: 'offline' }).where(eq(runners.id, row.runnerId));
+      await db
+        .update(runners)
+        .set({ status: "offline" })
+        .where(eq(runners.id, row.runnerId));
       await db
         .update(embeddedSessions)
-        .set({ status: 'stopped', busySince: null, userId: null })
+        .set({ status: "stopped", busySince: null, userId: null })
         .where(eq(embeddedSessions.id, row.sessionId));
       reaped++;
-      console.warn(`[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (lastSeen ${row.lastSeen?.toISOString() ?? 'never'}, busy since ${row.busySince?.toISOString() ?? 'unknown'})`);
+      console.warn(
+        `[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (lastSeen ${row.lastSeen?.toISOString() ?? "never"}, busy since ${row.busySince?.toISOString() ?? "unknown"})`,
+      );
     }
   }
   return reaped;

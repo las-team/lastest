@@ -9,7 +9,7 @@ export {
   requireTeamAdmin,
   isAuthenticated,
   type SessionData,
-} from './session';
+} from "./session";
 
 export {
   capabilitiesFor,
@@ -19,4 +19,4 @@ export {
   requireRepoCapability,
   mutation,
   type Capability,
-} from './capabilities';
+} from "./capabilities";

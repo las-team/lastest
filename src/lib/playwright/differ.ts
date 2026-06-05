@@ -1,7 +1,7 @@
-import pixelmatch from 'pixelmatch';
-import { PNG } from 'pngjs';
-import fs from 'fs';
-import path from 'path';
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
+import fs from "fs";
+import path from "path";
 
 export interface DiffResult {
   baseline: string;
@@ -18,7 +18,7 @@ export async function compareImages(
   baselinePath: string,
   currentPath: string,
   outputPath: string,
-  threshold: number = 0.1
+  threshold: number = 0.1,
 ): Promise<DiffResult> {
   // Read images
   const baselineData = fs.readFileSync(baselinePath);
@@ -45,7 +45,7 @@ export async function compareImages(
     diff.data,
     width,
     height,
-    { threshold }
+    { threshold },
   );
 
   // Calculate percentage
@@ -89,12 +89,14 @@ function resizeImage(img: PNG, width: number, height: number): PNG {
 export async function compareScreenshots(
   baselineDir: string,
   currentDir: string,
-  outputDir: string
+  outputDir: string,
 ): Promise<DiffResult[]> {
   const results: DiffResult[] = [];
 
   // Get all screenshots from baseline
-  const baselineFiles = fs.readdirSync(baselineDir).filter(f => f.endsWith('.png'));
+  const baselineFiles = fs
+    .readdirSync(baselineDir)
+    .filter((f) => f.endsWith(".png"));
 
   for (const file of baselineFiles) {
     const baselinePath = path.join(baselineDir, file);
@@ -118,7 +120,7 @@ export interface ComparisonSummary {
 }
 
 export function summarizeComparison(results: DiffResult[]): ComparisonSummary {
-  const matching = results.filter(r => r.match).length;
+  const matching = results.filter((r) => r.match).length;
 
   return {
     total: results.length,

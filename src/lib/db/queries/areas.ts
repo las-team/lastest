@@ -1,11 +1,7 @@
-import { db } from '../index';
-import {
-  functionalAreas,
-  tests,
-  testSpecs,
-} from '../schema';
-import { getTestsByRepo, getLatestStatusMapForTestIds } from './tests';
-import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { db } from "../index";
+import { functionalAreas, tests, testSpecs } from "../schema";
+import { getTestsByRepo, getLatestStatusMapForTestIds } from "./tests";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 
 // Functional Areas Tree
 export interface FunctionalAreaWithChildren {
@@ -19,17 +15,28 @@ export interface FunctionalAreaWithChildren {
   planGeneratedAt: Date | null;
   planSnapshot: string | null;
   children: FunctionalAreaWithChildren[];
-  tests: { id: string; name: string; specTitle: string | null; latestStatus: string | null; isPlaceholder?: boolean }[];
+  tests: {
+    id: string;
+    name: string;
+    specTitle: string | null;
+    latestStatus: string | null;
+    isPlaceholder?: boolean;
+  }[];
 }
 
-export async function getFunctionalAreasTree(repositoryId: string): Promise<FunctionalAreaWithChildren[]> {
+export async function getFunctionalAreasTree(
+  repositoryId: string,
+): Promise<FunctionalAreaWithChildren[]> {
   const areas = await db
     .select()
     .from(functionalAreas)
-    .where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)))
-    .orderBy(functionalAreas.orderIndex, functionalAreas.name)
-    ;
-
+    .where(
+      and(
+        eq(functionalAreas.repositoryId, repositoryId),
+        isNull(functionalAreas.deletedAt),
+      ),
+    )
+    .orderBy(functionalAreas.orderIndex, functionalAreas.name);
   const allTests = await getTestsByRepo(repositoryId);
   const testsByArea = new Map<string, typeof allTests>();
 
@@ -41,7 +48,9 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     }
   }
 
-  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
+  const statusMap = await getLatestStatusMapForTestIds(
+    allTests.map((t) => t.id),
+  );
 
   // Fetch spec titles for tests via the 1:1 link
   const specTitleByTestId = new Map<string, string>();
@@ -49,8 +58,14 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     const rows = await db
       .select({ testId: testSpecs.testId, title: testSpecs.title })
       .from(testSpecs)
-      .where(inArray(testSpecs.testId, allTests.map(t => t.id)));
-    for (const r of rows) if (r.testId) specTitleByTestId.set(r.testId, r.title);
+      .where(
+        inArray(
+          testSpecs.testId,
+          allTests.map((t) => t.id),
+        ),
+      );
+    for (const r of rows)
+      if (r.testId) specTitleByTestId.set(r.testId, r.title);
   }
 
   // Build tree structure
@@ -62,7 +77,13 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
     areaMap.set(area.id, {
       ...area,
       children: [],
-      tests: areaTests.map(t => ({ id: t.id, name: t.name, specTitle: specTitleByTestId.get(t.id) ?? null, latestStatus: statusMap.get(t.id)?.status ?? null, isPlaceholder: t.isPlaceholder ?? false })),
+      tests: areaTests.map((t) => ({
+        id: t.id,
+        name: t.name,
+        specTitle: specTitleByTestId.get(t.id) ?? null,
+        latestStatus: statusMap.get(t.id)?.status ?? null,
+        isPlaceholder: t.isPlaceholder ?? false,
+      })),
     });
   }
 
@@ -78,16 +99,30 @@ export async function getFunctionalAreasTree(repositoryId: string): Promise<Func
   return rootAreas;
 }
 
-export async function updateFunctionalAreaParent(id: string, parentId: string | null) {
-  await db.update(functionalAreas).set({ parentId }).where(eq(functionalAreas.id, id));
+export async function updateFunctionalAreaParent(
+  id: string,
+  parentId: string | null,
+) {
+  await db
+    .update(functionalAreas)
+    .set({ parentId })
+    .where(eq(functionalAreas.id, id));
 }
 
-export async function reorderFunctionalAreas(repositoryId: string, orderedIds: string[]) {
+export async function reorderFunctionalAreas(
+  repositoryId: string,
+  orderedIds: string[],
+) {
   for (let i = 0; i < orderedIds.length; i++) {
     await db
       .update(functionalAreas)
       .set({ orderIndex: i })
-      .where(and(eq(functionalAreas.id, orderedIds[i]), eq(functionalAreas.repositoryId, repositoryId)));
+      .where(
+        and(
+          eq(functionalAreas.id, orderedIds[i]),
+          eq(functionalAreas.repositoryId, repositoryId),
+        ),
+      );
   }
 }
 
@@ -95,7 +130,13 @@ export async function getOrCreateRoutesFolder(repositoryId: string) {
   const [existing] = await db
     .select()
     .from(functionalAreas)
-    .where(and(eq(functionalAreas.repositoryId, repositoryId), eq(functionalAreas.name, 'Routes'), eq(functionalAreas.isRouteFolder, true)));
+    .where(
+      and(
+        eq(functionalAreas.repositoryId, repositoryId),
+        eq(functionalAreas.name, "Routes"),
+        eq(functionalAreas.isRouteFolder, true),
+      ),
+    );
 
   if (existing) return existing;
 
@@ -103,14 +144,24 @@ export async function getOrCreateRoutesFolder(repositoryId: string) {
   await db.insert(functionalAreas).values({
     id,
     repositoryId,
-    name: 'Routes',
+    name: "Routes",
     isRouteFolder: true,
     orderIndex: 0,
   });
 
-  return { id, repositoryId, name: 'Routes', parentId: null, isRouteFolder: true, orderIndex: 0 };
+  return {
+    id,
+    repositoryId,
+    name: "Routes",
+    parentId: null,
+    isRouteFolder: true,
+    orderIndex: 0,
+  };
 }
 
 export async function moveTestToArea(testId: string, areaId: string | null) {
-  await db.update(tests).set({ functionalAreaId: areaId, updatedAt: new Date() }).where(eq(tests.id, testId));
+  await db
+    .update(tests)
+    .set({ functionalAreaId: areaId, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }

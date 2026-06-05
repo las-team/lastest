@@ -6,9 +6,9 @@
  * one at a time (or in runs) on a fresh BrowserContext.
  */
 
-import type { Browser, Page, BrowserContext } from 'playwright';
-import type { StabilizationPayload } from './protocol.js';
-import { setupFreezeScripts } from './stabilization.js';
+import type { Browser, Page, BrowserContext } from "playwright";
+import type { StabilizationPayload } from "./protocol.js";
+import { setupFreezeScripts } from "./stabilization.js";
 
 // Types matching the protocol definitions
 export interface DebugStep {
@@ -17,12 +17,20 @@ export interface DebugStep {
   label: string;
   lineStart: number;
   lineEnd: number;
-  type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  type:
+    | "action"
+    | "navigation"
+    | "assertion"
+    | "screenshot"
+    | "wait"
+    | "variable"
+    | "log"
+    | "other";
 }
 
 export interface DebugStepResult {
   stepId: number;
-  status: 'passed' | 'failed' | 'pending';
+  status: "passed" | "failed" | "pending";
   durationMs: number;
   error?: string;
 }
@@ -30,7 +38,13 @@ export interface DebugStepResult {
 export interface DebugStatePayload {
   sessionId: string;
   testId: string;
-  status: 'initializing' | 'paused' | 'stepping' | 'running' | 'completed' | 'error';
+  status:
+    | "initializing"
+    | "paused"
+    | "stepping"
+    | "running"
+    | "completed"
+    | "error";
   currentStepIndex: number;
   steps: DebugStep[];
   stepResults: DebugStepResult[];
@@ -54,7 +68,12 @@ export interface StartDebugPayload {
 
 export interface DebugActionPayload {
   sessionId: string;
-  action: 'step_forward' | 'step_back' | 'run_to_end' | 'run_to_step' | 'update_code';
+  action:
+    | "step_forward"
+    | "step_back"
+    | "run_to_end"
+    | "run_to_step"
+    | "update_code";
   stepIndex?: number;
   code?: string;
   cleanBody?: string;
@@ -65,30 +84,34 @@ export interface DebugActionPayload {
 
 class StopError extends Error {
   constructor() {
-    super('Debug execution stopped');
-    this.name = 'StopError';
+    super("Debug execution stopped");
+    this.name = "StopError";
   }
 }
 
 class PauseController {
-  private mode: 'paused' | 'running' | 'run_to_step' | 'stopped';
+  private mode: "paused" | "running" | "run_to_step" | "stopped";
   private target: number;
   private pendingResolve: (() => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
   private onPause: () => void;
 
-  constructor(mode: 'paused' | 'running' | 'run_to_step', target: number, onPause: () => void) {
+  constructor(
+    mode: "paused" | "running" | "run_to_step",
+    target: number,
+    onPause: () => void,
+  ) {
     this.mode = mode;
     this.target = target;
     this.onPause = onPause;
   }
 
   async waitIfNeeded(stepIdx: number): Promise<void> {
-    if (this.mode === 'stopped') throw new StopError();
-    if (this.mode === 'running') return;
-    if (this.mode === 'run_to_step' && stepIdx < this.target) return;
+    if (this.mode === "stopped") throw new StopError();
+    if (this.mode === "running") return;
+    if (this.mode === "run_to_step" && stepIdx < this.target) return;
 
-    if (this.mode === 'run_to_step') this.mode = 'paused';
+    if (this.mode === "run_to_step") this.mode = "paused";
     this.onPause();
 
     return new Promise<void>((resolve, reject) => {
@@ -97,7 +120,7 @@ class PauseController {
     });
   }
 
-  resume(newMode: 'paused' | 'running' | 'run_to_step', target?: number): void {
+  resume(newMode: "paused" | "running" | "run_to_step", target?: number): void {
     this.mode = newMode;
     if (target !== undefined) this.target = target;
     const resolve = this.pendingResolve;
@@ -107,7 +130,7 @@ class PauseController {
   }
 
   stop(): void {
-    this.mode = 'stopped';
+    this.mode = "stopped";
     const reject = this.pendingReject;
     this.pendingResolve = null;
     this.pendingReject = null;
@@ -123,17 +146,17 @@ export class EmbeddedDebugExecutor {
   private debugPage: Page | null = null;
   private pauseController: PauseController | null = null;
 
-  private sessionId = '';
-  private testId = '';
-  private code = '';
-  private cleanBody = '';
+  private sessionId = "";
+  private testId = "";
+  private code = "";
+  private cleanBody = "";
   private steps: DebugStep[] = [];
   private stepResults: DebugStepResult[] = [];
   private currentStepIndex = -1;
-  private status: DebugStatePayload['status'] = 'initializing';
+  private status: DebugStatePayload["status"] = "initializing";
   private error?: string;
   private codeVersion = 0;
-  private targetUrl = '';
+  private targetUrl = "";
   private viewport = { width: 1280, height: 720 };
   private storageState?: string;
   private setupVariables?: Record<string, unknown>;
@@ -150,9 +173,13 @@ export class EmbeddedDebugExecutor {
     this.code = payload.code;
     this.cleanBody = payload.cleanBody;
     this.steps = payload.steps;
-    this.stepResults = payload.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
+    this.stepResults = payload.steps.map((s) => ({
+      stepId: s.id,
+      status: "pending" as const,
+      durationMs: 0,
+    }));
     this.currentStepIndex = -1;
-    this.status = 'initializing';
+    this.status = "initializing";
     this.error = undefined;
     this.codeVersion = 0;
     this.targetUrl = payload.targetUrl;
@@ -167,20 +194,23 @@ export class EmbeddedDebugExecutor {
     // Navigate to target URL
     if (this.debugPage && this.targetUrl) {
       try {
-        await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.debugPage.goto(this.targetUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
       } catch (err) {
-        console.error('[DebugExecutor] Navigation failed:', err);
+        console.error("[DebugExecutor] Navigation failed:", err);
       }
     }
 
     this.currentStepIndex = 0;
-    this.status = 'paused';
+    this.status = "paused";
 
     // Start the execution loop in background
     const gen = this.generation;
-    this.runExecution(gen).catch(err => {
+    this.runExecution(gen).catch((err) => {
       if (this.generation === gen) {
-        this.status = 'error';
+        this.status = "error";
         this.error = err?.message || String(err);
       }
     });
@@ -193,57 +223,72 @@ export class EmbeddedDebugExecutor {
     await this.createContextAndPage();
     if (this.debugPage && this.targetUrl) {
       try {
-        await this.debugPage.goto(this.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.debugPage.goto(this.targetUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
       } catch (err) {
-        console.error('[DebugExecutor] Navigation failed on replay:', err);
+        console.error("[DebugExecutor] Navigation failed on replay:", err);
       }
     }
-    this.stepResults = this.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
+    this.stepResults = this.steps.map((s) => ({
+      stepId: s.id,
+      status: "pending" as const,
+      durationMs: 0,
+    }));
     this.currentStepIndex = 0;
-    this.status = 'running';
+    this.status = "running";
     this.error = undefined;
     this.generation++;
     const gen = this.generation;
-    this.runExecution(gen, targetStep).catch(err => {
+    this.runExecution(gen, targetStep).catch((err) => {
       if (this.generation === gen) {
-        this.status = 'error';
+        this.status = "error";
         this.error = err?.message || String(err);
       }
     });
   }
 
-  async handleAction(action: string, payload?: DebugActionPayload): Promise<void> {
+  async handleAction(
+    action: string,
+    payload?: DebugActionPayload,
+  ): Promise<void> {
     switch (action) {
-      case 'step_forward':
+      case "step_forward":
         if (this.pauseController) {
-          this.status = 'stepping';
-          this.pauseController.resume('paused');
+          this.status = "stepping";
+          this.pauseController.resume("paused");
         }
         break;
 
-      case 'step_back': {
+      case "step_back": {
         if (this.currentStepIndex <= 0) break;
         await this.replayToStep(this.currentStepIndex - 1);
         break;
       }
 
-      case 'run_to_end':
+      case "run_to_end":
         if (this.pauseController) {
-          this.status = 'running';
-          this.pauseController.resume('running');
+          this.status = "running";
+          this.pauseController.resume("running");
         }
         break;
 
-      case 'run_to_step': {
+      case "run_to_step": {
         if (payload?.stepIndex === undefined) break;
         const targetIdx = payload.stepIndex;
         if (targetIdx < 0 || targetIdx >= this.steps.length) break;
         if (targetIdx === this.currentStepIndex) break;
 
-        if (targetIdx > this.currentStepIndex && this.pauseController && this.status !== 'completed' && this.status !== 'error') {
+        if (
+          targetIdx > this.currentStepIndex &&
+          this.pauseController &&
+          this.status !== "completed" &&
+          this.status !== "error"
+        ) {
           // FORWARD: resume existing execution
-          this.status = 'running';
-          this.pauseController.resume('run_to_step', targetIdx);
+          this.status = "running";
+          this.pauseController.resume("run_to_step", targetIdx);
         } else {
           // BACKWARD or forward from completed/error: full replay
           await this.replayToStep(targetIdx);
@@ -251,7 +296,7 @@ export class EmbeddedDebugExecutor {
         break;
       }
 
-      case 'update_code':
+      case "update_code":
         if (payload?.steps && payload?.cleanBody) {
           this.steps = payload.steps;
           this.cleanBody = payload.cleanBody;
@@ -259,24 +304,39 @@ export class EmbeddedDebugExecutor {
           this.codeVersion++;
 
           // Check if changes affect already-executed steps
-          const executedCount = this.stepResults.filter(r => r.status === 'passed').length;
+          const executedCount = this.stepResults.filter(
+            (r) => r.status === "passed",
+          ).length;
           if (executedCount > 0 && payload.steps.length > 0) {
             // Resize stepResults to match new steps
-            const newResults: DebugStepResult[] = payload.steps.map((s, idx) => {
-              if (idx < this.stepResults.length && this.stepResults[idx].status === 'passed') {
-                return this.stepResults[idx];
-              }
-              return { stepId: s.id, status: 'pending' as const, durationMs: 0 };
-            });
+            const newResults: DebugStepResult[] = payload.steps.map(
+              (s, idx) => {
+                if (
+                  idx < this.stepResults.length &&
+                  this.stepResults[idx].status === "passed"
+                ) {
+                  return this.stepResults[idx];
+                }
+                return {
+                  stepId: s.id,
+                  status: "pending" as const,
+                  durationMs: 0,
+                };
+              },
+            );
             this.stepResults = newResults;
 
             // If current step is past the changed area, warn
             if (this.currentStepIndex < payload.steps.length) {
-              this.error = 'Step back to apply code changes';
-              this.status = 'error';
+              this.error = "Step back to apply code changes";
+              this.status = "error";
             }
           } else {
-            this.stepResults = payload.steps.map(s => ({ stepId: s.id, status: 'pending' as const, durationMs: 0 }));
+            this.stepResults = payload.steps.map((s) => ({
+              stepId: s.id,
+              status: "pending" as const,
+              durationMs: 0,
+            }));
           }
         }
         break;
@@ -286,7 +346,7 @@ export class EmbeddedDebugExecutor {
   async stop(): Promise<void> {
     this.pauseController?.stop();
     this.pauseController = null;
-    this.status = 'completed';
+    this.status = "completed";
     await this.cleanupContextAndPage();
   }
 
@@ -316,16 +376,29 @@ export class EmbeddedDebugExecutor {
     if (this.storageState) {
       try {
         parsedStorageState = JSON.parse(this.storageState);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
-    const needsStabilized = this.stabilization?.crossOsConsistency || this.stabilization?.freezeAnimations;
+    const needsStabilized =
+      this.stabilization?.crossOsConsistency ||
+      this.stabilization?.freezeAnimations;
 
     this.context = await this.browser.newContext({
       viewport: this.viewport,
       ...(parsedStorageState ? { storageState: parsedStorageState } : {}),
-      ...(needsStabilized ? { deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light' as const } : {}),
-      ...(this.stabilization?.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+      ...(needsStabilized
+        ? {
+            deviceScaleFactor: 1,
+            locale: "en-US",
+            timezoneId: "UTC",
+            colorScheme: "light" as const,
+          }
+        : {}),
+      ...(this.stabilization?.freezeAnimations
+        ? { reducedMotion: "reduce" as const }
+        : {}),
     });
 
     this.debugPage = await this.context.newPage();
@@ -355,67 +428,151 @@ export class EmbeddedDebugExecutor {
 
     // Build helpers
     const logFn = (level: string, message: string) => {
-      console.log(`  [${level.toUpperCase()}] [debug:${this.testId}] ${message}`);
+      console.log(
+        `  [${level.toUpperCase()}] [debug:${this.testId}] ${message}`,
+      );
     };
 
     const stepLogger = {
-      log: (msg: string) => logFn('info', `Step: ${msg}`),
-      warn: (msg: string) => logFn('warn', `[WARN] ${msg}`),
-      error: (msg: string) => logFn('error', `Step error: ${msg}`),
-      softExpect: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
-      softAction: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* soft */ } },
+      log: (msg: string) => logFn("info", `Step: ${msg}`),
+      warn: (msg: string) => logFn("warn", `[WARN] ${msg}`),
+      error: (msg: string) => logFn("error", `Step error: ${msg}`),
+      softExpect: async (fn: () => Promise<void>) => {
+        try {
+          await fn();
+        } catch {
+          /* soft */
+        }
+      },
+      softAction: async (fn: () => Promise<void>) => {
+        try {
+          await fn();
+        } catch {
+          /* soft */
+        }
+      },
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const expect = (target: any, message?: string) => {
-      const msgPrefix = message ? `${message}: ` : '';
-      const isPage = typeof target?.goto === 'function';
-      const isLocator = typeof target?.click === 'function' && typeof target?.fill === 'function';
+      const msgPrefix = message ? `${message}: ` : "";
+      const isPage = typeof target?.goto === "function";
+      const isLocator =
+        typeof target?.click === "function" &&
+        typeof target?.fill === "function";
       if (isPage) {
         return {
           async toHaveTitle(expected: string | RegExp) {
             const title = await target.title();
-            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-            if (!regex.test(title)) throw new Error(`${msgPrefix}Expected title "${title}" to match ${regex}`);
+            const regex =
+              typeof expected === "string" ? new RegExp(expected) : expected;
+            if (!regex.test(title))
+              throw new Error(
+                `${msgPrefix}Expected title "${title}" to match ${regex}`,
+              );
           },
           async toHaveURL(expected: string | RegExp) {
             const url = target.url();
-            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-            if (!regex.test(url)) throw new Error(`${msgPrefix}Expected URL "${url}" to match ${regex}`);
+            const regex =
+              typeof expected === "string" ? new RegExp(expected) : expected;
+            if (!regex.test(url))
+              throw new Error(
+                `${msgPrefix}Expected URL "${url}" to match ${regex}`,
+              );
           },
         };
       }
       if (isLocator) {
         return {
-          async toBeVisible() { if (!await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be visible`); },
-          async toBeHidden() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element to be hidden`); },
+          async toBeVisible() {
+            if (!(await target.isVisible()))
+              throw new Error(`${msgPrefix}Expected element to be visible`);
+          },
+          async toBeHidden() {
+            if (await target.isVisible())
+              throw new Error(`${msgPrefix}Expected element to be hidden`);
+          },
           async toHaveText(expected: string | RegExp) {
-            const text = await target.textContent() || '';
-            const regex = typeof expected === 'string' ? new RegExp(expected) : expected;
-            if (!regex.test(text)) throw new Error(`${msgPrefix}Expected text "${text}" to match ${regex}`);
+            const text = (await target.textContent()) || "";
+            const regex =
+              typeof expected === "string" ? new RegExp(expected) : expected;
+            if (!regex.test(text))
+              throw new Error(
+                `${msgPrefix}Expected text "${text}" to match ${regex}`,
+              );
           },
           async toContainText(expected: string) {
-            const text = await target.textContent() || '';
-            if (!text.includes(expected)) throw new Error(`${msgPrefix}Expected text to contain "${expected}"`);
+            const text = (await target.textContent()) || "";
+            if (!text.includes(expected))
+              throw new Error(
+                `${msgPrefix}Expected text to contain "${expected}"`,
+              );
           },
           not: {
-            async toBeVisible() { if (await target.isVisible()) throw new Error(`${msgPrefix}Expected element not to be visible`); },
+            async toBeVisible() {
+              if (await target.isVisible())
+                throw new Error(
+                  `${msgPrefix}Expected element not to be visible`,
+                );
+            },
           },
         };
       }
       return {
-        toBe(expected: unknown) { if (target !== expected) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
-        toEqual(expected: unknown) { if (JSON.stringify(target) !== JSON.stringify(expected)) throw new Error(`${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`); },
-        toBeTruthy() { if (!target) throw new Error(`${msgPrefix}Expected value to be truthy but got ${target}`); },
-        toBeFalsy() { if (target) throw new Error(`${msgPrefix}Expected value to be falsy but got ${target}`); },
-        toContain(expected: unknown) {
-          if (Array.isArray(target)) { if (!target.includes(expected)) throw new Error(`${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`); }
-          else if (typeof target === 'string') { if (!target.includes(expected as string)) throw new Error(`${msgPrefix}Expected string to contain "${expected}"`); }
+        toBe(expected: unknown) {
+          if (target !== expected)
+            throw new Error(
+              `${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`,
+            );
         },
-        toHaveLength(expected: number) { if (target?.length !== expected) throw new Error(`${msgPrefix}Expected length ${expected} but got ${target?.length}`); },
+        toEqual(expected: unknown) {
+          if (JSON.stringify(target) !== JSON.stringify(expected))
+            throw new Error(
+              `${msgPrefix}Expected ${JSON.stringify(expected)} but got ${JSON.stringify(target)}`,
+            );
+        },
+        toBeTruthy() {
+          if (!target)
+            throw new Error(
+              `${msgPrefix}Expected value to be truthy but got ${target}`,
+            );
+        },
+        toBeFalsy() {
+          if (target)
+            throw new Error(
+              `${msgPrefix}Expected value to be falsy but got ${target}`,
+            );
+        },
+        toContain(expected: unknown) {
+          if (Array.isArray(target)) {
+            if (!target.includes(expected))
+              throw new Error(
+                `${msgPrefix}Expected array to contain ${JSON.stringify(expected)}`,
+              );
+          } else if (typeof target === "string") {
+            if (!target.includes(expected as string))
+              throw new Error(
+                `${msgPrefix}Expected string to contain "${expected}"`,
+              );
+          }
+        },
+        toHaveLength(expected: number) {
+          if (target?.length !== expected)
+            throw new Error(
+              `${msgPrefix}Expected length ${expected} but got ${target?.length}`,
+            );
+        },
         not: {
-          toBe(expected: unknown) { if (target === expected) throw new Error(`${msgPrefix}Expected not to be ${JSON.stringify(expected)}`); },
-          toBeTruthy() { if (target) throw new Error(`${msgPrefix}Expected value not to be truthy`); },
+          toBe(expected: unknown) {
+            if (target === expected)
+              throw new Error(
+                `${msgPrefix}Expected not to be ${JSON.stringify(expected)}`,
+              );
+          },
+          toBeTruthy() {
+            if (target)
+              throw new Error(`${msgPrefix}Expected value not to be truthy`);
+          },
         },
       };
     };
@@ -428,27 +585,41 @@ export class EmbeddedDebugExecutor {
       action: string,
       value?: string | null,
       coords?: { x: number; y: number } | null,
-      options?: Record<string, unknown> | null
+      options?: Record<string, unknown> | null,
     ) => {
       const validSelectors = selectors
         .map((sel: unknown) => {
-          if (typeof sel === 'string') return { type: 'css', value: sel };
-          if (sel && typeof sel === 'object' && 'type' in sel && 'value' in sel) return sel as { type: string; value: string };
-          const legacy = sel as { selector?: string; css?: string; text?: string };
-          return { type: 'css', value: legacy?.selector || legacy?.css || legacy?.text || '' };
+          if (typeof sel === "string") return { type: "css", value: sel };
+          if (sel && typeof sel === "object" && "type" in sel && "value" in sel)
+            return sel as { type: string; value: string };
+          const legacy = sel as {
+            selector?: string;
+            css?: string;
+            text?: string;
+          };
+          return {
+            type: "css",
+            value: legacy?.selector || legacy?.css || legacy?.text || "",
+          };
         })
-        .filter((s: { type: string; value: string }) => s.value && s.value.trim() && !s.value.includes('undefined'));
+        .filter(
+          (s: { type: string; value: string }) =>
+            s.value && s.value.trim() && !s.value.includes("undefined"),
+        );
 
       for (const sel of validSelectors) {
         try {
           let locator;
-          if (sel.type === 'ocr-text') {
-            const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+          if (sel.type === "ocr-text") {
+            const text = sel.value.replace(/^ocr-text="/, "").replace(/"$/, "");
             locator = pg.getByText(text, { exact: false });
-          } else if (sel.type === 'role-name') {
+          } else if (sel.type === "role-name") {
             const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
             if (match) {
-              locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+              locator = pg.getByRole(
+                match[1] as "button" | "link" | "heading",
+                { name: match[2] },
+              );
             } else {
               locator = pg.locator(sel.value);
             }
@@ -459,12 +630,13 @@ export class EmbeddedDebugExecutor {
           const target = locator.first();
           await target.waitFor({ timeout: 3000 });
 
-          if (action === 'locate') return target;
-          if (action === 'click') await target.click(options || {});
-          else if (action === 'fill') await target.fill(value || '');
-          else if (action === 'selectOption') await target.selectOption(value || '');
-          else if (action === 'check') await target.check();
-          else if (action === 'uncheck') await target.uncheck();
+          if (action === "locate") return target;
+          if (action === "click") await target.click(options || {});
+          else if (action === "fill") await target.fill(value || "");
+          else if (action === "selectOption")
+            await target.selectOption(value || "");
+          else if (action === "check") await target.check();
+          else if (action === "uncheck") await target.uncheck();
 
           return target;
         } catch {
@@ -472,22 +644,25 @@ export class EmbeddedDebugExecutor {
         }
       }
 
-      if (action === 'click' && coords) {
+      if (action === "click" && coords) {
         await pg.mouse.click(coords.x, coords.y, options || {});
         return;
       }
-      if (action === 'fill' && coords) {
+      if (action === "fill" && coords) {
         await pg.mouse.click(coords.x, coords.y);
-        await pg.keyboard.press('Control+a');
-        await pg.keyboard.type(value || '');
+        await pg.keyboard.press("Control+a");
+        await pg.keyboard.type(value || "");
         return;
       }
 
-      throw new Error('No selector matched: ' + JSON.stringify(validSelectors));
+      throw new Error("No selector matched: " + JSON.stringify(validSelectors));
     };
 
     // replayCursorPath (instant in debug mode)
-    const replayCursorPath = async (pg: Page, moves: [number, number, number][]) => {
+    const replayCursorPath = async (
+      pg: Page,
+      moves: [number, number, number][],
+    ) => {
       for (const [x, y] of moves) {
         await pg.mouse.move(x, y);
       }
@@ -505,17 +680,21 @@ export class EmbeddedDebugExecutor {
     }
     // Final checkpoint marks last step as done
     codeParts.push(`await __checkpoint(${steps.length});`);
-    const instrumentedBody = codeParts.join('\n');
+    const instrumentedBody = codeParts.join("\n");
 
     // Create pause controller
-    const initialMode = runToStep !== undefined ? 'run_to_step' : 'paused';
+    const initialMode = runToStep !== undefined ? "run_to_step" : "paused";
     const initialTarget = runToStep ?? 0;
 
-    this.pauseController = new PauseController(initialMode, initialTarget, () => {
-      if (this.generation === gen) {
-        this.status = 'paused';
-      }
-    });
+    this.pauseController = new PauseController(
+      initialMode,
+      initialTarget,
+      () => {
+        if (this.generation === gen) {
+          this.status = "paused";
+        }
+      },
+    );
 
     const controller = this.pauseController;
     const totalSteps = steps.length;
@@ -531,7 +710,7 @@ export class EmbeddedDebugExecutor {
         const prev = n - 1;
         this.stepResults[prev] = {
           stepId: steps[prev].id,
-          status: 'passed',
+          status: "passed",
           durationMs: now - stepStartTimes[prev],
         };
         this.currentStepIndex = prev;
@@ -547,25 +726,33 @@ export class EmbeddedDebugExecutor {
 
       await controller.waitIfNeeded(n);
       if (this.generation !== gen) throw new StopError();
-      if (this.status !== 'running') {
-        this.status = 'stepping';
+      if (this.status !== "running") {
+        this.status = "stepping";
       }
     };
 
     // Execute instrumented function
     try {
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      const AsyncFunction = Object.getPrototypeOf(
+        async function () {},
+      ).constructor;
 
       const debugFn = new AsyncFunction(
-        'page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect',
-        'locateWithFallback', 'replayCursorPath', '__checkpoint',
-        instrumentedBody
+        "page",
+        "baseUrl",
+        "screenshotPath",
+        "stepLogger",
+        "expect",
+        "locateWithFallback",
+        "replayCursorPath",
+        "__checkpoint",
+        instrumentedBody,
       );
 
       await debugFn(
         page,
-        this.targetUrl.replace(/\/+$/, ''),
-        'screenshot.png',
+        this.targetUrl.replace(/\/+$/, ""),
+        "screenshot.png",
         stepLogger,
         expect,
         locateWithFallback,
@@ -574,7 +761,7 @@ export class EmbeddedDebugExecutor {
       );
 
       if (this.generation === gen) {
-        this.status = 'completed';
+        this.status = "completed";
         this.currentStepIndex = steps.length - 1;
       }
     } catch (err) {
@@ -587,13 +774,13 @@ export class EmbeddedDebugExecutor {
         if (executingStepIdx >= 0 && executingStepIdx < totalSteps) {
           this.stepResults[executingStepIdx] = {
             stepId: steps[executingStepIdx].id,
-            status: 'failed',
+            status: "failed",
             durationMs: Date.now() - stepStartTimes[executingStepIdx],
             error: err instanceof Error ? err.message : String(err),
           };
           this.currentStepIndex = executingStepIdx;
         }
-        this.status = 'error';
+        this.status = "error";
         this.error = err instanceof Error ? err.message : String(err);
       }
     }

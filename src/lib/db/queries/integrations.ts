@@ -1,11 +1,11 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   specImports,
   googleSheetsAccounts,
   googleSheetsDataSources,
   composeConfigs,
   agentSessions,
-} from '../schema';
+} from "../schema";
 import type {
   NewSpecImport,
   NewGoogleSheetsAccount,
@@ -16,12 +16,14 @@ import type {
   AgentStepState,
   AgentStepId,
   AgentSessionMetadata,
-} from '../schema';
-import { eq, desc, and, or, isNotNull, lt } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { eq, desc, and, or, isNotNull, lt } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // Spec Imports
-export async function createSpecImport(data: Omit<NewSpecImport, 'id' | 'createdAt'>) {
+export async function createSpecImport(
+  data: Omit<NewSpecImport, "id" | "createdAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(specImports).values({ ...data, id, createdAt: now });
@@ -30,13 +32,26 @@ export async function createSpecImport(data: Omit<NewSpecImport, 'id' | 'created
 
 export async function updateSpecImport(
   id: string,
-  data: Partial<Pick<NewSpecImport, 'status' | 'extractedStories' | 'areasCreated' | 'testsCreated' | 'error' | 'completedAt'>>
+  data: Partial<
+    Pick<
+      NewSpecImport,
+      | "status"
+      | "extractedStories"
+      | "areasCreated"
+      | "testsCreated"
+      | "error"
+      | "completedAt"
+    >
+  >,
 ) {
   await db.update(specImports).set(data).where(eq(specImports.id, id));
 }
 
 export async function getSpecImport(id: string) {
-  const [row] = await db.select().from(specImports).where(eq(specImports.id, id));
+  const [row] = await db
+    .select()
+    .from(specImports)
+    .where(eq(specImports.id, id));
   return row;
 }
 
@@ -55,13 +70,13 @@ export async function getLatestSpecImportForRepo(repositoryId: string) {
     .where(
       and(
         eq(specImports.repositoryId, repositoryId),
-        eq(specImports.status, 'completed'),
+        eq(specImports.status, "completed"),
         isNotNull(specImports.extractedStories),
-      )
+      ),
     )
     .orderBy(desc(specImports.createdAt))
     .limit(1)
-    .then(rows => rows[0] ?? null);
+    .then((rows) => rows[0] ?? null);
 }
 
 // ============================================
@@ -126,7 +141,7 @@ export async function upsertGoogleSheetsAccount(data: {
 export async function updateGoogleSheetsAccountTokens(
   accountId: string,
   accessToken: string,
-  tokenExpiresAt: Date
+  tokenExpiresAt: Date,
 ) {
   await db
     .update(googleSheetsAccounts)
@@ -165,15 +180,18 @@ export async function getGoogleSheetsDataSource(id: string) {
   return row || null;
 }
 
-export async function getGoogleSheetsDataSourceByAlias(repositoryId: string, alias: string) {
+export async function getGoogleSheetsDataSourceByAlias(
+  repositoryId: string,
+  alias: string,
+) {
   const [row] = await db
     .select()
     .from(googleSheetsDataSources)
     .where(
       and(
         eq(googleSheetsDataSources.repositoryId, repositoryId),
-        eq(googleSheetsDataSources.alias, alias)
-      )
+        eq(googleSheetsDataSources.alias, alias),
+      ),
     );
   return row || null;
 }
@@ -226,7 +244,7 @@ export async function updateGoogleSheetsDataSource(
     cachedHeaders: string[] | null;
     cachedData: string[][] | null;
     lastSyncedAt: Date;
-  }>
+  }>,
 ) {
   await db
     .update(googleSheetsDataSources)
@@ -248,25 +266,33 @@ export async function getComposeConfig(repositoryId: string, branch: string) {
   const [row] = await db
     .select()
     .from(composeConfigs)
-    .where(and(
-      eq(composeConfigs.repositoryId, repositoryId),
-      eq(composeConfigs.branch, branch),
-    ));
+    .where(
+      and(
+        eq(composeConfigs.repositoryId, repositoryId),
+        eq(composeConfigs.branch, branch),
+      ),
+    );
   return row ?? null;
 }
 
 export async function upsertComposeConfig(
   repositoryId: string,
   branch: string,
-  data: { selectedTestIds: string[]; excludedTestIds: string[]; versionOverrides: Record<string, string> },
+  data: {
+    selectedTestIds: string[];
+    excludedTestIds: string[];
+    versionOverrides: Record<string, string>;
+  },
 ) {
   const [existing] = await db
     .select()
     .from(composeConfigs)
-    .where(and(
-      eq(composeConfigs.repositoryId, repositoryId),
-      eq(composeConfigs.branch, branch),
-    ));
+    .where(
+      and(
+        eq(composeConfigs.repositoryId, repositoryId),
+        eq(composeConfigs.branch, branch),
+      ),
+    );
 
   if (existing) {
     await db
@@ -299,7 +325,7 @@ export async function upsertComposeConfig(
 // Agent Sessions
 // ============================================
 
-export async function createAgentSession(data: Omit<NewAgentSession, 'id'>) {
+export async function createAgentSession(data: Omit<NewAgentSession, "id">) {
   const id = uuid();
   const now = new Date();
   await db.insert(agentSessions).values({
@@ -308,19 +334,30 @@ export async function createAgentSession(data: Omit<NewAgentSession, 'id'>) {
     createdAt: now,
     updatedAt: now,
   });
-  const [row] = await db.select().from(agentSessions).where(eq(agentSessions.id, id));
+  const [row] = await db
+    .select()
+    .from(agentSessions)
+    .where(eq(agentSessions.id, id));
   return row!;
 }
 
 export async function getAgentSession(id: string) {
-  const [row] = await db.select().from(agentSessions).where(eq(agentSessions.id, id));
+  const [row] = await db
+    .select()
+    .from(agentSessions)
+    .where(eq(agentSessions.id, id));
   return row;
 }
 
-export async function getActiveAgentSession(repositoryId: string, kind: 'play' | 'quickstart' = 'play') {
+export async function getActiveAgentSession(
+  repositoryId: string,
+  kind: "play" | "quickstart" = "play",
+) {
   // Opportunistic sweep so a stale "active" row doesn't keep the activity
   // feed spinning forever. Cheap when there's nothing to do.
-  await sweepStuckAgentSessions().catch(() => { /* sweep is best-effort */ });
+  await sweepStuckAgentSessions().catch(() => {
+    /* sweep is best-effort */
+  });
 
   const [row] = await db
     .select()
@@ -330,8 +367,8 @@ export async function getActiveAgentSession(repositoryId: string, kind: 'play' |
         eq(agentSessions.repositoryId, repositoryId),
         eq(agentSessions.kind, kind),
         or(
-          eq(agentSessions.status, 'active'),
-          eq(agentSessions.status, 'paused'),
+          eq(agentSessions.status, "active"),
+          eq(agentSessions.status, "paused"),
         ),
       ),
     )
@@ -369,7 +406,7 @@ export async function sweepStuckAgentSessions(idleMs: number = 60 * 60 * 1000) {
     .from(agentSessions)
     .where(
       and(
-        eq(agentSessions.status, 'active'),
+        eq(agentSessions.status, "active"),
         lt(agentSessions.updatedAt, cutoff),
       ),
     );
@@ -377,15 +414,19 @@ export async function sweepStuckAgentSessions(idleMs: number = 60 * 60 * 1000) {
 
   const now = new Date();
   for (const s of stuck) {
-    const steps: AgentStepState[] = (s.steps ?? []).map(step =>
-      step.status === 'active' || step.status === 'waiting_user'
-        ? { ...step, status: 'failed' as const, error: 'Session timed out — no progress for over an hour.' }
+    const steps: AgentStepState[] = (s.steps ?? []).map((step) =>
+      step.status === "active" || step.status === "waiting_user"
+        ? {
+            ...step,
+            status: "failed" as const,
+            error: "Session timed out — no progress for over an hour.",
+          }
         : step,
     );
     await db
       .update(agentSessions)
       .set({
-        status: 'failed',
+        status: "failed",
         steps,
         completedAt: now,
         updatedAt: now,

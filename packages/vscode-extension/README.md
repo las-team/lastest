@@ -29,21 +29,21 @@ Run AI-powered visual regression tests, watch live progress, and jump to screens
 
 ## Configuration
 
-| Setting | Type | Default | Description |
-| --- | --- | --- | --- |
-| `lastest.serverUrl` | string | `http://localhost:3000` | URL of the Lastest server. |
-| `lastest.apiToken` | string | `""` | Bearer token used for API and WebSocket auth. |
-| `lastest.autoRefresh` | boolean | `true` | Automatically refresh the test list after runs complete. |
-| `lastest.showStatusBar` | boolean | `true` | Show Lastest connection and test status in the status bar. |
+| Setting                 | Type    | Default                 | Description                                                |
+| ----------------------- | ------- | ----------------------- | ---------------------------------------------------------- |
+| `lastest.serverUrl`     | string  | `http://localhost:3000` | URL of the Lastest server.                                 |
+| `lastest.apiToken`      | string  | `""`                    | Bearer token used for API and WebSocket auth.              |
+| `lastest.autoRefresh`   | boolean | `true`                  | Automatically refresh the test list after runs complete.   |
+| `lastest.showStatusBar` | boolean | `true`                  | Show Lastest connection and test status in the status bar. |
 
 ## Commands
 
-| Command | ID | Where |
-| --- | --- | --- |
-| Run Test | `lastest.runTest` | Inline action on a test or functional area in the Test Explorer. |
-| Run All Tests | `lastest.runAllTests` | Test Explorer view title. |
-| Refresh Tests | `lastest.refreshTests` | Test Explorer view title. |
-| Open in Browser | `lastest.openInBrowser` | Inline action on a test — opens it in the Lastest dashboard. |
+| Command         | ID                      | Where                                                            |
+| --------------- | ----------------------- | ---------------------------------------------------------------- |
+| Run Test        | `lastest.runTest`       | Inline action on a test or functional area in the Test Explorer. |
+| Run All Tests   | `lastest.runAllTests`   | Test Explorer view title.                                        |
+| Refresh Tests   | `lastest.refreshTests`  | Test Explorer view title.                                        |
+| Open in Browser | `lastest.openInBrowser` | Inline action on a test — opens it in the Lastest dashboard.     |
 
 ## Links
 

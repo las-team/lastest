@@ -1,4 +1,10 @@
-export type AIProviderType = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
+export type AIProviderType =
+  | "claude-cli"
+  | "openrouter"
+  | "claude-agent-sdk"
+  | "ollama"
+  | "openai"
+  | "anthropic";
 
 export interface GenerateOptions {
   prompt: string;
@@ -9,7 +15,7 @@ export interface GenerateOptions {
   signal?: AbortSignal;
   /** Request structured JSON output. Forwarded as `response_format: { type: 'json_object' }`
    *  to providers that support it (OpenRouter, OpenAI). Other providers ignore it. */
-  responseFormat?: 'json_object';
+  responseFormat?: "json_object";
 }
 
 export interface StreamCallbacks {
@@ -20,7 +26,10 @@ export interface StreamCallbacks {
 
 export interface AIProvider {
   generate(options: GenerateOptions): Promise<string>;
-  generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void>;
+  generateStream(
+    options: GenerateOptions,
+    callbacks: StreamCallbacks,
+  ): Promise<void>;
   generateWithTools?(options: GenerateWithToolsOptions): Promise<string>;
 }
 
@@ -57,10 +66,13 @@ export interface AIProviderConfig {
   openrouterApiKey?: string | null;
   openrouterModel?: string;
   customInstructions?: string | null;
-  agentSdkPermissionMode?: 'plan' | 'default' | 'acceptEdits';
+  agentSdkPermissionMode?: "plan" | "default" | "acceptEdits";
   agentSdkModel?: string;
   agentSdkWorkingDir?: string;
-  agentSdkMcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  agentSdkMcpServers?: Record<
+    string,
+    { command: string; args?: string[]; env?: Record<string, string> }
+  >;
   agentSdkStrictMcpConfig?: boolean;
   agentSdkAllowedTools?: string[];
   agentSdkDisallowedTools?: string[];
@@ -72,13 +84,17 @@ export interface AIProviderConfig {
   openaiModel?: string;
 }
 
-export type DiscoverySource = 'file-scan' | 'nav-link' | 'mcp-explore' | 'manual';
+export type DiscoverySource =
+  | "file-scan"
+  | "nav-link"
+  | "mcp-explore"
+  | "manual";
 
 export interface ScanContext {
   discoverySource: DiscoverySource;
   sourceFilePath?: string;
   framework?: string;
-  routerType?: 'hash' | 'browser';
+  routerType?: "hash" | "browser";
   navLabel?: string;
   navSourceFile?: string;
   specDescription?: string;

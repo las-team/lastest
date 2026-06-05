@@ -1,22 +1,27 @@
-import { SetupPageClient } from './setup-page-client';
-import { AddRepoEmptyState } from '../tests/add-repo-empty-state';
+import { SetupPageClient } from "./setup-page-client";
+import { AddRepoEmptyState } from "../tests/add-repo-empty-state";
 import {
   getSelectedRepository,
   getRepositoriesByTeam,
   getPlaywrightSettings,
-} from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { getSetupScripts, getAvailableSetupTests } from '@/server/actions/setup-scripts';
-import { getSetupConfigs } from '@/server/actions/setup-configs';
-import { getDefaultSetupSteps } from '@/server/actions/setup-steps';
-import { getDefaultTeardownSteps } from '@/server/actions/teardown-steps';
-import { listStorageStates } from '@/server/actions/storage-states';
+} from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import {
+  getSetupScripts,
+  getAvailableSetupTests,
+} from "@/server/actions/setup-scripts";
+import { getSetupConfigs } from "@/server/actions/setup-configs";
+import { getDefaultSetupSteps } from "@/server/actions/setup-steps";
+import { getDefaultTeardownSteps } from "@/server/actions/teardown-steps";
+import { listStorageStates } from "@/server/actions/storage-states";
 
 export default async function SetupPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
+  const selectedRepo = teamId
+    ? await getSelectedRepository(userId, teamId)
+    : null;
 
   if (!selectedRepo) {
     const repos = teamId ? await getRepositoriesByTeam(teamId) : [];

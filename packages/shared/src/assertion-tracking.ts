@@ -42,7 +42,7 @@ export function instrumentAssertionTracking(
     return { instrumentedBody: body, wrappedCount: 0 };
   }
 
-  const lines = body.split('\n');
+  const lines = body.split("\n");
   let assertionIdx = 0;
 
   for (let i = 0; i < lines.length && assertionIdx < assertions.length; i++) {
@@ -63,9 +63,10 @@ export function instrumentAssertionTracking(
     const id = assertions[assertionIdx].id;
     const inner = awaitKw ? `${awaitKw}${stmt}` : stmt;
 
-    lines[i] = `${indent}await __assertion(${JSON.stringify(id)}, async () => { ${inner} });`;
+    lines[i] =
+      `${indent}await __assertion(${JSON.stringify(id)}, async () => { ${inner} });`;
     assertionIdx++;
   }
 
-  return { instrumentedBody: lines.join('\n'), wrappedCount: assertionIdx };
+  return { instrumentedBody: lines.join("\n"), wrappedCount: assertionIdx };
 }

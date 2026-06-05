@@ -7,19 +7,26 @@
  * Every function is idempotent and safe to run on every tick.
  */
 
-import * as queries from '@/lib/db/queries';
-import { currentWeekStartPT, weekEndPT, nextWeekStartPT } from './time';
-import { pickWinnerSlug } from './velocity';
-import type { LaunchCohort } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { currentWeekStartPT, weekEndPT, nextWeekStartPT } from "./time";
+import { pickWinnerSlug } from "./velocity";
+import type { LaunchCohort } from "@/lib/db/schema";
 
 // Drizzle wraps the driver error and hangs the real PostgresError (with
 // `.code`) off `.cause`, so check both levels.
 function isUniqueViolation(err: unknown): boolean {
   for (let cur: unknown = err, depth = 0; cur && depth < 3; depth++) {
-    if (typeof cur === 'object' && 'code' in cur && (cur as { code?: string }).code === '23505') {
+    if (
+      typeof cur === "object" &&
+      "code" in cur &&
+      (cur as { code?: string }).code === "23505"
+    ) {
       return true;
     }
-    cur = typeof cur === 'object' && 'cause' in cur ? (cur as { cause?: unknown }).cause : undefined;
+    cur =
+      typeof cur === "object" && "cause" in cur
+        ? (cur as { cause?: unknown }).cause
+        : undefined;
   }
   return false;
 }
@@ -31,7 +38,7 @@ async function ensureCohortForWeek(weekStart: Date): Promise<LaunchCohort> {
     return await queries.createCohort({
       weekStartAt: weekStart,
       weekEndAt: weekEndPT(weekStart),
-      state: 'open',
+      state: "open",
       winnerSlug: null,
     });
   } catch (err) {
@@ -48,14 +55,19 @@ async function ensureCohortForWeek(weekStart: Date): Promise<LaunchCohort> {
  * Ensure both the current week's cohort and the upcoming week's cohort exist.
  * Returns the upcoming `open` cohort — the home for newly queued submissions.
  */
-export async function ensureUpcomingCohort(now: Date = new Date()): Promise<LaunchCohort> {
+export async function ensureUpcomingCohort(
+  now: Date = new Date(),
+): Promise<LaunchCohort> {
   const thisWeek = currentWeekStartPT(now);
   await ensureCohortForWeek(thisWeek);
   return ensureCohortForWeek(nextWeekStartPT(thisWeek));
 }
 
 /** Recompute votes, pick the velocity winner, and lock a cohort. Returns the winner slug. */
-export async function lockCohortNow(cohortId: string, now: Date = new Date()): Promise<string | null> {
+export async function lockCohortNow(
+  cohortId: string,
+  now: Date = new Date(),
+): Promise<string | null> {
   await queries.clearSuspiciousVotes(cohortId);
   const featured = await queries.listFeaturedProfilesByCohort(cohortId);
   const cohort = await queries.getCohortById(cohortId);
@@ -71,25 +83,27 @@ export async function lockCohortNow(cohortId: string, now: Date = new Date()): P
  *  - voting → locked (winner decided) once the week has ended
  *  - locked → closed once a newer week has begun
  */
-export async function processLaunchCohorts(now: Date = new Date()): Promise<void> {
+export async function processLaunchCohorts(
+  now: Date = new Date(),
+): Promise<void> {
   await ensureUpcomingCohort(now);
   const thisWeekStart = currentWeekStartPT(now);
 
-  for (const c of await queries.listCohortsByStateAsc(['open'])) {
+  for (const c of await queries.listCohortsByStateAsc(["open"])) {
     if (c.weekStartAt && c.weekStartAt.getTime() <= now.getTime()) {
-      await queries.setCohortState(c.id, 'voting');
+      await queries.setCohortState(c.id, "voting");
     }
   }
 
-  for (const c of await queries.listCohortsByStateAsc(['voting'])) {
+  for (const c of await queries.listCohortsByStateAsc(["voting"])) {
     if (c.weekEndAt && c.weekEndAt.getTime() < now.getTime()) {
       await lockCohortNow(c.id, now);
     }
   }
 
-  for (const c of await queries.listCohortsByStateAsc(['locked'])) {
+  for (const c of await queries.listCohortsByStateAsc(["locked"])) {
     if (c.weekStartAt && c.weekStartAt.getTime() < thisWeekStart.getTime()) {
-      await queries.setCohortState(c.id, 'closed');
+      await queries.setCohortState(c.id, "closed");
     }
   }
 }

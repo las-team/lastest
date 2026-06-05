@@ -1,11 +1,15 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { compareBranches } from '@/lib/github/content';
-import { findAffectedTests, findUnaffectedTests, type AffectedTest } from '@/lib/smart-selection/file-matcher';
-import { createAndRunBuild } from './builds';
-import type { TriggerType } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { compareBranches } from "@/lib/github/content";
+import {
+  findAffectedTests,
+  findUnaffectedTests,
+  type AffectedTest,
+} from "@/lib/smart-selection/file-matcher";
+import { createAndRunBuild } from "./builds";
+import type { TriggerType } from "@/lib/db/schema";
 
 export interface SmartRunAnalysis {
   currentBranch: string;
@@ -22,19 +26,19 @@ export interface SmartRunAnalysis {
  * Uses GitHub API to compare the selected branch against the default branch
  */
 export async function analyzeSmartRun(
-  repositoryId: string | null
+  repositoryId: string | null,
 ): Promise<SmartRunAnalysis> {
   // Check if we have a repository ID
   if (repositoryId) await requireRepoAccess(repositoryId);
   if (!repositoryId) {
     return {
-      currentBranch: '',
-      baseBranch: '',
+      currentBranch: "",
+      baseBranch: "",
       changedFiles: [],
       affectedTests: [],
       skippedTests: [],
       isAvailable: false,
-      unavailableReason: 'No repository selected',
+      unavailableReason: "No repository selected",
     };
   }
 
@@ -42,33 +46,35 @@ export async function analyzeSmartRun(
   const repo = await queries.getRepository(repositoryId);
   if (!repo) {
     return {
-      currentBranch: '',
-      baseBranch: '',
+      currentBranch: "",
+      baseBranch: "",
       changedFiles: [],
       affectedTests: [],
       skippedTests: [],
       isAvailable: false,
-      unavailableReason: 'Repository not found',
+      unavailableReason: "Repository not found",
     };
   }
 
   // Get GitHub account for API access (team-scoped)
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
   if (!account?.accessToken) {
     return {
-      currentBranch: '',
-      baseBranch: '',
+      currentBranch: "",
+      baseBranch: "",
       changedFiles: [],
       affectedTests: [],
       skippedTests: [],
       isAvailable: false,
-      unavailableReason: 'GitHub not connected',
+      unavailableReason: "GitHub not connected",
     };
   }
 
   // Determine branches to compare
-  const currentBranch = repo.selectedBranch || repo.defaultBranch || 'main';
-  const baseBranch = repo.defaultBranch || 'main';
+  const currentBranch = repo.selectedBranch || repo.defaultBranch || "main";
+  const baseBranch = repo.defaultBranch || "main";
 
   // If on the same branch as base, smart run isn't useful
   if (currentBranch === baseBranch) {
@@ -89,7 +95,7 @@ export async function analyzeSmartRun(
     repo.owner,
     repo.name,
     baseBranch,
-    currentBranch
+    currentBranch,
   );
 
   if (!comparison) {
@@ -100,7 +106,8 @@ export async function analyzeSmartRun(
       affectedTests: [],
       skippedTests: [],
       isAvailable: false,
-      unavailableReason: 'Failed to compare branches. Check if both branches exist.',
+      unavailableReason:
+        "Failed to compare branches. Check if both branches exist.",
     };
   }
 
@@ -116,7 +123,7 @@ export async function analyzeSmartRun(
       affectedTests: [],
       skippedTests: [],
       isAvailable: false,
-      unavailableReason: 'No changed files between branches',
+      unavailableReason: "No changed files between branches",
     };
   }
 
@@ -133,7 +140,7 @@ export async function analyzeSmartRun(
       affectedTests: [],
       skippedTests,
       isAvailable: false,
-      unavailableReason: 'No tests match the changed files',
+      unavailableReason: "No tests match the changed files",
     };
   }
 
@@ -152,17 +159,17 @@ export async function analyzeSmartRun(
  */
 export async function runSmartBuild(
   repositoryId: string | null,
-  runnerId?: string
+  runnerId?: string,
 ): Promise<{ buildId: string; testCount: number } | { error: string }> {
   // Get analysis
   const analysis = await analyzeSmartRun(repositoryId);
 
   if (!analysis.isAvailable) {
-    return { error: analysis.unavailableReason || 'Smart run not available' };
+    return { error: analysis.unavailableReason || "Smart run not available" };
   }
 
   if (analysis.affectedTests.length === 0) {
-    return { error: 'No tests to run' };
+    return { error: "No tests to run" };
   }
 
   // Get affected test IDs
@@ -170,10 +177,10 @@ export async function runSmartBuild(
 
   // Run the build with only affected tests
   const result = await createAndRunBuild(
-    'manual' as TriggerType,
+    "manual" as TriggerType,
     testIds,
     repositoryId,
-    runnerId
+    runnerId,
   );
 
   return {
@@ -192,18 +199,21 @@ export async function runSmartBuild(
 export async function runVerifyBuild(
   repositoryId: string | null,
   runnerId?: string,
-): Promise<{ buildId: string; testCount: number; fallback?: boolean; reason?: string } | { error: string }> {
-  if (!repositoryId) return { error: 'No repository selected' };
+): Promise<
+  | { buildId: string; testCount: number; fallback?: boolean; reason?: string }
+  | { error: string }
+> {
+  if (!repositoryId) return { error: "No repository selected" };
 
   const smart = await runSmartBuild(repositoryId, runnerId);
-  if (!('error' in smart)) {
+  if (!("error" in smart)) {
     return smart;
   }
 
   // Fallback: run every test on the repo.
   try {
     const result = await createAndRunBuild(
-      'manual' as TriggerType,
+      "manual" as TriggerType,
       undefined,
       repositoryId,
       runnerId,
@@ -217,6 +227,6 @@ export async function runVerifyBuild(
   } catch (e) {
     // If even the run-all path fails, surface that error — it's a real
     // blocker (no tests defined, runner pool offline, etc.).
-    return { error: e instanceof Error ? e.message : 'Failed to start build' };
+    return { error: e instanceof Error ? e.message : "Failed to start build" };
   }
 }

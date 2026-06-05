@@ -1,6 +1,6 @@
-import { redirect } from 'next/navigation';
-import * as queries from '@/lib/db/queries';
-import { InviteForm } from './invite-form';
+import { redirect } from "next/navigation";
+import * as queries from "@/lib/db/queries";
+import { InviteForm } from "./invite-form";
 
 export default async function InvitePage({
   searchParams,
@@ -10,13 +10,17 @@ export default async function InvitePage({
   const params = await searchParams;
 
   if (!params.token) {
-    redirect('/register');
+    redirect("/register");
   }
 
   const invite = await queries.getInvitationByToken(params.token);
 
-  if (!invite || invite.acceptedAt || (invite.expiresAt && invite.expiresAt < new Date())) {
-    redirect('/register');
+  if (
+    !invite ||
+    invite.acceptedAt ||
+    (invite.expiresAt && invite.expiresAt < new Date())
+  ) {
+    redirect("/register");
   }
 
   return (

@@ -8,8 +8,8 @@
 export interface RunnerStatusEvent {
   runnerId: string;
   teamId: string;
-  status: 'online' | 'offline' | 'busy';
-  previousStatus?: 'online' | 'offline' | 'busy';
+  status: "online" | "offline" | "busy";
+  previousStatus?: "online" | "offline" | "busy";
   timestamp: number;
 }
 
@@ -51,7 +51,7 @@ export function emitRunnerStatusChange(event: RunnerStatusEvent): void {
     try {
       listener(event);
     } catch (error) {
-      console.error('[RunnerEvents] Listener error:', error);
+      console.error("[RunnerEvents] Listener error:", error);
     }
   }
 }
@@ -74,11 +74,14 @@ const globalCommandWaiters = globalThis as typeof globalThis & {
   __runnerCommandListenInit?: Promise<void> | null;
 };
 if (!globalCommandWaiters.__runnerCommandWaiters) {
-  globalCommandWaiters.__runnerCommandWaiters = new Map<string, CommandWaiter>();
+  globalCommandWaiters.__runnerCommandWaiters = new Map<
+    string,
+    CommandWaiter
+  >();
 }
 const commandWaiters = globalCommandWaiters.__runnerCommandWaiters;
 
-const COMMAND_CHANNEL = 'runner_cmd_queued';
+const COMMAND_CHANNEL = "runner_cmd_queued";
 
 function wakeLocalWaiter(runnerId: string): void {
   const waiter = commandWaiters.get(runnerId);
@@ -95,13 +98,16 @@ function ensureListening(): Promise<void> {
   }
   globalCommandWaiters.__runnerCommandListenInit = (async () => {
     try {
-      const { sql } = await import('@/lib/db');
+      const { sql } = await import("@/lib/db");
       await sql.listen(COMMAND_CHANNEL, (payload: string) => {
         if (payload) wakeLocalWaiter(payload);
       });
-      console.log('[RunnerEvents] Listening for command-queued notifications');
+      console.log("[RunnerEvents] Listening for command-queued notifications");
     } catch (error) {
-      console.error('[RunnerEvents] Failed to subscribe to command NOTIFY channel:', error);
+      console.error(
+        "[RunnerEvents] Failed to subscribe to command NOTIFY channel:",
+        error,
+      );
       // Reset so a later call can retry
       globalCommandWaiters.__runnerCommandListenInit = null;
       throw error;
@@ -152,10 +158,13 @@ export function notifyCommandQueued(runnerId: string): void {
   wakeLocalWaiter(runnerId);
   void (async () => {
     try {
-      const { sql } = await import('@/lib/db');
+      const { sql } = await import("@/lib/db");
       await sql.notify(COMMAND_CHANNEL, runnerId);
     } catch (error) {
-      console.error('[RunnerEvents] Failed to broadcast command NOTIFY:', error);
+      console.error(
+        "[RunnerEvents] Failed to broadcast command NOTIFY:",
+        error,
+      );
     }
   })();
 }

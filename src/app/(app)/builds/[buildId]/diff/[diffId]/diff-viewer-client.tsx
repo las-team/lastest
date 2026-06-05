@@ -1,36 +1,74 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { SliderComparison, type FocusRegionRect, type IgnoreRegionRect } from '@/components/diff/slider-comparison';
-import { SwipeDeck } from '@/components/diff/swipe-deck-client';
-import { useIsMobile } from '@/lib/hooks/use-is-mobile';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { approveDiff, undoApproval, addDiffTodo, addFocusRegion, removeFocusRegion, addIgnoreRegionForDiff, removeIgnoreRegionForDiff, submitDiffAsIssue } from '@/server/actions/diffs';
-import { toast } from 'sonner';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
-import type { VisualDiff, Test, DiffMetadata, AIDiffAnalysis, A11yViolation, NetworkRequest, DownloadRecord, DomDiffResult, VisualDiffWithTestStatus, TextDiffStatus } from '@/lib/db/schema';
-import type { DiffLine } from '@/lib/diff/text-diff';
-import { TextDiffPanel } from '@/components/diffs/text-diff-panel';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  SliderComparison,
+  type FocusRegionRect,
+  type IgnoreRegionRect,
+} from "@/components/diff/slider-comparison";
+import { SwipeDeck } from "@/components/diff/swipe-deck-client";
+import { useIsMobile } from "@/lib/hooks/use-is-mobile";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  approveDiff,
+  undoApproval,
+  addDiffTodo,
+  addFocusRegion,
+  removeFocusRegion,
+  addIgnoreRegionForDiff,
+  removeIgnoreRegionForDiff,
+  submitDiffAsIssue,
+} from "@/server/actions/diffs";
+import { toast } from "sonner";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
+import type {
+  VisualDiff,
+  Test,
+  DiffMetadata,
+  AIDiffAnalysis,
+  A11yViolation,
+  NetworkRequest,
+  DownloadRecord,
+  DomDiffResult,
+  VisualDiffWithTestStatus,
+  TextDiffStatus,
+} from "@/lib/db/schema";
+import type { DiffLine } from "@/lib/diff/text-diff";
+import { TextDiffPanel } from "@/components/diffs/text-diff-panel";
 
-type StripStatus = 'failed' | 'changed' | 'todo' | 'approved';
+type StripStatus = "failed" | "changed" | "todo" | "approved";
 
 function deriveStripStatus(d: VisualDiffWithTestStatus): StripStatus {
-  if (d.testResultStatus === 'failed' || d.status === 'rejected' || d.errorMessage) return 'failed';
-  if (d.status === 'todo') return 'todo';
-  if (d.status === 'approved' || d.status === 'auto_approved') return 'approved';
-  if (d.classification === 'unchanged' || (d.pixelDifference ?? 0) === 0) return 'approved';
-  if (d.status === 'pending' && (d.pixelDifference ?? 0) > 0) return 'changed';
-  return 'changed';
+  if (
+    d.testResultStatus === "failed" ||
+    d.status === "rejected" ||
+    d.errorMessage
+  )
+    return "failed";
+  if (d.status === "todo") return "todo";
+  if (d.status === "approved" || d.status === "auto_approved")
+    return "approved";
+  if (d.classification === "unchanged" || (d.pixelDifference ?? 0) === 0)
+    return "approved";
+  if (d.status === "pending" && (d.pixelDifference ?? 0) > 0) return "changed";
+  return "changed";
 }
 
 const stripStatusBar: Record<StripStatus, string> = {
-  failed: 'bg-red-500',
-  changed: 'bg-yellow-500',
-  todo: 'bg-amber-500',
-  approved: 'bg-green-500',
+  failed: "bg-red-500",
+  changed: "bg-yellow-500",
+  todo: "bg-amber-500",
+  approved: "bg-green-500",
 };
 
 const STRIP_TILE_WIDTH = 96;
@@ -68,11 +106,16 @@ function DiffStrip({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const currentIndex = Math.max(0, allDiffs.findIndex((d) => d.id === currentDiffId));
+  const currentIndex = Math.max(
+    0,
+    allDiffs.findIndex((d) => d.id === currentDiffId),
+  );
   const totalWidth = allDiffs.length * STRIP_STEP - STRIP_TILE_GAP;
   const maxOffset = Math.max(0, totalWidth - containerWidth);
-  const desiredOffset = currentIndex * STRIP_STEP - (containerWidth - STRIP_TILE_WIDTH) / 2;
-  const offset = containerWidth > 0 ? Math.max(0, Math.min(maxOffset, desiredOffset)) : 0;
+  const desiredOffset =
+    currentIndex * STRIP_STEP - (containerWidth - STRIP_TILE_WIDTH) / 2;
+  const offset =
+    containerWidth > 0 ? Math.max(0, Math.min(maxOffset, desiredOffset)) : 0;
 
   return (
     <div ref={containerRef} className="relative w-full overflow-hidden pb-2">
@@ -81,8 +124,10 @@ function DiffStrip({
         style={{
           gap: `${STRIP_TILE_GAP}px`,
           transform: `translate3d(${-offset}px, 0, 0)`,
-          transition: transitionEnabled ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
-          willChange: 'transform',
+          transition: transitionEnabled
+            ? "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)"
+            : "none",
+          willChange: "transform",
         }}
       >
         {allDiffs.map((d, i) => {
@@ -92,10 +137,10 @@ function DiffStrip({
             <Link
               key={d.id}
               href={buildDiffUrl(d.id)}
-              title={`${d.testName ?? 'unnamed'} · ${d.stepLabel ?? `step ${i + 1}`} · ${status}`}
+              title={`${d.testName ?? "unnamed"} · ${d.stepLabel ?? `step ${i + 1}`} · ${status}`}
               style={{ width: STRIP_TILE_WIDTH }}
               className={`flex-none rounded overflow-hidden border border-border bg-card transition ${
-                isCurrent ? 'ring-2 ring-primary' : 'hover:opacity-80'
+                isCurrent ? "ring-2 ring-primary" : "hover:opacity-80"
               }`}
             >
               {d.currentImagePath ? (
@@ -107,7 +152,10 @@ function DiffStrip({
                   className="w-full object-cover"
                 />
               ) : (
-                <div style={{ height: STRIP_TILE_HEIGHT }} className="w-full bg-muted" />
+                <div
+                  style={{ height: STRIP_TILE_HEIGHT }}
+                  className="w-full bg-muted"
+                />
               )}
               <div className={`h-1 w-full ${stripStatusBar[status]}`} />
               <div className="text-center font-mono text-[10px] py-0.5 text-muted-foreground">
@@ -120,15 +168,42 @@ function DiffStrip({
     </div>
   );
 }
-import { A11yViolationsPanel } from '@/components/builds/a11y-violations-panel';
-import { RuntimeErrorsPanel, stripRuntimeErrorsFromMessage } from '@/components/builds/runtime-errors-panel';
-import { CheckCircle, ListTodo, SkipForward, Eye, Image as ImageIcon, Sparkles, Loader2, ArrowUpDown, Bug, ChevronDown, Code2, Crosshair, EyeOff, CircleAlert, ExternalLink } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
+import { A11yViolationsPanel } from "@/components/builds/a11y-violations-panel";
+import {
+  RuntimeErrorsPanel,
+  stripRuntimeErrorsFromMessage,
+} from "@/components/builds/runtime-errors-panel";
+import {
+  CheckCircle,
+  ListTodo,
+  SkipForward,
+  Eye,
+  Image as ImageIcon,
+  Sparkles,
+  Loader2,
+  ArrowUpDown,
+  Bug,
+  ChevronDown,
+  Code2,
+  Crosshair,
+  EyeOff,
+  CircleAlert,
+  ExternalLink,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface DiffViewerClientProps {
-  diff: VisualDiff & { test: Test | null; errorMessage?: string | null; a11yViolations?: A11yViolation[] | null; consoleErrors?: string[] | null; networkRequests?: NetworkRequest[] | null; networkBodiesPath?: string | null; downloads?: DownloadRecord[] | null };
+  diff: VisualDiff & {
+    test: Test | null;
+    errorMessage?: string | null;
+    a11yViolations?: A11yViolation[] | null;
+    consoleErrors?: string[] | null;
+    networkRequests?: NetworkRequest[] | null;
+    networkBodiesPath?: string | null;
+    downloads?: DownloadRecord[] | null;
+  };
   buildId: string;
   prevDiffId?: string;
   nextDiffId?: string;
@@ -144,33 +219,56 @@ interface DiffViewerClientProps {
   } | null;
 }
 
-export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiMode = false, enableDomDiff = false, initialFocusRegions = [], initialIgnoreRegions = [], allDiffs = [], textDiff = null }: DiffViewerClientProps) {
+export function DiffViewerClient({
+  diff,
+  buildId,
+  prevDiffId,
+  nextDiffId,
+  banAiMode = false,
+  enableDomDiff = false,
+  initialFocusRegions = [],
+  initialIgnoreRegions = [],
+  allDiffs = [],
+  textDiff = null,
+}: DiffViewerClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
-  const viewParam = searchParams.get('view') as 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare' | null;
+  const viewParam = searchParams.get("view") as
+    | "slider"
+    | "side-by-side"
+    | "overlay"
+    | "three-way"
+    | "planned-vs-actual"
+    | "shift-compare"
+    | null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [showUndo, setShowUndo] = useState(false);
   const [undoTimeout, setUndoTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showTodoInput, setShowTodoInput] = useState(false);
-  const [todoDescription, setTodoDescription] = useState('');
+  const [todoDescription, setTodoDescription] = useState("");
   const todoInputRef = useRef<HTMLInputElement>(null);
   const currentViewMode = useRef(viewParam);
 
-  const buildDiffUrl = useCallback((diffId: string) => {
-    const base = `/builds/${buildId}/diff/${diffId}`;
-    return currentViewMode.current ? `${base}?view=${currentViewMode.current}` : base;
-  }, [buildId]);
+  const buildDiffUrl = useCallback(
+    (diffId: string) => {
+      const base = `/builds/${buildId}/diff/${diffId}`;
+      return currentViewMode.current
+        ? `${base}?view=${currentViewMode.current}`
+        : base;
+    },
+    [buildId],
+  );
 
   const handleViewModeChange = useCallback((mode: string) => {
     currentViewMode.current = mode as typeof viewParam;
     const url = new URL(window.location.href);
-    url.searchParams.set('view', mode);
-    window.history.replaceState(null, '', url.toString());
+    url.searchParams.set("view", mode);
+    window.history.replaceState(null, "", url.toString());
   }, []);
 
   const handleApprove = useCallback(async () => {
-    if (isProcessing || diff.status === 'approved') return;
+    if (isProcessing || diff.status === "approved") return;
 
     setIsProcessing(true);
     try {
@@ -196,16 +294,23 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
         }, 500);
       }
     } catch (error) {
-      console.error('Failed to approve:', error);
+      console.error("Failed to approve:", error);
     } finally {
       setIsProcessing(false);
     }
-   
-  }, [diff.id, diff.status, isProcessing, nextDiffId, buildId, router, buildDiffUrl]);
+  }, [
+    diff.id,
+    diff.status,
+    isProcessing,
+    nextDiffId,
+    buildId,
+    router,
+    buildDiffUrl,
+  ]);
 
   const handleAddTodo = useCallback(async () => {
     if (!todoDescription.trim()) return;
-    if (isProcessing || diff.status === 'todo') return;
+    if (isProcessing || diff.status === "todo") return;
 
     setIsProcessing(true);
     try {
@@ -215,10 +320,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
         buildId,
       });
       setShowTodoInput(false);
-      setTodoDescription('');
+      setTodoDescription("");
       router.refresh();
     } catch (error) {
-      console.error('Failed to add todo:', error);
+      console.error("Failed to add todo:", error);
     } finally {
       setIsProcessing(false);
     }
@@ -237,7 +342,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
       await undoApproval(diff.id);
       router.refresh();
     } catch (error) {
-      console.error('Failed to undo:', error);
+      console.error("Failed to undo:", error);
     }
   };
 
@@ -248,29 +353,39 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   }, [nextDiffId, buildDiffUrl, router]);
 
   const [issueSubmitting, setIssueSubmitting] = useState(false);
-  const [issueUrl, setIssueUrl] = useState<string | null>(diff.issueUrl ?? null);
+  const [issueUrl, setIssueUrl] = useState<string | null>(
+    diff.issueUrl ?? null,
+  );
 
   const handleSubmitAsIssue = useCallback(async () => {
     if (issueSubmitting) return;
     if (issueUrl) {
-      window.open(issueUrl, '_blank', 'noopener,noreferrer');
+      window.open(issueUrl, "_blank", "noopener,noreferrer");
       return;
     }
     setIssueSubmitting(true);
     try {
       const res = await submitDiffAsIssue(diff.id);
       if (!res.success || !res.issueUrl) {
-        toast.error(res.error || 'Failed to create issue');
+        toast.error(res.error || "Failed to create issue");
         return;
       }
       setIssueUrl(res.issueUrl);
       const url = res.issueUrl;
-      toast.success(res.alreadyExists ? 'Issue already exists' : 'Issue created', {
-        action: { label: 'Open', onClick: () => window.open(url, '_blank', 'noopener,noreferrer') },
-      });
+      toast.success(
+        res.alreadyExists ? "Issue already exists" : "Issue created",
+        {
+          action: {
+            label: "Open",
+            onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
+          },
+        },
+      );
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create issue');
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create issue",
+      );
     } finally {
       setIssueSubmitting(false);
     }
@@ -285,46 +400,55 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
         return;
       }
 
       switch (e.key) {
-        case 'e':
-        case 'E':
+        case "e":
+        case "E":
           e.preventDefault();
           handleApprove();
           break;
-        case 't':
-        case 'T':
+        case "t":
+        case "T":
           e.preventDefault();
           handleShowTodoInput();
           break;
-        case 's':
-        case 'S':
+        case "s":
+        case "S":
           e.preventDefault();
           handleSkip();
           break;
-        case 'ArrowLeft':
+        case "ArrowLeft":
           e.preventDefault();
           handlePrev();
           break;
-        case 'ArrowRight':
+        case "ArrowRight":
           e.preventDefault();
           handleSkip();
           break;
-        case 'Escape':
+        case "Escape":
           if (showTodoInput) {
             setShowTodoInput(false);
-            setTodoDescription('');
+            setTodoDescription("");
           }
           break;
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleApprove, handleShowTodoInput, handleSkip, handlePrev, showTodoInput]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    handleApprove,
+    handleShowTodoInput,
+    handleSkip,
+    handlePrev,
+    showTodoInput,
+  ]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -339,85 +463,142 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
   const [showRegions, setShowRegions] = useState(false);
   const [showDomOverlay, setShowDomOverlay] = useState(enableDomDiff);
   const [drawFocusMode, setDrawFocusMode] = useState(false);
-  const [focusRegions, setFocusRegions] = useState<FocusRegionRect[]>(initialFocusRegions);
+  const [focusRegions, setFocusRegions] =
+    useState<FocusRegionRect[]>(initialFocusRegions);
   const [focusPending, setFocusPending] = useState(false);
   const [drawIgnoreMode, setDrawIgnoreMode] = useState(false);
-  const [ignoreRegions, setIgnoreRegions] = useState<IgnoreRegionRect[]>(initialIgnoreRegions);
+  const [ignoreRegions, setIgnoreRegions] =
+    useState<IgnoreRegionRect[]>(initialIgnoreRegions);
   const [ignorePending, setIgnorePending] = useState(false);
 
   // Sync if server reloads with new regions (e.g. after router.refresh)
-  useEffect(() => { setFocusRegions(initialFocusRegions); }, [initialFocusRegions]);
-  useEffect(() => { setIgnoreRegions(initialIgnoreRegions); }, [initialIgnoreRegions]);
+  useEffect(() => {
+    setFocusRegions(initialFocusRegions);
+  }, [initialFocusRegions]);
+  useEffect(() => {
+    setIgnoreRegions(initialIgnoreRegions);
+  }, [initialIgnoreRegions]);
 
-  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
-    if (focusPending) return;
-    setFocusPending(true);
-    try {
-      const created = await addFocusRegion(diff.id, rect);
-      setFocusRegions(prev => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
-      setDrawFocusMode(false);
-      router.refresh();
-    } catch (error) {
-      console.error('Failed to add focus region:', error);
-    } finally {
-      setFocusPending(false);
-    }
-  }, [diff.id, focusPending, router]);
+  const handleFocusDrawn = useCallback(
+    async (rect: { x: number; y: number; width: number; height: number }) => {
+      if (focusPending) return;
+      setFocusPending(true);
+      try {
+        const created = await addFocusRegion(diff.id, rect);
+        setFocusRegions((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        ]);
+        setDrawFocusMode(false);
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to add focus region:", error);
+      } finally {
+        setFocusPending(false);
+      }
+    },
+    [diff.id, focusPending, router],
+  );
 
-  const handleFocusDelete = useCallback(async (regionId: string) => {
-    if (focusPending) return;
-    setFocusPending(true);
-    setFocusRegions(prev => prev.filter(r => r.id !== regionId));
-    try {
-      await removeFocusRegion(regionId, diff.id);
-      router.refresh();
-    } catch (error) {
-      console.error('Failed to remove focus region:', error);
-    } finally {
-      setFocusPending(false);
-    }
-  }, [diff.id, focusPending, router]);
+  const handleFocusDelete = useCallback(
+    async (regionId: string) => {
+      if (focusPending) return;
+      setFocusPending(true);
+      setFocusRegions((prev) => prev.filter((r) => r.id !== regionId));
+      try {
+        await removeFocusRegion(regionId, diff.id);
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to remove focus region:", error);
+      } finally {
+        setFocusPending(false);
+      }
+    },
+    [diff.id, focusPending, router],
+  );
 
-  const handleIgnoreDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
-    if (ignorePending) return;
-    setIgnorePending(true);
-    try {
-      const created = await addIgnoreRegionForDiff(diff.id, rect);
-      setIgnoreRegions(prev => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
-      setDrawIgnoreMode(false);
-      toast.success('Ignore region added — applies to every screenshot of this test');
-      router.refresh();
-    } catch (error) {
-      console.error('Failed to add ignore region:', error);
-      toast.error('Failed to add ignore region');
-    } finally {
-      setIgnorePending(false);
-    }
-  }, [diff.id, ignorePending, router]);
+  const handleIgnoreDrawn = useCallback(
+    async (rect: { x: number; y: number; width: number; height: number }) => {
+      if (ignorePending) return;
+      setIgnorePending(true);
+      try {
+        const created = await addIgnoreRegionForDiff(diff.id, rect);
+        setIgnoreRegions((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        ]);
+        setDrawIgnoreMode(false);
+        toast.success(
+          "Ignore region added — applies to every screenshot of this test",
+        );
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to add ignore region:", error);
+        toast.error("Failed to add ignore region");
+      } finally {
+        setIgnorePending(false);
+      }
+    },
+    [diff.id, ignorePending, router],
+  );
 
-  const handleIgnoreDelete = useCallback(async (regionId: string) => {
-    if (ignorePending) return;
-    setIgnorePending(true);
-    setIgnoreRegions(prev => prev.filter(r => r.id !== regionId));
-    try {
-      await removeIgnoreRegionForDiff(regionId, diff.id);
-      router.refresh();
-    } catch (error) {
-      console.error('Failed to remove ignore region:', error);
-    } finally {
-      setIgnorePending(false);
-    }
-  }, [diff.id, ignorePending, router]);
+  const handleIgnoreDelete = useCallback(
+    async (regionId: string) => {
+      if (ignorePending) return;
+      setIgnorePending(true);
+      setIgnoreRegions((prev) => prev.filter((r) => r.id !== regionId));
+      try {
+        await removeIgnoreRegionForDiff(regionId, diff.id);
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to remove ignore region:", error);
+      } finally {
+        setIgnorePending(false);
+      }
+    },
+    [diff.id, ignorePending, router],
+  );
   const changedRegions = metadata?.changedRegions;
   const domDiff = enableDomDiff ? metadata?.domDiff : undefined;
-  const hasDomChanges = domDiff && (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0);
+  const hasDomChanges =
+    domDiff &&
+    (domDiff.added.length > 0 ||
+      domDiff.removed.length > 0 ||
+      domDiff.changed.length > 0);
 
   // Build DOM overlay regions from DOM diff bounding boxes
-  const domOverlayRegions = showDomOverlay && domDiff ? [
-    ...domDiff.removed.map(el => ({ ...el.boundingBox, color: 'rgba(239, 68, 68, 0.25)' as const, border: '#ef4444' })),
-    ...domDiff.added.map(el => ({ ...el.boundingBox, color: 'rgba(34, 197, 94, 0.25)' as const, border: '#22c55e' })),
-    ...domDiff.changed.map(c => ({ ...c.current.boundingBox, color: 'rgba(234, 179, 8, 0.25)' as const, border: '#eab308' })),
-  ] : [];
+  const domOverlayRegions =
+    showDomOverlay && domDiff
+      ? [
+          ...domDiff.removed.map((el) => ({
+            ...el.boundingBox,
+            color: "rgba(239, 68, 68, 0.25)" as const,
+            border: "#ef4444",
+          })),
+          ...domDiff.added.map((el) => ({
+            ...el.boundingBox,
+            color: "rgba(34, 197, 94, 0.25)" as const,
+            border: "#22c55e",
+          })),
+          ...domDiff.changed.map((c) => ({
+            ...c.current.boundingBox,
+            color: "rgba(234, 179, 8, 0.25)" as const,
+            border: "#eab308",
+          })),
+        ]
+      : [];
 
   return (
     <div className="space-y-6">
@@ -427,21 +608,26 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           <div className="flex items-center gap-4 flex-wrap">
             <div
               className={`px-3 py-1 rounded-full text-sm font-medium ${
-                diff.status === 'approved' || diff.status === 'auto_approved'
-                  ? 'bg-green-100 text-green-700'
-                  : diff.status === 'rejected'
-                    ? 'bg-destructive/10 text-destructive'
-                    : diff.status === 'todo'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-yellow-100 text-yellow-700'
+                diff.status === "approved" || diff.status === "auto_approved"
+                  ? "bg-green-100 text-green-700"
+                  : diff.status === "rejected"
+                    ? "bg-destructive/10 text-destructive"
+                    : diff.status === "todo"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-yellow-100 text-yellow-700"
               }`}
             >
-              {diff.status === 'auto_approved' ? 'Auto-Approved (Carry-Forward)' : diff.status === 'todo' ? 'Todo' : diff.status}
+              {diff.status === "auto_approved"
+                ? "Auto-Approved (Carry-Forward)"
+                : diff.status === "todo"
+                  ? "Todo"
+                  : diff.status}
             </div>
 
             {diff.pixelDifference !== null && diff.pixelDifference > 0 && (
               <div className="text-sm text-muted-foreground">
-                {diff.pixelDifference.toLocaleString()} pixels changed ({diff.percentageDifference}%)
+                {diff.pixelDifference.toLocaleString()} pixels changed (
+                {diff.percentageDifference}%)
               </div>
             )}
 
@@ -449,7 +635,8 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             {diff.mainBaselineImagePath && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
                 vs Main
-                {diff.mainPercentageDifference && parseFloat(diff.mainPercentageDifference) > 0 ? (
+                {diff.mainPercentageDifference &&
+                parseFloat(diff.mainPercentageDifference) > 0 ? (
                   <span className="text-purple-500">
                     ({diff.mainPercentageDifference}% drift)
                   </span>
@@ -476,89 +663,119 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             {metadata?.pageShift?.detected && (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
                 <ArrowUpDown className="w-4 h-4" />
-                Page Shift {metadata.pageShift.deltaY > 0 ? '+' : ''}{metadata.pageShift.deltaY}px
+                Page Shift {metadata.pageShift.deltaY > 0 ? "+" : ""}
+                {metadata.pageShift.deltaY}px
               </div>
             )}
           </div>
 
           {/* Execution Error Banner (collapsed by default) */}
-          {diff.errorMessage && (() => {
-            const cleaned = stripRuntimeErrorsFromMessage(diff.errorMessage);
-            return cleaned ? (
-              <details className="border border-orange-200 bg-orange-50 rounded-lg">
-                <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
-                  <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
-                  <span className="font-medium text-orange-800">Execution Error</span>
-                  <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
-                </summary>
-                <div className="px-4 pb-4">
-                  <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">{cleaned}</pre>
-                </div>
-              </details>
-            ) : null;
-          })()}
+          {diff.errorMessage &&
+            (() => {
+              const cleaned = stripRuntimeErrorsFromMessage(diff.errorMessage);
+              return cleaned ? (
+                <details className="border border-orange-200 bg-orange-50 rounded-lg">
+                  <summary className="flex items-center gap-3 p-4 cursor-pointer select-none">
+                    <Bug className="w-5 h-5 text-orange-600 flex-shrink-0" />
+                    <span className="font-medium text-orange-800">
+                      Execution Error
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-orange-400 ml-auto transition-transform [[open]>&]:rotate-180" />
+                  </summary>
+                  <div className="px-4 pb-4">
+                    <pre className="text-sm text-orange-700 whitespace-pre-wrap break-words">
+                      {cleaned}
+                    </pre>
+                  </div>
+                </details>
+              ) : null;
+            })()}
 
-          <RuntimeErrorsPanel consoleErrors={diff.consoleErrors} networkRequests={diff.networkRequests} networkBodiesPath={diff.networkBodiesPath} downloads={diff.downloads} />
+          <RuntimeErrorsPanel
+            consoleErrors={diff.consoleErrors}
+            networkRequests={diff.networkRequests}
+            networkBodiesPath={diff.networkBodiesPath}
+            downloads={diff.downloads}
+          />
 
           {/* AI Analysis */}
-          {!banAiMode && (aiAnalysis || aiStatus === 'running' || aiStatus === 'pending') && (
-            <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  {aiStatus === 'running' || aiStatus === 'pending' ? (
-                    <div className="flex items-center gap-2 text-sm text-purple-600">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      AI analysis in progress...
-                    </div>
-                  ) : aiAnalysis ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          aiAnalysis.classification === 'insignificant' ? 'bg-green-100 text-green-700'
-                            : aiAnalysis.classification === 'noise' ? 'bg-blue-100 text-blue-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {aiAnalysis.classification}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          aiAnalysis.recommendation === 'approve' ? 'bg-green-100 text-green-700'
-                            : aiAnalysis.recommendation === 'flag' ? 'bg-red-100 text-red-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {aiAnalysis.recommendation}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {Math.round(aiAnalysis.confidence * 100)}% confidence
-                        </span>
+          {!banAiMode &&
+            (aiAnalysis ||
+              aiStatus === "running" ||
+              aiStatus === "pending") && (
+              <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    {aiStatus === "running" || aiStatus === "pending" ? (
+                      <div className="flex items-center gap-2 text-sm text-purple-600">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        AI analysis in progress...
                       </div>
-                      <p className="text-sm text-gray-700">{aiAnalysis.summary}</p>
-                      {aiAnalysis.recommendation === 'approve' && diff.status === 'pending' && (
-                        <button
-                          onClick={handleApprove}
-                          disabled={isProcessing}
-                          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          Mark as Expected Change
-                        </button>
-                      )}
-                    </>
-                  ) : null}
+                    ) : aiAnalysis ? (
+                      <>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              aiAnalysis.classification === "insignificant"
+                                ? "bg-green-100 text-green-700"
+                                : aiAnalysis.classification === "noise"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
+                            {aiAnalysis.classification}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              aiAnalysis.recommendation === "approve"
+                                ? "bg-green-100 text-green-700"
+                                : aiAnalysis.recommendation === "flag"
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
+                            {aiAnalysis.recommendation}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {Math.round(aiAnalysis.confidence * 100)}%
+                            confidence
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-700">
+                          {aiAnalysis.summary}
+                        </p>
+                        {aiAnalysis.recommendation === "approve" &&
+                          diff.status === "pending" && (
+                            <button
+                              onClick={handleApprove}
+                              disabled={isProcessing}
+                              className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Mark as Expected Change
+                            </button>
+                          )}
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           <A11yViolationsPanel violations={diff.a11yViolations ?? []} />
 
           {/* DOM Changes Panel */}
-          {enableDomDiff && metadata?.domDiff && (metadata.domDiff.added.length > 0 || metadata.domDiff.removed.length > 0 || metadata.domDiff.changed.length > 0) && (
-            <DomChangesPanel domDiff={metadata.domDiff} />
-          )}
+          {enableDomDiff &&
+            metadata?.domDiff &&
+            (metadata.domDiff.added.length > 0 ||
+              metadata.domDiff.removed.length > 0 ||
+              metadata.domDiff.changed.length > 0) && (
+              <DomChangesPanel domDiff={metadata.domDiff} />
+            )}
 
           {/* Page Text Diff Panel — hidden when text capture wasn't enabled for this build */}
-          {textDiff && textDiff.status !== 'skipped' && (
+          {textDiff && textDiff.status !== "skipped" && (
             <TextDiffPanel
               status={textDiff.status}
               summary={textDiff.summary}
@@ -569,167 +786,211 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
           {/* Diff Comparison */}
           <SwipeDeck
             disabled={!isMobile}
-            onSwipeRight={diff.status === 'pending' && !isProcessing ? handleApprove : undefined}
-            onSwipeLeft={diff.status === 'pending' && !isProcessing ? handleShowTodoInput : undefined}
+            onSwipeRight={
+              diff.status === "pending" && !isProcessing
+                ? handleApprove
+                : undefined
+            }
+            onSwipeLeft={
+              diff.status === "pending" && !isProcessing
+                ? handleShowTodoInput
+                : undefined
+            }
             onSwipeUp={nextDiffId ? handleSkip : undefined}
           >
-          {diff.currentImagePath ? (
-            (() => {
-              // On main branch (no mainBaselineImagePath), only show one tab
-              const isMainBranch = !diff.mainBaselineImagePath && diff.baselineImagePath;
+            {diff.currentImagePath ? (
+              (() => {
+                // On main branch (no mainBaselineImagePath), only show one tab
+                const isMainBranch =
+                  !diff.mainBaselineImagePath && diff.baselineImagePath;
 
-              type TabDef = { id: string; label: string; pct: string | null; baseline: string | null; diffImg: string | null | undefined; leftLabel?: string; alignedBaseline?: string; alignedCurrent?: string; alignedDiffImage?: string; alignmentSegments?: import('@/lib/db/schema').AlignmentSegment[] };
-              const tabs: TabDef[] = [];
+                type TabDef = {
+                  id: string;
+                  label: string;
+                  pct: string | null;
+                  baseline: string | null;
+                  diffImg: string | null | undefined;
+                  leftLabel?: string;
+                  alignedBaseline?: string;
+                  alignedCurrent?: string;
+                  alignedDiffImage?: string;
+                  alignmentSegments?: import("@/lib/db/schema").AlignmentSegment[];
+                };
+                const tabs: TabDef[] = [];
 
-              // Branch tab — always present
-              tabs.push({
-                id: 'branch', label: isMainBranch ? 'vs Baseline' : 'vs Branch',
-                pct: diff.baselineImagePath ? diff.percentageDifference : null,
-                baseline: diff.baselineImagePath,
-                diffImg: diff.diffImagePath,
-                alignedBaseline: metadata?.pageShift?.alignedBaselineImagePath ?? undefined,
-                alignedCurrent: metadata?.pageShift?.alignedCurrentImagePath ?? undefined,
-                alignedDiffImage: metadata?.pageShift?.alignedDiffImagePath ?? undefined,
-                alignmentSegments: metadata?.pageShift?.alignmentSegments ?? undefined,
-              });
-
-              // Main tab — present on feature branches
-              if (!isMainBranch) {
+                // Branch tab — always present
                 tabs.push({
-                  id: 'main', label: 'vs Main',
-                  pct: diff.mainBaselineImagePath ? diff.mainPercentageDifference : null,
-                  baseline: diff.mainBaselineImagePath,
-                  diffImg: diff.mainDiffImagePath,
+                  id: "branch",
+                  label: isMainBranch ? "vs Baseline" : "vs Branch",
+                  pct: diff.baselineImagePath
+                    ? diff.percentageDifference
+                    : null,
+                  baseline: diff.baselineImagePath,
+                  diffImg: diff.diffImagePath,
+                  alignedBaseline:
+                    metadata?.pageShift?.alignedBaselineImagePath ?? undefined,
+                  alignedCurrent:
+                    metadata?.pageShift?.alignedCurrentImagePath ?? undefined,
+                  alignedDiffImage:
+                    metadata?.pageShift?.alignedDiffImagePath ?? undefined,
+                  alignmentSegments:
+                    metadata?.pageShift?.alignmentSegments ?? undefined,
                 });
-              }
 
-              // Planned tab — only when planned screenshot exists
-              if (diff.plannedImagePath) {
-                tabs.push({
-                  id: 'planned', label: 'vs Planned',
-                  pct: diff.plannedPercentageDifference,
-                  baseline: diff.plannedImagePath,
-                  diffImg: diff.plannedDiffImagePath,
-                  leftLabel: 'Planned',
-                });
-              }
+                // Main tab — present on feature branches
+                if (!isMainBranch) {
+                  tabs.push({
+                    id: "main",
+                    label: "vs Main",
+                    pct: diff.mainBaselineImagePath
+                      ? diff.mainPercentageDifference
+                      : null,
+                    baseline: diff.mainBaselineImagePath,
+                    diffImg: diff.mainDiffImagePath,
+                  });
+                }
 
-              // Find first tab with data for default selection
-              const defaultTab = tabs.find(t => t.id === 'main' && t.baseline) || tabs.find(t => t.baseline) || tabs[0];
+                // Planned tab — only when planned screenshot exists
+                if (diff.plannedImagePath) {
+                  tabs.push({
+                    id: "planned",
+                    label: "vs Planned",
+                    pct: diff.plannedPercentageDifference,
+                    baseline: diff.plannedImagePath,
+                    diffImg: diff.plannedDiffImagePath,
+                    leftLabel: "Planned",
+                  });
+                }
 
-              if (tabs.length <= 1) {
-                const tab = tabs[0];
-                return tab?.baseline ? (
-                  <SliderComparison
-                    baselineImage={tab.baseline}
-                    currentImage={diff.currentImagePath!}
-                    diffImage={tab.diffImg || undefined}
-                    leftLabel={tab.leftLabel}
-                    alignedBaselineImage={tab.alignedBaseline}
-                    alignedCurrentImage={tab.alignedCurrent}
-                    alignedDiffImage={tab.alignedDiffImage}
-                    alignmentSegments={tab.alignmentSegments}
-                    changedRegions={changedRegions}
-                    domOverlayRegions={domOverlayRegions}
-                    showRegions={showRegions}
-                    focusRegions={focusRegions}
-                    drawFocusMode={drawFocusMode}
-                    onFocusRegionDrawn={handleFocusDrawn}
-                    onFocusRegionDelete={handleFocusDelete}
-                    ignoreRegions={ignoreRegions}
-                    drawIgnoreMode={drawIgnoreMode}
-                    onIgnoreRegionDrawn={handleIgnoreDrawn}
-                    onIgnoreRegionDelete={handleIgnoreDelete}
-                    initialViewMode={viewParam || undefined}
-                    onViewModeChange={handleViewModeChange}
-                  />
-                ) : (
-                  <div className="p-4">
-                    <div className="text-sm text-muted-foreground mb-2">New Screenshot (No Baseline)</div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={diff.currentImagePath!}
-                      alt="Current screenshot"
-                      className="w-full rounded"
+                // Find first tab with data for default selection
+                const defaultTab =
+                  tabs.find((t) => t.id === "main" && t.baseline) ||
+                  tabs.find((t) => t.baseline) ||
+                  tabs[0];
+
+                if (tabs.length <= 1) {
+                  const tab = tabs[0];
+                  return tab?.baseline ? (
+                    <SliderComparison
+                      baselineImage={tab.baseline}
+                      currentImage={diff.currentImagePath!}
+                      diffImage={tab.diffImg || undefined}
+                      leftLabel={tab.leftLabel}
+                      alignedBaselineImage={tab.alignedBaseline}
+                      alignedCurrentImage={tab.alignedCurrent}
+                      alignedDiffImage={tab.alignedDiffImage}
+                      alignmentSegments={tab.alignmentSegments}
+                      changedRegions={changedRegions}
+                      domOverlayRegions={domOverlayRegions}
+                      showRegions={showRegions}
+                      focusRegions={focusRegions}
+                      drawFocusMode={drawFocusMode}
+                      onFocusRegionDrawn={handleFocusDrawn}
+                      onFocusRegionDelete={handleFocusDelete}
+                      ignoreRegions={ignoreRegions}
+                      drawIgnoreMode={drawIgnoreMode}
+                      onIgnoreRegionDrawn={handleIgnoreDrawn}
+                      onIgnoreRegionDelete={handleIgnoreDelete}
+                      initialViewMode={viewParam || undefined}
+                      onViewModeChange={handleViewModeChange}
                     />
-                  </div>
-                );
-              }
+                  ) : (
+                    <div className="p-4">
+                      <div className="text-sm text-muted-foreground mb-2">
+                        New Screenshot (No Baseline)
+                      </div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={diff.currentImagePath!}
+                        alt="Current screenshot"
+                        className="w-full rounded"
+                      />
+                    </div>
+                  );
+                }
 
-              return (
-                <Tabs defaultValue={defaultTab.id} className="w-full">
-                  <TabsList>
+                return (
+                  <Tabs defaultValue={defaultTab.id} className="w-full">
+                    <TabsList>
+                      {tabs.map((tab) => (
+                        <TabsTrigger key={tab.id} value={tab.id}>
+                          {tab.label}
+                          {tab.baseline &&
+                          tab.pct &&
+                          parseFloat(tab.pct) > 0 ? (
+                            <span className="ml-1 text-muted-foreground">
+                              ({parseFloat(tab.pct).toFixed(1)}%)
+                            </span>
+                          ) : !tab.baseline ? (
+                            <span className="ml-1 text-muted-foreground/50">
+                              n/a
+                            </span>
+                          ) : null}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
                     {tabs.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id}>
-                        {tab.label}
-                        {tab.baseline && tab.pct && parseFloat(tab.pct) > 0 ? (
-                          <span className="ml-1 text-muted-foreground">({parseFloat(tab.pct).toFixed(1)}%)</span>
-                        ) : !tab.baseline ? (
-                          <span className="ml-1 text-muted-foreground/50">n/a</span>
-                        ) : null}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {tabs.map((tab) => (
-                    <TabsContent key={tab.id} value={tab.id}>
-                      {tab.baseline ? (
-                        <SliderComparison
-                          baselineImage={tab.baseline}
-                          currentImage={diff.currentImagePath!}
-                          diffImage={tab.diffImg || undefined}
-                          leftLabel={tab.leftLabel}
-                          alignedBaselineImage={tab.alignedBaseline}
-                          alignedCurrentImage={tab.alignedCurrent}
-                          alignedDiffImage={tab.alignedDiffImage}
-                          alignmentSegments={tab.alignmentSegments}
-                          changedRegions={changedRegions}
-                          domOverlayRegions={domOverlayRegions}
-                          showRegions={showRegions}
-                          focusRegions={focusRegions}
-                          drawFocusMode={drawFocusMode}
-                          onFocusRegionDrawn={handleFocusDrawn}
-                          onFocusRegionDelete={handleFocusDelete}
-                          ignoreRegions={ignoreRegions}
-                          drawIgnoreMode={drawIgnoreMode}
-                          onIgnoreRegionDrawn={handleIgnoreDrawn}
-                          onIgnoreRegionDelete={handleIgnoreDelete}
-                          initialViewMode={viewParam || undefined}
-                          onViewModeChange={handleViewModeChange}
-                        />
-                      ) : (
-                        <div className="p-8 text-center text-muted-foreground space-y-2">
-                          <p className="font-medium">
-                            {tab.id === 'branch' ? 'No branch baseline yet' : 'No main baseline yet'}
-                          </p>
-                          <p className="text-sm">
-                            {tab.id === 'branch'
-                              ? 'A branch baseline will be created when you approve a diff on this branch.'
-                              : 'Run and approve a build on the default branch to create a main baseline.'}
-                          </p>
-                          <div className="pt-2">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={diff.currentImagePath!}
-                              alt="Current screenshot"
-                              className="w-full rounded opacity-60"
-                            />
+                      <TabsContent key={tab.id} value={tab.id}>
+                        {tab.baseline ? (
+                          <SliderComparison
+                            baselineImage={tab.baseline}
+                            currentImage={diff.currentImagePath!}
+                            diffImage={tab.diffImg || undefined}
+                            leftLabel={tab.leftLabel}
+                            alignedBaselineImage={tab.alignedBaseline}
+                            alignedCurrentImage={tab.alignedCurrent}
+                            alignedDiffImage={tab.alignedDiffImage}
+                            alignmentSegments={tab.alignmentSegments}
+                            changedRegions={changedRegions}
+                            domOverlayRegions={domOverlayRegions}
+                            showRegions={showRegions}
+                            focusRegions={focusRegions}
+                            drawFocusMode={drawFocusMode}
+                            onFocusRegionDrawn={handleFocusDrawn}
+                            onFocusRegionDelete={handleFocusDelete}
+                            ignoreRegions={ignoreRegions}
+                            drawIgnoreMode={drawIgnoreMode}
+                            onIgnoreRegionDrawn={handleIgnoreDrawn}
+                            onIgnoreRegionDelete={handleIgnoreDelete}
+                            initialViewMode={viewParam || undefined}
+                            onViewModeChange={handleViewModeChange}
+                          />
+                        ) : (
+                          <div className="p-8 text-center text-muted-foreground space-y-2">
+                            <p className="font-medium">
+                              {tab.id === "branch"
+                                ? "No branch baseline yet"
+                                : "No main baseline yet"}
+                            </p>
+                            <p className="text-sm">
+                              {tab.id === "branch"
+                                ? "A branch baseline will be created when you approve a diff on this branch."
+                                : "Run and approve a build on the default branch to create a main baseline."}
+                            </p>
+                            <div className="pt-2">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={diff.currentImagePath!}
+                                alt="Current screenshot"
+                                className="w-full rounded opacity-60"
+                              />
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              );
-            })()
-          ) : (
-            <div className="p-8 text-center text-muted-foreground">
-              No screenshot available
-            </div>
-          )}
+                        )}
+                      </TabsContent>
+                    ))}
+                  </Tabs>
+                );
+              })()
+            ) : (
+              <div className="p-8 text-center text-muted-foreground">
+                No screenshot available
+              </div>
+            )}
           </SwipeDeck>
 
           {/* Mobile hint */}
-          {isMobile && diff.status === 'pending' && (
+          {isMobile && diff.status === "pending" && (
             <p className="md:hidden text-center text-xs text-muted-foreground -mt-2">
               Swipe right to approve · left for todo · up to skip
             </p>
@@ -749,7 +1010,11 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 onClick={handleApprove}
-                disabled={isProcessing || diff.status === 'approved' || diff.status === 'auto_approved'}
+                disabled={
+                  isProcessing ||
+                  diff.status === "approved" ||
+                  diff.status === "auto_approved"
+                }
               >
                 <CheckCircle className="w-4 h-4" />
                 Expected Change
@@ -762,8 +1027,11 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     value={todoDescription}
                     onChange={(e) => setTodoDescription(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddTodo();
-                      if (e.key === 'Escape') { setShowTodoInput(false); setTodoDescription(''); }
+                      if (e.key === "Enter") handleAddTodo();
+                      if (e.key === "Escape") {
+                        setShowTodoInput(false);
+                        setTodoDescription("");
+                      }
                     }}
                     placeholder="Describe what needs fixing..."
                     className="w-64 h-9"
@@ -779,7 +1047,10 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => { setShowTodoInput(false); setTodoDescription(''); }}
+                    onClick={() => {
+                      setShowTodoInput(false);
+                      setTodoDescription("");
+                    }}
                   >
                     Cancel
                   </Button>
@@ -788,7 +1059,7 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                 <Button
                   variant="outline"
                   onClick={handleShowTodoInput}
-                  disabled={isProcessing || diff.status === 'todo'}
+                  disabled={isProcessing || diff.status === "todo"}
                   className="border-amber-300 text-amber-700 hover:bg-amber-50"
                 >
                   <ListTodo className="w-4 h-4" />
@@ -810,7 +1081,11 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                 onClick={handleSubmitAsIssue}
                 disabled={issueSubmitting}
                 className="border-blue-300 text-blue-700 hover:bg-blue-50"
-                title={issueUrl ? 'Open the GitHub issue created from this diff' : 'Create an issue in your configured tracker'}
+                title={
+                  issueUrl
+                    ? "Open the GitHub issue created from this diff"
+                    : "Create an issue in your configured tracker"
+                }
               >
                 {issueSubmitting ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -819,29 +1094,51 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                 ) : (
                   <CircleAlert className="w-4 h-4" />
                 )}
-                {issueUrl ? 'View Issue' : 'Submit as Issue'}
+                {issueUrl ? "View Issue" : "Submit as Issue"}
               </Button>
 
               <Button
-                variant={drawFocusMode ? 'default' : 'outline'}
-                onClick={() => { setDrawFocusMode(prev => !prev); setDrawIgnoreMode(false); }}
+                variant={drawFocusMode ? "default" : "outline"}
+                onClick={() => {
+                  setDrawFocusMode((prev) => !prev);
+                  setDrawIgnoreMode(false);
+                }}
                 disabled={focusPending}
-                className={drawFocusMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'border-green-300 text-green-700 hover:bg-green-50'}
+                className={
+                  drawFocusMode
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : "border-green-300 text-green-700 hover:bg-green-50"
+                }
                 title="Click and drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions."
               >
                 <Crosshair className="w-4 h-4" />
-                {drawFocusMode ? 'Drawing — click + drag' : focusRegions.length > 0 ? `Focus (${focusRegions.length})` : 'Draw Focus Region'}
+                {drawFocusMode
+                  ? "Drawing — click + drag"
+                  : focusRegions.length > 0
+                    ? `Focus (${focusRegions.length})`
+                    : "Draw Focus Region"}
               </Button>
 
               <Button
-                variant={drawIgnoreMode ? 'default' : 'outline'}
-                onClick={() => { setDrawIgnoreMode(prev => !prev); setDrawFocusMode(false); }}
+                variant={drawIgnoreMode ? "default" : "outline"}
+                onClick={() => {
+                  setDrawIgnoreMode((prev) => !prev);
+                  setDrawFocusMode(false);
+                }}
                 disabled={ignorePending}
-                className={drawIgnoreMode ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'border-rose-300 text-rose-700 hover:bg-rose-50'}
+                className={
+                  drawIgnoreMode
+                    ? "bg-rose-600 hover:bg-rose-700 text-white"
+                    : "border-rose-300 text-rose-700 hover:bg-rose-50"
+                }
                 title="Click and drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test."
               >
                 <EyeOff className="w-4 h-4" />
-                {drawIgnoreMode ? 'Drawing — click + drag' : ignoreRegions.length > 0 ? `Ignore (${ignoreRegions.length})` : 'Draw Ignore Region'}
+                {drawIgnoreMode
+                  ? "Drawing — click + drag"
+                  : ignoreRegions.length > 0
+                    ? `Ignore (${ignoreRegions.length})`
+                    : "Draw Ignore Region"}
               </Button>
             </div>
 
@@ -853,18 +1150,19 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                     onClick={() => setShowRegions(!showRegions)}
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
                       showRegions
-                        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                        : 'bg-muted hover:bg-muted/80'
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                        : "bg-muted hover:bg-muted/80"
                     }`}
                   >
                     <Eye className="w-3 h-3" />
-                    {showRegions ? 'Hide' : 'Show'} Regions
+                    {showRegions ? "Hide" : "Show"} Regions
                   </button>
                   <span>
                     {metadata.changedRegions.length} region(s) changed
-                    {metadata.affectedComponents && metadata.affectedComponents.length > 0 && (
-                      <span> · {metadata.affectedComponents.join(', ')}</span>
-                    )}
+                    {metadata.affectedComponents &&
+                      metadata.affectedComponents.length > 0 && (
+                        <span> · {metadata.affectedComponents.join(", ")}</span>
+                      )}
                   </span>
                 </>
               )}
@@ -873,17 +1171,18 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
                   onClick={() => setShowDomOverlay(!showDomOverlay)}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
                     showDomOverlay
-                      ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400'
-                      : 'bg-muted hover:bg-muted/80'
+                      ? "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400"
+                      : "bg-muted hover:bg-muted/80"
                   }`}
                 >
                   <Code2 className="w-3 h-3" />
-                  {showDomOverlay ? 'Hide' : 'Show'} DOM
+                  {showDomOverlay ? "Hide" : "Show"} DOM
                 </button>
               )}
               {metadata?.pageShift?.detected && (
                 <span className="ml-3 text-blue-600">
-                  · Shift: {metadata.pageShift.insertedRows ?? 0} rows added, {metadata.pageShift.deletedRows ?? 0} removed
+                  · Shift: {metadata.pageShift.insertedRows ?? 0} rows added,{" "}
+                  {metadata.pageShift.deletedRows ?? 0} removed
                 </span>
               )}
             </div>
@@ -914,7 +1213,9 @@ export function DiffViewerClient({ diff, buildId, prevDiffId, nextDiffId, banAiM
 // Drop entries whose bbox is fully contained by another entry in the same
 // list AND whose text/selector value is a substring of the container — those
 // are nested duplicates (e.g. an <a> sitting inside an added <li>).
-function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(items: T[]): { items: T[]; dropped: number } {
+function dedupeNested<T extends import("@/lib/db/schema").DomSnapshotElement>(
+  items: T[],
+): { items: T[]; dropped: number } {
   if (items.length <= 1) return { items, dropped: 0 };
   // Largest area first so containers come before their children.
   const sorted = [...items].sort((a, b) => {
@@ -924,9 +1225,11 @@ function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(it
   });
   const kept: T[] = [];
   let dropped = 0;
-  const textOf = (el: T) => (el.textContent ?? el.selectors[0]?.value ?? '').trim().toLowerCase();
+  const textOf = (el: T) =>
+    (el.textContent ?? el.selectors[0]?.value ?? "").trim().toLowerCase();
   const contains = (outer: T, inner: T) => {
-    const o = outer.boundingBox, i = inner.boundingBox;
+    const o = outer.boundingBox,
+      i = inner.boundingBox;
     return (
       i.x >= o.x - 1 &&
       i.y >= o.y - 1 &&
@@ -936,12 +1239,12 @@ function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(it
   };
   for (const el of sorted) {
     const elText = textOf(el);
-    const isNested = kept.some(parent => {
+    const isNested = kept.some((parent) => {
       if (!contains(parent, el)) return false;
       const parentText = textOf(parent);
       // Drop when the child text is empty (pure structural wrapper) or fully
       // contained in the parent's text — these are not independent changes.
-      return elText === '' || parentText.includes(elText);
+      return elText === "" || parentText.includes(elText);
     });
     if (isNested) dropped++;
     else kept.push(el);
@@ -951,8 +1254,14 @@ function dedupeNested<T extends import('@/lib/db/schema').DomSnapshotElement>(it
 
 function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
   const [expanded, setExpanded] = useState(false);
-  const dedupedAdded = useMemo(() => dedupeNested(domDiff.added), [domDiff.added]);
-  const dedupedRemoved = useMemo(() => dedupeNested(domDiff.removed), [domDiff.removed]);  
+  const dedupedAdded = useMemo(
+    () => dedupeNested(domDiff.added),
+    [domDiff.added],
+  );
+  const dedupedRemoved = useMemo(
+    () => dedupeNested(domDiff.removed),
+    [domDiff.removed],
+  );
 
   return (
     <details
@@ -966,9 +1275,21 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
           DOM Changes
         </span>
         <span className="text-xs text-cyan-600 dark:text-cyan-400">
-          {dedupedRemoved.items.length > 0 && <span className="text-red-600 dark:text-red-400 mr-2">-{dedupedRemoved.items.length} removed</span>}
-          {dedupedAdded.items.length > 0 && <span className="text-green-600 dark:text-green-400 mr-2">+{dedupedAdded.items.length} added</span>}
-          {domDiff.changed.length > 0 && <span className="text-yellow-600 dark:text-yellow-400">~{domDiff.changed.length} changed</span>}
+          {dedupedRemoved.items.length > 0 && (
+            <span className="text-red-600 dark:text-red-400 mr-2">
+              -{dedupedRemoved.items.length} removed
+            </span>
+          )}
+          {dedupedAdded.items.length > 0 && (
+            <span className="text-green-600 dark:text-green-400 mr-2">
+              +{dedupedAdded.items.length} added
+            </span>
+          )}
+          {domDiff.changed.length > 0 && (
+            <span className="text-yellow-600 dark:text-yellow-400">
+              ~{domDiff.changed.length} changed
+            </span>
+          )}
         </span>
         <span className="text-xs text-muted-foreground ml-auto mr-2">
           {domDiff.unchangedCount} unchanged
@@ -982,7 +1303,9 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
             <div className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">
               Removed ({dedupedRemoved.items.length})
               {dedupedRemoved.dropped > 0 && (
-                <span className="ml-1 text-muted-foreground font-normal">· {dedupedRemoved.dropped} nested hidden</span>
+                <span className="ml-1 text-muted-foreground font-normal">
+                  · {dedupedRemoved.dropped} nested hidden
+                </span>
               )}
             </div>
             <div className="space-y-1">
@@ -990,7 +1313,9 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
                 <DomElementRow key={`r-${i}`} element={el} variant="removed" />
               ))}
               {dedupedRemoved.items.length > 20 && (
-                <div className="text-xs text-muted-foreground pl-2">... and {dedupedRemoved.items.length - 20} more</div>
+                <div className="text-xs text-muted-foreground pl-2">
+                  ... and {dedupedRemoved.items.length - 20} more
+                </div>
               )}
             </div>
           </div>
@@ -1001,7 +1326,9 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
             <div className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">
               Added ({dedupedAdded.items.length})
               {dedupedAdded.dropped > 0 && (
-                <span className="ml-1 text-muted-foreground font-normal">· {dedupedAdded.dropped} nested hidden</span>
+                <span className="ml-1 text-muted-foreground font-normal">
+                  · {dedupedAdded.dropped} nested hidden
+                </span>
               )}
             </div>
             <div className="space-y-1">
@@ -1009,7 +1336,9 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
                 <DomElementRow key={`a-${i}`} element={el} variant="added" />
               ))}
               {dedupedAdded.items.length > 20 && (
-                <div className="text-xs text-muted-foreground pl-2">... and {dedupedAdded.items.length - 20} more</div>
+                <div className="text-xs text-muted-foreground pl-2">
+                  ... and {dedupedAdded.items.length - 20} more
+                </div>
               )}
             </div>
           </div>
@@ -1017,17 +1346,27 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
         {/* Changed elements */}
         {domDiff.changed.length > 0 && (
           <div>
-            <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-1">Changed ({domDiff.changed.length})</div>
+            <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-1">
+              Changed ({domDiff.changed.length})
+            </div>
             <div className="space-y-1">
               {domDiff.changed.slice(0, 20).map((c, i) => (
-                <div key={`c-${i}`} className="flex items-start gap-2 text-xs bg-yellow-50/50 dark:bg-yellow-900/10 rounded px-2 py-1">
-                  <span className="font-mono text-yellow-700 dark:text-yellow-400">&lt;{c.current.tag}&gt;</span>
+                <div
+                  key={`c-${i}`}
+                  className="flex items-start gap-2 text-xs bg-yellow-50/50 dark:bg-yellow-900/10 rounded px-2 py-1"
+                >
+                  <span className="font-mono text-yellow-700 dark:text-yellow-400">
+                    &lt;{c.current.tag}&gt;
+                  </span>
                   <span className="text-muted-foreground truncate flex-1">
-                    {c.current.selectors[0]?.value ?? ''}
+                    {c.current.selectors[0]?.value ?? ""}
                   </span>
                   <div className="flex gap-1 flex-shrink-0">
-                    {c.changes.map(ch => (
-                      <span key={ch} className="px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-800/30 text-yellow-800 dark:text-yellow-300 text-[10px]">
+                    {c.changes.map((ch) => (
+                      <span
+                        key={ch}
+                        className="px-1 py-0.5 rounded bg-yellow-100 dark:bg-yellow-800/30 text-yellow-800 dark:text-yellow-300 text-[10px]"
+                      >
                         {ch}
                       </span>
                     ))}
@@ -1035,7 +1374,9 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
                 </div>
               ))}
               {domDiff.changed.length > 20 && (
-                <div className="text-xs text-muted-foreground pl-2">... and {domDiff.changed.length - 20} more</div>
+                <div className="text-xs text-muted-foreground pl-2">
+                  ... and {domDiff.changed.length - 20} more
+                </div>
               )}
             </div>
           </div>
@@ -1045,17 +1386,28 @@ function DomChangesPanel({ domDiff }: { domDiff: DomDiffResult }) {
   );
 }
 
-function DomElementRow({ element, variant }: { element: import('@/lib/db/schema').DomSnapshotElement; variant: 'added' | 'removed' }) {
-  const color = variant === 'added'
-    ? 'bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-400'
-    : 'bg-red-50/50 dark:bg-red-900/10 text-red-700 dark:text-red-400';
-  const sign = variant === 'added' ? '+' : '-';
+function DomElementRow({
+  element,
+  variant,
+}: {
+  element: import("@/lib/db/schema").DomSnapshotElement;
+  variant: "added" | "removed";
+}) {
+  const color =
+    variant === "added"
+      ? "bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-400"
+      : "bg-red-50/50 dark:bg-red-900/10 text-red-700 dark:text-red-400";
+  const sign = variant === "added" ? "+" : "-";
 
   return (
-    <div className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${color}`}>
-      <span className="font-mono flex-shrink-0">{sign} &lt;{element.tag}&gt;</span>
+    <div
+      className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${color}`}
+    >
+      <span className="font-mono flex-shrink-0">
+        {sign} &lt;{element.tag}&gt;
+      </span>
       <span className="text-muted-foreground truncate flex-1">
-        {element.selectors[0]?.value ?? element.textContent?.slice(0, 40) ?? ''}
+        {element.selectors[0]?.value ?? element.textContent?.slice(0, 40) ?? ""}
       </span>
       {element.textContent && (
         <span className="text-muted-foreground/60 truncate max-w-32 text-[10px]">

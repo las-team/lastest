@@ -1,12 +1,28 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from 'lucide-react';
-import { BrowserToolbar } from '@/components/embedded-browser/browser-toolbar-client';
-import { Button } from '@/components/ui/button';
-import type { StreamMouseEvent, StreamKeyboardEvent, StreamTouchEvent } from '@/lib/ws/protocol';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
+import { Wifi, WifiOff, Loader2, RefreshCw, Upload } from "lucide-react";
+import { BrowserToolbar } from "@/components/embedded-browser/browser-toolbar-client";
+import { Button } from "@/components/ui/button";
+import type {
+  StreamMouseEvent,
+  StreamKeyboardEvent,
+  StreamTouchEvent,
+} from "@/lib/ws/protocol";
 
-type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting';
+type ConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "reconnecting";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
@@ -61,7 +77,32 @@ export interface BrowserViewerHandle {
   sendInspectMode: (enabled: boolean) => void;
 }
 
-export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>(function BrowserViewer({ streamUrl, initialViewport, className, expiresAt, hideControls, hideToolbar, hideStatusBar, hideFullscreenToggle, hideScreenshot, hideViewportSelector, readOnlyUrl, interactive = true, inspectMode, fit, cropIndicators, onInspectResult, onDomSnapshot, onViewportChange }, ref) {
+export const BrowserViewer = forwardRef<
+  BrowserViewerHandle,
+  BrowserViewerProps
+>(function BrowserViewer(
+  {
+    streamUrl,
+    initialViewport,
+    className,
+    expiresAt,
+    hideControls,
+    hideToolbar,
+    hideStatusBar,
+    hideFullscreenToggle,
+    hideScreenshot,
+    hideViewportSelector,
+    readOnlyUrl,
+    interactive = true,
+    inspectMode,
+    fit,
+    cropIndicators,
+    onInspectResult,
+    onDomSnapshot,
+    onViewportChange,
+  },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -73,7 +114,12 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
   // Edge-shadow state for the 1:1 scroll container (fit=false only). Each flag
   // is true when the canvas extends past that edge of the viewport, i.e. the
   // user can still scroll in that direction.
-  const [edges, setEdges] = useState({ top: false, bottom: false, left: false, right: false });
+  const [edges, setEdges] = useState({
+    top: false,
+    bottom: false,
+    left: false,
+    right: false,
+  });
   const updateEdges = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -82,14 +128,20 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     const left = el.scrollLeft > 0;
     const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 0.5;
     setEdges((prev) =>
-      prev.top === top && prev.bottom === bottom && prev.left === left && prev.right === right
+      prev.top === top &&
+      prev.bottom === bottom &&
+      prev.left === left &&
+      prev.right === right
         ? prev
-        : { top, bottom, left, right }
+        : { top, bottom, left, right },
     );
   }, []);
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
-  const [viewport, setViewport] = useState(initialViewport ?? { width: 1280, height: 720 });
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("connecting");
+  const [viewport, setViewport] = useState(
+    initialViewport ?? { width: 1280, height: 720 },
+  );
   const [currentUrl, setCurrentUrl] = useState<string>();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fps, setFps] = useState(0);
@@ -124,7 +176,9 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
   // *real* stream aspect ratio. CDP's deviceWidth/Height drifts from the
   // requested viewport (browser chrome, scrollbar, device-metrics rounding)
   // — especially after setup restarts the screencast on a different page.
-  const lastFrameSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const lastFrameSizeRef = useRef<{ width: number; height: number } | null>(
+    null,
+  );
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
 
@@ -134,7 +188,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
   // misalign content with the box. Use the image's actual pixel size instead.
   const renderFrame = useCallback((base64Data: string) => {
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
     if (!imageRef.current) {
@@ -195,14 +249,18 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
   onDomSnapshotRef.current = onDomSnapshot;
 
   // Expose imperative methods for parent components
-  useImperativeHandle(ref, () => ({
-    requestDomSnapshot: () => {
-      sendWs({ type: 'stream:dom_snapshot_request', payload: {} });
-    },
-    sendInspectMode: (enabled: boolean) => {
-      sendWs({ type: 'stream:inspect_mode', payload: { enabled } });
-    },
-  }), [sendWs]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      requestDomSnapshot: () => {
+        sendWs({ type: "stream:dom_snapshot_request", payload: {} });
+      },
+      sendInspectMode: (enabled: boolean) => {
+        sendWs({ type: "stream:inspect_mode", payload: { enabled } });
+      },
+    }),
+    [sendWs],
+  );
 
   // Ref to hold the connect function so onclose can call it without circular deps
   const connectWsRef = useRef<(attempt: number) => void>(() => {});
@@ -218,8 +276,8 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
-      if (streamUrl.startsWith('ws://') || streamUrl.startsWith('wss://')) {
-        if (window.location.protocol === 'https:') {
+      if (streamUrl.startsWith("ws://") || streamUrl.startsWith("wss://")) {
+        if (window.location.protocol === "https:") {
           // On HTTPS pages, direct ws:// is blocked by mixed-content policy.
           // Route through the ws-proxy-preload.js proxy via the origin.
           const url = new URL(streamUrl);
@@ -228,16 +286,16 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           // HTTP (local dev) — connect directly
           wsUrl = streamUrl;
         }
-      } else if (streamUrl.startsWith('/')) {
+      } else if (streamUrl.startsWith("/")) {
         // Relative path — construct full WebSocket URL from page origin
-        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = `${proto}//${window.location.host}${streamUrl}`;
       }
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setConnectionStatus('connected');
+        setConnectionStatus("connected");
         setReconnectAttempt(0);
         lastFrameTimeRef.current = Date.now();
         screencastPausedRef.current = false;
@@ -252,16 +310,21 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
             wsRef.current?.readyState === WebSocket.OPEN &&
             !screencastPausedRef.current
           ) {
-            console.warn('[BrowserViewer] Frame stall detected — reconnecting');
+            console.warn("[BrowserViewer] Frame stall detected — reconnecting");
             wsRef.current?.close();
           }
         }, 3000);
 
         // Apply the initial viewport size to the remote browser
-        ws.send(JSON.stringify({
-          type: 'stream:session',
-          payload: { action: 'resize', viewport: initialViewport ?? { width: 1280, height: 720 } },
-        }));
+        ws.send(
+          JSON.stringify({
+            type: "stream:session",
+            payload: {
+              action: "resize",
+              viewport: initialViewport ?? { width: 1280, height: 720 },
+            },
+          }),
+        );
       };
 
       ws.onmessage = (event) => {
@@ -269,7 +332,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           const message = JSON.parse(event.data);
 
           switch (message.type) {
-            case 'stream:frame': {
+            case "stream:frame": {
               const { data } = message.payload;
               renderFrame(data);
 
@@ -287,31 +350,37 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
               break;
             }
 
-            case 'stream:inspect_element_response': {
+            case "stream:inspect_element_response": {
               onInspectResultRef.current?.(message.payload.element ?? null);
               break;
             }
 
-            case 'stream:dom_snapshot_response': {
+            case "stream:dom_snapshot_response": {
               onDomSnapshotRef.current?.(message.payload);
               break;
             }
 
-            case 'stream:status': {
+            case "stream:status": {
               if (message.payload.currentUrl) {
                 setCurrentUrl(message.payload.currentUrl);
               }
               if (message.payload.viewport) {
                 setViewport(message.payload.viewport);
               }
-              setFileChooserPending(message.payload.fileChooserPending ?? false);
+              setFileChooserPending(
+                message.payload.fileChooserPending ?? false,
+              );
 
               // Any status message from the server proves the connection is alive
               lastFrameTimeRef.current = Date.now();
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
-              if (status === 'busy' || status === 'recording' || status === 'debugging') {
+              if (
+                status === "busy" ||
+                status === "recording" ||
+                status === "debugging"
+              ) {
                 screencastPausedRef.current = true;
               } else {
                 screencastPausedRef.current = false;
@@ -326,21 +395,27 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
       ws.onclose = () => {
         wsRef.current = null;
-        if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
+        if (stallCheckRef.current) {
+          clearInterval(stallCheckRef.current);
+          stallCheckRef.current = null;
+        }
         lastFrameTimeRef.current = 0;
         if (intentionalCloseRef.current) {
-          setConnectionStatus('disconnected');
+          setConnectionStatus("disconnected");
           return;
         }
         // Auto-reconnect with exponential backoff
         const nextAttempt = attempt + 1;
         if (nextAttempt <= MAX_RECONNECT_ATTEMPTS) {
-          setConnectionStatus('reconnecting');
+          setConnectionStatus("reconnecting");
           setReconnectAttempt(nextAttempt);
           const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt);
-          reconnectTimerRef.current = setTimeout(() => connect(nextAttempt), delay);
+          reconnectTimerRef.current = setTimeout(
+            () => connect(nextAttempt),
+            delay,
+          );
         } else {
-          setConnectionStatus('disconnected');
+          setConnectionStatus("disconnected");
         }
       };
 
@@ -355,7 +430,10 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
     return () => {
       intentionalCloseRef.current = true;
-      if (stallCheckRef.current) { clearInterval(stallCheckRef.current); stallCheckRef.current = null; }
+      if (stallCheckRef.current) {
+        clearInterval(stallCheckRef.current);
+        stallCheckRef.current = null;
+      }
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -377,7 +455,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         }
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamUrl, renderFrame]);
 
   // Manual reconnect handler
@@ -389,14 +467,17 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     wsRef.current?.close();
     wsRef.current = null;
     intentionalCloseRef.current = false;
-    setConnectionStatus('connecting');
+    setConnectionStatus("connecting");
     setReconnectAttempt(0);
     connectWsRef.current(0);
   }, []);
 
   // Mouse event handlers
   const handleMouseEvent = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>, action: StreamMouseEvent['action']) => {
+    (
+      e: React.MouseEvent<HTMLCanvasElement>,
+      action: StreamMouseEvent["action"],
+    ) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -409,16 +490,21 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       // In inspect mode: forward moves (for CDP overlay highlighting),
       // intercept clicks to send inspect request instead
       if (inspectMode) {
-        if (action === 'move') {
+        if (action === "move") {
           // Forward moves so CDP Overlay can highlight elements
           sendWs({
-            type: 'stream:input',
-            payload: { type: 'mouse', action: 'move', x, y } satisfies StreamMouseEvent,
+            type: "stream:input",
+            payload: {
+              type: "mouse",
+              action: "move",
+              x,
+              y,
+            } satisfies StreamMouseEvent,
           });
-        } else if (action === 'down') {
+        } else if (action === "down") {
           // Click → inspect element at this point
           sendWs({
-            type: 'stream:inspect_element_request',
+            type: "stream:inspect_element_request",
             payload: { x, y },
           });
         }
@@ -427,20 +513,20 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       }
 
       const payload: StreamMouseEvent = {
-        type: 'mouse',
+        type: "mouse",
         action,
         x,
         y,
-        button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left',
+        button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left",
       };
 
-      if (action === 'down' || action === 'up') {
+      if (action === "down" || action === "up") {
         payload.clickCount = e.detail || 1;
       }
 
-      sendWs({ type: 'stream:input', payload });
+      sendWs({ type: "stream:input", payload });
     },
-    [sendWs, inspectMode]
+    [sendWs, inspectMode],
   );
 
   const handleWheel = useCallback(
@@ -455,10 +541,10 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       const y = Math.round((e.clientY - rect.top) * scaleY);
 
       sendWs({
-        type: 'stream:input',
+        type: "stream:input",
         payload: {
-          type: 'mouse',
-          action: 'wheel',
+          type: "mouse",
+          action: "wheel",
           x,
           y,
           deltaX: e.deltaX,
@@ -466,13 +552,13 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         } satisfies StreamMouseEvent,
       });
     },
-    [sendWs]
+    [sendWs],
   );
 
   // File upload handler for embedded browser
   const handleFileUpload = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
+    const input = document.createElement("input");
+    input.type = "file";
     input.multiple = true;
     input.onchange = async () => {
       if (!input.files?.length) return;
@@ -480,13 +566,20 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       for (const file of Array.from(input.files)) {
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
-        let binary = '';
+        let binary = "";
         for (let i = 0; i < bytes.length; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
-        files.push({ name: file.name, data: btoa(binary), mimeType: file.type || 'application/octet-stream' });
+        files.push({
+          name: file.name,
+          data: btoa(binary),
+          mimeType: file.type || "application/octet-stream",
+        });
       }
-      sendWs({ type: 'stream:input', payload: { type: 'file_upload' as const, files } });
+      sendWs({
+        type: "stream:input",
+        payload: { type: "file_upload" as const, files },
+      });
       setFileChooserPending(false);
     };
     input.click();
@@ -520,19 +613,22 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       if (composingRef.current) return;
 
       // Dead key — let the browser start composition
-      if (e.key === 'Dead') return;
+      if (e.key === "Dead") return;
 
       // Intercept paste: read local clipboard and send as clipboard_paste event
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      if ((e.ctrlKey || e.metaKey) && e.key === "v") {
         e.preventDefault();
-        navigator.clipboard.readText().then(text => {
-          if (text) {
-            sendWs({
-              type: 'stream:input',
-              payload: { type: 'clipboard_paste' as const, text },
-            });
-          }
-        }).catch(() => {});
+        navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (text) {
+              sendWs({
+                type: "stream:input",
+                payload: { type: "clipboard_paste" as const, text },
+              });
+            }
+          })
+          .catch(() => {});
         return;
       }
 
@@ -545,10 +641,10 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       // Everything else (non-printable keys, modifier combos): forward directly
       e.preventDefault();
       sendWs({
-        type: 'stream:input',
+        type: "stream:input",
         payload: {
-          type: 'keyboard',
-          action: 'keydown',
+          type: "keyboard",
+          action: "keydown",
           key: e.key,
           code: e.code,
           text: e.key.length === 1 ? e.key : undefined,
@@ -561,20 +657,20 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         } satisfies StreamKeyboardEvent,
       });
     },
-    [sendWs]
+    [sendWs],
   );
 
   const handleKeyUp = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (composingRef.current || e.key === 'Dead') return;
+      if (composingRef.current || e.key === "Dead") return;
       // Only forward non-printable keyups (printable chars handled via input event)
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       e.preventDefault();
       sendWs({
-        type: 'stream:input',
+        type: "stream:input",
         payload: {
-          type: 'keyboard',
-          action: 'keyup',
+          type: "keyboard",
+          action: "keyup",
           key: e.key,
           code: e.code,
           modifiers: {
@@ -586,7 +682,7 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
         } satisfies StreamKeyboardEvent,
       });
     },
-    [sendWs]
+    [sendWs],
   );
 
   // Textarea input event — fires for every character that enters the textarea
@@ -597,15 +693,15 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     if (!ta || !ta.value) return;
     // Forward all accumulated text and clear
     sendWs({
-      type: 'stream:input',
+      type: "stream:input",
       payload: {
-        type: 'keyboard',
-        action: 'type',
-        key: '',
+        type: "keyboard",
+        action: "type",
+        key: "",
         text: ta.value,
       } satisfies StreamKeyboardEvent,
     });
-    ta.value = '';
+    ta.value = "";
   }, [sendWs]);
 
   // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
@@ -619,35 +715,38 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       const composed = e.data;
       if (composed) {
         sendWs({
-          type: 'stream:input',
+          type: "stream:input",
           payload: {
-            type: 'keyboard',
-            action: 'type',
-            key: '',
+            type: "keyboard",
+            action: "type",
+            key: "",
             text: composed,
           } satisfies StreamKeyboardEvent,
         });
       }
       if (textareaRef.current) {
-        textareaRef.current.value = '';
+        textareaRef.current.value = "";
       }
     },
-    [sendWs]
+    [sendWs],
   );
 
   // Touch event helper — extracts touch points relative to canvas
-  const getTouchPoints = useCallback((e: globalThis.TouchEvent): StreamTouchEvent['touches'] => {
-    const canvas = canvasRef.current;
-    if (!canvas) return [];
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = rect.width ? canvas.width / rect.width : 1;
-    const scaleY = rect.height ? canvas.height / rect.height : 1;
-    return Array.from(e.touches).map((t) => ({
-      x: Math.round((t.clientX - rect.left) * scaleX),
-      y: Math.round((t.clientY - rect.top) * scaleY),
-      id: t.identifier,
-    }));
-  }, []);
+  const getTouchPoints = useCallback(
+    (e: globalThis.TouchEvent): StreamTouchEvent["touches"] => {
+      const canvas = canvasRef.current;
+      if (!canvas) return [];
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width ? canvas.width / rect.width : 1;
+      const scaleY = rect.height ? canvas.height / rect.height : 1;
+      return Array.from(e.touches).map((t) => ({
+        x: Math.round((t.clientX - rect.left) * scaleX),
+        y: Math.round((t.clientY - rect.top) * scaleY),
+        id: t.identifier,
+      }));
+    },
+    [],
+  );
 
   // Attach non-passive touch listeners so preventDefault() works (suppresses synthetic mouse events)
   useEffect(() => {
@@ -657,16 +756,24 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     const onTouchStart = (e: globalThis.TouchEvent) => {
       e.preventDefault();
       sendWs({
-        type: 'stream:input',
-        payload: { type: 'touch', action: 'start', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+        type: "stream:input",
+        payload: {
+          type: "touch",
+          action: "start",
+          touches: getTouchPoints(e),
+        } satisfies StreamTouchEvent,
       });
     };
 
     const onTouchMove = (e: globalThis.TouchEvent) => {
       e.preventDefault();
       sendWs({
-        type: 'stream:input',
-        payload: { type: 'touch', action: 'move', touches: getTouchPoints(e) } satisfies StreamTouchEvent,
+        type: "stream:input",
+        payload: {
+          type: "touch",
+          action: "move",
+          touches: getTouchPoints(e),
+        } satisfies StreamTouchEvent,
       });
     };
 
@@ -674,21 +781,25 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
       e.preventDefault();
       // On touchend, e.touches is empty — send empty array so CDP knows all fingers lifted
       sendWs({
-        type: 'stream:input',
-        payload: { type: 'touch', action: 'end', touches: [] } satisfies StreamTouchEvent,
+        type: "stream:input",
+        payload: {
+          type: "touch",
+          action: "end",
+          touches: [],
+        } satisfies StreamTouchEvent,
       });
     };
 
-    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
+    canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
     return () => {
-      canvas.removeEventListener('touchstart', onTouchStart);
-      canvas.removeEventListener('touchmove', onTouchMove);
-      canvas.removeEventListener('touchend', onTouchEnd);
-      canvas.removeEventListener('touchcancel', onTouchEnd);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
     };
   }, [sendWs, getTouchPoints]);
 
@@ -696,22 +807,22 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
   const handleNavigate = useCallback(
     (url: string) => {
       sendWs({
-        type: 'stream:session',
-        payload: { action: 'navigate', url },
+        type: "stream:session",
+        payload: { action: "navigate", url },
       });
     },
-    [sendWs]
+    [sendWs],
   );
 
   const handleViewportChange = useCallback(
     (newViewport: { width: number; height: number }) => {
       setViewport(newViewport);
       sendWs({
-        type: 'stream:session',
-        payload: { action: 'resize', viewport: newViewport },
+        type: "stream:session",
+        payload: { action: "resize", viewport: newViewport },
       });
     },
-    [sendWs]
+    [sendWs],
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -734,12 +845,12 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
     const handler = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
-    document.addEventListener('fullscreenchange', handler);
-    return () => document.removeEventListener('fullscreenchange', handler);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
   return (
-    <div ref={containerRef} className={`flex flex-col ${className ?? ''}`}>
+    <div ref={containerRef} className={`flex flex-col ${className ?? ""}`}>
       {!hideToolbar && (
         <BrowserToolbar
           currentUrl={currentUrl}
@@ -747,7 +858,9 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           isFullscreen={isFullscreen}
           onNavigate={handleNavigate}
           onViewportChange={handleViewportChange}
-          onFullscreenToggle={hideFullscreenToggle ? undefined : toggleFullscreen}
+          onFullscreenToggle={
+            hideFullscreenToggle ? undefined : toggleFullscreen
+          }
           hideControls={hideControls}
           hideFullscreenToggle={hideFullscreenToggle}
           hideScreenshot={hideScreenshot}
@@ -763,16 +876,19 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
                              BrowserViewer's height (else viewport = 0px).
            • default:        1:1 pixels with intrinsic-height container —
                              scrolls only when parent imposes a height. */}
-      <div className={`relative ${hideToolbar ? '' : 'rounded-b-lg border'} ${hideToolbar && hideStatusBar ? '' : 'bg-black'} ${fit ? 'flex-1 min-h-0 overflow-hidden flex items-center justify-center' : cropIndicators ? 'flex-1 min-h-0 overflow-hidden' : 'overflow-auto'}`}>
-        {connectionStatus !== 'connected' && (
+      <div
+        className={`relative ${hideToolbar ? "" : "rounded-b-lg border"} ${hideToolbar && hideStatusBar ? "" : "bg-black"} ${fit ? "flex-1 min-h-0 overflow-hidden flex items-center justify-center" : cropIndicators ? "flex-1 min-h-0 overflow-hidden" : "overflow-auto"}`}
+      >
+        {connectionStatus !== "connected" && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
-            {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') ? (
+            {connectionStatus === "connecting" ||
+            connectionStatus === "reconnecting" ? (
               <div className="flex flex-col items-center gap-2 text-white">
                 <Loader2 className="h-8 w-8 animate-spin" />
                 <span className="text-sm">
-                  {connectionStatus === 'reconnecting'
+                  {connectionStatus === "reconnecting"
                     ? `Reconnecting... (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})`
-                    : 'Connecting to browser...'}
+                    : "Connecting to browser..."}
                 </span>
               </div>
             ) : (
@@ -797,25 +913,30 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
             <Upload className="h-8 w-8 text-muted-foreground" />
             <p className="text-sm font-medium">File upload requested</p>
-            <Button onClick={handleFileUpload} size="sm">Choose Files</Button>
+            <Button onClick={handleFileUpload} size="sm">
+              Choose Files
+            </Button>
           </div>
         )}
 
         {fit ? (
           <canvas
             ref={canvasRef}
-            className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+            className={`outline-none ${inspectMode ? "cursor-crosshair" : interactive ? "cursor-default" : "cursor-default pointer-events-none"}`}
             style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              width: 'auto',
-              height: 'auto',
+              maxWidth: "100%",
+              maxHeight: "100%",
+              width: "auto",
+              height: "auto",
               aspectRatio: `${viewport.width} / ${viewport.height}`,
-              objectFit: 'contain',
+              objectFit: "contain",
             }}
-            onMouseMove={(e) => handleMouseEvent(e, 'move')}
-            onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
-            onMouseUp={(e) => handleMouseEvent(e, 'up')}
+            onMouseMove={(e) => handleMouseEvent(e, "move")}
+            onMouseDown={(e) => {
+              handleMouseEvent(e, "down");
+              focusTextarea();
+            }}
+            onMouseUp={(e) => handleMouseEvent(e, "up")}
             onWheel={handleWheel}
             onContextMenu={(e) => e.preventDefault()}
           />
@@ -829,15 +950,26 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
               ref={scrollRef}
               onScroll={updateEdges}
               className="absolute inset-0 overflow-auto flex"
-              style={{ alignItems: 'safe center', justifyContent: 'safe center' }}
+              style={{
+                alignItems: "safe center",
+                justifyContent: "safe center",
+              }}
             >
               <canvas
                 ref={canvasRef}
-                className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
-                style={{ width: viewport.width, height: viewport.height, display: 'block', flexShrink: 0 }}
-                onMouseMove={(e) => handleMouseEvent(e, 'move')}
-                onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
-                onMouseUp={(e) => handleMouseEvent(e, 'up')}
+                className={`outline-none ${inspectMode ? "cursor-crosshair" : interactive ? "cursor-default" : "cursor-default pointer-events-none"}`}
+                style={{
+                  width: viewport.width,
+                  height: viewport.height,
+                  display: "block",
+                  flexShrink: 0,
+                }}
+                onMouseMove={(e) => handleMouseEvent(e, "move")}
+                onMouseDown={(e) => {
+                  handleMouseEvent(e, "down");
+                  focusTextarea();
+                }}
+                onMouseUp={(e) => handleMouseEvent(e, "up")}
                 onWheel={handleWheel}
                 onContextMenu={(e) => e.preventDefault()}
               />
@@ -845,29 +977,32 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
             {/* Edge shadows — opacity-driven so they fade as the user scrolls to each boundary. */}
             <div
               aria-hidden
-              className={`pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-150 ${edges.top ? 'opacity-100' : 'opacity-0'}`}
+              className={`pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-150 ${edges.top ? "opacity-100" : "opacity-0"}`}
             />
             <div
               aria-hidden
-              className={`pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/70 to-transparent transition-opacity duration-150 ${edges.bottom ? 'opacity-100' : 'opacity-0'}`}
+              className={`pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/70 to-transparent transition-opacity duration-150 ${edges.bottom ? "opacity-100" : "opacity-0"}`}
             />
             <div
               aria-hidden
-              className={`pointer-events-none absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-black/70 to-transparent transition-opacity duration-150 ${edges.left ? 'opacity-100' : 'opacity-0'}`}
+              className={`pointer-events-none absolute top-0 bottom-0 left-0 w-8 bg-gradient-to-r from-black/70 to-transparent transition-opacity duration-150 ${edges.left ? "opacity-100" : "opacity-0"}`}
             />
             <div
               aria-hidden
-              className={`pointer-events-none absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-black/70 to-transparent transition-opacity duration-150 ${edges.right ? 'opacity-100' : 'opacity-0'}`}
+              className={`pointer-events-none absolute top-0 bottom-0 right-0 w-8 bg-gradient-to-l from-black/70 to-transparent transition-opacity duration-150 ${edges.right ? "opacity-100" : "opacity-0"}`}
             />
           </>
         ) : (
           <canvas
             ref={canvasRef}
-            className={`outline-none ${inspectMode ? 'cursor-crosshair' : interactive ? 'cursor-default' : 'cursor-default pointer-events-none'}`}
+            className={`outline-none ${inspectMode ? "cursor-crosshair" : interactive ? "cursor-default" : "cursor-default pointer-events-none"}`}
             style={{ width: viewport.width, height: viewport.height }}
-            onMouseMove={(e) => handleMouseEvent(e, 'move')}
-            onMouseDown={(e) => { handleMouseEvent(e, 'down'); focusTextarea(); }}
-            onMouseUp={(e) => handleMouseEvent(e, 'up')}
+            onMouseMove={(e) => handleMouseEvent(e, "move")}
+            onMouseDown={(e) => {
+              handleMouseEvent(e, "down");
+              focusTextarea();
+            }}
+            onMouseUp={(e) => handleMouseEvent(e, "up")}
             onWheel={handleWheel}
             onContextMenu={(e) => e.preventDefault()}
           />
@@ -878,7 +1013,15 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
           <textarea
             ref={textareaRef}
             className="absolute top-0 left-0 overflow-hidden outline-none"
-            style={{ width: 1, height: 1, opacity: 0.01, resize: 'none', zIndex: 10, pointerEvents: 'none', caretColor: 'transparent' }}
+            style={{
+              width: 1,
+              height: 1,
+              opacity: 0.01,
+              resize: "none",
+              zIndex: 10,
+              pointerEvents: "none",
+              caretColor: "transparent",
+            }}
             tabIndex={0}
             autoComplete="off"
             autoCapitalize="off"
@@ -896,44 +1039,48 @@ export const BrowserViewer = forwardRef<BrowserViewerHandle, BrowserViewerProps>
 
       {/* Status bar */}
       {!hideStatusBar && (
-      <div className="flex items-center justify-between px-2 py-1">
-        {connectionStatus === 'connecting' && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Connecting...
-          </div>
-        )}
-        {connectionStatus === 'reconnecting' && (
-          <div className="flex items-center gap-1.5 text-xs text-yellow-600">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Reconnecting ({reconnectAttempt}/{MAX_RECONNECT_ATTEMPTS})...
-          </div>
-        )}
-        {connectionStatus === 'connected' && (
-          <div className="flex items-center gap-1.5 text-xs text-green-600">
-            <Wifi className="h-3 w-3" />
-            {fps} FPS
-          </div>
-        )}
-        {(connectionStatus === 'disconnected' || connectionStatus === 'error') && (
-          <div className="flex items-center gap-1.5 text-xs text-destructive">
-            <WifiOff className="h-3 w-3" />
-            Disconnected
-          </div>
-        )}
-        <div className="flex items-center gap-3">
-          {timeRemaining !== null && timeRemaining <= SESSION_EXPIRY_WARN_MS && (
-            <span className={`text-xs font-medium ${timeRemaining <= 60_000 ? 'text-destructive' : 'text-yellow-600'}`}>
-              {timeRemaining <= 0
-                ? 'Session expired'
-                : `${Math.floor(timeRemaining / 60_000)}:${String(Math.floor((timeRemaining % 60_000) / 1000)).padStart(2, '0')} remaining`}
-            </span>
+        <div className="flex items-center justify-between px-2 py-1">
+          {connectionStatus === "connecting" && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Connecting...
+            </div>
           )}
-          <span className="text-xs text-muted-foreground">
-            {viewport.width}×{viewport.height}
-          </span>
+          {connectionStatus === "reconnecting" && (
+            <div className="flex items-center gap-1.5 text-xs text-yellow-600">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Reconnecting ({reconnectAttempt}/{MAX_RECONNECT_ATTEMPTS})...
+            </div>
+          )}
+          {connectionStatus === "connected" && (
+            <div className="flex items-center gap-1.5 text-xs text-green-600">
+              <Wifi className="h-3 w-3" />
+              {fps} FPS
+            </div>
+          )}
+          {(connectionStatus === "disconnected" ||
+            connectionStatus === "error") && (
+            <div className="flex items-center gap-1.5 text-xs text-destructive">
+              <WifiOff className="h-3 w-3" />
+              Disconnected
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            {timeRemaining !== null &&
+              timeRemaining <= SESSION_EXPIRY_WARN_MS && (
+                <span
+                  className={`text-xs font-medium ${timeRemaining <= 60_000 ? "text-destructive" : "text-yellow-600"}`}
+                >
+                  {timeRemaining <= 0
+                    ? "Session expired"
+                    : `${Math.floor(timeRemaining / 60_000)}:${String(Math.floor((timeRemaining % 60_000) / 1000)).padStart(2, "0")} remaining`}
+                </span>
+              )}
+            <span className="text-xs text-muted-foreground">
+              {viewport.width}×{viewport.height}
+            </span>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

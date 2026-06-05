@@ -1,6 +1,9 @@
-import type { GithubActionMode, GithubActionTriggerEvent } from '@/lib/db/schema';
+import type {
+  GithubActionMode,
+  GithubActionTriggerEvent,
+} from "@/lib/db/schema";
 
-const RUNNER_VERSION = '0.4.2';
+const RUNNER_VERSION = "0.4.2";
 
 export interface WorkflowConfig {
   mode: GithubActionMode;
@@ -15,36 +18,38 @@ export interface WorkflowConfig {
 }
 
 function buildOnBlock(config: WorkflowConfig): string {
-  const lines: string[] = ['on:'];
+  const lines: string[] = ["on:"];
 
-  const hasBoth = config.triggerEvents.includes('push') && config.triggerEvents.includes('pull_request');
+  const hasBoth =
+    config.triggerEvents.includes("push") &&
+    config.triggerEvents.includes("pull_request");
   const noBranchFilter = config.branchFilter.length === 0;
 
   for (const event of config.triggerEvents) {
-    if (event === 'schedule') {
+    if (event === "schedule") {
       if (config.cronSchedule) {
         lines.push(`  schedule:`);
         lines.push(`    - cron: '${config.cronSchedule}'`);
       }
       continue;
     }
-    if (event === 'workflow_dispatch') {
+    if (event === "workflow_dispatch") {
       lines.push(`  workflow_dispatch:`);
       continue;
     }
     // Skip push when both push and pull_request are selected without branch
     // filters — otherwise GitHub runs the workflow twice for every PR push.
-    if (event === 'push' && hasBoth && noBranchFilter) {
+    if (event === "push" && hasBoth && noBranchFilter) {
       continue;
     }
     // push / pull_request
     lines.push(`  ${event}:`);
     if (config.branchFilter.length > 0) {
-      lines.push(`    branches: [${config.branchFilter.join(', ')}]`);
+      lines.push(`    branches: [${config.branchFilter.join(", ")}]`);
     }
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function buildPersistentSteps(config: WorkflowConfig): string {
@@ -55,11 +60,17 @@ function buildPersistentSteps(config: WorkflowConfig): string {
   flags.push(`--repo "${repo}"`);
   flags.push(`--branch "$\{{ github.head_ref || github.ref_name }}"`);
   flags.push(`--commit "$\{{ github.sha }}"`);
-  if (config.failOnChanges) flags.push('--fail-on-changes');
+  if (config.failOnChanges) flags.push("--fail-on-changes");
   flags.push(`--timeout ${config.timeout}`);
   if (config.targetUrl) flags.push(`--target-url "${config.targetUrl}"`);
 
-  const runCmd = flags.map((f, i) => i === 0 ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
+  const runCmd = flags
+    .map((f, i) =>
+      i === 0
+        ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}`
+        : `            ${f}`,
+    )
+    .join(" \\\n");
 
   return `      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,11 +92,17 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
   flags.push(`--repo "${repo}"`);
   flags.push(`--branch "$\{{ github.head_ref || github.ref_name }}"`);
   flags.push(`--commit "$\{{ github.sha }}"`);
-  if (config.failOnChanges) flags.push('--fail-on-changes');
+  if (config.failOnChanges) flags.push("--fail-on-changes");
   flags.push(`--timeout ${config.timeout}`);
   if (config.targetUrl) flags.push(`--target-url "${config.targetUrl}"`);
 
-  const triggerFlags = flags.map((f, i) => i === 0 ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}` : `            ${f}`).join(' \\\n');
+  const triggerFlags = flags
+    .map((f, i) =>
+      i === 0
+        ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}`
+        : `            ${f}`,
+    )
+    .join(" \\\n");
 
   return `      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -128,11 +145,13 @@ function buildEphemeralSteps(config: WorkflowConfig): string {
 }
 
 export function generateWorkflowYaml(config: WorkflowConfig): string {
-  const timeoutMinutes = Math.ceil(config.timeout / 60000) + (config.mode === 'ephemeral' ? 5 : 0);
+  const timeoutMinutes =
+    Math.ceil(config.timeout / 60000) + (config.mode === "ephemeral" ? 5 : 0);
   const onBlock = buildOnBlock(config);
-  const steps = config.mode === 'ephemeral'
-    ? buildEphemeralSteps(config)
-    : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
+  const steps =
+    config.mode === "ephemeral"
+      ? buildEphemeralSteps(config)
+      : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 
   return `name: Lastest Visual Tests
 ${onBlock}

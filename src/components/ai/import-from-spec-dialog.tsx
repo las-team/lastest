@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,11 +8,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   discoverSpecFiles,
   extractUserStoriesFromFiles,
@@ -22,9 +22,9 @@ import {
   generateTestsFromStories,
   createPlaceholdersFromStories,
   validateAllTestsWithMCP,
-} from '@/server/actions/spec-import';
-import type { DiscoveredSpecFile } from '@/server/actions/spec-import';
-import type { ExtractedUserStory } from '@/lib/db/schema';
+} from "@/server/actions/spec-import";
+import type { DiscoveredSpecFile } from "@/server/actions/spec-import";
+import type { ExtractedUserStory } from "@/lib/db/schema";
 import {
   Loader2,
   FileText,
@@ -45,12 +45,18 @@ import {
   Plus,
   Globe,
   Zap,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
+} from "lucide-react";
+import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
-type Step = 'input' | 'file-selection' | 'extracting' | 'review' | 'generating' | 'results';
+type Step =
+  | "input"
+  | "file-selection"
+  | "extracting"
+  | "review"
+  | "generating"
+  | "results";
 
 interface ImportFromSpecDialogProps {
   open: boolean;
@@ -69,14 +75,16 @@ export function ImportFromSpecDialog({
   onComplete,
   reviewSessionId,
 }: ImportFromSpecDialogProps) {
-  const [step, setStep] = useState<Step>('input');
+  const [step, setStep] = useState<Step>("input");
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCreatingPlaceholders, setIsCreatingPlaceholders] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
 
   // File selection
-  const [discoveredFiles, setDiscoveredFiles] = useState<DiscoveredSpecFile[]>([]);
+  const [discoveredFiles, setDiscoveredFiles] = useState<DiscoveredSpecFile[]>(
+    [],
+  );
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,13 +92,15 @@ export function ImportFromSpecDialog({
   // Extracted stories
   const [stories, setStories] = useState<ExtractedUserStory[]>([]);
   const [importId, setImportId] = useState<string | null>(null);
-  const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
+  const [expandedStories, setExpandedStories] = useState<Set<string>>(
+    new Set(),
+  );
   const [editingAC, setEditingAC] = useState<string | null>(null);
-  const [editingValue, setEditingValue] = useState('');
+  const [editingValue, setEditingValue] = useState("");
 
   // Generation options
   const [useBranchContext, setUseBranchContext] = useState(true);
-  const [targetUrl, setTargetUrl] = useState('');
+  const [targetUrl, setTargetUrl] = useState("");
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
 
   // Results
@@ -112,13 +122,15 @@ export function ImportFromSpecDialog({
       if (result.success && result.stories) {
         setStories(result.stories);
         setImportId(result.importId || null);
-        setExpandedStories(new Set(result.stories.map(s => s.id)));
-        setStep('review');
+        setExpandedStories(new Set(result.stories.map((s) => s.id)));
+        setStep("review");
       } else {
-        toast.error(result.error || 'Failed to load spec import results');
+        toast.error(result.error || "Failed to load spec import results");
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, reviewSessionId]);
 
   // ============================================
@@ -131,14 +143,14 @@ export function ImportFromSpecDialog({
       const response = await discoverSpecFiles(repositoryId, branch);
       if (response.success && response.files) {
         setDiscoveredFiles(response.files);
-        setSelectedFiles(new Set(response.files.map(f => f.path)));
-        setStep('file-selection');
+        setSelectedFiles(new Set(response.files.map((f) => f.path)));
+        setStep("file-selection");
         toast.success(`Found ${response.files.length} spec file(s)`);
       } else {
-        toast.error(response.error || 'Failed to discover specs');
+        toast.error(response.error || "Failed to discover specs");
       }
     } catch {
-      toast.error('Failed to scan repository');
+      toast.error("Failed to scan repository");
     } finally {
       setIsDiscovering(false);
     }
@@ -151,7 +163,7 @@ export function ImportFromSpecDialog({
   };
 
   const toggleFile = (path: string) => {
-    setSelectedFiles(prev => {
+    setSelectedFiles((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
@@ -159,7 +171,8 @@ export function ImportFromSpecDialog({
     });
   };
 
-  const selectAll = () => setSelectedFiles(new Set(discoveredFiles.map(f => f.path)));
+  const selectAll = () =>
+    setSelectedFiles(new Set(discoveredFiles.map((f) => f.path)));
   const deselectAll = () => setSelectedFiles(new Set());
 
   // ============================================
@@ -168,7 +181,7 @@ export function ImportFromSpecDialog({
 
   const handleExtractFromGitHub = async () => {
     if (selectedFiles.size === 0) {
-      toast.error('Please select at least one file');
+      toast.error("Please select at least one file");
       return;
     }
 
@@ -176,22 +189,24 @@ export function ImportFromSpecDialog({
       const response = await extractUserStoriesFromFiles(
         repositoryId,
         branch,
-        Array.from(selectedFiles)
+        Array.from(selectedFiles),
       );
       if (response.success) {
-        toast.success('Spec import started — check the activity feed for progress');
+        toast.success(
+          "Spec import started — check the activity feed for progress",
+        );
         onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to start extraction');
+        toast.error(response.error || "Failed to start extraction");
       }
     } catch {
-      toast.error('Failed to start extraction');
+      toast.error("Failed to start extraction");
     }
   };
 
   const handleExtractFromUpload = async () => {
     if (uploadedFiles.length === 0) {
-      toast.error('Please select files first');
+      toast.error("Please select files first");
       return;
     }
 
@@ -200,21 +215,28 @@ export function ImportFromSpecDialog({
         uploadedFiles.map(async (file) => {
           const buffer = await file.arrayBuffer();
           const bytes = new Uint8Array(buffer);
-          let binary = '';
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++)
+            binary += String.fromCharCode(bytes[i]);
           return { name: file.name, content: btoa(binary) };
-        })
+        }),
       );
 
-      const response = await extractUserStoriesFromUpload(encodedFiles, repositoryId, branch);
+      const response = await extractUserStoriesFromUpload(
+        encodedFiles,
+        repositoryId,
+        branch,
+      );
       if (response.success) {
-        toast.success('Spec import started — check the activity feed for progress');
+        toast.success(
+          "Spec import started — check the activity feed for progress",
+        );
         onOpenChange(false);
       } else {
-        toast.error(response.error || 'Failed to start extraction');
+        toast.error(response.error || "Failed to start extraction");
       }
     } catch {
-      toast.error('Failed to start extraction');
+      toast.error("Failed to start extraction");
     }
   };
 
@@ -223,7 +245,7 @@ export function ImportFromSpecDialog({
   // ============================================
 
   const toggleStory = (storyId: string) => {
-    setExpandedStories(prev => {
+    setExpandedStories((prev) => {
       const next = new Set(prev);
       if (next.has(storyId)) next.delete(storyId);
       else next.add(storyId);
@@ -232,17 +254,21 @@ export function ImportFromSpecDialog({
   };
 
   const removeStory = (storyId: string) => {
-    setStories(prev => prev.filter(s => s.id !== storyId));
+    setStories((prev) => prev.filter((s) => s.id !== storyId));
   };
 
   const removeAC = (storyId: string, acId: string) => {
-    setStories(prev => prev.map(s => {
-      if (s.id !== storyId) return s;
-      return {
-        ...s,
-        acceptanceCriteria: s.acceptanceCriteria.filter(ac => ac.id !== acId),
-      };
-    }));
+    setStories((prev) =>
+      prev.map((s) => {
+        if (s.id !== storyId) return s;
+        return {
+          ...s,
+          acceptanceCriteria: s.acceptanceCriteria.filter(
+            (ac) => ac.id !== acId,
+          ),
+        };
+      }),
+    );
   };
 
   const startEditAC = (acId: string, currentName: string) => {
@@ -252,36 +278,40 @@ export function ImportFromSpecDialog({
 
   const saveEditAC = (storyId: string, acId: string) => {
     if (!editingValue.trim()) return;
-    setStories(prev => prev.map(s => {
-      if (s.id !== storyId) return s;
-      return {
-        ...s,
-        acceptanceCriteria: s.acceptanceCriteria.map(ac => {
-          if (ac.id !== acId) return ac;
-          return { ...ac, testName: editingValue.trim() };
-        }),
-      };
-    }));
+    setStories((prev) =>
+      prev.map((s) => {
+        if (s.id !== storyId) return s;
+        return {
+          ...s,
+          acceptanceCriteria: s.acceptanceCriteria.map((ac) => {
+            if (ac.id !== acId) return ac;
+            return { ...ac, testName: editingValue.trim() };
+          }),
+        };
+      }),
+    );
     setEditingAC(null);
-    setEditingValue('');
+    setEditingValue("");
   };
 
   const addACToStory = useCallback((storyId: string) => {
-    setStories(prev => prev.map(s => {
-      if (s.id !== storyId) return s;
-      const newId = `AC-${storyId.replace('US-', '')}.${s.acceptanceCriteria.length + 1}`;
-      return {
-        ...s,
-        acceptanceCriteria: [
-          ...s.acceptanceCriteria,
-          {
-            id: newId,
-            description: 'New acceptance criterion',
-            testName: 'New test',
-          },
-        ],
-      };
-    }));
+    setStories((prev) =>
+      prev.map((s) => {
+        if (s.id !== storyId) return s;
+        const newId = `AC-${storyId.replace("US-", "")}.${s.acceptanceCriteria.length + 1}`;
+        return {
+          ...s,
+          acceptanceCriteria: [
+            ...s.acceptanceCriteria,
+            {
+              id: newId,
+              description: "New acceptance criterion",
+              testName: "New test",
+            },
+          ],
+        };
+      }),
+    );
   }, []);
 
   // ============================================
@@ -290,12 +320,12 @@ export function ImportFromSpecDialog({
 
   const handleGenerate = async () => {
     if (stories.length === 0) {
-      toast.error('No user stories to generate tests from');
+      toast.error("No user stories to generate tests from");
       return;
     }
 
     setIsGenerating(true);
-    setStep('generating');
+    setStep("generating");
     try {
       const response = await generateTestsFromStories(
         repositoryId,
@@ -305,7 +335,7 @@ export function ImportFromSpecDialog({
         {
           useBranchContext,
           targetUrl: targetUrl.trim() || undefined,
-        }
+        },
       );
 
       setResults({
@@ -313,17 +343,20 @@ export function ImportFromSpecDialog({
         testsCreated: response.testsCreated,
         errors: response.errors,
       });
-      setStep('results');
+      setStep("results");
 
       if (response.success) {
-        toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} tests`);
-        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
+        toast.success(
+          `Created ${response.areasCreated} areas and ${response.testsCreated} tests`,
+        );
+        if (reviewSessionId)
+          completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
-        toast.error(response.error || 'Failed to generate tests');
+        toast.error(response.error || "Failed to generate tests");
       }
     } catch {
-      toast.error('Failed to generate tests');
-      setStep('review');
+      toast.error("Failed to generate tests");
+      setStep("review");
     } finally {
       setIsGenerating(false);
     }
@@ -331,19 +364,19 @@ export function ImportFromSpecDialog({
 
   const handleCreatePlaceholders = async () => {
     if (stories.length === 0) {
-      toast.error('No user stories to create placeholders from');
+      toast.error("No user stories to create placeholders from");
       return;
     }
 
     setIsCreatingPlaceholders(true);
-    setStep('generating');
+    setStep("generating");
     try {
       const response = await createPlaceholdersFromStories(
         repositoryId,
         importId,
         stories,
         branch,
-        { targetUrl: targetUrl.trim() || undefined }
+        { targetUrl: targetUrl.trim() || undefined },
       );
 
       setResults({
@@ -352,17 +385,20 @@ export function ImportFromSpecDialog({
         errors: response.errors,
         usedPlaceholders: true,
       });
-      setStep('results');
+      setStep("results");
 
       if (response.success) {
-        toast.success(`Created ${response.areasCreated} areas and ${response.testsCreated} placeholder tests`);
-        if (reviewSessionId) completeSpecImportSession(reviewSessionId).catch(() => {});
+        toast.success(
+          `Created ${response.areasCreated} areas and ${response.testsCreated} placeholder tests`,
+        );
+        if (reviewSessionId)
+          completeSpecImportSession(reviewSessionId).catch(() => {});
       } else {
-        toast.error(response.error || 'Failed to create placeholders');
+        toast.error(response.error || "Failed to create placeholders");
       }
     } catch {
-      toast.error('Failed to create placeholder tests');
-      setStep('review');
+      toast.error("Failed to create placeholder tests");
+      setStep("review");
     } finally {
       setIsCreatingPlaceholders(false);
     }
@@ -374,20 +410,22 @@ export function ImportFromSpecDialog({
 
   const handleMCPValidation = async () => {
     if (!results?.testIds || results.testIds.length === 0) return;
-    const validationUrl = targetUrl.trim() || 'http://localhost:3000';
+    const validationUrl = targetUrl.trim() || "http://localhost:3000";
 
     setIsValidating(true);
     try {
       const result = await validateAllTestsWithMCP(
         repositoryId,
         results.testIds,
-        validationUrl
+        validationUrl,
       );
       if (result.success) {
-        toast.success(`Validated ${result.validated} tests, fixed ${result.fixed}`);
+        toast.success(
+          `Validated ${result.validated} tests, fixed ${result.fixed}`,
+        );
       }
     } catch {
-      toast.error('MCP validation failed');
+      toast.error("MCP validation failed");
     } finally {
       setIsValidating(false);
     }
@@ -398,7 +436,7 @@ export function ImportFromSpecDialog({
   // ============================================
 
   const handleClose = () => {
-    setStep('input');
+    setStep("input");
     setStories([]);
     setImportId(null);
     setDiscoveredFiles([]);
@@ -414,11 +452,20 @@ export function ImportFromSpecDialog({
     }
   };
 
-  const totalAC = stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
-  const isLocalhostTarget = targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1') || !targetUrl.trim();
+  const totalAC = stories.reduce(
+    (sum, s) => sum + s.acceptanceCriteria.length,
+    0,
+  );
+  const isLocalhostTarget =
+    targetUrl.includes("localhost") ||
+    targetUrl.includes("127.0.0.1") ||
+    !targetUrl.trim();
 
   return (
-    <Dialog open={open} onOpenChange={(v) => v ? onOpenChange(true) : handleClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => (v ? onOpenChange(true) : handleClose())}
+    >
       <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -426,30 +473,47 @@ export function ImportFromSpecDialog({
             Import from Specification
           </DialogTitle>
           <DialogDescription>
-            {step === 'input' && 'Import a specification document to extract User Stories and generate tests.'}
-            {step === 'file-selection' && 'Select which spec files to analyze for User Stories.'}
-            {step === 'extracting' && 'Extracting User Stories and Acceptance Criteria...'}
-            {step === 'review' && `Review ${stories.length} User Stories with ${totalAC} Acceptance Criteria before generating tests.`}
-            {step === 'generating' && (isCreatingPlaceholders ? 'Creating placeholder tests for each acceptance criterion...' : 'Generating test scripts for each acceptance criterion...')}
-            {step === 'results' && 'Import complete. Review the results below.'}
+            {step === "input" &&
+              "Import a specification document to extract User Stories and generate tests."}
+            {step === "file-selection" &&
+              "Select which spec files to analyze for User Stories."}
+            {step === "extracting" &&
+              "Extracting User Stories and Acceptance Criteria..."}
+            {step === "review" &&
+              `Review ${stories.length} User Stories with ${totalAC} Acceptance Criteria before generating tests.`}
+            {step === "generating" &&
+              (isCreatingPlaceholders
+                ? "Creating placeholder tests for each acceptance criterion..."
+                : "Generating test scripts for each acceptance criterion...")}
+            {step === "results" && "Import complete. Review the results below."}
           </DialogDescription>
         </DialogHeader>
 
         {/* Step 1: Input */}
-        {step === 'input' && (
+        {step === "input" && (
           <Tabs defaultValue="github" className="flex-1">
             <TabsList className="w-full">
-              <TabsTrigger value="github" className="flex-1">Scan GitHub</TabsTrigger>
-              <TabsTrigger value="upload" className="flex-1">Upload Files</TabsTrigger>
+              <TabsTrigger value="github" className="flex-1">
+                Scan GitHub
+              </TabsTrigger>
+              <TabsTrigger value="upload" className="flex-1">
+                Upload Files
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="github" className="py-4">
               <div className="flex flex-col items-center justify-center py-8 gap-4">
                 <FolderSearch className="h-12 w-12 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground text-center max-w-sm">
-                  Scan the <code className="font-mono text-xs px-1 py-0.5 bg-muted rounded">{branch}</code> branch
-                  for specification files in <code className="text-xs">docs/</code>, <code className="text-xs">specs/</code>,
-                  <code className="text-xs">requirements/</code>, and <code className="text-xs">stories/</code>.
+                  Scan the{" "}
+                  <code className="font-mono text-xs px-1 py-0.5 bg-muted rounded">
+                    {branch}
+                  </code>{" "}
+                  branch for specification files in{" "}
+                  <code className="text-xs">docs/</code>,{" "}
+                  <code className="text-xs">specs/</code>,
+                  <code className="text-xs">requirements/</code>, and{" "}
+                  <code className="text-xs">stories/</code>.
                 </p>
                 <Button onClick={handleGitHubScan} disabled={isDiscovering}>
                   {isDiscovering ? (
@@ -476,19 +540,29 @@ export function ImportFromSpecDialog({
                   onChange={handleFilesChange}
                   className="hidden"
                 />
-                <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   <Upload className="h-4 w-4 mr-2" />
                   Select Files
                 </Button>
                 {uploadedFiles.length > 0 && (
                   <div className="w-full space-y-2">
-                    <p className="text-sm text-muted-foreground">{uploadedFiles.length} file(s) selected:</p>
+                    <p className="text-sm text-muted-foreground">
+                      {uploadedFiles.length} file(s) selected:
+                    </p>
                     <div className="flex flex-wrap gap-1">
                       {uploadedFiles.map((f, i) => (
-                        <Badge key={i} variant="secondary">{f.name}</Badge>
+                        <Badge key={i} variant="secondary">
+                          {f.name}
+                        </Badge>
                       ))}
                     </div>
-                    <Button onClick={handleExtractFromUpload} className="w-full mt-2">
+                    <Button
+                      onClick={handleExtractFromUpload}
+                      className="w-full mt-2"
+                    >
                       <Sparkles className="h-4 w-4 mr-2" />
                       Extract User Stories
                     </Button>
@@ -500,11 +574,12 @@ export function ImportFromSpecDialog({
         )}
 
         {/* Step 2: File Selection */}
-        {step === 'file-selection' && (
+        {step === "file-selection" && (
           <div className="flex-1 min-h-0 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">
-                {selectedFiles.size} of {discoveredFiles.length} file(s) selected
+                {selectedFiles.size} of {discoveredFiles.length} file(s)
+                selected
               </span>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" onClick={selectAll}>
@@ -533,21 +608,28 @@ export function ImportFromSpecDialog({
                   </div>
                   <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <code className="text-sm font-mono truncate block">{file.path}</code>
+                    <code className="text-sm font-mono truncate block">
+                      {file.path}
+                    </code>
                   </div>
                   {file.size !== undefined && (
                     <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(1)} KB`}
+                      {file.size < 1024
+                        ? `${file.size} B`
+                        : `${(file.size / 1024).toFixed(1)} KB`}
                     </span>
                   )}
                 </div>
               ))}
             </div>
             <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" onClick={() => setStep('input')}>
+              <Button variant="outline" onClick={() => setStep("input")}>
                 Back
               </Button>
-              <Button onClick={handleExtractFromGitHub} disabled={selectedFiles.size === 0}>
+              <Button
+                onClick={handleExtractFromGitHub}
+                disabled={selectedFiles.size === 0}
+              >
                 <Sparkles className="h-4 w-4 mr-2" />
                 Extract User Stories
               </Button>
@@ -556,10 +638,12 @@ export function ImportFromSpecDialog({
         )}
 
         {/* Step 3: Extracting */}
-        {step === 'extracting' && (
+        {step === "extracting" && (
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">Extracting User Stories & Acceptance Criteria...</p>
+            <p className="text-muted-foreground">
+              Extracting User Stories & Acceptance Criteria...
+            </p>
             <p className="text-xs text-muted-foreground mt-2">
               AI is analyzing the specification document
             </p>
@@ -567,15 +651,18 @@ export function ImportFromSpecDialog({
         )}
 
         {/* Step 4: Review US/AC */}
-        {step === 'review' && (
+        {step === "review" && (
           <div className="flex-1 min-h-0 space-y-4 overflow-hidden flex flex-col">
             {/* Branch context info */}
             {changedFiles.length > 0 && (
               <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg text-sm">
                 <GitBranch className="h-4 w-4 text-primary flex-shrink-0" />
                 <span className="text-muted-foreground">
-                  Branch <code className="font-mono text-xs px-1 py-0.5 bg-muted rounded">{branch}</code> has{' '}
-                  <strong>{changedFiles.length}</strong> changed files
+                  Branch{" "}
+                  <code className="font-mono text-xs px-1 py-0.5 bg-muted rounded">
+                    {branch}
+                  </code>{" "}
+                  has <strong>{changedFiles.length}</strong> changed files
                 </span>
               </div>
             )}
@@ -583,7 +670,9 @@ export function ImportFromSpecDialog({
             {/* Generation options */}
             <div className="grid grid-cols-2 gap-3 px-1">
               <div className="space-y-2">
-                <Label htmlFor="target-url" className="text-xs">Target URL (optional)</Label>
+                <Label htmlFor="target-url" className="text-xs">
+                  Target URL (optional)
+                </Label>
                 <Input
                   id="target-url"
                   value={targetUrl}
@@ -598,7 +687,10 @@ export function ImportFromSpecDialog({
                   checked={useBranchContext}
                   onCheckedChange={setUseBranchContext}
                 />
-                <Label htmlFor="use-branch-context" className="text-xs cursor-pointer">
+                <Label
+                  htmlFor="use-branch-context"
+                  className="text-xs cursor-pointer"
+                >
                   Use branch code changes as context
                 </Label>
               </div>
@@ -624,12 +716,19 @@ export function ImportFromSpecDialog({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <FolderTree className="h-4 w-4 text-primary flex-shrink-0" />
-                          <span className="font-medium text-sm">{story.title}</span>
-                          <Badge variant="outline" className="text-xs flex-shrink-0">
+                          <span className="font-medium text-sm">
+                            {story.title}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className="text-xs flex-shrink-0"
+                          >
                             {story.acceptanceCriteria.length} AC
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 ml-6">{story.description}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 ml-6">
+                          {story.description}
+                        </p>
                       </div>
                       <Button
                         variant="ghost"
@@ -655,12 +754,16 @@ export function ImportFromSpecDialog({
                                 <div className="flex items-center gap-1">
                                   <Input
                                     value={editingValue}
-                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onChange={(e) =>
+                                      setEditingValue(e.target.value)
+                                    }
                                     className="h-6 text-xs"
                                     autoFocus
                                     onKeyDown={(e) => {
-                                      if (e.key === 'Enter') saveEditAC(story.id, ac.id);
-                                      if (e.key === 'Escape') setEditingAC(null);
+                                      if (e.key === "Enter")
+                                        saveEditAC(story.id, ac.id);
+                                      if (e.key === "Escape")
+                                        setEditingAC(null);
                                     }}
                                   />
                                   <Button
@@ -679,19 +782,26 @@ export function ImportFromSpecDialog({
                                       {ac.testName || ac.id}
                                     </span>
                                     {ac.groupedWith && (
-                                      <Badge variant="secondary" className="text-[10px] h-4">
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[10px] h-4"
+                                      >
                                         grouped
                                       </Badge>
                                     )}
                                   </div>
-                                  <p className="text-xs text-muted-foreground mt-0.5">{ac.description}</p>
+                                  <p className="text-xs text-muted-foreground mt-0.5">
+                                    {ac.description}
+                                  </p>
                                 </>
                               )}
                             </div>
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                               <button
                                 className="p-0.5 text-muted-foreground hover:text-foreground"
-                                onClick={() => startEditAC(ac.id, ac.testName || '')}
+                                onClick={() =>
+                                  startEditAC(ac.id, ac.testName || "")
+                                }
                               >
                                 <Pencil className="h-3 w-3" />
                               </button>
@@ -721,45 +831,56 @@ export function ImportFromSpecDialog({
         )}
 
         {/* Step 5: Generating */}
-        {step === 'generating' && (
+        {step === "generating" && (
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
             <p className="text-muted-foreground">
-              {isCreatingPlaceholders ? 'Creating placeholder tests...' : 'Generating test scripts...'}
+              {isCreatingPlaceholders
+                ? "Creating placeholder tests..."
+                : "Generating test scripts..."}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
-              {isCreatingPlaceholders
-                ? 'Creating areas and placeholder tests from Acceptance Criteria'
-                : <>Creating areas from User Stories and tests from Acceptance Criteria
-                    {useBranchContext && changedFiles.length > 0 && (
-                      <span> (with branch code context)</span>
-                    )}
-                  </>
-              }
+              {isCreatingPlaceholders ? (
+                "Creating areas and placeholder tests from Acceptance Criteria"
+              ) : (
+                <>
+                  Creating areas from User Stories and tests from Acceptance
+                  Criteria
+                  {useBranchContext && changedFiles.length > 0 && (
+                    <span> (with branch code context)</span>
+                  )}
+                </>
+              )}
             </p>
           </div>
         )}
 
         {/* Step 6: Results */}
-        {step === 'results' && results && (
+        {step === "results" && results && (
           <div className="flex-1 min-h-0 space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center p-4 bg-muted/50 rounded-lg">
                 <FolderTree className="h-8 w-8 mx-auto mb-2 text-primary" />
                 <div className="text-2xl font-bold">{results.areasCreated}</div>
-                <div className="text-sm text-muted-foreground">Areas Created</div>
+                <div className="text-sm text-muted-foreground">
+                  Areas Created
+                </div>
               </div>
               <div className="text-center p-4 bg-muted/50 rounded-lg">
                 <FileCode className="h-8 w-8 mx-auto mb-2 text-primary" />
                 <div className="text-2xl font-bold">{results.testsCreated}</div>
                 <div className="text-sm text-muted-foreground">
-                  {results.usedPlaceholders ? 'Placeholders Created' : 'Tests Generated'}
+                  {results.usedPlaceholders
+                    ? "Placeholders Created"
+                    : "Tests Generated"}
                 </div>
               </div>
               <div className="text-center p-4 bg-muted/50 rounded-lg">
                 <GitBranch className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                 <div className="text-2xl font-bold">{changedFiles.length}</div>
-                <div className="text-sm text-muted-foreground">Branch Files Used</div>
+                <div className="text-sm text-muted-foreground">
+                  Branch Files Used
+                </div>
               </div>
             </div>
 
@@ -770,7 +891,9 @@ export function ImportFromSpecDialog({
                 </p>
                 <div className="max-h-24 overflow-y-auto">
                   {results.errors.map((err, i) => (
-                    <p key={i} className="text-xs text-muted-foreground">{err}</p>
+                    <p key={i} className="text-xs text-muted-foreground">
+                      {err}
+                    </p>
                   ))}
                 </div>
               </div>
@@ -782,11 +905,13 @@ export function ImportFromSpecDialog({
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-primary" />
                   <span className="text-sm font-medium">MCP Validation</span>
-                  <Badge variant="secondary" className="text-xs">Optional</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    Optional
+                  </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Validate generated tests against your running localhost server using MCP tools.
-                  This will check selectors and fix any issues.
+                  Validate generated tests against your running localhost server
+                  using MCP tools. This will check selectors and fix any issues.
                 </p>
                 <Button
                   size="sm"
@@ -799,7 +924,7 @@ export function ImportFromSpecDialog({
                   ) : (
                     <Zap className="h-4 w-4 mr-2" />
                   )}
-                  {isValidating ? 'Validating...' : 'Validate with MCP'}
+                  {isValidating ? "Validating..." : "Validate with MCP"}
                 </Button>
               </div>
             )}
@@ -808,14 +933,16 @@ export function ImportFromSpecDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>
-            {step === 'results' ? 'Done' : 'Cancel'}
+            {step === "results" ? "Done" : "Cancel"}
           </Button>
-          {step === 'review' && (
+          {step === "review" && (
             <>
               <Button
                 variant="outline"
                 onClick={handleCreatePlaceholders}
-                disabled={stories.length === 0 || isGenerating || isCreatingPlaceholders}
+                disabled={
+                  stories.length === 0 || isGenerating || isCreatingPlaceholders
+                }
               >
                 {isCreatingPlaceholders ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -824,13 +951,18 @@ export function ImportFromSpecDialog({
                 )}
                 Create as Placeholders
               </Button>
-              <Button onClick={handleGenerate} disabled={stories.length === 0 || isGenerating || isCreatingPlaceholders}>
+              <Button
+                onClick={handleGenerate}
+                disabled={
+                  stories.length === 0 || isGenerating || isCreatingPlaceholders
+                }
+              >
                 {isGenerating ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
                   <ArrowRight className="h-4 w-4 mr-2" />
                 )}
-                Generate {totalAC} Test{totalAC !== 1 ? 's' : ''}
+                Generate {totalAC} Test{totalAC !== 1 ? "s" : ""}
               </Button>
             </>
           )}

@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation';
+import { notFound, redirect } from "next/navigation";
 import {
   getBuild,
   getBuildChangeMap,
@@ -11,19 +11,21 @@ import {
   getDesignSystemScoreTrend,
   getBuildDesignSystemViolations,
   getPlaywrightSettings,
-} from '@/lib/db/queries';
-import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
-import { isVerifyPhaseEnabled } from '@/lib/verify/feature-flag';
-import { fetchRepoBranches } from '@/server/actions/repos';
-import { BoardFocusClient } from './board-focus-client';
+} from "@/lib/db/queries";
+import { getCurrentSession, requireRepoAccess } from "@/lib/auth";
+import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
+import { fetchRepoBranches } from "@/server/actions/repos";
+import { BoardFocusClient } from "./board-focus-client";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 interface VerifyBuildPageProps {
   params: Promise<{ buildId: string }>;
 }
 
-export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) {
+export default async function VerifyBuildPage({
+  params,
+}: VerifyBuildPageProps) {
   const { buildId } = await params;
   const session = await getCurrentSession();
   if (!isVerifyPhaseEnabled(session?.team)) {
@@ -34,15 +36,29 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
   if (!build) notFound();
 
   const testRun = build.testRunId ? await getTestRun(build.testRunId) : null;
-  const repo = testRun?.repositoryId ? await getRepository(testRun.repositoryId) : null;
+  const repo = testRun?.repositoryId
+    ? await getRepository(testRun.repositoryId)
+    : null;
   if (repo) await requireRepoAccess(repo.id);
 
   // Frame-only data — fast lookups for the header chrome + drag/drop targets.
   // Heavy data (step_comparisons, layer feedback, visual_diffs, test_results,
   // change-map compute, crashed-build backfill) is deferred to the client's
   // first /verify-status fetch so the page renders the frame instantly.
-  const [areas, tests, branches, changeMap, a11yTrend, a11yViolations, designSystemTrend, designSystemViolations, pwSettings] = await Promise.all([
-    repo ? getFunctionalAreasByRepo(repo.id).catch(() => []) : Promise.resolve([]),
+  const [
+    areas,
+    tests,
+    branches,
+    changeMap,
+    a11yTrend,
+    a11yViolations,
+    designSystemTrend,
+    designSystemViolations,
+    pwSettings,
+  ] = await Promise.all([
+    repo
+      ? getFunctionalAreasByRepo(repo.id).catch(() => [])
+      : Promise.resolve([]),
     repo ? getTestsByRepo(repo.id).catch(() => []) : Promise.resolve([]),
     repo ? fetchRepoBranches(repo.id).catch(() => []) : Promise.resolve([]),
     getBuildChangeMap(buildId).catch(() => null),
@@ -52,11 +68,15 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
     (build.a11yViolationCount ?? 0) > 0
       ? getBuildA11yViolations(buildId).catch(() => [])
       : Promise.resolve([]),
-    repo ? getDesignSystemScoreTrend(repo.id).catch(() => []) : Promise.resolve([]),
+    repo
+      ? getDesignSystemScoreTrend(repo.id).catch(() => [])
+      : Promise.resolve([]),
     (build.designSystemViolationCount ?? 0) > 0
       ? getBuildDesignSystemViolations(buildId).catch(() => [])
       : Promise.resolve([]),
-    repo ? getPlaywrightSettings(repo.id).catch(() => null) : Promise.resolve(null),
+    repo
+      ? getPlaywrightSettings(repo.id).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -66,7 +86,11 @@ export default async function VerifyBuildPage({ params }: VerifyBuildPageProps) 
       changeMap={changeMap}
       stepComparisons={[]}
       areas={areas.map((a) => ({ id: a.id, name: a.name }))}
-      tests={tests.map((t) => ({ id: t.id, name: t.name, functionalAreaId: t.functionalAreaId }))}
+      tests={tests.map((t) => ({
+        id: t.id,
+        name: t.name,
+        functionalAreaId: t.functionalAreaId,
+      }))}
       layerFeedback={[]}
       visualDiffs={[]}
       testResults={[]}

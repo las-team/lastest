@@ -1,12 +1,16 @@
-'use client';
+"use client";
 
-import { useState, useTransition, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { Pencil, Plus, Loader2 } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { updateStepLabelAndRediff } from '@/server/actions/diffs';
+import { useState, useTransition, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { Pencil, Plus, Loader2 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { updateStepLabelAndRediff } from "@/server/actions/diffs";
 
 interface StepLabelEditorProps {
   diffId: string;
@@ -15,9 +19,13 @@ interface StepLabelEditorProps {
   suggestions: string[];
 }
 
-export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepLabelEditorProps) {
+export function StepLabelEditor({
+  diffId,
+  currentStepLabel,
+  suggestions,
+}: StepLabelEditorProps) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(currentStepLabel ?? '');
+  const [value, setValue] = useState(currentStepLabel ?? "");
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -25,7 +33,7 @@ export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepL
   const filtered = useMemo(() => {
     if (!value.trim()) return suggestions;
     const lower = value.toLowerCase();
-    return suggestions.filter(s => s.toLowerCase().includes(lower));
+    return suggestions.filter((s) => s.toLowerCase().includes(lower));
   }, [value, suggestions]);
 
   const handleSubmit = () => {
@@ -55,10 +63,16 @@ export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepL
   };
 
   return (
-    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setValue(currentStepLabel ?? ''); }}>
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setValue(currentStepLabel ?? "");
+      }}
+    >
       <PopoverTrigger asChild>
         <button className="inline-flex items-center gap-1 text-muted-foreground font-normal text-base group hover:text-foreground transition-colors">
-          &rsaquo;{' '}
+          &rsaquo;{" "}
           {currentStepLabel ? (
             <span>{currentStepLabel}</span>
           ) : (
@@ -73,12 +87,16 @@ export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepL
       </PopoverTrigger>
       <PopoverContent className="w-72 p-3" align="start">
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">Step Label</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            Step Label
+          </label>
           <Input
             ref={inputRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSubmit();
+            }}
             placeholder="Enter step label..."
             disabled={isPending}
             autoFocus
@@ -94,7 +112,9 @@ export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepL
                 >
                   {label}
                   {label === currentStepLabel && (
-                    <span className="text-xs text-muted-foreground ml-1">(current)</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      (current)
+                    </span>
                   )}
                 </button>
               ))}
@@ -112,7 +132,7 @@ export function StepLabelEditor({ diffId, currentStepLabel, suggestions }: StepL
                 Re-diffing...
               </>
             ) : (
-              'Save & Re-diff'
+              "Save & Re-diff"
             )}
           </Button>
         </div>

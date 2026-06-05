@@ -1,8 +1,11 @@
-'use client';
+"use client";
 
-import { BranchSelector } from '@/components/settings/branch-selector';
-import { ReviewContent, type TodoRow } from '@/components/review/review-content';
-import type { VisualDiffWithTestStatus } from '@/lib/db/schema';
+import { BranchSelector } from "@/components/settings/branch-selector";
+import {
+  ReviewContent,
+  type TodoRow,
+} from "@/components/review/review-content";
+import type { VisualDiffWithTestStatus } from "@/lib/db/schema";
 
 interface ReviewClientProps {
   repositoryId: string | null;
@@ -35,7 +38,9 @@ export function ReviewClient({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Review</h1>
-            <p className="text-sm text-muted-foreground mt-1">Track review todos and branch status</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Track review todos and branch status
+            </p>
           </div>
           <BranchSelector
             repositoryId={repositoryId}

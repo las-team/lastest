@@ -1,7 +1,7 @@
-import type { Page, Route } from 'playwright';
-import type { StabilizationSettings } from '@/lib/db/schema';
-import type { CoreStabilizationSettings } from '@lastest/shared';
-import { DEFAULT_STABILIZATION_SETTINGS } from '@/lib/db/schema';
+import type { Page, Route } from "playwright";
+import type { StabilizationSettings } from "@/lib/db/schema";
+import type { CoreStabilizationSettings } from "@lastest/shared";
+import { DEFAULT_STABILIZATION_SETTINGS } from "@/lib/db/schema";
 import {
   HIDE_SPINNERS_CSS,
   SYSTEM_FONTS_CSS,
@@ -16,7 +16,7 @@ import {
   injectCSS,
   getFreezeRandomScript,
   getFreezeTimestampsScript,
-} from '@lastest/shared';
+} from "@lastest/shared";
 
 // Re-export shared helpers for backward compatibility with local runner consumers
 export {
@@ -32,7 +32,9 @@ export {
 /**
  * Convert local StabilizationSettings to CoreStabilizationSettings.
  */
-function toCoreSettings(settings: StabilizationSettings): CoreStabilizationSettings {
+function toCoreSettings(
+  settings: StabilizationSettings,
+): CoreStabilizationSettings {
   return {
     freezeTimestamps: settings.freezeTimestamps,
     frozenTimestamp: settings.frozenTimestamp,
@@ -41,7 +43,9 @@ function toCoreSettings(settings: StabilizationSettings): CoreStabilizationSetti
     reseedRandomOnInput: settings.reseedRandomOnInput,
     freezeAnimations: settings.freezeAnimations,
     crossOsConsistency: settings.crossOsConsistency,
-    crossOsFontCSS: settings.crossOsConsistency ? getCrossOsFontCSS() : undefined,
+    crossOsFontCSS: settings.crossOsConsistency
+      ? getCrossOsFontCSS()
+      : undefined,
     waitForNetworkIdle: settings.waitForNetworkIdle,
     networkIdleTimeout: settings.networkIdleTimeout,
     waitForDomStable: settings.waitForDomStable,
@@ -65,14 +69,22 @@ function toCoreSettings(settings: StabilizationSettings): CoreStabilizationSetti
 export async function setupThirdPartyBlocking(
   page: Page,
   targetUrl: string,
-  settings: Pick<StabilizationSettings, 'blockThirdParty' | 'allowedDomains' | 'mockThirdPartyImages'>
+  settings: Pick<
+    StabilizationSettings,
+    "blockThirdParty" | "allowedDomains" | "mockThirdPartyImages"
+  >,
 ): Promise<void> {
   if (!settings.blockThirdParty) return;
 
   const targetHost = new URL(targetUrl).hostname;
-  const allowed = new Set([targetHost, 'localhost', '127.0.0.1', ...settings.allowedDomains]);
+  const allowed = new Set([
+    targetHost,
+    "localhost",
+    "127.0.0.1",
+    ...settings.allowedDomains,
+  ]);
 
-  await page.route('**/*', async (route: Route) => {
+  await page.route("**/*", async (route: Route) => {
     const request = route.request();
     let urlHost: string;
 
@@ -88,15 +100,15 @@ export async function setupThirdPartyBlocking(
 
     const resourceType = request.resourceType();
 
-    if (resourceType === 'image' && settings.mockThirdPartyImages) {
+    if (resourceType === "image" && settings.mockThirdPartyImages) {
       return route.fulfill({
         status: 200,
-        contentType: 'image/png',
+        contentType: "image/png",
         body: PLACEHOLDER_IMAGE_BUFFER,
       });
     }
 
-    if (['script', 'stylesheet', 'xhr', 'fetch'].includes(resourceType)) {
+    if (["script", "stylesheet", "xhr", "fetch"].includes(resourceType)) {
       return route.abort();
     }
 
@@ -110,7 +122,7 @@ export async function setupThirdPartyBlocking(
  */
 export async function setupFreezeScripts(
   page: Page,
-  settings?: Partial<StabilizationSettings>
+  settings?: Partial<StabilizationSettings>,
 ): Promise<void> {
   const s = { ...DEFAULT_STABILIZATION_SETTINGS, ...settings };
   await sharedSetupFreezeScripts(page, toCoreSettings(s));
@@ -124,7 +136,7 @@ export async function setupFreezeScripts(
 export async function applyStabilization(
   page: Page,
   targetUrl: string,
-  settings?: Partial<StabilizationSettings>
+  settings?: Partial<StabilizationSettings>,
 ): Promise<void> {
   const s = { ...DEFAULT_STABILIZATION_SETTINGS, ...settings };
   const core = toCoreSettings(s);
@@ -137,20 +149,20 @@ export async function applyStabilization(
 
   if (core.waitForNetworkIdle) {
     concurrentWaits.push(
-      page.waitForLoadState('networkidle', { timeout: core.networkIdleTimeout }).catch(() => {})
+      page
+        .waitForLoadState("networkidle", { timeout: core.networkIdleTimeout })
+        .catch(() => {}),
     );
   }
 
   if (core.waitForImages) {
     concurrentWaits.push(
-      waitForImagesLoaded(page, core.waitForImagesTimeout).catch(() => {})
+      waitForImagesLoaded(page, core.waitForImagesTimeout).catch(() => {}),
     );
   }
 
   if (core.waitForFonts) {
-    concurrentWaits.push(
-      waitForStylesLoaded(page, 3000)
-    );
+    concurrentWaits.push(waitForStylesLoaded(page, 3000));
   }
 
   if (concurrentWaits.length > 0) {
@@ -168,7 +180,11 @@ export async function applyStabilization(
 
   // 1c. Local-only spinner waiting
   if (s.hideLoadingIndicators && s.loadingSelectors.length > 0) {
-    await waitForSpinnersToDisappear(page, s.loadingSelectors, s.domStableTimeout);
+    await waitForSpinnersToDisappear(
+      page,
+      s.loadingSelectors,
+      s.domStableTimeout,
+    );
   }
 
   // 1d. DOM stability
@@ -178,22 +194,28 @@ export async function applyStabilization(
 
   // Phase 2: Freeze performance.now, reset Excalidraw RNG, enable RAF gating + flush
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  await page.evaluate(() => {
-    (window as any).__perfNowFrozen = performance.now();
-    if (typeof (window as any).__resetExcalidrawRNG === 'function') {
-      (window as any).__resetExcalidrawRNG();
-    }
-    if (typeof (window as any).__enableRAFGating === 'function') {
-      (window as any).__enableRAFGating();
-    }
-    if (typeof (window as any).__flushAnimationFrames === 'function') {
-      (window as any).__flushAnimationFrames(20);
-    }
-  }).catch(() => {});
+  await page
+    .evaluate(() => {
+      (window as any).__perfNowFrozen = performance.now();
+      if (typeof (window as any).__resetExcalidrawRNG === "function") {
+        (window as any).__resetExcalidrawRNG();
+      }
+      if (typeof (window as any).__enableRAFGating === "function") {
+        (window as any).__enableRAFGating();
+      }
+      if (typeof (window as any).__flushAnimationFrames === "function") {
+        (window as any).__flushAnimationFrames(20);
+      }
+    })
+    .catch(() => {});
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
   // Phase 3: Wait for canvas stability
   if (core.waitForCanvasStable) {
-    await waitForCanvasStable(page, core.canvasStableTimeout, core.canvasStableThreshold);
+    await waitForCanvasStable(
+      page,
+      core.canvasStableTimeout,
+      core.canvasStableThreshold,
+    );
   }
 }

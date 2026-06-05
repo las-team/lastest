@@ -21,12 +21,12 @@ export function parseByteRange(
   const [, startStr, endStr] = match;
   // Reject multi-range requests — we'd have to emit multipart/byteranges
   // and no current caller (HTML video element) needs it.
-  if (header.includes(',')) return null;
+  if (header.includes(",")) return null;
 
   let start: number;
   let end: number;
-  if (startStr === '' && endStr === '') return null;
-  if (startStr === '') {
+  if (startStr === "" && endStr === "") return null;
+  if (startStr === "") {
     // Suffix range: last N bytes.
     const suffix = parseInt(endStr, 10);
     if (!Number.isFinite(suffix) || suffix <= 0) return null;
@@ -34,7 +34,7 @@ export function parseByteRange(
     end = size - 1;
   } else {
     start = parseInt(startStr, 10);
-    end = endStr === '' ? size - 1 : parseInt(endStr, 10);
+    end = endStr === "" ? size - 1 : parseInt(endStr, 10);
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
     if (start < 0 || end < start) return null;
     if (start >= size) return null;

@@ -5,8 +5,8 @@
  * pending | approved | rejected | snoozed | auto_approved.
  */
 
-import { db } from '../index';
-import { stepLayerFeedback } from '../schema';
+import { db } from "../index";
+import { stepLayerFeedback } from "../schema";
 import type {
   StepLayerFeedback,
   NewStepLayerFeedback,
@@ -14,26 +14,38 @@ import type {
   LayerFeedbackStatus,
   LayerBaselineKind,
   AIDiffRecommendation,
-} from '../schema';
-import { eq, and } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { eq, and } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
-export async function getLayerFeedback(stepComparisonId: string, layer: EvidenceLayer): Promise<StepLayerFeedback | undefined> {
+export async function getLayerFeedback(
+  stepComparisonId: string,
+  layer: EvidenceLayer,
+): Promise<StepLayerFeedback | undefined> {
   const [row] = await db
     .select()
     .from(stepLayerFeedback)
-    .where(and(eq(stepLayerFeedback.stepComparisonId, stepComparisonId), eq(stepLayerFeedback.layer, layer)));
+    .where(
+      and(
+        eq(stepLayerFeedback.stepComparisonId, stepComparisonId),
+        eq(stepLayerFeedback.layer, layer),
+      ),
+    );
   return row;
 }
 
-export async function getLayerFeedbackByStep(stepComparisonId: string): Promise<StepLayerFeedback[]> {
+export async function getLayerFeedbackByStep(
+  stepComparisonId: string,
+): Promise<StepLayerFeedback[]> {
   return db
     .select()
     .from(stepLayerFeedback)
     .where(eq(stepLayerFeedback.stepComparisonId, stepComparisonId));
 }
 
-export async function getLayerFeedbackByBuild(buildId: string): Promise<StepLayerFeedback[]> {
+export async function getLayerFeedbackByBuild(
+  buildId: string,
+): Promise<StepLayerFeedback[]> {
   return db
     .select()
     .from(stepLayerFeedback)
@@ -52,7 +64,9 @@ interface UpsertInput {
   aiRecommendation?: AIDiffRecommendation | null;
 }
 
-export async function upsertLayerFeedback(input: UpsertInput): Promise<StepLayerFeedback> {
+export async function upsertLayerFeedback(
+  input: UpsertInput,
+): Promise<StepLayerFeedback> {
   const existing = await getLayerFeedback(input.stepComparisonId, input.layer);
   if (existing) {
     await db
@@ -67,7 +81,10 @@ export async function upsertLayerFeedback(input: UpsertInput): Promise<StepLayer
         aiRecommendation: input.aiRecommendation ?? null,
       })
       .where(eq(stepLayerFeedback.id, existing.id));
-    const [row] = await db.select().from(stepLayerFeedback).where(eq(stepLayerFeedback.id, existing.id));
+    const [row] = await db
+      .select()
+      .from(stepLayerFeedback)
+      .where(eq(stepLayerFeedback.id, existing.id));
     return row;
   }
   const id = uuid();
@@ -85,6 +102,9 @@ export async function upsertLayerFeedback(input: UpsertInput): Promise<StepLayer
     aiRecommendation: input.aiRecommendation ?? null,
   };
   await db.insert(stepLayerFeedback).values(insert);
-  const [row] = await db.select().from(stepLayerFeedback).where(eq(stepLayerFeedback.id, id));
+  const [row] = await db
+    .select()
+    .from(stepLayerFeedback)
+    .where(eq(stepLayerFeedback.id, id));
   return row;
 }

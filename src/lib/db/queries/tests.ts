@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   functionalAreas,
   tests,
@@ -14,7 +14,7 @@ import {
   visualDiffs,
   setupScripts,
   testSpecs,
-} from '../schema';
+} from "../schema";
 import type {
   NewFunctionalArea,
   NewTest,
@@ -25,33 +25,56 @@ import type {
   TestChangeReason,
   StepCriterion,
   StepRule,
-} from '../schema';
-import { eq, ne, desc, and, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
+} from "../schema";
+import {
+  eq,
+  ne,
+  desc,
+  and,
+  inArray,
+  isNull,
+  isNotNull,
+  sql,
+} from "drizzle-orm";
+import { v4 as uuid } from "uuid";
+import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
 
 // Functional Areas
 export async function getFunctionalAreas() {
-  return db.select().from(functionalAreas).where(isNull(functionalAreas.deletedAt));
+  return db
+    .select()
+    .from(functionalAreas)
+    .where(isNull(functionalAreas.deletedAt));
 }
 
 export async function getFunctionalArea(id: string) {
-  const [row] = await db.select().from(functionalAreas).where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt)));
+  const [row] = await db
+    .select()
+    .from(functionalAreas)
+    .where(and(eq(functionalAreas.id, id), isNull(functionalAreas.deletedAt)));
   return row;
 }
 
-export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
+export async function createFunctionalArea(
+  data: Omit<NewFunctionalArea, "id">,
+) {
   const id = uuid();
   await db.insert(functionalAreas).values({ ...data, id });
   return { id, deletedAt: null, ...data };
 }
 
-export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
+export async function updateFunctionalArea(
+  id: string,
+  data: Partial<NewFunctionalArea>,
+) {
   await db.update(functionalAreas).set(data).where(eq(functionalAreas.id, id));
 }
 
 export async function deleteFunctionalArea(id: string) {
-  await db.update(functionalAreas).set({ deletedAt: new Date() }).where(eq(functionalAreas.id, id));
+  await db
+    .update(functionalAreas)
+    .set({ deletedAt: new Date() })
+    .where(eq(functionalAreas.id, id));
 }
 
 // Get or create functional area with case-insensitive name matching within a repo.
@@ -60,39 +83,66 @@ export async function deleteFunctionalArea(id: string) {
 export async function getOrCreateFunctionalAreaByRepo(
   repositoryId: string,
   name: string,
-  agentPlan?: string
+  agentPlan?: string,
 ) {
   const areas = await getFunctionalAreasByRepo(repositoryId);
-  const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
+  const existing = areas.find(
+    (a) => a.name.toLowerCase() === name.toLowerCase(),
+  );
 
   if (existing) {
     if (agentPlan && !existing.agentPlan) {
-      await updateFunctionalArea(existing.id, { agentPlan, planGeneratedAt: new Date() });
+      await updateFunctionalArea(existing.id, {
+        agentPlan,
+        planGeneratedAt: new Date(),
+      });
       return { ...existing, agentPlan, planGeneratedAt: new Date() };
     }
     return existing;
   }
 
-  return createFunctionalArea({ repositoryId, name, agentPlan, planGeneratedAt: agentPlan ? new Date() : null });
+  return createFunctionalArea({
+    repositoryId,
+    name,
+    agentPlan,
+    planGeneratedAt: agentPlan ? new Date() : null,
+  });
 }
 
 // Tests
 export async function getTests() {
-  return db.select().from(tests).where(isNull(tests.deletedAt)).orderBy(desc(tests.createdAt));
+  return db
+    .select()
+    .from(tests)
+    .where(isNull(tests.deletedAt))
+    .orderBy(desc(tests.createdAt));
 }
 
 /** Fetch just the playwrightOverrides JSON for a set of test ids — used by
  *  the verify route to build a per-test error-mode resolution map without
  *  pulling the full test rows (which include code / specs / metadata). */
 export async function getPlaywrightOverridesByTestIds(testIds: string[]) {
-  if (testIds.length === 0) return [] as Array<{ id: string; playwrightOverrides: typeof tests.$inferSelect.playwrightOverrides }>;
-  return db.select({ id: tests.id, playwrightOverrides: tests.playwrightOverrides })
+  if (testIds.length === 0)
+    return [] as Array<{
+      id: string;
+      playwrightOverrides: typeof tests.$inferSelect.playwrightOverrides;
+    }>;
+  return db
+    .select({ id: tests.id, playwrightOverrides: tests.playwrightOverrides })
     .from(tests)
     .where(inArray(tests.id, testIds));
 }
 
 export async function getTestsByFunctionalArea(functionalAreaId: string) {
-  return db.select().from(tests).where(and(eq(tests.functionalAreaId, functionalAreaId), isNull(tests.deletedAt)));
+  return db
+    .select()
+    .from(tests)
+    .where(
+      and(
+        eq(tests.functionalAreaId, functionalAreaId),
+        isNull(tests.deletedAt),
+      ),
+    );
 }
 
 export async function getTest(id: string) {
@@ -100,11 +150,17 @@ export async function getTest(id: string) {
   return row;
 }
 
-export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>, branch?: string | null, viewport?: { width?: number; height?: number } | null) {
+export async function createTest(
+  data: Omit<NewTest, "id" | "createdAt" | "updatedAt">,
+  branch?: string | null,
+  viewport?: { width?: number; height?: number } | null,
+) {
   const id = uuid();
   const now = new Date();
   data = await withParsedAssertions(data);
-  await db.insert(tests).values({ ...data, id, createdAt: now, updatedAt: now });
+  await db
+    .insert(tests)
+    .values({ ...data, id, createdAt: now, updatedAt: now });
 
   // Create initial version (version 1)
   await db.insert(testVersions).values({
@@ -114,7 +170,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
     code: data.code,
     name: data.name,
     targetUrl: data.targetUrl ?? null,
-    changeReason: 'initial',
+    changeReason: "initial",
     branch: branch ?? null,
     viewportWidth: viewport?.width ?? null,
     viewportHeight: viewport?.height ?? null,
@@ -123,7 +179,7 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 
   // Gamification: stamp creator + award test_created. Dynamic import to break
   // the module-eval cycle (queries → auth → queries). Never throws.
-  import('@/lib/gamification/hooks')
+  import("@/lib/gamification/hooks")
     .then((m) =>
       m.onTestCreated(id, {
         createdByUserId: data.createdByUserId ?? null,
@@ -136,14 +192,23 @@ export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updat
 }
 
 // Step criteria — per-step pass/fail rules (see schema StepCriterion / StepRule).
-export async function getStepCriteria(testId: string): Promise<StepCriterion[]> {
-  const [row] = await db.select({ stepCriteria: tests.stepCriteria }).from(tests).where(eq(tests.id, testId));
+export async function getStepCriteria(
+  testId: string,
+): Promise<StepCriterion[]> {
+  const [row] = await db
+    .select({ stepCriteria: tests.stepCriteria })
+    .from(tests)
+    .where(eq(tests.id, testId));
   return row?.stepCriteria ?? [];
 }
 
-export async function updateStepCriteria(testId: string, stepLabel: string, rules: StepRule[]) {
+export async function updateStepCriteria(
+  testId: string,
+  stepLabel: string,
+  rules: StepRule[],
+) {
   const current = await getStepCriteria(testId);
-  const others = current.filter(c => c.stepLabel !== stepLabel);
+  const others = current.filter((c) => c.stepLabel !== stepLabel);
   const next = rules.length === 0 ? others : [...others, { stepLabel, rules }];
   await db
     .update(tests)
@@ -165,48 +230,65 @@ export async function updateTest(id: string, data: Partial<NewTest>) {
       .where(eq(tests.id, id));
     if (current?.isPlaceholder) patch.isPlaceholder = false;
   }
-  await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
+  await db
+    .update(tests)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(tests.id, id));
 }
 
 // Re-parse `tests.assertions` from `code` whenever a write changes the code and
 // the caller hasn't supplied its own `assertions` array. Keeps the Criteria tab's
 // per-assertion list in sync without each callsite having to remember.
-async function withParsedAssertions<T extends Partial<NewTest>>(patch: T): Promise<T> {
-  if (typeof patch.code !== 'string') return patch;
+async function withParsedAssertions<T extends Partial<NewTest>>(
+  patch: T,
+): Promise<T> {
+  if (typeof patch.code !== "string") return patch;
   if (patch.code === PLACEHOLDER_CODE) return patch;
   if (patch.assertions !== undefined) return patch;
-  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  const { parseAssertions } = await import("@/lib/playwright/assertion-parser");
   return { ...patch, assertions: parseAssertions(patch.code) };
 }
 
 export async function softDeleteTest(id: string) {
   // Fetch the test before deleting so we can update route coverage
-  const [deletingTest] = await db.select({ functionalAreaId: tests.functionalAreaId })
-    .from(tests).where(eq(tests.id, id));
+  const [deletingTest] = await db
+    .select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests)
+    .where(eq(tests.id, id));
 
   // Clear setup test references so other tests don't reference a deleted test
-  await db.update(tests)
+  await db
+    .update(tests)
     .set({ setupTestId: null })
     .where(eq(tests.setupTestId, id));
-  await db.update(repositories)
+  await db
+    .update(repositories)
     .set({ defaultSetupTestId: null })
     .where(eq(repositories.defaultSetupTestId, id));
-  await db.update(builds)
+  await db
+    .update(builds)
     .set({ buildSetupTestId: null })
     .where(eq(builds.buildSetupTestId, id));
 
   // Clean up setupOverrides that reference this test in extraSteps
-  const testsWithOverrides = await db.select()
+  const testsWithOverrides = await db
+    .select()
     .from(tests)
     .where(isNotNull(tests.setupOverrides));
   for (const test of testsWithOverrides) {
     if (test.setupOverrides && test.setupOverrides.extraSteps) {
       const filteredSteps = test.setupOverrides.extraSteps.filter(
-        step => step.stepType !== 'test' || step.testId !== id
+        (step) => step.stepType !== "test" || step.testId !== id,
       );
       if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
-        await db.update(tests)
-          .set({ setupOverrides: { ...test.setupOverrides, extraSteps: filteredSteps } })
+        await db
+          .update(tests)
+          .set({
+            setupOverrides: {
+              ...test.setupOverrides,
+              extraSteps: filteredSteps,
+            },
+          })
           .where(eq(tests.id, test.id));
       }
     }
@@ -217,17 +299,19 @@ export async function softDeleteTest(id: string) {
 
   // Reset hasTest on routes whose functional area no longer has active tests
   if (deletingTest?.functionalAreaId) {
-    const activeTestsInArea = await db.select({ id: tests.id })
+    const activeTestsInArea = await db
+      .select({ id: tests.id })
       .from(tests)
-      .where(and(
-        eq(tests.functionalAreaId, deletingTest.functionalAreaId),
-        isNull(tests.deletedAt),
-      ))
-      .limit(1)
-      ;
-
+      .where(
+        and(
+          eq(tests.functionalAreaId, deletingTest.functionalAreaId),
+          isNull(tests.deletedAt),
+        ),
+      )
+      .limit(1);
     if (activeTestsInArea.length === 0) {
-      await db.update(routes)
+      await db
+        .update(routes)
         .set({ hasTest: false })
         .where(eq(routes.functionalAreaId, deletingTest.functionalAreaId));
     }
@@ -238,10 +322,13 @@ export async function restoreTest(id: string) {
   await db.update(tests).set({ deletedAt: null }).where(eq(tests.id, id));
 
   // Re-mark routes as having a test when restoring
-  const [restoredTest] = await db.select({ functionalAreaId: tests.functionalAreaId })
-    .from(tests).where(eq(tests.id, id));
+  const [restoredTest] = await db
+    .select({ functionalAreaId: tests.functionalAreaId })
+    .from(tests)
+    .where(eq(tests.id, id));
   if (restoredTest?.functionalAreaId) {
-    await db.update(routes)
+    await db
+      .update(routes)
       .set({ hasTest: true })
       .where(eq(routes.functionalAreaId, restoredTest.functionalAreaId));
   }
@@ -249,55 +336,66 @@ export async function restoreTest(id: string) {
 
 export async function getDeletedTests(repositoryId?: string) {
   if (repositoryId) {
-    return db.select().from(tests)
-      .where(and(eq(tests.repositoryId, repositoryId), isNotNull(tests.deletedAt)))
-      .orderBy(desc(tests.deletedAt))
-      ;
+    return db
+      .select()
+      .from(tests)
+      .where(
+        and(eq(tests.repositoryId, repositoryId), isNotNull(tests.deletedAt)),
+      )
+      .orderBy(desc(tests.deletedAt));
   }
-  return db.select().from(tests)
+  return db
+    .select()
+    .from(tests)
     .where(isNotNull(tests.deletedAt))
-    .orderBy(desc(tests.deletedAt))
-    ;
+    .orderBy(desc(tests.deletedAt));
 }
 
 export async function permanentlyDeleteTest(id: string) {
   // Delete related records first (cascade)
-  await db.delete(routeTestSuggestions).where(eq(routeTestSuggestions.matchedTestId, id));
+  await db
+    .delete(routeTestSuggestions)
+    .where(eq(routeTestSuggestions.matchedTestId, id));
   await db.delete(ignoreRegions).where(eq(ignoreRegions.testId, id));
   await db.delete(baselines).where(eq(baselines.testId, id));
   await db.delete(visualDiffs).where(eq(visualDiffs.testId, id));
   await db.delete(testResults).where(eq(testResults.testId, id));
 
   // Clear setup test references before deletion
-  await db.update(tests)
+  await db
+    .update(tests)
     .set({ setupTestId: null })
     .where(eq(tests.setupTestId, id));
-  await db.update(repositories)
+  await db
+    .update(repositories)
     .set({ defaultSetupTestId: null })
     .where(eq(repositories.defaultSetupTestId, id));
-  await db.update(builds)
+  await db
+    .update(builds)
     .set({ buildSetupTestId: null })
     .where(eq(builds.buildSetupTestId, id));
 
   // Clean up setupOverrides that reference this test in extraSteps
-  const testsWithOverrides = await db.select()
+  const testsWithOverrides = await db
+    .select()
     .from(tests)
     .where(isNotNull(tests.setupOverrides));
 
   for (const test of testsWithOverrides) {
     if (test.setupOverrides && test.setupOverrides.extraSteps) {
       const filteredSteps = test.setupOverrides.extraSteps.filter(
-        step => step.stepType !== 'test' || step.testId !== id
+        (step) => step.stepType !== "test" || step.testId !== id,
       );
 
       // Only update if we actually removed steps
       if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
-        await db.update(tests)
+        await db
+          .update(tests)
           .set({
             setupOverrides: {
               ...test.setupOverrides,
-              extraSteps: filteredSteps
-            }
+              extraSteps: filteredSteps,
+            },
           })
           .where(eq(tests.id, test.id));
       }
@@ -310,81 +408,143 @@ export async function permanentlyDeleteTest(id: string) {
 
 // Clean up orphaned setup references (setup tests/scripts that no longer exist)
 export async function cleanupOrphanedSetupReferences() {
-  const allTests = await db.select({ id: sql<string>`${tests.id}` }).from(tests);
-  const testIds = new Set(allTests.map(t => t.id));
+  const allTests = await db
+    .select({ id: sql<string>`${tests.id}` })
+    .from(tests);
+  const testIds = new Set(allTests.map((t) => t.id));
 
-  const allScripts = await db.select({ id: sql<string>`${setupScripts.id}` }).from(setupScripts);
-  const scriptIds = new Set(allScripts.map(s => s.id));
+  const allScripts = await db
+    .select({ id: sql<string>`${setupScripts.id}` })
+    .from(setupScripts);
+  const scriptIds = new Set(allScripts.map((s) => s.id));
 
   let cleanedCount = 0;
 
   // 1. Clean tests.setupTestId
-  const testsWithSetup = await db.select().from(tests).where(isNotNull(tests.setupTestId));
+  const testsWithSetup = await db
+    .select()
+    .from(tests)
+    .where(isNotNull(tests.setupTestId));
   for (const test of testsWithSetup) {
     if (test.setupTestId && !testIds.has(test.setupTestId)) {
-      await db.update(tests).set({ setupTestId: null }).where(eq(tests.id, test.id));
+      await db
+        .update(tests)
+        .set({ setupTestId: null })
+        .where(eq(tests.id, test.id));
       cleanedCount++;
     }
   }
 
   // 2. Clean tests.setupScriptId
-  const testsWithScript = await db.select().from(tests).where(isNotNull(tests.setupScriptId));
+  const testsWithScript = await db
+    .select()
+    .from(tests)
+    .where(isNotNull(tests.setupScriptId));
   for (const test of testsWithScript) {
     if (test.setupScriptId && !scriptIds.has(test.setupScriptId)) {
-      await db.update(tests).set({ setupScriptId: null }).where(eq(tests.id, test.id));
+      await db
+        .update(tests)
+        .set({ setupScriptId: null })
+        .where(eq(tests.id, test.id));
       cleanedCount++;
     }
   }
 
   // 3. Clean repositories.defaultSetupTestId
-  const reposWithSetupTest = await db.select().from(repositories).where(isNotNull(repositories.defaultSetupTestId));
+  const reposWithSetupTest = await db
+    .select()
+    .from(repositories)
+    .where(isNotNull(repositories.defaultSetupTestId));
   for (const repo of reposWithSetupTest) {
     if (repo.defaultSetupTestId && !testIds.has(repo.defaultSetupTestId)) {
-      await db.update(repositories).set({ defaultSetupTestId: null }).where(eq(repositories.id, repo.id));
+      await db
+        .update(repositories)
+        .set({ defaultSetupTestId: null })
+        .where(eq(repositories.id, repo.id));
       cleanedCount++;
     }
   }
 
   // 4. Clean repositories.defaultSetupScriptId
-  const reposWithSetupScript = await db.select().from(repositories).where(isNotNull(repositories.defaultSetupScriptId));
+  const reposWithSetupScript = await db
+    .select()
+    .from(repositories)
+    .where(isNotNull(repositories.defaultSetupScriptId));
   for (const repo of reposWithSetupScript) {
-    if (repo.defaultSetupScriptId && !scriptIds.has(repo.defaultSetupScriptId)) {
-      await db.update(repositories).set({ defaultSetupScriptId: null }).where(eq(repositories.id, repo.id));
+    if (
+      repo.defaultSetupScriptId &&
+      !scriptIds.has(repo.defaultSetupScriptId)
+    ) {
+      await db
+        .update(repositories)
+        .set({ defaultSetupScriptId: null })
+        .where(eq(repositories.id, repo.id));
       cleanedCount++;
     }
   }
 
   // 5. Clean builds.buildSetupTestId
-  const buildsWithSetupTest = await db.select().from(builds).where(isNotNull(builds.buildSetupTestId));
+  const buildsWithSetupTest = await db
+    .select()
+    .from(builds)
+    .where(isNotNull(builds.buildSetupTestId));
   for (const build of buildsWithSetupTest) {
     if (build.buildSetupTestId && !testIds.has(build.buildSetupTestId)) {
-      await db.update(builds).set({ buildSetupTestId: null }).where(eq(builds.id, build.id));
+      await db
+        .update(builds)
+        .set({ buildSetupTestId: null })
+        .where(eq(builds.id, build.id));
       cleanedCount++;
     }
   }
 
   // 8. Clean builds.buildSetupScriptId
-  const buildsWithSetupScript = await db.select().from(builds).where(isNotNull(builds.buildSetupScriptId));
+  const buildsWithSetupScript = await db
+    .select()
+    .from(builds)
+    .where(isNotNull(builds.buildSetupScriptId));
   for (const build of buildsWithSetupScript) {
     if (build.buildSetupScriptId && !scriptIds.has(build.buildSetupScriptId)) {
-      await db.update(builds).set({ buildSetupScriptId: null }).where(eq(builds.id, build.id));
+      await db
+        .update(builds)
+        .set({ buildSetupScriptId: null })
+        .where(eq(builds.id, build.id));
       cleanedCount++;
     }
   }
 
   // 9. Clean setupOverrides.extraSteps
-  const testsWithOverrides = await db.select().from(tests).where(isNotNull(tests.setupOverrides));
+  const testsWithOverrides = await db
+    .select()
+    .from(tests)
+    .where(isNotNull(tests.setupOverrides));
   for (const test of testsWithOverrides) {
     if (test.setupOverrides && test.setupOverrides.extraSteps) {
-      const filteredSteps = test.setupOverrides.extraSteps.filter(step => {
-        if (step.stepType === 'test' && step.testId && !testIds.has(step.testId)) return false;
-        if (step.stepType === 'script' && step.scriptId && !scriptIds.has(step.scriptId)) return false;
+      const filteredSteps = test.setupOverrides.extraSteps.filter((step) => {
+        if (
+          step.stepType === "test" &&
+          step.testId &&
+          !testIds.has(step.testId)
+        )
+          return false;
+        if (
+          step.stepType === "script" &&
+          step.scriptId &&
+          !scriptIds.has(step.scriptId)
+        )
+          return false;
         return true;
       });
 
       if (filteredSteps.length !== test.setupOverrides.extraSteps.length) {
-        await db.update(tests)
-          .set({ setupOverrides: { ...test.setupOverrides, extraSteps: filteredSteps } })
+        await db
+          .update(tests)
+          .set({
+            setupOverrides: {
+              ...test.setupOverrides,
+              extraSteps: filteredSteps,
+            },
+          })
           .where(eq(tests.id, test.id));
         cleanedCount++;
       }
@@ -398,7 +558,7 @@ export async function cleanupOrphanedSetupReferences() {
 
 // Upsert test by targetUrl within a functional area (for auto-generated tests)
 export async function upsertTestByTargetUrl(
-  data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>
+  data: Omit<NewTest, "id" | "createdAt" | "updatedAt">,
 ) {
   if (!data.targetUrl || !data.functionalAreaId) {
     // Without targetUrl or functionalAreaId, just create new test
@@ -413,8 +573,8 @@ export async function upsertTestByTargetUrl(
       and(
         eq(tests.functionalAreaId, data.functionalAreaId),
         eq(tests.targetUrl, data.targetUrl),
-        isNull(tests.deletedAt)
-      )
+        isNull(tests.deletedAt),
+      ),
     );
 
   if (existing) {
@@ -441,7 +601,7 @@ export async function getTestRunsByIds(ids: string[]) {
   return db.select().from(testRuns).where(inArray(testRuns.id, ids));
 }
 
-export async function createTestRun(data: Omit<NewTestRun, 'id'>) {
+export async function createTestRun(data: Omit<NewTestRun, "id">) {
   const id = uuid();
   await db.insert(testRuns).values({ ...data, id });
   return { id, ...data };
@@ -453,12 +613,18 @@ export async function updateTestRun(id: string, data: Partial<NewTestRun>) {
 
 // Test Results
 export async function getTestResultById(id: string) {
-  const [row] = await db.select().from(testResults).where(eq(testResults.id, id));
+  const [row] = await db
+    .select()
+    .from(testResults)
+    .where(eq(testResults.id, id));
   return row;
 }
 
 export async function getTestResultsByRun(testRunId: string) {
-  return db.select().from(testResults).where(eq(testResults.testRunId, testRunId));
+  return db
+    .select()
+    .from(testResults)
+    .where(eq(testResults.testRunId, testRunId));
 }
 
 export async function getTestResultsByTest(testId: string) {
@@ -496,12 +662,10 @@ export async function getTestResultsByTest(testId: string) {
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
     .where(eq(testResults.testId, testId))
-    .orderBy(desc(testRuns.startedAt))
-    ;
+    .orderBy(desc(testRuns.startedAt));
 }
 
-
-export async function createTestResult(data: Omit<NewTestResult, 'id'>) {
+export async function createTestResult(data: Omit<NewTestResult, "id">) {
   const id = uuid();
   await db.insert(testResults).values({ ...data, id });
   return { id, ...data };
@@ -520,33 +684,41 @@ export async function getPreviousTestResultForTest(
     .select()
     .from(testResults)
     .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
-    .where(and(
-      eq(testResults.testId, testId),
-      ne(testResults.testRunId, excludeTestRunId),
-    ))
+    .where(
+      and(
+        eq(testResults.testId, testId),
+        ne(testResults.testRunId, excludeTestRunId),
+      ),
+    )
     .orderBy(desc(testRuns.startedAt))
     .limit(1);
   return rows[0]?.test_results ?? null;
 }
 
-export async function updateTestResult(id: string, data: Partial<NewTestResult>) {
+export async function updateTestResult(
+  id: string,
+  data: Partial<NewTestResult>,
+) {
   await db.update(testResults).set(data).where(eq(testResults.id, id));
 }
 
 // Get flaky rate for a test over the last N runs
-export async function getTestFlakyRate(testId: string, lastN = 10): Promise<{ total: number; flakyCount: number; rate: number }> {
+export async function getTestFlakyRate(
+  testId: string,
+  lastN = 10,
+): Promise<{ total: number; flakyCount: number; rate: number }> {
   const results = await db
     .select({ isFlaky: testResults.isFlaky })
     .from(testResults)
     .where(eq(testResults.testId, testId))
     .orderBy(desc(testResults.id))
-    .limit(lastN)
-    ;
-  const flakyCount = results.filter(r => r.isFlaky).length;
+    .limit(lastN);
+  const flakyCount = results.filter((r) => r.isFlaky).length;
   return {
     total: results.length,
     flakyCount,
-    rate: results.length > 0 ? Math.round((flakyCount / results.length) * 100) : 0,
+    rate:
+      results.length > 0 ? Math.round((flakyCount / results.length) * 100) : 0,
   };
 }
 
@@ -555,20 +727,26 @@ export async function getQuarantinedTests(repositoryId: string) {
   return db
     .select()
     .from(tests)
-    .where(and(eq(tests.repositoryId, repositoryId), eq(tests.quarantined, true)))
-    ;
+    .where(
+      and(eq(tests.repositoryId, repositoryId), eq(tests.quarantined, true)),
+    );
 }
 
 // Toggle quarantine status for a test
 export async function setTestQuarantined(testId: string, quarantined: boolean) {
-  await db.update(tests).set({ quarantined, updatedAt: new Date() }).where(eq(tests.id, testId));
+  await db
+    .update(tests)
+    .set({ quarantined, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }
 
 // Latest status per test, one query. PG DISTINCT ON picks the most recent
 // test_run per test_id. Returns a Map<testId, { status, startedAt }>.
 export type LatestRunInfo = { status: string; startedAt: Date | null };
 
-export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<Map<string, LatestRunInfo>> {
+export async function getLatestStatusMapForTestIds(
+  testIds: string[],
+): Promise<Map<string, LatestRunInfo>> {
   if (testIds.length === 0) return new Map();
   const rows = await db
     .selectDistinctOn([testResults.testId], {
@@ -582,14 +760,17 @@ export async function getLatestStatusMapForTestIds(testIds: string[]): Promise<M
     .orderBy(testResults.testId, desc(testRuns.startedAt));
   const map = new Map<string, LatestRunInfo>();
   for (const r of rows) {
-    if (r.testId && r.status) map.set(r.testId, { status: r.status, startedAt: r.startedAt ?? null });
+    if (r.testId && r.status)
+      map.set(r.testId, { status: r.status, startedAt: r.startedAt ?? null });
   }
   return map;
 }
 
 // Lightweight helper — for a list of test IDs, return Map<testId, spec.title>.
 // Used by list/tree queries that previously denormalized `description`.
-async function getSpecTitleMapForTestIds(testIds: string[]): Promise<Map<string, string>> {
+async function getSpecTitleMapForTestIds(
+  testIds: string[],
+): Promise<Map<string, string>> {
   if (testIds.length === 0) return new Map();
   const rows = await db
     .select({ testId: testSpecs.testId, title: testSpecs.title })
@@ -604,9 +785,13 @@ async function getSpecTitleMapForTestIds(testIds: string[]): Promise<Map<string,
 export async function getTestsWithStatus() {
   const allTests = await getTests();
   const areas = await getFunctionalAreas();
-  const areaMap = new Map(areas.map(a => [a.id, a]));
-  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
-  const specTitleMap = await getSpecTitleMapForTestIds(allTests.map(t => t.id));
+  const areaMap = new Map(areas.map((a) => [a.id, a]));
+  const statusMap = await getLatestStatusMapForTestIds(
+    allTests.map((t) => t.id),
+  );
+  const specTitleMap = await getSpecTitleMapForTestIds(
+    allTests.map((t) => t.id),
+  );
 
   return allTests.map((test) => {
     const info = statusMap.get(test.id);
@@ -624,9 +809,13 @@ export async function getTestsWithStatus() {
 export async function getTestsWithStatusByRepo(repositoryId: string) {
   const allTests = await getTestsByRepo(repositoryId);
   const areas = await getFunctionalAreasByRepo(repositoryId);
-  const areaMap = new Map(areas.map(a => [a.id, a]));
-  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
-  const specTitleMap = await getSpecTitleMapForTestIds(allTests.map(t => t.id));
+  const areaMap = new Map(areas.map((a) => [a.id, a]));
+  const statusMap = await getLatestStatusMapForTestIds(
+    allTests.map((t) => t.id),
+  );
+  const specTitleMap = await getSpecTitleMapForTestIds(
+    allTests.map((t) => t.id),
+  );
 
   return allTests.map((test) => {
     const info = statusMap.get(test.id);
@@ -642,20 +831,38 @@ export async function getTestsWithStatusByRepo(repositoryId: string) {
 
 // Repo-filtered queries
 export async function getFunctionalAreasByRepo(repositoryId: string) {
-  return db.select().from(functionalAreas).where(and(eq(functionalAreas.repositoryId, repositoryId), isNull(functionalAreas.deletedAt)));
+  return db
+    .select()
+    .from(functionalAreas)
+    .where(
+      and(
+        eq(functionalAreas.repositoryId, repositoryId),
+        isNull(functionalAreas.deletedAt),
+      ),
+    );
 }
 
 export async function getTestsByRepo(repositoryId: string) {
-  return db.select().from(tests).where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt));
+  return db
+    .select()
+    .from(tests)
+    .where(and(eq(tests.repositoryId, repositoryId), isNull(tests.deletedAt)))
+    .orderBy(desc(tests.createdAt));
 }
 
 export async function getUncategorizedTests() {
-  return db.select().from(tests).where(and(isNull(tests.repositoryId), isNull(tests.deletedAt))).orderBy(desc(tests.createdAt));
+  return db
+    .select()
+    .from(tests)
+    .where(and(isNull(tests.repositoryId), isNull(tests.deletedAt)))
+    .orderBy(desc(tests.createdAt));
 }
 
 export async function getUncategorizedTestsWithStatus() {
   const allTests = await getUncategorizedTests();
-  const statusMap = await getLatestStatusMapForTestIds(allTests.map(t => t.id));
+  const statusMap = await getLatestStatusMapForTestIds(
+    allTests.map((t) => t.id),
+  );
 
   return allTests.map((test) => {
     const info = statusMap.get(test.id);
@@ -669,18 +876,26 @@ export async function getUncategorizedTestsWithStatus() {
 }
 
 export async function getDeletedUncategorizedTests() {
-  return db.select().from(tests)
+  return db
+    .select()
+    .from(tests)
     .where(and(isNull(tests.repositoryId), isNotNull(tests.deletedAt)))
-    .orderBy(desc(tests.deletedAt))
-    ;
+    .orderBy(desc(tests.deletedAt));
 }
 
 export async function getTestRunsByRepo(repositoryId: string) {
-  return db.select().from(testRuns).where(eq(testRuns.repositoryId, repositoryId)).orderBy(desc(testRuns.startedAt));
+  return db
+    .select()
+    .from(testRuns)
+    .where(eq(testRuns.repositoryId, repositoryId))
+    .orderBy(desc(testRuns.startedAt));
 }
 
 // Get latest test run for a specific branch
-export async function getLatestRunByBranch(branch: string, repositoryId?: string) {
+export async function getLatestRunByBranch(
+  branch: string,
+  repositoryId?: string,
+) {
   const conditions = [eq(testRuns.gitBranch, branch)];
   if (repositoryId) {
     conditions.push(eq(testRuns.repositoryId, repositoryId));
@@ -709,21 +924,22 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
     })
     .from(testResults)
     .innerJoin(tests, eq(testResults.testId, tests.id))
-    .where(eq(testResults.testRunId, testRunId))
-    ;
-
+    .where(eq(testResults.testRunId, testRunId));
   return results;
 }
 
 // Get all tests for a repository with their status from a specific run
-export async function getTestsWithRunStatus(repositoryId: string, testRunId?: string) {
+export async function getTestsWithRunStatus(
+  repositoryId: string,
+  testRunId?: string,
+) {
   const allTests = await getTestsByRepo(repositoryId);
   const areas = await getFunctionalAreasByRepo(repositoryId);
-  const areaMap = new Map(areas.map(a => [a.id, a]));
+  const areaMap = new Map(areas.map((a) => [a.id, a]));
 
   // If no testRunId provided, return all tests with null status
   if (!testRunId) {
-    return allTests.map(test => ({
+    return allTests.map((test) => ({
       ...test,
       area: test.functionalAreaId ? areaMap.get(test.functionalAreaId) : null,
       status: null as string | null,
@@ -735,9 +951,9 @@ export async function getTestsWithRunStatus(repositoryId: string, testRunId?: st
 
   // Get results for this specific run
   const results = await getTestResultsByRun(testRunId);
-  const resultMap = new Map(results.map(r => [r.testId, r]));
+  const resultMap = new Map(results.map((r) => [r.testId, r]));
 
-  return allTests.map(test => {
+  return allTests.map((test) => {
     const result = resultMap.get(test.id);
     return {
       ...test,
@@ -756,15 +972,16 @@ export async function getTestVersions(testId: string) {
     .select()
     .from(testVersions)
     .where(eq(testVersions.testId, testId))
-    .orderBy(desc(testVersions.version))
-    ;
+    .orderBy(desc(testVersions.version));
 }
 
 export async function getTestVersion(testId: string, version: number) {
   const [row] = await db
     .select()
     .from(testVersions)
-    .where(and(eq(testVersions.testId, testId), eq(testVersions.version, version)));
+    .where(
+      and(eq(testVersions.testId, testId), eq(testVersions.version, version)),
+    );
   return row;
 }
 
@@ -780,7 +997,10 @@ export async function getLatestVersionNumber(testId: string): Promise<number> {
 
 export async function getRecordingViewport(testId: string) {
   const [row] = await db
-    .select({ viewportWidth: testVersions.viewportWidth, viewportHeight: testVersions.viewportHeight })
+    .select({
+      viewportWidth: testVersions.viewportWidth,
+      viewportHeight: testVersions.viewportHeight,
+    })
     .from(testVersions)
     .where(eq(testVersions.testId, testId))
     .orderBy(desc(testVersions.version))
@@ -788,7 +1008,7 @@ export async function getRecordingViewport(testId: string) {
   return row;
 }
 
-export async function createTestVersion(data: Omit<NewTestVersion, 'id'>) {
+export async function createTestVersion(data: Omit<NewTestVersion, "id">) {
   const id = uuid();
   await db.insert(testVersions).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
@@ -799,7 +1019,7 @@ export async function stampFirstBuild(
   testVersionId: string,
   buildId: string,
   branch: string | null,
-  commit: string | null
+  commit: string | null,
 ) {
   await db
     .update(testVersions)
@@ -811,8 +1031,8 @@ export async function stampFirstBuild(
     .where(
       and(
         eq(testVersions.id, testVersionId),
-        isNull(testVersions.firstBuildId)
-      )
+        isNull(testVersions.firstBuildId),
+      ),
     );
 }
 
@@ -830,21 +1050,30 @@ export async function getTestVersionsByBranch(testId: string, branch: string) {
   return db
     .select()
     .from(testVersions)
-    .where(and(eq(testVersions.testId, testId), eq(testVersions.branch, branch)))
-    .orderBy(desc(testVersions.version))
-    ;
+    .where(
+      and(eq(testVersions.testId, testId), eq(testVersions.branch, branch)),
+    )
+    .orderBy(desc(testVersions.version));
 }
 
 // For each test in a repo, get the latest version on a given branch
-export async function getLatestBranchVersions(repositoryId: string, branch: string) {
+export async function getLatestBranchVersions(
+  repositoryId: string,
+  branch: string,
+) {
   const repoTests = await getTestsByRepo(repositoryId);
-  const results: { testId: string; version: typeof testVersions.$inferSelect }[] = [];
+  const results: {
+    testId: string;
+    version: typeof testVersions.$inferSelect;
+  }[] = [];
 
   for (const test of repoTests) {
     const [latest] = await db
       .select()
       .from(testVersions)
-      .where(and(eq(testVersions.testId, test.id), eq(testVersions.branch, branch)))
+      .where(
+        and(eq(testVersions.testId, test.id), eq(testVersions.branch, branch)),
+      )
       .orderBy(desc(testVersions.version))
       .limit(1);
     if (latest) {
@@ -860,10 +1089,10 @@ export async function updateTestWithVersion(
   data: Partial<NewTest>,
   changeReason?: TestChangeReason | string,
   branch?: string,
-  viewport?: { width?: number; height?: number } | null
+  viewport?: { width?: number; height?: number } | null,
 ) {
   const test = await getTest(id);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
 
   // Get next version number
   const nextVersion = (await getLatestVersionNumber(id)) + 1;
@@ -875,7 +1104,7 @@ export async function updateTestWithVersion(
     code: test.code,
     name: test.name,
     targetUrl: test.targetUrl,
-    changeReason: changeReason ?? 'manual_edit',
+    changeReason: changeReason ?? "manual_edit",
     branch: branch ?? null,
     viewportWidth: viewport?.width ?? null,
     viewportHeight: viewport?.height ?? null,
@@ -893,73 +1122,123 @@ export async function updateTestWithVersion(
   }
 
   // Update the test
-  await db.update(tests).set({ ...patch, updatedAt: new Date() }).where(eq(tests.id, id));
+  await db
+    .update(tests)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(tests.id, id));
 }
 
 // ===== Test Specs =====
 
 export async function getTestSpec(testId: string) {
-  const [row] = await db.select().from(testSpecs).where(eq(testSpecs.testId, testId));
+  const [row] = await db
+    .select()
+    .from(testSpecs)
+    .where(eq(testSpecs.testId, testId));
   return row ?? null;
 }
 
 export async function getSpecById(specId: string) {
-  const [row] = await db.select().from(testSpecs).where(eq(testSpecs.id, specId));
+  const [row] = await db
+    .select()
+    .from(testSpecs)
+    .where(eq(testSpecs.id, specId));
   return row ?? null;
 }
 
 export async function getSpecsForArea(functionalAreaId: string) {
-  return db.select().from(testSpecs).where(eq(testSpecs.functionalAreaId, functionalAreaId));
+  return db
+    .select()
+    .from(testSpecs)
+    .where(eq(testSpecs.functionalAreaId, functionalAreaId));
 }
 
 export async function getSpecsByRepo(repositoryId: string) {
-  return db.select().from(testSpecs).where(eq(testSpecs.repositoryId, repositoryId));
+  return db
+    .select()
+    .from(testSpecs)
+    .where(eq(testSpecs.repositoryId, repositoryId));
 }
 
 export async function getOrphanSpecs(repositoryId: string) {
-  return db.select().from(testSpecs).where(
-    and(eq(testSpecs.repositoryId, repositoryId), isNull(testSpecs.testId))
-  );
+  return db
+    .select()
+    .from(testSpecs)
+    .where(
+      and(eq(testSpecs.repositoryId, repositoryId), isNull(testSpecs.testId)),
+    );
 }
 
 export async function getSpecCoverage(repositoryId: string) {
   const specs = await getSpecsByRepo(repositoryId);
   const totalSpecs = specs.length;
-  const withTests = specs.filter(s => s.testId != null).length;
+  const withTests = specs.filter((s) => s.testId != null).length;
   const withoutTests = totalSpecs - withTests;
-  const outdated = specs.filter(s => s.status === 'outdated').length;
+  const outdated = specs.filter((s) => s.status === "outdated").length;
   return { totalSpecs, withTests, withoutTests, outdated };
 }
 
-export async function createTestSpec(data: Omit<NewTestSpec, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createTestSpec(
+  data: Omit<NewTestSpec, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
-  await db.insert(testSpecs).values({ ...data, id, createdAt: now, updatedAt: now });
+  await db
+    .insert(testSpecs)
+    .values({ ...data, id, createdAt: now, updatedAt: now });
   return id;
 }
 
-export async function updateTestSpec(id: string, data: Partial<Pick<NewTestSpec, 'title' | 'spec' | 'status' | 'codeHash' | 'testId' | 'functionalAreaId'>>) {
-  await db.update(testSpecs).set({ ...data, updatedAt: new Date() }).where(eq(testSpecs.id, id));
+export async function updateTestSpec(
+  id: string,
+  data: Partial<
+    Pick<
+      NewTestSpec,
+      "title" | "spec" | "status" | "codeHash" | "testId" | "functionalAreaId"
+    >
+  >,
+) {
+  await db
+    .update(testSpecs)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(testSpecs.id, id));
 }
 
 export async function deleteTestSpec(id: string) {
   // Unlink test first
   const spec = await getSpecById(id);
   if (spec?.testId) {
-    await db.update(tests).set({ specId: null }).where(eq(tests.id, spec.testId));
+    await db
+      .update(tests)
+      .set({ specId: null })
+      .where(eq(tests.id, spec.testId));
   }
   await db.delete(testSpecs).where(eq(testSpecs.id, id));
 }
 
 export async function linkSpecToTest(specId: string, testId: string) {
-  await db.update(testSpecs).set({ testId, status: 'has_test', updatedAt: new Date() }).where(eq(testSpecs.id, specId));
+  await db
+    .update(testSpecs)
+    .set({ testId, status: "has_test", updatedAt: new Date() })
+    .where(eq(testSpecs.id, specId));
   await db.update(tests).set({ specId }).where(eq(tests.id, testId));
 }
 
 export async function unlinkSpec(specId: string) {
   const spec = await getSpecById(specId);
   if (spec?.testId) {
-    await db.update(tests).set({ specId: null }).where(eq(tests.id, spec.testId));
+    await db
+      .update(tests)
+      .set({ specId: null })
+      .where(eq(tests.id, spec.testId));
   }
-  await db.update(testSpecs).set({ testId: null, status: 'draft', codeHash: null, updatedAt: new Date() }).where(eq(testSpecs.id, specId));
+  await db
+    .update(testSpecs)
+    .set({
+      testId: null,
+      status: "draft",
+      codeHash: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(testSpecs.id, specId));
 }

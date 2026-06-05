@@ -1,18 +1,23 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import fs from 'fs';
-import path from 'path';
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess, requireCapability, requireRepoCapability } from '@/lib/auth';
+import { revalidatePath } from "next/cache";
+import fs from "fs";
+import path from "path";
+import * as queries from "@/lib/db/queries";
+import {
+  requireRepoAccess,
+  requireTeamAccess,
+  requireCapability,
+  requireRepoCapability,
+} from "@/lib/auth";
 import {
   requireAreaOwnership,
   requireTestOwnership,
   requireTestResultOwnership,
-} from '@/lib/auth/ownership';
-import type { NewTest, NewFunctionalArea } from '@/lib/db/schema';
-import { getCurrentBranchForRepo } from '@/lib/git-utils';
-import { STORAGE_DIRS } from '@/lib/storage/paths';
+} from "@/lib/auth/ownership";
+import type { NewTest, NewFunctionalArea } from "@/lib/db/schema";
+import { getCurrentBranchForRepo } from "@/lib/git-utils";
+import { STORAGE_DIRS } from "@/lib/storage/paths";
 
 /**
  * Fetch all selector_stats rows for a test so the UI can display per-step
@@ -27,79 +32,102 @@ export async function getSelectorStatsForTestAction(testId: string) {
   return queries.getSelectorStatsForTest(testId);
 }
 
-export async function createFunctionalArea(data: Omit<NewFunctionalArea, 'id'>) {
-  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'areas:write');
-  else await requireCapability('areas:write');
+export async function createFunctionalArea(
+  data: Omit<NewFunctionalArea, "id">,
+) {
+  if (data.repositoryId)
+    await requireRepoCapability(data.repositoryId, "areas:write");
+  else await requireCapability("areas:write");
   const result = await queries.createFunctionalArea(data);
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
   return result;
 }
 
-export async function updateFunctionalArea(id: string, data: Partial<NewFunctionalArea>) {
+export async function updateFunctionalArea(
+  id: string,
+  data: Partial<NewFunctionalArea>,
+) {
   await requireAreaOwnership(id);
   await queries.updateFunctionalArea(id, data);
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function deleteFunctionalArea(id: string) {
   await requireAreaOwnership(id);
   await queries.deleteFunctionalArea(id);
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function cloneTest(id: string) {
-  await requireCapability('tests:write');
+  await requireCapability("tests:write");
   const test = await queries.getTest(id);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
-    await requireRepoCapability(test.repositoryId, 'tests:write');
+    await requireRepoCapability(test.repositoryId, "tests:write");
   }
-  const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, deletedAt: _deletedAt, ...data } = test;
+  const {
+    id: _id,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    deletedAt: _deletedAt,
+    ...data
+  } = test;
   const result = await queries.createTest({
     ...data,
     name: `${test.name} (copy)`,
   });
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
   return result;
 }
 
-export async function createTest(data: Omit<NewTest, 'id' | 'createdAt' | 'updatedAt'>) {
-  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'tests:write');
-  else await requireCapability('tests:write');
+export async function createTest(
+  data: Omit<NewTest, "id" | "createdAt" | "updatedAt">,
+) {
+  if (data.repositoryId)
+    await requireRepoCapability(data.repositoryId, "tests:write");
+  else await requireCapability("tests:write");
   // Gamification stamping + awarding happens inside queries.createTest via
   // the onTestCreated hook — it handles every caller, not just this one.
   const result = await queries.createTest(data);
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
   return result;
 }
 
 export async function updateTest(id: string, data: Partial<NewTest>) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(id);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
   const branch = await getCurrentBranchForRepo(test?.repositoryId);
-  await queries.updateTestWithVersion(id, data, 'manual_edit', branch ?? undefined);
-  revalidatePath('/tests');
+  await queries.updateTestWithVersion(
+    id,
+    data,
+    "manual_edit",
+    branch ?? undefined,
+  );
+  revalidatePath("/tests");
   revalidatePath(`/tests/${id}`);
 }
 
 // Updates only the parsed assertions metadata — no version history entry
-export async function syncTestAssertions(id: string, assertions: import('@/lib/db/schema').TestAssertion[]) {
-  const session = await requireCapability('tests:write');
+export async function syncTestAssertions(
+  id: string,
+  assertions: import("@/lib/db/schema").TestAssertion[],
+) {
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(id);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
   await queries.updateTest(id, { assertions });
   revalidatePath(`/tests/${id}`);
@@ -108,14 +136,14 @@ export async function syncTestAssertions(id: string, assertions: import('@/lib/d
 export async function saveStepCriteria(
   testId: string,
   stepLabel: string,
-  rules: import('@/lib/db/schema').StepRule[],
+  rules: import("@/lib/db/schema").StepRule[],
 ) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
   const next = await queries.updateStepCriteria(testId, stepLabel, rules);
   revalidatePath(`/tests/${testId}`);
@@ -124,45 +152,56 @@ export async function saveStepCriteria(
 
 export async function saveTestVariables(
   testId: string,
-  variables: import('@/lib/db/schema').TestVariable[],
+  variables: import("@/lib/db/schema").TestVariable[],
 ) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
 
   // Validate
   const seen = new Set<string>();
   for (const v of variables) {
     if (!v.name || !/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(v.name)) {
-      throw new Error(`Variable name "${v.name}" is invalid (letters/digits/underscore/hyphen, must start with a letter)`);
+      throw new Error(
+        `Variable name "${v.name}" is invalid (letters/digits/underscore/hyphen, must start with a letter)`,
+      );
     }
     if (seen.has(v.name)) throw new Error(`Duplicate variable name: ${v.name}`);
     seen.add(v.name);
-    if (v.mode !== 'extract' && v.mode !== 'assign') {
+    if (v.mode !== "extract" && v.mode !== "assign") {
       throw new Error(`Variable "${v.name}" has invalid mode`);
     }
-    if (v.mode === 'extract' && !v.targetSelector) {
-      throw new Error(`Extract-mode variable "${v.name}" requires a targetSelector`);
+    if (v.mode === "extract" && !v.targetSelector) {
+      throw new Error(
+        `Extract-mode variable "${v.name}" requires a targetSelector`,
+      );
     }
-    if (v.mode === 'assign') {
-      if (v.sourceType === 'static' && v.staticValue === undefined) {
+    if (v.mode === "assign") {
+      if (v.sourceType === "static" && v.staticValue === undefined) {
         throw new Error(`Static variable "${v.name}" requires a staticValue`);
       }
-      if ((v.sourceType === 'gsheet' || v.sourceType === 'csv') && (!v.sourceAlias || !v.sourceColumn)) {
-        throw new Error(`${v.sourceType} variable "${v.name}" requires sourceAlias and sourceColumn`);
+      if (
+        (v.sourceType === "gsheet" || v.sourceType === "csv") &&
+        (!v.sourceAlias || !v.sourceColumn)
+      ) {
+        throw new Error(
+          `${v.sourceType} variable "${v.name}" requires sourceAlias and sourceColumn`,
+        );
       }
-      if (v.sourceType === 'ai-generated') {
+      if (v.sourceType === "ai-generated") {
         if (!v.aiPreset) {
           throw new Error(`AI variable "${v.name}" requires aiPreset`);
         }
-        if (v.aiPreset === 'custom' && !v.aiCustomPrompt?.trim()) {
-          throw new Error(`AI variable "${v.name}" with custom preset requires aiCustomPrompt`);
+        if (v.aiPreset === "custom" && !v.aiCustomPrompt?.trim()) {
+          throw new Error(
+            `AI variable "${v.name}" with custom preset requires aiCustomPrompt`,
+          );
         }
-        if (v.sourceRowMode === 'increment') {
+        if (v.sourceRowMode === "increment") {
           throw new Error(`AI variable "${v.name}" cannot use increment mode`);
         }
       }
@@ -170,7 +209,7 @@ export async function saveTestVariables(
   }
 
   await queries.updateTest(testId, { variables });
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
@@ -183,39 +222,49 @@ export async function saveTestVariables(
  */
 export async function generateAIVarValuePreview(
   testId: string,
-  variable: import('@/lib/db/schema').TestVariable,
+  variable: import("@/lib/db/schema").TestVariable,
 ): Promise<{ value: string }> {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
-  if (variable.sourceType !== 'ai-generated') {
-    throw new Error('Variable is not AI-generated');
+  if (variable.sourceType !== "ai-generated") {
+    throw new Error("Variable is not AI-generated");
   }
 
   // Lazy imports to keep the action file's bundle slim and avoid cycles.
-  const { buildAIVarPrompt, sanitizeAIVarOutput } = await import('@/lib/vars/ai-presets');
-  const { generateWithAI } = await import('@/lib/ai');
+  const { buildAIVarPrompt, sanitizeAIVarOutput } =
+    await import("@/lib/vars/ai-presets");
+  const { generateWithAI } = await import("@/lib/ai");
   const prompt = buildAIVarPrompt(variable);
-  if (!prompt) throw new Error('AI variable has no prompt configured');
+  if (!prompt) throw new Error("AI variable has no prompt configured");
 
   const settings = await queries.getAISettings(test.repositoryId ?? undefined);
-  if (!settings) throw new Error('AI provider not configured');
-  const provider = settings.provider as import('@/lib/ai').AIProviderConfig['provider'];
-  if (provider === 'claude-cli') throw new Error('AI provider not configured (CLI provider is not used for variable generation — pick a different provider in AI settings)');
-  if (provider === 'openrouter' && !settings.openrouterApiKey) throw new Error('OpenRouter API key is missing');
-  if (provider === 'anthropic' && !settings.anthropicApiKey) throw new Error('Anthropic API key is missing');
-  if (provider === 'openai' && !settings.openaiApiKey) throw new Error('OpenAI API key is missing');
-  if (provider === 'ollama' && !settings.ollamaModel) throw new Error('Ollama model is not set');
+  if (!settings) throw new Error("AI provider not configured");
+  const provider =
+    settings.provider as import("@/lib/ai").AIProviderConfig["provider"];
+  if (provider === "claude-cli")
+    throw new Error(
+      "AI provider not configured (CLI provider is not used for variable generation — pick a different provider in AI settings)",
+    );
+  if (provider === "openrouter" && !settings.openrouterApiKey)
+    throw new Error("OpenRouter API key is missing");
+  if (provider === "anthropic" && !settings.anthropicApiKey)
+    throw new Error("Anthropic API key is missing");
+  if (provider === "openai" && !settings.openaiApiKey)
+    throw new Error("OpenAI API key is missing");
+  if (provider === "ollama" && !settings.ollamaModel)
+    throw new Error("Ollama model is not set");
 
-  const config: import('@/lib/ai').AIProviderConfig = {
+  const config: import("@/lib/ai").AIProviderConfig = {
     provider,
     openrouterApiKey: settings.openrouterApiKey ?? undefined,
     openrouterModel: settings.openrouterModel ?? undefined,
-    agentSdkPermissionMode: (settings.agentSdkPermissionMode ?? undefined) as import('@/lib/ai').AIProviderConfig['agentSdkPermissionMode'],
+    agentSdkPermissionMode: (settings.agentSdkPermissionMode ??
+      undefined) as import("@/lib/ai").AIProviderConfig["agentSdkPermissionMode"],
     agentSdkModel: settings.agentSdkModel ?? undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir ?? undefined,
     ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
@@ -234,9 +283,9 @@ export async function generateAIVarValuePreview(
     raw = await generateWithAI(
       config,
       prompt,
-      'You generate short, realistic test data values. Output the value verbatim — no quotes, no labels, no commentary.',
+      "You generate short, realistic test data values. Output the value verbatim — no quotes, no labels, no commentary.",
       {
-        actionType: 'generate_var_value',
+        actionType: "generate_var_value",
         repositoryId: test.repositoryId ?? undefined,
         signal: controller.signal,
       },
@@ -245,7 +294,7 @@ export async function generateAIVarValuePreview(
     clearTimeout(timeout);
   }
   const value = sanitizeAIVarOutput(raw);
-  if (!value) throw new Error('AI returned an empty value');
+  if (!value) throw new Error("AI returned an empty value");
 
   // Persist into the test row's aiVarLastValues cache so subsequent runs
   // (and the editor preview) see it without another AI call.
@@ -255,19 +304,26 @@ export async function generateAIVarValuePreview(
   return { value };
 }
 
-export async function updateStepValue(testId: string, lineStart: number, lineEnd: number, oldValue: string, newValue: string) {
-  const session = await requireCapability('tests:write');
+export async function updateStepValue(
+  testId: string,
+  lineStart: number,
+  lineEnd: number,
+  oldValue: string,
+  newValue: string,
+) {
+  const session = await requireCapability("tests:write");
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== session.team.id) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
   }
 
-  let code = test.code || '';
-  const lines = code.split('\n');
+  let code = test.code || "";
+  const lines = code.split("\n");
 
-  const escapeForSingleQuoted = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const escapeForSingleQuoted = (s: string) =>
+    s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const escapedOld = escapeForSingleQuoted(oldValue);
   const escapedNew = escapeForSingleQuoted(newValue);
 
@@ -284,14 +340,16 @@ export async function updateStepValue(testId: string, lineStart: number, lineEnd
 
   const sliceStart = Math.max(0, lineStart - 1);
   const sliceEnd = Math.min(lineEnd, lines.length);
-  const block = lines.slice(sliceStart, sliceEnd).join('\n');
+  const block = lines.slice(sliceStart, sliceEnd).join("\n");
 
   let replaced = false;
   let newBlock = block;
   for (const re of VALUE_PATTERNS) {
     if (re.test(newBlock)) {
-      newBlock = newBlock.replace(re, (_m, prefix: string, _value: string, suffix: string) =>
-        `${prefix}${escapedNew}${suffix}`,
+      newBlock = newBlock.replace(
+        re,
+        (_m, prefix: string, _value: string, suffix: string) =>
+          `${prefix}${escapedNew}${suffix}`,
       );
       replaced = true;
       break;
@@ -302,93 +360,99 @@ export async function updateStepValue(testId: string, lineStart: number, lineEnd
   if (!replaced && escapedOld) {
     const idx = newBlock.indexOf(escapedOld);
     if (idx !== -1) {
-      newBlock = newBlock.slice(0, idx) + escapedNew + newBlock.slice(idx + escapedOld.length);
+      newBlock =
+        newBlock.slice(0, idx) +
+        escapedNew +
+        newBlock.slice(idx + escapedOld.length);
       replaced = true;
     }
   }
 
-  if (!replaced) throw new Error('Could not find value in code');
+  if (!replaced) throw new Error("Could not find value in code");
 
-  lines.splice(sliceStart, sliceEnd - sliceStart, ...newBlock.split('\n'));
-  code = lines.join('\n');
+  lines.splice(sliceStart, sliceEnd - sliceStart, ...newBlock.split("\n"));
+  code = lines.join("\n");
 
-  const { parseAssertions } = await import('@/lib/playwright/assertion-parser');
+  const { parseAssertions } = await import("@/lib/playwright/assertion-parser");
   const updatedAssertions = parseAssertions(code);
 
   const branch = await getCurrentBranchForRepo(test.repositoryId);
   await queries.updateTestWithVersion(
     testId,
-    { code, assertions: updatedAssertions.length > 0 ? updatedAssertions : undefined },
-    'manual_edit',
+    {
+      code,
+      assertions: updatedAssertions.length > 0 ? updatedAssertions : undefined,
+    },
+    "manual_edit",
     branch ?? undefined,
   );
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${testId}`);
 }
 
 async function verifyTestOwnership(testId: string, teamId: string) {
   const test = await queries.getTest(testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
   if (test.repositoryId) {
     const repo = await queries.getRepository(test.repositoryId);
-    if (!repo || repo.teamId !== teamId) throw new Error('Forbidden');
+    if (!repo || repo.teamId !== teamId) throw new Error("Forbidden");
   }
 }
 
 export async function deleteTest(id: string) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   await verifyTestOwnership(id, session.team.id);
   await queries.softDeleteTest(id);
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${id}`);
-  revalidatePath('/');
+  revalidatePath("/");
 }
 
 export async function deleteTests(testIds: string[]) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.softDeleteTest(id);
   }
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function restoreTest(id: string) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   await verifyTestOwnership(id, session.team.id);
   await queries.restoreTest(id);
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${id}`);
-  revalidatePath('/');
+  revalidatePath("/");
 }
 
 export async function restoreTests(testIds: string[]) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.restoreTest(id);
   }
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function permanentlyDeleteTest(id: string) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   await verifyTestOwnership(id, session.team.id);
   await queries.permanentlyDeleteTest(id);
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function permanentlyDeleteTests(testIds: string[]) {
-  const session = await requireCapability('tests:write');
+  const session = await requireCapability("tests:write");
   for (const id of testIds) {
     await verifyTestOwnership(id, session.team.id);
     await queries.permanentlyDeleteTest(id);
   }
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 }
 
 export async function getDeletedTests(repositoryId?: string) {
@@ -402,7 +466,10 @@ export async function getTest(id: string) {
   return test;
 }
 
-export async function getTestDetailData(testId: string, repositoryId?: string | null) {
+export async function getTestDetailData(
+  testId: string,
+  repositoryId?: string | null,
+) {
   // requireTestOwnership throws `Forbidden: …` for a stale / deleted / cross-team
   // testId (e.g. a leftover ?test=<id> in the URL after switching teams, or a
   // freshly-claimed test the session can't yet see). Convert that EXPECTED case
@@ -413,14 +480,30 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
   // message is still intact, lets callers treat `null` as "not accessible".
   // Genuinely unexpected errors still propagate.
   const ownership = await requireTestOwnership(testId).catch((err) => {
-    if (err instanceof Error && err.message.startsWith('Forbidden:')) return null;
+    if (err instanceof Error && err.message.startsWith("Forbidden:"))
+      return null;
     throw err;
   });
   if (!ownership) return null;
   const { session, test } = ownership;
 
   const repoId = test.repositoryId || repositoryId;
-  const [results, screenshotGroups, plannedScreenshots, defaultSetupSteps, availableTests, setupScripts, sheetDataSources, csvDataSources, googleSheetsAccount, playwrightSettings, diffSettings, envConfig, testSpec, aiSettings] = await Promise.all([
+  const [
+    results,
+    screenshotGroups,
+    plannedScreenshots,
+    defaultSetupSteps,
+    availableTests,
+    setupScripts,
+    sheetDataSources,
+    csvDataSources,
+    googleSheetsAccount,
+    playwrightSettings,
+    diffSettings,
+    envConfig,
+    testSpec,
+    aiSettings,
+  ] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
     queries.getPlannedScreenshotsByTest(testId),
@@ -441,16 +524,18 @@ export async function getTestDetailData(testId: string, repositoryId?: string | 
   // chosen AND its credentials/model are present. Mirrors the gating in
   // executor.buildAIVarRuntime so the editor stays honest about whether the
   // Refresh-now button will work.
-  const aiAvailable = !!aiSettings && (() => {
-    const p = aiSettings.provider;
-    if (!p || p === 'claude-cli') return false;
-    if (p === 'openrouter') return !!aiSettings.openrouterApiKey;
-    if (p === 'anthropic') return !!aiSettings.anthropicApiKey;
-    if (p === 'openai') return !!aiSettings.openaiApiKey;
-    if (p === 'ollama') return !!aiSettings.ollamaModel;
-    if (p === 'claude-agent-sdk') return true;
-    return false;
-  })();
+  const aiAvailable =
+    !!aiSettings &&
+    (() => {
+      const p = aiSettings.provider;
+      if (!p || p === "claude-cli") return false;
+      if (p === "openrouter") return !!aiSettings.openrouterApiKey;
+      if (p === "anthropic") return !!aiSettings.anthropicApiKey;
+      if (p === "openai") return !!aiSettings.openaiApiKey;
+      if (p === "ollama") return !!aiSettings.ollamaModel;
+      if (p === "claude-agent-sdk") return true;
+      return false;
+    })();
 
   return {
     test,
@@ -503,16 +588,19 @@ export interface ScreenshotGroup {
   // Baseline + diff lookup keyed by the captured screenshot path (matches
   // `currentImagePath` on visualDiffs). Lets the gallery viewer toggle to
   // "diff vs baseline" without an extra fetch on click.
-  diffsByPath?: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }>;
+  diffsByPath?: Record<
+    string,
+    { baselineImagePath: string | null; diffImagePath: string | null }
+  >;
 }
 
 export async function getTestScreenshots(
   testId: string,
-  repositoryId?: string | null
+  repositoryId?: string | null,
 ): Promise<string[]> {
   if (repositoryId) {
     if (!/^[a-zA-Z0-9_-]+$/.test(repositoryId)) {
-      throw new Error('Forbidden: invalid repositoryId');
+      throw new Error("Forbidden: invalid repositoryId");
     }
     await requireRepoAccess(repositoryId);
   } else {
@@ -527,20 +615,30 @@ export async function getTestScreenshots(
 
   const files = fs.readdirSync(dir);
   const testFiles = files
-    .filter(f => f.includes(testId) && f.endsWith('.png'))
+    .filter((f) => f.includes(testId) && f.endsWith(".png"))
     .sort();
 
-  const prefix = safeRepoId ? `/screenshots/${safeRepoId}` : '/screenshots';
-  return testFiles.map(f => `${prefix}/${f}`);
+  const prefix = safeRepoId ? `/screenshots/${safeRepoId}` : "/screenshots";
+  return testFiles.map((f) => `${prefix}/${f}`);
 }
 
 export async function getTestScreenshotsGrouped(
   testId: string,
-  _repositoryId?: string | null
+  _repositoryId?: string | null,
 ): Promise<ScreenshotGroup[]> {
   // Primary: Get screenshots from database (stored in test results)
   const testResults = await queries.getTestResultsByTest(testId);
-  const groups: Map<string, { startedAt: Date | null; screenshots: string[]; diffsByPath: Record<string, { baselineImagePath: string | null; diffImagePath: string | null }> }> = new Map();
+  const groups: Map<
+    string,
+    {
+      startedAt: Date | null;
+      screenshots: string[];
+      diffsByPath: Record<
+        string,
+        { baselineImagePath: string | null; diffImagePath: string | null }
+      >;
+    }
+  > = new Map();
 
   for (const result of testResults) {
     const runId = result.testRunId;
@@ -561,7 +659,10 @@ export async function getTestScreenshotsGrouped(
     }
 
     // Fallback to single screenshotPath if no array
-    if (result.screenshotPath && !group.screenshots.includes(result.screenshotPath)) {
+    if (
+      result.screenshotPath &&
+      !group.screenshots.includes(result.screenshotPath)
+    ) {
       group.screenshots.push(result.screenshotPath);
     }
 
@@ -580,17 +681,20 @@ export async function getTestScreenshotsGrouped(
   // Get run timestamps
   const runIds = Array.from(groups.keys());
   const runs = await queries.getTestRunsByIds(runIds);
-  const runMap = new Map(runs.map(r => [r.id, r.startedAt]));
+  const runMap = new Map(runs.map((r) => [r.id, r.startedAt]));
 
   // Natural sort for filenames like step_1, step_2, ..., step_10
   const naturalCompare = (a: string, b: string) => {
-    const nameA = a.split('/').pop() || '';
-    const nameB = b.split('/').pop() || '';
-    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    const nameA = a.split("/").pop() || "";
+    const nameB = b.split("/").pop() || "";
+    return nameA.localeCompare(nameB, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   };
 
   // Build result
-  const result: ScreenshotGroup[] = runIds.map(runId => ({
+  const result: ScreenshotGroup[] = runIds.map((runId) => ({
     runId,
     startedAt: runMap.get(runId) || null,
     screenshots: (groups.get(runId)?.screenshots || []).sort(naturalCompare),
@@ -633,10 +737,10 @@ export async function restoreTestVersion(testId: string, version: number) {
       targetUrl: versionData.targetUrl,
     },
     `restored_from_v${version}`,
-    branch ?? undefined
+    branch ?? undefined,
   );
 
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
@@ -651,8 +755,8 @@ export async function getVisualDiffsForTestResult(testResultId: string) {
 export async function cleanupOrphanedSetupReferences() {
   await requireTeamAccess();
   const result = await queries.cleanupOrphanedSetupReferences();
-  revalidatePath('/tests');
-  revalidatePath('/settings');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/settings");
+  revalidatePath("/");
   return result;
 }

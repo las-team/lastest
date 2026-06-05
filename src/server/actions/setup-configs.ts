@@ -1,13 +1,13 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { requireSetupConfigOwnership } from '@/lib/auth/ownership';
-import type { SetupAuthType, SetupAuthConfig } from '@/lib/db/schema';
-import { runApiSetup } from '@/lib/setup/api-seeder';
-import type { SetupConfig, SetupContext } from '@/lib/setup/types';
-import { validateUrl } from '@/lib/security/url-validation';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { requireSetupConfigOwnership } from "@/lib/auth/ownership";
+import type { SetupAuthType, SetupAuthConfig } from "@/lib/db/schema";
+import { runApiSetup } from "@/lib/setup/api-seeder";
+import type { SetupConfig, SetupContext } from "@/lib/setup/types";
+import { validateUrl } from "@/lib/security/url-validation";
 
 export interface CreateSetupConfigInput {
   repositoryId: string;
@@ -49,7 +49,7 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
   try {
     new URL(data.baseUrl);
   } catch {
-    throw new Error('Invalid base URL');
+    throw new Error("Invalid base URL");
   }
 
   const ssrfError = validateUrl(data.baseUrl);
@@ -58,39 +58,45 @@ export async function createSetupConfig(data: CreateSetupConfigInput) {
   }
 
   // Validate auth config based on type
-  if (data.authType === 'bearer' && !data.authConfig?.token) {
-    throw new Error('Bearer auth requires a token');
+  if (data.authType === "bearer" && !data.authConfig?.token) {
+    throw new Error("Bearer auth requires a token");
   }
-  if (data.authType === 'basic' && (!data.authConfig?.username || !data.authConfig?.password)) {
-    throw new Error('Basic auth requires username and password');
+  if (
+    data.authType === "basic" &&
+    (!data.authConfig?.username || !data.authConfig?.password)
+  ) {
+    throw new Error("Basic auth requires username and password");
   }
-  if (data.authType === 'custom' && !data.authConfig?.headers) {
-    throw new Error('Custom auth requires headers');
+  if (data.authType === "custom" && !data.authConfig?.headers) {
+    throw new Error("Custom auth requires headers");
   }
 
   const result = await queries.createSetupConfig({
     repositoryId: data.repositoryId,
     name: data.name,
-    baseUrl: data.baseUrl.replace(/\/+$/, ''),
+    baseUrl: data.baseUrl.replace(/\/+$/, ""),
     authType: data.authType,
     authConfig: data.authConfig || null,
   });
 
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return result;
 }
 
 /**
  * Update a setup config
  */
-export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput) {
+export async function updateSetupConfig(
+  id: string,
+  data: UpdateSetupConfigInput,
+) {
   await requireSetupConfigOwnership(id);
   // Validate base URL if provided
   if (data.baseUrl) {
     try {
       new URL(data.baseUrl);
     } catch {
-      throw new Error('Invalid base URL');
+      throw new Error("Invalid base URL");
     }
     const ssrfError = validateUrl(data.baseUrl);
     if (ssrfError) {
@@ -99,7 +105,7 @@ export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput
   }
 
   await queries.updateSetupConfig(id, data);
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return { success: true };
 }
 
@@ -109,26 +115,28 @@ export async function updateSetupConfig(id: string, data: UpdateSetupConfigInput
 export async function deleteSetupConfig(id: string) {
   await requireSetupConfigOwnership(id);
   await queries.deleteSetupConfig(id);
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return { success: true };
 }
 
 /**
  * Test a setup config by making a simple request
  */
-export async function testSetupConfig(id: string): Promise<{ success: boolean; error?: string }> {
+export async function testSetupConfig(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
   const { config } = await requireSetupConfigOwnership(id);
 
   try {
     // Create a simple test script that just makes a GET request
     const testScript = {
-      id: 'test',
+      id: "test",
       repositoryId: config.repositoryId,
-      name: 'Test Connection',
-      type: 'api' as const,
+      name: "Test Connection",
+      type: "api" as const,
       code: JSON.stringify({
-        method: 'GET',
-        endpoint: '/',
+        method: "GET",
+        endpoint: "/",
       }),
       description: null,
       createdAt: null,
@@ -141,7 +149,11 @@ export async function testSetupConfig(id: string): Promise<{ success: boolean; e
       repositoryId: config.repositoryId,
     };
 
-    const result = await runApiSetup(config as SetupConfig, testScript, context);
+    const result = await runApiSetup(
+      config as SetupConfig,
+      testScript,
+      context,
+    );
 
     return {
       success: result.success,
@@ -162,7 +174,7 @@ export async function testApiEndpoint(
   configId: string,
   method: string,
   endpoint: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<{ success: boolean; error?: string; response?: unknown }> {
   const { config } = await requireSetupConfigOwnership(configId);
 
@@ -174,18 +186,22 @@ export async function testApiEndpoint(
     }
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     // Apply auth
-    if (config.authType === 'bearer' && config.authConfig?.token) {
-      headers['Authorization'] = `Bearer ${config.authConfig.token}`;
-    } else if (config.authType === 'basic' && config.authConfig?.username && config.authConfig?.password) {
+    if (config.authType === "bearer" && config.authConfig?.token) {
+      headers["Authorization"] = `Bearer ${config.authConfig.token}`;
+    } else if (
+      config.authType === "basic" &&
+      config.authConfig?.username &&
+      config.authConfig?.password
+    ) {
       const credentials = Buffer.from(
-        `${config.authConfig.username}:${config.authConfig.password}`
-      ).toString('base64');
-      headers['Authorization'] = `Basic ${credentials}`;
-    } else if (config.authType === 'custom' && config.authConfig?.headers) {
+        `${config.authConfig.username}:${config.authConfig.password}`,
+      ).toString("base64");
+      headers["Authorization"] = `Basic ${credentials}`;
+    } else if (config.authType === "custom" && config.authConfig?.headers) {
       Object.assign(headers, config.authConfig.headers);
     }
 
@@ -195,9 +211,9 @@ export async function testApiEndpoint(
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    const contentType = response.headers.get('content-type');
+    const contentType = response.headers.get("content-type");
     let responseData: unknown;
-    if (contentType?.includes('application/json')) {
+    if (contentType?.includes("application/json")) {
       responseData = await response.json();
     } else {
       responseData = await response.text();

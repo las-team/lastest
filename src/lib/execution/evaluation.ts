@@ -7,7 +7,7 @@
 // Pure helpers (`evaluateRules`) operate on plain data shapes so they're
 // trivial to unit-test without a database.
 
-import * as queries from '@/lib/db/queries';
+import * as queries from "@/lib/db/queries";
 import type {
   AssertionResult,
   EvaluationOutcome,
@@ -15,7 +15,7 @@ import type {
   StepRule,
   TriggeredStepRule,
   VisualDiff,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 export interface StepObservations {
   visualDiffs: VisualDiff[];
@@ -29,7 +29,7 @@ export interface StepObservations {
 }
 
 export interface EvaluationResult {
-  overriddenStatus?: 'failed';
+  overriddenStatus?: "failed";
   triggeredRules: TriggeredStepRule[];
 }
 
@@ -67,49 +67,64 @@ export function evaluateRules(
     triggeredRules.push(...evaluateRulesForStep(criterion, obs));
   }
 
-  const overridden = triggeredRules.some(t => t.rule.severity === 'fail');
-  return { triggeredRules, overriddenStatus: overridden ? 'failed' : undefined };
+  const overridden = triggeredRules.some((t) => t.rule.severity === "fail");
+  return {
+    triggeredRules,
+    overriddenStatus: overridden ? "failed" : undefined,
+  };
 }
 
-function ruleTrips(rule: StepRule, observations: StepObservations): string | null {
+function ruleTrips(
+  rule: StepRule,
+  observations: StepObservations,
+): string | null {
   switch (rule.kind) {
-    case 'screenshot_changed': {
+    case "screenshot_changed": {
       const trippingDiff = observations.visualDiffs.find(
-        d => d.classification === 'changed' && d.status !== 'approved' && d.status !== 'auto_approved',
+        (d) =>
+          d.classification === "changed" &&
+          d.status !== "approved" &&
+          d.status !== "auto_approved",
       );
       return trippingDiff
         ? `Screenshot changed (diff ${trippingDiff.id}, status=${trippingDiff.status})`
         : null;
     }
-    case 'focus_region_changed': {
+    case "focus_region_changed": {
       // Hooks Feature 2 (focus regions). Until that ships there's no
       // focus-region diff signal to read; treat as a no-op so toggling the
       // rule doesn't crash builds.
       return null;
     }
-    case 'console_error': {
+    case "console_error": {
       return observations.consoleErrors.length > 0
         ? `Console error captured (${observations.consoleErrors.length})`
         : null;
     }
-    case 'assertion_failed': {
+    case "assertion_failed": {
       // When `params.assertionId` is set the rule is scoped to that specific
       // assertion (per-assertion toggle in the UI). When unset it matches
       // any failed assertion (legacy "fail if any assertion fails" rule).
-      const targetId = (rule.params as { assertionId?: string } | undefined)?.assertionId;
+      const targetId = (rule.params as { assertionId?: string } | undefined)
+        ?.assertionId;
       const failed = targetId
-        ? observations.assertionResults.find(a => a.assertionId === targetId && a.status === 'failed')
-        : observations.assertionResults.find(a => a.status === 'failed');
+        ? observations.assertionResults.find(
+            (a) => a.assertionId === targetId && a.status === "failed",
+          )
+        : observations.assertionResults.find((a) => a.status === "failed");
       return failed
-        ? `Assertion ${failed.assertionId} failed: ${failed.errorMessage ?? 'no message'}`
+        ? `Assertion ${failed.assertionId} failed: ${failed.errorMessage ?? "no message"}`
         : null;
     }
-    case 'variable_equals': {
-      const params = (rule.params ?? {}) as { varName?: string; expectedValue?: string };
+    case "variable_equals": {
+      const params = (rule.params ?? {}) as {
+        varName?: string;
+        expectedValue?: string;
+      };
       const varName = params.varName;
       if (!varName) return null;
       const actual = observations.extractedVariables?.[varName];
-      const expected = params.expectedValue ?? '';
+      const expected = params.expectedValue ?? "";
       if (actual === undefined) {
         return `Variable "${varName}" not extracted (expected "${expected}")`;
       }
@@ -118,12 +133,12 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
       }
       return null;
     }
-    case 'all_steps_executed': {
+    case "all_steps_executed": {
       // Test stopped before the last instrumented step — runtime error or
       // hard timeout. We only have signal when both fields were reported.
       const last = observations.lastReachedStep;
       const total = observations.totalSteps;
-      if (typeof last !== 'number' || typeof total !== 'number' || total <= 0) {
+      if (typeof last !== "number" || typeof total !== "number" || total <= 0) {
         return null;
       }
       if (last + 1 < total) {
@@ -138,31 +153,31 @@ function ruleTrips(rule: StepRule, observations: StepObservations): string | nul
 
 // Sentinel stepLabel for the synthesized `all_steps_executed` rule. Any unique
 // string works — we use one that won't collide with real screenshot labels.
-export const ALL_STEPS_EXECUTED_LABEL = '@all-steps-executed';
+export const ALL_STEPS_EXECUTED_LABEL = "@all-steps-executed";
 
 // Sentinel stepLabel for assertion rules. Must match `ASSERTION_STEP_LABEL`
 // in src/components/tests/step-criteria-tab.tsx.
-export const ASSERTION_STEP_LABEL = '__assertions__';
+export const ASSERTION_STEP_LABEL = "__assertions__";
 
 // Synthesize StepCriteria entries from a test's TestVariables so that the
 // evaluation engine has a single rule path. Vars with assertEnabled are
 // turned into a 'variable_equals' rule under the special @eotest stepLabel.
-export const EOTEST_STEP_LABEL = '@eotest';
+export const EOTEST_STEP_LABEL = "@eotest";
 
 export function synthesizeVariableCriteria(
-  variables: import('@/lib/db/schema').TestVariable[] | null | undefined,
+  variables: import("@/lib/db/schema").TestVariable[] | null | undefined,
 ): StepCriterion | null {
   if (!variables || variables.length === 0) return null;
   const rules: StepRule[] = [];
   for (const v of variables) {
-    if (v.mode !== 'extract') continue;
+    if (v.mode !== "extract") continue;
     if (!v.assertEnabled) continue;
     rules.push({
-      kind: 'variable_equals',
-      severity: v.assertSeverity ?? 'fail',
+      kind: "variable_equals",
+      severity: v.assertSeverity ?? "fail",
       params: {
         varName: v.name,
-        expectedValue: v.expectedValue ?? '',
+        expectedValue: v.expectedValue ?? "",
       },
     });
   }
@@ -175,7 +190,7 @@ export function synthesizeVariableCriteria(
 function groupDiffsByStep(diffs: VisualDiff[]): Map<string, VisualDiff[]> {
   const map = new Map<string, VisualDiff[]>();
   for (const d of diffs) {
-    const key = d.stepLabel ?? '';
+    const key = d.stepLabel ?? "";
     const arr = map.get(key) ?? [];
     arr.push(d);
     map.set(key, arr);
@@ -187,7 +202,9 @@ function groupDiffsByStep(diffs: VisualDiff[]): Map<string, VisualDiff[]> {
 // any rule with severity:'fail' fires) flips the test result's status to
 // 'failed' and persists the EvaluationOutcome. Returns the result so the
 // caller can re-tally build counts.
-export async function evaluateStepCriteria(testResultId: string): Promise<EvaluationResult> {
+export async function evaluateStepCriteria(
+  testResultId: string,
+): Promise<EvaluationResult> {
   const testResult = await queries.getTestResultById(testResultId);
   if (!testResult || !testResult.testId) {
     return { triggeredRules: [] };
@@ -205,13 +222,13 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   // Default-ON synthesis for `all_steps_executed`: if the user hasn't persisted
   // their own entry (with severity:'warn' meaning "opt out"), inject a
   // severity:'fail' rule so partial runs and runtime crashes show up as failed.
-  const hasExplicitAllSteps = criteria.some(c =>
-    c.rules.some(r => r.kind === 'all_steps_executed'),
+  const hasExplicitAllSteps = criteria.some((c) =>
+    c.rules.some((r) => r.kind === "all_steps_executed"),
   );
   if (!hasExplicitAllSteps) {
     criteria.push({
       stepLabel: ALL_STEPS_EXECUTED_LABEL,
-      rules: [{ kind: 'all_steps_executed', severity: 'fail' }],
+      rules: [{ kind: "all_steps_executed", severity: "fail" }],
     });
   }
 
@@ -220,17 +237,18 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   // persisted their own global entry (severity:'warn' = opt out, 'fail' =
   // explicit opt-in). Per-assertion entries (with assertionId) are orthogonal
   // and don't count as "the user configured the global behavior".
-  const hasExplicitGlobalAssertion = criteria.some(c =>
-    c.rules.some(r => {
-      if (r.kind !== 'assertion_failed') return false;
-      const id = (r.params as { assertionId?: string } | undefined)?.assertionId;
+  const hasExplicitGlobalAssertion = criteria.some((c) =>
+    c.rules.some((r) => {
+      if (r.kind !== "assertion_failed") return false;
+      const id = (r.params as { assertionId?: string } | undefined)
+        ?.assertionId;
       return !id;
     }),
   );
   if (!hasExplicitGlobalAssertion) {
     criteria.push({
       stepLabel: ASSERTION_STEP_LABEL,
-      rules: [{ kind: 'assertion_failed', severity: 'fail' }],
+      rules: [{ kind: "assertion_failed", severity: "fail" }],
     });
   }
 
@@ -271,14 +289,17 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
   const patch: Parameters<typeof queries.updateTestResult>[1] = {
     evaluationOutcome: outcome,
   };
-  if (evaluation.overriddenStatus === 'failed' && testResult.status !== 'failed') {
-    patch.status = 'failed';
+  if (
+    evaluation.overriddenStatus === "failed" &&
+    testResult.status !== "failed"
+  ) {
+    patch.status = "failed";
   }
 
   // When a fail-severity rule tripped, surface which criterion fired and how
   // far the test got in `errorMessage` so the result UI shows something
   // actionable instead of a bare "Cancelled by user" / empty string.
-  if (evaluation.overriddenStatus === 'failed') {
+  if (evaluation.overriddenStatus === "failed") {
     const criteriaError = formatCriteriaError(
       evaluation.triggeredRules,
       lastReachedStep,
@@ -286,7 +307,7 @@ export async function evaluateStepCriteria(testResultId: string): Promise<Evalua
     );
     if (criteriaError) {
       const prev = testResult.errorMessage?.trim();
-      const isPlaceholder = !prev || prev === 'Cancelled by user';
+      const isPlaceholder = !prev || prev === "Cancelled by user";
       patch.errorMessage = isPlaceholder
         ? criteriaError
         : `${prev} — Criteria: ${criteriaError}`;
@@ -307,26 +328,28 @@ function formatCriteriaError(
   lastReachedStep: number | undefined,
   totalSteps: number | undefined,
 ): string | null {
-  const failing = triggered.filter(t => t.rule.severity === 'fail');
+  const failing = triggered.filter((t) => t.rule.severity === "fail");
   if (failing.length === 0) return null;
 
-  const parts = failing.map(t => {
+  const parts = failing.map((t) => {
     const label = t.stepLabel;
     const isSentinel =
       label === ALL_STEPS_EXECUTED_LABEL ||
       label === EOTEST_STEP_LABEL ||
-      label === '';
+      label === "";
     return isSentinel ? t.reason : `step "${label}": ${t.reason}`;
   });
-  let msg = `Failed criteria: ${parts.join(' | ')}`;
+  let msg = `Failed criteria: ${parts.join(" | ")}`;
 
   // Skip the progress suffix when an all_steps_executed rule already encoded
   // step counts in its reason.
-  const hasProgressInReason = failing.some(t => t.rule.kind === 'all_steps_executed');
+  const hasProgressInReason = failing.some(
+    (t) => t.rule.kind === "all_steps_executed",
+  );
   if (
     !hasProgressInReason &&
-    typeof lastReachedStep === 'number' &&
-    typeof totalSteps === 'number' &&
+    typeof lastReachedStep === "number" &&
+    typeof totalSteps === "number" &&
     totalSteps > 0
   ) {
     msg += ` (reached step ${lastReachedStep + 1}/${totalSteps})`;

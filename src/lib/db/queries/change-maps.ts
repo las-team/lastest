@@ -4,12 +4,14 @@
  * One row per build, computed once at build completion and cached.
  */
 
-import { db } from '../index';
-import { buildChangeMaps } from '../schema';
-import type { ChangeMap } from '../schema';
-import { eq } from 'drizzle-orm';
+import { db } from "../index";
+import { buildChangeMaps } from "../schema";
+import type { ChangeMap } from "../schema";
+import { eq } from "drizzle-orm";
 
-export async function getBuildChangeMap(buildId: string): Promise<ChangeMap | null> {
+export async function getBuildChangeMap(
+  buildId: string,
+): Promise<ChangeMap | null> {
   const [row] = await db
     .select()
     .from(buildChangeMaps)
@@ -17,7 +19,10 @@ export async function getBuildChangeMap(buildId: string): Promise<ChangeMap | nu
   return row?.payload ?? null;
 }
 
-export async function upsertBuildChangeMap(buildId: string, payload: ChangeMap): Promise<void> {
+export async function upsertBuildChangeMap(
+  buildId: string,
+  payload: ChangeMap,
+): Promise<void> {
   const computedAt = new Date();
   await db
     .insert(buildChangeMaps)

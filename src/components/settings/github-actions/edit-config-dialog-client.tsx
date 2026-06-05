@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Loader2, Cloud, Server, Zap, Check, X, Rocket } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { Loader2, Cloud, Server, Zap, Check, X, Rocket } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,23 +9,31 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Switch } from '@/components/ui/switch';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import type { GithubActionConfig, GithubActionMode, GithubActionTriggerEvent, Runner } from '@/lib/db/schema';
-import { WorkflowPreview } from '@/components/settings/github-actions/workflow-preview-client';
-import { updateGithubActionConfigAction, deployWorkflowToGithub } from '@/server/actions/github-actions';
-import { toast } from 'sonner';
+} from "@/components/ui/select";
+import type {
+  GithubActionConfig,
+  GithubActionMode,
+  GithubActionTriggerEvent,
+  Runner,
+} from "@/lib/db/schema";
+import { WorkflowPreview } from "@/components/settings/github-actions/workflow-preview-client";
+import {
+  updateGithubActionConfigAction,
+  deployWorkflowToGithub,
+} from "@/server/actions/github-actions";
+import { toast } from "sonner";
 
 interface EditConfigDialogProps {
   open: boolean;
@@ -35,27 +43,45 @@ interface EditConfigDialogProps {
 }
 
 const TRIGGER_OPTIONS: { value: GithubActionTriggerEvent; label: string }[] = [
-  { value: 'push', label: 'Push' },
-  { value: 'pull_request', label: 'Pull Request' },
-  { value: 'workflow_dispatch', label: 'Manual Dispatch' },
-  { value: 'schedule', label: 'Schedule (cron)' },
+  { value: "push", label: "Push" },
+  { value: "pull_request", label: "Pull Request" },
+  { value: "workflow_dispatch", label: "Manual Dispatch" },
+  { value: "schedule", label: "Schedule (cron)" },
 ];
 
-const VERCEL_PREVIEW_URL = 'https://${{ github.event.repository.name }}-git-${{ github.head_ref }}-${{ github.repository_owner }}.vercel.app';
+const VERCEL_PREVIEW_URL =
+  "https://${{ github.event.repository.name }}-git-${{ github.head_ref }}-${{ github.repository_owner }}.vercel.app";
 
-type StepStatus = 'pending' | 'loading' | 'success' | 'error';
+type StepStatus = "pending" | "loading" | "success" | "error";
 
-export function EditConfigDialog({ open, onOpenChange, config, runners }: EditConfigDialogProps) {
-  const [mode, setMode] = useState<GithubActionMode>(config.mode as GithubActionMode);
-  const [runnerId, setRunnerId] = useState<string>(config.runnerId ?? '');
-  const [triggerEvents, setTriggerEvents] = useState<GithubActionTriggerEvent[]>(
-    (config.triggerEvents ?? ['push', 'pull_request', 'workflow_dispatch']) as GithubActionTriggerEvent[],
+export function EditConfigDialog({
+  open,
+  onOpenChange,
+  config,
+  runners,
+}: EditConfigDialogProps) {
+  const [mode, setMode] = useState<GithubActionMode>(
+    config.mode as GithubActionMode,
   );
-  const [branches, setBranches] = useState((config.branchFilter as string[] ?? []).join(', '));
-  const [cronSchedule, setCronSchedule] = useState(config.cronSchedule ?? '');
-  const [targetUrl, setTargetUrl] = useState(config.targetUrl ?? '');
+  const [runnerId, setRunnerId] = useState<string>(config.runnerId ?? "");
+  const [triggerEvents, setTriggerEvents] = useState<
+    GithubActionTriggerEvent[]
+  >(
+    (config.triggerEvents ?? [
+      "push",
+      "pull_request",
+      "workflow_dispatch",
+    ]) as GithubActionTriggerEvent[],
+  );
+  const [branches, setBranches] = useState(
+    ((config.branchFilter as string[]) ?? []).join(", "),
+  );
+  const [cronSchedule, setCronSchedule] = useState(config.cronSchedule ?? "");
+  const [targetUrl, setTargetUrl] = useState(config.targetUrl ?? "");
   const [timeout, setTimeout_] = useState(String(config.timeout ?? 300000));
-  const [failOnChanges, setFailOnChanges] = useState(config.failOnChanges ?? false);
+  const [failOnChanges, setFailOnChanges] = useState(
+    config.failOnChanges ?? false,
+  );
   const [saving, setSaving] = useState(false);
 
   // Redeploy prompt state
@@ -65,24 +91,32 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
     workflow: StepStatus;
     tokenSecret: StepStatus;
     urlSecret: StepStatus;
-  }>({ workflow: 'pending', tokenSecret: 'pending', urlSecret: 'pending' });
+  }>({ workflow: "pending", tokenSecret: "pending", urlSecret: "pending" });
 
   // Re-init state when dialog opens or config changes
   useEffect(() => {
     if (open) {
       setMode(config.mode as GithubActionMode);
-      setRunnerId(config.runnerId ?? '');
+      setRunnerId(config.runnerId ?? "");
       setTriggerEvents(
-        (config.triggerEvents ?? ['push', 'pull_request', 'workflow_dispatch']) as GithubActionTriggerEvent[],
+        (config.triggerEvents ?? [
+          "push",
+          "pull_request",
+          "workflow_dispatch",
+        ]) as GithubActionTriggerEvent[],
       );
-      setBranches((config.branchFilter as string[] ?? []).join(', '));
-      setCronSchedule(config.cronSchedule ?? '');
-      setTargetUrl(config.targetUrl ?? '');
+      setBranches(((config.branchFilter as string[]) ?? []).join(", "));
+      setCronSchedule(config.cronSchedule ?? "");
+      setTargetUrl(config.targetUrl ?? "");
       setTimeout_(String(config.timeout ?? 300000));
       setFailOnChanges(config.failOnChanges ?? false);
       setShowRedeploy(false);
       setDeploying(false);
-      setDeploySteps({ workflow: 'pending', tokenSecret: 'pending', urlSecret: 'pending' });
+      setDeploySteps({
+        workflow: "pending",
+        tokenSecret: "pending",
+        urlSecret: "pending",
+      });
     }
   }, [open, config]);
 
@@ -93,7 +127,7 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
   };
 
   const branchFilter = branches
-    .split(',')
+    .split(",")
     .map((b) => b.trim())
     .filter(Boolean);
 
@@ -122,65 +156,77 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
         timeout: parseInt(timeout, 10) || 300000,
         failOnChanges,
       });
-      toast.success('Config updated');
+      toast.success("Config updated");
       if (config.workflowDeployed) {
         setShowRedeploy(true);
       } else {
         onOpenChange(false);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update config');
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update config",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const isEphemeral = config.mode === 'ephemeral';
-  const isAuto = config.mode === 'auto';
+  const isEphemeral = config.mode === "ephemeral";
+  const isAuto = config.mode === "auto";
   const hasPersistentRunner = !isEphemeral && !isAuto && !!config.runnerId;
   const willSetSecrets = isEphemeral || isAuto || hasPersistentRunner;
 
   const handleRedeploy = async () => {
     setDeploying(true);
     setDeploySteps({
-      workflow: 'loading',
-      tokenSecret: willSetSecrets ? 'loading' : 'pending',
-      urlSecret: willSetSecrets ? 'loading' : 'pending',
+      workflow: "loading",
+      tokenSecret: willSetSecrets ? "loading" : "pending",
+      urlSecret: willSetSecrets ? "loading" : "pending",
     });
 
     try {
       const results = await deployWorkflowToGithub(config.id);
       setDeploySteps({
-        workflow: results.workflow ? 'success' : 'error',
+        workflow: results.workflow ? "success" : "error",
         tokenSecret: willSetSecrets
-          ? (results.tokenSecret ? 'success' : 'error')
-          : 'pending',
+          ? results.tokenSecret
+            ? "success"
+            : "error"
+          : "pending",
         urlSecret: willSetSecrets
-          ? (results.urlSecret ? 'success' : 'error')
-          : 'pending',
+          ? results.urlSecret
+            ? "success"
+            : "error"
+          : "pending",
       });
-      toast.success('Workflow redeployed');
+      toast.success("Workflow redeployed");
     } catch (err) {
       setDeploySteps((prev) => ({
         ...prev,
-        workflow: prev.workflow === 'loading' ? 'error' : prev.workflow,
-        tokenSecret: prev.tokenSecret === 'loading' ? 'error' : prev.tokenSecret,
-        urlSecret: prev.urlSecret === 'loading' ? 'error' : prev.urlSecret,
+        workflow: prev.workflow === "loading" ? "error" : prev.workflow,
+        tokenSecret:
+          prev.tokenSecret === "loading" ? "error" : prev.tokenSecret,
+        urlSecret: prev.urlSecret === "loading" ? "error" : prev.urlSecret,
       }));
-      toast.error(err instanceof Error ? err.message : 'Redeployment failed');
+      toast.error(err instanceof Error ? err.message : "Redeployment failed");
     } finally {
       setDeploying(false);
     }
   };
 
   const StepIcon = ({ status }: { status: StepStatus }) => {
-    if (status === 'loading') return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
-    if (status === 'success') return <Check className="h-4 w-4 text-green-500" />;
-    if (status === 'error') return <X className="h-4 w-4 text-destructive" />;
-    return <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />;
+    if (status === "loading")
+      return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+    if (status === "success")
+      return <Check className="h-4 w-4 text-green-500" />;
+    if (status === "error") return <X className="h-4 w-4 text-destructive" />;
+    return (
+      <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />
+    );
   };
 
-  const deployDone = deploySteps.workflow !== 'pending' && deploySteps.workflow !== 'loading';
+  const deployDone =
+    deploySteps.workflow !== "pending" && deploySteps.workflow !== "loading";
 
   // Redeploy prompt view
   if (showRedeploy) {
@@ -190,10 +236,10 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
           <DialogHeader>
             <DialogTitle>Redeploy Workflow?</DialogTitle>
             <DialogDescription>
-              Settings for{' '}
+              Settings for{" "}
               <span className="font-mono text-foreground">
                 {config.repositoryOwner}/{config.repositoryName}
-              </span>{' '}
+              </span>{" "}
               have been updated. Redeploy to apply changes to GitHub?
             </DialogDescription>
           </DialogHeader>
@@ -226,11 +272,17 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
               </Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deploying}>
+                <Button
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={deploying}
+                >
                   Skip
                 </Button>
                 <Button onClick={handleRedeploy} disabled={deploying}>
-                  {deploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {deploying && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  )}
                   <Rocket className="h-4 w-4 mr-2" />
                   Redeploy
                 </Button>
@@ -247,11 +299,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>
-            Edit Config
-          </DialogTitle>
+          <DialogTitle>Edit Config</DialogTitle>
           <DialogDescription>
-            <span className="font-mono">{config.repositoryOwner}/{config.repositoryName}</span>
+            <span className="font-mono">
+              {config.repositoryOwner}/{config.repositoryName}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -265,11 +317,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === 'auto'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-muted-foreground/50'
+                    mode === "auto"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/50"
                   }`}
-                  onClick={() => setMode('auto')}
+                  onClick={() => setMode("auto")}
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Zap className="h-3.5 w-3.5" />
@@ -282,11 +334,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === 'persistent'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-muted-foreground/50'
+                    mode === "persistent"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/50"
                   }`}
-                  onClick={() => setMode('persistent')}
+                  onClick={() => setMode("persistent")}
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Server className="h-3.5 w-3.5" />
@@ -299,11 +351,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === 'ephemeral'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-muted-foreground/50'
+                    mode === "ephemeral"
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/50"
                   }`}
-                  onClick={() => setMode('ephemeral')}
+                  onClick={() => setMode("ephemeral")}
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Cloud className="h-3.5 w-3.5" />
@@ -317,7 +369,7 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
             </div>
 
             {/* Runner (persistent mode) */}
-            {mode === 'persistent' && runners.length > 0 && (
+            {mode === "persistent" && runners.length > 0 && (
               <div className="space-y-2">
                 <h4 className="text-sm font-medium">Runner (optional)</h4>
                 <Select value={runnerId} onValueChange={setRunnerId}>
@@ -327,8 +379,10 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
                   <SelectContent>
                     {runners.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
-                        {r.name}{' '}
-                        <span className="text-muted-foreground">({r.status})</span>
+                        {r.name}{" "}
+                        <span className="text-muted-foreground">
+                          ({r.status})
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -341,7 +395,10 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
               <Label className="text-xs">Trigger Events</Label>
               <div className="flex flex-wrap gap-x-3 gap-y-1.5">
                 {TRIGGER_OPTIONS.map((opt) => (
-                  <label key={opt.value} className="flex items-center gap-1.5 text-sm">
+                  <label
+                    key={opt.value}
+                    className="flex items-center gap-1.5 text-sm"
+                  >
                     <Checkbox
                       checked={triggerEvents.includes(opt.value)}
                       onCheckedChange={() => toggleTrigger(opt.value)}
@@ -366,9 +423,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
               />
             </div>
 
-            {triggerEvents.includes('schedule') && (
+            {triggerEvents.includes("schedule") && (
               <div className="space-y-1">
-                <Label htmlFor="edit-cron" className="text-xs">Cron schedule</Label>
+                <Label htmlFor="edit-cron" className="text-xs">
+                  Cron schedule
+                </Label>
                 <Input
                   id="edit-cron"
                   value={cronSchedule}
@@ -381,7 +440,9 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
 
             {/* Target URL */}
             <div className="space-y-1">
-              <Label htmlFor="edit-target-url" className="text-xs">Target URL (optional)</Label>
+              <Label htmlFor="edit-target-url" className="text-xs">
+                Target URL (optional)
+              </Label>
               <Input
                 id="edit-target-url"
                 value={targetUrl}
@@ -405,7 +466,9 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
             {/* Timeout + fail toggle */}
             <div className="flex items-end gap-3">
               <div className="space-y-1 flex-1">
-                <Label htmlFor="edit-timeout" className="text-xs">Timeout (ms)</Label>
+                <Label htmlFor="edit-timeout" className="text-xs">
+                  Timeout (ms)
+                </Label>
                 <Input
                   id="edit-timeout"
                   type="number"
@@ -420,7 +483,10 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
                   checked={failOnChanges}
                   onCheckedChange={setFailOnChanges}
                 />
-                <Label htmlFor="edit-fail-on-changes" className="text-xs whitespace-nowrap">
+                <Label
+                  htmlFor="edit-fail-on-changes"
+                  className="text-xs whitespace-nowrap"
+                >
                   Fail on changes
                 </Label>
               </div>
@@ -437,7 +503,11 @@ export function EditConfigDialog({ open, onOpenChange, config, runners }: EditCo
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>

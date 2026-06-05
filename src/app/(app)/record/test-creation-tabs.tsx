@@ -1,24 +1,24 @@
-'use client';
+"use client";
 
-import { useCallback, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Code2, Compass, FileText, Telescope, Video } from 'lucide-react';
-import type { FunctionalArea, PlaywrightSettings, Test } from '@/lib/db/schema';
-import { RecordingClient } from './recording-client';
-import { ExploreUrlPanel } from './panels/explore-url-panel';
-import { AutoExplorePanel } from './panels/auto-explore-panel';
-import { SpecPanel } from './panels/spec-panel';
-import { ImportCodePanel } from './panels/import-code-panel';
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Code2, Compass, FileText, Telescope, Video } from "lucide-react";
+import type { FunctionalArea, PlaywrightSettings, Test } from "@/lib/db/schema";
+import { RecordingClient } from "./recording-client";
+import { ExploreUrlPanel } from "./panels/explore-url-panel";
+import { AutoExplorePanel } from "./panels/auto-explore-panel";
+import { SpecPanel } from "./panels/spec-panel";
+import { ImportCodePanel } from "./panels/import-code-panel";
 
-type TabKey = 'record' | 'explore' | 'auto' | 'spec' | 'import';
-const TAB_KEYS: TabKey[] = ['record', 'explore', 'auto', 'spec', 'import'];
+type TabKey = "record" | "explore" | "auto" | "spec" | "import";
+const TAB_KEYS: TabKey[] = ["record", "explore", "auto", "spec", "import"];
 
-type RecordingStep = 'setup' | 'recording' | 'saving';
+type RecordingStep = "setup" | "recording" | "saving";
 
 interface SetupStepInfo {
   id: string;
-  stepType: 'test' | 'script' | 'storage_state';
+  stepType: "test" | "script" | "storage_state";
   testId: string | null;
   scriptId: string | null;
   storageStateId?: string | null;
@@ -40,32 +40,34 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rerecording = !!props.rerecordTest;
-  const [recordingStep, setRecordingStep] = useState<RecordingStep>('setup');
-  const hideTabBar = recordingStep === 'recording';
+  const [recordingStep, setRecordingStep] = useState<RecordingStep>("setup");
+  const hideTabBar = recordingStep === "recording";
 
   const activeTab = useMemo<TabKey>(() => {
-    if (rerecording) return 'record';
-    const mode = searchParams.get('mode');
-    return (TAB_KEYS as string[]).includes(mode ?? '') ? (mode as TabKey) : 'record';
+    if (rerecording) return "record";
+    const mode = searchParams.get("mode");
+    return (TAB_KEYS as string[]).includes(mode ?? "")
+      ? (mode as TabKey)
+      : "record";
   }, [searchParams, rerecording]);
 
   const handleTabChange = useCallback(
     (value: string) => {
       if (rerecording) return;
       const params = new URLSearchParams(searchParams.toString());
-      if (value === 'record') params.delete('mode');
-      else params.set('mode', value);
+      if (value === "record") params.delete("mode");
+      else params.set("mode", value);
       const qs = params.toString();
-      router.replace(qs ? `/record?${qs}` : '/record');
+      router.replace(qs ? `/record?${qs}` : "/record");
     },
     [router, searchParams, rerecording],
   );
 
   const repoId = props.repositoryId ?? undefined;
-  const baseUrl = props.defaultBaseUrl ?? '';
+  const baseUrl = props.defaultBaseUrl ?? "";
 
   const triggerClass =
-    'flex-1 min-w-0 px-2 sm:px-6 text-xs sm:text-sm gap-1 sm:gap-1.5 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm';
+    "flex-1 min-w-0 px-2 sm:px-6 text-xs sm:text-sm gap-1 sm:gap-1.5 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm";
 
   return (
     <Tabs
@@ -82,26 +84,54 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
             <Video className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">Record</span>
           </TabsTrigger>
-          <TabsTrigger value="explore" disabled={rerecording} className={triggerClass}>
+          <TabsTrigger
+            value="explore"
+            disabled={rerecording}
+            className={triggerClass}
+          >
             <Compass className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate"><span className="sm:hidden">URL</span><span className="hidden sm:inline">Explore (URL)</span></span>
+            <span className="truncate">
+              <span className="sm:hidden">URL</span>
+              <span className="hidden sm:inline">Explore (URL)</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="auto" disabled={rerecording} className={triggerClass}>
+          <TabsTrigger
+            value="auto"
+            disabled={rerecording}
+            className={triggerClass}
+          >
             <Telescope className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate"><span className="sm:hidden">Auto</span><span className="hidden sm:inline">Auto-Explore</span></span>
+            <span className="truncate">
+              <span className="sm:hidden">Auto</span>
+              <span className="hidden sm:inline">Auto-Explore</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="spec" disabled={rerecording} className={triggerClass}>
+          <TabsTrigger
+            value="spec"
+            disabled={rerecording}
+            className={triggerClass}
+          >
             <FileText className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">Spec</span>
           </TabsTrigger>
-          <TabsTrigger value="import" disabled={rerecording} className={triggerClass}>
+          <TabsTrigger
+            value="import"
+            disabled={rerecording}
+            className={triggerClass}
+          >
             <Code2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate"><span className="sm:hidden">Import</span><span className="hidden sm:inline">Import code</span></span>
+            <span className="truncate">
+              <span className="sm:hidden">Import</span>
+              <span className="hidden sm:inline">Import code</span>
+            </span>
           </TabsTrigger>
         </TabsList>
       </div>
 
-      <TabsContent value="record" className="overflow-auto flex-1 flex flex-col">
+      <TabsContent
+        value="record"
+        className="overflow-auto flex-1 flex flex-col"
+      >
         <RecordingClient
           areas={props.areas}
           settings={props.settings}
@@ -115,8 +145,15 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
         />
       </TabsContent>
 
-      <TabsContent value="explore" className="overflow-auto flex-1 flex flex-col">
-        <ExploreUrlPanel repositoryId={repoId} areas={props.areas} defaultBaseUrl={baseUrl} />
+      <TabsContent
+        value="explore"
+        className="overflow-auto flex-1 flex flex-col"
+      >
+        <ExploreUrlPanel
+          repositoryId={repoId}
+          areas={props.areas}
+          defaultBaseUrl={baseUrl}
+        />
       </TabsContent>
 
       <TabsContent value="auto" className="overflow-auto flex-1 flex flex-col">
@@ -127,8 +164,15 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
         <SpecPanel repositoryId={repoId} />
       </TabsContent>
 
-      <TabsContent value="import" className="overflow-auto flex-1 flex flex-col">
-        <ImportCodePanel repositoryId={repoId} areas={props.areas} defaultBaseUrl={baseUrl} />
+      <TabsContent
+        value="import"
+        className="overflow-auto flex-1 flex flex-col"
+      >
+        <ImportCodePanel
+          repositoryId={repoId}
+          areas={props.areas}
+          defaultBaseUrl={baseUrl}
+        />
       </TabsContent>
     </Tabs>
   );

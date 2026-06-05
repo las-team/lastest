@@ -20,7 +20,7 @@ export class LastestClient {
   private apiKey: string;
 
   constructor(config: LastestClientConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '');
+    this.baseUrl = config.baseUrl.replace(/\/+$/, "");
     this.apiKey = config.apiKey;
   }
 
@@ -32,7 +32,7 @@ export class LastestClient {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     const res = await fetch(url, {
@@ -42,39 +42,41 @@ export class LastestClient {
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Lastest API error ${res.status}: ${text || res.statusText}`);
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `Lastest API error ${res.status}: ${text || res.statusText}`,
+      );
     }
 
     return res.json() as Promise<T>;
   }
 
   private get<T = unknown>(path: string): Promise<T> {
-    return this.request<T>('GET', path);
+    return this.request<T>("GET", path);
   }
 
   private post<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('POST', path, body);
+    return this.request<T>("POST", path, body);
   }
 
   private put<T = unknown>(path: string, body?: unknown): Promise<T> {
-    return this.request<T>('PUT', path, body);
+    return this.request<T>("PUT", path, body);
   }
 
   private del<T = unknown>(path: string): Promise<T> {
-    return this.request<T>('DELETE', path);
+    return this.request<T>("DELETE", path);
   }
 
   // --- Health ---
 
   async health(): Promise<{ ok: boolean }> {
-    return this.get('/api/v1/health');
+    return this.get("/api/v1/health");
   }
 
   // --- Repositories ---
 
   async listRepos(): Promise<unknown[]> {
-    return this.get('/api/v1/repos');
+    return this.get("/api/v1/repos");
   }
 
   async getRepo(repoId: string): Promise<unknown> {
@@ -84,13 +86,23 @@ export class LastestClient {
   async createRepo(
     name: string,
     opts?: { baseUrl?: string },
-  ): Promise<{ id: string; name: string; fullName: string; baseUrl?: string | null }> {
-    return this.post('/api/v1/repos', { name, baseUrl: opts?.baseUrl });
+  ): Promise<{
+    id: string;
+    name: string;
+    fullName: string;
+    baseUrl?: string | null;
+  }> {
+    return this.post("/api/v1/repos", { name, baseUrl: opts?.baseUrl });
   }
 
   async updateRepo(
     repoId: string,
-    data: { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string },
+    data: {
+      name?: string;
+      defaultBranch?: string;
+      selectedBranch?: string;
+      baseUrl?: string;
+    },
   ): Promise<unknown> {
     return this.put(`/api/v1/repos/${repoId}`, data);
   }
@@ -105,7 +117,7 @@ export class LastestClient {
     gitBranch?: string;
     forceVideoRecording?: boolean;
   }): Promise<{ buildId: string; testRunId: string; testCount: number }> {
-    return this.post('/api/v1/runs', {
+    return this.post("/api/v1/runs", {
       repositoryId: opts.repositoryId,
       testIds: opts.testIds,
       functionalAreaId: opts.functionalAreaId,
@@ -126,7 +138,7 @@ export class LastestClient {
   }
 
   async getBuild(buildId: string, opts?: { full?: boolean }): Promise<unknown> {
-    const qs = opts?.full ? '?full=true' : '';
+    const qs = opts?.full ? "?full=true" : "";
     return this.get(`/api/v1/builds/${buildId}${qs}`);
   }
 
@@ -159,8 +171,12 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/functional-areas`);
   }
 
-  async createArea(data: { name: string; repositoryId?: string; parentId?: string }): Promise<unknown> {
-    return this.post('/api/v1/functional-areas', data);
+  async createArea(data: {
+    name: string;
+    repositoryId?: string;
+    parentId?: string;
+  }): Promise<unknown> {
+    return this.post("/api/v1/functional-areas", data);
   }
 
   async updateArea(
@@ -188,7 +204,7 @@ export class LastestClient {
       targetUrl?: string;
       functionalAreaId?: string;
       quarantined?: boolean;
-      executionMode?: 'procedural' | 'agent';
+      executionMode?: "procedural" | "agent";
       viewportOverride?: { width: number; height: number } | null;
       playwrightOverrides?: Record<string, unknown> | null;
       diffOverrides?: Record<string, unknown> | null;
@@ -198,7 +214,7 @@ export class LastestClient {
       setupOverrides?: {
         skippedDefaultStepIds?: string[];
         extraSteps?: Array<{
-          stepType: 'test' | 'script' | 'storage_state';
+          stepType: "test" | "script" | "storage_state";
           testId?: string | null;
           scriptId?: string | null;
           storageStateId?: string | null;
@@ -207,7 +223,7 @@ export class LastestClient {
       teardownOverrides?: {
         skippedDefaultStepIds?: string[];
         extraSteps?: Array<{
-          stepType: 'test' | 'script' | 'storage_state';
+          stepType: "test" | "script" | "storage_state";
           testId?: string | null;
           scriptId?: string | null;
           storageStateId?: string | null;
@@ -224,7 +240,10 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/playwright-settings`);
   }
 
-  async updatePlaywrightSettings(repoId: string, data: Record<string, unknown>): Promise<unknown> {
+  async updatePlaywrightSettings(
+    repoId: string,
+    data: Record<string, unknown>,
+  ): Promise<unknown> {
     return this.put(`/api/v1/repos/${repoId}/playwright-settings`, data);
   }
 
@@ -234,8 +253,11 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/storage-states`);
   }
 
-  async getStorageState(stateId: string, opts?: { includeJson?: boolean }): Promise<unknown> {
-    const qs = opts?.includeJson ? '?includeJson=true' : '';
+  async getStorageState(
+    stateId: string,
+    opts?: { includeJson?: boolean },
+  ): Promise<unknown> {
+    const qs = opts?.includeJson ? "?includeJson=true" : "";
     return this.get(`/api/v1/storage-states/${stateId}${qs}`);
   }
 
@@ -269,14 +291,24 @@ export class LastestClient {
 
   async createSetupScript(
     repoId: string,
-    data: { name: string; type: 'playwright' | 'api'; code: string; description?: string },
+    data: {
+      name: string;
+      type: "playwright" | "api";
+      code: string;
+      description?: string;
+    },
   ): Promise<unknown> {
     return this.post(`/api/v1/repos/${repoId}/setup-scripts`, data);
   }
 
   async updateSetupScript(
     scriptId: string,
-    data: { name?: string; type?: 'playwright' | 'api'; code?: string; description?: string | null },
+    data: {
+      name?: string;
+      type?: "playwright" | "api";
+      code?: string;
+      description?: string | null;
+    },
   ): Promise<unknown> {
     return this.put(`/api/v1/setup-scripts/${scriptId}`, data);
   }
@@ -302,11 +334,11 @@ export class LastestClient {
   }
 
   async approveDiffs(diffIds: string[]): Promise<{ approvedCount: number }> {
-    return this.post('/api/v1/diffs/approve', { diffIds });
+    return this.post("/api/v1/diffs/approve", { diffIds });
   }
 
   async rejectDiffs(diffIds: string[]): Promise<{ rejectedCount: number }> {
-    return this.post('/api/v1/diffs/reject', { diffIds });
+    return this.post("/api/v1/diffs/reject", { diffIds });
   }
 
   async approveDiff(diffId: string): Promise<{ success: boolean }> {
@@ -324,7 +356,7 @@ export class LastestClient {
   // --- Background Jobs ---
 
   async getActiveJobs(): Promise<unknown[]> {
-    return this.get('/api/v1/jobs/active');
+    return this.get("/api/v1/jobs/active");
   }
 
   async getJob(jobId: string): Promise<unknown> {
@@ -345,7 +377,7 @@ export class LastestClient {
     prompt?: string;
     functionalAreaId?: string;
   }): Promise<unknown> {
-    return this.post('/api/v1/tests/create', opts);
+    return this.post("/api/v1/tests/create", opts);
   }
 
   async createTestDirect(opts: {
@@ -356,7 +388,7 @@ export class LastestClient {
     targetUrl?: string;
     description?: string;
   }): Promise<{ id: string; name: string; code: string }> {
-    return this.post('/api/v1/tests', opts);
+    return this.post("/api/v1/tests", opts);
   }
 
   async healTest(testId: string): Promise<unknown> {
@@ -376,8 +408,8 @@ export class LastestClient {
 
   async getQuickstartStatus(sessionId: string): Promise<{
     id: string;
-    kind: 'quickstart';
-    status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+    kind: "quickstart";
+    status: "active" | "paused" | "completed" | "failed" | "cancelled";
     currentStepId: string | null;
     steps: Array<{
       id: string;
@@ -414,10 +446,10 @@ export class LastestClient {
     stepComparisonId: string;
     buildId: string;
     layer: string;
-    status: 'approved' | 'rejected' | 'snoozed';
+    status: "approved" | "rejected" | "snoozed";
     note?: string;
   }): Promise<unknown> {
-    return this.post('/api/v1/verify/layer-feedback', opts);
+    return this.post("/api/v1/verify/layer-feedback", opts);
   }
 
   async reportActivity(data: {
@@ -432,7 +464,7 @@ export class LastestClient {
     artifactLabel?: string;
   }): Promise<void> {
     try {
-      await this.post('/api/v1/activity', data);
+      await this.post("/api/v1/activity", data);
     } catch {
       // Activity reporting is best-effort — never fail the tool call
     }

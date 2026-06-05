@@ -28,13 +28,17 @@ import type {
   StepVerdict,
   EvidenceItem,
   StepComparisonEvidence,
-} from '@/lib/db/schema';
-import { computeNetworkDiff, summarizeNetworkDiff } from './network-diff';
-import { computeConsoleDiff, summarizeConsoleDiff } from './console-diff';
-import { computeUrlTrajectoryDiff, normalizeTrajectoryUrl, summarizeUrlTrajectoryDiff } from './url-trajectory-diff';
-import { computeA11yDiff, summarizeA11yDiff } from './a11y-diff';
-import { computeVariableDiff, summarizeVariableDiff } from './variable-diff';
-import { computePerfDiff, summarizePerfDiff } from './perf-diff';
+} from "@/lib/db/schema";
+import { computeNetworkDiff, summarizeNetworkDiff } from "./network-diff";
+import { computeConsoleDiff, summarizeConsoleDiff } from "./console-diff";
+import {
+  computeUrlTrajectoryDiff,
+  normalizeTrajectoryUrl,
+  summarizeUrlTrajectoryDiff,
+} from "./url-trajectory-diff";
+import { computeA11yDiff, summarizeA11yDiff } from "./a11y-diff";
+import { computeVariableDiff, summarizeVariableDiff } from "./variable-diff";
+import { computePerfDiff, summarizePerfDiff } from "./perf-diff";
 
 export interface MultiLayerVerdict {
   verdict: StepVerdict;
@@ -45,15 +49,28 @@ export interface MultiLayerVerdict {
 interface ScoreInputs {
   baseline: Pick<
     TestResult,
-    'consoleErrors' | 'networkRequests' | 'a11yViolations' | 'urlTrajectory' | 'webVitals' | 'extractedVariables'
+    | "consoleErrors"
+    | "networkRequests"
+    | "a11yViolations"
+    | "urlTrajectory"
+    | "webVitals"
+    | "extractedVariables"
   > | null;
   current: Pick<
     TestResult,
-    'consoleErrors' | 'networkRequests' | 'a11yViolations' | 'urlTrajectory' | 'webVitals' | 'extractedVariables'
+    | "consoleErrors"
+    | "networkRequests"
+    | "a11yViolations"
+    | "urlTrajectory"
+    | "webVitals"
+    | "extractedVariables"
   >;
   /** Optional visual-diff record so we can fold visual signal into the verdict.
    *  When omitted we skip the visual layer entirely. */
-  visualDiff?: Pick<VisualDiff, 'pixelDifference' | 'percentageDifference' | 'id'> | null;
+  visualDiff?: Pick<
+    VisualDiff,
+    "pixelDifference" | "percentageDifference" | "id"
+  > | null;
   /** Variable-diff ignore patterns (per-test; defaults to none). */
   variableIgnorePaths?: string[];
 }
@@ -75,9 +92,9 @@ export function scoreMultiLayer({
       diffId: visualDiff.id,
     };
     evidence.push({
-      layer: 'visual',
-      signal: 'medium',
-      summary: `${visualDiff.pixelDifference} px (${visualDiff.percentageDifference ?? '?'}%)`,
+      layer: "visual",
+      signal: "medium",
+      summary: `${visualDiff.pixelDifference} px (${visualDiff.percentageDifference ?? "?"}%)`,
     });
   }
 
@@ -87,7 +104,9 @@ export function scoreMultiLayer({
   // next build via getPreviousTestResultForTest. Visual already ran above —
   // its baseline lifecycle is independent (getBranchBaseline / auto-approve).
   if (baseline === null) {
-    const verdict: StepVerdict = evidence.some(e => e.signal === 'medium') ? 'yellow' : 'green';
+    const verdict: StepVerdict = evidence.some((e) => e.signal === "medium")
+      ? "yellow"
+      : "green";
     return { verdict, evidence, layers };
   }
 
@@ -96,8 +115,11 @@ export function scoreMultiLayer({
     baseline?.consoleErrors ?? [],
     current.consoleErrors ?? [],
   );
-  if (consoleDiff.newFingerprints.length > 0 || consoleDiff.disappeared.length > 0
-      || Object.keys(consoleDiff.countDelta).length > 0) {
+  if (
+    consoleDiff.newFingerprints.length > 0 ||
+    consoleDiff.disappeared.length > 0 ||
+    Object.keys(consoleDiff.countDelta).length > 0
+  ) {
     layers.consoleDiff = consoleDiff;
     if (consoleDiff.newFingerprints.length > 0) {
       // Only NEW *app* (or CSP) fingerprints redden the verdict. Third-party
@@ -106,18 +128,21 @@ export function scoreMultiLayer({
       // visible at medium signal but do not gate. The `category` field on each
       // fingerprint is set by classifyConsoleFingerprint at fingerprint time.
       const hasOwnedNew = consoleDiff.newFingerprints.some(
-        f => f.category === 'app' || f.category === 'csp' || f.category === 'unknown',
+        (f) =>
+          f.category === "app" ||
+          f.category === "csp" ||
+          f.category === "unknown",
       );
       evidence.push({
-        layer: 'console',
-        signal: hasOwnedNew ? 'high' : 'medium',
+        layer: "console",
+        signal: hasOwnedNew ? "high" : "medium",
         summary: summarizeConsoleDiff(consoleDiff),
         details: { newFingerprints: consoleDiff.newFingerprints.slice(0, 5) },
       });
     } else {
       evidence.push({
-        layer: 'console',
-        signal: 'low',
+        layer: "console",
+        signal: "low",
         summary: summarizeConsoleDiff(consoleDiff),
       });
     }
@@ -134,21 +159,23 @@ export function scoreMultiLayer({
     current.networkRequests ?? [],
   );
   // computeNetworkDiff is fresh-compute → endpoint counts are always populated.
-  if (networkDiff.newErrorCount > 0
-      || (networkDiff.addedEndpoints ?? 0) > 0
-      || (networkDiff.removedEndpoints ?? 0) > 0
-      || (networkDiff.changedEndpoints ?? 0) > 0) {
+  if (
+    networkDiff.newErrorCount > 0 ||
+    (networkDiff.addedEndpoints ?? 0) > 0 ||
+    (networkDiff.removedEndpoints ?? 0) > 0 ||
+    (networkDiff.changedEndpoints ?? 0) > 0
+  ) {
     layers.network = networkDiff;
     if (networkDiff.newErrorCount > 0) {
       evidence.push({
-        layer: 'network',
-        signal: 'high',
+        layer: "network",
+        signal: "high",
         summary: summarizeNetworkDiff(networkDiff),
       });
     } else {
       evidence.push({
-        layer: 'network',
-        signal: 'low',
+        layer: "network",
+        signal: "low",
         summary: summarizeNetworkDiff(networkDiff),
       });
     }
@@ -164,12 +191,14 @@ export function scoreMultiLayer({
     // A divergedStep is "real" only when the normalized finalUrl actually
     // changed. A redirect-chain-length-only change with identical normalized
     // finalUrl is CDN/A-B/auth-cache noise — keep it visible but don't fail.
-    const hasRealUrlChange = urlDiff.divergedSteps.some(s =>
-      normalizeTrajectoryUrl(s.baselineUrl) !== normalizeTrajectoryUrl(s.currentUrl),
+    const hasRealUrlChange = urlDiff.divergedSteps.some(
+      (s) =>
+        normalizeTrajectoryUrl(s.baselineUrl) !==
+        normalizeTrajectoryUrl(s.currentUrl),
     );
     evidence.push({
-      layer: 'url',
-      signal: hasRealUrlChange ? 'high' : 'low',
+      layer: "url",
+      signal: hasRealUrlChange ? "high" : "low",
       summary: summarizeUrlTrajectoryDiff(urlDiff),
       details: { divergedSteps: urlDiff.divergedSteps.slice(0, 5) },
     });
@@ -182,10 +211,15 @@ export function scoreMultiLayer({
   );
   if (a11yDiff.newViolations.length > 0 || a11yDiff.disappeared.length > 0) {
     layers.a11y = a11yDiff;
-    const isHigh = a11yDiff.newBySeverity.critical + a11yDiff.newBySeverity.serious > 0;
+    const isHigh =
+      a11yDiff.newBySeverity.critical + a11yDiff.newBySeverity.serious > 0;
     evidence.push({
-      layer: 'a11y',
-      signal: isHigh ? 'high' : (a11yDiff.newViolations.length > 0 ? 'medium' : 'low'),
+      layer: "a11y",
+      signal: isHigh
+        ? "high"
+        : a11yDiff.newViolations.length > 0
+          ? "medium"
+          : "low",
       summary: summarizeA11yDiff(a11yDiff),
     });
   }
@@ -198,10 +232,12 @@ export function scoreMultiLayer({
   );
   if (varDiff.changes.length > 0) {
     layers.variable = varDiff;
-    const hasStructural = varDiff.changes.some(c => c.tier === 'structural-break');
+    const hasStructural = varDiff.changes.some(
+      (c) => c.tier === "structural-break",
+    );
     evidence.push({
-      layer: 'variable',
-      signal: hasStructural ? 'high' : 'medium',
+      layer: "variable",
+      signal: hasStructural ? "high" : "medium",
       summary: summarizeVariableDiff(varDiff),
     });
   }
@@ -217,19 +253,19 @@ export function scoreMultiLayer({
   );
   if (perfDiff.deltas.length > 0) {
     layers.perf = perfDiff;
-    const newBreach = perfDiff.deltas.some(d => d.newlyBreached);
-    const drifted = perfDiff.deltas.some(d => d.drifted);
+    const newBreach = perfDiff.deltas.some((d) => d.newlyBreached);
+    const drifted = perfDiff.deltas.some((d) => d.drifted);
     evidence.push({
-      layer: 'perf',
-      signal: newBreach ? 'high' : (drifted ? 'medium' : 'low'),
+      layer: "perf",
+      signal: newBreach ? "high" : drifted ? "medium" : "low",
       summary: summarizePerfDiff(perfDiff),
     });
   }
 
   // ── Verdict ──────────────────────────────────────────────────────────
-  const hasHigh = evidence.some(e => e.signal === 'high');
-  const hasMedium = evidence.some(e => e.signal === 'medium');
-  const verdict: StepVerdict = hasHigh ? 'red' : hasMedium ? 'yellow' : 'green';
+  const hasHigh = evidence.some((e) => e.signal === "high");
+  const hasMedium = evidence.some((e) => e.signal === "medium");
+  const verdict: StepVerdict = hasHigh ? "red" : hasMedium ? "yellow" : "green";
 
   return { verdict, evidence, layers };
 }

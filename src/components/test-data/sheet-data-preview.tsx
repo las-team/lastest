@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Table2, AlertCircle, ArrowRight } from 'lucide-react';
-import { previewSheetReferences } from '@/lib/google-sheets/resolver';
-import type { GoogleSheetsDataSource } from '@/lib/db/schema';
+import { useMemo } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Table2, AlertCircle, ArrowRight } from "lucide-react";
+import { previewSheetReferences } from "@/lib/google-sheets/resolver";
+import type { GoogleSheetsDataSource } from "@/lib/db/schema";
 
 interface SheetDataPreviewProps {
   code: string;
@@ -38,7 +38,7 @@ export function SheetDataPreview({ code, dataSources }: SheetDataPreviewProps) {
         <Table2 className="h-3.5 w-3.5 text-blue-500" />
         <span className="text-xs font-medium">Sheet Data References</span>
         <Badge variant="secondary" className="text-[10px] h-4">
-          {previews.length} ref{previews.length !== 1 ? 's' : ''}
+          {previews.length} ref{previews.length !== 1 ? "s" : ""}
         </Badge>
       </div>
 
@@ -66,8 +66,8 @@ export function SheetDataPreview({ code, dataSources }: SheetDataPreviewProps) {
                     key={i}
                     className={`flex items-start gap-2 text-xs rounded px-2 py-1.5 ${
                       ref.error
-                        ? 'bg-red-50 border border-red-100'
-                        : 'bg-muted/30'
+                        ? "bg-red-50 border border-red-100"
+                        : "bg-muted/30"
                     }`}
                   >
                     {/* Reference expression */}
@@ -98,15 +98,21 @@ export function SheetDataPreview({ code, dataSources }: SheetDataPreviewProps) {
               {source && source.sampleData.length > 0 && (
                 <details className="group">
                   <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground">
-                    Show sample data ({source.headers.length} columns, {source.sampleData.length} rows)
+                    Show sample data ({source.headers.length} columns,{" "}
+                    {source.sampleData.length} rows)
                   </summary>
                   <div className="mt-1.5 overflow-x-auto border rounded">
                     <table className="w-full text-[10px]">
                       <thead>
                         <tr className="bg-muted/40 border-b">
-                          <th className="px-1.5 py-1 text-left text-muted-foreground w-6">#</th>
+                          <th className="px-1.5 py-1 text-left text-muted-foreground w-6">
+                            #
+                          </th>
                           {source.headers.map((h, hi) => (
-                            <th key={hi} className="px-1.5 py-1 text-left font-medium">
+                            <th
+                              key={hi}
+                              className="px-1.5 py-1 text-left font-medium"
+                            >
                               {h}
                             </th>
                           ))}
@@ -115,10 +121,15 @@ export function SheetDataPreview({ code, dataSources }: SheetDataPreviewProps) {
                       <tbody>
                         {source.sampleData.map((row, ri) => (
                           <tr key={ri} className="border-b last:border-b-0">
-                            <td className="px-1.5 py-0.5 text-muted-foreground">{ri}</td>
+                            <td className="px-1.5 py-0.5 text-muted-foreground">
+                              {ri}
+                            </td>
                             {source.headers.map((_, ci) => (
-                              <td key={ci} className="px-1.5 py-0.5 max-w-[120px] truncate font-mono">
-                                {row[ci] || ''}
+                              <td
+                                key={ci}
+                                className="px-1.5 py-0.5 max-w-[120px] truncate font-mono"
+                              >
+                                {row[ci] || ""}
                               </td>
                             ))}
                           </tr>

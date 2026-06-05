@@ -10,7 +10,7 @@
  * - Sends events via callback
  */
 
-import type { Browser, Page, BrowserContext } from 'playwright';
+import type { Browser, Page, BrowserContext } from "playwright";
 
 /**
  * Callback for looking up a retained setup BrowserContext by setupId.
@@ -18,20 +18,26 @@ import type { Browser, Page, BrowserContext } from 'playwright';
  * avoids EmbeddedRecorder importing TestExecutor and keeps test surfaces
  * separate.
  */
-export type RetainedSetupContextLookup = (
-  setupId: string,
-) => { context: BrowserContext; storageState?: unknown; viewport?: { width: number; height: number } } | null;
-import { browserRecordingScript } from './browser-script.js';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
+export type RetainedSetupContextLookup = (setupId: string) => {
+  context: BrowserContext;
+  storageState?: unknown;
+  viewport?: { width: number; height: number };
+} | null;
+import { browserRecordingScript } from "./browser-script.js";
+import path from "path";
+import fs from "fs";
+import os from "os";
 
 // Re-define minimal payload type to avoid cross-package imports
 interface StartRecordingPayload {
   sessionId: string;
   targetUrl: string;
   viewport?: { width: number; height: number };
-  selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
   pointerGestures?: boolean;
   cursorFPS?: number;
   setupSteps?: Array<{ code: string; codeHash: string }>;
@@ -59,7 +65,7 @@ interface RecordingEventData {
   type: string;
   timestamp: number;
   sequence: number;
-  status: 'preview' | 'committed';
+  status: "preview" | "committed";
   verification?: {
     syntaxValid: boolean;
     domVerified?: boolean;
@@ -79,7 +85,7 @@ export class EmbeddedRecorder {
   private ownsContext = true;
   private events: RecordingEventData[] = [];
   private sequenceCounter = 0;
-  private baseOrigin = '';
+  private baseOrigin = "";
   private isRecording = false;
   private eventBatchInterval: ReturnType<typeof setInterval> | null = null;
   private pendingEvents: RecordingEventData[] = [];
@@ -92,7 +98,8 @@ export class EmbeddedRecorder {
   // contends with the active screencast and glitches a frame, which the live
   // viewer renders as a flicker on every click. Reusing a frame we already
   // have costs the page nothing.
-  private latestFrame: { data: string; width: number; height: number } | null = null;
+  private latestFrame: { data: string; width: number; height: number } | null =
+    null;
 
   /**
    * Start recording on a fresh context/page.
@@ -125,9 +132,13 @@ export class EmbeddedRecorder {
       const entry = lookupRetainedSetupContext(payload.setupContextId);
       if (entry) {
         retainedContext = entry.context;
-        console.log(`  [EmbeddedRecorder] Reusing live setup context (setupId=${payload.setupContextId})`);
+        console.log(
+          `  [EmbeddedRecorder] Reusing live setup context (setupId=${payload.setupContextId})`,
+        );
       } else {
-        console.warn(`  [EmbeddedRecorder] Retained setup context ${payload.setupContextId} aged out — falling back to storageState JSON`);
+        console.warn(
+          `  [EmbeddedRecorder] Retained setup context ${payload.setupContextId} aged out — falling back to storageState JSON`,
+        );
       }
     }
 
@@ -139,12 +150,16 @@ export class EmbeddedRecorder {
     } else {
       // Fallback: build a fresh context, seeded with storageState JSON if any.
       // Auth missing sessionStorage / IndexedDB ends up here.
-      let parsedStorageState: NonNullable<Parameters<Browser['newContext']>[0]>['storageState'] | undefined;
+      let parsedStorageState:
+        | NonNullable<Parameters<Browser["newContext"]>[0]>["storageState"]
+        | undefined;
       if (payload.storageStateJson) {
         try {
           parsedStorageState = JSON.parse(payload.storageStateJson);
         } catch (err) {
-          console.warn(`  [EmbeddedRecorder] Bad storageStateJson, recording starts un-authed: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `  [EmbeddedRecorder] Bad storageStateJson, recording starts un-authed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
       this.context = await browser.newContext({
@@ -157,57 +172,72 @@ export class EmbeddedRecorder {
     }
     this.page = await this.context.newPage();
     await this.page.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
 
       // Intercept File System Access API (showSaveFilePicker) — convert to a regular
       // blob download so Playwright's download event fires and we can capture it.
-      if (typeof window !== 'undefined') {
-        const _origSave = (window as unknown as Record<string, unknown>).showSaveFilePicker as ((...args: unknown[]) => Promise<unknown>) | undefined;
-        (window as unknown as Record<string, unknown>).showSaveFilePicker = async function (...args: unknown[]) {
-          // Extract suggested filename from options
-          const opts = (args[0] ?? {}) as Record<string, unknown>;
-          const suggestedName = (opts.suggestedName as string) || 'download';
+      if (typeof window !== "undefined") {
+        const _origSave = (window as unknown as Record<string, unknown>)
+          .showSaveFilePicker as
+          | ((...args: unknown[]) => Promise<unknown>)
+          | undefined;
+        (window as unknown as Record<string, unknown>).showSaveFilePicker =
+          async function (...args: unknown[]) {
+            // Extract suggested filename from options
+            const opts = (args[0] ?? {}) as Record<string, unknown>;
+            const suggestedName = (opts.suggestedName as string) || "download";
 
-          // Create a fake FileSystemFileHandle that collects written data
-          // then triggers a real <a download> click
-          const chunks: BlobPart[] = [];
-          const fakeHandle = {
-            createWritable: async () => ({
-              write: async (data: BlobPart) => { chunks.push(data); },
-              seek: async () => {},
-              truncate: async () => {},
-              close: async () => {
-                // Trigger a real download via <a> element
-                const blob = new Blob(chunks);
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = suggestedName;
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-              },
-            }),
-            getFile: async () => new File(chunks, suggestedName),
+            // Create a fake FileSystemFileHandle that collects written data
+            // then triggers a real <a download> click
+            const chunks: BlobPart[] = [];
+            const fakeHandle = {
+              createWritable: async () => ({
+                write: async (data: BlobPart) => {
+                  chunks.push(data);
+                },
+                seek: async () => {},
+                truncate: async () => {},
+                close: async () => {
+                  // Trigger a real download via <a> element
+                  const blob = new Blob(chunks);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = suggestedName;
+                  a.style.display = "none";
+                  document.body.appendChild(a);
+                  a.click();
+                  setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                    a.remove();
+                  }, 100);
+                },
+              }),
+              getFile: async () => new File(chunks, suggestedName),
+            };
+            return fakeHandle;
           };
-          return fakeHandle;
-        };
       }
     });
 
     // Detect page crash/close to prevent using a dead page
-    this.page.on('crash', () => {
-      console.error('  [EmbeddedRecorder] Recording page crashed!');
+    this.page.on("crash", () => {
+      console.error("  [EmbeddedRecorder] Recording page crashed!");
       this.isRecording = false;
-      if (this.eventBatchInterval) { clearInterval(this.eventBatchInterval); this.eventBatchInterval = null; }
+      if (this.eventBatchInterval) {
+        clearInterval(this.eventBatchInterval);
+        this.eventBatchInterval = null;
+      }
     });
 
-    this.page.on('close', () => {
+    this.page.on("close", () => {
       if (this.isRecording) {
-        console.warn('  [EmbeddedRecorder] Recording page closed unexpectedly');
+        console.warn("  [EmbeddedRecorder] Recording page closed unexpectedly");
         this.isRecording = false;
-        if (this.eventBatchInterval) { clearInterval(this.eventBatchInterval); this.eventBatchInterval = null; }
+        if (this.eventBatchInterval) {
+          clearInterval(this.eventBatchInterval);
+          this.eventBatchInterval = null;
+        }
       }
     });
 
@@ -216,7 +246,10 @@ export class EmbeddedRecorder {
     // and its captured storageState is seeded into this.context above. We
     // just navigate to the target URL — cookies / localStorage from auth
     // setup are present from the first frame.
-    await this.page.goto(payload.targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await this.page.goto(payload.targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
 
     // Set up recording event capture (exposeFunction + inject script)
     await this.setupRecording(payload);
@@ -225,27 +258,29 @@ export class EmbeddedRecorder {
 
     // Record initial navigation
     const relativePath = this.getRelativePath(payload.targetUrl);
-    this.addEvent('navigation', { url: payload.targetUrl, relativePath });
+    this.addEvent("navigation", { url: payload.targetUrl, relativePath });
 
     // Track navigation events
-    this.page.on('framenavigated', (frame) => {
+    this.page.on("framenavigated", (frame) => {
       if (frame === this.page?.mainFrame() && this.isRecording) {
         const url = frame.url();
         const rp = this.getRelativePath(url);
-        this.addEvent('navigation', { url, relativePath: rp });
+        this.addEvent("navigation", { url, relativePath: rp });
       }
     });
 
     // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
     // and auto-save the file so the download completes without a file dialog
-    const dlDir = path.join(os.tmpdir(), 'lastest-eb-downloads');
+    const dlDir = path.join(os.tmpdir(), "lastest-eb-downloads");
     fs.mkdirSync(dlDir, { recursive: true });
-    this.page.on('download', async (download) => {
+    this.page.on("download", async (download) => {
       if (!this.isRecording) return;
       for (let i = this.events.length - 1; i >= 0; i--) {
         const ev = this.events[i];
-        const isClick = ev.type === 'action' && (ev.data.action === 'click' || ev.data.action === 'rightclick');
-        const isMouseDown = ev.type === 'mouse-down';
+        const isClick =
+          ev.type === "action" &&
+          (ev.data.action === "click" || ev.data.action === "rightclick");
+        const isMouseDown = ev.type === "mouse-down";
         if (isClick || isMouseDown) {
           if (!ev.data.downloadWrap) {
             ev.data.downloadWrap = true;
@@ -255,13 +290,17 @@ export class EmbeddedRecorder {
         }
       }
       // Auto-save to temp dir so the download completes cleanly
-      const safeName = path.basename(download.suggestedFilename()).replace(/\.\./g, '_');
+      const safeName = path
+        .basename(download.suggestedFilename())
+        .replace(/\.\./g, "_");
       try {
         await download.saveAs(path.join(dlDir, safeName));
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
       // Auto-add download assertion to timeline
-      this.addEvent('assertion', {
-        assertionType: 'downloadExists',
+      this.addEvent("assertion", {
+        assertionType: "downloadExists",
         downloadFilename: download.suggestedFilename(),
       });
     });
@@ -273,7 +312,9 @@ export class EmbeddedRecorder {
       this.flushPendingEvents();
     }, 150);
 
-    console.log(`  [EmbeddedRecorder] Recording started, viewport: ${viewport.width}x${viewport.height}`);
+    console.log(
+      `  [EmbeddedRecorder] Recording started, viewport: ${viewport.width}x${viewport.height}`,
+    );
     return this.page;
   }
 
@@ -284,131 +325,210 @@ export class EmbeddedRecorder {
     const pointerGestures = payload.pointerGestures ?? false;
 
     // Expose recording functions that forward events to the server
-    await this.page.exposeFunction('__recordAction', (
-      action: string,
-      selectors: Array<{ type: string; value: string }>,
-      value?: string,
-      boundingBox?: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number },
-      actionId?: string,
-      modifiers?: string[]
-    ) => {
-      const primarySelector = selectors[0]?.value || '';
-      // Use actual click position if available (critical for canvas elements),
-      // otherwise fall back to element center (fine for buttons/inputs)
-      const coordinates = boundingBox
-        ? (boundingBox.clickX != null && boundingBox.clickY != null
-            ? { x: Math.round(boundingBox.clickX), y: Math.round(boundingBox.clickY) }
-            : { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) })
-        : undefined;
+    await this.page.exposeFunction(
+      "__recordAction",
+      (
+        action: string,
+        selectors: Array<{ type: string; value: string }>,
+        value?: string,
+        boundingBox?: {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          clickX?: number;
+          clickY?: number;
+        },
+        actionId?: string,
+        modifiers?: string[],
+      ) => {
+        const primarySelector = selectors[0]?.value || "";
+        // Use actual click position if available (critical for canvas elements),
+        // otherwise fall back to element center (fine for buttons/inputs)
+        const coordinates = boundingBox
+          ? boundingBox.clickX != null && boundingBox.clickY != null
+            ? {
+                x: Math.round(boundingBox.clickX),
+                y: Math.round(boundingBox.clickY),
+              }
+            : {
+                x: Math.round(boundingBox.x + boundingBox.width / 2),
+                y: Math.round(boundingBox.y + boundingBox.height / 2),
+              }
+          : undefined;
 
-      const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
-      const hasValidSelectors = validSelectors.length > 0;
-      const hasCoordsFallback = (action === 'click' || action === 'rightclick') && coordinates !== undefined;
-      const syntaxValid = hasValidSelectors || hasCoordsFallback;
+        const validSelectors = selectors.filter(
+          (sel) =>
+            sel.value && sel.value.trim() && !sel.value.includes("undefined"),
+        );
+        const hasValidSelectors = validSelectors.length > 0;
+        const hasCoordsFallback =
+          (action === "click" || action === "rightclick") &&
+          coordinates !== undefined;
+        const syntaxValid = hasValidSelectors || hasCoordsFallback;
 
-      // Check if this click was pre-flagged as a download trigger
-      const downloadWrap = (action === 'click' || action === 'rightclick') && this.nextClickIsDownload ? true : undefined;
-      if (downloadWrap) this.nextClickIsDownload = false;
-
-      this.addEvent('action', {
-        action, selector: primarySelector, selectors, value, coordinates, actionId,
-        modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined,
-        downloadWrap,
-      }, 'committed', {
-        syntaxValid,
-        domVerified: undefined,
-        lastChecked: undefined,
-      });
-
-      // Best-effort element thumbnail (see runner recorder for rationale).
-      if (actionId && boundingBox) {
-        void this.captureElementThumbnail(actionId, boundingBox);
-      }
-    });
-
-    if (pointerGestures) {
-      await this.page.exposeFunction('__recordCursorMove', (x: number, y: number) => {
-        this.addEvent('cursor-move', { coordinates: { x, y } });
-      });
-
-      await this.page.exposeFunction('__recordMouseEvent', (type: string, x: number, y: number, button: number, modifiers?: string[]) => {
-        // Check if this mouse-down was pre-flagged as a download trigger
-        const downloadWrap = type === 'down' && this.nextClickIsDownload ? true : undefined;
+        // Check if this click was pre-flagged as a download trigger
+        const downloadWrap =
+          (action === "click" || action === "rightclick") &&
+          this.nextClickIsDownload
+            ? true
+            : undefined;
         if (downloadWrap) this.nextClickIsDownload = false;
 
-        this.addEvent(type === 'down' ? 'mouse-down' : 'mouse-up', {
-          coordinates: { x, y }, button,
-          modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined,
-          downloadWrap,
-        });
-      });
+        this.addEvent(
+          "action",
+          {
+            action,
+            selector: primarySelector,
+            selectors,
+            value,
+            coordinates,
+            actionId,
+            modifiers:
+              modifiers && modifiers.length > 0 ? modifiers : undefined,
+            downloadWrap,
+          },
+          "committed",
+          {
+            syntaxValid,
+            domVerified: undefined,
+            lastChecked: undefined,
+          },
+        );
+
+        // Best-effort element thumbnail (see runner recorder for rationale).
+        if (actionId && boundingBox) {
+          void this.captureElementThumbnail(actionId, boundingBox);
+        }
+      },
+    );
+
+    if (pointerGestures) {
+      await this.page.exposeFunction(
+        "__recordCursorMove",
+        (x: number, y: number) => {
+          this.addEvent("cursor-move", { coordinates: { x, y } });
+        },
+      );
+
+      await this.page.exposeFunction(
+        "__recordMouseEvent",
+        (
+          type: string,
+          x: number,
+          y: number,
+          button: number,
+          modifiers?: string[],
+        ) => {
+          // Check if this mouse-down was pre-flagged as a download trigger
+          const downloadWrap =
+            type === "down" && this.nextClickIsDownload ? true : undefined;
+          if (downloadWrap) this.nextClickIsDownload = false;
+
+          this.addEvent(type === "down" ? "mouse-down" : "mouse-up", {
+            coordinates: { x, y },
+            button,
+            modifiers:
+              modifiers && modifiers.length > 0 ? modifiers : undefined,
+            downloadWrap,
+          });
+        },
+      );
     }
 
-    await this.page.exposeFunction('__recordKeypress', (key: string, modifiers?: string[]) => {
-      this.addEvent('keypress', { key, modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined });
-    });
+    await this.page.exposeFunction(
+      "__recordKeypress",
+      (key: string, modifiers?: string[]) => {
+        this.addEvent("keypress", {
+          key,
+          modifiers: modifiers && modifiers.length > 0 ? modifiers : undefined,
+        });
+      },
+    );
 
     // Scroll tracking with coalescing (mirrors server-side recorder logic)
-    await this.page.exposeFunction('__recordScroll', (deltaX: number, deltaY: number, modifiers?: string[]) => {
-      const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
-      // Coalesce with previous scroll event if same modifiers
-      if (this.events.length > 0) {
-        const lastEvent = this.events[this.events.length - 1];
-        if (lastEvent?.type === 'scroll') {
-          const lastMods = lastEvent.data.modifiers;
-          if (JSON.stringify(lastMods) === JSON.stringify(mods)) {
-            lastEvent.data.deltaX = ((lastEvent.data.deltaX as number) || 0) + deltaX;
-            lastEvent.data.deltaY = ((lastEvent.data.deltaY as number) || 0) + deltaY;
-            return;
+    await this.page.exposeFunction(
+      "__recordScroll",
+      (deltaX: number, deltaY: number, modifiers?: string[]) => {
+        const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
+        // Coalesce with previous scroll event if same modifiers
+        if (this.events.length > 0) {
+          const lastEvent = this.events[this.events.length - 1];
+          if (lastEvent?.type === "scroll") {
+            const lastMods = lastEvent.data.modifiers;
+            if (JSON.stringify(lastMods) === JSON.stringify(mods)) {
+              lastEvent.data.deltaX =
+                ((lastEvent.data.deltaX as number) || 0) + deltaX;
+              lastEvent.data.deltaY =
+                ((lastEvent.data.deltaY as number) || 0) + deltaY;
+              return;
+            }
           }
         }
-      }
-      this.addEvent('scroll', { deltaX, deltaY, modifiers: mods });
-    });
+        this.addEvent("scroll", { deltaX, deltaY, modifiers: mods });
+      },
+    );
 
-    await this.page.exposeFunction('__recordHoverPreview', (elementInfo: Record<string, unknown>) => {
-      // Replace previous hover-preview in pending batch
-      if (this.events.length > 0) {
-        const lastEvent = this.events[this.events.length - 1];
-        if (lastEvent?.type === 'hover-preview' && lastEvent.status === 'preview') {
-          this.events.pop();
-          this.sequenceCounter--;
-          const pendingIdx = this.pendingEvents.findLastIndex(e => e.type === 'hover-preview');
-          if (pendingIdx !== -1) this.pendingEvents.splice(pendingIdx, 1);
+    await this.page.exposeFunction(
+      "__recordHoverPreview",
+      (elementInfo: Record<string, unknown>) => {
+        // Replace previous hover-preview in pending batch
+        if (this.events.length > 0) {
+          const lastEvent = this.events[this.events.length - 1];
+          if (
+            lastEvent?.type === "hover-preview" &&
+            lastEvent.status === "preview"
+          ) {
+            this.events.pop();
+            this.sequenceCounter--;
+            const pendingIdx = this.pendingEvents.findLastIndex(
+              (e) => e.type === "hover-preview",
+            );
+            if (pendingIdx !== -1) this.pendingEvents.splice(pendingIdx, 1);
+          }
         }
-      }
-      this.addEvent('hover-preview', { elementInfo }, 'preview');
-    });
+        this.addEvent("hover-preview", { elementInfo }, "preview");
+      },
+    );
 
-    await this.page.exposeFunction('__recordElementAssertion', (assertion: Record<string, unknown>) => {
-      this.addEvent('assertion', { elementAssertion: assertion });
-    });
+    await this.page.exposeFunction(
+      "__recordElementAssertion",
+      (assertion: Record<string, unknown>) => {
+        this.addEvent("assertion", { elementAssertion: assertion });
+      },
+    );
 
-    await this.page.exposeFunction('__recordScreenshot', () => {
+    await this.page.exposeFunction("__recordScreenshot", () => {
       this.takeScreenshot();
     });
 
-    await this.page.exposeFunction('__updateVerification', (
-      actionId: string,
-      verified: boolean,
-      extra?: {
-        selectorMatches?: RecordingSelectorMatch[];
-        chosenSelector?: string;
-        autoRepaired?: boolean;
-      },
-    ) => {
-      const event = this.events.find(e => e.data.actionId === actionId);
-      if (event && event.verification) {
-        event.verification.domVerified = verified;
-        event.verification.lastChecked = Date.now();
-        if (extra?.selectorMatches) event.verification.selectorMatches = extra.selectorMatches;
-        if (extra?.chosenSelector) event.verification.chosenSelector = extra.chosenSelector;
-        if (extra?.autoRepaired !== undefined) event.verification.autoRepaired = extra.autoRepaired;
-        if (!this.pendingEvents.includes(event)) {
-          this.pendingEvents.push(event);
+    await this.page.exposeFunction(
+      "__updateVerification",
+      (
+        actionId: string,
+        verified: boolean,
+        extra?: {
+          selectorMatches?: RecordingSelectorMatch[];
+          chosenSelector?: string;
+          autoRepaired?: boolean;
+        },
+      ) => {
+        const event = this.events.find((e) => e.data.actionId === actionId);
+        if (event && event.verification) {
+          event.verification.domVerified = verified;
+          event.verification.lastChecked = Date.now();
+          if (extra?.selectorMatches)
+            event.verification.selectorMatches = extra.selectorMatches;
+          if (extra?.chosenSelector)
+            event.verification.chosenSelector = extra.chosenSelector;
+          if (extra?.autoRepaired !== undefined)
+            event.verification.autoRepaired = extra.autoRepaired;
+          if (!this.pendingEvents.includes(event)) {
+            this.pendingEvents.push(event);
+          }
         }
-      }
-    });
+      },
+    );
 
     // Inject the browser-side recording script
     const initArgs = {
@@ -424,8 +544,8 @@ export class EmbeddedRecorder {
   private addEvent(
     type: string,
     data: Record<string, unknown>,
-    status: 'preview' | 'committed' = 'committed',
-    verification?: NonNullable<RecordingEventData['verification']>
+    status: "preview" | "committed" = "committed",
+    verification?: NonNullable<RecordingEventData["verification"]>,
   ): void {
     const event: RecordingEventData = {
       type,
@@ -472,8 +592,20 @@ export class EmbeddedRecorder {
       const scaleY = frame.height / viewport.height;
       const sx = Math.max(0, Math.round((boundingBox.x - padding) * scaleX));
       const sy = Math.max(0, Math.round((boundingBox.y - padding) * scaleY));
-      const sw = Math.round(Math.min((boundingBox.width + padding * 2) * scaleX, maxSide * scaleX, frame.width - sx));
-      const sh = Math.round(Math.min((boundingBox.height + padding * 2) * scaleY, maxSide * scaleY, frame.height - sy));
+      const sw = Math.round(
+        Math.min(
+          (boundingBox.width + padding * 2) * scaleX,
+          maxSide * scaleX,
+          frame.width - sx,
+        ),
+      );
+      const sh = Math.round(
+        Math.min(
+          (boundingBox.height + padding * 2) * scaleY,
+          maxSide * scaleY,
+          frame.height - sy,
+        ),
+      );
       if (sw < 1 || sh < 1) return;
 
       // Crop the already-streamed frame INSIDE the page using OffscreenCanvas.
@@ -481,30 +613,43 @@ export class EmbeddedRecorder {
       // surface read — so it cannot glitch the live screencast (unlike
       // page.screenshot / Page.captureScreenshot, which do). Decode from a Blob
       // (not fetch()) to dodge any page CSP on data: URLs.
-      const cropped = await this.page.evaluate(async (a: { frameData: string; sx: number; sy: number; sw: number; sh: number }) => {
-        try {
-          const bin = atob(a.frameData);
-          const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const blob = new Blob([bytes], { type: 'image/jpeg' });
-          const bmp = await createImageBitmap(blob, a.sx, a.sy, a.sw, a.sh);
-          const canvas = new OffscreenCanvas(a.sw, a.sh);
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return null;
-          ctx.drawImage(bmp, 0, 0);
-          bmp.close();
-          const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
-          const arr = new Uint8Array(await out.arrayBuffer());
-          let s = '';
-          for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-          return btoa(s);
-        } catch {
-          return null;
-        }
-      }, { frameData: frame.data, sx, sy, sw, sh });
+      const cropped = await this.page.evaluate(
+        async (a: {
+          frameData: string;
+          sx: number;
+          sy: number;
+          sw: number;
+          sh: number;
+        }) => {
+          try {
+            const bin = atob(a.frameData);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const blob = new Blob([bytes], { type: "image/jpeg" });
+            const bmp = await createImageBitmap(blob, a.sx, a.sy, a.sw, a.sh);
+            const canvas = new OffscreenCanvas(a.sw, a.sh);
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return null;
+            ctx.drawImage(bmp, 0, 0);
+            bmp.close();
+            const out = await canvas.convertToBlob({
+              type: "image/jpeg",
+              quality: 0.7,
+            });
+            const arr = new Uint8Array(await out.arrayBuffer());
+            let s = "";
+            for (let i = 0; i < arr.length; i++)
+              s += String.fromCharCode(arr[i]);
+            return btoa(s);
+          } catch {
+            return null;
+          }
+        },
+        { frameData: frame.data, sx, sy, sw, sh },
+      );
 
       if (!cropped) return;
-      const event = this.events.find(e => e.data.actionId === actionId);
+      const event = this.events.find((e) => e.data.actionId === actionId);
       if (!event) return;
       event.data.thumbnailPath = `data:image/jpeg;base64,${cropped}`;
       if (!this.pendingEvents.includes(event)) {
@@ -530,7 +675,7 @@ export class EmbeddedRecorder {
    * actionId — older sessions or stale IDs are silently ignored.
    */
   promoteSelector(actionId: string, selectorValue: string): void {
-    const event = this.events.find(e => e.data.actionId === actionId);
+    const event = this.events.find((e) => e.data.actionId === actionId);
     if (!event) return;
     if (!event.verification) {
       event.verification = { syntaxValid: true };
@@ -544,13 +689,13 @@ export class EmbeddedRecorder {
 
   private getRelativePath(url: string): string {
     if (url.startsWith(this.baseOrigin)) {
-      return url.slice(this.baseOrigin.length) || '/';
+      return url.slice(this.baseOrigin.length) || "/";
     }
     return url;
   }
 
   async stop(): Promise<RecordingEventData[]> {
-    console.log('  [EmbeddedRecorder] Stopping recording...');
+    console.log("  [EmbeddedRecorder] Stopping recording...");
     this.isRecording = false;
 
     if (this.eventBatchInterval) {
@@ -562,7 +707,7 @@ export class EmbeddedRecorder {
     this.flushPendingEvents();
 
     // Add completion event
-    this.addEvent('complete', {});
+    this.addEvent("complete", {});
     this.flushPendingEvents();
 
     // Close the recording page. Only close the context if we own it —
@@ -570,28 +715,39 @@ export class EmbeddedRecorder {
     // and stay alive for the sweeper / future test runs.
     this.latestFrame = null;
     if (this.page) await this.page.close().catch(() => {});
-    if (this.context && this.ownsContext) await this.context.close().catch(() => {});
+    if (this.context && this.ownsContext)
+      await this.context.close().catch(() => {});
     this.page = null;
     this.context = null;
     this.ownsContext = true;
 
-    console.log(`  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`);
+    console.log(
+      `  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`,
+    );
     return this.events;
   }
 
   /**
    * Capture a screenshot from the recording page and add it as a recording event.
    */
-  async takeScreenshot(): Promise<{ data: string; width: number; height: number } | null> {
+  async takeScreenshot(): Promise<{
+    data: string;
+    width: number;
+    height: number;
+  } | null> {
     if (!this.page || !this.isRecording) return null;
     try {
       const buffer = await this.page.screenshot({ fullPage: true });
       const viewport = this.page.viewportSize() || { width: 1280, height: 720 };
-      const data = buffer.toString('base64');
-      this.addEvent('screenshot', { screenshotData: data, width: viewport.width, height: viewport.height });
+      const data = buffer.toString("base64");
+      this.addEvent("screenshot", {
+        screenshotData: data,
+        width: viewport.width,
+        height: viewport.height,
+      });
       return { data, width: viewport.width, height: viewport.height };
     } catch (err) {
-      console.error('[EmbeddedRecorder] Failed to take screenshot:', err);
+      console.error("[EmbeddedRecorder] Failed to take screenshot:", err);
       return null;
     }
   }
@@ -601,7 +757,7 @@ export class EmbeddedRecorder {
    */
   createAssertion(assertionType: string): void {
     if (!this.isRecording) return;
-    this.addEvent('assertion', { assertionType });
+    this.addEvent("assertion", { assertionType });
   }
 
   /**
@@ -610,15 +766,15 @@ export class EmbeddedRecorder {
    * page.waitForTimeout / page.waitForSelector call at replay time.
    */
   createWait(payload: {
-    waitType: 'duration' | 'selector';
+    waitType: "duration" | "selector";
     durationMs?: number;
     selector?: string;
     selectors?: Array<{ type: string; value: string }>;
-    condition?: 'visible' | 'hidden';
+    condition?: "visible" | "hidden";
     timeoutMs?: number;
   }): void {
     if (!this.isRecording) return;
-    this.addEvent('wait', {
+    this.addEvent("wait", {
       waitType: payload.waitType,
       durationMs: payload.durationMs,
       selector: payload.selector,
@@ -635,7 +791,7 @@ export class EmbeddedRecorder {
     if (!this.isRecording || !this.page) return;
     const timestamp = new Date().toISOString();
     await this.page.keyboard.type(timestamp);
-    this.addEvent('insert-timestamp', { timestampFormat: 'iso' });
+    this.addEvent("insert-timestamp", { timestampFormat: "iso" });
   }
 
   /**
@@ -644,14 +800,14 @@ export class EmbeddedRecorder {
   flagDownload(): void {
     if (!this.isRecording) return;
     this.nextClickIsDownload = true;
-    this.addEvent('download', {});
+    this.addEvent("download", {});
   }
 
   /**
    * Force cleanup recorder state when stop() throws or recording needs to be force-killed.
    */
   async forceCleanup(): Promise<void> {
-    console.log('  [EmbeddedRecorder] Force cleanup...');
+    console.log("  [EmbeddedRecorder] Force cleanup...");
     this.isRecording = false;
     if (this.eventBatchInterval) {
       clearInterval(this.eventBatchInterval);
@@ -662,7 +818,8 @@ export class EmbeddedRecorder {
     this.latestFrame = null;
     if (this.page) await this.page.close().catch(() => {});
     // Only close borrowed contexts; setup-contexts are owned by TestExecutor.
-    if (this.context && this.ownsContext) await this.context.close().catch(() => {});
+    if (this.context && this.ownsContext)
+      await this.context.close().catch(() => {});
     this.page = null;
     this.context = null;
     this.ownsContext = true;

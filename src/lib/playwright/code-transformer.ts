@@ -25,13 +25,16 @@
  * ```
  */
 
-export function transformPlaywrightCode(rawCode: string, recordedUrl?: string): string {
-  if (!rawCode || rawCode.trim() === '') {
+export function transformPlaywrightCode(
+  rawCode: string,
+  recordedUrl?: string,
+): string {
+  if (!rawCode || rawCode.trim() === "") {
     return generateEmptyTemplate();
   }
 
   // Extract the base URL from the recorded URL
-  let baseUrlOrigin = '';
+  let baseUrlOrigin = "";
   if (recordedUrl) {
     try {
       const url = new URL(recordedUrl);
@@ -68,7 +71,7 @@ export function transformPlaywrightCode(rawCode: string, recordedUrl?: string): 
 function extractTestBody(code: string): string | null {
   // Pattern 1: test('...', async ({ page }) => { ... });
   const testBlockMatch = code.match(
-    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*)\}\s*\)\s*;?\s*$/
+    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*)\}\s*\)\s*;?\s*$/,
   );
   if (testBlockMatch) {
     return testBlockMatch[1].trim();
@@ -76,21 +79,23 @@ function extractTestBody(code: string): string | null {
 
   // Pattern 2: test('...', async ({ page }) => { ... }) without trailing semicolon
   const testBlockMatch2 = code.match(
-    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*?)\}\s*\)/
+    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*?)\}\s*\)/,
   );
   if (testBlockMatch2) {
     return testBlockMatch2[1].trim();
   }
 
   // Pattern 3: Just async function body (some codegen outputs)
-  const asyncFnMatch = code.match(/async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*)\}/);
+  const asyncFnMatch = code.match(
+    /async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*)\}/,
+  );
   if (asyncFnMatch) {
     return asyncFnMatch[1].trim();
   }
 
   // Pattern 4: Multiple test blocks - take the first one
   const multiTestMatch = code.match(
-    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*?)\}\s*\)\s*;/
+    /test\s*\(\s*['"`][^'"`]*['"`]\s*,\s*async\s*\(\s*\{\s*page\s*\}\s*\)\s*=>\s*\{([\s\S]*?)\}\s*\)\s*;/,
   );
   if (multiTestMatch) {
     return multiTestMatch[1].trim();
@@ -112,12 +117,13 @@ function transformGotoStatements(code: string, baseUrlOrigin: string): string {
 
       // If the URL matches our base, convert to relative
       if (baseUrlOrigin && parsedUrl.origin === baseUrlOrigin) {
-        const relativePath = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+        const relativePath =
+          parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
         return `page.goto(buildUrl(baseUrl, '${relativePath}'))`;
       }
 
       // If it's just a path (starts with /)
-      if (url.startsWith('/')) {
+      if (url.startsWith("/")) {
         return `page.goto(buildUrl(baseUrl, '${url}'))`;
       }
 
@@ -125,7 +131,7 @@ function transformGotoStatements(code: string, baseUrlOrigin: string): string {
       return match;
     } catch {
       // If URL parsing fails, check if it's a relative path
-      if (url.startsWith('/')) {
+      if (url.startsWith("/")) {
         return `page.goto(buildUrl(baseUrl, '${url}'))`;
       }
       return match;
@@ -138,16 +144,17 @@ function transformGotoStatements(code: string, baseUrlOrigin: string): string {
  */
 function removeImports(code: string): string {
   // Remove various import patterns
-  const lines = code.split('\n');
+  const lines = code.split("\n");
   const filteredLines = lines.filter((line) => {
     const trimmed = line.trim();
     // Skip import statements
-    if (trimmed.startsWith('import ')) return false;
+    if (trimmed.startsWith("import ")) return false;
     // Skip require statements
-    if (trimmed.startsWith('const ') && trimmed.includes('require(')) return false;
+    if (trimmed.startsWith("const ") && trimmed.includes("require("))
+      return false;
     return true;
   });
-  return filteredLines.join('\n');
+  return filteredLines.join("\n");
 }
 
 /**
@@ -155,20 +162,20 @@ function removeImports(code: string): string {
  */
 function cleanupCode(code: string): string {
   // Split into lines
-  const lines = code.split('\n');
+  const lines = code.split("\n");
 
   // Remove leading/trailing empty lines
-  while (lines.length > 0 && lines[0].trim() === '') {
+  while (lines.length > 0 && lines[0].trim() === "") {
     lines.shift();
   }
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
     lines.pop();
   }
 
   // Find minimum indentation (excluding empty lines)
   let minIndent = Infinity;
   for (const line of lines) {
-    if (line.trim() === '') continue;
+    if (line.trim() === "") continue;
     const match = line.match(/^(\s*)/);
     if (match && match[1].length < minIndent) {
       minIndent = match[1].length;
@@ -179,14 +186,14 @@ function cleanupCode(code: string): string {
   if (minIndent !== Infinity && minIndent > 0) {
     return lines
       .map((line) => {
-        if (line.trim() === '') return '';
-        return '  ' + line.slice(minIndent);
+        if (line.trim() === "") return "";
+        return "  " + line.slice(minIndent);
       })
-      .join('\n');
+      .join("\n");
   }
 
   // Just add indentation
-  return lines.map((line) => (line.trim() ? '  ' + line : '')).join('\n');
+  return lines.map((line) => (line.trim() ? "  " + line : "")).join("\n");
 }
 
 /**

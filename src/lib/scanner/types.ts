@@ -1,16 +1,21 @@
 export interface RouteInfo {
   path: string;
-  type: 'static' | 'dynamic';
+  type: "static" | "dynamic";
   filePath?: string;
   component?: string;
-  framework?: 'nextjs-app' | 'nextjs-pages' | 'react-router' | 'vue' | 'unknown';
-  routerType?: 'hash' | 'browser';
+  framework?:
+    | "nextjs-app"
+    | "nextjs-pages"
+    | "react-router"
+    | "vue"
+    | "unknown";
+  routerType?: "hash" | "browser";
   label?: string; // Human-readable label from navigation
   navSource?: string; // File where navigation link was found
 }
 
 export interface ScanProgress {
-  phase: 'detecting' | 'scanning' | 'complete';
+  phase: "detecting" | "scanning" | "complete";
   progress: number; // 0-100
   currentFile?: string;
   routesFound: number;

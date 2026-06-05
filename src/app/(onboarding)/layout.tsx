@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
-import { getCurrentSession } from '@/lib/auth';
+import { redirect } from "next/navigation";
+import { getCurrentSession } from "@/lib/auth";
 
 export default async function OnboardingLayout({
   children,
@@ -8,16 +8,12 @@ export default async function OnboardingLayout({
 }) {
   const session = await getCurrentSession();
   if (!session?.user) {
-    redirect('/login');
+    redirect("/login");
   }
   // If onboarding is already done, bounce back to dashboard. Reset flow re-nulls
   // the timestamp via Settings → Restore Setup Guide.
   if (session.user.onboardingCompletedAt) {
-    redirect('/');
+    redirect("/");
   }
-  return (
-    <div className="min-h-screen bg-background">
-      {children}
-    </div>
-  );
+  return <div className="min-h-screen bg-background">{children}</div>;
 }

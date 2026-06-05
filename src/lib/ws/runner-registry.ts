@@ -12,15 +12,15 @@ interface WebSocket {
   close(): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
-import type { RunnerStatus } from '@/lib/db/schema';
-import { failActiveCommandsForRunner } from '@/lib/db/queries/runners';
+import type { RunnerStatus } from "@/lib/db/schema";
+import { failActiveCommandsForRunner } from "@/lib/db/queries/runners";
 import type {
   Message,
   ServerCommand,
   HeartbeatPayload,
   ConnectionEstablishedMessage,
-} from './protocol';
-import { createMessage } from './protocol';
+} from "./protocol";
+import { createMessage } from "./protocol";
 
 export interface ConnectedRunner {
   runnerId: string;
@@ -52,13 +52,13 @@ class RunnerRegistry {
     runnerId: string,
     teamId: string,
     socket: WebSocket,
-    capabilities: string[] = ['run', 'record']
+    capabilities: string[] = ["run", "record"],
   ): void {
     const runner: ConnectedRunner = {
       runnerId,
       teamId,
       socket,
-      status: 'online',
+      status: "online",
       capabilities,
       connectedAt: Date.now(),
       lastHeartbeat: Date.now(),
@@ -73,7 +73,7 @@ class RunnerRegistry {
     this.runnersByTeam.get(teamId)!.add(runnerId);
 
     // Setup socket handlers
-    socket.on('message', (data: unknown) => {
+    socket.on("message", (data: unknown) => {
       try {
         const message = JSON.parse(String(data)) as Message;
         this.handleMessage(runnerId, message);
@@ -82,19 +82,19 @@ class RunnerRegistry {
       }
     });
 
-    socket.on('close', () => {
+    socket.on("close", () => {
       this.unregisterRunner(runnerId);
     });
 
-    socket.on('error', (err: unknown) => {
+    socket.on("error", (err: unknown) => {
       console.error(`WebSocket error for runner ${runnerId}:`, err);
       this.unregisterRunner(runnerId);
     });
 
     // Send connection established message
     const connMsg = createMessage<ConnectionEstablishedMessage>(
-      'connection:established',
-      { runnerId, teamId, capabilities, agentId: runnerId }
+      "connection:established",
+      { runnerId, teamId, capabilities, agentId: runnerId },
     );
     this.sendToRunner(runnerId, connMsg);
   }
@@ -108,7 +108,10 @@ class RunnerRegistry {
 
     // Fail any in-flight commands so the executor doesn't poll forever
     failActiveCommandsForRunner(runnerId).catch((err) => {
-      console.error(`[RunnerRegistry] Failed to mark commands as failed for runner ${runnerId}:`, err);
+      console.error(
+        `[RunnerRegistry] Failed to mark commands as failed for runner ${runnerId}:`,
+        err,
+      );
     });
 
     // Remove from team tracking
@@ -150,12 +153,13 @@ class RunnerRegistry {
   /**
    * Get an available (online, idle) runner for a team.
    */
-  getAvailableRunner(teamId: string, capability: string = 'run'): ConnectedRunner | undefined {
+  getAvailableRunner(
+    teamId: string,
+    capability: string = "run",
+  ): ConnectedRunner | undefined {
     const runners = this.getRunnersByTeam(teamId);
     return runners.find(
-      (r) =>
-        r.status === 'online' &&
-        r.capabilities.includes(capability)
+      (r) => r.status === "online" && r.capabilities.includes(capability),
     );
   }
 
@@ -178,7 +182,7 @@ class RunnerRegistry {
   async sendCommand(
     runnerId: string,
     command: ServerCommand,
-    timeout: number = 30000
+    timeout: number = 30000,
   ): Promise<Message> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -189,10 +193,10 @@ class RunnerRegistry {
       const handler: MessageHandler = (respRunnerId, message) => {
         if (respRunnerId !== runnerId) return;
         if (
-          'payload' in message &&
-          typeof message.payload === 'object' &&
+          "payload" in message &&
+          typeof message.payload === "object" &&
           message.payload !== null &&
-          'correlationId' in message.payload &&
+          "correlationId" in message.payload &&
           message.payload.correlationId === command.id
         ) {
           clearTimeout(timer);
@@ -206,7 +210,7 @@ class RunnerRegistry {
       if (!this.sendToRunner(runnerId, command)) {
         clearTimeout(timer);
         this.messageHandlers.delete(handler);
-        reject(new Error('Failed to send command to runner'));
+        reject(new Error("Failed to send command to runner"));
       }
     });
   }
@@ -219,13 +223,13 @@ class RunnerRegistry {
     if (!runner) return;
 
     // Map heartbeat status to runner status
-    if (heartbeat.status === 'idle') {
-      runner.status = 'online';
-    } else if (heartbeat.status === 'busy') {
-      runner.status = 'busy';
+    if (heartbeat.status === "idle") {
+      runner.status = "online";
+    } else if (heartbeat.status === "busy") {
+      runner.status = "busy";
     } else {
       // recording maps to busy
-      runner.status = 'busy';
+      runner.status = "busy";
     }
     runner.lastHeartbeat = Date.now();
     runner.currentTask = heartbeat.currentTask;
@@ -242,7 +246,7 @@ class RunnerRegistry {
     }
 
     // Handle heartbeat messages
-    if (message.type === 'status:heartbeat') {
+    if (message.type === "status:heartbeat") {
       this.updateRunnerStatus(runnerId, message.payload as HeartbeatPayload);
     }
 

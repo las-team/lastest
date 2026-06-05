@@ -1,8 +1,15 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Share2, Copy, Check, Link as LinkIcon, XCircle, Loader2 } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Share2,
+  Copy,
+  Check,
+  Link as LinkIcon,
+  XCircle,
+  Loader2,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,23 +17,23 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import {
   publishBuildShare,
   publishLatestTestShare,
   revokePublicShare,
   listBuildShares,
   listTestShares,
-} from '@/server/actions/public-shares';
-import { buildShareUrl } from '@/lib/share/slug';
-import { toast } from 'sonner';
+} from "@/server/actions/public-shares";
+import { buildShareUrl } from "@/lib/share/slug";
+import { toast } from "sonner";
 
 export interface ShareRecord {
   id: string;
   slug: string;
   url: string;
-  status: 'public' | 'revoked';
+  status: "public" | "revoked";
   createdAt: Date | null;
   viewCount: number;
   claimedAt: Date | null;
@@ -36,8 +43,8 @@ export interface PublishShareDialogProps {
   buildId?: string;
   testId?: string;
   initialShares: ShareRecord[];
-  size?: 'sm' | 'default' | 'icon';
-  variant?: 'outline' | 'secondary' | 'ghost';
+  size?: "sm" | "default" | "icon";
+  variant?: "outline" | "secondary" | "ghost";
   iconOnly?: boolean;
 }
 
@@ -45,8 +52,8 @@ export function PublishShareDialog({
   buildId,
   testId,
   initialShares,
-  size = 'sm',
-  variant = 'outline',
+  size = "sm",
+  variant = "outline",
   iconOnly = false,
 }: PublishShareDialogProps) {
   const router = useRouter();
@@ -55,7 +62,7 @@ export function PublishShareDialog({
   const [shares, setShares] = useState<ShareRecord[]>(initialShares);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
-  const activeShare = shares.find((s) => s.status === 'public');
+  const activeShare = shares.find((s) => s.status === "public");
 
   // Refresh the list from the server whenever the dialog opens, so revokes /
   // publishes made in other tabs (or in prior sessions) show up correctly.
@@ -100,7 +107,7 @@ export function PublishShareDialog({
           ? await publishLatestTestShare(testId)
           : null;
       if (!result) {
-        toast.error('Nothing to publish');
+        toast.error("Nothing to publish");
         return;
       }
       setShares((prev) => [
@@ -108,7 +115,7 @@ export function PublishShareDialog({
           id: result.shareId,
           slug: result.slug,
           url: result.url,
-          status: 'public',
+          status: "public",
           createdAt: new Date(),
           viewCount: 0,
           claimedAt: null,
@@ -118,10 +125,10 @@ export function PublishShareDialog({
       await navigator.clipboard.writeText(result.url).catch(() => {});
       setCopiedSlug(result.slug);
       setTimeout(() => setCopiedSlug(null), 2000);
-      toast.success('Public share created and copied to clipboard');
+      toast.success("Public share created and copied to clipboard");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to publish');
+      toast.error(err instanceof Error ? err.message : "Failed to publish");
     } finally {
       setBusy(false);
     }
@@ -134,13 +141,13 @@ export function PublishShareDialog({
       await revokePublicShare(id);
       setShares((prev) =>
         prev.map((s) =>
-          s.id === id ? { ...s, status: 'revoked' as const } : s,
+          s.id === id ? { ...s, status: "revoked" as const } : s,
         ),
       );
-      toast.success('Public share revoked');
+      toast.success("Public share revoked");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to revoke');
+      toast.error(err instanceof Error ? err.message : "Failed to revoke");
     } finally {
       setBusy(false);
     }
@@ -150,10 +157,10 @@ export function PublishShareDialog({
     await navigator.clipboard.writeText(url).catch(() => {});
     setCopiedSlug(slug);
     setTimeout(() => setCopiedSlug(null), 2000);
-    toast.success('Link copied');
+    toast.success("Link copied");
   }
 
-  const triggerLabel = activeShare ? 'Shared publicly' : 'Publish share';
+  const triggerLabel = activeShare ? "Shared publicly" : "Publish share";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -164,14 +171,14 @@ export function PublishShareDialog({
             size="icon"
             aria-label={triggerLabel}
             title={triggerLabel}
-            className={activeShare ? 'text-primary' : undefined}
+            className={activeShare ? "text-primary" : undefined}
           >
             <Share2 className="h-4 w-4" />
           </Button>
         ) : (
           <Button
-            variant={activeShare ? 'secondary' : variant}
-            size={size === 'icon' ? 'sm' : size}
+            variant={activeShare ? "secondary" : variant}
+            size={size === "icon" ? "sm" : size}
             className="gap-2"
           >
             <Share2 className="h-4 w-4" />
@@ -186,9 +193,10 @@ export function PublishShareDialog({
             Public share link
           </DialogTitle>
           <DialogDescription>
-            Anyone with this URL can view the recording, screenshots, and diff for this
-            {testId ? ' test' : ' build'} — without signing in. Only publish runs you&apos;re
-            comfortable sharing publicly.
+            Anyone with this URL can view the recording, screenshots, and diff
+            for this
+            {testId ? " test" : " build"} — without signing in. Only publish
+            runs you&apos;re comfortable sharing publicly.
           </DialogDescription>
         </DialogHeader>
 
@@ -203,7 +211,9 @@ export function PublishShareDialog({
             <div
               key={s.id}
               className={`rounded-md border p-3 space-y-2 ${
-                s.status === 'revoked' ? 'opacity-60 border-dashed' : 'border-border'
+                s.status === "revoked"
+                  ? "opacity-60 border-dashed"
+                  : "border-border"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -218,7 +228,7 @@ export function PublishShareDialog({
                   size="sm"
                   variant="outline"
                   onClick={() => handleCopy(s.url, s.slug)}
-                  disabled={s.status === 'revoked'}
+                  disabled={s.status === "revoked"}
                   className="gap-1.5 shrink-0"
                 >
                   {copiedSlug === s.slug ? (
@@ -231,16 +241,20 @@ export function PublishShareDialog({
               </div>
               <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                 <span>
-                  {s.status === 'revoked' ? (
-                    <span className="text-destructive font-medium">Revoked</span>
+                  {s.status === "revoked" ? (
+                    <span className="text-destructive font-medium">
+                      Revoked
+                    </span>
                   ) : (
                     <>
-                      {s.viewCount} {s.viewCount === 1 ? 'view' : 'views'}
-                      {s.claimedAt && <span className="ml-2 text-primary">· Claimed</span>}
+                      {s.viewCount} {s.viewCount === 1 ? "view" : "views"}
+                      {s.claimedAt && (
+                        <span className="ml-2 text-primary">· Claimed</span>
+                      )}
                     </>
                   )}
                 </span>
-                {s.status === 'public' && (
+                {s.status === "public" && (
                   <button
                     type="button"
                     onClick={() => handleRevoke(s.id)}
@@ -265,7 +279,9 @@ export function PublishShareDialog({
             ) : (
               <Share2 className="w-4 h-4" />
             )}
-            {activeShare ? 'Active share exists — revoke first' : 'Publish public share'}
+            {activeShare
+              ? "Active share exists — revoke first"
+              : "Publish public share"}
           </Button>
         </div>
       </DialogContent>

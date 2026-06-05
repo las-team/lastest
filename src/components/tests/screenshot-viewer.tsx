@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { X, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import { X, ChevronLeft, ChevronRight, Info } from "lucide-react";
 
-export type ScreenshotViewerMode = 'captured' | 'plan' | 'baseline' | 'diff';
+export type ScreenshotViewerMode = "captured" | "plan" | "baseline" | "diff";
 
 interface ScreenshotViewerProps {
   open: boolean;
@@ -24,10 +24,10 @@ interface ScreenshotViewerProps {
 }
 
 const MODE_LABEL: Record<ScreenshotViewerMode, string> = {
-  captured: 'Captured',
-  plan: 'Plan',
-  baseline: 'Baseline',
-  diff: 'Diff vs baseline',
+  captured: "Captured",
+  plan: "Plan",
+  baseline: "Baseline",
+  diff: "Diff vs baseline",
 };
 
 export function ScreenshotViewer({
@@ -55,21 +55,24 @@ export function ScreenshotViewer({
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
   }, [open]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!open || typeof document === "undefined") return null;
 
   // Resolve the active source by mode; fall back to captured if a mode's
   // source is missing (e.g. no baseline yet for this step).
   const src =
-    mode === 'plan' && planSrc ? planSrc :
-    mode === 'baseline' && baselineSrc ? baselineSrc :
-    mode === 'diff' && diffSrc ? diffSrc :
-    imageSrc;
+    mode === "plan" && planSrc
+      ? planSrc
+      : mode === "baseline" && baselineSrc
+        ? baselineSrc
+        : mode === "diff" && diffSrc
+          ? diffSrc
+          : imageSrc;
   const hasAnyAlternate = !!planSrc || !!baselineSrc || !!diffSrc;
 
   return createPortal(
@@ -78,16 +81,16 @@ export function ScreenshotViewer({
       tabIndex={-1}
       className="fixed inset-0 z-50 bg-black/85 animate-in fade-in-0 outline-none"
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
+        if (e.key === "Escape") {
           e.preventDefault();
           onClose();
-        } else if (e.key === 'ArrowRight' && hasNext) {
+        } else if (e.key === "ArrowRight" && hasNext) {
           e.preventDefault();
           onNext();
-        } else if (e.key === 'ArrowLeft' && hasPrev) {
+        } else if (e.key === "ArrowLeft" && hasPrev) {
           e.preventDefault();
           onPrev();
-        } else if (e.key === ' ' && hasAnyAlternate) {
+        } else if (e.key === " " && hasAnyAlternate) {
           e.preventDefault();
           onCycleMode();
         }
@@ -144,17 +147,26 @@ export function ScreenshotViewer({
           <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
           <p className="text-xs leading-snug">
             {diffSrc && (
-              <>This step has a baseline — the viewer opened on the <span className="font-medium">diff</span> so you can see what changed. </>
+              <>
+                This step has a baseline — the viewer opened on the{" "}
+                <span className="font-medium">diff</span> so you can see what
+                changed.{" "}
+              </>
             )}
-            Click the badge top-left or press{' '}
-            <kbd className="px-1 py-0.5 rounded bg-white/20 font-mono text-[10px]">Space</kbd>{' '}
-            to cycle through{' '}
+            Click the badge top-left or press{" "}
+            <kbd className="px-1 py-0.5 rounded bg-white/20 font-mono text-[10px]">
+              Space
+            </kbd>{" "}
+            to cycle through{" "}
             {[
-              diffSrc ? 'diff' : null,
-              baselineSrc ? 'baseline' : null,
-              planSrc ? 'plan' : null,
-              'captured',
-            ].filter(Boolean).join(' → ')}.
+              diffSrc ? "diff" : null,
+              baselineSrc ? "baseline" : null,
+              planSrc ? "plan" : null,
+              "captured",
+            ]
+              .filter(Boolean)
+              .join(" → ")}
+            .
           </p>
         </div>
       )}
@@ -198,7 +210,6 @@ export function ScreenshotViewer({
           <ChevronRight className="h-6 w-6" />
         </button>
       )}
-
     </div>,
     document.body,
   );

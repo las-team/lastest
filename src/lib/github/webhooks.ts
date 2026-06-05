@@ -1,12 +1,15 @@
-import crypto from 'crypto';
+import crypto from "crypto";
 
-const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
+const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
-export function verifyWebhookSignature(payload: string, signature: string | null): boolean {
+export function verifyWebhookSignature(
+  payload: string,
+  signature: string | null,
+): boolean {
   if (!signature || !WEBHOOK_SECRET) return false;
 
-  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
-  const digest = 'sha256=' + hmac.update(payload).digest('hex');
+  const hmac = crypto.createHmac("sha256", WEBHOOK_SECRET);
+  const digest = "sha256=" + hmac.update(payload).digest("hex");
 
   try {
     return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
@@ -16,7 +19,7 @@ export function verifyWebhookSignature(payload: string, signature: string | null
 }
 
 export interface PullRequestEvent {
-  action: 'opened' | 'synchronize' | 'closed' | 'reopened';
+  action: "opened" | "synchronize" | "closed" | "reopened";
   number: number;
   pull_request: {
     number: number;
@@ -56,20 +59,20 @@ export interface PushEvent {
 
 export function isPullRequestEvent(event: unknown): event is PullRequestEvent {
   return (
-    typeof event === 'object' &&
+    typeof event === "object" &&
     event !== null &&
-    'action' in event &&
-    'pull_request' in event
+    "action" in event &&
+    "pull_request" in event
   );
 }
 
 export function isPushEvent(event: unknown): event is PushEvent {
   return (
-    typeof event === 'object' &&
+    typeof event === "object" &&
     event !== null &&
-    'ref' in event &&
-    'after' in event &&
-    !('pull_request' in event)
+    "ref" in event &&
+    "after" in event &&
+    !("pull_request" in event)
   );
 }
 
@@ -79,10 +82,10 @@ export function isPushEvent(event: unknown): event is PushEvent {
  * and auto-flip the verify board back to done on green.
  */
 export interface IssuesEvent {
-  action: 'opened' | 'edited' | 'closed' | 'reopened' | 'deleted' | string;
+  action: "opened" | "edited" | "closed" | "reopened" | "deleted" | string;
   issue: {
     number: number;
-    state: 'open' | 'closed';
+    state: "open" | "closed";
     title: string;
     html_url: string;
     labels?: Array<{ name: string }>;
@@ -95,12 +98,12 @@ export interface IssuesEvent {
 }
 
 export function isIssuesEvent(event: unknown): event is IssuesEvent {
-  if (typeof event !== 'object' || event === null) return false;
-  if (!('action' in event) || !('issue' in event)) return false;
+  if (typeof event !== "object" || event === null) return false;
+  if (!("action" in event) || !("issue" in event)) return false;
   // GH sends pull-request opens through the `issues` event endpoint too,
   // tagged with `issue.pull_request`. Filter those out so we only act on
   // actual issues.
   const issue = (event as { issue: unknown }).issue;
-  if (typeof issue !== 'object' || issue === null) return false;
-  return !('pull_request' in issue);
+  if (typeof issue !== "object" || issue === null) return false;
+  return !("pull_request" in issue);
 }

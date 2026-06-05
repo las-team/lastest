@@ -5,7 +5,12 @@
  * to SSE connections. Uses globalThis to persist across module reloads.
  */
 
-import type { ActivityEventType, ActivitySourceType, ActivityArtifactType, PwAgentType } from '@/lib/db/schema';
+import type {
+  ActivityEventType,
+  ActivitySourceType,
+  ActivityArtifactType,
+  PwAgentType,
+} from "@/lib/db/schema";
 
 export interface ActivityFeedEvent {
   id: string;
@@ -34,7 +39,10 @@ const globalEvents = globalThis as typeof globalThis & {
 };
 
 if (!globalEvents.__activityFeedListeners) {
-  globalEvents.__activityFeedListeners = new Map<string, ActivityFeedListener>();
+  globalEvents.__activityFeedListeners = new Map<
+    string,
+    ActivityFeedListener
+  >();
 }
 if (globalEvents.__activityFeedCounter === undefined) {
   globalEvents.__activityFeedCounter = 0;
@@ -42,7 +50,9 @@ if (globalEvents.__activityFeedCounter === undefined) {
 
 const listeners = globalEvents.__activityFeedListeners;
 
-export function subscribeToActivityFeed(listener: ActivityFeedListener): () => void {
+export function subscribeToActivityFeed(
+  listener: ActivityFeedListener,
+): () => void {
   const id = String(++globalEvents.__activityFeedCounter!);
   listeners.set(id, listener);
   return () => {
@@ -55,7 +65,7 @@ export function emitActivityEvent(event: ActivityFeedEvent): void {
     try {
       listener(event);
     } catch (error) {
-      console.error('[ActivityFeed] Listener error:', error);
+      console.error("[ActivityFeed] Listener error:", error);
     }
   }
 }

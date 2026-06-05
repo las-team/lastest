@@ -1,5 +1,5 @@
-import type { AIProvider, GenerateOptions, StreamCallbacks } from './types';
-import { assertSafeOutboundUrl } from '@/lib/security/outbound-url';
+import type { AIProvider, GenerateOptions, StreamCallbacks } from "./types";
+import { assertSafeOutboundUrl } from "@/lib/security/outbound-url";
 
 export interface OllamaConfig {
   baseUrl: string;
@@ -11,7 +11,7 @@ export class OllamaProvider implements AIProvider {
   private model: string;
 
   constructor(config: OllamaConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
+    this.baseUrl = config.baseUrl.replace(/\/$/, ""); // Remove trailing slash
     this.model = config.model;
   }
 
@@ -27,36 +27,43 @@ export class OllamaProvider implements AIProvider {
 
   async generate(options: GenerateOptions): Promise<string> {
     await this.assertBaseUrlSafe();
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, images, signal } = options;
+    const {
+      prompt,
+      systemPrompt,
+      maxTokens = 4096,
+      temperature = 0.7,
+      images,
+      signal,
+    } = options;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const messages: { role: string; content: any }[] = [];
 
     if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: "system", content: systemPrompt });
     }
 
     // Handle multimodal (vision models like llava)
     if (images && images.length > 0) {
       messages.push({
-        role: 'user',
+        role: "user",
         content: [
-          { type: 'text', text: prompt },
-          ...images.map(img => ({
-            type: 'image_url',
+          { type: "text", text: prompt },
+          ...images.map((img) => ({
+            type: "image_url",
             image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
           })),
         ],
       });
     } else {
-      messages.push({ role: 'user', content: prompt });
+      messages.push({ role: "user", content: prompt });
     }
 
     // OpenAI-compatible endpoint
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: this.model,
@@ -69,31 +76,42 @@ export class OllamaProvider implements AIProvider {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({
-        error: { message: response.statusText }
+        error: { message: response.statusText },
       }));
-      throw new Error(`Ollama API error: ${error.error?.message || 'Unknown error'}`);
+      throw new Error(
+        `Ollama API error: ${error.error?.message || "Unknown error"}`,
+      );
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
+    return data.choices?.[0]?.message?.content || "";
   }
 
-  async generateStream(options: GenerateOptions, callbacks: StreamCallbacks): Promise<void> {
+  async generateStream(
+    options: GenerateOptions,
+    callbacks: StreamCallbacks,
+  ): Promise<void> {
     await this.assertBaseUrlSafe();
-    const { prompt, systemPrompt, maxTokens = 4096, temperature = 0.7, signal } = options;
+    const {
+      prompt,
+      systemPrompt,
+      maxTokens = 4096,
+      temperature = 0.7,
+      signal,
+    } = options;
 
     const messages: { role: string; content: string }[] = [];
 
     if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: "system", content: systemPrompt });
     }
-    messages.push({ role: 'user', content: prompt });
+    messages.push({ role: "user", content: prompt });
 
     try {
       const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: this.model,
@@ -107,30 +125,32 @@ export class OllamaProvider implements AIProvider {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({
-          error: { message: response.statusText }
+          error: { message: response.statusText },
         }));
-        throw new Error(`Ollama API error: ${error.error?.message || 'Unknown error'}`);
+        throw new Error(
+          `Ollama API error: ${error.error?.message || "Unknown error"}`,
+        );
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error('No response body');
+        throw new Error("No response body");
       }
 
       const decoder = new TextDecoder();
-      let fullText = '';
+      let fullText = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter((line) => line.trim() !== '');
+        const lines = chunk.split("\n").filter((line) => line.trim() !== "");
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith("data: ")) {
             const data = line.slice(6);
-            if (data === '[DONE]') continue;
+            if (data === "[DONE]") continue;
 
             try {
               const parsed = JSON.parse(data);
@@ -148,7 +168,7 @@ export class OllamaProvider implements AIProvider {
 
       callbacks.onComplete?.(fullText);
     } catch (error) {
-      const err = error instanceof Error ? error : new Error('Stream failed');
+      const err = error instanceof Error ? error : new Error("Stream failed");
       callbacks.onError?.(err);
       throw err;
     }

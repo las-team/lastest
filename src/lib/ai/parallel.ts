@@ -27,7 +27,11 @@ export interface ParallelResult<T> {
 export async function runParallel<T>(
   tasks: ParallelTask<T>[],
   maxConcurrent: number = 5,
-  onProgress?: (completed: number, total: number, activeCount: number) => Promise<void>
+  onProgress?: (
+    completed: number,
+    total: number,
+    activeCount: number,
+  ) => Promise<void>,
 ): Promise<ParallelResult<T>[]> {
   if (tasks.length === 0) return [];
 
@@ -75,7 +79,9 @@ export async function runParallel<T>(
       release();
       completedCount++;
       if (onProgress) {
-        await onProgress(completedCount, tasks.length, activeCount).catch(() => {});
+        await onProgress(completedCount, tasks.length, activeCount).catch(
+          () => {},
+        );
       }
     }
   });

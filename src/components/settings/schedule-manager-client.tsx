@@ -1,21 +1,46 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
-import { CalendarClock, Play, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { createScheduleAction, deleteScheduleAction, getSchedulesAction, toggleScheduleAction, triggerScheduleNowAction } from '@/server/actions/schedules';
-import { PRESET_SCHEDULES } from '@/lib/scheduling/cron';
-import type { PresetScheduleKey } from '@/lib/scheduling/cron';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+import { useState, useEffect, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { CalendarClock, Play, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  createScheduleAction,
+  deleteScheduleAction,
+  getSchedulesAction,
+  toggleScheduleAction,
+  triggerScheduleNowAction,
+} from "@/server/actions/schedules";
+import { PRESET_SCHEDULES } from "@/lib/scheduling/cron";
+import type { PresetScheduleKey } from "@/lib/scheduling/cron";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 interface ScheduleWithDescription {
   id: string;
@@ -34,14 +59,20 @@ interface ScheduleWithDescription {
   maxConsecutiveFailures: number | null;
 }
 
-export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) {
+export function ScheduleManagerCard({
+  repositoryId,
+}: {
+  repositoryId: string;
+}) {
   const [schedules, setSchedules] = useState<ScheduleWithDescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [selectedPreset, setSelectedPreset] = useState<PresetScheduleKey | 'custom'>('daily_3am');
-  const [customCron, setCustomCron] = useState('');
-  const [gitBranch, setGitBranch] = useState('');
+  const [newName, setNewName] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState<
+    PresetScheduleKey | "custom"
+  >("daily_3am");
+  const [customCron, setCustomCron] = useState("");
+  const [gitBranch, setGitBranch] = useState("");
 
   const loadSchedules = useCallback(async () => {
     try {
@@ -60,27 +91,32 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
 
   const handleCreate = async () => {
     try {
-      const cronExpression = selectedPreset === 'custom' ? customCron : PRESET_SCHEDULES[selectedPreset].cron;
+      const cronExpression =
+        selectedPreset === "custom"
+          ? customCron
+          : PRESET_SCHEDULES[selectedPreset].cron;
       await createScheduleAction({
         repositoryId,
-        name: newName || 'Scheduled Run',
+        name: newName || "Scheduled Run",
         cronExpression,
-        preset: selectedPreset !== 'custom' ? selectedPreset : undefined,
+        preset: selectedPreset !== "custom" ? selectedPreset : undefined,
         gitBranch: gitBranch || undefined,
       });
       track(Events.schedule_created, {
         repoId: repositoryId,
         preset: selectedPreset,
-        hasBranch: gitBranch ? 'true' : 'false',
+        hasBranch: gitBranch ? "true" : "false",
       });
-      toast.success('Schedule created');
+      toast.success("Schedule created");
       setShowDialog(false);
-      setNewName('');
-      setCustomCron('');
-      setGitBranch('');
+      setNewName("");
+      setCustomCron("");
+      setGitBranch("");
       await loadSchedules();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create schedule');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create schedule",
+      );
     }
   };
 
@@ -89,27 +125,27 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
       await toggleScheduleAction(id, repositoryId, enabled);
       await loadSchedules();
     } catch {
-      toast.error('Failed to toggle schedule');
+      toast.error("Failed to toggle schedule");
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
       await deleteScheduleAction(id, repositoryId);
-      toast.success('Schedule deleted');
+      toast.success("Schedule deleted");
       await loadSchedules();
     } catch {
-      toast.error('Failed to delete schedule');
+      toast.error("Failed to delete schedule");
     }
   };
 
   const handleTriggerNow = async (id: string) => {
     try {
       await triggerScheduleNowAction(id, repositoryId);
-      toast.success('Build triggered');
+      toast.success("Build triggered");
       await loadSchedules();
     } catch {
-      toast.error('Failed to trigger build');
+      toast.error("Failed to trigger build");
     }
   };
 
@@ -122,7 +158,9 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
               <CalendarClock className="h-5 w-5" />
               Scheduled Runs
             </CardTitle>
-            <CardDescription>Configure recurring test runs on a schedule</CardDescription>
+            <CardDescription>
+              Configure recurring test runs on a schedule
+            </CardDescription>
           </div>
           <Dialog open={showDialog} onOpenChange={setShowDialog}>
             <DialogTrigger asChild>
@@ -141,33 +179,44 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
                   <Input
                     placeholder="e.g., Nightly Regression"
                     value={newName}
-                    onChange={e => setNewName(e.target.value)}
+                    onChange={(e) => setNewName(e.target.value)}
                   />
                 </div>
                 <div>
                   <Label>Frequency</Label>
-                  <Select value={selectedPreset} onValueChange={v => setSelectedPreset(v as PresetScheduleKey | 'custom')}>
+                  <Select
+                    value={selectedPreset}
+                    onValueChange={(v) =>
+                      setSelectedPreset(v as PresetScheduleKey | "custom")
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(PRESET_SCHEDULES).map(([key, preset]) => (
-                        <SelectItem key={key} value={key}>{preset.label}</SelectItem>
+                        <SelectItem key={key} value={key}>
+                          {preset.label}
+                        </SelectItem>
                       ))}
-                      <SelectItem value="custom">Custom cron expression</SelectItem>
+                      <SelectItem value="custom">
+                        Custom cron expression
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                {selectedPreset === 'custom' && (
+                {selectedPreset === "custom" && (
                   <div>
                     <Label>Cron Expression</Label>
                     <Input
                       placeholder="0 3 * * *"
                       value={customCron}
-                      onChange={e => setCustomCron(e.target.value)}
+                      onChange={(e) => setCustomCron(e.target.value)}
                       className="font-mono"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Standard 5-field cron: minute hour day month weekday</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Standard 5-field cron: minute hour day month weekday
+                    </p>
                   </div>
                 )}
                 <div>
@@ -175,12 +224,14 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
                   <Input
                     placeholder="Leave empty for default branch"
                     value={gitBranch}
-                    onChange={e => setGitBranch(e.target.value)}
+                    onChange={(e) => setGitBranch(e.target.value)}
                   />
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setShowDialog(false)}>
+                  Cancel
+                </Button>
                 <Button onClick={handleCreate}>Create Schedule</Button>
               </DialogFooter>
             </DialogContent>
@@ -191,19 +242,28 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading schedules...</p>
         ) : schedules.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No scheduled runs configured. Add one to run tests automatically.</p>
+          <p className="text-sm text-muted-foreground">
+            No scheduled runs configured. Add one to run tests automatically.
+          </p>
         ) : (
           <div className="space-y-3">
-            {schedules.map(schedule => (
-              <div key={schedule.id} className="flex items-center justify-between rounded-md border p-3">
+            {schedules.map((schedule) => (
+              <div
+                key={schedule.id}
+                className="flex items-center justify-between rounded-md border p-3"
+              >
                 <div className="flex items-center gap-3">
                   <Switch
                     checked={schedule.enabled ?? false}
-                    onCheckedChange={checked => handleToggle(schedule.id, checked)}
+                    onCheckedChange={(checked) =>
+                      handleToggle(schedule.id, checked)
+                    }
                   />
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{schedule.name}</span>
+                      <span className="font-medium text-sm">
+                        {schedule.name}
+                      </span>
                       <Badge variant="outline" className="text-xs font-mono">
                         {schedule.cronDescription}
                       </Badge>
@@ -216,9 +276,13 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
                     <div className="text-xs text-muted-foreground mt-0.5">
                       {schedule.nextRunAt
                         ? `Next run: ${new Date(schedule.nextRunAt).toLocaleString()}`
-                        : 'Not scheduled'}
+                        : "Not scheduled"}
                       {schedule.lastRunAt && (
-                        <> · Last run: {new Date(schedule.lastRunAt).toLocaleString()}</>
+                        <>
+                          {" "}
+                          · Last run:{" "}
+                          {new Date(schedule.lastRunAt).toLocaleString()}
+                        </>
                       )}
                       {schedule.gitBranch && (
                         <> · Branch: {schedule.gitBranch}</>
@@ -227,10 +291,20 @@ export function ScheduleManagerCard({ repositoryId }: { repositoryId: string }) 
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" onClick={() => handleTriggerNow(schedule.id)} title="Run now">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleTriggerNow(schedule.id)}
+                    title="Run now"
+                  >
                     <Play className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(schedule.id)} title="Delete">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDelete(schedule.id)}
+                    title="Delete"
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   closestCenter,
@@ -10,27 +10,34 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { FlaskConical, FileCode, GripVertical, X, RotateCcw, Info } from 'lucide-react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+} from "@dnd-kit/sortable";
+import {
+  FlaskConical,
+  FileCode,
+  GripVertical,
+  X,
+  RotateCcw,
+  Info,
+} from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   skipDefaultTeardownStepForTest,
   unskipDefaultTeardownStepForTest,
@@ -38,13 +45,17 @@ import {
   removeExtraTeardownStep,
   reorderExtraTeardownSteps,
   saveTestTeardownOverrides,
-} from '@/server/actions/teardown-steps';
-import { toast } from 'sonner';
-import type { Test, SetupScript, TestTeardownOverrides as TestTeardownOverridesType } from '@/lib/db/schema';
+} from "@/server/actions/teardown-steps";
+import { toast } from "sonner";
+import type {
+  Test,
+  SetupScript,
+  TestTeardownOverrides as TestTeardownOverridesType,
+} from "@/lib/db/schema";
 
 interface DefaultStep {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: "test" | "script";
   testId: string | null;
   scriptId: string | null;
   orderIndex: number;
@@ -55,7 +66,7 @@ interface DefaultStep {
 interface ExtraStepDisplay {
   id: string;
   index: number;
-  stepType: 'test' | 'script' | 'storage_state';
+  stepType: "test" | "script" | "storage_state";
   name: string;
 }
 
@@ -81,17 +92,19 @@ function SortableExtraStep({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const Icon = item.stepType === 'test' ? FlaskConical : FileCode;
-  const iconColor = item.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
-  const bgColor = item.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
+  const Icon = item.stepType === "test" ? FlaskConical : FileCode;
+  const iconColor =
+    item.stepType === "test" ? "text-blue-500" : "text-green-500";
+  const bgColor =
+    item.stepType === "test" ? "bg-blue-500/10" : "bg-green-500/10";
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-3 p-3 bg-background border rounded-lg group',
-        isDragging && 'shadow-lg ring-2 ring-primary'
+        "flex items-center gap-3 p-3 bg-background border rounded-lg group",
+        isDragging && "shadow-lg ring-2 ring-primary",
       )}
     >
       <button
@@ -102,15 +115,18 @@ function SortableExtraStep({
         <GripVertical className="w-4 h-4" />
       </button>
 
-      <div className={cn('flex items-center justify-center w-7 h-7 rounded', bgColor)}>
-        <Icon className={cn('w-4 h-4', iconColor)} />
+      <div
+        className={cn(
+          "flex items-center justify-center w-7 h-7 rounded",
+          bgColor,
+        )}
+      >
+        <Icon className={cn("w-4 h-4", iconColor)} />
       </div>
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{item.name}</p>
-        <p className="text-xs text-muted-foreground">
-          Extra {item.stepType}
-        </p>
+        <p className="text-xs text-muted-foreground">Extra {item.stepType}</p>
       </div>
 
       <Button
@@ -145,24 +161,26 @@ export function TestTeardownOverrides({
   const [isSaving, setIsSaving] = useState(false);
 
   const skippedIds = new Set(teardownOverrides?.skippedDefaultStepIds ?? []);
-  const hasOverrides = teardownOverrides !== null && (
-    (teardownOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
-    (teardownOverrides.extraSteps?.length ?? 0) > 0
-  );
+  const hasOverrides =
+    teardownOverrides !== null &&
+    ((teardownOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
+      (teardownOverrides.extraSteps?.length ?? 0) > 0);
 
-  const extraSteps: ExtraStepDisplay[] = (teardownOverrides?.extraSteps ?? []).map((step, i) => {
-    let name = 'Unknown';
-    if (step.stepType === 'test' && step.testId) {
+  const extraSteps: ExtraStepDisplay[] = (
+    teardownOverrides?.extraSteps ?? []
+  ).map((step, i) => {
+    let name = "Unknown";
+    if (step.stepType === "test" && step.testId) {
       const t = availableTests.find((t) => t.id === step.testId);
-      name = t?.name || 'Deleted test';
-    } else if (step.stepType === 'script' && step.scriptId) {
+      name = t?.name || "Deleted test";
+    } else if (step.stepType === "script" && step.scriptId) {
       const s = availableScripts.find((s) => s.id === step.scriptId);
-      name = s?.name || 'Deleted script';
+      name = s?.name || "Deleted script";
     }
     return { id: `extra-${i}`, index: i, stepType: step.stepType, name };
   });
 
-  const [addStepType, setAddStepType] = useState<'test' | 'script'>('test');
+  const [addStepType, setAddStepType] = useState<"test" | "script">("test");
 
   useEffect(() => {
     setMounted(true);
@@ -172,10 +190,13 @@ export function TestTeardownOverrides({
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
-  const handleToggleSkip = async (stepId: string, isCurrentlySkipped: boolean) => {
+  const handleToggleSkip = async (
+    stepId: string,
+    isCurrentlySkipped: boolean,
+  ) => {
     setIsSaving(true);
     try {
       if (isCurrentlySkipped) {
@@ -185,20 +206,23 @@ export function TestTeardownOverrides({
       }
       router.refresh();
     } catch {
-      toast.error('Failed to update teardown override');
+      toast.error("Failed to update teardown override");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddExtra = async (stepType: 'test' | 'script', itemId: string) => {
+  const handleAddExtra = async (
+    stepType: "test" | "script",
+    itemId: string,
+  ) => {
     setIsSaving(true);
     try {
       await addExtraTeardownStep(testId, stepType, itemId);
       router.refresh();
-      toast.success('Extra teardown step added');
+      toast.success("Extra teardown step added");
     } catch {
-      toast.error('Failed to add extra teardown step');
+      toast.error("Failed to add extra teardown step");
     } finally {
       setIsSaving(false);
     }
@@ -210,7 +234,7 @@ export function TestTeardownOverrides({
       await removeExtraTeardownStep(testId, index);
       router.refresh();
     } catch {
-      toast.error('Failed to remove extra teardown step');
+      toast.error("Failed to remove extra teardown step");
     } finally {
       setIsSaving(false);
     }
@@ -225,7 +249,7 @@ export function TestTeardownOverrides({
     const reordered = arrayMove(
       extraSteps.map((_, i) => i),
       oldIndex,
-      newIndex
+      newIndex,
     );
 
     setIsSaving(true);
@@ -233,7 +257,7 @@ export function TestTeardownOverrides({
       await reorderExtraTeardownSteps(testId, reordered);
       router.refresh();
     } catch {
-      toast.error('Failed to reorder teardown steps');
+      toast.error("Failed to reorder teardown steps");
     } finally {
       setIsSaving(false);
     }
@@ -244,9 +268,9 @@ export function TestTeardownOverrides({
     try {
       await saveTestTeardownOverrides(testId, null);
       router.refresh();
-      toast.success('Reset to defaults');
+      toast.success("Reset to defaults");
     } catch {
-      toast.error('Failed to reset');
+      toast.error("Failed to reset");
     } finally {
       setIsSaving(false);
     }
@@ -254,17 +278,21 @@ export function TestTeardownOverrides({
 
   const extraTestIds = new Set(
     (teardownOverrides?.extraSteps ?? [])
-      .filter((s) => s.stepType === 'test' && s.testId)
-      .map((s) => s.testId!)
+      .filter((s) => s.stepType === "test" && s.testId)
+      .map((s) => s.testId!),
   );
   const extraScriptIds = new Set(
     (teardownOverrides?.extraSteps ?? [])
-      .filter((s) => s.stepType === 'script' && s.scriptId)
-      .map((s) => s.scriptId!)
+      .filter((s) => s.stepType === "script" && s.scriptId)
+      .map((s) => s.scriptId!),
   );
 
-  const pickableTests = availableTests.filter((t) => t.id !== testId && !extraTestIds.has(t.id));
-  const pickableScripts = availableScripts.filter((s) => !extraScriptIds.has(s.id));
+  const pickableTests = availableTests.filter(
+    (t) => t.id !== testId && !extraTestIds.has(t.id),
+  );
+  const pickableScripts = availableScripts.filter(
+    (s) => !extraScriptIds.has(s.id),
+  );
 
   if (!mounted) {
     return <div className="p-4 text-muted-foreground">Loading...</div>;
@@ -279,11 +307,19 @@ export function TestTeardownOverrides({
           {hasOverrides ? (
             <span>This test has custom teardown overrides</span>
           ) : (
-            <span>Using defaults{defaultTeardownSteps.length === 0 ? ' (none configured)' : ''}</span>
+            <span>
+              Using defaults
+              {defaultTeardownSteps.length === 0 ? " (none configured)" : ""}
+            </span>
           )}
         </div>
         {hasOverrides && (
-          <Button variant="outline" size="sm" onClick={handleResetToDefaults} disabled={isSaving}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResetToDefaults}
+            disabled={isSaving}
+          >
             <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
             Reset to defaults
           </Button>
@@ -305,39 +341,55 @@ export function TestTeardownOverrides({
             <div className="space-y-2">
               {defaultTeardownSteps.map((step) => {
                 const isSkipped = skippedIds.has(step.id);
-                const Icon = step.stepType === 'test' ? FlaskConical : FileCode;
-                const iconColor = step.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
-                const bgColor = step.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
-                const name = step.testName || step.scriptName || 'Unknown';
+                const Icon = step.stepType === "test" ? FlaskConical : FileCode;
+                const iconColor =
+                  step.stepType === "test" ? "text-blue-500" : "text-green-500";
+                const bgColor =
+                  step.stepType === "test"
+                    ? "bg-blue-500/10"
+                    : "bg-green-500/10";
+                const name = step.testName || step.scriptName || "Unknown";
 
                 return (
                   <div
                     key={step.id}
                     className={cn(
-                      'flex items-center gap-3 p-3 border rounded-lg transition-opacity',
-                      isSkipped && 'opacity-50'
+                      "flex items-center gap-3 p-3 border rounded-lg transition-opacity",
+                      isSkipped && "opacity-50",
                     )}
                   >
-                    <div className={cn('flex items-center justify-center w-7 h-7 rounded', bgColor)}>
-                      <Icon className={cn('w-4 h-4', iconColor)} />
+                    <div
+                      className={cn(
+                        "flex items-center justify-center w-7 h-7 rounded",
+                        bgColor,
+                      )}
+                    >
+                      <Icon className={cn("w-4 h-4", iconColor)} />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className={cn('text-sm font-medium truncate', isSkipped && 'line-through')}>
+                      <p
+                        className={cn(
+                          "text-sm font-medium truncate",
+                          isSkipped && "line-through",
+                        )}
+                      >
                         {name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {step.stepType === 'test' ? 'Test' : 'Script'}
+                        {step.stepType === "test" ? "Test" : "Script"}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {isSkipped ? 'Skipped' : 'Active'}
+                        {isSkipped ? "Skipped" : "Active"}
                       </span>
                       <Switch
                         checked={!isSkipped}
-                        onCheckedChange={() => handleToggleSkip(step.id, isSkipped)}
+                        onCheckedChange={() =>
+                          handleToggleSkip(step.id, isSkipped)
+                        }
                         disabled={isSaving}
                       />
                     </div>
@@ -384,7 +436,10 @@ export function TestTeardownOverrides({
 
           {/* Add step picker */}
           <div className="flex gap-2 items-center pt-2 border-t">
-            <Select value={addStepType} onValueChange={(v) => setAddStepType(v as 'test' | 'script')}>
+            <Select
+              value={addStepType}
+              onValueChange={(v) => setAddStepType(v as "test" | "script")}
+            >
               <SelectTrigger className="w-[110px]">
                 <SelectValue />
               </SelectTrigger>
@@ -402,7 +457,7 @@ export function TestTeardownOverrides({
                 <SelectValue placeholder="Select to add..." />
               </SelectTrigger>
               <SelectContent>
-                {addStepType === 'test' ? (
+                {addStepType === "test" ? (
                   pickableTests.length > 0 ? (
                     pickableTests.map((t) => (
                       <SelectItem key={t.id} value={t.id}>
@@ -413,21 +468,23 @@ export function TestTeardownOverrides({
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem value="_none" disabled>No tests available</SelectItem>
+                    <SelectItem value="_none" disabled>
+                      No tests available
+                    </SelectItem>
                   )
+                ) : pickableScripts.length > 0 ? (
+                  pickableScripts.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      <div className="flex items-center gap-2">
+                        <FileCode className="w-3.5 h-3.5 text-green-500" />
+                        {s.name}
+                      </div>
+                    </SelectItem>
+                  ))
                 ) : (
-                  pickableScripts.length > 0 ? (
-                    pickableScripts.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        <div className="flex items-center gap-2">
-                          <FileCode className="w-3.5 h-3.5 text-green-500" />
-                          {s.name}
-                        </div>
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="_none" disabled>No scripts available</SelectItem>
-                  )
+                  <SelectItem value="_none" disabled>
+                    No scripts available
+                  </SelectItem>
                 )}
               </SelectContent>
             </Select>

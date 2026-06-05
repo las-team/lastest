@@ -6,7 +6,7 @@
  */
 
 export interface TestStartEvent {
-  type: 'test:start';
+  type: "test:start";
   testId: string;
   runId: string;
   buildId: string;
@@ -15,7 +15,7 @@ export interface TestStartEvent {
 }
 
 export interface TestProgressEvent {
-  type: 'test:progress';
+  type: "test:progress";
   testId: string;
   runId: string;
   buildId: string;
@@ -26,29 +26,33 @@ export interface TestProgressEvent {
 }
 
 export interface TestCompleteEvent {
-  type: 'test:complete';
+  type: "test:complete";
   testId: string;
   runId: string;
   buildId: string;
   teamId: string;
-  status: 'passed' | 'failed' | 'error';
+  status: "passed" | "failed" | "error";
   errorMessage?: string;
   duration: number;
   timestamp: number;
 }
 
 export interface BuildCompleteEvent {
-  type: 'build:complete';
+  type: "build:complete";
   buildId: string;
   teamId: string;
-  status: 'safe_to_merge' | 'review_required' | 'blocked';
+  status: "safe_to_merge" | "review_required" | "blocked";
   passedCount: number;
   failedCount: number;
   totalTests: number;
   timestamp: number;
 }
 
-export type TestEvent = TestStartEvent | TestProgressEvent | TestCompleteEvent | BuildCompleteEvent;
+export type TestEvent =
+  | TestStartEvent
+  | TestProgressEvent
+  | TestCompleteEvent
+  | BuildCompleteEvent;
 
 type TestEventListener = (event: TestEvent) => void;
 
@@ -88,7 +92,7 @@ export function emitTestEvent(event: TestEvent): void {
     try {
       listener(event);
     } catch (error) {
-      console.error('[TestEvents] Listener error:', error);
+      console.error("[TestEvents] Listener error:", error);
     }
   }
 }

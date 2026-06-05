@@ -42,21 +42,21 @@ DEXILION will process personal data in accordance with the purposes set out in t
 
 The provision of these services will require DEXILION to carry out the following processing activities:
 
-* Collecting (capture information containing personal data).
-* Recording (enter or record information in automated or non-automated system or device for subsequent processing).
-* Structuring (order and structure data for ease of processing).
-* Alteration (change or alter the data).
-* Storage (keep information for a specific term).
-* Consultation (search for data on the system or device where it is recorded).
-* Erasure (delete or remove information from the system or device where it is originally recorded).
+- Collecting (capture information containing personal data).
+- Recording (enter or record information in automated or non-automated system or device for subsequent processing).
+- Structuring (order and structure data for ease of processing).
+- Alteration (change or alter the data).
+- Storage (keep information for a specific term).
+- Consultation (search for data on the system or device where it is recorded).
+- Erasure (delete or remove information from the system or device where it is originally recorded).
 
 ## **4. CATEGORIES OF PERSONAL DATA AND CATEGORIES OF DATA SUBJECTS**
 
 The following types of personal data will be processed:
 
-* a) Names and surnames of employees of the Controller.
-* b) Email of the employees
-* c) Any other category of data provided by the employee through the enabled channels.
+- a) Names and surnames of employees of the Controller.
+- b) Email of the employees
+- c) Any other category of data provided by the employee through the enabled channels.
 
 ## **5. TERM AND DATA RETENTION POLICY**
 
@@ -76,20 +76,20 @@ This obligation is of a generic nature and applies generally to data and informa
 
 The Controller undertakes to:
 
-* a) Deliver the Personal Data for processing to the Processor.
-* b) Notify the Processor as soon as possible of any changes to the processing or processed personal data which entail it must implement different or additional security measures to those described in this DPA.
-* c) Comply with its obligations under data protection laws in force at any given time, and to supervise processing activities, where necessary, and carry out inspections and audits when required to do so. This is to include, but not be limited to, the following issues: (i) Establishing the lawfulness, legitimacy and validity of the data processing, which will be carried out by performing Data Protection Impact Assessments and complying with the accountability principle before Data Subjects and Data Protection Authorities, (ii) Ensuring insofar as possible that the consent granted by legal representatives of those Data Subjects that are under fourteen (14) years of age is appropriately obtained, (iii) Undertaking reasonable steps to ensure that Data Subjects are aware of their data protection rights and (iv) Developing and implementing internal protocols and procedures designed to prove that the processing of data is consistent with this DPA and in compliance with applicable regulations.
+- a) Deliver the Personal Data for processing to the Processor.
+- b) Notify the Processor as soon as possible of any changes to the processing or processed personal data which entail it must implement different or additional security measures to those described in this DPA.
+- c) Comply with its obligations under data protection laws in force at any given time, and to supervise processing activities, where necessary, and carry out inspections and audits when required to do so. This is to include, but not be limited to, the following issues: (i) Establishing the lawfulness, legitimacy and validity of the data processing, which will be carried out by performing Data Protection Impact Assessments and complying with the accountability principle before Data Subjects and Data Protection Authorities, (ii) Ensuring insofar as possible that the consent granted by legal representatives of those Data Subjects that are under fourteen (14) years of age is appropriately obtained, (iii) Undertaking reasonable steps to ensure that Data Subjects are aware of their data protection rights and (iv) Developing and implementing internal protocols and procedures designed to prove that the processing of data is consistent with this DPA and in compliance with applicable regulations.
 
 ## **7. DATA PROCESSOR'S OBLIGATIONS**
 
 DEXILION undertakes to:
 
-* a) To process the personal data provided by the Data Controller following the instructions set in this DPA and not to use the data for different processing purposes. More specifically, DEXILION undertakes to process the personal data in accordance with the instructions it receives from the Data Controller at any given time, as well as with the provisions of the applicable data protection regulations.
-* b) Not to perform any other processing operation regarding the personal data, as well as not to apply or use the data for any purpose other than the provision of the service referred to in this Contract, or to use such data for its own purposes.
-* c) Keep a Record of Processing Activities carried out on behalf of the Controller, where necessary, in accordance with Article 30 of the GDPR.
-* d) Provide assistance to the Controller in carrying out Data Protection Impact Assessments, as well as prior consultations from the Data Protection Authorities, where appropriate.
-* e) Make available to the Data Controller, if requested, the necessary information to prove compliance with its obligations, as well as to allow and actively assist in the performance of audits or inspections carried out by the Data Controller and/or by an authorized auditor. Audits will be carried out with a maximum frequency of one per year and must be notified thirty (30) days in advance, all expenses, fees, taxes and charges arising from the conduct of such an audit shall be borne by the Controller. Moreover, and notwithstanding the above, DEXILION conducts internal and external audits sporadically.
-* f) To preserve the confidentiality and professional secrecy of all personal data processed under this DPA, as well as the duty to keep it secret during the term of the main agreement and after its termination, while the personal data processed are of such confidential nature. Therefore, the Data Processor shall ensure that the persons authorized to process personal data undertake to uphold said confidentiality and comply with the appropriate security measures, of which the Data Processor shall inform them as necessary.
+- a) To process the personal data provided by the Data Controller following the instructions set in this DPA and not to use the data for different processing purposes. More specifically, DEXILION undertakes to process the personal data in accordance with the instructions it receives from the Data Controller at any given time, as well as with the provisions of the applicable data protection regulations.
+- b) Not to perform any other processing operation regarding the personal data, as well as not to apply or use the data for any purpose other than the provision of the service referred to in this Contract, or to use such data for its own purposes.
+- c) Keep a Record of Processing Activities carried out on behalf of the Controller, where necessary, in accordance with Article 30 of the GDPR.
+- d) Provide assistance to the Controller in carrying out Data Protection Impact Assessments, as well as prior consultations from the Data Protection Authorities, where appropriate.
+- e) Make available to the Data Controller, if requested, the necessary information to prove compliance with its obligations, as well as to allow and actively assist in the performance of audits or inspections carried out by the Data Controller and/or by an authorized auditor. Audits will be carried out with a maximum frequency of one per year and must be notified thirty (30) days in advance, all expenses, fees, taxes and charges arising from the conduct of such an audit shall be borne by the Controller. Moreover, and notwithstanding the above, DEXILION conducts internal and external audits sporadically.
+- f) To preserve the confidentiality and professional secrecy of all personal data processed under this DPA, as well as the duty to keep it secret during the term of the main agreement and after its termination, while the personal data processed are of such confidential nature. Therefore, the Data Processor shall ensure that the persons authorized to process personal data undertake to uphold said confidentiality and comply with the appropriate security measures, of which the Data Processor shall inform them as necessary.
 
 ## **8. WARRANTIES AND DATA PROTECTION RIGHTS**
 
@@ -111,10 +111,10 @@ DEXILION informs you that no international data transfers are foreseen for the p
 
 DEXILION has implemented the necessary and appropriate security measures and procedures to:
 
-* a) Ensure the ongoing confidentiality, integrity, availability and resilience of processing systems and services;
-* b) Restore the availability and access to personal data in a timely manner in the event of a physical or technical incident;
-* c) Regularly test, assess and evaluate the effectiveness of technical and organizational measures to ensure the security level of the processing.
-* d) Where necessary, pseudonymize and encrypt personal data.
+- a) Ensure the ongoing confidentiality, integrity, availability and resilience of processing systems and services;
+- b) Restore the availability and access to personal data in a timely manner in the event of a physical or technical incident;
+- c) Regularly test, assess and evaluate the effectiveness of technical and organizational measures to ensure the security level of the processing.
+- d) Where necessary, pseudonymize and encrypt personal data.
 
 ## **11. SECURITY BREACH NOTIFICATIONS**
 
@@ -122,10 +122,10 @@ Both Parties undertake to notify each other, without undue delay, and in any cas
 
 Where the Client is required to notify any incident to DEXILION, it shall do so via the e-mail address provided for this purpose: security@lastest.cloud providing the following information:
 
-* a) A detailed description of the nature of the incident, where possible the category and approximate number of data subjects involved.
-* b) The contact details of an information or coordination point from which to obtain further information concerning the incident.
-* c) A description of the most probable consequences of the incident.
-* d) A description of the measures undertaken or to be undertaken regarding the incident and, where appropriate, further measures and procedures to be implemented to mitigate the adverse effects of the incident
+- a) A detailed description of the nature of the incident, where possible the category and approximate number of data subjects involved.
+- b) The contact details of an information or coordination point from which to obtain further information concerning the incident.
+- c) A description of the most probable consequences of the incident.
+- d) A description of the measures undertaken or to be undertaken regarding the incident and, where appropriate, further measures and procedures to be implemented to mitigate the adverse effects of the incident
 
 ## **12. LIABILITY AND INDEMNITY**
 
@@ -135,8 +135,8 @@ Both Parties (hereinafter, individually, the "Indemnifying Party") mutually unde
 
 All notices between the Parties shall be in writing and through one of the following means:
 
-* a) Registered mail with acknowledgement of receipt.
-* b) E-mail with confirmation of delivery and reading.
+- a) Registered mail with acknowledgement of receipt.
+- b) E-mail with confirmation of delivery and reading.
 
 Notifications made to Client, with reference to this DPA, shall be sent to the following address:
 

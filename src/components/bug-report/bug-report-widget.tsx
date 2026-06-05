@@ -1,37 +1,37 @@
-'use client';
+"use client";
 
-import { useState, useTransition, useEffect } from 'react';
-import { Bug } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
+import { useState, useTransition, useEffect } from "react";
+import { Bug } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from '@/components/ui/sheet';
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { useContextCollector } from '@/components/bug-report/context-collector';
-import { submitBugReport } from '@/server/actions/bug-reports';
-import { DiscordIcon } from '@/components/icons/discord-icon';
-import { DISCORD_INVITE_URL } from '@/lib/brand';
-import type { BugReportSeverity } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import { useContextCollector } from "@/components/bug-report/context-collector";
+import { submitBugReport } from "@/server/actions/bug-reports";
+import { DiscordIcon } from "@/components/icons/discord-icon";
+import { DISCORD_INVITE_URL } from "@/lib/brand";
+import type { BugReportSeverity } from "@/lib/db/schema";
 
 export function BugReportWidget() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
-  const [description, setDescription] = useState('');
-  const [severity, setSeverity] = useState<BugReportSeverity>('medium');
+  const [description, setDescription] = useState("");
+  const [severity, setSeverity] = useState<BugReportSeverity>("medium");
   const [includeScreenshot, setIncludeScreenshot] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { getSnapshot } = useContextCollector();
@@ -42,7 +42,7 @@ export function BugReportWidget() {
 
   const handleSubmit = () => {
     if (description.trim().length < 10) {
-      toast.error('Description must be at least 10 characters.');
+      toast.error("Description must be at least 10 characters.");
       return;
     }
 
@@ -52,14 +52,16 @@ export function BugReportWidget() {
 
         if (includeScreenshot) {
           try {
-            const html2canvas = (await import('html2canvas-pro')).default;
+            const html2canvas = (await import("html2canvas-pro")).default;
             const canvas = await html2canvas(document.body, {
               logging: false,
               useCORS: true,
               scale: 1,
-              ignoreElements: (el) => el.tagName === 'IMG' && el.getAttribute('src')?.startsWith('http') === true,
+              ignoreElements: (el) =>
+                el.tagName === "IMG" &&
+                el.getAttribute("src")?.startsWith("http") === true,
             });
-            screenshotBase64 = canvas.toDataURL('image/png').split(',')[1];
+            screenshotBase64 = canvas.toDataURL("image/png").split(",")[1];
           } catch {
             // Screenshot capture is best-effort; proceed without it
           }
@@ -75,21 +77,24 @@ export function BugReportWidget() {
 
         if (result.success) {
           if (result.forwardingErrors?.length) {
-            toast.warning('Bug report saved, but notifications failed to send.', {
-              description: result.forwardingErrors.join('; '),
-            });
+            toast.warning(
+              "Bug report saved, but notifications failed to send.",
+              {
+                description: result.forwardingErrors.join("; "),
+              },
+            );
           } else {
-            toast.success('Bug report submitted. Thank you!');
+            toast.success("Bug report submitted. Thank you!");
           }
-          setDescription('');
-          setSeverity('medium');
+          setDescription("");
+          setSeverity("medium");
           setIncludeScreenshot(false);
           setOpen(false);
         } else {
-          toast.error(result.error ?? 'Failed to submit bug report.');
+          toast.error(result.error ?? "Failed to submit bug report.");
         }
       } catch {
-        toast.error('Failed to submit bug report. Please try again.');
+        toast.error("Failed to submit bug report. Please try again.");
       }
     });
   };
@@ -120,7 +125,9 @@ export function BugReportWidget() {
             <DiscordIcon className="h-5 w-5 text-[#5865F2]" />
             <div className="flex-1">
               <div className="font-medium">Need instant support?</div>
-              <div className="text-xs text-muted-foreground">Chat with us on Discord</div>
+              <div className="text-xs text-muted-foreground">
+                Chat with us on Discord
+              </div>
             </div>
           </a>
           <div className="space-y-2">
@@ -157,7 +164,9 @@ export function BugReportWidget() {
             <Checkbox
               id="include-screenshot"
               checked={includeScreenshot}
-              onCheckedChange={(checked) => setIncludeScreenshot(checked === true)}
+              onCheckedChange={(checked) =>
+                setIncludeScreenshot(checked === true)
+              }
               disabled={isPending}
             />
             <Label htmlFor="include-screenshot" className="cursor-pointer">
@@ -170,7 +179,7 @@ export function BugReportWidget() {
             disabled={isPending || description.trim().length < 10}
             className="w-full"
           >
-            {isPending ? 'Submitting...' : 'Submit Bug Report'}
+            {isPending ? "Submitting..." : "Submit Bug Report"}
           </Button>
         </div>
       </SheetContent>

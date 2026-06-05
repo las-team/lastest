@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -11,13 +11,25 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
-import { CSS } from '@dnd-kit/utilities';
-import { Upload, Check, X, Image as ImageIcon, GripVertical, Link2, Loader2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { assignPlannedToStep, unassignPlannedFromStep, deletePlannedScreenshot } from '@/server/actions/planned-screenshots';
-import { toast } from 'sonner';
-import type { ScreenshotGroup } from '@/server/actions/tests';
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Upload,
+  Check,
+  X,
+  Image as ImageIcon,
+  GripVertical,
+  Link2,
+  Loader2,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  assignPlannedToStep,
+  unassignPlannedFromStep,
+  deletePlannedScreenshot,
+} from "@/server/actions/planned-screenshots";
+import { toast } from "sonner";
+import type { ScreenshotGroup } from "@/server/actions/tests";
 
 interface PlannedScreenshot {
   id: string;
@@ -50,11 +62,11 @@ function extractStepsFromGroups(groups: ScreenshotGroup[]): StepInfo[] {
   const steps: StepInfo[] = [];
 
   for (const path of latestGroup.screenshots) {
-    const filename = path.split('/').pop() || '';
+    const filename = path.split("/").pop() || "";
     // Extract label from filename (after runId-testId-)
-    const parts = filename.split('-');
+    const parts = filename.split("-");
     // Skip first 10 parts (timestamp segments) and get the label
-    const label = parts.slice(10).join('-').replace('.png', '') || 'screenshot';
+    const label = parts.slice(10).join("-").replace(".png", "") || "screenshot";
     steps.push({ label, imagePath: path });
   }
 
@@ -75,7 +87,7 @@ function DraggablePlannedItem({
 }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: screenshot.id,
-    data: { type: 'planned', screenshot },
+    data: { type: "planned", screenshot },
   });
 
   const style = {
@@ -116,7 +128,7 @@ function DraggablePlannedItem({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={screenshot.imagePath}
-            alt={screenshot.name || 'Planned'}
+            alt={screenshot.name || "Planned"}
             className="w-full h-16 object-cover rounded border"
           />
         </div>
@@ -143,14 +155,14 @@ function DroppableStepSlot({
 }) {
   const { setNodeRef } = useDroppable({
     id: `step-${step.label}`,
-    data: { type: 'step', step },
+    data: { type: "step", step },
   });
 
   return (
     <div
       ref={setNodeRef}
       className={`border rounded-lg p-3 transition-colors ${
-        isOver ? 'border-purple-500 bg-purple-50' : 'border-border'
+        isOver ? "border-purple-500 bg-purple-50" : "border-border"
       }`}
     >
       <div className="flex gap-3">
@@ -175,12 +187,14 @@ function DroppableStepSlot({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <Link2 className="h-3 w-3 text-green-600" />
-                  <span className="text-xs font-medium text-green-700">Matched</span>
+                  <span className="text-xs font-medium text-green-700">
+                    Matched
+                  </span>
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={matchedPlanned.imagePath}
-                  alt={matchedPlanned.name || 'Planned'}
+                  alt={matchedPlanned.name || "Planned"}
                   className="w-full h-12 object-cover rounded border mt-1"
                 />
               </div>
@@ -209,7 +223,7 @@ function DroppableStepSlot({
           ) : (
             <div
               className={`h-full min-h-[60px] border-2 border-dashed rounded-lg flex items-center justify-center ${
-                isOver ? 'border-purple-400 bg-purple-50' : 'border-muted'
+                isOver ? "border-purple-400 bg-purple-50" : "border-muted"
               }`}
             >
               <p className="text-xs text-muted-foreground text-center px-2">
@@ -239,41 +253,41 @@ function InlineUploader({
 
   const handleUpload = async (file: File) => {
     // Validate file
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Use PNG, JPEG, or WebP.');
+      toast.error("Invalid file type. Use PNG, JPEG, or WebP.");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast.error('File too large. Max 10MB.');
+      toast.error("File too large. Max 10MB.");
       return;
     }
 
     setIsUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
-      formData.append('repositoryId', repositoryId);
-      formData.append('testId', testId);
+      formData.append("file", file);
+      formData.append("repositoryId", repositoryId);
+      formData.append("testId", testId);
 
-      const response = await fetch('/api/planned-screenshots/upload', {
-        method: 'POST',
+      const response = await fetch("/api/planned-screenshots/upload", {
+        method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
         const result = await response.json();
-        throw new Error(result.error || 'Upload failed');
+        throw new Error(result.error || "Upload failed");
       }
 
-      toast.success('Screenshot uploaded');
+      toast.success("Screenshot uploaded");
       onUploadComplete();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        fileInputRef.current.value = "";
       }
     }
   };
@@ -292,15 +306,18 @@ function InlineUploader({
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
       onClick={() => !isUploading && fileInputRef.current?.click()}
       className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
         isDragging
-          ? 'border-purple-500 bg-purple-50'
-          : 'border-muted hover:border-purple-400 hover:bg-purple-50/50'
-      } ${isUploading ? 'opacity-50 cursor-wait' : ''}`}
+          ? "border-purple-500 bg-purple-50"
+          : "border-muted hover:border-purple-400 hover:bg-purple-50/50"
+      } ${isUploading ? "opacity-50 cursor-wait" : ""}`}
     >
       {isUploading ? (
         <>
@@ -344,7 +361,7 @@ export function StepScreenshotMatcher({
       activationConstraint: {
         distance: 8,
       },
-    })
+    }),
   );
 
   const steps = extractStepsFromGroups(screenshotGroups);
@@ -376,8 +393,10 @@ export function StepScreenshotMatcher({
 
     if (!over) return;
 
-    const overData = over.data.current as { type: string; step: StepInfo } | undefined;
-    if (overData?.type !== 'step') return;
+    const overData = over.data.current as
+      | { type: string; step: StepInfo }
+      | undefined;
+    if (overData?.type !== "step") return;
 
     const plannedId = active.id as string;
     const stepLabel = overData.step.label;
@@ -389,10 +408,10 @@ export function StepScreenshotMatcher({
         toast.success(`Matched to step: ${stepLabel}`);
         onUpdate?.();
       } else {
-        toast.error('Failed to assign screenshot');
+        toast.error("Failed to assign screenshot");
       }
     } catch {
-      toast.error('Failed to assign screenshot');
+      toast.error("Failed to assign screenshot");
     } finally {
       setIsAssigning(false);
     }
@@ -403,13 +422,13 @@ export function StepScreenshotMatcher({
     try {
       const result = await unassignPlannedFromStep(plannedId);
       if (result.success) {
-        toast.success('Match removed');
+        toast.success("Match removed");
         onUpdate?.();
       } else {
-        toast.error('Failed to remove match');
+        toast.error("Failed to remove match");
       }
     } catch {
-      toast.error('Failed to remove match');
+      toast.error("Failed to remove match");
     } finally {
       setIsAssigning(false);
     }
@@ -419,10 +438,10 @@ export function StepScreenshotMatcher({
     setDeletingId(plannedId);
     try {
       await deletePlannedScreenshot(plannedId);
-      toast.success('Screenshot deleted');
+      toast.success("Screenshot deleted");
       onUpdate?.();
     } catch {
-      toast.error('Failed to delete screenshot');
+      toast.error("Failed to delete screenshot");
     } finally {
       setDeletingId(null);
     }
@@ -481,7 +500,9 @@ export function StepScreenshotMatcher({
                     isOver={overId === `step-${step.label}`}
                     onUnmatch={handleUnmatch}
                     onDeletePlanned={handleDelete}
-                    isDeletingPlanned={deletingId === matchedByStep.get(step.label)?.id}
+                    isDeletingPlanned={
+                      deletingId === matchedByStep.get(step.label)?.id
+                    }
                   />
                 ))}
               </div>
@@ -535,7 +556,7 @@ export function StepScreenshotMatcher({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={activePlanned.imagePath}
-                  alt={activePlanned.name || 'Planned'}
+                  alt={activePlanned.name || "Planned"}
                   className="w-24 h-16 object-cover rounded border"
                 />
               </div>

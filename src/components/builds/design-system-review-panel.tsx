@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Verify-page graphical review of the design-system layer. Mirrors the
@@ -15,15 +15,15 @@
  *   - buildDesignSystem.tokenUsage   — aggregated on-token usage counts
  *   - buildDesignSystem.violations   — off-token rows with nearest match
  */
-import { useMemo } from 'react';
+import { useMemo } from "react";
 import type {
   DesignSystemConfig,
   DesignSystemTokenUsage,
   DesignRoleToken,
   DesignTokenCategory,
-} from '@/lib/db/schema';
-import type { BuildDesignSystemViolationRow } from '@/lib/db/queries/builds';
-import { cn } from '@/lib/utils';
+} from "@/lib/db/schema";
+import type { BuildDesignSystemViolationRow } from "@/lib/db/queries/builds";
+import { cn } from "@/lib/utils";
 
 interface DesignSystemReviewPanelProps {
   config: DesignSystemConfig;
@@ -50,7 +50,11 @@ export function DesignSystemReviewPanel({
   // Group violations by category so each section renders its own extras.
   const violationsByCategory = useMemo(() => {
     const m: Record<DesignTokenCategory, BuildDesignSystemViolationRow[]> = {
-      color: [], 'border-radius': [], 'font-family': [], 'font-size': [], spacing: [],
+      color: [],
+      "border-radius": [],
+      "font-family": [],
+      "font-size": [],
+      spacing: [],
     };
     for (const v of violations) {
       if (m[v.category]) m[v.category].push(v);
@@ -65,13 +69,33 @@ export function DesignSystemReviewPanel({
   // Per-category headline counts shown on each section title.
   const headline = useMemo(() => {
     return {
-      color: countSection(groups.brandPalette, tokenUsage.color, violationsByCategory.color),
+      color: countSection(
+        groups.brandPalette,
+        tokenUsage.color,
+        violationsByCategory.color,
+      ),
       surfaces: countSection(groups.surfaces, tokenUsage.color, []),
       semantic: countSection(groups.semantic, tokenUsage.color, []),
-      radii: countSection(groups.radii, tokenUsage['border-radius'], violationsByCategory['border-radius']),
-      spacing: countSection(groups.spacing, tokenUsage.spacing, violationsByCategory.spacing),
-      typeScale: countSection(groups.typeScale, tokenUsage['font-size'], violationsByCategory['font-size']),
-      fonts: countSection(groups.fonts, tokenUsage['font-family'], violationsByCategory['font-family']),
+      radii: countSection(
+        groups.radii,
+        tokenUsage["border-radius"],
+        violationsByCategory["border-radius"],
+      ),
+      spacing: countSection(
+        groups.spacing,
+        tokenUsage.spacing,
+        violationsByCategory.spacing,
+      ),
+      typeScale: countSection(
+        groups.typeScale,
+        tokenUsage["font-size"],
+        violationsByCategory["font-size"],
+      ),
+      fonts: countSection(
+        groups.fonts,
+        tokenUsage["font-family"],
+        violationsByCategory["font-family"],
+      ),
     };
   }, [groups, tokenUsage, violationsByCategory]);
 
@@ -84,7 +108,10 @@ export function DesignSystemReviewPanel({
           sublabel={`${headline.color.used} of ${headline.color.total} used`}
           extraCount={headline.color.extras}
         >
-          <BrandPaletteRow tokens={groups.brandPalette} usage={tokenUsage.color} />
+          <BrandPaletteRow
+            tokens={groups.brandPalette}
+            usage={tokenUsage.color}
+          />
           {violationsByCategory.color.length > 0 && (
             <ExtrasRow rows={violationsByCategory.color} kind="color" />
           )}
@@ -95,12 +122,18 @@ export function DesignSystemReviewPanel({
       {(groups.semantic?.length || groups.surfaces?.length) && (
         <Section
           title="Semantic + surface colors"
-          sublabel={`${(headline.semantic.used + headline.surfaces.used)} of ${(headline.semantic.total + headline.surfaces.total)} used`}
+          sublabel={`${headline.semantic.used + headline.surfaces.used} of ${headline.semantic.total + headline.surfaces.total} used`}
         >
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {[...(groups.semantic ?? []), ...(groups.surfaces ?? [])].map((t) => (
-              <ColorRowTile key={t.name} token={t} usage={tokenUsage.color?.[t.value] ?? 0} />
-            ))}
+            {[...(groups.semantic ?? []), ...(groups.surfaces ?? [])].map(
+              (t) => (
+                <ColorRowTile
+                  key={t.name}
+                  token={t}
+                  usage={tokenUsage.color?.[t.value] ?? 0}
+                />
+              ),
+            )}
           </div>
         </Section>
       )}
@@ -114,11 +147,18 @@ export function DesignSystemReviewPanel({
         >
           <div className="flex items-end gap-4 flex-wrap">
             {groups.radii.map((r) => (
-              <RadiusTile key={r.name} token={r} usage={tokenUsage['border-radius']?.[r.value] ?? 0} />
+              <RadiusTile
+                key={r.name}
+                token={r}
+                usage={tokenUsage["border-radius"]?.[r.value] ?? 0}
+              />
             ))}
           </div>
-          {violationsByCategory['border-radius'].length > 0 && (
-            <ExtrasRow rows={violationsByCategory['border-radius']} kind="radius" />
+          {violationsByCategory["border-radius"].length > 0 && (
+            <ExtrasRow
+              rows={violationsByCategory["border-radius"]}
+              kind="radius"
+            />
           )}
         </Section>
       )}
@@ -132,7 +172,11 @@ export function DesignSystemReviewPanel({
         >
           <div className="space-y-1.5">
             {groups.spacing.map((s) => (
-              <SpacingRow key={s.name} token={s} usage={tokenUsage.spacing?.[s.value] ?? 0} />
+              <SpacingRow
+                key={s.name}
+                token={s}
+                usage={tokenUsage.spacing?.[s.value] ?? 0}
+              />
             ))}
           </div>
           {violationsByCategory.spacing.length > 0 && (
@@ -150,11 +194,15 @@ export function DesignSystemReviewPanel({
         >
           <div className="space-y-1">
             {groups.typeScale.map((t) => (
-              <TypeScaleRow key={t.name} token={t} usage={tokenUsage['font-size']?.[t.value] ?? 0} />
+              <TypeScaleRow
+                key={t.name}
+                token={t}
+                usage={tokenUsage["font-size"]?.[t.value] ?? 0}
+              />
             ))}
           </div>
-          {violationsByCategory['font-size'].length > 0 && (
-            <ExtrasRow rows={violationsByCategory['font-size']} kind="px" />
+          {violationsByCategory["font-size"].length > 0 && (
+            <ExtrasRow rows={violationsByCategory["font-size"]} kind="px" />
           )}
         </Section>
       )}
@@ -168,11 +216,15 @@ export function DesignSystemReviewPanel({
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {groups.fonts.map((f) => (
-              <TypeFamilyTile key={f.name} token={f} usage={tokenUsage['font-family']?.[f.value] ?? 0} />
+              <TypeFamilyTile
+                key={f.name}
+                token={f}
+                usage={tokenUsage["font-family"]?.[f.value] ?? 0}
+              />
             ))}
           </div>
-          {violationsByCategory['font-family'].length > 0 && (
-            <ExtrasRow rows={violationsByCategory['font-family']} kind="font" />
+          {violationsByCategory["font-family"].length > 0 && (
+            <ExtrasRow rows={violationsByCategory["font-family"]} kind="font" />
           )}
         </Section>
       )}
@@ -213,11 +265,13 @@ function Section({
       <div className="px-3 py-2 border-b bg-muted/30 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-baseline gap-2 min-w-0">
           <div className="text-sm font-semibold">{title}</div>
-          {sublabel && <div className="text-[11px] text-muted-foreground">{sublabel}</div>}
+          {sublabel && (
+            <div className="text-[11px] text-muted-foreground">{sublabel}</div>
+          )}
         </div>
         {extraCount !== undefined && extraCount > 0 && (
           <span className="text-[10px] uppercase tracking-wider font-semibold text-destructive bg-destructive/10 border border-destructive/30 rounded-full px-2 py-0.5">
-            +{extraCount} extra{extraCount === 1 ? '' : 's'}
+            +{extraCount} extra{extraCount === 1 ? "" : "s"}
           </span>
         )}
       </div>
@@ -245,33 +299,49 @@ function BrandPaletteRow({
           <div
             key={t.name}
             className={cn(
-              'relative rounded-md overflow-hidden border h-28 flex flex-col justify-between p-3 transition-opacity',
-              !used && 'opacity-40 grayscale',
+              "relative rounded-md overflow-hidden border h-28 flex flex-col justify-between p-3 transition-opacity",
+              !used && "opacity-40 grayscale",
             )}
             style={{ backgroundColor: t.value }}
-            title={used ? `Used on ${n} element${n === 1 ? '' : 's'}` : 'Not rendered in this build'}
+            title={
+              used
+                ? `Used on ${n} element${n === 1 ? "" : "s"}`
+                : "Not rendered in this build"
+            }
           >
             <div
               className={cn(
-                'text-[10px] font-mono uppercase tracking-widest font-semibold flex items-center justify-between gap-1',
-                dark ? 'text-white/85' : 'text-black/70',
+                "text-[10px] font-mono uppercase tracking-widest font-semibold flex items-center justify-between gap-1",
+                dark ? "text-white/85" : "text-black/70",
               )}
             >
-              <span>{t.role ?? ''}</span>
+              <span>{t.role ?? ""}</span>
               {used && (
-                <span className={cn(
-                  'text-[9px] rounded-full px-1.5 py-0.5 font-bold',
-                  dark ? 'bg-white/20 text-white' : 'bg-black/20 text-black',
-                )}>
+                <span
+                  className={cn(
+                    "text-[9px] rounded-full px-1.5 py-0.5 font-bold",
+                    dark ? "bg-white/20 text-white" : "bg-black/20 text-black",
+                  )}
+                >
                   ×{formatCount(n)}
                 </span>
               )}
             </div>
             <div>
-              <div className={cn('text-base font-semibold leading-none', dark ? 'text-white' : 'text-black')}>
+              <div
+                className={cn(
+                  "text-base font-semibold leading-none",
+                  dark ? "text-white" : "text-black",
+                )}
+              >
                 {t.label}
               </div>
-              <div className={cn('text-[11px] font-mono mt-0.5', dark ? 'text-white/75' : 'text-black/60')}>
+              <div
+                className={cn(
+                  "text-[11px] font-mono mt-0.5",
+                  dark ? "text-white/75" : "text-black/60",
+                )}
+              >
                 {t.value.toUpperCase()}
               </div>
             </div>
@@ -282,16 +352,22 @@ function BrandPaletteRow({
   );
 }
 
-function ColorRowTile({ token, usage }: { token: DesignRoleToken; usage: number }) {
+function ColorRowTile({
+  token,
+  usage,
+}: {
+  token: DesignRoleToken;
+  usage: number;
+}) {
   const used = usage > 0;
   const dark = isDark(token.value);
   return (
     <div
       className={cn(
-        'rounded-md border overflow-hidden flex items-stretch transition-opacity',
-        !used && 'opacity-40',
+        "rounded-md border overflow-hidden flex items-stretch transition-opacity",
+        !used && "opacity-40",
       )}
-      title={used ? `Used ${usage}×` : 'Unused'}
+      title={used ? `Used ${usage}×` : "Unused"}
     >
       <div
         className="w-10 shrink-0 flex items-center justify-center"
@@ -300,90 +376,169 @@ function ColorRowTile({ token, usage }: { token: DesignRoleToken; usage: number 
         {token.role && (
           <span
             className={cn(
-              'text-[9px] font-mono uppercase font-semibold',
-              dark ? 'text-white/80' : 'text-black/60',
+              "text-[9px] font-mono uppercase font-semibold",
+              dark ? "text-white/80" : "text-black/60",
             )}
-            style={{ writingMode: 'vertical-rl' as const, transform: 'rotate(180deg)' }}
+            style={{
+              writingMode: "vertical-rl" as const,
+              transform: "rotate(180deg)",
+            }}
           >
             {token.role.slice(0, 4)}
           </span>
         )}
       </div>
       <div className="flex-1 min-w-0 px-2.5 py-2 flex flex-col justify-center">
-        <div className="text-xs font-medium font-mono truncate flex items-center justify-between gap-1" title={token.name}>
+        <div
+          className="text-xs font-medium font-mono truncate flex items-center justify-between gap-1"
+          title={token.name}
+        >
           <span className="truncate">{token.name}</span>
-          {used && <span className="text-[10px] text-foreground/80 shrink-0">×{formatCount(usage)}</span>}
+          {used && (
+            <span className="text-[10px] text-foreground/80 shrink-0">
+              ×{formatCount(usage)}
+            </span>
+          )}
         </div>
-        <div className="text-[10px] text-muted-foreground font-mono">{token.value.toUpperCase()}</div>
+        <div className="text-[10px] text-muted-foreground font-mono">
+          {token.value.toUpperCase()}
+        </div>
       </div>
     </div>
   );
 }
 
-function RadiusTile({ token, usage }: { token: DesignRoleToken; usage: number }) {
+function RadiusTile({
+  token,
+  usage,
+}: {
+  token: DesignRoleToken;
+  usage: number;
+}) {
   const used = usage > 0;
   const px = Math.min(parseFloat(token.value) || 0, 28);
   return (
     <div
-      className={cn('flex flex-col items-center gap-1.5 min-w-[64px] transition-opacity', !used && 'opacity-40')}
-      title={used ? `Used ${usage}×` : 'Unused'}
+      className={cn(
+        "flex flex-col items-center gap-1.5 min-w-[64px] transition-opacity",
+        !used && "opacity-40",
+      )}
+      title={used ? `Used ${usage}×` : "Unused"}
     >
       <div
         className="w-12 h-12 bg-primary/15 border-2 border-primary/40"
         style={{ borderRadius: `${px}px` }}
       />
-      <div className="text-[11px] font-mono">{token.name.replace(/^--/, '')}</div>
+      <div className="text-[11px] font-mono">
+        {token.name.replace(/^--/, "")}
+      </div>
       <div className="text-[10px] text-muted-foreground font-mono">
-        {token.value} {used && <span className="text-foreground/80">· ×{formatCount(usage)}</span>}
+        {token.value}{" "}
+        {used && (
+          <span className="text-foreground/80">· ×{formatCount(usage)}</span>
+        )}
       </div>
     </div>
   );
 }
 
-function SpacingRow({ token, usage }: { token: DesignRoleToken; usage: number }) {
+function SpacingRow({
+  token,
+  usage,
+}: {
+  token: DesignRoleToken;
+  usage: number;
+}) {
   const used = usage > 0;
   const px = parseFloat(token.value) || 0;
   return (
     <div
-      className={cn('flex items-center gap-3 transition-opacity', !used && 'opacity-40')}
-      title={used ? `Used ${usage}×` : 'Unused'}
+      className={cn(
+        "flex items-center gap-3 transition-opacity",
+        !used && "opacity-40",
+      )}
+      title={used ? `Used ${usage}×` : "Unused"}
     >
-      <div className="font-mono text-[11px] w-20 shrink-0 truncate">{token.name.replace(/^--/, '')}</div>
-      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">{token.value}</div>
-      <div className="bg-primary/30 h-3 rounded-sm" style={{ width: `${Math.min(px, 320)}px` }} />
-      {used && <div className="text-[10px] text-muted-foreground ml-auto shrink-0">×{formatCount(usage)}</div>}
+      <div className="font-mono text-[11px] w-20 shrink-0 truncate">
+        {token.name.replace(/^--/, "")}
+      </div>
+      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">
+        {token.value}
+      </div>
+      <div
+        className="bg-primary/30 h-3 rounded-sm"
+        style={{ width: `${Math.min(px, 320)}px` }}
+      />
+      {used && (
+        <div className="text-[10px] text-muted-foreground ml-auto shrink-0">
+          ×{formatCount(usage)}
+        </div>
+      )}
     </div>
   );
 }
 
-function TypeScaleRow({ token, usage }: { token: DesignRoleToken; usage: number }) {
+function TypeScaleRow({
+  token,
+  usage,
+}: {
+  token: DesignRoleToken;
+  usage: number;
+}) {
   const used = usage > 0;
   const px = parseFloat(token.value) || 14;
   return (
     <div
-      className={cn('flex items-baseline gap-3 py-1 border-b last:border-0 transition-opacity', !used && 'opacity-40')}
-      title={used ? `Used ${usage}×` : 'Unused'}
+      className={cn(
+        "flex items-baseline gap-3 py-1 border-b last:border-0 transition-opacity",
+        !used && "opacity-40",
+      )}
+      title={used ? `Used ${usage}×` : "Unused"}
     >
-      <div className="font-mono text-[10px] text-muted-foreground w-16 shrink-0">{token.name.replace(/^--/, '')}</div>
-      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">{token.value}</div>
-      <div className="truncate flex-1" style={{ fontSize: `${Math.min(px, 42)}px`, lineHeight: 1.1 }}>
+      <div className="font-mono text-[10px] text-muted-foreground w-16 shrink-0">
+        {token.name.replace(/^--/, "")}
+      </div>
+      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">
+        {token.value}
+      </div>
+      <div
+        className="truncate flex-1"
+        style={{ fontSize: `${Math.min(px, 42)}px`, lineHeight: 1.1 }}
+      >
         The quick brown fox
       </div>
-      {used && <div className="text-[10px] text-muted-foreground shrink-0">×{formatCount(usage)}</div>}
+      {used && (
+        <div className="text-[10px] text-muted-foreground shrink-0">
+          ×{formatCount(usage)}
+        </div>
+      )}
     </div>
   );
 }
 
-function TypeFamilyTile({ token, usage }: { token: DesignRoleToken; usage: number }) {
+function TypeFamilyTile({
+  token,
+  usage,
+}: {
+  token: DesignRoleToken;
+  usage: number;
+}) {
   const used = usage > 0;
   return (
     <div
-      className={cn('rounded-md border p-3 transition-opacity', !used && 'opacity-40')}
-      title={used ? `Used ${usage}×` : 'Unused'}
+      className={cn(
+        "rounded-md border p-3 transition-opacity",
+        !used && "opacity-40",
+      )}
+      title={used ? `Used ${usage}×` : "Unused"}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{token.label}</div>
-        {used && <div className="text-[10px] font-medium">×{formatCount(usage)}</div>}
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+          {token.label}
+        </div>
+        {used && (
+          <div className="text-[10px] font-medium">×{formatCount(usage)}</div>
+        )}
       </div>
       <div
         className="text-2xl mt-1 truncate"
@@ -392,7 +547,9 @@ function TypeFamilyTile({ token, usage }: { token: DesignRoleToken; usage: numbe
       >
         Aa
       </div>
-      <div className="text-[11px] font-mono text-muted-foreground mt-1 truncate">{token.value}</div>
+      <div className="text-[11px] font-mono text-muted-foreground mt-1 truncate">
+        {token.value}
+      </div>
     </div>
   );
 }
@@ -404,7 +561,7 @@ function ExtrasRow({
   kind,
 }: {
   rows: BuildDesignSystemViolationRow[];
-  kind: 'color' | 'radius' | 'px' | 'font';
+  kind: "color" | "radius" | "px" | "font";
 }) {
   return (
     <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
@@ -430,7 +587,7 @@ function ExtraTile({
   kind,
 }: {
   row: BuildDesignSystemViolationRow;
-  kind: 'color' | 'radius' | 'px' | 'font';
+  kind: "color" | "radius" | "px" | "font";
 }) {
   return (
     <div className="rounded border bg-background px-2.5 py-2 flex items-center gap-2">
@@ -438,7 +595,8 @@ function ExtraTile({
       <div className="min-w-0 flex-1">
         <div className="font-mono text-[11px] truncate">{row.actual}</div>
         <div className="text-[10px] text-muted-foreground truncate">
-          {row.property} · {row.totalNodes} node{row.totalNodes === 1 ? '' : 's'}
+          {row.property} · {row.totalNodes} node
+          {row.totalNodes === 1 ? "" : "s"}
         </div>
       </div>
       {row.expected && (
@@ -447,9 +605,13 @@ function ExtraTile({
           <div className="flex items-center gap-1.5 min-w-0">
             <ExtraSwatch value={row.expected} kind={kind} />
             <div className="min-w-0">
-              <div className="font-mono text-[11px] truncate">{row.expected}</div>
+              <div className="font-mono text-[11px] truncate">
+                {row.expected}
+              </div>
               {row.expectedName && (
-                <div className="text-[10px] text-muted-foreground truncate">{row.expectedName}</div>
+                <div className="text-[10px] text-muted-foreground truncate">
+                  {row.expectedName}
+                </div>
               )}
             </div>
           </div>
@@ -459,8 +621,14 @@ function ExtraTile({
   );
 }
 
-function ExtraSwatch({ value, kind }: { value: string; kind: 'color' | 'radius' | 'px' | 'font' }) {
-  if (kind === 'color') {
+function ExtraSwatch({
+  value,
+  kind,
+}: {
+  value: string;
+  kind: "color" | "radius" | "px" | "font";
+}) {
+  if (kind === "color") {
     return (
       <span
         className="inline-block w-6 h-6 rounded border border-border shrink-0"
@@ -468,7 +636,7 @@ function ExtraSwatch({ value, kind }: { value: string; kind: 'color' | 'radius' 
       />
     );
   }
-  if (kind === 'radius') {
+  if (kind === "radius") {
     const px = Math.min(parseFloat(value) || 0, 16);
     return (
       <span
@@ -477,11 +645,14 @@ function ExtraSwatch({ value, kind }: { value: string; kind: 'color' | 'radius' 
       />
     );
   }
-  if (kind === 'px') {
+  if (kind === "px") {
     return (
       <span
         className="inline-block bg-primary/30 h-3 rounded-sm shrink-0"
-        style={{ width: `${Math.min(parseFloat(value) || 0, 56)}px`, minWidth: 4 }}
+        style={{
+          width: `${Math.min(parseFloat(value) || 0, 56)}px`,
+          minWidth: 4,
+        }}
       />
     );
   }

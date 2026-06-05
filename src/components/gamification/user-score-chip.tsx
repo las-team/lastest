@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { Star, Zap } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { getViewerGamificationSnapshot } from '@/server/actions/gamification';
+import { useEffect, useState } from "react";
+import { Star, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { getViewerGamificationSnapshot } from "@/server/actions/gamification";
 
 interface Snapshot {
   seasonId: string;
@@ -12,7 +12,12 @@ interface Snapshot {
   testsCreated: number;
   regressionsCaught: number;
   flakesIncurred: number;
-  blitz: { id: string; name: string; multiplier: number; endsAt: Date | null } | null;
+  blitz: {
+    id: string;
+    name: string;
+    multiplier: number;
+    endsAt: Date | null;
+  } | null;
 }
 
 function useScoreSnapshot() {
@@ -65,30 +70,40 @@ export function InlineScore({
   if (!snapshot) return null;
 
   const numberColor = active
-    ? 'text-primary-foreground'
+    ? "text-primary-foreground"
     : snapshot.blitz
-      ? 'text-yellow-500'
-      : 'text-primary';
+      ? "text-yellow-500"
+      : "text-primary";
 
   return (
     <span
-      className={cn('flex items-center gap-1 font-mono text-xs tabular-nums', className)}
+      className={cn(
+        "flex items-center gap-1 font-mono text-xs tabular-nums",
+        className,
+      )}
       title={`Score — Season: ${snapshot.seasonName}`}
       aria-label="Score"
     >
-      <Star className={cn('h-3 w-3 shrink-0', numberColor)} aria-hidden="true" />
+      <Star
+        className={cn("h-3 w-3 shrink-0", numberColor)}
+        aria-hidden="true"
+      />
       <span
         className={cn(
-          'font-bold tabular-nums rounded px-1',
+          "font-bold tabular-nums rounded px-1",
           numberColor,
-          pulse && 'ring-2 ring-primary shadow-[0_0_12px_rgba(250,204,21,0.55)]',
+          pulse &&
+            "ring-2 ring-primary shadow-[0_0_12px_rgba(250,204,21,0.55)]",
         )}
       >
         {snapshot.total.toLocaleString()}
       </span>
       {snapshot.blitz && (
         <Zap
-          className={cn('h-3 w-3 animate-pulse', active ? 'text-primary-foreground' : 'text-yellow-500')}
+          className={cn(
+            "h-3 w-3 animate-pulse",
+            active ? "text-primary-foreground" : "text-yellow-500",
+          )}
           aria-label="Bug Blitz active"
         />
       )}

@@ -3,9 +3,9 @@
  * Runs a 60-second interval that checks for due schedules and triggers builds.
  */
 
-import * as queries from '@/lib/db/queries';
-import { getNextRunTime } from './cron';
-import { processLaunchCohorts } from '@/lib/launch/cohort-engine';
+import * as queries from "@/lib/db/queries";
+import { getNextRunTime } from "./cron";
+import { processLaunchCohorts } from "@/lib/launch/cohort-engine";
 
 let started = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -17,8 +17,8 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
  */
 export function ensureSchedulerStarted() {
   if (started) return;
-  if (process.env.DISABLE_SCHEDULER === 'true') {
-    console.log('[scheduler] Disabled via DISABLE_SCHEDULER=true');
+  if (process.env.DISABLE_SCHEDULER === "true") {
+    console.log("[scheduler] Disabled via DISABLE_SCHEDULER=true");
     started = true;
     return;
   }
@@ -28,21 +28,21 @@ export function ensureSchedulerStarted() {
     try {
       await processDueSchedules();
     } catch (error) {
-      console.error('[scheduler] Error processing due schedules:', error);
+      console.error("[scheduler] Error processing due schedules:", error);
     }
     try {
       await processLaunchCohorts();
     } catch (error) {
-      console.error('[scheduler] Error processing launch cohorts:', error);
+      console.error("[scheduler] Error processing launch cohorts:", error);
     }
   }, 60_000); // Check every 60 seconds
 
   // Don't keep process alive just for scheduler
-  if (intervalId && typeof intervalId === 'object' && 'unref' in intervalId) {
+  if (intervalId && typeof intervalId === "object" && "unref" in intervalId) {
     intervalId.unref();
   }
 
-  console.log('[scheduler] Build scheduler started (60s interval)');
+  console.log("[scheduler] Build scheduler started (60s interval)");
 }
 
 export function stopScheduler() {
@@ -68,12 +68,13 @@ async function processDueSchedules() {
         const nextRunAt = getNextRunTime(schedule.cronExpression, new Date());
 
         // Import dynamically to avoid circular dependencies
-        const { createAndRunBuildFromCI } = await import('@/server/actions/builds');
+        const { createAndRunBuildFromCI } =
+          await import("@/server/actions/builds");
 
         const result = await createAndRunBuildFromCI({
-          triggerType: 'scheduled',
+          triggerType: "scheduled",
           repositoryId: schedule.repositoryId,
-          runnerId: schedule.runnerId || 'local',
+          runnerId: schedule.runnerId || "local",
           gitBranch: schedule.gitBranch || undefined,
         });
 
@@ -81,9 +82,14 @@ async function processDueSchedules() {
           await queries.markScheduleRun(schedule.id, result.buildId, nextRunAt);
         }
 
-        console.log(`[scheduler] Triggered build ${result.buildId} for schedule "${schedule.name}"`);
+        console.log(
+          `[scheduler] Triggered build ${result.buildId} for schedule "${schedule.name}"`,
+        );
       } catch (error) {
-        console.error(`[scheduler] Failed to run schedule "${schedule.name}":`, error);
+        console.error(
+          `[scheduler] Failed to run schedule "${schedule.name}":`,
+          error,
+        );
         await queries.incrementScheduleFailures(schedule.id);
 
         // Still advance nextRunAt so we don't retry immediately

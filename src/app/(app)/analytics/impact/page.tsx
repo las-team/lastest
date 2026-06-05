@@ -1,5 +1,5 @@
-import { ImpactTimelineClient } from '@/components/analytics/impact-timeline-client';
-import { getCurrentSession } from '@/lib/auth';
+import { ImpactTimelineClient } from "@/components/analytics/impact-timeline-client";
+import { getCurrentSession } from "@/lib/auth";
 import {
   getSelectedRepository,
   getIssueTimeline,
@@ -7,16 +7,18 @@ import {
   getPRAuthors,
   getImpactSummary,
   getGithubAccountByTeam,
-} from '@/lib/db/queries';
-import { syncGithubIssues } from '@/lib/integrations/github-issues-sync';
+} from "@/lib/db/queries";
+import { syncGithubIssues } from "@/lib/integrations/github-issues-sync";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export default async function ImpactPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
+  const selectedRepo = teamId
+    ? await getSelectedRepository(userId, teamId)
+    : null;
 
   let initialData = null;
   if (selectedRepo && teamId) {
@@ -27,7 +29,7 @@ export default async function ImpactPage() {
         try {
           await syncGithubIssues(selectedRepo.id, githubAccount.accessToken);
         } catch (syncError) {
-          console.error('[impact] Issue sync failed:', syncError);
+          console.error("[impact] Issue sync failed:", syncError);
         }
       }
 
@@ -40,7 +42,7 @@ export default async function ImpactPage() {
 
       initialData = { timeline, mergedPRs, authors, summary };
     } catch (error) {
-      console.error('[impact] Failed to load initial data:', error);
+      console.error("[impact] Failed to load initial data:", error);
     }
   }
 

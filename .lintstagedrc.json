@@ -1,7 +1,7 @@
 {
-  "{*.ts,*.js,*.tsx,*.jsx,*.mjs,*.json,*.css,*.scss}": [
-    "prettier --list-different",
-    "tsc --noEmit",
-    "eslint"
+  "{*.ts,*.tsx}": ["pnpm prettier --list-different", "pnpm eslint"],
+  "{*.js,*.jsx,*.json,*.css,*.scss,*.mjs}": [
+    "pnpm prettier --list-different",
+    "pnpm eslint"
   ]
 }

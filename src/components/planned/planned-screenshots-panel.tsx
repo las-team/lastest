@@ -1,9 +1,16 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Image as ImageIcon, Trash2, ExternalLink, Plus, X, Eye } from 'lucide-react';
-import { PlannedScreenshotUploader } from './planned-screenshot-uploader';
-import { deletePlannedScreenshot } from '@/server/actions/planned-screenshots';
+import { useState } from "react";
+import {
+  Image as ImageIcon,
+  Trash2,
+  ExternalLink,
+  Plus,
+  X,
+  Eye,
+} from "lucide-react";
+import { PlannedScreenshotUploader } from "./planned-screenshot-uploader";
+import { deletePlannedScreenshot } from "@/server/actions/planned-screenshots";
 
 interface PlannedScreenshot {
   id: string;
@@ -28,21 +35,23 @@ export function PlannedScreenshotsPanel({
   testId,
   plannedScreenshots,
   onUpdate,
-  className = '',
+  className = "",
 }: PlannedScreenshotsPanelProps) {
   const [showUploader, setShowUploader] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<PlannedScreenshot | null>(null);
+  const [selectedImage, setSelectedImage] = useState<PlannedScreenshot | null>(
+    null,
+  );
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this planned screenshot?')) return;
+    if (!confirm("Delete this planned screenshot?")) return;
 
     setIsDeleting(id);
     try {
       await deletePlannedScreenshot(id);
       onUpdate?.();
     } catch (error) {
-      console.error('Failed to delete:', error);
+      console.error("Failed to delete:", error);
     } finally {
       setIsDeleting(null);
     }
@@ -105,7 +114,7 @@ export function PlannedScreenshotsPanel({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={screenshot.imagePath}
-                  alt={screenshot.name || 'Planned screenshot'}
+                  alt={screenshot.name || "Planned screenshot"}
                   loading="lazy"
                   decoding="async"
                   className="w-full h-full object-cover"
@@ -155,7 +164,9 @@ export function PlannedScreenshotsPanel({
         <div className="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">
           <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-40" />
           <p className="text-sm">No planned screenshots</p>
-          <p className="text-xs mt-1">Upload design mockups to compare against actual screenshots</p>
+          <p className="text-xs mt-1">
+            Upload design mockups to compare against actual screenshots
+          </p>
         </div>
       ) : null}
 
@@ -173,10 +184,12 @@ export function PlannedScreenshotsPanel({
             <div className="flex items-center justify-between p-4 border-b">
               <div>
                 <h4 className="font-medium">
-                  {selectedImage.name || 'Planned Screenshot'}
+                  {selectedImage.name || "Planned Screenshot"}
                 </h4>
                 {selectedImage.stepLabel && (
-                  <p className="text-sm text-gray-500">Step: {selectedImage.stepLabel}</p>
+                  <p className="text-sm text-gray-500">
+                    Step: {selectedImage.stepLabel}
+                  </p>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -205,7 +218,7 @@ export function PlannedScreenshotsPanel({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={selectedImage.imagePath}
-                alt={selectedImage.name || 'Planned screenshot'}
+                alt={selectedImage.name || "Planned screenshot"}
                 className="max-w-full"
               />
               {selectedImage.description && (

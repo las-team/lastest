@@ -1,32 +1,35 @@
-'use client';
+"use client";
 
-import { useCallback, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
-import { extractUserStoriesFromUpload } from '@/server/actions/spec-import';
-import { FileText, Loader2, Upload, X } from 'lucide-react';
-import { toast } from 'sonner';
+} from "@/components/ui/card";
+import { extractUserStoriesFromUpload } from "@/server/actions/spec-import";
+import { FileText, Loader2, Upload, X } from "lucide-react";
+import { toast } from "sonner";
 
 interface SpecPanelProps {
   repositoryId: string | undefined;
   defaultBranch?: string;
 }
 
-const ACCEPTED_TYPES = ['.md', '.txt', '.pdf', '.docx'];
+const ACCEPTED_TYPES = [".md", ".txt", ".pdf", ".docx"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelProps) {
+export function SpecPanel({
+  repositoryId,
+  defaultBranch = "main",
+}: SpecPanelProps) {
   const router = useRouter();
-  const [pastedText, setPastedText] = useState('');
+  const [pastedText, setPastedText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -82,45 +85,55 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
   const fileToBase64 = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++)
+      binary += String.fromCharCode(bytes[i]);
     return btoa(binary);
   };
 
   const handleSubmit = async () => {
     if (!repositoryId) {
-      toast.error('Select a repository first');
+      toast.error("Select a repository first");
       return;
     }
 
     const hasPaste = pastedText.trim().length > 0;
     if (!hasPaste && files.length === 0) {
-      toast.error('Paste a spec or drop a file');
+      toast.error("Paste a spec or drop a file");
       return;
     }
 
     setIsSubmitting(true);
     try {
       const encoded = await Promise.all(
-        files.map(async (file) => ({ name: file.name, content: await fileToBase64(file) })),
+        files.map(async (file) => ({
+          name: file.name,
+          content: await fileToBase64(file),
+        })),
       );
 
       if (hasPaste) {
         encoded.push({
-          name: 'pasted-spec.md',
+          name: "pasted-spec.md",
           content: btoa(unescape(encodeURIComponent(pastedText))),
         });
       }
 
-      const response = await extractUserStoriesFromUpload(encoded, repositoryId, defaultBranch);
+      const response = await extractUserStoriesFromUpload(
+        encoded,
+        repositoryId,
+        defaultBranch,
+      );
       if (response.success) {
-        toast.success('Spec import started — extraction runs in the background');
-        router.push('/');
+        toast.success(
+          "Spec import started — extraction runs in the background",
+        );
+        router.push("/");
       } else {
-        toast.error(response.error || 'Failed to start spec import');
+        toast.error(response.error || "Failed to start spec import");
       }
     } catch {
-      toast.error('Failed to start spec import');
+      toast.error("Failed to start spec import");
     } finally {
       setIsSubmitting(false);
     }
@@ -136,8 +149,9 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
               Spec-driven Agent
             </CardTitle>
             <CardDescription>
-              Paste user stories / acceptance criteria, or drop spec documents. The agent extracts
-              US/AC and generates one test per acceptance criterion in the background.
+              Paste user stories / acceptance criteria, or drop spec documents.
+              The agent extracts US/AC and generates one test per acceptance
+              criterion in the background.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -147,7 +161,9 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
                 id="spec-paste"
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
-                placeholder={'## User Story\nAs a user, I want to...\n\n### Acceptance Criteria\n- [ ] AC-1: ...'}
+                placeholder={
+                  "## User Story\nAs a user, I want to...\n\n### Acceptance Criteria\n- [ ] AC-1: ..."
+                }
                 rows={8}
                 className="font-mono text-xs"
               />
@@ -162,8 +178,8 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
                 onClick={() => inputRef.current?.click()}
                 className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
                   isDragging
-                    ? 'border-primary bg-primary/5'
-                    : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30'
+                    ? "border-primary bg-primary/5"
+                    : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
                 }`}
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
@@ -180,7 +196,7 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
                   accept=".md,.txt,.pdf,.docx"
                   onChange={(e) => {
                     if (e.target.files) addFiles(e.target.files);
-                    e.target.value = '';
+                    e.target.value = "";
                   }}
                   className="hidden"
                 />
@@ -194,7 +210,7 @@ export function SpecPanel({ repositoryId, defaultBranch = 'main' }: SpecPanelPro
                       className="flex items-center justify-between text-sm bg-muted/30 rounded px-3 py-1.5"
                     >
                       <span className="truncate">
-                        {file.name}{' '}
+                        {file.name}{" "}
                         <span className="text-muted-foreground text-xs">
                           ({(file.size / 1024).toFixed(1)} KB)
                         </span>

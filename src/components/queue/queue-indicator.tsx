@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect, useContext } from 'react';
-import { Activity } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { JobPollingContext } from './job-polling-context';
-import { QueueDropdown } from './queue-dropdown';
+import { useState, useRef, useEffect, useContext } from "react";
+import { Activity } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { JobPollingContext } from "./job-polling-context";
+import { QueueDropdown } from "./queue-dropdown";
 
 export function QueueIndicator() {
   const ctx = useContext(JobPollingContext);
@@ -18,8 +18,8 @@ export function QueueIndicator() {
         setOpen(false);
       }
     }
-    if (open) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
   const [mounted, setMounted] = useState(false);
@@ -31,12 +31,17 @@ export function QueueIndicator() {
   if (!ctx) return null;
   const { jobs } = ctx;
 
-  const activeJobs = mounted ? jobs.filter(j => j.status === 'running' || j.status === 'pending') : [];
+  const activeJobs = mounted
+    ? jobs.filter((j) => j.status === "running" || j.status === "pending")
+    : [];
   const hasActive = activeJobs.length > 0;
 
   // Aggregate progress for the indicator bar
   const avgProgress = hasActive
-    ? Math.round(activeJobs.reduce((sum, j) => sum + (j.progress ?? 0), 0) / activeJobs.length)
+    ? Math.round(
+        activeJobs.reduce((sum, j) => sum + (j.progress ?? 0), 0) /
+          activeJobs.length,
+      )
     : 100;
 
   return (
@@ -46,9 +51,13 @@ export function QueueIndicator() {
         size="sm"
         className="relative gap-2"
         onClick={() => setOpen(!open)}
-        aria-label={hasActive ? `Job queue: ${activeJobs.length} running` : 'Job queue'}
+        aria-label={
+          hasActive ? `Job queue: ${activeJobs.length} running` : "Job queue"
+        }
       >
-        <Activity className={`h-4 w-4 ${hasActive ? 'text-primary' : 'text-muted-foreground'}`} />
+        <Activity
+          className={`h-4 w-4 ${hasActive ? "text-primary" : "text-muted-foreground"}`}
+        />
         {hasActive && (
           <>
             <span className="text-xs">{activeJobs.length}</span>

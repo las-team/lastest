@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,20 +8,26 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Loader2, FileSpreadsheet, ChevronRight, ArrowLeft, Table2 } from 'lucide-react';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Loader2,
+  FileSpreadsheet,
+  ChevronRight,
+  ArrowLeft,
+  Table2,
+} from "lucide-react";
+import { toast } from "sonner";
 import {
   listAvailableSpreadsheets,
   getSpreadsheetDetails,
   previewSheetData,
   importSheetDataSource,
-} from '@/server/actions/google-sheets';
+} from "@/server/actions/google-sheets";
 
-type Step = 'list' | 'sheets' | 'preview' | 'import';
+type Step = "list" | "sheets" | "preview" | "import";
 
 interface DriveFile {
   id: string;
@@ -47,18 +53,23 @@ interface SheetDataBrowserProps {
   onClose: () => void;
 }
 
-export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrowserProps) {
-  const [step, setStep] = useState<Step>('list');
+export function SheetDataBrowser({
+  repositoryId,
+  open,
+  onClose,
+}: SheetDataBrowserProps) {
+  const [step, setStep] = useState<Step>("list");
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // Data
   const [spreadsheets, setSpreadsheets] = useState<DriveFile[]>([]);
-  const [selectedSpreadsheet, setSelectedSpreadsheet] = useState<DriveFile | null>(null);
+  const [selectedSpreadsheet, setSelectedSpreadsheet] =
+    useState<DriveFile | null>(null);
   const [sheets, setSheets] = useState<SheetTab[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<SheetTab | null>(null);
   const [previewData, setPreviewData] = useState<SheetData | null>(null);
-  const [alias, setAlias] = useState('');
+  const [alias, setAlias] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -73,10 +84,10 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
       if (result.success && result.spreadsheets) {
         setSpreadsheets(result.spreadsheets);
       } else {
-        toast.error(result.error || 'Failed to load spreadsheets');
+        toast.error(result.error || "Failed to load spreadsheets");
       }
     } catch {
-      toast.error('Failed to load spreadsheets');
+      toast.error("Failed to load spreadsheets");
     } finally {
       setLoading(false);
     }
@@ -89,12 +100,12 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
       const result = await getSpreadsheetDetails(file.id);
       if (result.success && result.info) {
         setSheets(result.info.sheets);
-        setStep('sheets');
+        setStep("sheets");
       } else {
-        toast.error(result.error || 'Failed to load sheets');
+        toast.error(result.error || "Failed to load sheets");
       }
     } catch {
-      toast.error('Failed to load sheet details');
+      toast.error("Failed to load sheet details");
     } finally {
       setLoading(false);
     }
@@ -104,21 +115,25 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
     setSelectedSheet(sheet);
     setLoading(true);
     try {
-      const result = await previewSheetData(selectedSpreadsheet!.id, sheet.title, 10);
+      const result = await previewSheetData(
+        selectedSpreadsheet!.id,
+        sheet.title,
+        10,
+      );
       if (result.success && result.data) {
         setPreviewData(result.data);
         // Auto-generate alias from sheet name
         const autoAlias = sheet.title
           .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '_')
-          .replace(/^_|_$/g, '');
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_|_$/g, "");
         setAlias(autoAlias);
-        setStep('preview');
+        setStep("preview");
       } else {
-        toast.error(result.error || 'Failed to preview data');
+        toast.error(result.error || "Failed to preview data");
       }
     } catch {
-      toast.error('Failed to load preview');
+      toast.error("Failed to load preview");
     } finally {
       setLoading(false);
     }
@@ -126,11 +141,13 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
 
   const handleImport = async () => {
     if (!alias.trim()) {
-      toast.error('Please enter an alias');
+      toast.error("Please enter an alias");
       return;
     }
     if (!/^[a-z][a-z0-9_]*$/.test(alias)) {
-      toast.error('Alias must start with a letter and contain only lowercase letters, numbers, and underscores');
+      toast.error(
+        "Alias must start with a letter and contain only lowercase letters, numbers, and underscores",
+      );
       return;
     }
 
@@ -146,24 +163,24 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
       });
 
       if (result.success) {
-        toast.success('Sheet imported successfully');
+        toast.success("Sheet imported successfully");
         onClose();
       } else {
-        toast.error(result.error || 'Failed to import');
+        toast.error(result.error || "Failed to import");
       }
     } catch {
-      toast.error('Failed to import sheet');
+      toast.error("Failed to import sheet");
     } finally {
       setImporting(false);
     }
   };
 
   const goBack = () => {
-    if (step === 'sheets') {
-      setStep('list');
+    if (step === "sheets") {
+      setStep("list");
       setSelectedSpreadsheet(null);
-    } else if (step === 'preview') {
-      setStep('sheets');
+    } else if (step === "preview") {
+      setStep("sheets");
       setSelectedSheet(null);
       setPreviewData(null);
     }
@@ -174,20 +191,28 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {step !== 'list' && (
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={goBack}>
+            {step !== "list" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={goBack}
+              >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             )}
             <Table2 className="w-5 h-5" />
-            {step === 'list' && 'Select a Spreadsheet'}
-            {step === 'sheets' && `${selectedSpreadsheet?.name} — Select Sheet`}
-            {step === 'preview' && `Preview: ${selectedSheet?.title}`}
+            {step === "list" && "Select a Spreadsheet"}
+            {step === "sheets" && `${selectedSpreadsheet?.name} — Select Sheet`}
+            {step === "preview" && `Preview: ${selectedSheet?.title}`}
           </DialogTitle>
           <DialogDescription>
-            {step === 'list' && 'Choose a Google Sheets spreadsheet to import data from'}
-            {step === 'sheets' && 'Select which sheet/tab contains your test data'}
-            {step === 'preview' && 'Review the data and set an alias for use in test scripts'}
+            {step === "list" &&
+              "Choose a Google Sheets spreadsheet to import data from"}
+            {step === "sheets" &&
+              "Select which sheet/tab contains your test data"}
+            {step === "preview" &&
+              "Review the data and set an alias for use in test scripts"}
           </DialogDescription>
         </DialogHeader>
 
@@ -199,7 +224,7 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
           ) : (
             <>
               {/* Step 1: Spreadsheet List */}
-              {step === 'list' && (
+              {step === "list" && (
                 <div className="space-y-1">
                   {spreadsheets.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
@@ -216,9 +241,12 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
                         <div className="flex items-center gap-3">
                           <FileSpreadsheet className="h-5 w-5 text-green-600 flex-shrink-0" />
                           <div>
-                            <div className="text-sm font-medium">{file.name}</div>
+                            <div className="text-sm font-medium">
+                              {file.name}
+                            </div>
                             <div className="text-xs text-muted-foreground">
-                              Modified {new Date(file.modifiedTime).toLocaleDateString()}
+                              Modified{" "}
+                              {new Date(file.modifiedTime).toLocaleDateString()}
                             </div>
                           </div>
                         </div>
@@ -230,7 +258,7 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
               )}
 
               {/* Step 2: Sheet/Tab Selection */}
-              {step === 'sheets' && (
+              {step === "sheets" && (
                 <div className="space-y-1">
                   {sheets.map((sheet) => (
                     <button
@@ -241,9 +269,12 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
                       <div className="flex items-center gap-3">
                         <Table2 className="h-4 w-4 text-blue-500 flex-shrink-0" />
                         <div>
-                          <div className="text-sm font-medium">{sheet.title}</div>
+                          <div className="text-sm font-medium">
+                            {sheet.title}
+                          </div>
                           <div className="text-xs text-muted-foreground">
-                            {sheet.rowCount} rows &times; {sheet.columnCount} columns
+                            {sheet.rowCount} rows &times; {sheet.columnCount}{" "}
+                            columns
                           </div>
                         </div>
                       </div>
@@ -254,7 +285,7 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
               )}
 
               {/* Step 3: Preview + Import */}
-              {step === 'preview' && previewData && (
+              {step === "preview" && previewData && (
                 <div className="space-y-4">
                   {/* Alias Input */}
                   <div className="space-y-2">
@@ -267,7 +298,10 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
                       className="font-mono"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Use this alias in test code: <code className="bg-muted px-1 rounded">{'{{'}sheet:{alias || 'alias'}.columnName[0]{'}}'}</code>
+                      Use this alias in test code:{" "}
+                      <code className="bg-muted px-1 rounded">
+                        {"{{"}sheet:{alias || "alias"}.columnName[0]{"}}"}
+                      </code>
                     </p>
                   </div>
 
@@ -280,9 +314,14 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b bg-muted/30">
-                            <th className="px-2 py-1.5 text-left text-muted-foreground font-medium w-8">#</th>
+                            <th className="px-2 py-1.5 text-left text-muted-foreground font-medium w-8">
+                              #
+                            </th>
                             {previewData.headers.map((h, i) => (
-                              <th key={i} className="px-2 py-1.5 text-left font-medium">
+                              <th
+                                key={i}
+                                className="px-2 py-1.5 text-left font-medium"
+                              >
                                 {h}
                               </th>
                             ))}
@@ -290,11 +329,19 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
                         </thead>
                         <tbody>
                           {previewData.rows.slice(0, 8).map((row, ri) => (
-                            <tr key={ri} className="border-b last:border-b-0 hover:bg-muted/20">
-                              <td className="px-2 py-1.5 text-muted-foreground">{ri}</td>
+                            <tr
+                              key={ri}
+                              className="border-b last:border-b-0 hover:bg-muted/20"
+                            >
+                              <td className="px-2 py-1.5 text-muted-foreground">
+                                {ri}
+                              </td>
                               {previewData.headers.map((_, ci) => (
-                                <td key={ci} className="px-2 py-1.5 max-w-[200px] truncate">
-                                  {row[ci] || ''}
+                                <td
+                                  key={ci}
+                                  className="px-2 py-1.5 max-w-[200px] truncate"
+                                >
+                                  {row[ci] || ""}
                                 </td>
                               ))}
                             </tr>
@@ -306,24 +353,28 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
 
                   {/* Reference Examples */}
                   <div className="bg-muted/30 border rounded-lg p-3 space-y-2">
-                    <div className="text-xs font-medium">Usage examples in test code:</div>
+                    <div className="text-xs font-medium">
+                      Usage examples in test code:
+                    </div>
                     <div className="space-y-1 font-mono text-xs">
                       {previewData.headers.slice(0, 3).map((h, i) => (
                         <div key={i} className="flex items-center gap-2">
                           <code className="bg-muted px-1.5 py-0.5 rounded text-blue-600">
-                            {'{{'}sheet:{alias || 'alias'}.{h}[0]{'}}'}
+                            {"{{"}sheet:{alias || "alias"}.{h}[0]{"}}"}
                           </code>
                           <span className="text-muted-foreground">→</span>
                           <span className="text-green-600">
-                            &quot;{previewData.rows[0]?.[i] || ''}&quot;
+                            &quot;{previewData.rows[0]?.[i] || ""}&quot;
                           </span>
                         </div>
                       ))}
                       <div className="flex items-center gap-2">
                         <code className="bg-muted px-1.5 py-0.5 rounded text-blue-600">
-                          {'{{'}sheet:{alias || 'alias'}.row[0]{'}}'}
+                          {"{{"}sheet:{alias || "alias"}.row[0]{"}}"}
                         </code>
-                        <span className="text-muted-foreground">→ entire row as JSON</span>
+                        <span className="text-muted-foreground">
+                          → entire row as JSON
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -333,12 +384,15 @@ export function SheetDataBrowser({ repositoryId, open, onClose }: SheetDataBrows
           )}
         </div>
 
-        {step === 'preview' && (
+        {step === "preview" && (
           <DialogFooter>
             <Button variant="outline" onClick={goBack}>
               Back
             </Button>
-            <Button onClick={handleImport} disabled={importing || !alias.trim()}>
+            <Button
+              onClick={handleImport}
+              disabled={importing || !alias.trim()}
+            >
               {importing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Import Data Source
             </Button>

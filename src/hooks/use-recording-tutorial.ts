@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY = 'lastest-recording-tutorial';
+const STORAGE_KEY = "lastest-recording-tutorial";
 const TOTAL_STEPS = 4;
 
 interface TutorialState {
@@ -10,7 +10,7 @@ interface TutorialState {
 }
 
 function loadState(): TutorialState {
-  if (typeof window === 'undefined') return { dismissed: false };
+  if (typeof window === "undefined") return { dismissed: false };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);

@@ -1,47 +1,47 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSessionCookie } from 'better-auth/cookies';
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionCookie } from "better-auth/cookies";
 
 const PUBLIC_PATHS = [
-  '/login',
-  '/register',
-  '/invite',
-  '/awards',     // "Prove your app is not AI slop" campaign landing
-  '/terms',      // Public legal pages (Google OAuth verification requires
-  '/privacy',    // these to be directly reachable as plain HTML, no auth)
-  '/cookies',
-  '/dpa',
-  '/r/',         // Public share pages
-  '/share/',     // Static share media (public/share/<slug>/...)
-  '/sitemap.xml', // Crawler discovery of /r/<slug> share pages
-  '/robots.txt',  // Crawler directives
-  '/oauth/',     // Launch OAuth authorize endpoint — the handler itself does
-                 // the auth check + /login?returnTo bounce (needs to run for
-                 // both authed token-mint and unauth redirect cases).
-  '/api/og/', // Public OG/Twitter card images for shared builds
-  '/api/badge/', // Public embeddable badge SVGs
-  '/api/auth/',
-  '/api/health',
-  '/api/webhooks/',
-  '/api/builds/',
-  '/api/runners/',
-  '/api/ws/runner',
-  '/api/embedded/register',
-  '/api/embedded/auto-register',
-  '/api/embedded/stream/ws',
-  '/api/config',
-  '/api/v1/',
-  '/api/media/',
-  '/screenshots/',
-  '/diffs/',
-  '/baselines/',
-  '/traces/',
-  '/videos/',
-  '/planned/',
-  '/bug-reports/',
-  '/_umami/',
+  "/login",
+  "/register",
+  "/invite",
+  "/awards", // "Prove your app is not AI slop" campaign landing
+  "/terms", // Public legal pages (Google OAuth verification requires
+  "/privacy", // these to be directly reachable as plain HTML, no auth)
+  "/cookies",
+  "/dpa",
+  "/r/", // Public share pages
+  "/share/", // Static share media (public/share/<slug>/...)
+  "/sitemap.xml", // Crawler discovery of /r/<slug> share pages
+  "/robots.txt", // Crawler directives
+  "/oauth/", // Launch OAuth authorize endpoint — the handler itself does
+  // the auth check + /login?returnTo bounce (needs to run for
+  // both authed token-mint and unauth redirect cases).
+  "/api/og/", // Public OG/Twitter card images for shared builds
+  "/api/badge/", // Public embeddable badge SVGs
+  "/api/auth/",
+  "/api/health",
+  "/api/webhooks/",
+  "/api/builds/",
+  "/api/runners/",
+  "/api/ws/runner",
+  "/api/embedded/register",
+  "/api/embedded/auto-register",
+  "/api/embedded/stream/ws",
+  "/api/config",
+  "/api/v1/",
+  "/api/media/",
+  "/screenshots/",
+  "/diffs/",
+  "/baselines/",
+  "/traces/",
+  "/videos/",
+  "/planned/",
+  "/bug-reports/",
+  "/_umami/",
 ];
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env.NODE_ENV !== "production";
 
 // Per-request CSP nonce. Set on the response Content-Security-Policy header
 // and on the modified request headers (x-nonce) so server components can read
@@ -77,30 +77,30 @@ function buildCsp(nonce: string): string {
     "frame-src 'self' https://trace.playwright.dev",
     "frame-ancestors 'none'",
     "form-action 'self' https://github.com https://gitlab.com",
-  ].join('; ');
+  ].join("; ");
 }
 
 // CSP belongs on HTML responses, not API or rewritten-media responses. Same
 // path-prefix list we use for the auth bypass works as a CSP bypass too — the
 // API + static-asset surfaces don't serve scripts.
 const NON_HTML_PREFIXES = [
-  '/api/',
-  '/_umami/',
-  '/screenshots/',
-  '/diffs/',
-  '/baselines/',
-  '/traces/',
-  '/videos/',
-  '/planned/',
-  '/bug-reports/',
+  "/api/",
+  "/_umami/",
+  "/screenshots/",
+  "/diffs/",
+  "/baselines/",
+  "/traces/",
+  "/videos/",
+  "/planned/",
+  "/bug-reports/",
 ];
 
 function shouldApplyCsp(pathname: string, request: NextRequest): boolean {
   if (NON_HTML_PREFIXES.some((p) => pathname.startsWith(p))) return false;
   // Skip prefetch responses — they carry RSC payloads, not full HTML, and
   // recycling a fresh nonce on every prefetch invalidates cached layouts.
-  if (request.headers.get('next-router-prefetch') !== null) return false;
-  if (request.headers.get('purpose') === 'prefetch') return false;
+  if (request.headers.get("next-router-prefetch") !== null) return false;
+  if (request.headers.get("purpose") === "prefetch") return false;
   return true;
 }
 
@@ -115,12 +115,12 @@ export default function proxy(request: NextRequest) {
   if (!isPublic) {
     const session = getSessionCookie(request);
     if (!session) {
-      const forwardedHost = request.headers.get('x-forwarded-host');
-      const forwardedProto = request.headers.get('x-forwarded-proto');
+      const forwardedHost = request.headers.get("x-forwarded-host");
+      const forwardedProto = request.headers.get("x-forwarded-proto");
       const base = forwardedHost
-        ? `${forwardedProto ?? 'https'}://${forwardedHost}`
+        ? `${forwardedProto ?? "https"}://${forwardedHost}`
         : request.url;
-      return NextResponse.redirect(new URL('/login', base));
+      return NextResponse.redirect(new URL("/login", base));
     }
   }
 
@@ -129,31 +129,31 @@ export default function proxy(request: NextRequest) {
   }
 
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set("x-nonce", nonce);
   // Mirror the policy onto request headers so Next.js can apply the nonce to
   // its own framework-emitted inline scripts during rendering.
-  requestHeaders.set('content-security-policy', csp);
+  requestHeaders.set("content-security-policy", csp);
 
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
-  response.headers.set('Content-Security-Policy', csp);
+  response.headers.set("Content-Security-Policy", csp);
   return response;
 }
 
 export const config = {
   matcher: [
     // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     // Always run for API routes
-    '/(api|trpc)(.*)',
+    "/(api|trpc)(.*)",
     // Media assets (rewritten to /api/media/*)
-    '/screenshots/:path*',
-    '/diffs/:path*',
-    '/baselines/:path*',
-    '/traces/:path*',
-    '/videos/:path*',
-    '/planned/:path*',
-    '/bug-reports/:path*',
+    "/screenshots/:path*",
+    "/diffs/:path*",
+    "/baselines/:path*",
+    "/traces/:path*",
+    "/videos/:path*",
+    "/planned/:path*",
+    "/bug-reports/:path*",
   ],
 };

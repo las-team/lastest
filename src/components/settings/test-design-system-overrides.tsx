@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Per-test Design System config card.
@@ -16,23 +16,20 @@
  * the a11y layer: per-test_result violations roll up into a build-level
  * score and drill-in panel on the verify page.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { Palette, RotateCcw, Check } from 'lucide-react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Palette, RotateCcw, Check } from "lucide-react";
+import { toast } from "sonner";
 import {
   saveTestDesignSystemFromCss,
   resetTestDesignSystemOverrides,
-} from '@/server/actions/design-system-overrides';
-import { parseDesignSystemCss } from '@/lib/design-system/tokens';
-import type {
-  DesignSystemConfig,
-  DesignTokenCategory,
-} from '@/lib/db/schema';
+} from "@/server/actions/design-system-overrides";
+import { parseDesignSystemCss } from "@/lib/design-system/tokens";
+import type { DesignSystemConfig, DesignTokenCategory } from "@/lib/db/schema";
 
 interface TestDesignSystemOverridesProps {
   testId: string;
@@ -46,11 +43,11 @@ interface TestDesignSystemOverridesProps {
 }
 
 const CATEGORY_LABELS: Record<DesignTokenCategory, string> = {
-  color: 'Colors',
-  'border-radius': 'Radii',
-  'font-family': 'Fonts',
-  'font-size': 'Type scale',
-  spacing: 'Spacing',
+  color: "Colors",
+  "border-radius": "Radii",
+  "font-family": "Fonts",
+  "font-size": "Type scale",
+  spacing: "Spacing",
 };
 
 const PLACEHOLDER = `/* Paste your design-system CSS here. Example: */
@@ -65,10 +62,20 @@ const PLACEHOLDER = `/* Paste your design-system CSS here. Example: */
   --font-sans: "Inter", system-ui, sans-serif;
 }`;
 
-function countTokens(config: Partial<DesignSystemConfig> | null | undefined): Record<DesignTokenCategory, number> {
-  const out = { color: 0, 'border-radius': 0, 'font-family': 0, 'font-size': 0, spacing: 0 } as Record<DesignTokenCategory, number>;
+function countTokens(
+  config: Partial<DesignSystemConfig> | null | undefined,
+): Record<DesignTokenCategory, number> {
+  const out = {
+    color: 0,
+    "border-radius": 0,
+    "font-family": 0,
+    "font-size": 0,
+    spacing: 0,
+  } as Record<DesignTokenCategory, number>;
   if (!config?.tokens) return out;
-  for (const [cat, list] of Object.entries(config.tokens) as Array<[DesignTokenCategory, unknown]>) {
+  for (const [cat, list] of Object.entries(config.tokens) as Array<
+    [DesignTokenCategory, unknown]
+  >) {
     if (Array.isArray(list)) out[cat] = list.length;
   }
   return out;
@@ -80,9 +87,10 @@ export function TestDesignSystemOverrides({
   repoDefault,
   enabledForRepo,
 }: TestDesignSystemOverridesProps) {
-  const [css, setCss] = useState('');
+  const [css, setCss] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [savedConfig, setSavedConfig] = useState<Partial<DesignSystemConfig> | null>(overrides);
+  const [savedConfig, setSavedConfig] =
+    useState<Partial<DesignSystemConfig> | null>(overrides);
 
   // Live token counts as the user types — gives instant feedback without
   // round-tripping. The persisted config comes back from the server on
@@ -98,15 +106,21 @@ export function TestDesignSystemOverrides({
 
   const effective = previewConfig ?? savedConfig ?? null;
   const counts = useMemo(() => countTokens(effective), [effective]);
-  const totalTokens = useMemo(() => Object.values(counts).reduce((a, b) => a + b, 0), [counts]);
+  const totalTokens = useMemo(
+    () => Object.values(counts).reduce((a, b) => a + b, 0),
+    [counts],
+  );
 
   const inheriting = !savedConfig && !!repoDefault;
   const repoCounts = useMemo(() => countTokens(repoDefault), [repoDefault]);
-  const repoTotal = useMemo(() => Object.values(repoCounts).reduce((a, b) => a + b, 0), [repoCounts]);
+  const repoTotal = useMemo(
+    () => Object.values(repoCounts).reduce((a, b) => a + b, 0),
+    [repoCounts],
+  );
 
   const handleSave = useCallback(async () => {
     if (!css.trim()) {
-      toast.error('Paste some CSS first');
+      toast.error("Paste some CSS first");
       return;
     }
     setIsSaving(true);
@@ -114,13 +128,15 @@ export function TestDesignSystemOverrides({
       const res = await saveTestDesignSystemFromCss(testId, css);
       if (res.success) {
         setSavedConfig(res.config);
-        setCss('');
+        setCss("");
         const c = countTokens(res.config);
         const total = Object.values(c).reduce((a, b) => a + b, 0);
-        toast.success(`Saved ${total} design token${total === 1 ? '' : 's'}`);
+        toast.success(`Saved ${total} design token${total === 1 ? "" : "s"}`);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save design system');
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save design system",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -131,10 +147,10 @@ export function TestDesignSystemOverrides({
     try {
       await resetTestDesignSystemOverrides(testId);
       setSavedConfig(null);
-      setCss('');
-      toast.success('Reverted to repo default');
+      setCss("");
+      toast.success("Reverted to repo default");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reset');
+      toast.error(err instanceof Error ? err.message : "Failed to reset");
     } finally {
       setIsSaving(false);
     }
@@ -155,7 +171,10 @@ export function TestDesignSystemOverrides({
           </span>
           {!enabledForRepo && (
             <span className="text-[10px] text-muted-foreground font-normal">
-              Enable in <a href="../settings" className="underline">Playwright Settings → Design System Checks</a>
+              Enable in{" "}
+              <a href="../settings" className="underline">
+                Playwright Settings → Design System Checks
+              </a>
             </span>
           )}
         </CardTitle>
@@ -192,7 +211,11 @@ export function TestDesignSystemOverrides({
         {inheriting && (
           <div className="rounded-md border bg-muted/30 p-3 space-y-2">
             <div className="text-xs text-muted-foreground">
-              Inheriting <span className="font-medium text-foreground">{repoTotal} token{repoTotal === 1 ? '' : 's'}</span> from repo
+              Inheriting{" "}
+              <span className="font-medium text-foreground">
+                {repoTotal} token{repoTotal === 1 ? "" : "s"}
+              </span>{" "}
+              from repo
             </div>
             <TokenCountStrip counts={repoCounts} />
           </div>
@@ -211,7 +234,7 @@ export function TestDesignSystemOverrides({
           {previewConfig && (
             <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-1.5">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Preview · {totalTokens} token{totalTokens === 1 ? '' : 's'}
+                Preview · {totalTokens} token{totalTokens === 1 ? "" : "s"}
               </div>
               <TokenCountStrip counts={counts} />
             </div>
@@ -232,7 +255,11 @@ export function TestDesignSystemOverrides({
   );
 }
 
-function TokenCountStrip({ counts }: { counts: Record<DesignTokenCategory, number> }) {
+function TokenCountStrip({
+  counts,
+}: {
+  counts: Record<DesignTokenCategory, number>;
+}) {
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       {(Object.entries(counts) as Array<[DesignTokenCategory, number]>)
@@ -243,7 +270,9 @@ function TokenCountStrip({ counts }: { counts: Record<DesignTokenCategory, numbe
           </Badge>
         ))}
       {Object.values(counts).every((n) => n === 0) && (
-        <span className="text-[10px] text-muted-foreground">no tokens parsed</span>
+        <span className="text-[10px] text-muted-foreground">
+          no tokens parsed
+        </span>
       )}
     </div>
   );

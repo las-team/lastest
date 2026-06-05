@@ -1,15 +1,24 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { db } from '@/lib/db';
-import { stepComparisons } from '@/lib/db/schema';
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
-import { eq } from 'drizzle-orm';
-import type { EvidenceLayer, StepIssueKind, StepIssueState } from '@/lib/db/schema';
-import { searchGitHubIssues, getGitHubIssueDetail, type GitHubIssueListItem, type GitHubIssueDetail } from '@/lib/integrations/github-issues';
-import { buildVerifyCaseBody } from '@/lib/integrations/github-issue-body';
-import { decideLayer } from './layer-feedback';
+import { revalidatePath } from "next/cache";
+import { db } from "@/lib/db";
+import { stepComparisons } from "@/lib/db/schema";
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess, getCurrentSession } from "@/lib/auth";
+import { eq } from "drizzle-orm";
+import type {
+  EvidenceLayer,
+  StepIssueKind,
+  StepIssueState,
+} from "@/lib/db/schema";
+import {
+  searchGitHubIssues,
+  getGitHubIssueDetail,
+  type GitHubIssueListItem,
+  type GitHubIssueDetail,
+} from "@/lib/integrations/github-issues";
+import { buildVerifyCaseBody } from "@/lib/integrations/github-issue-body";
+import { decideLayer } from "./layer-feedback";
 
 interface CreateIssueInput {
   stepComparisonId: string;
@@ -19,7 +28,7 @@ interface CreateIssueInput {
    *  details that the client can't see). */
   body?: string;
   /** Whether the case is a regression (auto state) or manual link. */
-  state?: 'auto' | 'open';
+  state?: "auto" | "open";
   /** Typed-ticket kind. Persisted on stepComparisons.githubIssueKind so the
    *  board can filter and the webhook can interpret close events correctly.
    *  Defaults to 'verification' for the legacy manual-file path. */
@@ -44,43 +53,51 @@ interface IssueResult {
  * Create a GitHub issue for a verification case and store the link on the
  * step comparison row.
  */
-export async function createIssueForCase(input: CreateIssueInput): Promise<IssueResult> {
+export async function createIssueForCase(
+  input: CreateIssueInput,
+): Promise<IssueResult> {
   const session = await getCurrentSession();
-  if (!session) return { ok: false, error: 'Not authenticated' };
+  if (!session) return { ok: false, error: "Not authenticated" };
 
   const step = await getStep(input.stepComparisonId);
-  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step) return { ok: false, error: "Step not found" };
 
   const build = await queries.getBuild(step.buildId);
-  if (!build) return { ok: false, error: 'Build not found' };
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build) return { ok: false, error: "Build not found" };
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) return { ok: false, error: 'No repository on build' };
+  if (!repoId) return { ok: false, error: "No repository on build" };
   await requireRepoAccess(repoId);
 
   const repo = await queries.getRepository(repoId);
-  if (!repo || repo.provider !== 'github') {
-    return { ok: false, error: 'Repository is not a GitHub repository' };
+  if (!repo || repo.provider !== "github") {
+    return { ok: false, error: "Repository is not a GitHub repository" };
   }
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
-  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
+  if (!account?.accessToken)
+    return { ok: false, error: "GitHub not connected for this team" };
 
   const test = await queries.getTest(step.testId);
   const functionalArea = test?.functionalAreaId
     ? await queries.getFunctionalArea(test.functionalAreaId)
     : null;
   const testResult = step.testResultId
-    ? (await queries.getTestResultById(step.testResultId)) ?? null
+    ? ((await queries.getTestResultById(step.testResultId)) ?? null)
     : null;
   const diff = step.visualDiffId
-    ? (await queries.getVisualDiff(step.visualDiffId)) ?? null
+    ? ((await queries.getVisualDiff(step.visualDiffId)) ?? null)
     : null;
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.BETTER_AUTH_BASE_URL ||
-    'http://localhost:3000';
+    "http://localhost:3000";
 
-  const reviewerNote = (input.reviewerNote ?? step.reviewerNote)?.trim() || null;
+  const reviewerNote =
+    (input.reviewerNote ?? step.reviewerNote)?.trim() || null;
 
   // When the caller passed a pre-composed body, honor it verbatim (the
   // issue-picker dialog's free-form Create tab uses this path). Otherwise
@@ -89,10 +106,14 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
   const enriched = buildVerifyCaseBody({
     step,
     diff,
-    test: test ? { id: test.id, name: test.name, targetUrl: test.targetUrl } : null,
+    test: test
+      ? { id: test.id, name: test.name, targetUrl: test.targetUrl }
+      : null,
     functionalAreaName: functionalArea?.name ?? null,
     build: { id: build.id },
-    testRun: testRun ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit } : null,
+    testRun: testRun
+      ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit }
+      : null,
     testResult,
     repoFullName: repo.fullName,
     reporterEmail: session.user?.email ?? null,
@@ -106,22 +127,23 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
 
   // Always tag with the typed kind so the webhook can match on close. Falls
   // back to verdict-based label so the legacy manual flow stays useful.
-  const kind: StepIssueKind = input.kind ?? (step.verdict === 'red' ? 'bugfix' : 'verification');
-  const labels = ['verify', kind, ...(kind === 'bugfix' ? ['regression'] : [])];
+  const kind: StepIssueKind =
+    input.kind ?? (step.verdict === "red" ? "bugfix" : "verification");
+  const labels = ["verify", kind, ...(kind === "bugfix" ? ["regression"] : [])];
 
   try {
     const response = await fetch(
       `https://api.github.com/repos/${repo.owner}/${repo.name}/issues`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
           Authorization: `Bearer ${account.accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
-          'X-GitHub-Api-Version': '2022-11-28',
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": "2022-11-28",
         },
         body: JSON.stringify({ title, body, labels }),
-      }
+      },
     );
     if (!response.ok) {
       const text = await response.text();
@@ -146,7 +168,7 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
           {
             headers: {
               Authorization: `Bearer ${account.accessToken}`,
-              Accept: 'application/vnd.github.v3+json',
+              Accept: "application/vnd.github.v3+json",
             },
           },
         );
@@ -157,7 +179,9 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
           };
         }
         if (probe.ok) {
-          const meta = await probe.json().catch(() => null) as { has_issues?: boolean } | null;
+          const meta = (await probe.json().catch(() => null)) as {
+            has_issues?: boolean;
+          } | null;
           if (meta?.has_issues === false) {
             return {
               ok: false,
@@ -170,10 +194,16 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
           };
         }
       }
-      return { ok: false, error: `GitHub API ${response.status}: ${text.slice(0, 200)}` };
+      return {
+        ok: false,
+        error: `GitHub API ${response.status}: ${text.slice(0, 200)}`,
+      };
     }
-    const issue = (await response.json()) as { html_url: string; number: number };
-    const state: StepIssueState = input.state ?? 'auto';
+    const issue = (await response.json()) as {
+      html_url: string;
+      number: number;
+    };
+    const state: StepIssueState = input.state ?? "auto";
     await db
       .update(stepComparisons)
       .set({
@@ -184,9 +214,14 @@ export async function createIssueForCase(input: CreateIssueInput): Promise<Issue
       })
       .where(eq(stepComparisons.id, input.stepComparisonId));
     revalidatePath(`/verify/${step.buildId}`);
-    return { ok: true, issueUrl: issue.html_url, issueNumber: issue.number, state };
+    return {
+      ok: true,
+      issueUrl: issue.html_url,
+      issueNumber: issue.number,
+      state,
+    };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'unknown' };
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
   }
 }
 
@@ -196,67 +231,86 @@ interface LinkIssueInput {
   issueUrl: string;
 }
 
-export async function linkIssueToCase(input: LinkIssueInput): Promise<IssueResult> {
+export async function linkIssueToCase(
+  input: LinkIssueInput,
+): Promise<IssueResult> {
   const step = await getStep(input.stepComparisonId);
-  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step) return { ok: false, error: "Step not found" };
 
   const build = await queries.getBuild(step.buildId);
-  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) return { ok: false, error: 'No repository on build' };
+  if (!repoId) return { ok: false, error: "No repository on build" };
   await requireRepoAccess(repoId);
 
   const match = input.issueUrl.match(/\/issues\/(\d+)(?:[/?#]|$)/);
-  if (!match) return { ok: false, error: 'Could not parse issue number from URL' };
+  if (!match)
+    return { ok: false, error: "Could not parse issue number from URL" };
   const issueNumber = parseInt(match[1], 10);
 
   await db
     .update(stepComparisons)
-    .set({ githubIssueUrl: input.issueUrl, githubIssueNumber: issueNumber, githubIssueState: 'linked' })
+    .set({
+      githubIssueUrl: input.issueUrl,
+      githubIssueNumber: issueNumber,
+      githubIssueState: "linked",
+    })
     .where(eq(stepComparisons.id, input.stepComparisonId));
   revalidatePath(`/verify/${step.buildId}`);
-  return { ok: true, issueUrl: input.issueUrl, issueNumber, state: 'linked' };
+  return { ok: true, issueUrl: input.issueUrl, issueNumber, state: "linked" };
 }
 
-export async function closeIssueForCase(stepComparisonId: string): Promise<IssueResult> {
+export async function closeIssueForCase(
+  stepComparisonId: string,
+): Promise<IssueResult> {
   const step = await getStep(stepComparisonId);
-  if (!step?.githubIssueNumber) return { ok: false, error: 'No issue linked' };
+  if (!step?.githubIssueNumber) return { ok: false, error: "No issue linked" };
 
   const build = await queries.getBuild(step.buildId);
-  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) return { ok: false, error: 'No repository on build' };
+  if (!repoId) return { ok: false, error: "No repository on build" };
   await requireRepoAccess(repoId);
   const repo = await queries.getRepository(repoId);
-  if (!repo) return { ok: false, error: 'Repository not found' };
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
-  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
+  if (!repo) return { ok: false, error: "Repository not found" };
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
+  if (!account?.accessToken)
+    return { ok: false, error: "GitHub not connected for this team" };
 
   try {
     const response = await fetch(
       `https://api.github.com/repos/${repo.owner}/${repo.name}/issues/${step.githubIssueNumber}`,
       {
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
           Authorization: `Bearer ${account.accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({ state: 'closed' }),
-      }
+        body: JSON.stringify({ state: "closed" }),
+      },
     );
     if (!response.ok) {
       const text = await response.text();
-      return { ok: false, error: `GitHub API ${response.status}: ${text.slice(0, 200)}` };
+      return {
+        ok: false,
+        error: `GitHub API ${response.status}: ${text.slice(0, 200)}`,
+      };
     }
     await db
       .update(stepComparisons)
-      .set({ githubIssueState: 'closed' })
+      .set({ githubIssueState: "closed" })
       .where(eq(stepComparisons.id, stepComparisonId));
     revalidatePath(`/verify/${step.buildId}`);
-    return { ok: true, state: 'closed' };
+    return { ok: true, state: "closed" };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'unknown' };
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
   }
 }
 
@@ -281,20 +335,32 @@ async function getStep(stepComparisonId: string) {
 export async function searchIssuesForCase(
   stepComparisonId: string,
   query?: string,
-  state: 'open' | 'closed' | 'all' = 'open',
+  state: "open" | "closed" | "all" = "open",
 ): Promise<{ ok: boolean; issues?: GitHubIssueListItem[]; error?: string }> {
   const step = await getStep(stepComparisonId);
-  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step) return { ok: false, error: "Step not found" };
   const build = await queries.getBuild(step.buildId);
-  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) return { ok: false, error: 'No repository on build' };
+  if (!repoId) return { ok: false, error: "No repository on build" };
   await requireRepoAccess(repoId);
   const repo = await queries.getRepository(repoId);
-  if (!repo || repo.provider !== 'github') return { ok: false, error: 'Not a GitHub repository' };
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
-  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
-  const result = await searchGitHubIssues(account.accessToken, repo.owner, repo.name, query, state);
+  if (!repo || repo.provider !== "github")
+    return { ok: false, error: "Not a GitHub repository" };
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
+  if (!account?.accessToken)
+    return { ok: false, error: "GitHub not connected for this team" };
+  const result = await searchGitHubIssues(
+    account.accessToken,
+    repo.owner,
+    repo.name,
+    query,
+    state,
+  );
   if (!result.success) return { ok: false, error: result.error };
   return { ok: true, issues: result.issues };
 }
@@ -309,18 +375,29 @@ export async function fetchLinkedIssueForCase(
   stepComparisonId: string,
 ): Promise<{ ok: boolean; issue?: GitHubIssueDetail | null; error?: string }> {
   const step = await getStep(stepComparisonId);
-  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step) return { ok: false, error: "Step not found" };
   if (!step.githubIssueNumber) return { ok: true, issue: null };
   const build = await queries.getBuild(step.buildId);
-  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
-  if (!repoId) return { ok: false, error: 'No repository on build' };
+  if (!repoId) return { ok: false, error: "No repository on build" };
   await requireRepoAccess(repoId);
   const repo = await queries.getRepository(repoId);
-  if (!repo || repo.provider !== 'github') return { ok: false, error: 'Not a GitHub repository' };
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
-  if (!account?.accessToken) return { ok: false, error: 'GitHub not connected for this team' };
-  const result = await getGitHubIssueDetail(account.accessToken, repo.owner, repo.name, step.githubIssueNumber);
+  if (!repo || repo.provider !== "github")
+    return { ok: false, error: "Not a GitHub repository" };
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
+  if (!account?.accessToken)
+    return { ok: false, error: "GitHub not connected for this team" };
+  const result = await getGitHubIssueDetail(
+    account.accessToken,
+    repo.owner,
+    repo.name,
+    step.githubIssueNumber,
+  );
   if (!result.success) return { ok: false, error: result.error };
   return { ok: true, issue: result.issue ?? null };
 }
@@ -339,7 +416,7 @@ export async function fetchLinkedIssueForCase(
 // per-layer feedback so deriveCaseStatus produces the right column on the
 // next poll, and (3) creates/closes the GitHub issue with the typed kind.
 
-export type ConfirmKind = 'done' | 'improvement' | 'regression';
+export type ConfirmKind = "done" | "improvement" | "regression";
 
 export interface ConfirmCaseResult {
   ok: boolean;
@@ -354,14 +431,17 @@ export interface ConfirmCaseResult {
 
 const KIND_TO_ISSUE: Record<ConfirmKind, StepIssueKind | null> = {
   done: null,
-  improvement: 'improvement',
-  regression: 'bugfix',
+  improvement: "improvement",
+  regression: "bugfix",
 };
 
-const KIND_TO_DECISION: Record<ConfirmKind, 'approved' | 'rejected' | 'snoozed'> = {
-  done: 'approved',
-  improvement: 'snoozed',
-  regression: 'rejected',
+const KIND_TO_DECISION: Record<
+  ConfirmKind,
+  "approved" | "rejected" | "snoozed"
+> = {
+  done: "approved",
+  improvement: "snoozed",
+  regression: "rejected",
 };
 
 export async function confirmCase(
@@ -369,15 +449,20 @@ export async function confirmCase(
   kind: ConfirmKind,
 ): Promise<ConfirmCaseResult> {
   const session = await getCurrentSession();
-  if (!session) return { ok: false, ticketChanged: false, error: 'Not authenticated' };
+  if (!session)
+    return { ok: false, ticketChanged: false, error: "Not authenticated" };
   const userId = session.user?.id ?? null;
 
   const step = await getStep(stepComparisonId);
-  if (!step) return { ok: false, ticketChanged: false, error: 'Step not found' };
+  if (!step)
+    return { ok: false, ticketChanged: false, error: "Step not found" };
 
   const build = await queries.getBuild(step.buildId);
-  if (!build) return { ok: false, ticketChanged: false, error: 'Build not found' };
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build)
+    return { ok: false, ticketChanged: false, error: "Build not found" };
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
   if (repoId) await requireRepoAccess(repoId);
 
@@ -394,9 +479,10 @@ export async function confirmCase(
   //    lands. Reuses the per-layer baseline / review-todo side effects
   //    that already power the existing approve/reject flow.
   const decision = KIND_TO_DECISION[kind];
-  const evidenceLayers: EvidenceLayer[] = step.evidence.length > 0
-    ? Array.from(new Set(step.evidence.map((e) => e.layer)))
-    : ['visual'];
+  const evidenceLayers: EvidenceLayer[] =
+    step.evidence.length > 0
+      ? Array.from(new Set(step.evidence.map((e) => e.layer)))
+      : ["visual"];
   await Promise.all(
     evidenceLayers.map((layer) =>
       decideLayer({
@@ -423,13 +509,13 @@ export async function confirmCase(
   let issueKind: StepIssueKind | undefined;
 
   const targetKind = KIND_TO_ISSUE[kind];
-  const shouldAutoFile = kind === 'regression';
+  const shouldAutoFile = kind === "regression";
 
   if (targetKind && !step.githubIssueNumber && shouldAutoFile) {
     // No issue yet AND this kind opts into auto-file → file one.
     const result = await createIssueForCase({
       stepComparisonId,
-      state: 'auto',
+      state: "auto",
       kind: targetKind,
     });
     if (result.ok) {
@@ -448,7 +534,7 @@ export async function confirmCase(
       .set({ githubIssueKind: targetKind })
       .where(eq(stepComparisons.id, stepComparisonId));
     issueKind = targetKind;
-  } else if (kind === 'done' && step.githubIssueNumber) {
+  } else if (kind === "done" && step.githubIssueNumber) {
     const result = await closeIssueForCase(stepComparisonId);
     if (result.ok) {
       ticketChanged = true;
@@ -468,21 +554,33 @@ export async function confirmCase(
   // convention as approveDiffCore on the build-detail path).
 
   revalidatePath(`/verify/${step.buildId}`);
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${step.buildId}`);
-  return { ok: true, ticketChanged, issueUrl, issueNumber, issueState, issueKind };
+  return {
+    ok: true,
+    ticketChanged,
+    issueUrl,
+    issueNumber,
+    issueState,
+    issueKind,
+  };
 }
 
 /**
  * Save a reviewer note on a step comparison. Surfaces as the lead paragraph
  * of any issue subsequently created from this case.
  */
-export async function setReviewerNote(stepComparisonId: string, note: string): Promise<{ ok: boolean; error?: string }> {
+export async function setReviewerNote(
+  stepComparisonId: string,
+  note: string,
+): Promise<{ ok: boolean; error?: string }> {
   const step = await getStep(stepComparisonId);
-  if (!step) return { ok: false, error: 'Step not found' };
+  if (!step) return { ok: false, error: "Step not found" };
   const build = await queries.getBuild(step.buildId);
-  if (!build) return { ok: false, error: 'Build not found' };
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build) return { ok: false, error: "Build not found" };
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
   if (repoId) await requireRepoAccess(repoId);
   await db

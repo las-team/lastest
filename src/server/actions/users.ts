@@ -1,9 +1,9 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireTeamAdmin, requireTeamAccess } from '@/lib/auth';
-import { sendInvitationEmail } from '@/lib/email';
-import type { UserRole } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { requireTeamAdmin, requireTeamAccess } from "@/lib/auth";
+import { sendInvitationEmail } from "@/lib/email";
+import type { UserRole } from "@/lib/db/schema";
 
 export async function getUsers() {
   const session = await requireTeamAccess();
@@ -15,19 +15,23 @@ export async function getPendingInvitations() {
   return queries.getPendingInvitationsByTeam(session.team.id);
 }
 
-export async function inviteUser(email: string, role: UserRole = 'member') {
+export async function inviteUser(email: string, role: UserRole = "member") {
   const session = await requireTeamAdmin();
 
   // Check if user already exists
   const existingUser = await queries.getUserByEmail(email);
   if (existingUser) {
-    return { error: 'A user with this email already exists' };
+    return { error: "A user with this email already exists" };
   }
 
   // Check if there's a pending invitation
   const existingInvitation = await queries.getInvitationByEmail(email);
-  if (existingInvitation && !existingInvitation.acceptedAt && existingInvitation.expiresAt > new Date()) {
-    return { error: 'An invitation has already been sent to this email' };
+  if (
+    existingInvitation &&
+    !existingInvitation.acceptedAt &&
+    existingInvitation.expiresAt > new Date()
+  ) {
+    return { error: "An invitation has already been sent to this email" };
   }
 
   // Create invitation with team context
@@ -50,18 +54,18 @@ export async function updateUserRole(userId: string, role: UserRole) {
 
   // Prevent admin from changing their own role
   if (userId === session.user.id) {
-    return { error: 'You cannot change your own role' };
+    return { error: "You cannot change your own role" };
   }
 
   // Verify user is in the same team
   const targetUser = await queries.getUserById(userId);
   if (!targetUser || targetUser.teamId !== session.team.id) {
-    return { error: 'User not found in your team' };
+    return { error: "User not found in your team" };
   }
 
   // Cannot change owner role
-  if (targetUser.role === 'owner') {
-    return { error: 'Cannot change the role of the team owner' };
+  if (targetUser.role === "owner") {
+    return { error: "Cannot change the role of the team owner" };
   }
 
   await queries.updateUserRole(userId, role);
@@ -73,18 +77,18 @@ export async function removeUser(userId: string) {
 
   // Prevent admin from removing themselves
   if (userId === session.user.id) {
-    return { error: 'You cannot remove yourself' };
+    return { error: "You cannot remove yourself" };
   }
 
   // Verify user is in the same team
   const targetUser = await queries.getUserById(userId);
   if (!targetUser || targetUser.teamId !== session.team.id) {
-    return { error: 'User not found in your team' };
+    return { error: "User not found in your team" };
   }
 
   // Cannot remove the owner
-  if (targetUser.role === 'owner') {
-    return { error: 'Cannot remove the team owner' };
+  if (targetUser.role === "owner") {
+    return { error: "Cannot remove the team owner" };
   }
 
   await queries.deleteUser(userId);
@@ -95,7 +99,7 @@ export async function cancelInvitation(invitationId: string) {
   const session = await requireTeamAdmin();
   const invitation = await queries.getInvitationById(invitationId);
   if (!invitation || invitation.teamId !== session.team.id) {
-    return { error: 'Invitation not found' };
+    return { error: "Invitation not found" };
   }
   await queries.deleteInvitation(invitation.id);
   return { success: true };
@@ -106,12 +110,12 @@ export async function resendInvitation(invitationId: string) {
 
   const invitation = await queries.getInvitationById(invitationId);
   if (!invitation) {
-    return { error: 'Invitation not found' };
+    return { error: "Invitation not found" };
   }
 
   // Verify invitation is for the same team
   if (invitation.teamId !== session.team.id) {
-    return { error: 'Invitation not found' };
+    return { error: "Invitation not found" };
   }
 
   // Create a new invitation (the old one will be replaced)

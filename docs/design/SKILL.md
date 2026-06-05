@@ -18,10 +18,12 @@ When designing for **Lastest**, follow the rules in `README.md`. Highlights:
 ## Setup
 
 ```html
-<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="colors_and_type.css" />
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <!-- ... -->
-<script>lucide.createIcons();</script>
+<script>
+  lucide.createIcons();
+</script>
 ```
 
 Use Lucide icons (matches the codebase). Default size `h-4 w-4` (16px) inline.

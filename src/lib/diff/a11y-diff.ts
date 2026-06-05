@@ -8,12 +8,12 @@
  *  - per-side WCAG scores from `calculateWcagScore`, plus delta.
  */
 
-import type { A11yViolation, WcagScoreSummary } from '@/lib/db/schema';
-import { calculateWcagScore } from '@/lib/a11y/wcag-score';
+import type { A11yViolation, WcagScoreSummary } from "@/lib/db/schema";
+import { calculateWcagScore } from "@/lib/a11y/wcag-score";
 
 export interface A11yNodeDelta {
   ruleId: string;
-  impact: A11yViolation['impact'];
+  impact: A11yViolation["impact"];
   nodesA: number;
   nodesB: number;
 }
@@ -51,9 +51,19 @@ export function computeA11yDiff(
       continue;
     }
     if (b.nodes > a.nodes) {
-      regressed.push({ ruleId: id, impact: b.impact, nodesA: a.nodes, nodesB: b.nodes });
+      regressed.push({
+        ruleId: id,
+        impact: b.impact,
+        nodesA: a.nodes,
+        nodesB: b.nodes,
+      });
     } else if (b.nodes < a.nodes) {
-      improved.push({ ruleId: id, impact: b.impact, nodesA: a.nodes, nodesB: b.nodes });
+      improved.push({
+        ruleId: id,
+        impact: b.impact,
+        nodesA: a.nodes,
+        nodesB: b.nodes,
+      });
     }
   }
   for (const [id, a] of mapA) {

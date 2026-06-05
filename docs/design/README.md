@@ -28,6 +28,7 @@ Renewed visual system for **Lastest** — free, open-source visual regression te
 **Voice.** Direct, technical, slightly proud. Lastest writes like a senior engineer demoing their own tool — confident about specifics, dismissive of bloat. The README opens with a problem statement (visual regression testing is "**expensive**, **flaky**, or **painful to maintain**") and pivots to a clear solution. Marketing tagline: "Record it. Test it. Ship it. — $0 forever."
 
 **Casing.**
+
 - **Sentence case** for headings, body, and button labels: "Record a test", "Run all tests", "Approve baseline".
 - **Lowercase** for nav items in the sidebar: "Dashboard", "Tests", "Compose", "Runs", "Compare".
 - **UPPERCASE MONO** for eyebrows, labels above content, and badges in the print kit ("PRIMARY · LIGHT", "★ COLOR SYSTEM").
@@ -36,6 +37,7 @@ Renewed visual system for **Lastest** — free, open-source visual regression te
 **Pronouns.** "You" — second person. "Your data stays on your server. Your screenshots never leave your infra." Never "we".
 
 **Tone hits.**
+
 - Numbers as proof: "29 tools", "11-step pipeline", "3 diff engines", "$0 forever", "WCAG 2.2 AA · 0–100 score".
 - Mode names get a confident verb: "Record. Test. Ship.", "Plan · Generate · Heal".
 - Status copy is terse: `safe_to_merge`, `review_required`, `blocked`, `flaky`, `passed`.
@@ -44,6 +46,7 @@ Renewed visual system for **Lastest** — free, open-source visual regression te
 **Emoji.** Effectively no. The print kit uses a single retro `★` glyph (Press Start 2P) as a brand flourish on eyebrows; never anywhere else. The CLI uses `→` and `↳` as terminal cues, and `✦` as a regression marker. **Do not** add 🎉 / 🚀 / ✨ etc. — they break the tone.
 
 **Examples to copy from.**
+
 - "Did my last commit break the UI?" — questions are okay; they sound like a developer talking.
 - "Build once, run forever — $0" — em-dash + price tag is on-brand.
 - "You own the test code and can edit it by hand." — empowerment over magic.

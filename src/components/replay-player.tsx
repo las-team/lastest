@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { VideoPlayer, type VideoPlayerHandle } from '@/components/video-player';
+import { useEffect, useRef } from "react";
+import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player";
 
 export interface ReplayClip {
   src: string;
@@ -39,14 +39,14 @@ export function ReplayPlayer({ clips, className }: ReplayPlayerProps) {
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      const seekEl = target?.closest('[data-seek]') as HTMLElement | null;
+      const seekEl = target?.closest("[data-seek]") as HTMLElement | null;
       if (!seekEl) return;
-      const sec = parseFloat(seekEl.getAttribute('data-seek') || '');
+      const sec = parseFloat(seekEl.getAttribute("data-seek") || "");
       if (!Number.isFinite(sec)) return;
       handlesRef.current[0]?.seekAndPlay(sec);
     };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, []);
 
   return (
@@ -62,7 +62,7 @@ export function ReplayPlayer({ clips, className }: ReplayPlayerProps) {
           preload="metadata"
           className={
             className ??
-            'share-video w-full aspect-video rounded-md border bg-black'
+            "share-video w-full aspect-video rounded-md border bg-black"
           }
           onReady={(h) => {
             handlesRef.current[i] = h;

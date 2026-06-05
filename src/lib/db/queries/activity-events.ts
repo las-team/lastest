@@ -1,14 +1,17 @@
-import { db } from '../index';
-import { activityEvents } from '../schema';
-import type { NewActivityEvent, ActivityEvent } from '../schema';
-import { eq, desc, and, lt, asc } from 'drizzle-orm';
-import { emitActivityEvent, type ActivityFeedEvent } from '@/lib/ws/activity-events';
+import { db } from "../index";
+import { activityEvents } from "../schema";
+import type { NewActivityEvent, ActivityEvent } from "../schema";
+import { eq, desc, and, lt, asc } from "drizzle-orm";
+import {
+  emitActivityEvent,
+  type ActivityFeedEvent,
+} from "@/lib/ws/activity-events";
 
 /**
  * Insert an activity event and broadcast it to live SSE listeners.
  */
 export async function emitAndPersistActivityEvent(
-  data: Omit<NewActivityEvent, 'id' | 'createdAt'>,
+  data: Omit<NewActivityEvent, "id" | "createdAt">,
 ): Promise<ActivityEvent> {
   const now = new Date();
   const id = crypto.randomUUID();
@@ -51,7 +54,9 @@ export async function getRecentActivityEvents(
   const conditions = [eq(activityEvents.teamId, teamId)];
 
   if (sourceType) {
-    conditions.push(eq(activityEvents.sourceType, sourceType as 'play_agent' | 'mcp_server'));
+    conditions.push(
+      eq(activityEvents.sourceType, sourceType as "play_agent" | "mcp_server"),
+    );
   }
 
   if (cursor) {

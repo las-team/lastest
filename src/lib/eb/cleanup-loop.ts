@@ -17,17 +17,33 @@
  * the loop in parallel is safe (first to delete wins, the other no-ops).
  */
 
-import { updateRunnerStatus, markStaleRunnersOffline, deleteStaleSystemRunners } from '@/server/actions/runners';
-import { reapStalePoolEBs, reapIdleEBJobs } from '@/server/actions/embedded-sessions';
-import { ensureWarmPool, isKubernetesMode, ebIdleTTLMs } from '@/lib/eb/provisioner';
-import { ensureGlobalPlaywrightSettings } from '@/lib/db/queries/settings';
-import { cleanupOldCommands, timeoutStaleCommands } from '@/lib/db/queries';
-import { cleanupExpiredUrlDiffs } from '@/lib/url-diff/cleanup';
+import {
+  updateRunnerStatus,
+  markStaleRunnersOffline,
+  deleteStaleSystemRunners,
+} from "@/server/actions/runners";
+import {
+  reapStalePoolEBs,
+  reapIdleEBJobs,
+} from "@/server/actions/embedded-sessions";
+import {
+  ensureWarmPool,
+  isKubernetesMode,
+  ebIdleTTLMs,
+} from "@/lib/eb/provisioner";
+import { ensureGlobalPlaywrightSettings } from "@/lib/db/queries/settings";
+import { cleanupOldCommands, timeoutStaleCommands } from "@/lib/db/queries";
+import { cleanupExpiredUrlDiffs } from "@/lib/url-diff/cleanup";
 
 export const SESSION_TIMEOUT_MS = 60_000;
 const CLEANUP_INTERVAL_MS = 60_000;
 
-type SessionEntry = { lastPoll: number; sessionId: string; connectCount: number; firstConnectAt: number };
+type SessionEntry = {
+  lastPoll: number;
+  sessionId: string;
+  connectCount: number;
+  firstConnectAt: number;
+};
 
 const globalState = globalThis as typeof globalThis & {
   __runnerActiveSessions?: Map<string, SessionEntry>;
@@ -52,13 +68,15 @@ export function startCleanupLoop(): void {
   globalState.__cleanupLoopStarted = true;
 
   // One-shot startup tasks
-  markStaleRunnersOffline(SESSION_TIMEOUT_MS).then((count) => {
-    if (count > 0) {
-      console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
-    }
-  }).catch((error) => {
-    console.error('[Startup] Failed to mark stale runners offline:', error);
-  });
+  markStaleRunnersOffline(SESSION_TIMEOUT_MS)
+    .then((count) => {
+      if (count > 0) {
+        console.log(`[Startup] Marked ${count} stale runner(s) as offline`);
+      }
+    })
+    .catch((error) => {
+      console.error("[Startup] Failed to mark stale runners offline:", error);
+    });
 
   ensureGlobalPlaywrightSettings()
     .then(() => {
@@ -67,7 +85,10 @@ export function startCleanupLoop(): void {
       }
     })
     .catch((error) => {
-      console.error('[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:', error);
+      console.error(
+        "[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:",
+        error,
+      );
     });
 
   globalState.__cleanupLoopHandle = setInterval(async () => {
@@ -76,10 +97,15 @@ export function startCleanupLoop(): void {
       if (now - session.lastPoll > SESSION_TIMEOUT_MS) {
         activeRunnerSessions.delete(runnerId);
         try {
-          await updateRunnerStatus(runnerId, 'offline');
-          console.log(`[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`);
+          await updateRunnerStatus(runnerId, "offline");
+          console.log(
+            `[Cleanup] Runner ${runnerId} marked offline (no heartbeat for ${SESSION_TIMEOUT_MS}ms)`,
+          );
         } catch (error) {
-          console.error(`[Cleanup] Failed to mark runner ${runnerId} offline:`, error);
+          console.error(
+            `[Cleanup] Failed to mark runner ${runnerId} offline:`,
+            error,
+          );
         }
       }
     }
@@ -87,7 +113,7 @@ export function startCleanupLoop(): void {
     try {
       await markStaleRunnersOffline(SESSION_TIMEOUT_MS);
     } catch (error) {
-      console.error('[Cleanup] Failed to mark stale runners offline:', error);
+      console.error("[Cleanup] Failed to mark stale runners offline:", error);
     }
 
     try {
@@ -96,7 +122,7 @@ export function startCleanupLoop(): void {
         console.log(`[GC] Deleted ${deleted} stale system runners`);
       }
     } catch (error) {
-      console.error('[GC] Failed to delete stale system runners:', error);
+      console.error("[GC] Failed to delete stale system runners:", error);
     }
 
     try {
@@ -105,36 +131,39 @@ export function startCleanupLoop(): void {
         console.log(`[GC] Cleaned up ${cleaned} old runner commands`);
       }
     } catch (error) {
-      console.error('[GC] Failed to clean old commands:', error);
+      console.error("[GC] Failed to clean old commands:", error);
     }
 
     try {
       await timeoutStaleCommands(30 * 60 * 1000, 10 * 60 * 1000);
     } catch (error) {
-      console.error('[GC] Failed to timeout stale commands:', error);
+      console.error("[GC] Failed to timeout stale commands:", error);
     }
 
     try {
-      const heartbeatTimeoutMs = parseInt(process.env.EB_HEARTBEAT_TIMEOUT_MS || '300000', 10);
+      const heartbeatTimeoutMs = parseInt(
+        process.env.EB_HEARTBEAT_TIMEOUT_MS || "300000",
+        10,
+      );
       const reaped = await reapStalePoolEBs(heartbeatTimeoutMs);
       if (reaped > 0) {
         console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
       }
     } catch (error) {
-      console.error('[Reaper] Failed to reap stale pool EBs:', error);
+      console.error("[Reaper] Failed to reap stale pool EBs:", error);
     }
 
     try {
       const idleTtlMs = await ebIdleTTLMs();
       await reapIdleEBJobs(idleTtlMs);
     } catch (error) {
-      console.error('[Reaper] Failed to reap idle EB Jobs:', error);
+      console.error("[Reaper] Failed to reap idle EB Jobs:", error);
     }
 
     try {
       await ensureWarmPool();
     } catch (error) {
-      console.error('[WarmPool] ensureWarmPool failed:', error);
+      console.error("[WarmPool] ensureWarmPool failed:", error);
     }
 
     // URL-Diff artefacts are stateless with a 1h TTL. Run on the same
@@ -142,10 +171,12 @@ export function startCleanupLoop(): void {
     try {
       const { deleted } = await cleanupExpiredUrlDiffs();
       if (deleted > 0) {
-        console.log(`[GC] Cleaned up ${deleted} expired URL-Diff artefact dir(s)`);
+        console.log(
+          `[GC] Cleaned up ${deleted} expired URL-Diff artefact dir(s)`,
+        );
       }
     } catch (error) {
-      console.error('[GC] Failed to clean URL-Diff artefacts:', error);
+      console.error("[GC] Failed to clean URL-Diff artefacts:", error);
     }
   }, CLEANUP_INTERVAL_MS);
 

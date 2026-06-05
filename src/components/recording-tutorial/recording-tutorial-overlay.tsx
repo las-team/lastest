@@ -1,44 +1,46 @@
-'use client';
+"use client";
 
-import { useRecordingTutorial } from '@/hooks/use-recording-tutorial';
-import { TutorialStepCallout } from '@/components/recording-tutorial/tutorial-step-callout';
+import { useRecordingTutorial } from "@/hooks/use-recording-tutorial";
+import { TutorialStepCallout } from "@/components/recording-tutorial/tutorial-step-callout";
 
 interface RecordingTutorialOverlayProps {
-  layout: 'embedded' | 'card';
+  layout: "embedded" | "card";
 }
 
 const TUTORIAL_STEPS = [
   {
-    target: 'screenshot',
-    title: 'Screenshots are Key',
+    target: "screenshot",
+    title: "Screenshots are Key",
     description:
-      'Each screenshot becomes a visual baseline checkpoint. Take screenshots at key moments — they\'re the core of visual regression testing.',
+      "Each screenshot becomes a visual baseline checkpoint. Take screenshots at key moments — they're the core of visual regression testing.",
     highlight: true, // all steps highlight their target
   },
   {
-    target: 'assertion',
-    title: 'Add Success Criteria',
+    target: "assertion",
+    title: "Add Success Criteria",
     description:
-      'Use the dropdown for page-level checks (load, idle, URL). Shift+Right-click any element for visibility, text, or attribute assertions.',
+      "Use the dropdown for page-level checks (load, idle, URL). Shift+Right-click any element for visibility, text, or attribute assertions.",
     highlight: true,
   },
   {
-    target: 'download',
-    title: 'Validate Downloads & Clipboard',
+    target: "download",
+    title: "Validate Downloads & Clipboard",
     description:
-      'Click this before a download link to verify file downloads. Copy/paste operations are captured automatically.',
+      "Click this before a download link to verify file downloads. Copy/paste operations are captured automatically.",
     highlight: true,
   },
   {
-    target: 'timeline',
-    title: 'Quick Tips',
+    target: "timeline",
+    title: "Quick Tips",
     description:
-      'Use Ctrl+Shift+S for quick screenshots. Open the Timeline to review all recorded events in real time.',
+      "Use Ctrl+Shift+S for quick screenshots. Open the Timeline to review all recorded events in real time.",
     highlight: true,
   },
 ];
 
-export function RecordingTutorialOverlay({ layout }: RecordingTutorialOverlayProps) {
+export function RecordingTutorialOverlay({
+  layout,
+}: RecordingTutorialOverlayProps) {
   const { isVisible, currentStep, totalSteps, nextStep, prevStep, dismiss } =
     useRecordingTutorial();
 
@@ -49,7 +51,7 @@ export function RecordingTutorialOverlay({ layout }: RecordingTutorialOverlayPro
 
   // Embedded layout: buttons are at bottom, callouts go above
   // Card layout: buttons are at top of card, callouts go below
-  const side = layout === 'embedded' ? 'top' : 'bottom';
+  const side = layout === "embedded" ? "top" : "bottom";
 
   return (
     <TutorialStepCallout

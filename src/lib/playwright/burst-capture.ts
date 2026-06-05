@@ -1,7 +1,7 @@
-import type { Page } from 'playwright';
-import { PNG } from 'pngjs';
-import pixelmatch from 'pixelmatch';
-import type { StabilityMetadata } from '@/lib/db/schema';
+import type { Page } from "playwright";
+import { PNG } from "pngjs";
+import pixelmatch from "pixelmatch";
+import type { StabilityMetadata } from "@/lib/db/schema";
 
 interface BurstCaptureOptions {
   frameCount: number;
@@ -19,8 +19,8 @@ interface BurstCaptureResult {
  */
 export async function captureWithBurst(
   page: Page,
-  screenshotOptions: Parameters<Page['screenshot']>[0],
-  options: BurstCaptureOptions
+  screenshotOptions: Parameters<Page["screenshot"]>[0],
+  options: BurstCaptureOptions,
 ): Promise<BurstCaptureResult> {
   const { frameCount, stabilityThreshold } = options;
 
@@ -56,7 +56,7 @@ export async function captureWithBurst(
       output,
       prev.width,
       prev.height,
-      { threshold: 0.1 }
+      { threshold: 0.1 },
     );
 
     const diffPercent = (diffPixels / totalPixels) * 100;
@@ -67,7 +67,8 @@ export async function captureWithBurst(
     }
   }
 
-  const isStable = frames.length <= 1 ? false : stableFrames === frames.length - 1;
+  const isStable =
+    frames.length <= 1 ? false : stableFrames === frames.length - 1;
 
   return {
     buffer: frames[frames.length - 1], // Use last frame as canonical

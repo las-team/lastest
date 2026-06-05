@@ -1,51 +1,63 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from '@/components/ui/tooltip';
+} from "@/components/ui/tooltip";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+} from "@/components/ui/collapsible";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Globe, ChevronDown, RotateCcw, Timer, AlertTriangle, Settings, MousePointer, ShieldCheck } from 'lucide-react';
-import { toast } from 'sonner';
-import { saveTestPlaywrightOverrides, resetTestPlaywrightOverrides } from '@/server/actions/test-overrides';
-import type { TestPlaywrightOverrides as TestPlaywrightOverridesType } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import {
+  Globe,
+  ChevronDown,
+  RotateCcw,
+  Timer,
+  AlertTriangle,
+  Settings,
+  MousePointer,
+  ShieldCheck,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  saveTestPlaywrightOverrides,
+  resetTestPlaywrightOverrides,
+} from "@/server/actions/test-overrides";
+import type { TestPlaywrightOverrides as TestPlaywrightOverridesType } from "@/lib/db/schema";
 import {
   defaultCheckModes,
   type CheckLayer,
   type CheckMode,
   type CheckModeMap,
-} from '@/lib/verify/check-modes';
+} from "@/lib/verify/check-modes";
 
 interface TestPlaywrightOverridesProps {
   testId: string;
   repositoryId: string | null;
   overrides: TestPlaywrightOverridesType | null;
   defaults: {
-    browser: 'chromium' | 'firefox' | 'webkit';
+    browser: "chromium" | "firefox" | "webkit";
     navigationTimeout: number;
     actionTimeout: number;
     screenshotDelay: number;
-    networkErrorMode: 'fail' | 'warn' | 'ignore';
-    consoleErrorMode: 'fail' | 'warn' | 'ignore';
+    networkErrorMode: "fail" | "warn" | "ignore";
+    consoleErrorMode: "fail" | "warn" | "ignore";
     acceptAnyCertificate: boolean;
     maxParallelTests: number;
     baseUrl: string;
@@ -58,68 +70,97 @@ interface TestPlaywrightOverridesProps {
 }
 
 const MODE_LAYERS: { id: CheckLayer; name: string }[] = [
-  { id: 'visual',  name: 'Visual' },
-  { id: 'text',    name: 'Text' },
-  { id: 'dom',     name: 'DOM' },
-  { id: 'network', name: 'Network' },
-  { id: 'console', name: 'Console' },
-  { id: 'a11y',    name: 'A11y' },
-  { id: 'design',  name: 'Design' },
-  { id: 'perf',    name: 'Perf' },
-  { id: 'url',     name: 'URL' },
+  { id: "visual", name: "Visual" },
+  { id: "text", name: "Text" },
+  { id: "dom", name: "DOM" },
+  { id: "network", name: "Network" },
+  { id: "console", name: "Console" },
+  { id: "a11y", name: "A11y" },
+  { id: "design", name: "Design" },
+  { id: "perf", name: "Perf" },
+  { id: "url", name: "URL" },
 ];
 
 const MODE_OPTIONS: { id: CheckMode | null; label: string; hint: string }[] = [
-  { id: null,      label: 'Inherit', hint: 'Use the repo-level mode for this layer' },
-  { id: 'enforce', label: 'Enforce', hint: 'Run and fail the test on issues' },
-  { id: 'log',     label: 'Log',     hint: "Run, surface issues, never fail" },
-  { id: 'disable', label: 'Disable', hint: "Don't run this check for this test" },
+  {
+    id: null,
+    label: "Inherit",
+    hint: "Use the repo-level mode for this layer",
+  },
+  { id: "enforce", label: "Enforce", hint: "Run and fail the test on issues" },
+  { id: "log", label: "Log", hint: "Run, surface issues, never fail" },
+  {
+    id: "disable",
+    label: "Disable",
+    hint: "Don't run this check for this test",
+  },
 ];
 
-export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initialOverrides, defaults, repoCheckModes }: TestPlaywrightOverridesProps) {
-  const [overrides, setOverrides] = useState<TestPlaywrightOverridesType>(initialOverrides ?? {});
+export function TestPlaywrightOverrides({
+  testId,
+  repositoryId,
+  overrides: initialOverrides,
+  defaults,
+  repoCheckModes,
+}: TestPlaywrightOverridesProps) {
+  const [overrides, setOverrides] = useState<TestPlaywrightOverridesType>(
+    initialOverrides ?? {},
+  );
   const effectiveRepoCheckModes = repoCheckModes ?? defaultCheckModes();
   const [isSaving, setIsSaving] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef<string>(JSON.stringify(initialOverrides ?? {}));
 
-  const getVal = <K extends keyof TestPlaywrightOverridesType>(key: K): NonNullable<TestPlaywrightOverridesType[K]> => {
-    return (key in overrides ? overrides[key] : defaults[key as keyof typeof defaults]) as NonNullable<TestPlaywrightOverridesType[K]>;
+  const getVal = <K extends keyof TestPlaywrightOverridesType>(
+    key: K,
+  ): NonNullable<TestPlaywrightOverridesType[K]> => {
+    return (
+      key in overrides ? overrides[key] : defaults[key as keyof typeof defaults]
+    ) as NonNullable<TestPlaywrightOverridesType[K]>;
   };
 
-  const isOverridden = (key: keyof TestPlaywrightOverridesType) => key in overrides;
+  const isOverridden = (key: keyof TestPlaywrightOverridesType) =>
+    key in overrides;
 
-  const setVal = <K extends keyof TestPlaywrightOverridesType>(key: K, value: TestPlaywrightOverridesType[K]) => {
-    setOverrides(prev => ({ ...prev, [key]: value }));
+  const setVal = <K extends keyof TestPlaywrightOverridesType>(
+    key: K,
+    value: TestPlaywrightOverridesType[K],
+  ) => {
+    setOverrides((prev) => ({ ...prev, [key]: value }));
   };
 
   const restoreKey = (...keys: (keyof TestPlaywrightOverridesType)[]) => {
-    setOverrides(prev => {
+    setOverrides((prev) => {
       const next = { ...prev };
       for (const key of keys) delete next[key];
       return next;
     });
   };
 
-  const doSave = useCallback(async (current: TestPlaywrightOverridesType) => {
-    const serialized = JSON.stringify(current);
-    if (serialized === lastSaved.current) return;
-    setIsSaving(true);
-    try {
-      const toSave = Object.keys(current).length === 0 ? null : current;
-      await saveTestPlaywrightOverrides(testId, repositoryId, toSave);
-      lastSaved.current = serialized;
-    } catch {
-      toast.error('Failed to save playwright overrides');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [testId, repositoryId]);
+  const doSave = useCallback(
+    async (current: TestPlaywrightOverridesType) => {
+      const serialized = JSON.stringify(current);
+      if (serialized === lastSaved.current) return;
+      setIsSaving(true);
+      try {
+        const toSave = Object.keys(current).length === 0 ? null : current;
+        await saveTestPlaywrightOverrides(testId, repositoryId, toSave);
+        lastSaved.current = serialized;
+      } catch {
+        toast.error("Failed to save playwright overrides");
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [testId, repositoryId],
+  );
 
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => doSave(overrides), 500);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
   }, [overrides, doSave]);
 
   const handleReset = async () => {
@@ -131,22 +172,34 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
     lastSaved.current = JSON.stringify({});
     try {
       await resetTestPlaywrightOverrides(testId, repositoryId);
-      toast.success('Playwright overrides reset');
+      toast.success("Playwright overrides reset");
     } catch {
-      toast.error('Failed to reset overrides');
+      toast.error("Failed to reset overrides");
     }
   };
 
   const overrideCount = Object.keys(overrides).length;
 
-  const OverrideIndicator = ({ keys }: { keys: (keyof TestPlaywrightOverridesType)[] }) => {
-    const anyOverridden = keys.some(k => isOverridden(k));
+  const OverrideIndicator = ({
+    keys,
+  }: {
+    keys: (keyof TestPlaywrightOverridesType)[];
+  }) => {
+    const anyOverridden = keys.some((k) => isOverridden(k));
     if (!anyOverridden) return null;
     return (
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); restoreKey(...keys); }}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                restoreKey(...keys);
+              }}
+            >
               <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
             </Button>
           </TooltipTrigger>
@@ -168,10 +221,12 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
             {overrideCount > 0 && (
               <span className="text-xs bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded-full flex items-center gap-1">
                 <AlertTriangle className="h-3 w-3" />
-                {overrideCount} override{overrideCount !== 1 ? 's' : ''}
+                {overrideCount} override{overrideCount !== 1 ? "s" : ""}
               </span>
             )}
-            {isSaving && <span className="text-xs text-muted-foreground">Saving...</span>}
+            {isSaving && (
+              <span className="text-xs text-muted-foreground">Saving...</span>
+            )}
           </CardTitle>
           {overrideCount > 0 && (
             <Button variant="ghost" size="sm" onClick={handleReset}>
@@ -180,13 +235,23 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
             </Button>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">Per-test Playwright settings. Changed values override repo defaults and show a warning indicator.</p>
+        <p className="text-xs text-muted-foreground">
+          Per-test Playwright settings. Changed values override repo defaults
+          and show a warning indicator.
+        </p>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Browser */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['browser'].includes(k))}>
+        <Collapsible
+          defaultOpen={Object.keys(overrides).some((k) =>
+            ["browser"].includes(k),
+          )}
+        >
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-between p-2 h-auto"
+            >
               <div className="flex items-center gap-2">
                 <Globe className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Browser</span>
@@ -197,13 +262,20 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['browser']} />
+                <OverrideIndicator keys={["browser"]} />
                 <div className="space-y-0.5">
                   <Label className="text-sm">Browser Engine</Label>
-                  <p className="text-xs text-muted-foreground">Browser to use for test execution</p>
+                  <p className="text-xs text-muted-foreground">
+                    Browser to use for test execution
+                  </p>
                 </div>
               </div>
-              <Select value={getVal('browser')} onValueChange={(value) => setVal('browser', value as 'chromium' | 'firefox' | 'webkit')}>
+              <Select
+                value={getVal("browser")}
+                onValueChange={(value) =>
+                  setVal("browser", value as "chromium" | "firefox" | "webkit")
+                }
+              >
                 <SelectTrigger className="w-32">
                   <SelectValue />
                 </SelectTrigger>
@@ -218,9 +290,18 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
         </Collapsible>
 
         {/* Timeouts */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['navigationTimeout', 'actionTimeout', 'screenshotDelay'].includes(k))}>
+        <Collapsible
+          defaultOpen={Object.keys(overrides).some((k) =>
+            ["navigationTimeout", "actionTimeout", "screenshotDelay"].includes(
+              k,
+            ),
+          )}
+        >
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-between p-2 h-auto"
+            >
               <div className="flex items-center gap-2">
                 <Timer className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Timeouts</span>
@@ -231,7 +312,7 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
             <div className="flex items-center justify-between pl-4">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['navigationTimeout']} />
+                <OverrideIndicator keys={["navigationTimeout"]} />
                 <Label className="text-sm">Navigation Timeout</Label>
               </div>
               <div className="flex items-center gap-2">
@@ -240,8 +321,16 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                   min={0}
                   max={120000}
                   step={1000}
-                  value={getVal('navigationTimeout')}
-                  onChange={(e) => setVal('navigationTimeout', Math.max(0, Math.min(120000, parseInt(e.target.value) || 0)))}
+                  value={getVal("navigationTimeout")}
+                  onChange={(e) =>
+                    setVal(
+                      "navigationTimeout",
+                      Math.max(
+                        0,
+                        Math.min(120000, parseInt(e.target.value) || 0),
+                      ),
+                    )
+                  }
                   className="w-20"
                 />
                 <span className="text-xs text-muted-foreground">ms</span>
@@ -249,7 +338,7 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
             </div>
             <div className="flex items-center justify-between pl-4">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['actionTimeout']} />
+                <OverrideIndicator keys={["actionTimeout"]} />
                 <Label className="text-sm">Action Timeout</Label>
               </div>
               <div className="flex items-center gap-2">
@@ -258,8 +347,16 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                   min={0}
                   max={120000}
                   step={1000}
-                  value={getVal('actionTimeout')}
-                  onChange={(e) => setVal('actionTimeout', Math.max(0, Math.min(120000, parseInt(e.target.value) || 0)))}
+                  value={getVal("actionTimeout")}
+                  onChange={(e) =>
+                    setVal(
+                      "actionTimeout",
+                      Math.max(
+                        0,
+                        Math.min(120000, parseInt(e.target.value) || 0),
+                      ),
+                    )
+                  }
                   className="w-20"
                 />
                 <span className="text-xs text-muted-foreground">ms</span>
@@ -267,7 +364,7 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
             </div>
             <div className="flex items-center justify-between pl-4">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['screenshotDelay']} />
+                <OverrideIndicator keys={["screenshotDelay"]} />
                 <Label className="text-sm">Screenshot Delay</Label>
               </div>
               <div className="flex items-center gap-2">
@@ -276,8 +373,16 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                   min={0}
                   max={10000}
                   step={100}
-                  value={getVal('screenshotDelay')}
-                  onChange={(e) => setVal('screenshotDelay', Math.max(0, Math.min(10000, parseInt(e.target.value) || 0)))}
+                  value={getVal("screenshotDelay")}
+                  onChange={(e) =>
+                    setVal(
+                      "screenshotDelay",
+                      Math.max(
+                        0,
+                        Math.min(10000, parseInt(e.target.value) || 0),
+                      ),
+                    )
+                  }
                   className="w-20"
                 />
                 <span className="text-xs text-muted-foreground">ms</span>
@@ -292,9 +397,14 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
             on the repo says. Network/Console additionally write the legacy
             *ErrorMode keys for back-compat with executor code that still
             reads them. */}
-        <Collapsible defaultOpen={MODE_LAYERS.some(l => `${l.id}Mode` in overrides)}>
+        <Collapsible
+          defaultOpen={MODE_LAYERS.some((l) => `${l.id}Mode` in overrides)}
+        >
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-between p-2 h-auto"
+            >
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Check Modes</span>
@@ -304,31 +414,44 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 pt-2 pl-4">
             <p className="text-xs text-muted-foreground">
-              Override the repo&apos;s check modes for this test only. &quot;Inherit&quot; clears the override.
+              Override the repo&apos;s check modes for this test only.
+              &quot;Inherit&quot; clears the override.
             </p>
             {MODE_LAYERS.map((layer) => {
-              const overrideKey = `${layer.id}Mode` as keyof TestPlaywrightOverridesType;
-              const currentOverride = overrides[overrideKey] as CheckMode | undefined;
+              const overrideKey =
+                `${layer.id}Mode` as keyof TestPlaywrightOverridesType;
+              const currentOverride = overrides[overrideKey] as
+                | CheckMode
+                | undefined;
               const isOverriddenLayer = overrideKey in overrides;
               const repoMode = effectiveRepoCheckModes[layer.id];
               return (
-                <div key={layer.id} className="flex items-center justify-between">
+                <div
+                  key={layer.id}
+                  className="flex items-center justify-between"
+                >
                   <div className="flex items-center gap-1.5">
                     <OverrideIndicator keys={[overrideKey]} />
                     <Label className="text-sm">{layer.name}</Label>
                   </div>
                   <Select
-                    value={isOverriddenLayer ? (currentOverride ?? 'inherit') : 'inherit'}
+                    value={
+                      isOverriddenLayer
+                        ? (currentOverride ?? "inherit")
+                        : "inherit"
+                    }
                     onValueChange={(value) => {
-                      if (value === 'inherit') {
+                      if (value === "inherit") {
                         // Strip both the new key and any legacy mirror so
                         // the test no longer carries an opinion for this
                         // layer.
                         setOverrides((prev) => {
                           const next = { ...prev };
                           delete next[overrideKey];
-                          if (layer.id === 'network') delete next.networkErrorMode;
-                          if (layer.id === 'console') delete next.consoleErrorMode;
+                          if (layer.id === "network")
+                            delete next.networkErrorMode;
+                          if (layer.id === "console")
+                            delete next.consoleErrorMode;
                           return next;
                         });
                         return;
@@ -339,9 +462,14 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                         // Mirror to the legacy executor-facing field for
                         // the two gating layers so older code paths see
                         // the same value.
-                        const err = mode === 'enforce' ? 'fail' : mode === 'log' ? 'warn' : 'ignore';
-                        if (layer.id === 'network') next.networkErrorMode = err;
-                        if (layer.id === 'console') next.consoleErrorMode = err;
+                        const err =
+                          mode === "enforce"
+                            ? "fail"
+                            : mode === "log"
+                              ? "warn"
+                              : "ignore";
+                        if (layer.id === "network") next.networkErrorMode = err;
+                        if (layer.id === "console") next.consoleErrorMode = err;
                         return next;
                       });
                     }}
@@ -351,7 +479,11 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                     </SelectTrigger>
                     <SelectContent>
                       {MODE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.label} value={opt.id ?? 'inherit'} title={opt.hint}>
+                        <SelectItem
+                          key={opt.label}
+                          value={opt.id ?? "inherit"}
+                          title={opt.hint}
+                        >
                           {opt.id === null
                             ? `Inherit (${repoMode})`
                             : opt.label}
@@ -366,9 +498,16 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
         </Collapsible>
 
         {/* Environment */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['acceptAnyCertificate', 'maxParallelTests', 'baseUrl'].includes(k))}>
+        <Collapsible
+          defaultOpen={Object.keys(overrides).some((k) =>
+            ["acceptAnyCertificate", "maxParallelTests", "baseUrl"].includes(k),
+          )}
+        >
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-between p-2 h-auto"
+            >
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Environment</span>
@@ -379,20 +518,24 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['acceptAnyCertificate']} />
+                <OverrideIndicator keys={["acceptAnyCertificate"]} />
                 <div className="space-y-0.5">
                   <Label className="text-sm">Accept Any Certificate</Label>
-                  <p className="text-xs text-muted-foreground">Ignore SSL/TLS certificate errors</p>
+                  <p className="text-xs text-muted-foreground">
+                    Ignore SSL/TLS certificate errors
+                  </p>
                 </div>
               </div>
               <Switch
-                checked={getVal('acceptAnyCertificate') as boolean}
-                onCheckedChange={(checked) => setVal('acceptAnyCertificate', checked)}
+                checked={getVal("acceptAnyCertificate") as boolean}
+                onCheckedChange={(checked) =>
+                  setVal("acceptAnyCertificate", checked)
+                }
               />
             </div>
             <div className="flex items-center justify-between pl-4">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['maxParallelTests']} />
+                <OverrideIndicator keys={["maxParallelTests"]} />
                 <Label className="text-sm">Max Parallel Tests</Label>
               </div>
               <div className="flex items-center gap-2">
@@ -401,24 +544,31 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
                   min={1}
                   max={10}
                   step={1}
-                  value={getVal('maxParallelTests')}
-                  onChange={(e) => setVal('maxParallelTests', Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                  value={getVal("maxParallelTests")}
+                  onChange={(e) =>
+                    setVal(
+                      "maxParallelTests",
+                      Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
+                    )
+                  }
                   className="w-20"
                 />
               </div>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['baseUrl']} />
+                <OverrideIndicator keys={["baseUrl"]} />
                 <div className="space-y-0.5">
                   <Label className="text-sm">Base URL</Label>
-                  <p className="text-xs text-muted-foreground">Override the base URL for this test</p>
+                  <p className="text-xs text-muted-foreground">
+                    Override the base URL for this test
+                  </p>
                 </div>
               </div>
               <Input
                 type="text"
-                value={getVal('baseUrl')}
-                onChange={(e) => setVal('baseUrl', e.target.value)}
+                value={getVal("baseUrl")}
+                onChange={(e) => setVal("baseUrl", e.target.value)}
                 className="w-48"
                 placeholder="https://example.com"
               />
@@ -426,9 +576,16 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           </CollapsibleContent>
         </Collapsible>
         {/* Cursor Tracking */}
-        <Collapsible defaultOpen={Object.keys(overrides).some(k => ['cursorPlaybackSpeed'].includes(k))}>
+        <Collapsible
+          defaultOpen={Object.keys(overrides).some((k) =>
+            ["cursorPlaybackSpeed"].includes(k),
+          )}
+        >
           <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+            <Button
+              variant="ghost"
+              className="w-full justify-between p-2 h-auto"
+            >
               <div className="flex items-center gap-2">
                 <MousePointer className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Cursor Tracking</span>
@@ -439,13 +596,20 @@ export function TestPlaywrightOverrides({ testId, repositoryId, overrides: initi
           <CollapsibleContent className="space-y-3 pt-2 pl-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <OverrideIndicator keys={['cursorPlaybackSpeed']} />
+                <OverrideIndicator keys={["cursorPlaybackSpeed"]} />
                 <div className="space-y-0.5">
                   <Label className="text-sm">Playback Speed</Label>
-                  <p className="text-xs text-muted-foreground">Speed multiplier for cursor replay</p>
+                  <p className="text-xs text-muted-foreground">
+                    Speed multiplier for cursor replay
+                  </p>
                 </div>
               </div>
-              <Select value={String(getVal('cursorPlaybackSpeed'))} onValueChange={(value) => setVal('cursorPlaybackSpeed', Number(value))}>
+              <Select
+                value={String(getVal("cursorPlaybackSpeed"))}
+                onValueChange={(value) =>
+                  setVal("cursorPlaybackSpeed", Number(value))
+                }
+              >
                 <SelectTrigger className="w-32">
                   <SelectValue />
                 </SelectTrigger>

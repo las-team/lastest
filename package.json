@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "types": "tsc --noEmit",
+    "types": "NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:studio": "drizzle-kit studio",

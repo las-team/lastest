@@ -50,13 +50,15 @@ export interface SelectorOutcome {
  * correctly per (type, value).
  */
 export function hashSelectors(selectors: ReadonlyArray<SelectorRef>): string {
-  const canonical = JSON.stringify(selectors.map((s) => ({ t: s.type, v: s.value })));
+  const canonical = JSON.stringify(
+    selectors.map((s) => ({ t: s.type, v: s.value })),
+  );
   let h = 0x811c9dc5;
   for (let i = 0; i < canonical.length; i++) {
     h ^= canonical.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return (h >>> 0).toString(16).padStart(8, '0');
+  return (h >>> 0).toString(16).padStart(8, "0");
 }
 
 /**
@@ -79,7 +81,9 @@ export function sortSelectorsByStats<T extends SelectorRef>(
     byKey.set(`${row.type}::${row.value}`, row);
   }
 
-  const score = (sel: SelectorRef): { rate: number; latency: number; known: boolean } => {
+  const score = (
+    sel: SelectorRef,
+  ): { rate: number; latency: number; known: boolean } => {
     const row = byKey.get(`${sel.type}::${sel.value}`);
     if (!row || row.totalAttempts === 0) {
       return { rate: 0, latency: Number.POSITIVE_INFINITY, known: false };
@@ -120,6 +124,7 @@ export function selectorTimeoutFor(
   stat: SelectorStatRow | undefined,
   defaultMs: number,
 ): number {
-  if (!stat || stat.totalAttempts < 3 || !stat.avgResponseTimeMs) return defaultMs;
+  if (!stat || stat.totalAttempts < 3 || !stat.avgResponseTimeMs)
+    return defaultMs;
   return Math.min(defaultMs, Math.max(stat.avgResponseTimeMs * 2, 500));
 }

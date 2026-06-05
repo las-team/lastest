@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useOptimistic, useTransition } from 'react';
-import { Switch } from '@/components/ui/switch';
-import { toast } from 'sonner';
-import { updateBanAiMode } from '@/server/actions/settings';
+import { useOptimistic, useTransition } from "react";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import { updateBanAiMode } from "@/server/actions/settings";
 
 interface BanAiModeToggleProps {
   enabled: boolean;
@@ -18,9 +18,9 @@ export function BanAiModeToggle({ enabled }: BanAiModeToggleProps) {
       setOptimisticEnabled(checked);
       try {
         await updateBanAiMode(checked);
-        toast.success(checked ? 'Ban AI mode enabled' : 'Ban AI mode disabled');
+        toast.success(checked ? "Ban AI mode enabled" : "Ban AI mode disabled");
       } catch {
-        toast.error('Failed to update setting');
+        toast.error("Failed to update setting");
       }
     });
   }

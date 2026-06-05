@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { authClient } from '@/lib/auth/auth-client';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
+import { useState } from "react";
+import Link from "next/link";
+import { authClient } from "@/lib/auth/auth-client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { AuthBrandHeader } from "@/components/auth/auth-brand-header";
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -21,7 +21,7 @@ export default function ForgotPasswordPage() {
     try {
       await authClient.requestPasswordReset({
         email,
-        redirectTo: '/reset-password',
+        redirectTo: "/reset-password",
       });
       setSubmitted(true);
     } catch {
@@ -44,9 +44,13 @@ export default function ForgotPasswordPage() {
           {submitted ? (
             <div className="text-center space-y-4">
               <p className="text-sm text-muted-foreground">
-                If an account exists with that email, you&apos;ll receive a password reset link shortly.
+                If an account exists with that email, you&apos;ll receive a
+                password reset link shortly.
               </p>
-              <Link href="/login" className="text-sm text-primary underline-offset-4 hover:underline">
+              <Link
+                href="/login"
+                className="text-sm text-primary underline-offset-4 hover:underline"
+              >
                 Back to sign in
               </Link>
             </div>
@@ -66,7 +70,7 @@ export default function ForgotPasswordPage() {
               </div>
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Sending...' : 'Send reset link'}
+                {loading ? "Sending..." : "Send reset link"}
               </Button>
             </form>
           )}
@@ -75,8 +79,11 @@ export default function ForgotPasswordPage() {
 
       {!submitted && (
         <p className="text-center text-sm text-muted-foreground">
-          Remember your password?{' '}
-          <Link href="/login" className="text-primary font-medium underline-offset-4 hover:underline">
+          Remember your password?{" "}
+          <Link
+            href="/login"
+            className="text-primary font-medium underline-offset-4 hover:underline"
+          >
             Sign in
           </Link>
         </p>

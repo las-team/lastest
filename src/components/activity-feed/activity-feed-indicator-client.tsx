@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Radio } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useActivityFeedContextSafe } from './activity-feed-provider-client';
-import { cn } from '@/lib/utils';
+import { useState, useEffect } from "react";
+import { Radio } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useActivityFeedContextSafe } from "./activity-feed-provider-client";
+import { cn } from "@/lib/utils";
 
 export function ActivityFeedIndicator() {
   const ctx = useActivityFeedContextSafe();
@@ -45,13 +45,25 @@ export function ActivityFeedIndicator() {
       size="sm"
       className="relative gap-1.5 h-8"
       onClick={() => setIsOpen(true)}
-      aria-label={isConnected ? 'Activity feed (connected)' : 'Activity feed (disconnected)'}
-      title={isConnected ? 'Activity Feed (connected)' : 'Activity Feed (disconnected)'}
+      aria-label={
+        isConnected
+          ? "Activity feed (connected)"
+          : "Activity feed (disconnected)"
+      }
+      title={
+        isConnected
+          ? "Activity Feed (connected)"
+          : "Activity Feed (disconnected)"
+      }
     >
       <Radio
         className={cn(
-          'h-4 w-4',
-          hasActive ? 'text-violet-500 animate-pulse' : hasEvents ? 'text-primary' : 'text-muted-foreground',
+          "h-4 w-4",
+          hasActive
+            ? "text-violet-500 animate-pulse"
+            : hasEvents
+              ? "text-primary"
+              : "text-muted-foreground",
         )}
       />
       {hasActive && (
@@ -60,9 +72,7 @@ export function ActivityFeedIndicator() {
         </span>
       )}
       {!hasActive && hasEvents && (
-        <span className="text-xs text-muted-foreground">
-          {events.length}
-        </span>
+        <span className="text-xs text-muted-foreground">{events.length}</span>
       )}
     </Button>
   );

@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   playwrightSettings,
   environmentConfigs,
@@ -6,7 +6,7 @@ import {
   aiSettings,
   aiPromptLogs,
   notificationSettings,
-} from '../schema';
+} from "../schema";
 import {
   DEFAULT_SELECTOR_PRIORITY,
   DEFAULT_DIFF_THRESHOLDS,
@@ -14,7 +14,7 @@ import {
   DEFAULT_RECORDING_ENGINES,
   DEFAULT_NOTIFICATION_SETTINGS,
   DEFAULT_STABILIZATION_SETTINGS,
-} from '../schema';
+} from "../schema";
 import type {
   NewPlaywrightSettings,
   NewEnvironmentConfig,
@@ -24,21 +24,31 @@ import type {
   NewNotificationSettings,
   SelectorConfig,
   AIProvider,
-} from '../schema';
-import { eq, desc, isNull } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { eq, desc, isNull } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
-export { DEFAULT_SELECTOR_PRIORITY, DEFAULT_DIFF_THRESHOLDS, DEFAULT_AI_SETTINGS, DEFAULT_RECORDING_ENGINES, DEFAULT_NOTIFICATION_SETTINGS };
+export {
+  DEFAULT_SELECTOR_PRIORITY,
+  DEFAULT_DIFF_THRESHOLDS,
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_RECORDING_ENGINES,
+  DEFAULT_NOTIFICATION_SETTINGS,
+};
 
 // Helper to merge saved selector priority with defaults (adds new types)
-function mergeSelectorPriority(saved: SelectorConfig[] | null | undefined): SelectorConfig[] {
+function mergeSelectorPriority(
+  saved: SelectorConfig[] | null | undefined,
+): SelectorConfig[] {
   if (!saved || saved.length === 0) return DEFAULT_SELECTOR_PRIORITY;
 
-  const savedTypes = new Set(saved.map(s => s.type));
-  const maxPriority = Math.max(...saved.map(s => s.priority));
+  const savedTypes = new Set(saved.map((s) => s.type));
+  const maxPriority = Math.max(...saved.map((s) => s.priority));
 
   // Add any new selector types from defaults that aren't in saved
-  const newTypes = DEFAULT_SELECTOR_PRIORITY.filter(d => !savedTypes.has(d.type));
+  const newTypes = DEFAULT_SELECTOR_PRIORITY.filter(
+    (d) => !savedTypes.has(d.type),
+  );
   if (newTypes.length === 0) return saved;
 
   return [
@@ -58,10 +68,11 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
       return {
         ...settings,
         selectorPriority: mergeSelectorPriority(settings.selectorPriority),
-        enabledRecordingEngines: settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
-        defaultRecordingEngine: settings.defaultRecordingEngine ?? 'lastest',
+        enabledRecordingEngines:
+          settings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
+        defaultRecordingEngine: settings.defaultRecordingEngine ?? "lastest",
         stabilization: settings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
-        browsers: settings.browsers ?? ['chromium'],
+        browsers: settings.browsers ?? ["chromium"],
       };
     }
   }
@@ -76,24 +87,27 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     return {
       ...globalSettings,
       selectorPriority: mergeSelectorPriority(globalSettings.selectorPriority),
-      enabledRecordingEngines: globalSettings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
-      defaultRecordingEngine: globalSettings.defaultRecordingEngine ?? 'lastest',
-      stabilization: globalSettings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
-      browsers: globalSettings.browsers ?? ['chromium'],
+      enabledRecordingEngines:
+        globalSettings.enabledRecordingEngines ?? DEFAULT_RECORDING_ENGINES,
+      defaultRecordingEngine:
+        globalSettings.defaultRecordingEngine ?? "lastest",
+      stabilization:
+        globalSettings.stabilization ?? DEFAULT_STABILIZATION_SETTINGS,
+      browsers: globalSettings.browsers ?? ["chromium"],
     };
   }
 
   // Return default settings object (not saved)
   return {
-    id: '',
+    id: "",
     repositoryId: null,
     selectorPriority: DEFAULT_SELECTOR_PRIORITY,
     customAttributeName: null,
-    browser: 'chromium' as const,
+    browser: "chromium" as const,
     viewportWidth: 1280,
     viewportHeight: 720,
     lockViewportToRecording: false,
-    headlessMode: 'true' as const,
+    headlessMode: "true" as const,
     navigationTimeout: 30000,
     actionTimeout: 5000,
     selectorTimeoutMs: 3000,
@@ -101,7 +115,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     cursorFPS: 30,
     cursorPlaybackSpeed: 1,
     enabledRecordingEngines: DEFAULT_RECORDING_ENGINES,
-    defaultRecordingEngine: 'lastest' as const,
+    defaultRecordingEngine: "lastest" as const,
     freezeAnimations: false,
     enableVideoRecording: false,
     screenshotDelay: 0,
@@ -111,16 +125,16 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     ebIdleTTLSeconds: 90,
     stabilization: DEFAULT_STABILIZATION_SETTINGS,
     acceptAnyCertificate: false,
-    networkErrorMode: 'fail',
+    networkErrorMode: "fail",
     ignoreExternalNetworkErrors: true,
-    consoleErrorMode: 'fail',
+    consoleErrorMode: "fail",
     consoleErrorIgnoreHosts: null as string[] | null,
     userAgentOverride: null as string | null,
     grantClipboardAccess: false,
     acceptDownloads: false,
     enableNetworkInterception: false,
     enableDomDiff: false,
-    browsers: ['chromium'] as string[],
+    browsers: ["chromium"] as string[],
     autoRetryCount: 0,
     enableA11y: false,
     enableDesignSystem: false,
@@ -141,7 +155,9 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
   };
 }
 
-export async function createPlaywrightSettings(data: Omit<NewPlaywrightSettings, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createPlaywrightSettings(
+  data: Omit<NewPlaywrightSettings, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(playwrightSettings).values({
@@ -154,11 +170,20 @@ export async function createPlaywrightSettings(data: Omit<NewPlaywrightSettings,
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updatePlaywrightSettings(id: string, data: Partial<NewPlaywrightSettings>) {
-  await db.update(playwrightSettings).set({ ...data, updatedAt: new Date() }).where(eq(playwrightSettings.id, id));
+export async function updatePlaywrightSettings(
+  id: string,
+  data: Partial<NewPlaywrightSettings>,
+) {
+  await db
+    .update(playwrightSettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(playwrightSettings.id, id));
 }
 
-export async function upsertPlaywrightSettings(repositoryId: string | null, data: Partial<NewPlaywrightSettings>) {
+export async function upsertPlaywrightSettings(
+  repositoryId: string | null,
+  data: Partial<NewPlaywrightSettings>,
+) {
   const whereClause = repositoryId
     ? eq(playwrightSettings.repositoryId, repositoryId)
     : isNull(playwrightSettings.repositoryId);
@@ -172,7 +197,10 @@ export async function upsertPlaywrightSettings(repositoryId: string | null, data
     await updatePlaywrightSettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createPlaywrightSettings({ ...data, repositoryId: repositoryId ?? undefined });
+    return createPlaywrightSettings({
+      ...data,
+      repositoryId: repositoryId ?? undefined,
+    });
   }
 }
 
@@ -182,9 +210,10 @@ export async function deletePlaywrightSettings(id: string) {
 
 // Cluster-wide EB pool limits — read from the global (repositoryId IS NULL) row.
 // Per-repo overrides are ignored on purpose: the pool is a shared cluster resource.
-export async function getGlobalPoolLimits(): Promise<
-  { ebPoolMax: number; ebIdleTTLSeconds: number } | null
-> {
+export async function getGlobalPoolLimits(): Promise<{
+  ebPoolMax: number;
+  ebIdleTTLSeconds: number;
+} | null> {
   const [row] = await db
     .select({
       ebPoolMax: playwrightSettings.ebPoolMax,
@@ -218,16 +247,17 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
       .select()
       .from(environmentConfigs)
       .where(eq(environmentConfigs.repositoryId, repositoryId));
-    if (config) return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, '') };
+    if (config)
+      return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, "") };
   }
 
   // Synthetic default when no repository row exists. The team-level
   // (repositoryId IS NULL) row has no UI writer and is intentionally ignored.
   return {
-    id: 'default',
+    id: "default",
     repositoryId: repositoryId ?? null,
-    mode: 'manual' as const,
-    baseUrl: 'http://localhost:3000',
+    mode: "manual" as const,
+    baseUrl: "http://localhost:3000",
     startCommand: null,
     healthCheckUrl: null,
     healthCheckTimeout: 60000,
@@ -237,7 +267,9 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
   };
 }
 
-export async function createEnvironmentConfig(data: Omit<NewEnvironmentConfig, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createEnvironmentConfig(
+  data: Omit<NewEnvironmentConfig, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(environmentConfigs).values({
@@ -249,11 +281,20 @@ export async function createEnvironmentConfig(data: Omit<NewEnvironmentConfig, '
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateEnvironmentConfig(id: string, data: Partial<NewEnvironmentConfig>) {
-  await db.update(environmentConfigs).set({ ...data, updatedAt: new Date() }).where(eq(environmentConfigs.id, id));
+export async function updateEnvironmentConfig(
+  id: string,
+  data: Partial<NewEnvironmentConfig>,
+) {
+  await db
+    .update(environmentConfigs)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(environmentConfigs.id, id));
 }
 
-export async function upsertEnvironmentConfig(repositoryId: string, data: Partial<NewEnvironmentConfig>) {
+export async function upsertEnvironmentConfig(
+  repositoryId: string,
+  data: Partial<NewEnvironmentConfig>,
+) {
   const [existing] = await db
     .select()
     .from(environmentConfigs)
@@ -285,13 +326,13 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
   const [globalSettings] = await db
     .select()
     .from(diffSensitivitySettings)
-    .where(eq(diffSensitivitySettings.repositoryId, ''));
+    .where(eq(diffSensitivitySettings.repositoryId, ""));
 
   if (globalSettings) return globalSettings;
 
   // Return default settings object (not saved)
   return {
-    id: '',
+    id: "",
     repositoryId: null,
     unchangedThreshold: DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
     flakyThreshold: DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
@@ -309,7 +350,9 @@ export async function getDiffSensitivitySettings(repositoryId?: string | null) {
   };
 }
 
-export async function createDiffSensitivitySettings(data: Omit<NewDiffSensitivitySettings, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createDiffSensitivitySettings(
+  data: Omit<NewDiffSensitivitySettings, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(diffSensitivitySettings).values({
@@ -321,11 +364,20 @@ export async function createDiffSensitivitySettings(data: Omit<NewDiffSensitivit
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateDiffSensitivitySettings(id: string, data: Partial<NewDiffSensitivitySettings>) {
-  await db.update(diffSensitivitySettings).set({ ...data, updatedAt: new Date() }).where(eq(diffSensitivitySettings.id, id));
+export async function updateDiffSensitivitySettings(
+  id: string,
+  data: Partial<NewDiffSensitivitySettings>,
+) {
+  await db
+    .update(diffSensitivitySettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(diffSensitivitySettings.id, id));
 }
 
-export async function upsertDiffSensitivitySettings(repositoryId: string | null, data: Partial<NewDiffSensitivitySettings>) {
+export async function upsertDiffSensitivitySettings(
+  repositoryId: string | null,
+  data: Partial<NewDiffSensitivitySettings>,
+) {
   const whereClause = repositoryId
     ? eq(diffSensitivitySettings.repositoryId, repositoryId)
     : isNull(diffSensitivitySettings.repositoryId);
@@ -339,12 +391,17 @@ export async function upsertDiffSensitivitySettings(repositoryId: string | null,
     await updateDiffSensitivitySettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createDiffSensitivitySettings({ ...data, repositoryId: repositoryId ?? undefined });
+    return createDiffSensitivitySettings({
+      ...data,
+      repositoryId: repositoryId ?? undefined,
+    });
   }
 }
 
 export async function deleteDiffSensitivitySettings(id: string) {
-  await db.delete(diffSensitivitySettings).where(eq(diffSensitivitySettings.id, id));
+  await db
+    .delete(diffSensitivitySettings)
+    .where(eq(diffSensitivitySettings.id, id));
 }
 
 // AI Settings
@@ -361,13 +418,13 @@ export async function getAISettings(repositoryId?: string | null) {
   const [globalSettings] = await db
     .select()
     .from(aiSettings)
-    .where(eq(aiSettings.repositoryId, ''));
+    .where(eq(aiSettings.repositoryId, ""));
 
   if (globalSettings) return globalSettings;
 
   // Return default settings object (not saved)
   return {
-    id: '',
+    id: "",
     repositoryId: null,
     provider: DEFAULT_AI_SETTINGS.provider as AIProvider,
     openrouterApiKey: null,
@@ -395,7 +452,9 @@ export async function getAISettings(repositoryId?: string | null) {
   };
 }
 
-export async function createAISettings(data: Omit<NewAISettings, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createAISettings(
+  data: Omit<NewAISettings, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(aiSettings).values({
@@ -407,25 +466,34 @@ export async function createAISettings(data: Omit<NewAISettings, 'id' | 'created
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateAISettings(id: string, data: Partial<NewAISettings>) {
-  await db.update(aiSettings).set({ ...data, updatedAt: new Date() }).where(eq(aiSettings.id, id));
+export async function updateAISettings(
+  id: string,
+  data: Partial<NewAISettings>,
+) {
+  await db
+    .update(aiSettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(aiSettings.id, id));
 }
 
-export async function upsertAISettings(repositoryId: string | null, data: Partial<NewAISettings>) {
+export async function upsertAISettings(
+  repositoryId: string | null,
+  data: Partial<NewAISettings>,
+) {
   const whereClause = repositoryId
     ? eq(aiSettings.repositoryId, repositoryId)
     : isNull(aiSettings.repositoryId);
 
-  const [existing] = await db
-    .select()
-    .from(aiSettings)
-    .where(whereClause);
+  const [existing] = await db.select().from(aiSettings).where(whereClause);
 
   if (existing) {
     await updateAISettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createAISettings({ ...data, repositoryId: repositoryId ?? undefined });
+    return createAISettings({
+      ...data,
+      repositoryId: repositoryId ?? undefined,
+    });
   }
 }
 
@@ -434,7 +502,9 @@ export async function deleteAISettings(id: string) {
 }
 
 // AI Prompt Logs
-export async function createAIPromptLog(data: Omit<NewAIPromptLog, 'id' | 'createdAt'>) {
+export async function createAIPromptLog(
+  data: Omit<NewAIPromptLog, "id" | "createdAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(aiPromptLogs).values({
@@ -447,37 +517,45 @@ export async function createAIPromptLog(data: Omit<NewAIPromptLog, 'id' | 'creat
 
 export async function updateAIPromptLog(
   id: string,
-  data: Partial<Pick<NewAIPromptLog, 'status' | 'response' | 'errorMessage' | 'durationMs'>>
+  data: Partial<
+    Pick<NewAIPromptLog, "status" | "response" | "errorMessage" | "durationMs">
+  >,
 ) {
   await db.update(aiPromptLogs).set(data).where(eq(aiPromptLogs.id, id));
 }
 
 export async function getAIPromptLog(id: string) {
-  const [row] = await db.select().from(aiPromptLogs).where(eq(aiPromptLogs.id, id));
+  const [row] = await db
+    .select()
+    .from(aiPromptLogs)
+    .where(eq(aiPromptLogs.id, id));
   return row;
 }
 
-export async function getAIPromptLogs(repositoryId?: string | null, limit = 50) {
+export async function getAIPromptLogs(
+  repositoryId?: string | null,
+  limit = 50,
+) {
   if (repositoryId) {
     return db
       .select()
       .from(aiPromptLogs)
       .where(eq(aiPromptLogs.repositoryId, repositoryId))
       .orderBy(desc(aiPromptLogs.createdAt))
-      .limit(limit)
-      ;
+      .limit(limit);
   }
   return db
     .select()
     .from(aiPromptLogs)
     .orderBy(desc(aiPromptLogs.createdAt))
-    .limit(limit)
-    ;
+    .limit(limit);
 }
 
 export async function deleteAllAIPromptLogs(repositoryId?: string | null) {
   if (repositoryId) {
-    await db.delete(aiPromptLogs).where(eq(aiPromptLogs.repositoryId, repositoryId));
+    await db
+      .delete(aiPromptLogs)
+      .where(eq(aiPromptLogs.repositoryId, repositoryId));
   } else {
     await db.delete(aiPromptLogs);
   }
@@ -503,14 +581,16 @@ export async function getNotificationSettings(repositoryId?: string | null) {
 
   // Return default settings object (not saved)
   return {
-    id: '',
+    id: "",
     repositoryId: null,
     slackWebhookUrl: null,
     slackEnabled: DEFAULT_NOTIFICATION_SETTINGS.slackEnabled,
     discordWebhookUrl: null,
     discordEnabled: DEFAULT_NOTIFICATION_SETTINGS.discordEnabled,
-    githubPrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
-    gitlabMrCommentsEnabled: DEFAULT_NOTIFICATION_SETTINGS.gitlabMrCommentsEnabled,
+    githubPrCommentsEnabled:
+      DEFAULT_NOTIFICATION_SETTINGS.githubPrCommentsEnabled,
+    gitlabMrCommentsEnabled:
+      DEFAULT_NOTIFICATION_SETTINGS.gitlabMrCommentsEnabled,
     customWebhookEnabled: DEFAULT_NOTIFICATION_SETTINGS.customWebhookEnabled,
     customWebhookUrl: null,
     customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
@@ -521,7 +601,9 @@ export async function getNotificationSettings(repositoryId?: string | null) {
   };
 }
 
-export async function createNotificationSettings(data: Omit<NewNotificationSettings, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createNotificationSettings(
+  data: Omit<NewNotificationSettings, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(notificationSettings).values({
@@ -533,11 +615,20 @@ export async function createNotificationSettings(data: Omit<NewNotificationSetti
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateNotificationSettings(id: string, data: Partial<NewNotificationSettings>) {
-  await db.update(notificationSettings).set({ ...data, updatedAt: new Date() }).where(eq(notificationSettings.id, id));
+export async function updateNotificationSettings(
+  id: string,
+  data: Partial<NewNotificationSettings>,
+) {
+  await db
+    .update(notificationSettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(notificationSettings.id, id));
 }
 
-export async function upsertNotificationSettings(repositoryId: string | null, data: Partial<NewNotificationSettings>) {
+export async function upsertNotificationSettings(
+  repositoryId: string | null,
+  data: Partial<NewNotificationSettings>,
+) {
   const whereClause = repositoryId
     ? eq(notificationSettings.repositoryId, repositoryId)
     : isNull(notificationSettings.repositoryId);
@@ -551,6 +642,9 @@ export async function upsertNotificationSettings(repositoryId: string | null, da
     await updateNotificationSettings(existing.id, data);
     return { ...existing, ...data, updatedAt: new Date() };
   } else {
-    return createNotificationSettings({ ...data, repositoryId: repositoryId ?? undefined });
+    return createNotificationSettings({
+      ...data,
+      repositoryId: repositoryId ?? undefined,
+    });
   }
 }

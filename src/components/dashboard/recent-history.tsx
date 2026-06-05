@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import type { Build } from '@/lib/db/schema';
+import Link from "next/link";
+import type { Build } from "@/lib/db/schema";
 
 interface RecentHistoryProps {
   builds: Build[];
 }
 
 const statusColors: Record<string, string> = {
-  safe_to_merge: 'bg-success',
-  review_required: 'bg-warning',
-  blocked: 'bg-destructive',
+  safe_to_merge: "bg-success",
+  review_required: "bg-warning",
+  blocked: "bg-destructive",
 };
 
 export function RecentHistory({ builds }: RecentHistoryProps) {
@@ -23,7 +23,7 @@ export function RecentHistory({ builds }: RecentHistoryProps) {
             key={build.id}
             href={`/builds/${build.id}`}
             className={`w-6 h-6 rounded ${statusColors[build.overallStatus]} hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 transition-all`}
-            title={`Build ${build.id.slice(0, 8)} - ${build.overallStatus.replace('_', ' ')}`}
+            title={`Build ${build.id.slice(0, 8)} - ${build.overallStatus.replace("_", " ")}`}
           />
         ))}
         {builds.length === 0 && (

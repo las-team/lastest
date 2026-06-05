@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { authClient } from '@/lib/auth/auth-client';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { recordRegistrationConsent } from '@/server/actions/consent';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { authClient } from "@/lib/auth/auth-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { recordRegistrationConsent } from "@/server/actions/consent";
 
 interface InviteFormProps {
   email: string;
@@ -17,15 +17,15 @@ interface InviteFormProps {
 
 export function InviteForm({ email, token: _token }: InviteFormProps) {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
   const [marketingConsent, setMarketingConsent] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
 
     // Sign up with the invited email — the databaseHook in auth.ts
@@ -37,14 +37,14 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
     });
 
     if (result.error) {
-      setError(result.error.message ?? 'Sign up failed');
+      setError(result.error.message ?? "Sign up failed");
       setLoading(false);
       return;
     }
 
     await recordRegistrationConsent({ marketingEmails: marketingConsent });
 
-    router.push('/');
+    router.push("/");
     router.refresh();
   }
 
@@ -71,12 +71,7 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            value={email}
-            disabled
-          />
+          <Input id="email" type="email" value={email} disabled />
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
@@ -92,7 +87,10 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
+          <Label
+            htmlFor="marketing"
+            className="text-sm font-normal text-muted-foreground leading-snug"
+          >
             Send me product updates, tips, and feature announcements
           </Label>
           <Switch
@@ -102,21 +100,27 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
           />
         </div>
 
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         <Button type="submit" className="w-full" disabled={loading}>
-          {loading ? 'Creating account...' : 'Accept invite & create account'}
+          {loading ? "Creating account..." : "Accept invite & create account"}
         </Button>
 
         <p className="text-xs text-muted-foreground text-center">
-          By creating an account, you agree to our{' '}
-          <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+          By creating an account, you agree to our{" "}
+          <Link
+            href="/terms"
+            className="underline underline-offset-4 hover:text-foreground"
+            target="_blank"
+          >
             Terms of Service
-          </Link>{' '}
-          and{' '}
-          <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+          </Link>{" "}
+          and{" "}
+          <Link
+            href="/privacy"
+            className="underline underline-offset-4 hover:text-foreground"
+            target="_blank"
+          >
             Privacy Policy
           </Link>
           .

@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   setupScripts,
   setupConfigs,
@@ -7,7 +7,7 @@ import {
   tests,
   repositories,
   storageStates,
-} from '../schema';
+} from "../schema";
 import type {
   NewSetupScript,
   NewSetupConfig,
@@ -19,12 +19,12 @@ import type {
   StabilizationSettings,
   TestDiffOverrides,
   TestPlaywrightOverrides,
-} from '../schema';
-import { getTest } from './tests';
-import { getRepository } from './repositories';
-import { getStorageState } from './storage-states';
-import { eq, desc, and, isNull } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "../schema";
+import { getTest } from "./tests";
+import { getRepository } from "./repositories";
+import { getStorageState } from "./storage-states";
+import { eq, desc, and, isNull } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // ============================================
 // Setup Scripts
@@ -35,16 +35,20 @@ export async function getSetupScripts(repositoryId: string) {
     .select()
     .from(setupScripts)
     .where(eq(setupScripts.repositoryId, repositoryId))
-    .orderBy(desc(setupScripts.createdAt))
-    ;
+    .orderBy(desc(setupScripts.createdAt));
 }
 
 export async function getSetupScript(id: string) {
-  const [row] = await db.select().from(setupScripts).where(eq(setupScripts.id, id));
+  const [row] = await db
+    .select()
+    .from(setupScripts)
+    .where(eq(setupScripts.id, id));
   return row;
 }
 
-export async function createSetupScript(data: Omit<NewSetupScript, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createSetupScript(
+  data: Omit<NewSetupScript, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(setupScripts).values({
@@ -56,8 +60,14 @@ export async function createSetupScript(data: Omit<NewSetupScript, 'id' | 'creat
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateSetupScript(id: string, data: Partial<NewSetupScript>) {
-  await db.update(setupScripts).set({ ...data, updatedAt: new Date() }).where(eq(setupScripts.id, id));
+export async function updateSetupScript(
+  id: string,
+  data: Partial<NewSetupScript>,
+) {
+  await db
+    .update(setupScripts)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(setupScripts.id, id));
 }
 
 export async function deleteSetupScript(id: string) {
@@ -86,16 +96,20 @@ export async function getSetupConfigs(repositoryId: string) {
     .select()
     .from(setupConfigs)
     .where(eq(setupConfigs.repositoryId, repositoryId))
-    .orderBy(desc(setupConfigs.createdAt))
-    ;
+    .orderBy(desc(setupConfigs.createdAt));
 }
 
 export async function getSetupConfig(id: string) {
-  const [row] = await db.select().from(setupConfigs).where(eq(setupConfigs.id, id));
+  const [row] = await db
+    .select()
+    .from(setupConfigs)
+    .where(eq(setupConfigs.id, id));
   return row;
 }
 
-export async function createSetupConfig(data: Omit<NewSetupConfig, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function createSetupConfig(
+  data: Omit<NewSetupConfig, "id" | "createdAt" | "updatedAt">,
+) {
   const id = uuid();
   const now = new Date();
   await db.insert(setupConfigs).values({
@@ -107,8 +121,14 @@ export async function createSetupConfig(data: Omit<NewSetupConfig, 'id' | 'creat
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
-export async function updateSetupConfig(id: string, data: Partial<NewSetupConfig>) {
-  await db.update(setupConfigs).set({ ...data, updatedAt: new Date() }).where(eq(setupConfigs.id, id));
+export async function updateSetupConfig(
+  id: string,
+  data: Partial<NewSetupConfig>,
+) {
+  await db
+    .update(setupConfigs)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(setupConfigs.id, id));
 }
 
 export async function deleteSetupConfig(id: string) {
@@ -146,24 +166,34 @@ export async function getTestWithSetup(testId: string) {
 }
 
 // Update test setup configuration
-export async function updateTestSetup(testId: string, setupTestId: string | null, setupScriptId: string | null) {
-  await db.update(tests).set({
-    setupTestId,
-    setupScriptId,
-    updatedAt: new Date(),
-  }).where(eq(tests.id, testId));
+export async function updateTestSetup(
+  testId: string,
+  setupTestId: string | null,
+  setupScriptId: string | null,
+) {
+  await db
+    .update(tests)
+    .set({
+      setupTestId,
+      setupScriptId,
+      updatedAt: new Date(),
+    })
+    .where(eq(tests.id, testId));
 }
 
 // Update repository default setup configuration
 export async function updateRepositoryDefaultSetup(
   repositoryId: string,
   defaultSetupTestId: string | null,
-  defaultSetupScriptId: string | null
+  defaultSetupScriptId: string | null,
 ) {
-  await db.update(repositories).set({
-    defaultSetupTestId,
-    defaultSetupScriptId,
-  }).where(eq(repositories.id, repositoryId));
+  await db
+    .update(repositories)
+    .set({
+      defaultSetupTestId,
+      defaultSetupScriptId,
+    })
+    .where(eq(repositories.id, repositoryId));
 }
 
 // Get tests that use a specific test as their setup
@@ -171,8 +201,7 @@ export async function getTestsUsingSetupTest(setupTestId: string) {
   return db
     .select()
     .from(tests)
-    .where(and(eq(tests.setupTestId, setupTestId), isNull(tests.deletedAt)))
-    ;
+    .where(and(eq(tests.setupTestId, setupTestId), isNull(tests.deletedAt)));
 }
 
 // Get tests that use a specific setup script
@@ -180,8 +209,9 @@ export async function getTestsUsingSetupScript(setupScriptId: string) {
   return db
     .select()
     .from(tests)
-    .where(and(eq(tests.setupScriptId, setupScriptId), isNull(tests.deletedAt)))
-    ;
+    .where(
+      and(eq(tests.setupScriptId, setupScriptId), isNull(tests.deletedAt)),
+    );
 }
 
 // ============================================
@@ -211,13 +241,17 @@ export async function getDefaultSetupSteps(repositoryId: string) {
     .from(defaultSetupSteps)
     .leftJoin(tests, eq(defaultSetupSteps.testId, tests.id))
     .leftJoin(setupScripts, eq(defaultSetupSteps.scriptId, setupScripts.id))
-    .leftJoin(storageStates, eq(defaultSetupSteps.storageStateId, storageStates.id))
+    .leftJoin(
+      storageStates,
+      eq(defaultSetupSteps.storageStateId, storageStates.id),
+    )
     .where(eq(defaultSetupSteps.repositoryId, repositoryId))
-    .orderBy(defaultSetupSteps.orderIndex)
-    ;
+    .orderBy(defaultSetupSteps.orderIndex);
 }
 
-export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id' | 'createdAt'>) {
+export async function createDefaultSetupStep(
+  data: Omit<NewDefaultSetupStep, "id" | "createdAt">,
+) {
   const id = uuid();
   await db.insert(defaultSetupSteps).values({
     ...data,
@@ -228,7 +262,10 @@ export async function createDefaultSetupStep(data: Omit<NewDefaultSetupStep, 'id
 }
 
 export async function getDefaultSetupStep(id: string) {
-  const [row] = await db.select().from(defaultSetupSteps).where(eq(defaultSetupSteps.id, id));
+  const [row] = await db
+    .select()
+    .from(defaultSetupSteps)
+    .where(eq(defaultSetupSteps.id, id));
   return row ?? null;
 }
 
@@ -237,16 +274,29 @@ export async function deleteDefaultSetupStep(id: string) {
 }
 
 export async function deleteAllDefaultSetupSteps(repositoryId: string) {
-  await db.delete(defaultSetupSteps).where(eq(defaultSetupSteps.repositoryId, repositoryId));
+  await db
+    .delete(defaultSetupSteps)
+    .where(eq(defaultSetupSteps.repositoryId, repositoryId));
 }
 
-export async function updateDefaultSetupStepOrder(id: string, orderIndex: number) {
-  await db.update(defaultSetupSteps).set({ orderIndex }).where(eq(defaultSetupSteps.id, id));
+export async function updateDefaultSetupStepOrder(
+  id: string,
+  orderIndex: number,
+) {
+  await db
+    .update(defaultSetupSteps)
+    .set({ orderIndex })
+    .where(eq(defaultSetupSteps.id, id));
 }
 
 export async function replaceDefaultSetupSteps(
   repositoryId: string,
-  steps: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>
+  steps: Array<{
+    stepType: "test" | "script" | "storage_state";
+    testId?: string | null;
+    scriptId?: string | null;
+    storageStateId?: string | null;
+  }>,
 ) {
   // Delete all existing steps
   await deleteAllDefaultSetupSteps(repositoryId);
@@ -273,11 +323,21 @@ export async function replaceDefaultSetupSteps(
 // Per-Test Setup Overrides
 // ============================================
 
-export async function updateTestSetupOverrides(testId: string, overrides: TestSetupOverrides | null) {
-  await db.update(tests).set({ setupOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+export async function updateTestSetupOverrides(
+  testId: string,
+  overrides: TestSetupOverrides | null,
+) {
+  await db
+    .update(tests)
+    .set({ setupOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }
 
-export async function getResolvedSetupStepsForTest(test: { id: string; repositoryId: string | null; setupOverrides: TestSetupOverrides | null }) {
+export async function getResolvedSetupStepsForTest(test: {
+  id: string;
+  repositoryId: string | null;
+  setupOverrides: TestSetupOverrides | null;
+}) {
   if (!test.repositoryId) return [];
 
   const defaults = await getDefaultSetupSteps(test.repositoryId);
@@ -288,20 +348,20 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
   const activeDefaults = defaults
     .filter((s) => !skippedIds.has(s.id))
     .map((s) => ({
-      source: 'default' as const,
+      source: "default" as const,
       id: s.id,
-      stepType: s.stepType as 'test' | 'script' | 'storage_state',
+      stepType: s.stepType as "test" | "script" | "storage_state",
       testId: s.testId,
       scriptId: s.scriptId,
       storageStateId: s.storageStateId,
-      name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
+      name: s.testName || s.scriptName || s.storageStateName || "Unknown",
     }));
 
   // Resolve extra steps names
   const extras: Array<{
-    source: 'extra';
+    source: "extra";
     id: string;
-    stepType: 'test' | 'script' | 'storage_state';
+    stepType: "test" | "script" | "storage_state";
     testId: string | null | undefined;
     scriptId: string | null | undefined;
     storageStateId: string | null | undefined;
@@ -311,19 +371,19 @@ export async function getResolvedSetupStepsForTest(test: { id: string; repositor
   if (overrides?.extraSteps) {
     for (let i = 0; i < overrides.extraSteps.length; i++) {
       const step = overrides.extraSteps[i];
-      let name = 'Unknown';
-      if (step.stepType === 'test' && step.testId) {
+      let name = "Unknown";
+      if (step.stepType === "test" && step.testId) {
         const t = await getTest(step.testId);
-        name = t?.name || 'Deleted test';
-      } else if (step.stepType === 'script' && step.scriptId) {
+        name = t?.name || "Deleted test";
+      } else if (step.stepType === "script" && step.scriptId) {
         const s = await getSetupScript(step.scriptId);
-        name = s?.name || 'Deleted script';
-      } else if (step.stepType === 'storage_state' && step.storageStateId) {
+        name = s?.name || "Deleted script";
+      } else if (step.stepType === "storage_state" && step.storageStateId) {
         const ss = await getStorageState(step.storageStateId);
-        name = ss?.name || 'Deleted auth state';
+        name = ss?.name || "Deleted auth state";
       }
       extras.push({
-        source: 'extra',
+        source: "extra",
         id: `extra-${i}`,
         stepType: step.stepType,
         testId: step.testId,
@@ -359,13 +419,17 @@ export async function getDefaultTeardownSteps(repositoryId: string) {
     .from(defaultTeardownSteps)
     .leftJoin(tests, eq(defaultTeardownSteps.testId, tests.id))
     .leftJoin(setupScripts, eq(defaultTeardownSteps.scriptId, setupScripts.id))
-    .leftJoin(storageStates, eq(defaultTeardownSteps.storageStateId, storageStates.id))
+    .leftJoin(
+      storageStates,
+      eq(defaultTeardownSteps.storageStateId, storageStates.id),
+    )
     .where(eq(defaultTeardownSteps.repositoryId, repositoryId))
-    .orderBy(defaultTeardownSteps.orderIndex)
-    ;
+    .orderBy(defaultTeardownSteps.orderIndex);
 }
 
-export async function createDefaultTeardownStep(data: Omit<NewDefaultTeardownStep, 'id' | 'createdAt'>) {
+export async function createDefaultTeardownStep(
+  data: Omit<NewDefaultTeardownStep, "id" | "createdAt">,
+) {
   const id = uuid();
   await db.insert(defaultTeardownSteps).values({
     ...data,
@@ -376,7 +440,10 @@ export async function createDefaultTeardownStep(data: Omit<NewDefaultTeardownSte
 }
 
 export async function getDefaultTeardownStep(id: string) {
-  const [row] = await db.select().from(defaultTeardownSteps).where(eq(defaultTeardownSteps.id, id));
+  const [row] = await db
+    .select()
+    .from(defaultTeardownSteps)
+    .where(eq(defaultTeardownSteps.id, id));
   return row ?? null;
 }
 
@@ -385,16 +452,29 @@ export async function deleteDefaultTeardownStep(id: string) {
 }
 
 export async function deleteAllDefaultTeardownSteps(repositoryId: string) {
-  await db.delete(defaultTeardownSteps).where(eq(defaultTeardownSteps.repositoryId, repositoryId));
+  await db
+    .delete(defaultTeardownSteps)
+    .where(eq(defaultTeardownSteps.repositoryId, repositoryId));
 }
 
-export async function updateDefaultTeardownStepOrder(id: string, orderIndex: number) {
-  await db.update(defaultTeardownSteps).set({ orderIndex }).where(eq(defaultTeardownSteps.id, id));
+export async function updateDefaultTeardownStepOrder(
+  id: string,
+  orderIndex: number,
+) {
+  await db
+    .update(defaultTeardownSteps)
+    .set({ orderIndex })
+    .where(eq(defaultTeardownSteps.id, id));
 }
 
 export async function replaceDefaultTeardownSteps(
   repositoryId: string,
-  steps: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>
+  steps: Array<{
+    stepType: "test" | "script" | "storage_state";
+    testId?: string | null;
+    scriptId?: string | null;
+    storageStateId?: string | null;
+  }>,
 ) {
   await deleteAllDefaultTeardownSteps(repositoryId);
   const results = [];
@@ -417,11 +497,21 @@ export async function replaceDefaultTeardownSteps(
 // Per-Test Teardown Overrides
 // ============================================
 
-export async function updateTestTeardownOverrides(testId: string, overrides: TestTeardownOverrides | null) {
-  await db.update(tests).set({ teardownOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+export async function updateTestTeardownOverrides(
+  testId: string,
+  overrides: TestTeardownOverrides | null,
+) {
+  await db
+    .update(tests)
+    .set({ teardownOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }
 
-export async function getResolvedTeardownStepsForTest(test: { id: string; repositoryId: string | null; teardownOverrides: TestTeardownOverrides | null }) {
+export async function getResolvedTeardownStepsForTest(test: {
+  id: string;
+  repositoryId: string | null;
+  teardownOverrides: TestTeardownOverrides | null;
+}) {
   if (!test.repositoryId) return [];
 
   const defaults = await getDefaultTeardownSteps(test.repositoryId);
@@ -431,19 +521,19 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
   const activeDefaults = defaults
     .filter((s) => !skippedIds.has(s.id))
     .map((s) => ({
-      source: 'default' as const,
+      source: "default" as const,
       id: s.id,
-      stepType: s.stepType as 'test' | 'script' | 'storage_state',
+      stepType: s.stepType as "test" | "script" | "storage_state",
       testId: s.testId,
       scriptId: s.scriptId,
       storageStateId: s.storageStateId,
-      name: s.testName || s.scriptName || s.storageStateName || 'Unknown',
+      name: s.testName || s.scriptName || s.storageStateName || "Unknown",
     }));
 
   const extras: Array<{
-    source: 'extra';
+    source: "extra";
     id: string;
-    stepType: 'test' | 'script' | 'storage_state';
+    stepType: "test" | "script" | "storage_state";
     testId: string | null | undefined;
     scriptId: string | null | undefined;
     storageStateId?: string | null | undefined;
@@ -453,25 +543,33 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
   if (overrides?.extraSteps) {
     for (let i = 0; i < overrides.extraSteps.length; i++) {
       const step = overrides.extraSteps[i];
-      let name = 'Unknown';
-      if (step.stepType === 'test' && step.testId) {
+      let name = "Unknown";
+      if (step.stepType === "test" && step.testId) {
         const t = await getTest(step.testId);
-        name = t?.name || 'Deleted test';
-      } else if (step.stepType === 'script' && step.scriptId) {
+        name = t?.name || "Deleted test";
+      } else if (step.stepType === "script" && step.scriptId) {
         const s = await getSetupScript(step.scriptId);
-        name = s?.name || 'Deleted script';
-      } else if (step.stepType === 'storage_state' && (step as Record<string, unknown>).storageStateId) {
-        const { getStorageState } = await import('./storage-states');
-        const ss = await getStorageState((step as Record<string, unknown>).storageStateId as string);
-        name = ss?.name || 'Deleted storage state';
+        name = s?.name || "Deleted script";
+      } else if (
+        step.stepType === "storage_state" &&
+        (step as Record<string, unknown>).storageStateId
+      ) {
+        const { getStorageState } = await import("./storage-states");
+        const ss = await getStorageState(
+          (step as Record<string, unknown>).storageStateId as string,
+        );
+        name = ss?.name || "Deleted storage state";
       }
       extras.push({
-        source: 'extra',
+        source: "extra",
         id: `extra-${i}`,
         stepType: step.stepType,
         testId: step.testId,
         scriptId: step.scriptId,
-        storageStateId: (step as Record<string, unknown>).storageStateId as string | null | undefined,
+        storageStateId: (step as Record<string, unknown>).storageStateId as
+          | string
+          | null
+          | undefined,
         name,
       });
     }
@@ -484,22 +582,40 @@ export async function getResolvedTeardownStepsForTest(test: { id: string; reposi
 // Per-Test Stabilization Overrides
 // ============================================
 
-export async function updateTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
-  await db.update(tests).set({ stabilizationOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+export async function updateTestStabilizationOverrides(
+  testId: string,
+  overrides: Partial<StabilizationSettings> | null,
+) {
+  await db
+    .update(tests)
+    .set({ stabilizationOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }
 
 // ============================================
 // Per-Test Diff Overrides
 // ============================================
 
-export async function updateTestDiffOverrides(testId: string, overrides: TestDiffOverrides | null) {
-  await db.update(tests).set({ diffOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+export async function updateTestDiffOverrides(
+  testId: string,
+  overrides: TestDiffOverrides | null,
+) {
+  await db
+    .update(tests)
+    .set({ diffOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }
 
 // ============================================
 // Per-Test Playwright Overrides
 // ============================================
 
-export async function updateTestPlaywrightOverrides(testId: string, overrides: TestPlaywrightOverrides | null) {
-  await db.update(tests).set({ playwrightOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+export async function updateTestPlaywrightOverrides(
+  testId: string,
+  overrides: TestPlaywrightOverrides | null,
+) {
+  await db
+    .update(tests)
+    .set({ playwrightOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
 }

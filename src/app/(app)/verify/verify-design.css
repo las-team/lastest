@@ -5,17 +5,17 @@
 
 .verify-page {
   --c-red: var(--destructive);
-  --c-amber: #E09836;
+  --c-amber: #e09836;
   --c-teal: var(--primary);
-  --c-blue: #3674A8;
+  --c-blue: #3674a8;
   /* Darker variants used wherever the brand colour appears as TEXT (chips,
    * "primary" CTA labels, link-like accents). The base brand stops are
    * tuned for backgrounds & icons but blow past AA when used as foreground
    * on light surfaces. */
-  --c-teal-text: #1F7B66;
-  --c-red-text: #B12F29;
-  --c-amber-text: #8C5C19;
-  --c-blue-text: #2E5E8C;
+  --c-teal-text: #1f7b66;
+  --c-red-text: #b12f29;
+  --c-amber-text: #8c5c19;
+  --c-blue-text: #2e5e8c;
   --c-soft: var(--muted);
   --c-soft-2: var(--secondary);
   --c-white: var(--card);
@@ -42,12 +42,14 @@
 }
 
 .verify-page .wm {
-  font-family: var(--font-display, 'Archivo'), system-ui, sans-serif;
+  font-family: var(--font-display, "Archivo"), system-ui, sans-serif;
   font-weight: 900;
   letter-spacing: -0.04em;
   text-transform: uppercase;
 }
-.verify-page .wm .t { color: var(--c-red); }
+.verify-page .wm .t {
+  color: var(--c-red);
+}
 
 .verify-page .v-chip {
   display: inline-flex;
@@ -76,31 +78,41 @@
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
   color: var(--c-red);
 }
-.verify-page .v-chip.regression .dot { background: var(--c-red); }
+.verify-page .v-chip.regression .dot {
+  background: var(--c-red);
+}
 .verify-page .v-chip.done {
   background: color-mix(in oklab, var(--c-teal) 10%, white);
   border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
   color: var(--c-teal-text);
 }
-.verify-page .v-chip.done .dot { background: var(--c-teal); }
+.verify-page .v-chip.done .dot {
+  background: var(--c-teal);
+}
 .verify-page .v-chip.missed {
   background: color-mix(in oklab, var(--c-amber) 12%, white);
   border-color: color-mix(in oklab, var(--c-amber) 30%, transparent);
   color: var(--c-amber-text);
 }
-.verify-page .v-chip.missed .dot { background: var(--c-amber); }
+.verify-page .v-chip.missed .dot {
+  background: var(--c-amber);
+}
 .verify-page .v-chip.unknown {
   background: var(--c-soft);
   border-color: var(--border-strong);
   color: var(--fg-2);
 }
-.verify-page .v-chip.unknown .dot { background: var(--fg-3); }
+.verify-page .v-chip.unknown .dot {
+  background: var(--fg-3);
+}
 .verify-page .v-chip.info {
   background: color-mix(in oklab, var(--c-blue) 8%, white);
   border-color: color-mix(in oklab, var(--c-blue) 22%, transparent);
   color: var(--c-blue-text);
 }
-.verify-page .v-chip.info .dot { background: var(--c-blue); }
+.verify-page .v-chip.info .dot {
+  background: var(--c-blue);
+}
 
 .verify-page .v-btn {
   display: inline-flex;
@@ -122,14 +134,18 @@
   white-space: nowrap;
   transition: background 120ms ease;
 }
-.verify-page .v-btn:hover { background: var(--c-soft); }
+.verify-page .v-btn:hover {
+  background: var(--c-soft);
+}
 .verify-page .v-btn.primary {
   /* Reserved for the single page-level primary CTA (the Run button). */
   background: var(--c-teal);
   border-color: transparent;
   color: white;
 }
-.verify-page .v-btn.primary:hover { background: #2E957D; }
+.verify-page .v-btn.primary:hover {
+  background: #2e957d;
+}
 .verify-page .v-btn.success {
   /* Approve / "yes this is intended" — tinted, not solid, so it doesn't
      compete with the page-level primary. */
@@ -137,7 +153,9 @@
   border-color: color-mix(in oklab, var(--c-teal) 25%, transparent);
   color: var(--c-teal-text);
 }
-.verify-page .v-btn.success:hover { background: color-mix(in oklab, var(--c-teal) 16%, white); }
+.verify-page .v-btn.success:hover {
+  background: color-mix(in oklab, var(--c-teal) 16%, white);
+}
 .verify-page .v-btn.danger {
   background: color-mix(in oklab, var(--c-red) 8%, white);
   border-color: color-mix(in oklab, var(--c-red) 22%, transparent);
@@ -214,7 +232,10 @@
 }
 
 .verify-page .v-thumb {
-  background-image: linear-gradient(rgba(31,42,51,0.04), rgba(31,42,51,0.07));
+  background-image: linear-gradient(
+    rgba(31, 42, 51, 0.04),
+    rgba(31, 42, 51, 0.07)
+  );
   background-color: var(--c-soft);
   border: 1px dashed var(--border-strong);
   border-radius: 6px;
@@ -223,6 +244,6 @@
 }
 .verify-page .v-thumb .v-region {
   position: absolute;
-  background: rgba(31,42,51,0.06);
+  background: rgba(31, 42, 51, 0.06);
   border-radius: 2px;
 }

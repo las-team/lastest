@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect } from 'react';
-import Image from 'next/image';
+import { useState, useRef, useEffect } from "react";
+import Image from "next/image";
 
 interface DiagramThumbnailProps {
   src: string;
@@ -11,25 +11,34 @@ interface DiagramThumbnailProps {
   className?: string;
 }
 
-export function DiagramThumbnail({ src, alt, width, height, className }: DiagramThumbnailProps) {
+export function DiagramThumbnail({
+  src,
+  alt,
+  width,
+  height,
+  className,
+}: DiagramThumbnailProps) {
   const [expanded, setExpanded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!expanded) return;
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setExpanded(false);
       }
     }
     function handleEscape(e: KeyboardEvent) {
-      if (e.key === 'Escape') setExpanded(false);
+      if (e.key === "Escape") setExpanded(false);
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [expanded]);
 
@@ -37,7 +46,7 @@ export function DiagramThumbnail({ src, alt, width, height, className }: Diagram
     <>
       <div
         ref={containerRef}
-        className={`group relative inline-block cursor-pointer ${className ?? ''}`}
+        className={`group relative inline-block cursor-pointer ${className ?? ""}`}
         onClick={() => setExpanded(true)}
       >
         <Image

@@ -19,14 +19,14 @@ export interface Test {
   functionalAreaId: number;
   targetUrl: string;
   code: string;
-  lastRunStatus: 'passed' | 'failed' | 'running' | null;
+  lastRunStatus: "passed" | "failed" | "running" | null;
   lastRunAt: string | null;
 }
 
 export interface TestRun {
   id: number;
   testId: number;
-  status: 'pending' | 'running' | 'passed' | 'failed' | 'error';
+  status: "pending" | "running" | "passed" | "failed" | "error";
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
@@ -36,7 +36,7 @@ export interface TestRun {
 export interface Build {
   id: number;
   repositoryId: number;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: "pending" | "running" | "completed" | "failed";
   totalTests: number;
   passedTests: number;
   failedTests: number;
@@ -44,15 +44,14 @@ export interface Build {
 }
 
 // Tree item types
-export type TreeItemType = 'repository' | 'functionalArea' | 'test';
+export type TreeItemType = "repository" | "functionalArea" | "test";
 
 export interface TestTreeItem {
   type: TreeItemType;
   id: number;
   name: string;
-  status?: 'passed' | 'failed' | 'running' | null;
+  status?: "passed" | "failed" | "running" | null;
   children?: TestTreeItem[];
   parentId?: number;
   lastRunAt?: string | null;
 }
-

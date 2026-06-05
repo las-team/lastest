@@ -6,21 +6,44 @@
  * lists with bounding boxes for overlay positioning on the diff viewer.
  */
 
-import type { DomSnapshotData, DomSnapshotElement, DomDiffResult } from '@/lib/db/schema';
+import type {
+  DomSnapshotData,
+  DomSnapshotElement,
+  DomDiffResult,
+} from "@/lib/db/schema";
 
 // Selector types ordered by stability (most stable first)
-const SELECTOR_PRIORITY = ['data-testid', 'id', 'label', 'role-name', 'aria-label', 'text', 'name'];
+const SELECTOR_PRIORITY = [
+  "data-testid",
+  "id",
+  "label",
+  "role-name",
+  "aria-label",
+  "text",
+  "name",
+];
 
 /** Tags considered "interactive" for verdict scoring — these are the ones
  *  that user research consistently shows produce real regressions when they
  *  appear/disappear. Decorative DOM churn (divs, spans without role) is
  *  excluded because in modern frameworks it's typical and noisy. */
-const INTERACTIVE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea', 'option', 'form', 'label']);
+const INTERACTIVE_TAGS = new Set([
+  "a",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "option",
+  "form",
+  "label",
+]);
 
 function isInteractive(el: DomSnapshotElement): boolean {
   if (INTERACTIVE_TAGS.has(el.tag.toLowerCase())) return true;
   // Anything with a `role-name` selector is exposed to assistive tech
-  return el.selectors.some(s => s.type === 'role-name' || s.type === 'aria-label');
+  return el.selectors.some(
+    (s) => s.type === "role-name" || s.type === "aria-label",
+  );
 }
 
 /**
@@ -29,7 +52,7 @@ function isInteractive(el: DomSnapshotElement): boolean {
  */
 function getStableKey(element: DomSnapshotElement): string | null {
   for (const type of SELECTOR_PRIORITY) {
-    const sel = element.selectors.find(s => s.type === type);
+    const sel = element.selectors.find((s) => s.type === type);
     if (sel) return `${type}::${sel.value}`;
   }
   return null;
@@ -52,35 +75,40 @@ function bboxDistance(a: DomSnapshotElement, b: DomSnapshotElement): number {
 function detectChanges(
   baseline: DomSnapshotElement,
   current: DomSnapshotElement,
-): ('text' | 'position' | 'size' | 'selector')[] {
-  const changes: ('text' | 'position' | 'size' | 'selector')[] = [];
+): ("text" | "position" | "size" | "selector")[] {
+  const changes: ("text" | "position" | "size" | "selector")[] = [];
 
   // Text change
-  if ((baseline.textContent || '') !== (current.textContent || '')) {
-    changes.push('text');
+  if ((baseline.textContent || "") !== (current.textContent || "")) {
+    changes.push("text");
   }
 
   // Position change (threshold: 5px)
   const dx = Math.abs(baseline.boundingBox.x - current.boundingBox.x);
   const dy = Math.abs(baseline.boundingBox.y - current.boundingBox.y);
   if (dx > 5 || dy > 5) {
-    changes.push('position');
+    changes.push("position");
   }
 
   // Size change (threshold: 5px)
   const dw = Math.abs(baseline.boundingBox.width - current.boundingBox.width);
   const dh = Math.abs(baseline.boundingBox.height - current.boundingBox.height);
   if (dw > 5 || dh > 5) {
-    changes.push('size');
+    changes.push("size");
   }
 
   // Selector change — compare selector sets
-  const baseSelectors = new Set(baseline.selectors.map(s => `${s.type}::${s.value}`));
-  const currSelectors = new Set(current.selectors.map(s => `${s.type}::${s.value}`));
-  const selectorDiff = [...baseSelectors].some(s => !currSelectors.has(s)) ||
-                       [...currSelectors].some(s => !baseSelectors.has(s));
+  const baseSelectors = new Set(
+    baseline.selectors.map((s) => `${s.type}::${s.value}`),
+  );
+  const currSelectors = new Set(
+    current.selectors.map((s) => `${s.type}::${s.value}`),
+  );
+  const selectorDiff =
+    [...baseSelectors].some((s) => !currSelectors.has(s)) ||
+    [...currSelectors].some((s) => !baseSelectors.has(s));
   if (selectorDiff) {
-    changes.push('selector');
+    changes.push("selector");
   }
 
   return changes;
@@ -104,12 +132,15 @@ export function computeDomDiff(
   // Apply interactive-only filter at the input layer so the matching algorithm
   // operates on a smaller, higher-signal element set.
   if (options.interactiveOnly) {
-    baseline = { ...baseline, elements: baseline.elements.filter(isInteractive) };
+    baseline = {
+      ...baseline,
+      elements: baseline.elements.filter(isInteractive),
+    };
     current = { ...current, elements: current.elements.filter(isInteractive) };
   }
   const added: DomSnapshotElement[] = [];
   const removed: DomSnapshotElement[] = [];
-  const changed: DomDiffResult['changed'] = [];
+  const changed: DomDiffResult["changed"] = [];
   let unchangedCount = 0;
 
   // Phase 1: Match by stable selector key
@@ -207,38 +238,53 @@ export function summarizeDomDiff(diff: DomDiffResult): string {
     parts.push(`REMOVED elements (${diff.removed.length}):`);
     for (const el of diff.removed.slice(0, 10)) {
       const sel = el.selectors[0];
-      parts.push(`  - <${el.tag}> ${sel ? `${sel.type}="${sel.value}"` : ''} ${el.textContent ? `"${el.textContent.slice(0, 50)}"` : ''}`);
+      parts.push(
+        `  - <${el.tag}> ${sel ? `${sel.type}="${sel.value}"` : ""} ${el.textContent ? `"${el.textContent.slice(0, 50)}"` : ""}`,
+      );
     }
-    if (diff.removed.length > 10) parts.push(`  ... and ${diff.removed.length - 10} more`);
+    if (diff.removed.length > 10)
+      parts.push(`  ... and ${diff.removed.length - 10} more`);
   }
 
   if (diff.added.length > 0) {
     parts.push(`ADDED elements (${diff.added.length}):`);
     for (const el of diff.added.slice(0, 10)) {
       const sel = el.selectors[0];
-      parts.push(`  + <${el.tag}> ${sel ? `${sel.type}="${sel.value}"` : ''} ${el.textContent ? `"${el.textContent.slice(0, 50)}"` : ''}`);
+      parts.push(
+        `  + <${el.tag}> ${sel ? `${sel.type}="${sel.value}"` : ""} ${el.textContent ? `"${el.textContent.slice(0, 50)}"` : ""}`,
+      );
     }
-    if (diff.added.length > 10) parts.push(`  ... and ${diff.added.length - 10} more`);
+    if (diff.added.length > 10)
+      parts.push(`  ... and ${diff.added.length - 10} more`);
   }
 
   if (diff.changed.length > 0) {
     parts.push(`CHANGED elements (${diff.changed.length}):`);
     for (const c of diff.changed.slice(0, 10)) {
       const sel = c.current.selectors[0];
-      parts.push(`  ~ <${c.current.tag}> ${sel ? `${sel.type}="${sel.value}"` : ''} changes: [${c.changes.join(', ')}]`);
-      if (c.changes.includes('text')) {
-        parts.push(`    text: "${c.baseline.textContent?.slice(0, 30) ?? ''}" → "${c.current.textContent?.slice(0, 30) ?? ''}"`);
+      parts.push(
+        `  ~ <${c.current.tag}> ${sel ? `${sel.type}="${sel.value}"` : ""} changes: [${c.changes.join(", ")}]`,
+      );
+      if (c.changes.includes("text")) {
+        parts.push(
+          `    text: "${c.baseline.textContent?.slice(0, 30) ?? ""}" → "${c.current.textContent?.slice(0, 30) ?? ""}"`,
+        );
       }
-      if (c.changes.includes('selector')) {
-        const oldSels = c.baseline.selectors.map(s => `${s.type}=${s.value}`).join(', ');
-        const newSels = c.current.selectors.map(s => `${s.type}=${s.value}`).join(', ');
+      if (c.changes.includes("selector")) {
+        const oldSels = c.baseline.selectors
+          .map((s) => `${s.type}=${s.value}`)
+          .join(", ");
+        const newSels = c.current.selectors
+          .map((s) => `${s.type}=${s.value}`)
+          .join(", ");
         parts.push(`    selectors: [${oldSels}] → [${newSels}]`);
       }
     }
-    if (diff.changed.length > 10) parts.push(`  ... and ${diff.changed.length - 10} more`);
+    if (diff.changed.length > 10)
+      parts.push(`  ... and ${diff.changed.length - 10} more`);
   }
 
   parts.push(`Unchanged: ${diff.unchangedCount} elements`);
 
-  return parts.join('\n');
+  return parts.join("\n");
 }

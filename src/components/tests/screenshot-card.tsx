@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import type { PlannedScreenshot } from '@/lib/db/schema';
+import { useState } from "react";
+import { Loader2 } from "lucide-react";
+import type { PlannedScreenshot } from "@/lib/db/schema";
 
 interface ScreenshotCardProps {
   src: string;
@@ -30,7 +30,7 @@ export function ScreenshotCard({
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     e.stopPropagation();
     setIsOver(true);
@@ -41,7 +41,7 @@ export function ScreenshotCard({
   };
 
   const handleDrop = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
+    if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     setIsOver(false);
     const file = e.dataTransfer.files[0];
@@ -63,7 +63,7 @@ export function ScreenshotCard({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
-          alt={label || 'Screenshot'}
+          alt={label || "Screenshot"}
           className="w-full rounded-lg border group-hover:opacity-90 transition-opacity"
         />
 
@@ -71,8 +71,8 @@ export function ScreenshotCard({
           <div
             className={`absolute inset-0 rounded-lg border-2 border-dashed flex items-center justify-center pointer-events-none transition-colors ${
               isOver
-                ? 'border-purple-600 bg-purple-500/20'
-                : 'border-purple-400 bg-purple-500/10'
+                ? "border-purple-600 bg-purple-500/20"
+                : "border-purple-400 bg-purple-500/10"
             }`}
           >
             <p className="text-sm font-medium text-purple-700 bg-white/80 px-3 py-1 rounded">
@@ -95,19 +95,21 @@ export function ScreenshotCard({
               onClickPlanBadge();
             }}
             className="absolute top-2 right-2 z-10 w-14 h-14 lg:w-16 lg:h-16 rounded border-2 border-white shadow-md ring-1 ring-black/10 overflow-hidden bg-white hover:ring-2 hover:ring-purple-500 transition-all"
-            title={plan.name || 'View plan'}
+            title={plan.name || "View plan"}
             aria-label="View plan"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={plan.imagePath}
-              alt={plan.name || 'Plan'}
+              alt={plan.name || "Plan"}
               className="w-full h-full object-cover"
             />
           </button>
         )}
       </div>
-      <p className="text-xs text-muted-foreground text-center capitalize">{displayLabel}</p>
+      <p className="text-xs text-muted-foreground text-center capitalize">
+        {displayLabel}
+      </p>
     </div>
   );
 }

@@ -1,10 +1,18 @@
-import fs from 'fs';
-import path from 'path';
-import { db } from '@/lib/db';
-import { repositories, testResults, testRuns, plannedScreenshots } from '@/lib/db/schema';
-import { eq, inArray } from 'drizzle-orm';
-import { updateTeamStorageUsage, getTeamStorageUsage } from '@/lib/db/queries/storage';
-import { STORAGE_ROOT } from './paths';
+import fs from "fs";
+import path from "path";
+import { db } from "@/lib/db";
+import {
+  repositories,
+  testResults,
+  testRuns,
+  plannedScreenshots,
+} from "@/lib/db/schema";
+import { eq, inArray } from "drizzle-orm";
+import {
+  updateTeamStorageUsage,
+  getTeamStorageUsage,
+} from "@/lib/db/queries/storage";
+import { STORAGE_ROOT } from "./paths";
 
 /**
  * Recursively calculate the total size in bytes of a directory.
@@ -56,7 +64,9 @@ function getFileSizeBytes(filePath: string): number {
  * (videos, diffs, planned) that may not be repo-scoped, we query the DB and stat
  * each file individually.
  */
-export async function calculateTeamStorageBytes(teamId: string): Promise<number> {
+export async function calculateTeamStorageBytes(
+  teamId: string,
+): Promise<number> {
   const repos = await db
     .select({ id: repositories.id })
     .from(repositories)
@@ -68,7 +78,12 @@ export async function calculateTeamStorageBytes(teamId: string): Promise<number>
   let totalBytes = 0;
 
   // 1. Repo-scoped directories — walk each repo's subdirectory
-  const repoScopedDirs = ['screenshots', 'baselines', 'fixtures', 'network-bodies'];
+  const repoScopedDirs = [
+    "screenshots",
+    "baselines",
+    "fixtures",
+    "network-bodies",
+  ];
   for (const dir of repoScopedDirs) {
     for (const repoId of repoIds) {
       totalBytes += getDirSizeBytes(path.join(STORAGE_ROOT, dir, repoId));
@@ -98,10 +113,14 @@ export async function calculateTeamStorageBytes(teamId: string): Promise<number>
 
       for (const r of results) {
         if (r.videoPath) {
-          totalBytes += getFileSizeBytes(path.join(STORAGE_ROOT, r.videoPath.replace(/^\//, '')));
+          totalBytes += getFileSizeBytes(
+            path.join(STORAGE_ROOT, r.videoPath.replace(/^\//, "")),
+          );
         }
         if (r.diffPath) {
-          totalBytes += getFileSizeBytes(path.join(STORAGE_ROOT, r.diffPath.replace(/^\//, '')));
+          totalBytes += getFileSizeBytes(
+            path.join(STORAGE_ROOT, r.diffPath.replace(/^\//, "")),
+          );
         }
       }
     }
@@ -115,7 +134,9 @@ export async function calculateTeamStorageBytes(teamId: string): Promise<number>
 
   for (const p of planned) {
     if (p.imagePath) {
-      totalBytes += getFileSizeBytes(path.join(STORAGE_ROOT, p.imagePath.replace(/^\//, '')));
+      totalBytes += getFileSizeBytes(
+        path.join(STORAGE_ROOT, p.imagePath.replace(/^\//, "")),
+      );
     }
   }
 
@@ -128,7 +149,7 @@ export async function calculateTeamStorageBytes(teamId: string): Promise<number>
  */
 export async function recalculateTeamStorage(
   teamId: string,
-  force = false
+  force = false,
 ): Promise<{ usedBytes: number }> {
   if (!force) {
     const current = await getTeamStorageUsage(teamId);

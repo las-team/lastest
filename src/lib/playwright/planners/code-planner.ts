@@ -3,8 +3,8 @@
  * Uses the existing aiScanRoutes() function.
  */
 
-import type { PlannerResult } from '@/lib/playwright/planner-types';
-import type { CodebaseIntelligenceContext } from '@/lib/ai/types';
+import type { PlannerResult } from "@/lib/playwright/planner-types";
+import type { CodebaseIntelligenceContext } from "@/lib/ai/types";
 
 export async function runCodePlanner(
   repositoryId: string,
@@ -14,38 +14,38 @@ export async function runCodePlanner(
   const start = Date.now();
 
   try {
-    const { aiScanRoutes } = await import('@/server/actions/ai-routes');
+    const { aiScanRoutes } = await import("@/server/actions/ai-routes");
     const result = await aiScanRoutes(repositoryId, branch, intelligence);
     const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
       return {
-        source: 'code',
+        source: "code",
         areas: [],
-        error: result.error || 'No routes found in codebase',
+        error: result.error || "No routes found in codebase",
         durationMs,
-        inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ''}`,
+        inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ""}`,
       };
     }
 
-    const areas = result.functionalAreas.map(fa => ({
+    const areas = result.functionalAreas.map((fa) => ({
       name: fa.name,
       description: fa.description,
-      routes: fa.routes.map(r => r.path),
+      routes: fa.routes.map((r) => r.path),
       testPlan: buildCodeTestPlan(fa.name, fa.routes),
     }));
 
     return {
-      source: 'code',
+      source: "code",
       areas,
       durationMs,
-      inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ''}`,
+      inputSummary: `branch: ${branch}${intelligence?.framework ? `, framework: ${intelligence.framework}` : ""}`,
     };
   } catch (error) {
     return {
-      source: 'code',
+      source: "code",
       areas: [],
-      error: error instanceof Error ? error.message : 'Code planner failed',
+      error: error instanceof Error ? error.message : "Code planner failed",
       durationMs: Date.now() - start,
       inputSummary: `branch: ${branch}`,
     };
@@ -54,7 +54,11 @@ export async function runCodePlanner(
 
 function buildCodeTestPlan(
   areaName: string,
-  routes: Array<{ path: string; description?: string; testSuggestions?: string[] }>,
+  routes: Array<{
+    path: string;
+    description?: string;
+    testSuggestions?: string[];
+  }>,
 ): string {
   const lines: string[] = [`## ${areaName} (from codebase scan)\n`];
 
@@ -71,8 +75,8 @@ function buildCodeTestPlan(
       lines.push(`- Check for correct heading/content`);
       lines.push(`- Verify navigation elements are present`);
     }
-    lines.push('');
+    lines.push("");
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }

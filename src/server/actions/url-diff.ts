@@ -1,11 +1,20 @@
-'use server';
+"use server";
 
-import { requireTeamAccess } from '@/lib/auth';
-import { createJob, completeJob, failJob, updateJobProgress } from '@/server/actions/jobs';
-import { updateBackgroundJob, getBackgroundJob } from '@/lib/db/queries';
-import { captureUrl, type CaptureSide, type PoolTier } from '@/lib/url-diff/capture';
-import { buildUrlDiff, type UrlDiffResult } from '@/lib/url-diff/engine';
-import { validateTargetUrl, SsrfBlockedError } from '@/lib/url-diff/ssrf';
+import { requireTeamAccess } from "@/lib/auth";
+import {
+  createJob,
+  completeJob,
+  failJob,
+  updateJobProgress,
+} from "@/server/actions/jobs";
+import { updateBackgroundJob, getBackgroundJob } from "@/lib/db/queries";
+import {
+  captureUrl,
+  type CaptureSide,
+  type PoolTier,
+} from "@/lib/url-diff/capture";
+import { buildUrlDiff, type UrlDiffResult } from "@/lib/url-diff/engine";
+import { validateTargetUrl, SsrfBlockedError } from "@/lib/url-diff/ssrf";
 
 export interface StartUrlDiffInput {
   urlA: string;
@@ -19,21 +28,29 @@ export interface StartUrlDiffInput {
   repositoryId?: string | null;
 }
 
-export async function startUrlDiff(input: StartUrlDiffInput): Promise<{ jobId: string }> {
+export async function startUrlDiff(
+  input: StartUrlDiffInput,
+): Promise<{ jobId: string }> {
   const session = await requireTeamAccess();
 
   // SSRF pre-flight — throws SsrfBlockedError on disallowed targets.
-  const ssrfOpts = { sourceIp: input.sourceIp ?? '' };
+  const ssrfOpts = { sourceIp: input.sourceIp ?? "" };
   await validateTargetUrl(input.urlA, ssrfOpts);
   await validateTargetUrl(input.urlB, ssrfOpts);
 
   const label = `URL Diff: ${truncate(input.urlA)} vs ${truncate(input.urlB)}`;
-  const jobId = await createJob('url_diff', label, 4, input.repositoryId ?? null, {
-    urlA: input.urlA,
-    urlB: input.urlB,
-    viewport: input.viewport,
-    teamId: session.team.id,
-  });
+  const jobId = await createJob(
+    "url_diff",
+    label,
+    4,
+    input.repositoryId ?? null,
+    {
+      urlA: input.urlA,
+      urlB: input.urlB,
+      viewport: input.viewport,
+      teamId: session.team.id,
+    },
+  );
 
   // Fire-and-forget orchestration. We do NOT await — the route returns
   // immediately and the client polls /api/jobs/:id via useJobResult.
@@ -42,13 +59,15 @@ export async function startUrlDiff(input: StartUrlDiffInput): Promise<{ jobId: s
     urlA: input.urlA,
     urlB: input.urlB,
     viewport: input.viewport,
-    poolTier: input.poolTier ?? 'interactive',
+    poolTier: input.poolTier ?? "interactive",
   });
 
   return { jobId };
 }
 
-export async function getUrlDiffResult(jobId: string): Promise<UrlDiffResult | null> {
+export async function getUrlDiffResult(
+  jobId: string,
+): Promise<UrlDiffResult | null> {
   await requireTeamAccess();
   const job = await getBackgroundJob(jobId);
   const meta = (job?.metadata ?? {}) as { urlDiffResult?: UrlDiffResult };
@@ -66,13 +85,19 @@ interface RunUrlDiffOpts {
 async function runUrlDiffAsync(opts: RunUrlDiffOpts): Promise<void> {
   const { jobId, urlA, urlB, viewport, poolTier } = opts;
   try {
-    const sides: Array<['a' | 'b', string]> = [
-      ['a', urlA],
-      ['b', urlB],
+    const sides: Array<["a" | "b", string]> = [
+      ["a", urlA],
+      ["b", urlB],
     ];
     const captures = await Promise.all(
       sides.map(([side, url]) =>
-        captureUrl({ url, jobId, side: side as CaptureSide, viewport, poolTier }),
+        captureUrl({
+          url,
+          jobId,
+          side: side as CaptureSide,
+          viewport,
+          poolTier,
+        }),
       ),
     );
     await updateJobProgress(jobId, 2, 4);
@@ -98,5 +123,5 @@ async function runUrlDiffAsync(opts: RunUrlDiffOpts): Promise<void> {
 }
 
 function truncate(s: string, n = 40): string {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }

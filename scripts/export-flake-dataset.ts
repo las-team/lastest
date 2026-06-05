@@ -15,10 +15,15 @@
  *       --sources local,olares --out data/open-dataset/
  */
 
-import postgres from 'postgres';
-import { createHmac } from 'node:crypto';
-import { mkdirSync, createWriteStream, writeFileSync, type WriteStream } from 'node:fs';
-import { resolve, join } from 'node:path';
+import postgres from "postgres";
+import { createHmac } from "node:crypto";
+import {
+  mkdirSync,
+  createWriteStream,
+  writeFileSync,
+  type WriteStream,
+} from "node:fs";
+import { resolve, join } from "node:path";
 
 // ─── CLI ──────────────────────────────────────────────────────────────
 
@@ -28,23 +33,33 @@ interface Args {
   minRunsPerTeam: number;
 }
 
-type SourceName = 'local' | 'olares';
+type SourceName = "local" | "olares";
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { out: 'data/open-dataset/', sources: ['local', 'olares'], minRunsPerTeam: 50 };
+  const out: Args = {
+    out: "data/open-dataset/",
+    sources: ["local", "olares"],
+    minRunsPerTeam: 50,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
-    if (a === '--out') out.out = next();
-    else if (a === '--sources') out.sources = next().split(',').map((s) => s.trim()) as SourceName[];
-    else if (a === '--min-runs-per-team') out.minRunsPerTeam = parseInt(next(), 10);
-    else if (a === '--help' || a === '-h') {
-      console.log('Usage: tsx scripts/export-flake-dataset.ts [--out DIR] [--sources local,olares] [--min-runs-per-team N]');
+    if (a === "--out") out.out = next();
+    else if (a === "--sources")
+      out.sources = next()
+        .split(",")
+        .map((s) => s.trim()) as SourceName[];
+    else if (a === "--min-runs-per-team")
+      out.minRunsPerTeam = parseInt(next(), 10);
+    else if (a === "--help" || a === "-h") {
+      console.log(
+        "Usage: tsx scripts/export-flake-dataset.ts [--out DIR] [--sources local,olares] [--min-runs-per-team N]",
+      );
       process.exit(0);
     }
   }
   for (const s of out.sources) {
-    if (s !== 'local' && s !== 'olares') {
+    if (s !== "local" && s !== "olares") {
       console.error(`Unknown source: ${s} (allowed: local, olares)`);
       process.exit(2);
     }
@@ -56,115 +71,143 @@ function parseArgs(argv: string[]): Args {
 
 const SALT = process.env.DATASET_SALT;
 if (!SALT) {
-  console.error('DATASET_SALT env var is required (use a fresh random hex per export).');
+  console.error(
+    "DATASET_SALT env var is required (use a fresh random hex per export).",
+  );
   process.exit(2);
 }
 
 function hashId(value: string | null | undefined, kind: string): string | null {
   if (!value) return null;
-  return createHmac('sha256', SALT!).update(`${kind}:${value}`).digest('hex').slice(0, 16);
+  return createHmac("sha256", SALT!)
+    .update(`${kind}:${value}`)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 function bucketDuration(ms: number | null | undefined): string {
-  if (ms == null) return 'unknown';
-  if (ms < 1000) return '<1s';
-  if (ms < 5000) return '1-5s';
-  if (ms < 15000) return '5-15s';
-  if (ms < 60000) return '15-60s';
-  return '>60s';
+  if (ms == null) return "unknown";
+  if (ms < 1000) return "<1s";
+  if (ms < 5000) return "1-5s";
+  if (ms < 15000) return "5-15s";
+  if (ms < 60000) return "15-60s";
+  return ">60s";
 }
 
 function dateBucket(d: Date | string | null | undefined): string | null {
   if (!d) return null;
-  const date = typeof d === 'string' ? new Date(d) : d;
+  const date = typeof d === "string" ? new Date(d) : d;
   if (Number.isNaN(date.getTime())) return null;
   const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
 
 // URL/host: no \b before scheme — real-world errors concatenate without whitespace
 // (e.g. "Base URLhttp://app.example.com").
 const URL_RX = /https?:\/\/[^\s'"<>)]+/gi;
-const HOST_RX = /\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.(?:com|io|net|org|cloud|app|dev|local|co|ai|sh|to|me|info|xyz|us|uk|eu)\b/gi;
-const HOST_SHORT_RX = /\b[a-z0-9][a-z0-9-]*\.(?:com|io|net|org|cloud|app|dev|local|co|ai|sh|to|me|info|xyz)\b/gi;
+const HOST_RX =
+  /\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.(?:com|io|net|org|cloud|app|dev|local|co|ai|sh|to|me|info|xyz|us|uk|eu)\b/gi;
+const HOST_SHORT_RX =
+  /\b[a-z0-9][a-z0-9-]*\.(?:com|io|net|org|cloud|app|dev|local|co|ai|sh|to|me|info|xyz)\b/gi;
 const LOCALHOST_RX = /\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{1,5})?\b/gi;
 const IPV4_RX = /\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b/g;
 const IPV6_RX = /\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi;
-const UUID_RX = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const UUID_RX =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 // Permissive email: anything that looks like local@domain, even with truncated TLDs.
 const EMAIL_RX = /[a-z0-9._%+-]+@[a-z0-9._-]+/gi;
 const QUOTED_RX = /(["'`])[^"'`\n]{2,}\1/g;
-const HASH_RX = /\b(?=[a-z0-9-_]{40,})(?=[^\s]*\d)(?=[^\s]*[a-z])[a-z0-9-_]+\b/gi;
+const HASH_RX =
+  /\b(?=[a-z0-9-_]{40,})(?=[^\s]*\d)(?=[^\s]*[a-z])[a-z0-9-_]+\b/gi;
 
 function scrubError(raw: string | null | undefined): string | null {
   if (!raw) return null;
   let s = raw;
-  s = s.replace(URL_RX, '<URL>');
-  s = s.replace(EMAIL_RX, '<EMAIL>');
-  s = s.replace(IPV4_RX, '<IP>');
-  s = s.replace(IPV6_RX, '<IP>');
-  s = s.replace(LOCALHOST_RX, '<HOST>');
-  s = s.replace(UUID_RX, '<UUID>');
-  s = s.replace(HOST_RX, '<HOST>');
-  s = s.replace(HOST_SHORT_RX, '<HOST>');
-  s = s.replace(QUOTED_RX, '<STR>');
-  s = s.replace(HASH_RX, '<HASH>');
-  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(URL_RX, "<URL>");
+  s = s.replace(EMAIL_RX, "<EMAIL>");
+  s = s.replace(IPV4_RX, "<IP>");
+  s = s.replace(IPV6_RX, "<IP>");
+  s = s.replace(LOCALHOST_RX, "<HOST>");
+  s = s.replace(UUID_RX, "<UUID>");
+  s = s.replace(HOST_RX, "<HOST>");
+  s = s.replace(HOST_SHORT_RX, "<HOST>");
+  s = s.replace(QUOTED_RX, "<STR>");
+  s = s.replace(HASH_RX, "<HASH>");
+  s = s.replace(/\s+/g, " ").trim();
 
   // Drop signatures that look like they leaked structured content
   // (JSON dumps, page text snapshots, DOM probe outputs). These tend to
   // carry team/repo/user names that no regex can reliably scrub.
-  if (s.includes('{') || s.includes('}')) return null;
+  if (s.includes("{") || s.includes("}")) return null;
   // Heuristic: many <STR> placeholders → original was a stringified object.
   const strCount = (s.match(/<STR>/g) ?? []).length;
   if (strCount >= 3) return null;
   // Cap length; further truncation drops trailing leak-prone context.
-  if (s.length > 240) s = s.slice(0, 240) + '…';
+  if (s.length > 240) s = s.slice(0, 240) + "…";
   return s || null;
 }
 
 function categorizeError(scrubbed: string | null): string | null {
   if (!scrubbed) return null;
   const s = scrubbed.toLowerCase();
-  if (/timeout|timed out|exceeded.*ms|deadline/.test(s)) return 'timeout';
-  if (/locator|selector|element.*not.*(found|visible|attached)|no element matches|waiting for/.test(s))
-    return 'selector_not_found';
-  if (/expect\(|assertion|to be visible|to have text|to equal/.test(s)) return 'assertion';
-  if (/net::|err_|failed to fetch|econnrefused|enotfound|connection refused|network|cors/.test(s))
-    return 'network';
-  if (/navigation|page\.goto|net::err_aborted/.test(s)) return 'navigation';
-  if (/uncaught|referenceerror|typeerror|syntaxerror|cannot read prop/.test(s)) return 'js_error';
-  if (/intercept|abort|frame detached/.test(s)) return 'browser_lifecycle';
-  return 'other';
+  if (/timeout|timed out|exceeded.*ms|deadline/.test(s)) return "timeout";
+  if (
+    /locator|selector|element.*not.*(found|visible|attached)|no element matches|waiting for/.test(
+      s,
+    )
+  )
+    return "selector_not_found";
+  if (/expect\(|assertion|to be visible|to have text|to equal/.test(s))
+    return "assertion";
+  if (
+    /net::|err_|failed to fetch|econnrefused|enotfound|connection refused|network|cors/.test(
+      s,
+    )
+  )
+    return "network";
+  if (/navigation|page\.goto|net::err_aborted/.test(s)) return "navigation";
+  if (/uncaught|referenceerror|typeerror|syntaxerror|cannot read prop/.test(s))
+    return "js_error";
+  if (/intercept|abort|frame detached/.test(s)) return "browser_lifecycle";
+  return "other";
 }
 
 function classifySelectorKind(t: string | null): string {
-  if (!t) return 'other';
+  if (!t) return "other";
   const s = t.toLowerCase();
-  if (s.includes('testid') || s === 'data-testid') return 'testid';
-  if (s.includes('role') || s.includes('aria')) return 'role';
-  if (s === 'text' || s.includes('label') || s.includes('placeholder') || s.includes('alt') || s.includes('title'))
-    return 'text';
-  if (s.includes('css') || s === 'id' || s === 'name') return 'css';
-  if (s.includes('xpath')) return 'xpath';
-  if (s.includes('ocr') || s.includes('coords')) return 'visual';
-  return 'other';
+  if (s.includes("testid") || s === "data-testid") return "testid";
+  if (s.includes("role") || s.includes("aria")) return "role";
+  if (
+    s === "text" ||
+    s.includes("label") ||
+    s.includes("placeholder") ||
+    s.includes("alt") ||
+    s.includes("title")
+  )
+    return "text";
+  if (s.includes("css") || s === "id" || s === "name") return "css";
+  if (s.includes("xpath")) return "xpath";
+  if (s.includes("ocr") || s.includes("coords")) return "visual";
+  return "other";
 }
 
 // ─── DB connection ────────────────────────────────────────────────────
 
 function connectionUrlFor(source: SourceName): string {
-  if (source === 'local') {
-    return process.env.DATABASE_URL || 'postgresql://lastest:lastest@localhost:5432/lastest';
+  if (source === "local") {
+    return (
+      process.env.DATABASE_URL ||
+      "postgresql://lastest:lastest@localhost:5432/lastest"
+    );
   }
   const url = process.env.OLARES_DATABASE_URL;
   if (!url) {
     console.error(
-      'OLARES_DATABASE_URL is not set. Port-forward the prod postgres in another shell, e.g.:\n' +
-        '  ssh root@ewyctorlab.olares.local kubectl -n lastest-dev-ewyctorlab port-forward svc/<postgres-svc> 15432:5432\n' +
-        'then export OLARES_DATABASE_URL=postgresql://USER:PASS@localhost:15432/DBNAME and re-run.\n' +
-        '(--sources local) skips Olares.',
+      "OLARES_DATABASE_URL is not set. Port-forward the prod postgres in another shell, e.g.:\n" +
+        "  ssh root@ewyctorlab.olares.local kubectl -n lastest-dev-ewyctorlab port-forward svc/<postgres-svc> 15432:5432\n" +
+        "then export OLARES_DATABASE_URL=postgresql://USER:PASS@localhost:15432/DBNAME and re-run.\n" +
+        "(--sources local) skips Olares.",
     );
     process.exit(2);
   }
@@ -193,14 +236,16 @@ interface Streams {
 function openStreams(outDir: string): Streams {
   mkdirSync(outDir, { recursive: true });
   return {
-    flakeRuns: createWriteStream(join(outDir, 'flake_runs.jsonl')),
-    visualDiffs: createWriteStream(join(outDir, 'visual_diffs.jsonl')),
-    selectorFragility: createWriteStream(join(outDir, 'selector_fragility.jsonl')),
+    flakeRuns: createWriteStream(join(outDir, "flake_runs.jsonl")),
+    visualDiffs: createWriteStream(join(outDir, "visual_diffs.jsonl")),
+    selectorFragility: createWriteStream(
+      join(outDir, "selector_fragility.jsonl"),
+    ),
   };
 }
 
 function writeJsonl(stream: WriteStream, record: unknown) {
-  stream.write(JSON.stringify(record) + '\n');
+  stream.write(JSON.stringify(record) + "\n");
 }
 
 async function closeStreams(s: Streams): Promise<void> {
@@ -220,7 +265,10 @@ interface Counters {
   diffClassDist: Record<string, number>;
   errorCategoryDist: Record<string, number>;
   selectorKindFailures: Record<string, { failures: number; attempts: number }>;
-  perSource: Record<string, { runs: number; flaky: number; diffs: number; selectors: number }>;
+  perSource: Record<
+    string,
+    { runs: number; flaky: number; diffs: number; selectors: number }
+  >;
 }
 
 function newCounters(): Counters {
@@ -235,8 +283,17 @@ function newCounters(): Counters {
   };
 }
 
-function bumpSource(c: Counters, source: SourceName, key: keyof Counters['perSource'][string]) {
-  const entry = (c.perSource[source] ??= { runs: 0, flaky: 0, diffs: 0, selectors: 0 });
+function bumpSource(
+  c: Counters,
+  source: SourceName,
+  key: keyof Counters["perSource"][string],
+) {
+  const entry = (c.perSource[source] ??= {
+    runs: 0,
+    flaky: 0,
+    diffs: 0,
+    selectors: 0,
+  });
   entry[key] += 1;
 }
 
@@ -253,7 +310,9 @@ async function runSource(
 
   try {
     // Pre-pass: build per-team run counts; enforce k-anon floor.
-    const teamCountsRaw = await sql<Array<{ team_id: string | null; runs: number }>>`
+    const teamCountsRaw = await sql<
+      Array<{ team_id: string | null; runs: number }>
+    >`
       select r.team_id as team_id, count(tr.id)::int as runs
       from test_results tr
       left join tests t on t.id = tr.test_id
@@ -262,7 +321,8 @@ async function runSource(
     `;
     const includedTeams = new Set<string>();
     for (const row of teamCountsRaw) {
-      if (row.team_id && row.runs >= minRunsPerTeam) includedTeams.add(row.team_id);
+      if (row.team_id && row.runs >= minRunsPerTeam)
+        includedTeams.add(row.team_id);
     }
     console.log(
       `[${source}] teams with ≥${minRunsPerTeam} runs: ${includedTeams.size} / ${teamCountsRaw.length}`,
@@ -283,7 +343,14 @@ async function runSource(
     for (const r of retryRows) retryCount.set(r.retry_of, r.n);
 
     // ── Pass 1: flake_runs ─────────────────────────────────────────
-    await pass1FlakeRuns(sql, source, streams, counters, includedTeams, retryCount);
+    await pass1FlakeRuns(
+      sql,
+      source,
+      streams,
+      counters,
+      includedTeams,
+      retryCount,
+    );
 
     // ── Pass 2: visual_diffs ───────────────────────────────────────
     await pass2VisualDiffs(sql, source, streams, counters, includedTeams);
@@ -363,21 +430,23 @@ async function pass1FlakeRuns(
       const category = categorizeError(scrubbed);
       const triageClass = row.triage?.classification ?? null;
       const triageConfidence =
-        typeof row.triage?.confidence === 'number' ? row.triage.confidence : null;
+        typeof row.triage?.confidence === "number"
+          ? row.triage.confidence
+          : null;
 
       const lastStep = row.last_reached_step ?? 0;
       const total = row.total_steps ?? 0;
 
       const assertionFailures = Array.isArray(row.assertion_results)
         ? row.assertion_results.filter(
-            (a) => a && (a.status === 'failed' || a.passed === false),
+            (a) => a && (a.status === "failed" || a.passed === false),
           ).length
         : 0;
 
       const record = {
-        run_id_hash: hashId(row.id, 'run'),
-        test_id_hash: hashId(row.test_id ?? null, 'test'),
-        team_id_hash: hashId(row.team_id, 'team'),
+        run_id_hash: hashId(row.id, "run"),
+        test_id_hash: hashId(row.test_id ?? null, "test"),
+        team_id_hash: hashId(row.team_id, "team"),
         status: row.status,
         is_flaky: !!row.is_flaky,
         retry_count: retryCount.get(row.id) ?? 0,
@@ -385,16 +454,21 @@ async function pass1FlakeRuns(
         duration_bucket: bucketDuration(row.duration_ms),
         total_steps: total,
         last_reached_step: lastStep,
-        step_completion_pct: total > 0 ? Math.round((lastStep / total) * 100) : null,
+        step_completion_pct:
+          total > 0 ? Math.round((lastStep / total) * 100) : null,
         triage_class: triageClass,
         triage_confidence: triageConfidence,
         error_signature: scrubbed,
         error_category: category,
-        console_error_count: Array.isArray(row.console_errors) ? row.console_errors.length : 0,
-        soft_error_count: Array.isArray(row.soft_errors) ? row.soft_errors.length : 0,
+        console_error_count: Array.isArray(row.console_errors)
+          ? row.console_errors.length
+          : 0,
+        soft_error_count: Array.isArray(row.soft_errors)
+          ? row.soft_errors.length
+          : 0,
         assertion_failure_count: assertionFailures,
         browser: row.browser,
-        execution_mode: row.execution_mode ?? 'procedural',
+        execution_mode: row.execution_mode ?? "procedural",
         date_bucket: dateBucket(row.completed_at),
         source,
       };
@@ -402,14 +476,20 @@ async function pass1FlakeRuns(
       writeJsonl(streams.flakeRuns, record);
       counters.totalRuns += 1;
       if (record.is_flaky) counters.totalFlaky += 1;
-      bumpSource(counters, source, 'runs');
-      if (record.is_flaky) bumpSource(counters, source, 'flaky');
-      if (triageClass) counters.triageDist[triageClass] = (counters.triageDist[triageClass] ?? 0) + 1;
-      if (category) counters.errorCategoryDist[category] = (counters.errorCategoryDist[category] ?? 0) + 1;
+      bumpSource(counters, source, "runs");
+      if (record.is_flaky) bumpSource(counters, source, "flaky");
+      if (triageClass)
+        counters.triageDist[triageClass] =
+          (counters.triageDist[triageClass] ?? 0) + 1;
+      if (category)
+        counters.errorCategoryDist[category] =
+          (counters.errorCategoryDist[category] ?? 0) + 1;
     }
     if (rows.length < CHUNK) break;
   }
-  console.log(`[${source}] flake_runs: emitted ${counters.perSource[source]?.runs ?? 0} rows`);
+  console.log(
+    `[${source}] flake_runs: emitted ${counters.perSource[source]?.runs ?? 0} rows`,
+  );
   void total;
 }
 
@@ -437,7 +517,11 @@ async function pass2VisualDiffs(
           pageShift?: { detected?: boolean } | null;
           textRegionDiffPixels?: number;
           nonTextRegionDiffPixels?: number;
-          domDiff?: { added?: unknown[]; removed?: unknown[]; changed?: unknown[] } | null;
+          domDiff?: {
+            added?: unknown[];
+            removed?: unknown[];
+            changed?: unknown[];
+          } | null;
         } | null;
         ai_analysis: { classification?: string; confidence?: number } | null;
         ai_recommendation: string | null;
@@ -470,28 +554,38 @@ async function pass2VisualDiffs(
     for (const row of rows) {
       if (!row.team_id || !includedTeams.has(row.team_id)) continue;
       const md = row.metadata ?? {};
-      const totalDiff = (md.textRegionDiffPixels ?? 0) + (md.nonTextRegionDiffPixels ?? 0);
-      const textPct = totalDiff > 0 ? (md.textRegionDiffPixels ?? 0) / totalDiff : null;
-      const nonTextPct = totalDiff > 0 ? (md.nonTextRegionDiffPixels ?? 0) / totalDiff : null;
+      const totalDiff =
+        (md.textRegionDiffPixels ?? 0) + (md.nonTextRegionDiffPixels ?? 0);
+      const textPct =
+        totalDiff > 0 ? (md.textRegionDiffPixels ?? 0) / totalDiff : null;
+      const nonTextPct =
+        totalDiff > 0 ? (md.nonTextRegionDiffPixels ?? 0) / totalDiff : null;
       const dom = md.domDiff;
-      const domDiffPresent = !!dom && (
-        (Array.isArray(dom.added) && dom.added.length > 0) ||
-        (Array.isArray(dom.removed) && dom.removed.length > 0) ||
-        (Array.isArray(dom.changed) && dom.changed.length > 0)
-      );
+      const domDiffPresent =
+        !!dom &&
+        ((Array.isArray(dom.added) && dom.added.length > 0) ||
+          (Array.isArray(dom.removed) && dom.removed.length > 0) ||
+          (Array.isArray(dom.changed) && dom.changed.length > 0));
 
       const record = {
-        diff_id_hash: hashId(row.id, 'diff'),
-        test_id_hash: hashId(row.test_id, 'test'),
-        team_id_hash: hashId(row.team_id, 'team'),
+        diff_id_hash: hashId(row.id, "diff"),
+        test_id_hash: hashId(row.test_id, "test"),
+        team_id_hash: hashId(row.team_id, "team"),
         classification: row.classification,
         ai_classification: row.ai_analysis?.classification ?? null,
-        ai_confidence: typeof row.ai_analysis?.confidence === 'number' ? row.ai_analysis.confidence : null,
+        ai_confidence:
+          typeof row.ai_analysis?.confidence === "number"
+            ? row.ai_analysis.confidence
+            : null,
         ai_recommendation: row.ai_recommendation,
         pixel_difference: row.pixel_difference ?? 0,
         percentage_difference:
-          row.percentage_difference != null ? parseFloat(row.percentage_difference) : null,
-        changed_region_count: Array.isArray(md.changedRegions) ? md.changedRegions.length : null,
+          row.percentage_difference != null
+            ? parseFloat(row.percentage_difference)
+            : null,
+        changed_region_count: Array.isArray(md.changedRegions)
+          ? md.changedRegions.length
+          : null,
         page_shift_detected: md.pageShift?.detected ?? null,
         text_region_diff_pct: textPct,
         non_text_region_diff_pct: nonTextPct,
@@ -502,7 +596,7 @@ async function pass2VisualDiffs(
         source,
       };
       writeJsonl(streams.visualDiffs, record);
-      bumpSource(counters, source, 'diffs');
+      bumpSource(counters, source, "diffs");
       if (row.classification) {
         counters.diffClassDist[row.classification] =
           (counters.diffClassDist[row.classification] ?? 0) + 1;
@@ -510,7 +604,9 @@ async function pass2VisualDiffs(
     }
     if (rows.length < CHUNK) break;
   }
-  console.log(`[${source}] visual_diffs: emitted ${counters.perSource[source]?.diffs ?? 0} rows`);
+  console.log(
+    `[${source}] visual_diffs: emitted ${counters.perSource[source]?.diffs ?? 0} rows`,
+  );
 }
 
 async function pass3SelectorFragility(
@@ -568,13 +664,16 @@ async function pass3SelectorFragility(
         total_attempts: attempts,
         failure_rate: Math.round(failureRate * 1000) / 1000,
         avg_response_time_ms: row.avg_response_time_ms,
-        test_id_hash: hashId(row.test_id ?? null, 'test'),
-        team_id_hash: hashId(row.team_id, 'team'),
+        test_id_hash: hashId(row.test_id ?? null, "test"),
+        team_id_hash: hashId(row.team_id, "team"),
         source,
       };
       writeJsonl(streams.selectorFragility, record);
-      bumpSource(counters, source, 'selectors');
-      const slot = (counters.selectorKindFailures[kind] ??= { failures: 0, attempts: 0 });
+      bumpSource(counters, source, "selectors");
+      const slot = (counters.selectorKindFailures[kind] ??= {
+        failures: 0,
+        attempts: 0,
+      });
       slot.failures += failures;
       slot.attempts += attempts;
     }
@@ -598,7 +697,8 @@ function buildSummary(counters: Counters, args: Args) {
       kind,
       failures,
       attempts,
-      failure_rate: attempts > 0 ? Math.round((failures / attempts) * 1000) / 1000 : 0,
+      failure_rate:
+        attempts > 0 ? Math.round((failures / attempts) * 1000) / 1000 : 0,
     }))
     .sort((a, b) => b.failure_rate - a.failure_rate);
 
@@ -609,7 +709,11 @@ function buildSummary(counters: Counters, args: Args) {
     totals: {
       runs: counters.totalRuns,
       flaky_runs: counters.totalFlaky,
-      flake_rate: counters.totalRuns > 0 ? Math.round((counters.totalFlaky / counters.totalRuns) * 10000) / 10000 : 0,
+      flake_rate:
+        counters.totalRuns > 0
+          ? Math.round((counters.totalFlaky / counters.totalRuns) * 10000) /
+            10000
+          : 0,
     },
     triage_class_distribution: counters.triageDist,
     diff_classification_distribution: counters.diffClassDist,
@@ -625,7 +729,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const outDir = resolve(args.out);
   console.log(`Output: ${outDir}`);
-  console.log(`Sources: ${args.sources.join(', ')}`);
+  console.log(`Sources: ${args.sources.join(", ")}`);
   const streams = openStreams(outDir);
   const counters = newCounters();
 
@@ -633,7 +737,10 @@ async function main(): Promise<void> {
     try {
       await runSource(source, streams, counters, args.minRunsPerTeam);
     } catch (err) {
-      console.error(`[${source}] failed:`, err instanceof Error ? err.message : err);
+      console.error(
+        `[${source}] failed:`,
+        err instanceof Error ? err.message : err,
+      );
       if (args.sources.length === 1) {
         await closeStreams(streams);
         process.exit(1);
@@ -643,9 +750,14 @@ async function main(): Promise<void> {
 
   await closeStreams(streams);
   const summary = buildSummary(counters, args);
-  writeFileSync(join(outDir, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
-  console.log(`\nDone. ${counters.totalRuns} runs (${counters.totalFlaky} flaky) across ${args.sources.length} source(s).`);
-  console.log(`Summary: ${join(outDir, 'summary.json')}`);
+  writeFileSync(
+    join(outDir, "summary.json"),
+    JSON.stringify(summary, null, 2) + "\n",
+  );
+  console.log(
+    `\nDone. ${counters.totalRuns} runs (${counters.totalFlaky} flaky) across ${args.sources.length} source(s).`,
+  );
+  console.log(`Summary: ${join(outDir, "summary.json")}`);
 }
 
 main().catch((err) => {

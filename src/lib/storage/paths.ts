@@ -1,25 +1,25 @@
-import path from 'path';
-import { promises as fs } from 'fs';
+import path from "path";
+import { promises as fs } from "fs";
 
 /**
  * Centralized storage paths — all media files live under `storage/` (outside `public/`).
  * Served to clients via the authenticated `/api/media/[...path]` route.
  */
 
-export const STORAGE_ROOT = path.join(process.cwd(), 'storage');
+export const STORAGE_ROOT = path.join(process.cwd(), "storage");
 
 export const STORAGE_DIRS = {
-  screenshots: path.join(STORAGE_ROOT, 'screenshots'),
-  diffs: path.join(STORAGE_ROOT, 'diffs'),
-  baselines: path.join(STORAGE_ROOT, 'baselines'),
-  traces: path.join(STORAGE_ROOT, 'traces'),
-  videos: path.join(STORAGE_ROOT, 'videos'),
-  planned: path.join(STORAGE_ROOT, 'planned'),
-  'bug-reports': path.join(STORAGE_ROOT, 'bug-reports'),
-  fixtures: path.join(STORAGE_ROOT, 'fixtures'),
-  'network-bodies': path.join(STORAGE_ROOT, 'network-bodies'),
-  'csv-sources': path.join(STORAGE_ROOT, 'csv-sources'),
-  'url-diffs': path.join(STORAGE_ROOT, 'url-diffs'),
+  screenshots: path.join(STORAGE_ROOT, "screenshots"),
+  diffs: path.join(STORAGE_ROOT, "diffs"),
+  baselines: path.join(STORAGE_ROOT, "baselines"),
+  traces: path.join(STORAGE_ROOT, "traces"),
+  videos: path.join(STORAGE_ROOT, "videos"),
+  planned: path.join(STORAGE_ROOT, "planned"),
+  "bug-reports": path.join(STORAGE_ROOT, "bug-reports"),
+  fixtures: path.join(STORAGE_ROOT, "fixtures"),
+  "network-bodies": path.join(STORAGE_ROOT, "network-bodies"),
+  "csv-sources": path.join(STORAGE_ROOT, "csv-sources"),
+  "url-diffs": path.join(STORAGE_ROOT, "url-diffs"),
 } as const;
 
 /** Subdirectory names allowed by the media API route. */
@@ -33,12 +33,12 @@ export const ALLOWED_STORAGE_SUBDIRS = new Set(Object.keys(STORAGE_DIRS));
  */
 export function resolveStoragePath(urlPath: string): string | null {
   // Strip leading slash
-  const cleaned = urlPath.replace(/^\/+/, '');
+  const cleaned = urlPath.replace(/^\/+/, "");
 
   // Block traversal
-  if (cleaned.includes('..')) return null;
+  if (cleaned.includes("..")) return null;
 
-  const firstSlash = cleaned.indexOf('/');
+  const firstSlash = cleaned.indexOf("/");
   const subdir = firstSlash === -1 ? cleaned : cleaned.slice(0, firstSlash);
 
   if (!ALLOWED_STORAGE_SUBDIRS.has(subdir)) return null;
@@ -51,7 +51,7 @@ export function resolveStoragePath(urlPath: string): string | null {
  * e.g. `/home/user/project/storage/diffs/abc.png` → `/diffs/abc.png`
  */
 export function toRelativePath(absPath: string): string {
-  return '/' + path.relative(STORAGE_ROOT, absPath).split(path.sep).join('/');
+  return "/" + path.relative(STORAGE_ROOT, absPath).split(path.sep).join("/");
 }
 
 /**
@@ -64,7 +64,9 @@ export function toRelativePath(absPath: string): string {
  * thumbnail generators) so a stray symlink under `storage/` can never be
  * used to exfiltrate arbitrary host files.
  */
-export async function resolveStoragePathStrict(urlPath: string): Promise<string | null> {
+export async function resolveStoragePathStrict(
+  urlPath: string,
+): Promise<string | null> {
   const candidate = resolveStoragePath(urlPath);
   if (!candidate) return null;
   let real: string;
@@ -76,7 +78,9 @@ export async function resolveStoragePathStrict(urlPath: string): Promise<string 
     return candidate;
   }
   const baseReal = await fs.realpath(STORAGE_ROOT).catch(() => STORAGE_ROOT);
-  const baseWithSep = baseReal.endsWith(path.sep) ? baseReal : baseReal + path.sep;
+  const baseWithSep = baseReal.endsWith(path.sep)
+    ? baseReal
+    : baseReal + path.sep;
   if (real !== baseReal && !real.startsWith(baseWithSep)) {
     return null;
   }

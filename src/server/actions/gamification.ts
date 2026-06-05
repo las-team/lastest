@@ -1,14 +1,14 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
-import { requireTeamAccess, requireTeamAdmin } from '@/lib/auth';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
+import { requireTeamAccess, requireTeamAdmin } from "@/lib/auth";
 import {
   SCORE_RULES,
   applyMultiplier,
   BEAT_BOT_TIERS,
-} from '@/lib/gamification/rules';
+} from "@/lib/gamification/rules";
 import type {
   ActorKind,
   ScoreEventKind,
@@ -17,7 +17,7 @@ import type {
   NewScoreEvent,
   UserScore,
   AchievementCode,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -59,9 +59,9 @@ async function ensureSeasonForTeam(teamId: string) {
   if (existing) return existing;
   return queries.createSeason({
     teamId,
-    name: 'Season 1',
+    name: "Season 1",
     startsAt: new Date(),
-    status: 'active',
+    status: "active",
   });
 }
 
@@ -75,19 +75,34 @@ async function ensureSeasonForTeam(teamId: string) {
  */
 export async function awardScore(input: AwardInput): Promise<AwardResult> {
   try {
-    const { teamId, kind, actor, sourceType, sourceId, detail, reason, revalidate } = input;
+    const {
+      teamId,
+      kind,
+      actor,
+      sourceType,
+      sourceId,
+      detail,
+      reason,
+      revalidate,
+    } = input;
 
     // 1. Feature gate
     if (!(await gamificationActiveForTeam(teamId))) {
-      return { awarded: false, reason: 'gamification_disabled' };
+      return { awarded: false, reason: "gamification_disabled" };
     }
 
     const rule = SCORE_RULES[kind];
-    if (!rule) return { awarded: false, reason: 'unknown_rule' };
+    if (!rule) return { awarded: false, reason: "unknown_rule" };
 
     // 2. Idempotency — short-circuit if this (actor, kind, source) already awarded
-    const existing = await queries.findScoreEvent(actor.kind, actor.id, kind, sourceType, sourceId);
-    if (existing) return { awarded: false, reason: 'already_awarded' };
+    const existing = await queries.findScoreEvent(
+      actor.kind,
+      actor.id,
+      kind,
+      sourceType,
+      sourceId,
+    );
+    if (existing) return { awarded: false, reason: "already_awarded" };
 
     // 3. Season + blitz lookup
     const season = await ensureSeasonForTeam(teamId);
@@ -97,15 +112,19 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
     // 4. Daily-cap check for penalties
     let baseDelta = rule.base;
     if (rule.dailyCap && baseDelta < 0) {
-      const spent = await queries.getDailyPenaltyTotal(actor.kind, actor.id, kind);
+      const spent = await queries.getDailyPenaltyTotal(
+        actor.kind,
+        actor.id,
+        kind,
+      );
       const headroom = rule.dailyCap - spent;
-      if (headroom <= 0) return { awarded: false, reason: 'daily_cap_reached' };
+      if (headroom <= 0) return { awarded: false, reason: "daily_cap_reached" };
       // Cap the outgoing penalty so we never exceed the limit.
       if (Math.abs(baseDelta) > headroom) baseDelta = -headroom;
     }
 
     const delta = applyMultiplier(baseDelta, multiplier);
-    if (delta === 0) return { awarded: false, reason: 'zero_delta' };
+    if (delta === 0) return { awarded: false, reason: "zero_delta" };
 
     // 5. Ensure a running-total row exists
     const scoreRow = await queries.ensureUserScoreRow({
@@ -138,9 +157,11 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
     const newTotal = previousTotal + delta;
     await queries.bumpUserScore(scoreRow.id, {
       total: newTotal,
-      testsCreated: scoreRow.testsCreated + (kind === 'test_created' ? 1 : 0),
-      regressionsCaught: scoreRow.regressionsCaught + (kind === 'regression_caught' ? 1 : 0),
-      flakesIncurred: scoreRow.flakesIncurred + (kind === 'flake_penalty' ? 1 : 0),
+      testsCreated: scoreRow.testsCreated + (kind === "test_created" ? 1 : 0),
+      regressionsCaught:
+        scoreRow.regressionsCaught + (kind === "regression_caught" ? 1 : 0),
+      flakesIncurred:
+        scoreRow.flakesIncurred + (kind === "flake_penalty" ? 1 : 0),
       lastEventAt: new Date(),
     });
 
@@ -160,7 +181,7 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
 
     // 9. Beat-the-bot check (only for users, only if delta is positive)
     let beatBot: { botName: string; beatBy: number } | null = null;
-    if (actor.kind === 'user' && delta > 0) {
+    if (actor.kind === "user" && delta > 0) {
       beatBot = await runBeatBotCheck({
         teamId,
         seasonId: season.id,
@@ -176,11 +197,11 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
         teamId,
         repositoryId: null,
         sessionId: null,
-        sourceType: 'play_agent',
-        eventType: delta >= 0 ? 'score:awarded' : 'score:penalty',
+        sourceType: "play_agent",
+        eventType: delta >= 0 ? "score:awarded" : "score:penalty",
         agentType: null,
         stepId: null,
-        summary: `${actor.kind === 'bot' ? '🤖 ' : ''}${reason ?? rule.reason} (${delta >= 0 ? '+' : ''}${delta})`,
+        summary: `${actor.kind === "bot" ? "🤖 " : ""}${reason ?? rule.reason} (${delta >= 0 ? "+" : ""}${delta})`,
         detail: {
           actorKind: actor.kind,
           actorId: actor.id,
@@ -191,7 +212,7 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
           newTotal,
           ...(detail ?? {}),
         },
-        artifactType: 'score',
+        artifactType: "score",
         artifactId: event.id,
         artifactLabel: rule.reason,
         promptLogId: null,
@@ -203,13 +224,17 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
           teamId,
           repositoryId: null,
           sessionId: null,
-          sourceType: 'play_agent',
-          eventType: 'achievement:unlocked',
+          sourceType: "play_agent",
+          eventType: "achievement:unlocked",
           agentType: null,
           stepId: null,
           summary: `🏆 Achievement unlocked: ${achievementUnlocked}`,
-          detail: { actorKind: actor.kind, actorId: actor.id, code: achievementUnlocked },
-          artifactType: 'score',
+          detail: {
+            actorKind: actor.kind,
+            actorId: actor.id,
+            code: achievementUnlocked,
+          },
+          artifactType: "score",
           artifactId: event.id,
           artifactLabel: achievementUnlocked,
           promptLogId: null,
@@ -222,13 +247,13 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
           teamId,
           repositoryId: null,
           sessionId: null,
-          sourceType: 'play_agent',
-          eventType: 'beat_the_bot',
+          sourceType: "play_agent",
+          eventType: "beat_the_bot",
           agentType: null,
           stepId: null,
           summary: `★ You beat ${beatBot.botName} by ${beatBot.beatBy}!`,
           detail: { actorKind: actor.kind, actorId: actor.id, ...beatBot },
-          artifactType: 'score',
+          artifactType: "score",
           artifactId: event.id,
           artifactLabel: beatBot.botName,
           promptLogId: null,
@@ -236,11 +261,11 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
         });
       }
     } catch (err) {
-      console.error('[gamification] failed to emit activity event', err);
+      console.error("[gamification] failed to emit activity event", err);
     }
 
     // 11. Revalidate paths (non-fatal if called outside a request)
-    const paths = revalidate ?? ['/leaderboard'];
+    const paths = revalidate ?? ["/leaderboard"];
     for (const p of paths) {
       try {
         revalidatePath(p);
@@ -256,8 +281,8 @@ export async function awardScore(input: AwardInput): Promise<AwardResult> {
       beatBot,
     };
   } catch (err) {
-    console.error('[gamification] awardScore failed', err);
-    return { awarded: false, reason: 'error' };
+    console.error("[gamification] awardScore failed", err);
+    return { awarded: false, reason: "error" };
   }
 }
 
@@ -275,10 +300,11 @@ async function runBeatBotCheck(args: {
   const botTotal = topBot.total;
 
   // Only fire on the transition: previously ≤ bot total, now > bot total
-  if (!(args.previousTotal <= botTotal && args.newTotal > botTotal)) return null;
+  if (!(args.previousTotal <= botTotal && args.newTotal > botTotal))
+    return null;
 
   const bot = await queries.getBotById(topBot.actorId);
-  const botName = bot?.name ?? 'Bot';
+  const botName = bot?.name ?? "Bot";
   const beatBy = args.newTotal - botTotal;
 
   // Unlock any qualifying beat-bot achievement tier
@@ -287,7 +313,7 @@ async function runBeatBotCheck(args: {
       await queries.insertAchievement({
         teamId: args.teamId,
         seasonId: args.seasonId,
-        actorKind: 'user',
+        actorKind: "user",
         actorId: args.userId,
         code: tier.code,
         detail: { botName, beatBy, tierLabel: tier.label },
@@ -309,32 +335,49 @@ export async function startNewSeason(name: string) {
   if (active) {
     await queries.endSeasonById(active.id);
     await emitAndPersistActivityEvent({
-      teamId, repositoryId: null, sessionId: null,
-      sourceType: 'play_agent', eventType: 'season:ended',
-      agentType: null, stepId: null,
+      teamId,
+      repositoryId: null,
+      sessionId: null,
+      sourceType: "play_agent",
+      eventType: "season:ended",
+      agentType: null,
+      stepId: null,
       summary: `Season "${active.name}" ended`,
       detail: { seasonId: active.id },
-      artifactType: 'score', artifactId: active.id, artifactLabel: active.name,
-      promptLogId: null, durationMs: null,
+      artifactType: "score",
+      artifactId: active.id,
+      artifactLabel: active.name,
+      promptLogId: null,
+      durationMs: null,
     }).catch(() => {});
   }
 
   const season = await queries.createSeason({
-    teamId, name, startsAt: new Date(), status: 'active',
+    teamId,
+    name,
+    startsAt: new Date(),
+    status: "active",
   });
 
   await emitAndPersistActivityEvent({
-    teamId, repositoryId: null, sessionId: null,
-    sourceType: 'play_agent', eventType: 'season:started',
-    agentType: null, stepId: null,
+    teamId,
+    repositoryId: null,
+    sessionId: null,
+    sourceType: "play_agent",
+    eventType: "season:started",
+    agentType: null,
+    stepId: null,
     summary: `Season "${name}" started ★`,
     detail: { seasonId: season.id },
-    artifactType: 'score', artifactId: season.id, artifactLabel: name,
-    promptLogId: null, durationMs: null,
+    artifactType: "score",
+    artifactId: season.id,
+    artifactLabel: name,
+    promptLogId: null,
+    durationMs: null,
   }).catch(() => {});
 
-  revalidatePath('/leaderboard');
-  revalidatePath('/settings');
+  revalidatePath("/leaderboard");
+  revalidatePath("/settings");
   return season;
 }
 
@@ -345,23 +388,34 @@ export async function endCurrentSeason() {
   await queries.endSeasonById(active.id);
 
   await emitAndPersistActivityEvent({
-    teamId: session.team.id, repositoryId: null, sessionId: null,
-    sourceType: 'play_agent', eventType: 'season:ended',
-    agentType: null, stepId: null,
+    teamId: session.team.id,
+    repositoryId: null,
+    sessionId: null,
+    sourceType: "play_agent",
+    eventType: "season:ended",
+    agentType: null,
+    stepId: null,
     summary: `Season "${active.name}" ended`,
     detail: { seasonId: active.id },
-    artifactType: 'score', artifactId: active.id, artifactLabel: active.name,
-    promptLogId: null, durationMs: null,
+    artifactType: "score",
+    artifactId: active.id,
+    artifactLabel: active.name,
+    promptLogId: null,
+    durationMs: null,
   }).catch(() => {});
 
-  revalidatePath('/leaderboard');
-  revalidatePath('/settings');
+  revalidatePath("/leaderboard");
+  revalidatePath("/settings");
   return active;
 }
 
 // ── Admin actions: bug blitz ────────────────────────────────────────────
 
-export async function startBugBlitz(data: { name: string; durationHours: number; multiplier: number }) {
+export async function startBugBlitz(data: {
+  name: string;
+  durationHours: number;
+  multiplier: number;
+}) {
   const session = await requireTeamAdmin();
   const season = await ensureSeasonForTeam(session.team.id);
 
@@ -375,29 +429,40 @@ export async function startBugBlitz(data: { name: string; durationHours: number;
     startsAt,
     endsAt,
     multiplier: Math.max(100, Math.min(500, Math.round(data.multiplier))),
-    status: 'active',
+    status: "active",
   });
 
   await emitAndPersistActivityEvent({
-    teamId: session.team.id, repositoryId: null, sessionId: null,
-    sourceType: 'play_agent', eventType: 'blitz:started',
-    agentType: null, stepId: null,
+    teamId: session.team.id,
+    repositoryId: null,
+    sessionId: null,
+    sourceType: "play_agent",
+    eventType: "blitz:started",
+    agentType: null,
+    stepId: null,
     summary: `🐛 Bug Blitz "${data.name}" started — ${(blitz.multiplier / 100).toFixed(1)}× points!`,
-    detail: { blitzId: blitz.id, multiplier: blitz.multiplier, endsAt: endsAt.toISOString() },
-    artifactType: 'score', artifactId: blitz.id, artifactLabel: data.name,
-    promptLogId: null, durationMs: null,
+    detail: {
+      blitzId: blitz.id,
+      multiplier: blitz.multiplier,
+      endsAt: endsAt.toISOString(),
+    },
+    artifactType: "score",
+    artifactId: blitz.id,
+    artifactLabel: data.name,
+    promptLogId: null,
+    durationMs: null,
   }).catch(() => {});
 
-  revalidatePath('/leaderboard');
-  revalidatePath('/settings');
+  revalidatePath("/leaderboard");
+  revalidatePath("/settings");
   return blitz;
 }
 
 export async function endBugBlitz(blitzId: string) {
   await requireTeamAdmin();
-  await queries.updateBugBlitzStatus(blitzId, 'ended');
-  revalidatePath('/leaderboard');
-  revalidatePath('/settings');
+  await queries.updateBugBlitzStatus(blitzId, "ended");
+  revalidatePath("/leaderboard");
+  revalidatePath("/settings");
   return { success: true };
 }
 
@@ -411,8 +476,8 @@ export async function toggleGamification(enabled: boolean) {
     await queries.ensureDefaultBots(session.team.id);
     await ensureSeasonForTeam(session.team.id);
   }
-  revalidatePath('/settings');
-  revalidatePath('/leaderboard');
+  revalidatePath("/settings");
+  revalidatePath("/leaderboard");
   return { enabled };
 }
 
@@ -427,7 +492,7 @@ export async function getViewerGamificationSnapshot() {
   if (!season) return null;
 
   const blitz = await queries.getActiveBugBlitz(team.id);
-  const row = await queries.getUserScoreRow(season.id, 'user', session.user.id);
+  const row = await queries.getUserScoreRow(season.id, "user", session.user.id);
 
   return {
     seasonId: season.id,
@@ -437,7 +502,12 @@ export async function getViewerGamificationSnapshot() {
     regressionsCaught: row?.regressionsCaught ?? 0,
     flakesIncurred: row?.flakesIncurred ?? 0,
     blitz: blitz
-      ? { id: blitz.id, name: blitz.name, multiplier: blitz.multiplier, endsAt: blitz.endsAt }
+      ? {
+          id: blitz.id,
+          name: blitz.name,
+          multiplier: blitz.multiplier,
+          endsAt: blitz.endsAt,
+        }
       : null,
   };
 }
@@ -446,7 +516,14 @@ export async function getViewerGamificationSnapshot() {
 
 export async function getLeaderboardSnapshot(): Promise<{
   seasonName: string;
-  rows: Array<UserScore & { displayName: string; avatarUrl: string | null; avatarEmoji: string | null; rank: number }>;
+  rows: Array<
+    UserScore & {
+      displayName: string;
+      avatarUrl: string | null;
+      avatarEmoji: string | null;
+      rank: number;
+    }
+  >;
   viewerActorId: string | null;
   blitz: { name: string; multiplier: number; endsAt: Date | null } | null;
 } | null> {
@@ -455,7 +532,11 @@ export async function getLeaderboardSnapshot(): Promise<{
   const season = await queries.getActiveSeason(session.team.id);
   if (!season) return null;
 
-  const leaderboard = await queries.getSeasonLeaderboard(season.id, session.team.id, 10);
+  const leaderboard = await queries.getSeasonLeaderboard(
+    season.id,
+    session.team.id,
+    10,
+  );
   const rows = leaderboard.map((lb) => ({
     id: `${lb.actorKind}:${lb.actorId}`,
     teamId: session.team.id,
@@ -473,7 +554,14 @@ export async function getLeaderboardSnapshot(): Promise<{
     avatarUrl: lb.avatarUrl,
     avatarEmoji: lb.avatarEmoji,
     rank: lb.rank,
-  })) as unknown as Array<UserScore & { displayName: string; avatarUrl: string | null; avatarEmoji: string | null; rank: number }>;
+  })) as unknown as Array<
+    UserScore & {
+      displayName: string;
+      avatarUrl: string | null;
+      avatarEmoji: string | null;
+      rank: number;
+    }
+  >;
 
   const blitz = await queries.getActiveBugBlitz(session.team.id);
 
@@ -481,6 +569,8 @@ export async function getLeaderboardSnapshot(): Promise<{
     seasonName: season.name,
     rows,
     viewerActorId: session.user.id,
-    blitz: blitz ? { name: blitz.name, multiplier: blitz.multiplier, endsAt: blitz.endsAt } : null,
+    blitz: blitz
+      ? { name: blitz.name, multiplier: blitz.multiplier, endsAt: blitz.endsAt }
+      : null,
   };
 }

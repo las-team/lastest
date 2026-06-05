@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -9,31 +9,31 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Loader2, UserPlus } from 'lucide-react';
-import { inviteUser } from '@/server/actions/users';
-import type { UserRole } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import { Loader2, UserPlus } from "lucide-react";
+import { inviteUser } from "@/server/actions/users";
+import type { UserRole } from "@/lib/db/schema";
 
 export function InviteUserDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<UserRole>('member');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<UserRole>("member");
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setIsLoading(true);
 
     try {
@@ -45,11 +45,11 @@ export function InviteUserDialog() {
       }
 
       setOpen(false);
-      setEmail('');
-      setRole('member');
+      setEmail("");
+      setRole("member");
       router.refresh();
     } catch {
-      setError('Failed to send invitation');
+      setError("Failed to send invitation");
     } finally {
       setIsLoading(false);
     }
@@ -106,9 +106,15 @@ export function InviteUserDialog() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="viewer">Viewer - Can view tests and results</SelectItem>
-                <SelectItem value="member">Member - Can create and run tests</SelectItem>
-                <SelectItem value="admin">Admin - Full access including user management</SelectItem>
+                <SelectItem value="viewer">
+                  Viewer - Can view tests and results
+                </SelectItem>
+                <SelectItem value="member">
+                  Member - Can create and run tests
+                </SelectItem>
+                <SelectItem value="admin">
+                  Admin - Full access including user management
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

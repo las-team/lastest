@@ -1,9 +1,9 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { createAndRunBuild } from '@/server/actions/builds';
-import { revalidatePath } from 'next/cache';
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import { createAndRunBuild } from "@/server/actions/builds";
+import { revalidatePath } from "next/cache";
 
 export interface BranchRunInfo {
   branch: string;
@@ -15,7 +15,7 @@ export interface BranchRunInfo {
 
 export async function getLatestRunForBranch(
   branch: string,
-  repositoryId?: string
+  repositoryId?: string,
 ): Promise<BranchRunInfo> {
   const run = await queries.getLatestRunByBranch(branch, repositoryId);
 
@@ -50,12 +50,16 @@ export async function getLatestRunForBranch(
   };
 }
 
-export async function queueRunForBranch(branch: string, repositoryId?: string, testIds?: string[]) {
+export async function queueRunForBranch(
+  branch: string,
+  repositoryId?: string,
+  testIds?: string[],
+) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
 
   const result = await createAndRunBuild(
-    'manual',
+    "manual",
     testIds,
     repositoryId,
     undefined,
@@ -63,11 +67,11 @@ export async function queueRunForBranch(branch: string, repositoryId?: string, t
     branch,
   );
 
-  revalidatePath('/compare');
+  revalidatePath("/compare");
 
   return {
     buildId: result.buildId as string | null,
     testRunId: result.testRunId as string | null,
-    queued: 'queued' in result ? true : false,
+    queued: "queued" in result ? true : false,
   };
 }

@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -13,21 +13,31 @@ import {
   MessageSquare,
   XCircle,
   Loader2,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { extractSelectorArray, type DebugStep } from '@/lib/playwright/debug-parser';
-import { hashSelectors, sortSelectorsByStats, type SelectorStatRow } from '@lastest/shared/selector-stats';
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  extractSelectorArray,
+  type DebugStep,
+} from "@/lib/playwright/debug-parser";
+import {
+  hashSelectors,
+  sortSelectorsByStats,
+  type SelectorStatRow,
+} from "@lastest/shared/selector-stats";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
-} from '@/components/ui/hover-card';
+} from "@/components/ui/hover-card";
 
-export type StepResultsMap = Record<number, {
-  status: 'passed' | 'failed';
-  durationMs?: number;
-  error?: string;
-}>;
+export type StepResultsMap = Record<
+  number,
+  {
+    status: "passed" | "failed";
+    durationMs?: number;
+    error?: string;
+  }
+>;
 
 interface PlaybackTimelineProps {
   steps: DebugStep[];
@@ -45,7 +55,10 @@ interface PlaybackTimelineProps {
 
 const ITEM_HEIGHT = 64; // px — used to compute the wheel translate
 
-const STEP_TYPE_ICONS: Record<DebugStep['type'], React.ComponentType<{ className?: string }>> = {
+const STEP_TYPE_ICONS: Record<
+  DebugStep["type"],
+  React.ComponentType<{ className?: string }>
+> = {
   action: MousePointerClick,
   navigation: Compass,
   assertion: Eye,
@@ -84,9 +97,9 @@ export function PlaybackTimeline({
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-xl border border-border shadow-sm',
-        'bg-card',
-        'flex flex-col',
+        "relative overflow-hidden rounded-xl border border-border shadow-sm",
+        "bg-card",
+        "flex flex-col",
         className,
       )}
     >
@@ -126,7 +139,7 @@ export function PlaybackTimeline({
           ref={stripRef}
           className="absolute inset-x-0 transition-transform duration-500 ease-out will-change-transform"
           style={{
-            top: '50%',
+            top: "50%",
             transform: `translateY(calc(-50% + ${translateY}px))`,
           }}
         >
@@ -156,11 +169,18 @@ interface StepRowProps {
   selectorStats?: SelectorStatRow[];
 }
 
-function StepRow({ step, index, currentStepIndex, result, compact, selectorStats }: StepRowProps) {
+function StepRow({
+  step,
+  index,
+  currentStepIndex,
+  result,
+  compact,
+  selectorStats,
+}: StepRowProps) {
   const isCurrent = index === currentStepIndex;
   const isCompleted = result !== undefined;
   const isUpcoming = !isCurrent && !isCompleted;
-  const isFailed = result?.status === 'failed';
+  const isFailed = result?.status === "failed";
 
   const Icon = STEP_TYPE_ICONS[step.type] ?? Circle;
 
@@ -168,7 +188,7 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
   // hover panel can show per-candidate stats. null when the step isn't a
   // locate call or the array is built dynamically (regex / JSON.parse fail).
   const selectorInfo = useMemo(() => {
-    if (step.type !== 'action') return null;
+    if (step.type !== "action") return null;
     const parsed = extractSelectorArray(step.code);
     if (!parsed) return null;
     const hash = hashSelectors(parsed.selectors);
@@ -181,46 +201,48 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
 
   const row = (
     <div
-      data-state={isCurrent ? 'current' : isCompleted ? 'done' : 'upcoming'}
+      data-state={isCurrent ? "current" : isCompleted ? "done" : "upcoming"}
       style={{ height: ITEM_HEIGHT }}
       className={cn(
-        'relative flex items-center gap-3 px-4 transition-all duration-300',
+        "relative flex items-center gap-3 px-4 transition-all duration-300",
         // Active step — strong, lively highlight so the eye lands here first.
         // Gradient fill, accent bar on the left, soft drop-shadow lift, and
         // an inset/outset ring pulse driven by `step-active-row-pulse`.
         isCurrent && [
-          'rounded-md',
-          'bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5',
-          'shadow-md shadow-primary/20',
-          'before:absolute before:inset-y-1 before:left-0 before:w-1 before:rounded-r-full before:bg-primary',
-          'playback-step-row-active',
+          "rounded-md",
+          "bg-gradient-to-r from-primary/25 via-primary/15 to-primary/5",
+          "shadow-md shadow-primary/20",
+          "before:absolute before:inset-y-1 before:left-0 before:w-1 before:rounded-r-full before:bg-primary",
+          "playback-step-row-active",
         ],
-        compact && 'gap-2 px-3',
-        selectorInfo && 'cursor-help',
+        compact && "gap-2 px-3",
+        selectorInfo && "cursor-help",
       )}
     >
       {/* Status badge / icon column */}
       <div
         className={cn(
-          'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors',
+          "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors",
           isFailed
-            ? 'border-destructive/60 bg-destructive/10 text-destructive'
+            ? "border-destructive/60 bg-destructive/10 text-destructive"
             : isCurrent
-              ? 'border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/30 playback-step-active'
+              ? "border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/30 playback-step-active"
               : isCompleted
-                ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                : 'border-border/60 bg-background/60 text-muted-foreground',
-          compact && 'h-7 w-7',
+                ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "border-border/60 bg-background/60 text-muted-foreground",
+          compact && "h-7 w-7",
         )}
       >
         {isFailed ? (
-          <XCircle className={cn('h-4 w-4', compact && 'h-3.5 w-3.5')} />
+          <XCircle className={cn("h-4 w-4", compact && "h-3.5 w-3.5")} />
         ) : isCurrent ? (
-          <Loader2 className={cn('h-4 w-4 animate-spin', compact && 'h-3.5 w-3.5')} />
+          <Loader2
+            className={cn("h-4 w-4 animate-spin", compact && "h-3.5 w-3.5")}
+          />
         ) : isCompleted ? (
-          <CheckCircle2 className={cn('h-4 w-4', compact && 'h-3.5 w-3.5')} />
+          <CheckCircle2 className={cn("h-4 w-4", compact && "h-3.5 w-3.5")} />
         ) : (
-          <Icon className={cn('h-4 w-4', compact && 'h-3.5 w-3.5')} />
+          <Icon className={cn("h-4 w-4", compact && "h-3.5 w-3.5")} />
         )}
       </div>
 
@@ -229,16 +251,16 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
         <div className="flex items-baseline gap-2">
           <span
             className={cn(
-              'text-[10px] font-mono tabular-nums uppercase tracking-wider',
-              isCurrent ? 'text-primary' : 'text-muted-foreground/70',
+              "text-[10px] font-mono tabular-nums uppercase tracking-wider",
+              isCurrent ? "text-primary" : "text-muted-foreground/70",
             )}
           >
-            {String(index + 1).padStart(2, '0')}
+            {String(index + 1).padStart(2, "0")}
           </span>
           <span
             className={cn(
-              'text-[10px] uppercase tracking-wider',
-              isCurrent ? 'text-primary/80' : 'text-muted-foreground/60',
+              "text-[10px] uppercase tracking-wider",
+              isCurrent ? "text-primary/80" : "text-muted-foreground/60",
             )}
           >
             {step.type}
@@ -251,17 +273,20 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
         </div>
         <div
           className={cn(
-            'truncate text-sm',
-            isCurrent ? 'font-semibold text-foreground' : 'text-foreground/80',
-            isUpcoming && 'text-foreground/70',
-            compact && 'text-xs',
+            "truncate text-sm",
+            isCurrent ? "font-semibold text-foreground" : "text-foreground/80",
+            isUpcoming && "text-foreground/70",
+            compact && "text-xs",
           )}
           title={step.label}
         >
           {step.label}
         </div>
         {isFailed && result?.error && (
-          <div className="truncate text-[10px] text-destructive/80" title={result.error}>
+          <div
+            className="truncate text-[10px] text-destructive/80"
+            title={result.error}
+          >
             {result.error}
           </div>
         )}
@@ -271,8 +296,8 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
       {result?.durationMs !== undefined && (
         <div
           className={cn(
-            'text-[10px] tabular-nums text-muted-foreground',
-            compact && 'hidden',
+            "text-[10px] tabular-nums text-muted-foreground",
+            compact && "hidden",
           )}
         >
           {formatDuration(result.durationMs)}
@@ -284,10 +309,10 @@ function StepRow({ step, index, currentStepIndex, result, compact, selectorStats
       {isCurrent && (
         <span
           className={cn(
-            'shrink-0 rounded-full bg-primary px-1.5 py-0.5',
-            'text-[9px] font-semibold uppercase tracking-wider text-primary-foreground',
-            'shadow-sm',
-            compact && 'px-1 text-[8px]',
+            "shrink-0 rounded-full bg-primary px-1.5 py-0.5",
+            "text-[9px] font-semibold uppercase tracking-wider text-primary-foreground",
+            "shadow-sm",
+            compact && "px-1 text-[8px]",
           )}
         >
           Now
@@ -320,15 +345,26 @@ interface SelectorStatsPanelProps {
   byKey: Map<string, SelectorStatRow>;
 }
 
-function SelectorStatsPanel({ action, hash, ordered, byKey }: SelectorStatsPanelProps) {
-  const totalRows = Array.from(byKey.values()).reduce((s, r) => s + r.totalAttempts, 0);
+function SelectorStatsPanel({
+  action,
+  hash,
+  ordered,
+  byKey,
+}: SelectorStatsPanelProps) {
+  const totalRows = Array.from(byKey.values()).reduce(
+    (s, r) => s + r.totalAttempts,
+    0,
+  );
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-2">
         <div className="text-xs font-semibold uppercase tracking-wider text-foreground">
           Selector fallback {action}
         </div>
-        <code className="text-[10px] font-mono text-muted-foreground" title="Stable hash of the selectors array">
+        <code
+          className="text-[10px] font-mono text-muted-foreground"
+          title="Stable hash of the selectors array"
+        >
           {hash}
         </code>
       </div>
@@ -338,40 +374,60 @@ function SelectorStatsPanel({ action, hash, ordered, byKey }: SelectorStatsPanel
             <tr>
               <th className="text-left px-2 py-1 font-medium">type</th>
               <th className="text-left px-2 py-1 font-medium">selector</th>
-              <th className="text-right px-2 py-1 font-medium" title="successCount / totalAttempts">hits</th>
+              <th
+                className="text-right px-2 py-1 font-medium"
+                title="successCount / totalAttempts"
+              >
+                hits
+              </th>
               <th className="text-right px-2 py-1 font-medium">rate</th>
-              <th className="text-right px-2 py-1 font-medium" title="avg ms when matched">avg</th>
+              <th
+                className="text-right px-2 py-1 font-medium"
+                title="avg ms when matched"
+              >
+                avg
+              </th>
             </tr>
           </thead>
           <tbody>
             {ordered.map((sel, i) => {
               const r = byKey.get(`${sel.type}::${sel.value}`);
-              const rate = r && r.totalAttempts > 0 ? Math.round((r.successCount / r.totalAttempts) * 100) : null;
+              const rate =
+                r && r.totalAttempts > 0
+                  ? Math.round((r.successCount / r.totalAttempts) * 100)
+                  : null;
               return (
                 <tr key={i} className="border-t border-border/40">
-                  <td className="px-2 py-1 text-muted-foreground/90 whitespace-nowrap">{sel.type}</td>
-                  <td className="px-2 py-1 font-mono text-foreground/80 truncate max-w-[160px]" title={sel.value}>
+                  <td className="px-2 py-1 text-muted-foreground/90 whitespace-nowrap">
+                    {sel.type}
+                  </td>
+                  <td
+                    className="px-2 py-1 font-mono text-foreground/80 truncate max-w-[160px]"
+                    title={sel.value}
+                  >
                     {sel.value}
                   </td>
                   <td className="px-2 py-1 text-right text-muted-foreground/90">
-                    {r ? `${r.successCount}/${r.totalAttempts}` : '—'}
+                    {r ? `${r.successCount}/${r.totalAttempts}` : "—"}
                   </td>
                   <td
                     className={cn(
-                      'px-2 py-1 text-right',
+                      "px-2 py-1 text-right",
                       rate === null
-                        ? 'text-muted-foreground/60'
+                        ? "text-muted-foreground/60"
                         : rate >= 80
-                          ? 'text-emerald-600 dark:text-emerald-400'
+                          ? "text-emerald-600 dark:text-emerald-400"
                           : rate <= 20
-                            ? 'text-destructive'
-                            : 'text-foreground/80',
+                            ? "text-destructive"
+                            : "text-foreground/80",
                     )}
                   >
-                    {rate === null ? '—' : `${rate}%`}
+                    {rate === null ? "—" : `${rate}%`}
                   </td>
                   <td className="px-2 py-1 text-right text-muted-foreground/90">
-                    {r?.avgResponseTimeMs != null ? `${r.avgResponseTimeMs}ms` : '—'}
+                    {r?.avgResponseTimeMs != null
+                      ? `${r.avgResponseTimeMs}ms`
+                      : "—"}
                   </td>
                 </tr>
               );
@@ -381,8 +437,8 @@ function SelectorStatsPanel({ action, hash, ordered, byKey }: SelectorStatsPanel
       </div>
       <div className="text-[10px] text-muted-foreground/80">
         {totalRows === 0
-          ? 'No runs recorded yet — order shown is the captured order.'
-          : 'Sorted by success rate · winners promoted on the next run.'}
+          ? "No runs recorded yet — order shown is the captured order."
+          : "Sorted by success rate · winners promoted on the next run."}
       </div>
     </div>
   );

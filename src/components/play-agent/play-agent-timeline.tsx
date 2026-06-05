@@ -1,64 +1,149 @@
-'use client';
+"use client";
 
-import { useState, useCallback } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Play, X, Check, Loader2, Pause, SkipForward, AlertCircle, RotateCcw, ChevronDown, ScrollText, Undo2, Circle } from 'lucide-react';
-import Link from 'next/link';
-import { PlayAgentStep } from './play-agent-step';
-import { PlayAgentStepDetail } from './play-agent-step-detail';
-import { usePlayAgent } from './use-play-agent';
-import { cn } from '@/lib/utils';
-import { rollbackAllAreaPlans } from '@/server/actions/areas';
-import { toast } from 'sonner';
-import type { AgentStepState, AgentStepId, PwAgentType } from '@/lib/db/schema';
+import { useState, useCallback } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Play,
+  X,
+  Check,
+  Loader2,
+  Pause,
+  SkipForward,
+  AlertCircle,
+  RotateCcw,
+  ChevronDown,
+  ScrollText,
+  Undo2,
+  Circle,
+} from "lucide-react";
+import Link from "next/link";
+import { PlayAgentStep } from "./play-agent-step";
+import { PlayAgentStepDetail } from "./play-agent-step-detail";
+import { usePlayAgent } from "./use-play-agent";
+import { cn } from "@/lib/utils";
+import { rollbackAllAreaPlans } from "@/server/actions/areas";
+import { toast } from "sonner";
+import type { AgentStepState, AgentStepId, PwAgentType } from "@/lib/db/schema";
 
 interface PlayAgentTimelineProps {
   repositoryId?: string | null;
 }
 
-const USER_STEPS: Set<AgentStepId> = new Set(['settings_check', 'select_repo', 'env_setup', 'review']);
-const AI_ONLY_STEPS: Set<AgentStepId> = new Set(['scan_and_template', 'plan', 'review', 'generate']);
+const USER_STEPS: Set<AgentStepId> = new Set([
+  "settings_check",
+  "select_repo",
+  "env_setup",
+  "review",
+]);
+const AI_ONLY_STEPS: Set<AgentStepId> = new Set([
+  "scan_and_template",
+  "plan",
+  "review",
+  "generate",
+]);
 
 const DEFAULT_STEPS: AgentStepState[] = [
-  { id: 'settings_check', status: 'pending', label: 'Settings', description: 'Verify configuration' },
-  { id: 'select_repo', status: 'pending', label: 'Repo', description: 'Ensure repo selected' },
-  { id: 'env_setup', status: 'pending', label: 'Seed', description: 'URL & login seed' },
-  { id: 'scan_and_template', status: 'pending', label: 'Scan', description: 'Scan routes & template' },
-  { id: 'plan', status: 'pending', label: 'Plan', description: 'Discover test areas' },
-  { id: 'review', status: 'pending', label: 'Review', description: 'Approve test plan' },
-  { id: 'generate', status: 'pending', label: 'Generate', description: 'Create tests' },
-  { id: 'run_tests', status: 'pending', label: 'Run', description: 'Run build' },
-  { id: 'fix_tests', status: 'pending', label: 'Fix', description: 'AI-fix tests' },
-  { id: 'rerun_tests', status: 'pending', label: 'Re-run', description: 'Re-run build' },
-  { id: 'summary', status: 'pending', label: 'Done', description: 'Results' },
+  {
+    id: "settings_check",
+    status: "pending",
+    label: "Settings",
+    description: "Verify configuration",
+  },
+  {
+    id: "select_repo",
+    status: "pending",
+    label: "Repo",
+    description: "Ensure repo selected",
+  },
+  {
+    id: "env_setup",
+    status: "pending",
+    label: "Seed",
+    description: "URL & login seed",
+  },
+  {
+    id: "scan_and_template",
+    status: "pending",
+    label: "Scan",
+    description: "Scan routes & template",
+  },
+  {
+    id: "plan",
+    status: "pending",
+    label: "Plan",
+    description: "Discover test areas",
+  },
+  {
+    id: "review",
+    status: "pending",
+    label: "Review",
+    description: "Approve test plan",
+  },
+  {
+    id: "generate",
+    status: "pending",
+    label: "Generate",
+    description: "Create tests",
+  },
+  {
+    id: "run_tests",
+    status: "pending",
+    label: "Run",
+    description: "Run build",
+  },
+  {
+    id: "fix_tests",
+    status: "pending",
+    label: "Fix",
+    description: "AI-fix tests",
+  },
+  {
+    id: "rerun_tests",
+    status: "pending",
+    label: "Re-run",
+    description: "Re-run build",
+  },
+  { id: "summary", status: "pending", label: "Done", description: "Results" },
 ];
 
 const AI_PROVIDER_LABELS: Record<string, string> = {
-  'claude-cli': 'Claude CLI',
-  'openrouter': 'OpenRouter',
-  'claude-agent-sdk': 'Claude SDK',
-  'anthropic-direct': 'Anthropic Direct',
+  "claude-cli": "Claude CLI",
+  openrouter: "OpenRouter",
+  "claude-agent-sdk": "Claude SDK",
+  "anthropic-direct": "Anthropic Direct",
 };
 
 const AGENT_LABELS: Record<string, string> = {
-  orchestrator: 'Orchestrator',
-  planner: 'Planner',
-  scout: 'Scout',
-  diver: 'Diver',
-  generator: 'Generator',
-  healer: 'Healer',
-  quickstart: 'QuickStart',
+  orchestrator: "Orchestrator",
+  planner: "Planner",
+  scout: "Scout",
+  diver: "Diver",
+  generator: "Generator",
+  healer: "Healer",
+  quickstart: "QuickStart",
 };
 
 const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
-  orchestrator: { bg: 'bg-violet-500/15', text: 'text-violet-600 dark:text-violet-400' },
-  planner: { bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400' },
-  scout: { bg: 'bg-cyan-500/15', text: 'text-cyan-600 dark:text-cyan-400' },
-  diver: { bg: 'bg-indigo-500/15', text: 'text-indigo-600 dark:text-indigo-400' },
-  generator: { bg: 'bg-emerald-500/15', text: 'text-emerald-600 dark:text-emerald-400' },
-  healer: { bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400' },
-  quickstart: { bg: 'bg-pink-500/15', text: 'text-pink-600 dark:text-pink-400' },
+  orchestrator: {
+    bg: "bg-violet-500/15",
+    text: "text-violet-600 dark:text-violet-400",
+  },
+  planner: { bg: "bg-blue-500/15", text: "text-blue-600 dark:text-blue-400" },
+  scout: { bg: "bg-cyan-500/15", text: "text-cyan-600 dark:text-cyan-400" },
+  diver: {
+    bg: "bg-indigo-500/15",
+    text: "text-indigo-600 dark:text-indigo-400",
+  },
+  generator: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-600 dark:text-emerald-400",
+  },
+  healer: { bg: "bg-amber-500/15", text: "text-amber-600 dark:text-amber-400" },
+  quickstart: {
+    bg: "bg-pink-500/15",
+    text: "text-pink-600 dark:text-pink-400",
+  },
 };
 
 // ============================================
@@ -71,64 +156,79 @@ interface Annotation {
 }
 
 function getAnnotations(step: AgentStepState): Annotation[] | null {
-  if (step.status !== 'completed' && step.status !== 'skipped') return null;
+  if (step.status !== "completed" && step.status !== "skipped") return null;
   const r = step.result;
   if (!r) return null;
 
   switch (step.id) {
-    case 'settings_check':
+    case "settings_check":
       return [
         { label: `GH: ${r.ghAccount}`, ok: true },
-        { label: AI_PROVIDER_LABELS[r.aiProvider as string] ?? (r.aiProvider as string), ok: true },
+        {
+          label:
+            AI_PROVIDER_LABELS[r.aiProvider as string] ??
+            (r.aiProvider as string),
+          ok: true,
+        },
       ];
-    case 'select_repo':
+    case "select_repo":
       return [
         { label: r.repoFullName as string, ok: true },
         { label: r.branch as string, ok: true },
       ];
-    case 'scan_and_template':
+    case "scan_and_template":
       return [
         { label: `${r.routesFound} routes`, ok: true },
         ...(r.framework ? [{ label: r.framework as string, ok: true }] : []),
         { label: `Template: ${r.templateApplied}`, ok: true },
       ];
-    case 'plan':
-      if (r.cached) return [{ label: 'Using cached tests', ok: true }];
+    case "plan":
+      if (r.cached) return [{ label: "Using cached tests", ok: true }];
       return [
         ...(r.areasFound ? [{ label: `${r.areasFound} areas`, ok: true }] : []),
-        ...(r.sourcesUsed ? [{ label: `${r.sourcesUsed} sources`, ok: true }] : []),
+        ...(r.sourcesUsed
+          ? [{ label: `${r.sourcesUsed} sources`, ok: true }]
+          : []),
       ];
-    case 'review':
+    case "review":
       if (r.skipped) return [{ label: r.reason as string, ok: true }];
-      if (r.autoApproved) return [{ label: 'Auto-approved', ok: true }];
-      return [{ label: 'Approved', ok: true }];
-    case 'generate':
-      return [
-        { label: `${r.testsCreated} tests`, ok: true },
-      ];
-    case 'env_setup':
+      if (r.autoApproved) return [{ label: "Auto-approved", ok: true }];
+      return [{ label: "Approved", ok: true }];
+    case "generate":
+      return [{ label: `${r.testsCreated} tests`, ok: true }];
+    case "env_setup":
       return [
         { label: r.url as string, ok: true },
         ...(r.responseTime ? [{ label: `${r.responseTime}ms`, ok: true }] : []),
-        ...(r.loginRequired === false ? [{ label: 'No login', ok: true }] : []),
-        ...(r.loginSetup ? [{ label: 'Login setup', ok: true }] : []),
+        ...(r.loginRequired === false ? [{ label: "No login", ok: true }] : []),
+        ...(r.loginSetup ? [{ label: "Login setup", ok: true }] : []),
       ];
-    case 'run_tests':
+    case "run_tests":
       return [
         { label: `${r.passedCount} passed`, ok: (r.passedCount as number) > 0 },
-        ...((r.failedCount as number) > 0 ? [{ label: `${r.failedCount} failed`, ok: false }] : []),
+        ...((r.failedCount as number) > 0
+          ? [{ label: `${r.failedCount} failed`, ok: false }]
+          : []),
       ];
-    case 'fix_tests':
+    case "fix_tests":
       if (r.skipped) return [{ label: r.reason as string, ok: true }];
       return [
-        ...((r.fixedCount as number) > 0 ? [{ label: `${r.fixedCount} fixed`, ok: true }] : []),
-        ...((r.unfixableCount as number) > 0 ? [{ label: `${r.unfixableCount} unfixable`, ok: false }] : []),
-        ...((r.fixedCount as number) === 0 && (r.unfixableCount as number) === 0 ? [{ label: 'No fixes needed', ok: true }] : []),
+        ...((r.fixedCount as number) > 0
+          ? [{ label: `${r.fixedCount} fixed`, ok: true }]
+          : []),
+        ...((r.unfixableCount as number) > 0
+          ? [{ label: `${r.unfixableCount} unfixable`, ok: false }]
+          : []),
+        ...((r.fixedCount as number) === 0 && (r.unfixableCount as number) === 0
+          ? [{ label: "No fixes needed", ok: true }]
+          : []),
       ];
-    case 'rerun_tests':
+    case "rerun_tests":
       return [
         { label: `${r.passedCount} passed`, ok: (r.passedCount as number) > 0 },
-        ...((r.failedCount as number) > 0 ? [{ label: `${r.failedCount} failed`, ok: false }] : []),
+        ...((r.failedCount as number) > 0
+          ? [{ label: `${r.failedCount} failed`, ok: false }]
+          : []),
       ];
     default:
       return null;
@@ -141,43 +241,56 @@ function getAnnotations(step: AgentStepState): Annotation[] | null {
 
 function getStepClasses(step: AgentStepState) {
   const isUser = USER_STEPS.has(step.id);
-  const isWaiting = step.status === 'waiting_user';
+  const isWaiting = step.status === "waiting_user";
 
   const dotClass = cn(
-    'h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-semibold transition-all border-2 shrink-0',
-    step.status === 'completed' && 'bg-success border-success text-white',
-    step.status === 'active' && !isUser && 'bg-info border-info text-white',
-    step.status === 'active' && isUser && 'bg-warning border-warning text-white',
-    isWaiting && 'bg-warning/15 border-warning text-warning ring-2 ring-warning/40 ring-offset-1 ring-offset-background',
-    step.status === 'failed' && 'bg-destructive border-destructive text-white',
-    step.status === 'skipped' && 'bg-muted border-muted-foreground/20 text-muted-foreground',
-    step.status === 'pending' && isUser && 'bg-background border-warning/40 text-warning/60',
-    step.status === 'pending' && !isUser && 'bg-background border-info/40 text-info/60',
+    "h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-semibold transition-all border-2 shrink-0",
+    step.status === "completed" && "bg-success border-success text-white",
+    step.status === "active" && !isUser && "bg-info border-info text-white",
+    step.status === "active" &&
+      isUser &&
+      "bg-warning border-warning text-white",
+    isWaiting &&
+      "bg-warning/15 border-warning text-warning ring-2 ring-warning/40 ring-offset-1 ring-offset-background",
+    step.status === "failed" && "bg-destructive border-destructive text-white",
+    step.status === "skipped" &&
+      "bg-muted border-muted-foreground/20 text-muted-foreground",
+    step.status === "pending" &&
+      isUser &&
+      "bg-background border-warning/40 text-warning/60",
+    step.status === "pending" &&
+      !isUser &&
+      "bg-background border-info/40 text-info/60",
   );
 
   const labelClass = cn(
-    'text-[10px] leading-tight font-medium whitespace-nowrap transition-colors',
-    step.status === 'completed' && 'text-success',
-    step.status === 'active' && !isUser && 'text-info font-semibold',
-    step.status === 'active' && isUser && 'text-warning font-semibold',
-    isWaiting && 'text-warning font-semibold',
-    step.status === 'failed' && 'text-destructive font-semibold',
-    step.status === 'skipped' && 'text-muted-foreground/60',
-    step.status === 'pending' && isUser && 'text-warning/60',
-    step.status === 'pending' && !isUser && 'text-info/60',
+    "text-[10px] leading-tight font-medium whitespace-nowrap transition-colors",
+    step.status === "completed" && "text-success",
+    step.status === "active" && !isUser && "text-info font-semibold",
+    step.status === "active" && isUser && "text-warning font-semibold",
+    isWaiting && "text-warning font-semibold",
+    step.status === "failed" && "text-destructive font-semibold",
+    step.status === "skipped" && "text-muted-foreground/60",
+    step.status === "pending" && isUser && "text-warning/60",
+    step.status === "pending" && !isUser && "text-info/60",
   );
 
   return { isUser, isWaiting, dotClass, labelClass };
 }
 
 function getDotIcon(step: AgentStepState) {
-  const isWaiting = step.status === 'waiting_user';
-  return step.status === 'completed' ? <Check className="h-2.5 w-2.5" /> :
-    step.status === 'active' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> :
-    isWaiting ? <Pause className="h-2.5 w-2.5" /> :
-    step.status === 'failed' ? <AlertCircle className="h-2.5 w-2.5" /> :
-    step.status === 'skipped' ? <SkipForward className="h-2 w-2" /> :
-    null;
+  const isWaiting = step.status === "waiting_user";
+  return step.status === "completed" ? (
+    <Check className="h-2.5 w-2.5" />
+  ) : step.status === "active" ? (
+    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+  ) : isWaiting ? (
+    <Pause className="h-2.5 w-2.5" />
+  ) : step.status === "failed" ? (
+    <AlertCircle className="h-2.5 w-2.5" />
+  ) : step.status === "skipped" ? (
+    <SkipForward className="h-2 w-2" />
+  ) : null;
 }
 
 // ============================================
@@ -185,25 +298,43 @@ function getDotIcon(step: AgentStepState) {
 // ============================================
 
 export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
-  const { session, loading, isActive, progress, start, resume, cancel, dismiss, approvePlan, rerunPlanner, skipSettings } =
-    usePlayAgent(repositoryId);
+  const {
+    session,
+    loading,
+    isActive,
+    progress,
+    start,
+    resume,
+    cancel,
+    dismiss,
+    approvePlan,
+    rerunPlanner,
+    skipSettings,
+  } = usePlayAgent(repositoryId);
 
-  const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(null);
+  const [expandedStepId, setExpandedStepId] = useState<AgentStepId | null>(
+    null,
+  );
   const [showRepoPrompt, setShowRepoPrompt] = useState(false);
 
   const steps = session?.steps ?? DEFAULT_STEPS;
-  const isRunning = isActive && session?.status === 'active';
-  const isPaused = session?.status === 'paused';
+  const isRunning = isActive && session?.status === "active";
+  const isPaused = session?.status === "paused";
   const manualMode = session?.metadata?.manualMode === true;
 
   // Extract agent roster from completed settings_check step
-  const settingsStep = steps.find(s => s.id === 'settings_check');
-  const settingsResult = settingsStep?.status === 'completed' ? settingsStep.result : null;
-  const activeAgents = (settingsResult?.activeAgents as string[] | undefined) ?? [];
+  const settingsStep = steps.find((s) => s.id === "settings_check");
+  const settingsResult =
+    settingsStep?.status === "completed" ? settingsStep.result : null;
+  const activeAgents =
+    (settingsResult?.activeAgents as string[] | undefined) ?? [];
   const pwAgentEnabled = activeAgents.length > 0;
 
   const activeStep = session?.steps.find(
-    (s) => s.status === 'active' || s.status === 'waiting_user' || s.status === 'failed',
+    (s) =>
+      s.status === "active" ||
+      s.status === "waiting_user" ||
+      s.status === "failed",
   );
 
   // Determine which agent is currently running and parallel counts
@@ -214,12 +345,13 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   for (const s of steps) {
     if (!s.substeps) continue;
     for (const sub of s.substeps) {
-      if (sub.agent && sub.status === 'running') {
+      if (sub.agent && sub.status === "running") {
         runningAgents.add(sub.agent);
         const countMatch = sub.detail?.match(/^(\d+)\s+\w+\s+in parallel$/);
-        if (countMatch) agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
+        if (countMatch)
+          agentParallelCount[sub.agent] = parseInt(countMatch[1], 10);
       }
-      if (sub.agent && (sub.status === 'done' || s.status === 'completed')) {
+      if (sub.agent && (sub.status === "done" || s.status === "completed")) {
         doneAgents.add(sub.agent);
       }
     }
@@ -228,9 +360,21 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   const pingElement = useCallback((selector: string) => {
     const el = document.querySelector(selector) as HTMLElement | null;
     if (!el) return;
-    el.classList.add('ring-2', 'ring-warning', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+    el.classList.add(
+      "ring-2",
+      "ring-warning",
+      "ring-offset-2",
+      "ring-offset-background",
+      "animate-pulse",
+    );
     setTimeout(() => {
-      el.classList.remove('ring-2', 'ring-warning', 'ring-offset-2', 'ring-offset-background', 'animate-pulse');
+      el.classList.remove(
+        "ring-2",
+        "ring-warning",
+        "ring-offset-2",
+        "ring-offset-background",
+        "animate-pulse",
+      );
     }, 3000);
   }, []);
 
@@ -254,7 +398,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
     setShowRepoPrompt(false);
     if (isRunning) {
       cancel();
-    } else if (isPaused || session?.status === 'failed') {
+    } else if (isPaused || session?.status === "failed") {
       resume();
     } else {
       start();
@@ -262,17 +406,20 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
   };
 
   const handleStepClick = (stepId: AgentStepId) => {
-    const step = steps.find(s => s.id === stepId);
-    if (!step || step.status === 'pending') return;
-    if (step.richResult || step.status === 'completed') {
-      setExpandedStepId(prev => prev === stepId ? null : stepId);
+    const step = steps.find((s) => s.id === stepId);
+    if (!step || step.status === "pending") return;
+    if (step.richResult || step.status === "completed") {
+      setExpandedStepId((prev) => (prev === stepId ? null : stepId));
     }
   };
 
   return (
-    <Card className={cn(
-      (activeStep?.status === 'waiting_user' || showRepoPrompt) && 'border-warning/40',
-    )}>
+    <Card
+      className={cn(
+        (activeStep?.status === "waiting_user" || showRepoPrompt) &&
+          "border-warning/40",
+      )}
+    >
       <CardContent className="py-4 px-4">
         {/* Title row */}
         <div className="flex items-center justify-between mb-3">
@@ -288,10 +435,25 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
           </div>
           <div className="flex items-center gap-1">
             {isActive && (
-              <span className="text-[11px] text-muted-foreground tabular-nums">{progress}%</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {progress}%
+              </span>
             )}
             {session && (
-              <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => { if (window.confirm('Reset agent progress? This cannot be undone.')) dismiss(); }} title="Restart">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-5 w-5 shrink-0"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Reset agent progress? This cannot be undone.",
+                    )
+                  )
+                    dismiss();
+                }}
+                title="Restart"
+              >
                 <RotateCcw className="h-3 w-3" />
               </Button>
             )}
@@ -302,32 +464,41 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
         {settingsResult && (
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium mr-1">
-              {pwAgentEnabled ? 'Agents' : 'Mode'}
+              {pwAgentEnabled ? "Agents" : "Mode"}
             </span>
             {pwAgentEnabled ? (
-              (['orchestrator', ...activeAgents] as PwAgentType[]).map(agent => {
-                const isRunning = runningAgents.has(agent);
-                const isDone = doneAgents.has(agent);
-                const isActiveAgent = isRunning || isDone;
-                const style = ROSTER_BADGE_STYLES[agent];
-                const count = agentParallelCount[agent];
-                return (
-                  <span
-                    key={agent}
-                    className={cn(
-                      'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors',
-                      isActiveAgent ? [style.bg, style.text] : 'bg-muted/60 text-muted-foreground/50',
-                    )}
-                  >
-                    {isRunning && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
-                    {isDone && !isRunning && <Check className="h-2.5 w-2.5" />}
-                    {AGENT_LABELS[agent] ?? agent.charAt(0).toUpperCase() + agent.slice(1)}
-                    {isRunning && count && count > 1 && (
-                      <span className="text-[9px] opacity-75">x{count}</span>
-                    )}
-                  </span>
-                );
-              })
+              (["orchestrator", ...activeAgents] as PwAgentType[]).map(
+                (agent) => {
+                  const isRunning = runningAgents.has(agent);
+                  const isDone = doneAgents.has(agent);
+                  const isActiveAgent = isRunning || isDone;
+                  const style = ROSTER_BADGE_STYLES[agent];
+                  const count = agentParallelCount[agent];
+                  return (
+                    <span
+                      key={agent}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors",
+                        isActiveAgent
+                          ? [style.bg, style.text]
+                          : "bg-muted/60 text-muted-foreground/50",
+                      )}
+                    >
+                      {isRunning && (
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      )}
+                      {isDone && !isRunning && (
+                        <Check className="h-2.5 w-2.5" />
+                      )}
+                      {AGENT_LABELS[agent] ??
+                        agent.charAt(0).toUpperCase() + agent.slice(1)}
+                      {isRunning && count && count > 1 && (
+                        <span className="text-[9px] opacity-75">x{count}</span>
+                      )}
+                    </span>
+                  );
+                },
+              )
             ) : (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
                 Prompt
@@ -344,35 +515,39 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             )}
             <button
               onClick={handlePlayPause}
-              disabled={loading || session?.status === 'completed'}
+              disabled={loading || session?.status === "completed"}
               aria-label={
                 loading
-                  ? 'Loading play agent'
+                  ? "Loading play agent"
                   : isRunning
-                    ? 'Pause play agent'
+                    ? "Pause play agent"
                     : isPaused
-                      ? 'Resume play agent'
-                      : session?.status === 'completed'
-                        ? 'Play agent run completed'
-                        : 'Start play agent'
+                      ? "Resume play agent"
+                      : session?.status === "completed"
+                        ? "Play agent run completed"
+                        : "Start play agent"
               }
               className={cn(
-                'relative h-8 w-8 rounded-full flex items-center justify-center transition-all',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                !session && 'bg-primary text-primary-foreground hover:bg-primary/90',
-                isRunning && 'bg-warning text-white hover:bg-warning/90',
-                isPaused && 'bg-primary text-primary-foreground hover:bg-primary/90',
-                session?.status === 'failed' && 'bg-primary text-primary-foreground hover:bg-primary/90',
-                session?.status === 'completed' && 'bg-success text-white',
-                session?.status === 'cancelled' && 'bg-muted text-muted-foreground',
-                loading && 'opacity-50 cursor-not-allowed',
+                "relative h-8 w-8 rounded-full flex items-center justify-center transition-all",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                !session &&
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                isRunning && "bg-warning text-white hover:bg-warning/90",
+                isPaused &&
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                session?.status === "failed" &&
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                session?.status === "completed" && "bg-success text-white",
+                session?.status === "cancelled" &&
+                  "bg-muted text-muted-foreground",
+                loading && "opacity-50 cursor-not-allowed",
               )}
             >
               {loading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : isRunning ? (
                 <Pause className="h-3.5 w-3.5 fill-current" />
-              ) : session?.status === 'completed' ? (
+              ) : session?.status === "completed" ? (
                 <Check className="h-3.5 w-3.5" />
               ) : (
                 <Play className="h-3.5 w-3.5 ml-0.5 fill-current" />
@@ -390,11 +565,21 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const { isUser, labelClass } = getStepClasses(step);
               const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
-                <div key={`top-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
+                <div
+                  key={`top-${step.id}`}
+                  className={cn(
+                    "flex justify-center min-w-0",
+                    dimmed && "opacity-20",
+                  )}
+                >
                   {!isUser ? (
-                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
+                    <span className={cn(labelClass, "truncate")}>
+                      {step.label}
+                    </span>
                   ) : (
-                    <span className="text-[10px] leading-tight invisible">.</span>
+                    <span className="text-[10px] leading-tight invisible">
+                      .
+                    </span>
                   )}
                 </div>
               );
@@ -404,27 +589,39 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {steps.map((step, i) => {
               const { dotClass } = getStepClasses(step);
               const icon = getDotIcon(step);
-              const prevCompleted = i > 0 && steps[i - 1].status === 'completed';
-              const currCompleted = step.status === 'completed';
-              const hasDetail = step.richResult || (step.status === 'completed' && step.result);
+              const prevCompleted =
+                i > 0 && steps[i - 1].status === "completed";
+              const currCompleted = step.status === "completed";
+              const hasDetail =
+                step.richResult || (step.status === "completed" && step.result);
               const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
-                <div key={`dot-${step.id}`} className={cn('relative flex items-center justify-center py-0.5', dimmed && 'opacity-20')}>
+                <div
+                  key={`dot-${step.id}`}
+                  className={cn(
+                    "relative flex items-center justify-center py-0.5",
+                    dimmed && "opacity-20",
+                  )}
+                >
                   {i > 0 && (
                     <div
                       className={cn(
-                        'absolute top-1/2 -translate-y-1/2 h-0.5 rounded-full',
-                        prevCompleted ? 'bg-success' : 'bg-muted-foreground/15',
+                        "absolute top-1/2 -translate-y-1/2 h-0.5 rounded-full",
+                        prevCompleted ? "bg-success" : "bg-muted-foreground/15",
                       )}
-                      style={{ left: 0, right: 'calc(50% + 12px)' }}
+                      style={{ left: 0, right: "calc(50% + 12px)" }}
                     />
                   )}
                   <button
                     onClick={() => handleStepClick(step.id)}
                     className={cn(
-                      dotClass, 'relative z-10',
-                      hasDetail && 'cursor-pointer hover:ring-2 hover:ring-primary/30',
-                      showRepoPrompt && step.id === 'select_repo' && 'ring-2 ring-warning ring-offset-1 ring-offset-background animate-pulse',
+                      dotClass,
+                      "relative z-10",
+                      hasDetail &&
+                        "cursor-pointer hover:ring-2 hover:ring-primary/30",
+                      showRepoPrompt &&
+                        step.id === "select_repo" &&
+                        "ring-2 ring-warning ring-offset-1 ring-offset-background animate-pulse",
                     )}
                     disabled={!hasDetail}
                     aria-label={`${step.label} — ${step.status}`}
@@ -434,10 +631,10 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                   {i < steps.length - 1 && (
                     <div
                       className={cn(
-                        'absolute top-1/2 -translate-y-1/2 h-0.5 rounded-full',
-                        currCompleted ? 'bg-success' : 'bg-muted-foreground/15',
+                        "absolute top-1/2 -translate-y-1/2 h-0.5 rounded-full",
+                        currCompleted ? "bg-success" : "bg-muted-foreground/15",
                       )}
-                      style={{ left: 'calc(50% + 12px)', right: 0 }}
+                      style={{ left: "calc(50% + 12px)", right: 0 }}
                     />
                   )}
                   {/* Expand indicator */}
@@ -453,11 +650,21 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               const { isUser, labelClass } = getStepClasses(step);
               const dimmed = manualMode && AI_ONLY_STEPS.has(step.id);
               return (
-                <div key={`bot-${step.id}`} className={cn('flex justify-center min-w-0', dimmed && 'opacity-20')}>
+                <div
+                  key={`bot-${step.id}`}
+                  className={cn(
+                    "flex justify-center min-w-0",
+                    dimmed && "opacity-20",
+                  )}
+                >
                   {isUser ? (
-                    <span className={cn(labelClass, 'truncate')}>{step.label}</span>
+                    <span className={cn(labelClass, "truncate")}>
+                      {step.label}
+                    </span>
                   ) : (
-                    <span className="text-[10px] leading-tight invisible">.</span>
+                    <span className="text-[10px] leading-tight invisible">
+                      .
+                    </span>
                   )}
                 </div>
               );
@@ -467,17 +674,25 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             {steps.map((step) => {
               const annotations = getAnnotations(step);
               return (
-                <div key={`ann-${step.id}`} className="flex flex-col items-center min-w-0">
+                <div
+                  key={`ann-${step.id}`}
+                  className="flex flex-col items-center min-w-0"
+                >
                   {annotations && annotations.length > 0 && (
                     <div className="mt-1 space-y-px">
                       {annotations.map((a, i) => (
-                        <div key={i} className="flex items-center gap-0.5 justify-center">
+                        <div
+                          key={i}
+                          className="flex items-center gap-0.5 justify-center"
+                        >
                           {a.ok ? (
                             <Check className="h-2 w-2 text-success shrink-0" />
                           ) : (
                             <X className="h-2 w-2 text-destructive shrink-0" />
                           )}
-                          <span className="text-[9px] text-muted-foreground truncate max-w-[72px]">{a.label}</span>
+                          <span className="text-[9px] text-muted-foreground truncate max-w-[72px]">
+                            {a.label}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -487,71 +702,85 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             })}
 
             {/* Row 5: Manual branch (alternate route with curved connectors) */}
-            {manualMode && (() => {
-              const envIdx = steps.findIndex(s => s.id === 'env_setup');
-              const runIdx = steps.findIndex(s => s.id === 'run_tests');
-              return (
-                <div
-                  className="relative h-12"
-                  style={{ gridColumn: `${envIdx + 1} / ${runIdx + 2}` }}
-                >
-                  {/* SVG curved path from env_setup down through dots and back up to run_tests */}
-                  <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 48">
-                    <path
-                      d="M 8.3 0 C 8.3 35, 25 30, 38 30 L 62 30 C 75 30, 91.7 35, 91.7 0"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="0.6"
-                      className="text-primary/40"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  </svg>
-                  {/* Record dot — icon center aligned to curve at 62% height */}
-                  <Link
-                    href="/record"
-                    onClick={() => pingElement('a[href="/record"]')}
-                    className="group absolute flex flex-col items-center -translate-x-1/2"
-                    style={{ left: '38%', top: 'calc(62% - 10px)' }}
+            {manualMode &&
+              (() => {
+                const envIdx = steps.findIndex((s) => s.id === "env_setup");
+                const runIdx = steps.findIndex((s) => s.id === "run_tests");
+                return (
+                  <div
+                    className="relative h-12"
+                    style={{ gridColumn: `${envIdx + 1} / ${runIdx + 2}` }}
                   >
-                    <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
-                      <Circle className="h-2 w-2 text-primary fill-primary" />
-                    </div>
-                    <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">Record</span>
-                  </Link>
-                  {/* Run test dot — icon center aligned to curve at 62% height */}
-                  <Link
-                    href="/run"
-                    onClick={() => pingElement('a[href="/run"]')}
-                    className="group absolute flex flex-col items-center -translate-x-1/2"
-                    style={{ left: '62%', top: 'calc(62% - 10px)' }}
-                  >
-                    <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
-                      <Play className="h-2 w-2 text-primary fill-primary" />
-                    </div>
-                    <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">Run test</span>
-                  </Link>
-                </div>
-              );
-            })()}
+                    {/* SVG curved path from env_setup down through dots and back up to run_tests */}
+                    <svg
+                      className="absolute inset-0 w-full h-full"
+                      preserveAspectRatio="none"
+                      viewBox="0 0 100 48"
+                    >
+                      <path
+                        d="M 8.3 0 C 8.3 35, 25 30, 38 30 L 62 30 C 75 30, 91.7 35, 91.7 0"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="0.6"
+                        className="text-primary/40"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </svg>
+                    {/* Record dot — icon center aligned to curve at 62% height */}
+                    <Link
+                      href="/record"
+                      onClick={() => pingElement('a[href="/record"]')}
+                      className="group absolute flex flex-col items-center -translate-x-1/2"
+                      style={{ left: "38%", top: "calc(62% - 10px)" }}
+                    >
+                      <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
+                        <Circle className="h-2 w-2 text-primary fill-primary" />
+                      </div>
+                      <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">
+                        Record
+                      </span>
+                    </Link>
+                    {/* Run test dot — icon center aligned to curve at 62% height */}
+                    <Link
+                      href="/run"
+                      onClick={() => pingElement('a[href="/run"]')}
+                      className="group absolute flex flex-col items-center -translate-x-1/2"
+                      style={{ left: "62%", top: "calc(62% - 10px)" }}
+                    >
+                      <div className="h-5 w-5 rounded-full border-2 border-primary bg-background flex items-center justify-center group-hover:ring-2 group-hover:ring-primary/30 transition-all relative z-10">
+                        <Play className="h-2 w-2 text-primary fill-primary" />
+                      </div>
+                      <span className="text-[9px] font-medium text-primary whitespace-nowrap bg-background px-1 mt-0.5">
+                        Run test
+                      </span>
+                    </Link>
+                  </div>
+                );
+              })()}
           </div>
         </div>
 
         {/* Expanded step detail panel */}
-        {expandedStepId && (() => {
-          const step = steps.find(s => s.id === expandedStepId);
-          if (!step) return null;
-          return (
-            <div className="mt-3 pt-3 border-t">
-              <PlayAgentStepDetail
-                step={step}
-                sessionId={session?.id}
-                loading={loading}
-                onApprovePlan={step.id === 'review' ? approvePlan : undefined}
-                onRerunPlanner={(step.id === 'plan' || step.id === 'review') ? rerunPlanner : undefined}
-              />
-            </div>
-          );
-        })()}
+        {expandedStepId &&
+          (() => {
+            const step = steps.find((s) => s.id === expandedStepId);
+            if (!step) return null;
+            return (
+              <div className="mt-3 pt-3 border-t">
+                <PlayAgentStepDetail
+                  step={step}
+                  sessionId={session?.id}
+                  loading={loading}
+                  onApprovePlan={step.id === "review" ? approvePlan : undefined}
+                  onRerunPlanner={
+                    step.id === "plan" || step.id === "review"
+                      ? rerunPlanner
+                      : undefined
+                  }
+                />
+              </div>
+            );
+          })()}
 
         {/* No-repo prompt — guide new users through setup */}
         {showRepoPrompt && !session && (
@@ -567,17 +796,29 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
             <div className="ml-7 space-y-1.5">
               <div className="flex items-center gap-2 text-xs">
                 <X className="h-3 w-3 text-destructive shrink-0" />
-                <span className="text-muted-foreground">Select a repository from the sidebar</span>
+                <span className="text-muted-foreground">
+                  Select a repository from the sidebar
+                </span>
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">—</span>
-                <Link href="/settings?highlight=github" className="text-muted-foreground hover:text-foreground transition-colors">
+                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">
+                  —
+                </span>
+                <Link
+                  href="/settings?highlight=github"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
                   Connect GitHub account
                 </Link>
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">—</span>
-                <Link href="/settings?highlight=ai-settings" className="text-muted-foreground hover:text-foreground transition-colors">
+                <span className="h-3 w-3 flex items-center justify-center text-muted-foreground/50 shrink-0">
+                  —
+                </span>
+                <Link
+                  href="/settings?highlight=ai-settings"
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
                   Configure AI provider
                 </Link>
               </div>
@@ -595,127 +836,150 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
               step={activeStep}
               stepNumber={steps.findIndex((s) => s.id === activeStep.id) + 1}
               loading={loading}
-              onResume={activeStep.status === 'waiting_user' || activeStep.status === 'failed' ? resume : undefined}
-              onSkip={activeStep.id === 'settings_check' && activeStep.status === 'waiting_user' ? skipSettings : undefined}
-              onApprovePlan={activeStep.id === 'review' && activeStep.status === 'waiting_user' ? approvePlan : undefined}
+              onResume={
+                activeStep.status === "waiting_user" ||
+                activeStep.status === "failed"
+                  ? resume
+                  : undefined
+              }
+              onSkip={
+                activeStep.id === "settings_check" &&
+                activeStep.status === "waiting_user"
+                  ? skipSettings
+                  : undefined
+              }
+              onApprovePlan={
+                activeStep.id === "review" &&
+                activeStep.status === "waiting_user"
+                  ? approvePlan
+                  : undefined
+              }
             />
           </div>
         )}
 
         {/* Manual mode: Record & Run tutorial — shown only while waiting for user to record */}
-        {manualMode && activeStep?.id === 'run_tests' && activeStep.status === 'active'
-          && activeStep.substeps?.[0]?.label?.includes('Waiting') && (
-          <div className="mt-3 pt-3 border-t space-y-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2.5">
-                <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
-                  <Circle className="h-2 w-2 text-primary fill-primary" />
+        {manualMode &&
+          activeStep?.id === "run_tests" &&
+          activeStep.status === "active" &&
+          activeStep.substeps?.[0]?.label?.includes("Waiting") && (
+            <div className="mt-3 pt-3 border-t space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
+                    <Circle className="h-2 w-2 text-primary fill-primary" />
+                  </div>
+                  <span className="text-sm font-medium">Record a test</span>
                 </div>
-                <span className="text-sm font-medium">Record a test</span>
+                <p className="ml-7 text-xs text-muted-foreground">
+                  Use the <strong>Record Test</strong> button in the header to
+                  open the recorder and interact with your app.
+                </p>
+                <div className="ml-7 flex items-center gap-2">
+                  <Link
+                    href="/record"
+                    onClick={() => pingElement('a[href="/record"]')}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                  >
+                    Open Recorder →
+                  </Link>
+                  <button
+                    onClick={() => pingElement('a[href="/record"]')}
+                    className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Show me
+                  </button>
+                </div>
               </div>
-              <p className="ml-7 text-xs text-muted-foreground">
-                Use the <strong>Record Test</strong> button in the header to open the recorder and interact with your app.
-              </p>
-              <div className="ml-7 flex items-center gap-2">
-                <Link
-                  href="/record"
-                  onClick={() => pingElement('a[href="/record"]')}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Open Recorder →
-                </Link>
-                <button
-                  onClick={() => pingElement('a[href="/record"]')}
-                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Show me
-                </button>
-              </div>
-            </div>
 
-            <div className="space-y-1">
-              <div className="flex items-center gap-2.5">
-                <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
-                  <Play className="h-2 w-2 text-primary fill-primary" />
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-5 w-5 rounded-full border-2 border-primary flex items-center justify-center shrink-0">
+                    <Play className="h-2 w-2 text-primary fill-primary" />
+                  </div>
+                  <span className="text-sm font-medium">Run your test</span>
                 </div>
-                <span className="text-sm font-medium">Run your test</span>
-              </div>
-              <p className="ml-7 text-xs text-muted-foreground">
-                Go to <strong>Runs</strong> in the sidebar to execute your recorded test and view results.
-              </p>
-              <div className="ml-7 flex items-center gap-2">
-                <Link
-                  href="/run"
-                  onClick={() => pingElement('a[href="/run"]')}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Go to Runs →
-                </Link>
-                <button
-                  onClick={() => pingElement('a[href="/run"]')}
-                  className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Show me
-                </button>
+                <p className="ml-7 text-xs text-muted-foreground">
+                  Go to <strong>Runs</strong> in the sidebar to execute your
+                  recorded test and view results.
+                </p>
+                <div className="ml-7 flex items-center gap-2">
+                  <Link
+                    href="/run"
+                    onClick={() => pingElement('a[href="/run"]')}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                  >
+                    Go to Runs →
+                  </Link>
+                  <button
+                    onClick={() => pingElement('a[href="/run"]')}
+                    className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Show me
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Review-stage actions: view plan + rollback */}
-        {activeStep?.id === 'review' && activeStep.status === 'waiting_user' && (
-          <div className="mt-2 flex items-center justify-center gap-4">
-            <Link
-              href="/areas?tab=plan"
-              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-            >
-              <ScrollText className="h-3.5 w-3.5" />
-              View Testing Plan
-            </Link>
-            {repositoryId && (
-              <RollbackAllButton repositoryId={repositoryId} />
-            )}
-          </div>
-        )}
-
-        {/* Completed summary — link to build diff + highlight nav */}
-        {session?.status === 'completed' && (() => {
-          const summaryStep = steps.find(s => s.id === 'summary');
-          const latestBuildId = summaryStep?.result?.latestBuildId as string | undefined;
-          return (
-            <div className="mt-3 pt-3 border-t space-y-2">
-              {latestBuildId && (
-                <div className="space-y-1.5">
-                  <Link
-                    href={`/builds/${latestBuildId}`}
-                    onClick={() => {
-                      pingElement('a[href="/run"]');
-                      pingElement('a[href="/review"]');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                  >
-                    <ScrollText className="h-3.5 w-3.5" />
-                    View latest build results →
-                  </Link>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => pingElement('a[href="/run"]')}
-                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Show Runs
-                    </button>
-                    <button
-                      onClick={() => pingElement('a[href="/review"]')}
-                      className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      Show Review
-                    </button>
-                  </div>
-                </div>
+        {activeStep?.id === "review" &&
+          activeStep.status === "waiting_user" && (
+            <div className="mt-2 flex items-center justify-center gap-4">
+              <Link
+                href="/areas?tab=plan"
+                className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+              >
+                <ScrollText className="h-3.5 w-3.5" />
+                View Testing Plan
+              </Link>
+              {repositoryId && (
+                <RollbackAllButton repositoryId={repositoryId} />
               )}
             </div>
-          );
-        })()}
+          )}
+
+        {/* Completed summary — link to build diff + highlight nav */}
+        {session?.status === "completed" &&
+          (() => {
+            const summaryStep = steps.find((s) => s.id === "summary");
+            const latestBuildId = summaryStep?.result?.latestBuildId as
+              | string
+              | undefined;
+            return (
+              <div className="mt-3 pt-3 border-t space-y-2">
+                {latestBuildId && (
+                  <div className="space-y-1.5">
+                    <Link
+                      href={`/builds/${latestBuildId}`}
+                      onClick={() => {
+                        pingElement('a[href="/run"]');
+                        pingElement('a[href="/review"]');
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <ScrollText className="h-3.5 w-3.5" />
+                      View latest build results →
+                    </Link>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => pingElement('a[href="/run"]')}
+                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Show Runs
+                      </button>
+                      <button
+                        onClick={() => pingElement('a[href="/review"]')}
+                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Show Review
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
       </CardContent>
     </Card>
   );
@@ -726,14 +990,19 @@ function RollbackAllButton({ repositoryId }: { repositoryId: string }) {
   const [done, setDone] = useState(false);
 
   const handleRollback = async () => {
-    if (!confirm('This will rollback all area plans from the latest agent run and delete generated tests. Continue?')) return;
+    if (
+      !confirm(
+        "This will rollback all area plans from the latest agent run and delete generated tests. Continue?",
+      )
+    )
+      return;
     setRolling(true);
     try {
       const count = await rollbackAllAreaPlans(repositoryId);
-      toast.success(`Rolled back ${count} area${count !== 1 ? 's' : ''}`);
+      toast.success(`Rolled back ${count} area${count !== 1 ? "s" : ""}`);
       setDone(true);
     } catch {
-      toast.error('Failed to rollback');
+      toast.error("Failed to rollback");
     } finally {
       setRolling(false);
     }
@@ -747,7 +1016,11 @@ function RollbackAllButton({ repositoryId }: { repositoryId: string }) {
       disabled={rolling}
       className="inline-flex items-center gap-1.5 text-xs text-destructive hover:underline disabled:opacity-50"
     >
-      {rolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+      {rolling ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Undo2 className="h-3.5 w-3.5" />
+      )}
       Rollback All
     </button>
   );

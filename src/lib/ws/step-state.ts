@@ -10,12 +10,12 @@
  * goes blank for a few seconds.
  */
 
-import type { StepEventPayload } from './protocol';
+import type { StepEventPayload } from "./protocol";
 
-export type StepStatus = 'started' | 'passed' | 'failed';
+export type StepStatus = "started" | "passed" | "failed";
 
 export interface StepResult {
-  status: 'passed' | 'failed';
+  status: "passed" | "failed";
   durationMs?: number;
   error?: string;
 }
@@ -23,8 +23,8 @@ export interface StepResult {
 export interface LiveStepState {
   testRunId: string;
   totalSteps: number;
-  currentStepIndex: number;          // -1 before first step:started
-  currentStatus: StepStatus | null;  // status of currentStepIndex
+  currentStepIndex: number; // -1 before first step:started
+  currentStatus: StepStatus | null; // status of currentStepIndex
   results: Record<number, StepResult>;
   lastEventAt: number;
 }
@@ -51,7 +51,8 @@ if (!globalState.__liveStepStateGCInit) {
 }
 
 export function recordStepEvent(payload: StepEventPayload): void {
-  const { testRunId, stepIndex, totalSteps, status, durationMs, error } = payload;
+  const { testRunId, stepIndex, totalSteps, status, durationMs, error } =
+    payload;
   if (!testRunId) return;
 
   const existing = store.get(testRunId);
@@ -67,9 +68,9 @@ export function recordStepEvent(payload: StepEventPayload): void {
   // Keep totalSteps in sync — runner may send a refined value.
   if (totalSteps > state.totalSteps) state.totalSteps = totalSteps;
 
-  if (status === 'started') {
+  if (status === "started") {
     state.currentStepIndex = stepIndex;
-    state.currentStatus = 'started';
+    state.currentStatus = "started";
   } else {
     // passed | failed — record the result and only roll the cursor forward
     // (out-of-order events shouldn't move the highlight back).

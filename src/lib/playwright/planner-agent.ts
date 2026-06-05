@@ -6,12 +6,12 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { revalidatePath } from 'next/cache';
-import { generateWithAI } from '@/lib/ai';
-import { getAIConfig, buildSeedFixture } from './agent-context';
-import type { PlannerArea, ScoutArea, ScoutOutput } from './planner-types';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { generateWithAI } from "@/lib/ai";
+import { getAIConfig, buildSeedFixture } from "./agent-context";
+import type { PlannerArea, ScoutArea, ScoutOutput } from "./planner-types";
 
 // ---------------------------------------------------------------------------
 // Planner system prompt (derived from Playwright's planner agent definition)
@@ -75,7 +75,7 @@ Quality Standards:
 // Types (re-exported from shared module)
 // ---------------------------------------------------------------------------
 
-export type { PlannerArea } from './planner-types';
+export type { PlannerArea } from "./planner-types";
 
 // ---------------------------------------------------------------------------
 // Core
@@ -83,7 +83,10 @@ export type { PlannerArea } from './planner-types';
 
 export function parseAreasFromResponse(response: string): PlannerArea[] {
   // Extract JSON from response (may be wrapped in markdown code fences)
-  const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, response];
+  const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [
+    null,
+    response,
+  ];
   const jsonStr = jsonMatch[1]?.trim() || response.trim();
 
   try {
@@ -97,7 +100,7 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
         name: String(a.name),
         description: a.description ? String(a.description) : undefined,
         routes: Array.isArray(a.routes) ? a.routes.map(String) : [],
-        testPlan: a.testPlan ? String(a.testPlan) : '',
+        testPlan: a.testPlan ? String(a.testPlan) : "",
       }));
   } catch {
     // Try to extract areas from non-JSON structured response
@@ -107,7 +110,7 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
       const nameMatch = block.match(/^## (.+)/m);
       if (!nameMatch) continue;
       const routes: string[] = [];
-      for (const line of block.split('\n')) {
+      for (const line of block.split("\n")) {
         const routeMatch = line.match(/^\s*[-*]\s*(\/\S+)/);
         if (routeMatch) routes.push(routeMatch[1]);
       }
@@ -133,7 +136,20 @@ export async function agentDiscoverAreas(
   repositoryId: string,
   baseUrl: string,
   options?: { onLogCreated?: (logId: string) => void },
-): Promise<{ success: boolean; functionalAreas?: Array<{ name: string; description?: string; routes: Array<{ path: string; type: 'dynamic' | 'static'; description?: string }> }>; rawResponse?: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  functionalAreas?: Array<{
+    name: string;
+    description?: string;
+    routes: Array<{
+      path: string;
+      type: "dynamic" | "static";
+      description?: string;
+    }>;
+  }>;
+  rawResponse?: string;
+  error?: string;
+}> {
   await requireRepoAccess(repositoryId);
 
   try {
@@ -147,34 +163,45 @@ export async function agentDiscoverAreas(
     prompt += `Discover all functional areas and routes, then produce a structured test plan.\n`;
     prompt += `\n---\n\n${seed.seedPrompt}`;
 
-    const response = await generateWithAI(config, prompt, PLANNER_SYSTEM_PROMPT, {
-      useMCP: true,
-      repositoryId,
-      actionType: 'agent_discover',
-      onLogCreated: options?.onLogCreated,
-      responseFormat: 'json_object',
-    });
+    const response = await generateWithAI(
+      config,
+      prompt,
+      PLANNER_SYSTEM_PROMPT,
+      {
+        useMCP: true,
+        repositoryId,
+        actionType: "agent_discover",
+        onLogCreated: options?.onLogCreated,
+        responseFormat: "json_object",
+      },
+    );
 
     const areas = parseAreasFromResponse(response);
 
     if (areas.length === 0) {
-      return { success: false, rawResponse: response, error: 'Planner agent found no functional areas' };
+      return {
+        success: false,
+        rawResponse: response,
+        error: "Planner agent found no functional areas",
+      };
     }
 
     // Map to DiscoveredArea format
-    const functionalAreas = areas.map(area => ({
+    const functionalAreas = areas.map((area) => ({
       name: area.name,
       description: area.description,
-      routes: area.routes.map(routePath => ({
+      routes: area.routes.map((routePath) => ({
         path: routePath,
-        type: (routePath.includes('[') || routePath.includes(':') ? 'dynamic' : 'static') as 'dynamic' | 'static',
+        type: (routePath.includes("[") || routePath.includes(":")
+          ? "dynamic"
+          : "static") as "dynamic" | "static",
         description: undefined,
       })),
     }));
 
     // Save agent plans to functional areas + auto-populate specs side so both
     // halves are generated together by the planner path.
-    const { syncAreaPlanAndSpecs } = await import('@/server/actions/specs');
+    const { syncAreaPlanAndSpecs } = await import("@/server/actions/specs");
     for (const area of areas) {
       if (area.testPlan) {
         const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
@@ -194,10 +221,11 @@ export async function agentDiscoverAreas(
       }
     }
 
-    revalidatePath('/areas');
+    revalidatePath("/areas");
     return { success: true, functionalAreas };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Planner agent failed';
+    const message =
+      error instanceof Error ? error.message : "Planner agent failed";
     return { success: false, error: message };
   }
 }
@@ -253,7 +281,7 @@ export async function runScoutClassification(
   const config = getAIConfig(settings);
 
   // Build input from other planners' results
-  const areasSummary = otherPlannerAreas.map(a => ({
+  const areasSummary = otherPlannerAreas.map((a) => ({
     name: a.name,
     routes: a.routes,
     hasTestSuggestions: !!a.testPlan && a.testPlan.length > 100,
@@ -262,27 +290,35 @@ export async function runScoutClassification(
 
   // Get codebase intelligence from active session
   const activeSession = await queries.getActiveAgentSession(repositoryId);
-  const intelligence = activeSession?.metadata?.codebaseIntelligence as Record<string, unknown> | undefined;
+  const intelligence = activeSession?.metadata?.codebaseIntelligence as
+    | Record<string, unknown>
+    | undefined;
 
   const prompt = `Classify these ${areasSummary.length} functional areas discovered from the codebase.
 
 ## Areas to Classify
 ${JSON.stringify(areasSummary, null, 2)}
 
-${intelligence ? `## Codebase Intelligence\n${JSON.stringify(intelligence, null, 2)}` : ''}
+${intelligence ? `## Codebase Intelligence\n${JSON.stringify(intelligence, null, 2)}` : ""}
 
 Classify each area as "skip" or "explore" and output JSON.`;
 
   try {
     const response = await generateWithAI(config, prompt, SCOUT_SYSTEM_PROMPT, {
       repositoryId,
-      actionType: 'agent_discover',
-      onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
-      responseFormat: 'json_object',
+      actionType: "agent_discover",
+      onLogCreated: (id) => {
+        promptLogId = id;
+        options?.onLogCreated?.(id);
+      },
+      responseFormat: "json_object",
     });
 
     // Parse scout output
-    const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, response];
+    const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [
+      null,
+      response,
+    ];
     const jsonStr = jsonMatch[1]?.trim() || response.trim();
     const parsed = JSON.parse(jsonStr);
     const rawAreas = parsed.areas || parsed;
@@ -292,11 +328,16 @@ Classify each area as "skip" or "explore" and output JSON.`;
     }
 
     const areas: ScoutArea[] = rawAreas.map((a: Record<string, unknown>) => ({
-      name: String(a.name || ''),
-      classification: a.classification === 'explore' ? 'explore' as const : 'skip' as const,
+      name: String(a.name || ""),
+      classification:
+        a.classification === "explore"
+          ? ("explore" as const)
+          : ("skip" as const),
       routes: Array.isArray(a.routes) ? a.routes.map(String) : [],
       testPlan: a.testPlan ? String(a.testPlan) : undefined,
-      focusPoints: Array.isArray(a.focusPoints) ? a.focusPoints.map(String) : undefined,
+      focusPoints: Array.isArray(a.focusPoints)
+        ? a.focusPoints.map(String)
+        : undefined,
     }));
 
     return { areas, durationMs: Date.now() - start, promptLogId };
@@ -347,10 +388,10 @@ export async function runDeepDiveExploration(
   const seed = await buildSeedFixture(repositoryId);
 
   let prompt = `Explore the "${areaName}" area of the web application at ${baseUrl}.\n\n`;
-  prompt += `Target routes:\n${routes.map(r => `- ${r}`).join('\n')}\n\n`;
+  prompt += `Target routes:\n${routes.map((r) => `- ${r}`).join("\n")}\n\n`;
 
   if (focusPoints && focusPoints.length > 0) {
-    prompt += `Focus your exploration on:\n${focusPoints.map(fp => `- ${fp}`).join('\n')}\n\n`;
+    prompt += `Focus your exploration on:\n${focusPoints.map((fp) => `- ${fp}`).join("\n")}\n\n`;
   }
 
   prompt += `Navigate to each route, interact with the UI using MCP tools, and create detailed test scenarios.\n`;
@@ -361,13 +402,18 @@ export async function runDeepDiveExploration(
 
   prompt += `\n---\n\n${seed.seedPrompt}`;
 
-  const response = await generateWithAI(config, prompt, DEEP_DIVER_SYSTEM_PROMPT, {
-    useMCP: true,
-    repositoryId,
-    actionType: 'agent_discover',
-    onLogCreated: options?.onLogCreated,
-    responseFormat: 'json_object',
-  });
+  const response = await generateWithAI(
+    config,
+    prompt,
+    DEEP_DIVER_SYSTEM_PROMPT,
+    {
+      useMCP: true,
+      repositoryId,
+      actionType: "agent_discover",
+      onLogCreated: options?.onLogCreated,
+      responseFormat: "json_object",
+    },
+  );
 
   return parseAreasFromResponse(response);
 }

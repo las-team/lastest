@@ -1,13 +1,16 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { hashImage } from '@/lib/diff/hasher';
-import { getCurrentSession, requireRepoAccess } from '@/lib/auth';
-import { requireTestOwnership, requirePlannedScreenshotOwnership } from '@/lib/auth/ownership';
-import path from 'path';
-import fs from 'fs/promises';
-import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { hashImage } from "@/lib/diff/hasher";
+import { getCurrentSession, requireRepoAccess } from "@/lib/auth";
+import {
+  requireTestOwnership,
+  requirePlannedScreenshotOwnership,
+} from "@/lib/auth/ownership";
+import path from "path";
+import fs from "fs/promises";
+import { STORAGE_DIRS } from "@/lib/storage/paths";
 
 const PLANNED_DIR = STORAGE_DIRS.planned;
 
@@ -34,7 +37,7 @@ export interface UploadPlannedScreenshotInput {
 export async function uploadPlannedScreenshot(
   input: UploadPlannedScreenshotInput,
   fileBuffer: Buffer,
-  fileName: string
+  fileName: string,
 ) {
   await requireRepoAccess(input.repositoryId);
   const session = await getCurrentSession();
@@ -48,13 +51,15 @@ export async function uploadPlannedScreenshot(
   // first, then re-base the result via path.basename as defense-in-depth.
   const timestamp = Date.now();
   const rawExt = path.extname(fileName).toLowerCase();
-  const ext = ['.png', '.jpg', '.jpeg', '.webp'].includes(rawExt) ? rawExt : '.png';
-  const safeStepLabel = input.stepLabel?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
-  const cleanTestId = input.testId?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
-  const cleanRouteId = input.routeId?.replace(/[^a-zA-Z0-9_-]/g, '') || '';
+  const ext = [".png", ".jpg", ".jpeg", ".webp"].includes(rawExt)
+    ? rawExt
+    : ".png";
+  const safeStepLabel = input.stepLabel?.replace(/[^a-zA-Z0-9_-]/g, "") || "";
+  const cleanTestId = input.testId?.replace(/[^a-zA-Z0-9_-]/g, "") || "";
+  const cleanRouteId = input.routeId?.replace(/[^a-zA-Z0-9_-]/g, "") || "";
   const baseName = cleanTestId
-    ? `${cleanTestId}${safeStepLabel ? `-${safeStepLabel}` : ''}`
-    : cleanRouteId || 'planned';
+    ? `${cleanTestId}${safeStepLabel ? `-${safeStepLabel}` : ""}`
+    : cleanRouteId || "planned";
   const rawFileName = `${baseName}-${timestamp}${ext}`;
   const newFileName = path.basename(rawFileName);
   const filePath = path.join(dir, newFileName);
@@ -70,7 +75,10 @@ export async function uploadPlannedScreenshot(
 
   // Deactivate any existing planned screenshot for this test/step or route
   if (input.testId) {
-    const existing = await queries.getPlannedScreenshotByTest(input.testId, input.stepLabel || null);
+    const existing = await queries.getPlannedScreenshotByTest(
+      input.testId,
+      input.stepLabel || null,
+    );
     if (existing) {
       await queries.deletePlannedScreenshot(existing.id);
     }
@@ -96,8 +104,8 @@ export async function uploadPlannedScreenshot(
     isActive: true,
   });
 
-  revalidatePath('/tests');
-  revalidatePath('/routes');
+  revalidatePath("/tests");
+  revalidatePath("/routes");
 
   return { success: true, plannedScreenshot: planned };
 }
@@ -145,8 +153,8 @@ export async function listPlannedScreenshotsForTest(testId: string) {
 export async function deletePlannedScreenshot(id: string) {
   await requirePlannedScreenshotOwnership(id);
   await queries.deletePlannedScreenshot(id);
-  revalidatePath('/tests');
-  revalidatePath('/routes');
+  revalidatePath("/tests");
+  revalidatePath("/routes");
   return { success: true };
 }
 
@@ -155,12 +163,12 @@ export async function deletePlannedScreenshot(id: string) {
  */
 export async function updatePlannedScreenshot(
   id: string,
-  data: { name?: string; description?: string; sourceUrl?: string }
+  data: { name?: string; description?: string; sourceUrl?: string },
 ) {
   await requirePlannedScreenshotOwnership(id);
   await queries.updatePlannedScreenshot(id, data);
-  revalidatePath('/tests');
-  revalidatePath('/routes');
+  revalidatePath("/tests");
+  revalidatePath("/routes");
   return { success: true };
 }
 
@@ -178,12 +186,16 @@ export async function getPlannedScreenshotById(id: string) {
 export async function assignPlannedToStep(
   plannedId: string,
   testId: string,
-  stepLabel: string
+  stepLabel: string,
 ) {
   const { planned } = await requirePlannedScreenshotOwnership(plannedId);
   const { test } = await requireTestOwnership(testId);
   if (planned.repositoryId !== test.repositoryId) {
-    return { success: false, error: 'Forbidden: planned screenshot and test belong to different repositories' };
+    return {
+      success: false,
+      error:
+        "Forbidden: planned screenshot and test belong to different repositories",
+    };
   }
 
   await queries.updatePlannedScreenshot(plannedId, {

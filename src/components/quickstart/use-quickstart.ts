@@ -1,13 +1,19 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const SESSION_KEY_PREFIX = 'quickstart-session-id:';
+const SESSION_KEY_PREFIX = "quickstart-session-id:";
 const POLL_INTERVAL_MS = 2500;
 
 export interface QuickstartStep {
   id: string;
-  status: 'pending' | 'active' | 'waiting_user' | 'completed' | 'failed' | 'skipped';
+  status:
+    | "pending"
+    | "active"
+    | "waiting_user"
+    | "completed"
+    | "failed"
+    | "skipped";
   label: string;
   description?: string;
   startedAt?: string;
@@ -18,9 +24,9 @@ export interface QuickstartStep {
 
 export interface QuickstartSessionView {
   id: string;
-  kind: 'quickstart';
+  kind: "quickstart";
   repositoryId: string;
-  status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  status: "active" | "paused" | "completed" | "failed" | "cancelled";
   currentStepId: string | null;
   steps: QuickstartStep[];
   metadata: {
@@ -53,7 +59,9 @@ export function useQuickstart(repositoryId?: string | null) {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const storageKey = repositoryId ? `${SESSION_KEY_PREFIX}${repositoryId}` : null;
+  const storageKey = repositoryId
+    ? `${SESSION_KEY_PREFIX}${repositoryId}`
+    : null;
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -62,24 +70,27 @@ export function useQuickstart(repositoryId?: string | null) {
     }
   }, []);
 
-  const poll = useCallback(async (sid: string) => {
-    try {
-      const res = await fetch(`/api/v1/quickstart/${sid}`);
-      if (!res.ok) {
-        if (storageKey) localStorage.removeItem(storageKey);
-        setSession(null);
-        stopPolling();
-        return;
+  const poll = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await fetch(`/api/v1/quickstart/${sid}`);
+        if (!res.ok) {
+          if (storageKey) localStorage.removeItem(storageKey);
+          setSession(null);
+          stopPolling();
+          return;
+        }
+        const data = (await res.json()) as QuickstartSessionView;
+        setSession(data);
+        if (data.status !== "active" && data.status !== "paused") {
+          stopPolling();
+        }
+      } catch {
+        // transient — keep polling
       }
-      const data = (await res.json()) as QuickstartSessionView;
-      setSession(data);
-      if (data.status !== 'active' && data.status !== 'paused') {
-        stopPolling();
-      }
-    } catch {
-      // transient — keep polling
-    }
-  }, [storageKey, stopPolling]);
+    },
+    [storageKey, stopPolling],
+  );
 
   // Restore session id from localStorage on mount / repo switch.
   useEffect(() => {
@@ -100,12 +111,16 @@ export function useQuickstart(repositoryId?: string | null) {
     setError(null);
     try {
       const res = await fetch(`/api/v1/repos/${repositoryId}/quickstart`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string; hint?: string; reason?: string };
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          hint?: string;
+          reason?: string;
+        };
         setError(body.hint ?? body.error ?? `HTTP ${res.status}`);
         return;
       }
@@ -125,7 +140,9 @@ export function useQuickstart(repositoryId?: string | null) {
     if (!session?.id) return;
     setLoading(true);
     try {
-      await fetch(`/api/v1/quickstart/${session.id}`, { method: 'DELETE' }).catch(() => {});
+      await fetch(`/api/v1/quickstart/${session.id}`, {
+        method: "DELETE",
+      }).catch(() => {});
       await poll(session.id);
     } finally {
       setLoading(false);
@@ -139,8 +156,20 @@ export function useQuickstart(repositoryId?: string | null) {
     stopPolling();
   }, [storageKey, stopPolling]);
 
-  const isActive = session?.status === 'active' || session?.status === 'paused';
-  const isTerminal = session?.status === 'completed' || session?.status === 'failed' || session?.status === 'cancelled';
+  const isActive = session?.status === "active" || session?.status === "paused";
+  const isTerminal =
+    session?.status === "completed" ||
+    session?.status === "failed" ||
+    session?.status === "cancelled";
 
-  return { session, loading, error, isActive, isTerminal, start, cancel, dismiss };
+  return {
+    session,
+    loading,
+    error,
+    isActive,
+    isTerminal,
+    start,
+    cancel,
+    dismiss,
+  };
 }

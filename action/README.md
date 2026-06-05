@@ -51,8 +51,8 @@ jobs:
           repo-id: ${{ vars.LASTEST_REPO_ID }}
           team-id: ${{ vars.LASTEST_TEAM_ID }}
           runner-id: ${{ vars.LASTEST_RUNNER_ID }}
-          timeout: '300'
-          fail-on-changes: 'false'
+          timeout: "300"
+          fail-on-changes: "false"
 
       - name: Comment on PR
         if: always()
@@ -80,26 +80,26 @@ jobs:
 
 ## Inputs
 
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
-| `server-url` | Lastest server URL | Yes | - |
-| `runner-token` | Runner authentication token | Yes | - |
-| `repo-id` | Repository ID in Lastest | Yes | - |
-| `team-id` | Team ID in Lastest | Yes | - |
-| `runner-id` | Remote runner ID | Yes | - |
-| `timeout` | Build timeout in seconds | No | `300` |
-| `fail-on-changes` | Fail when changes detected | No | `false` |
+| Input             | Description                 | Required | Default |
+| ----------------- | --------------------------- | -------- | ------- |
+| `server-url`      | Lastest server URL          | Yes      | -       |
+| `runner-token`    | Runner authentication token | Yes      | -       |
+| `repo-id`         | Repository ID in Lastest    | Yes      | -       |
+| `team-id`         | Team ID in Lastest          | Yes      | -       |
+| `runner-id`       | Remote runner ID            | Yes      | -       |
+| `timeout`         | Build timeout in seconds    | No       | `300`   |
+| `fail-on-changes` | Fail when changes detected  | No       | `false` |
 
 ## Outputs
 
-| Output | Description |
-|--------|-------------|
-| `status` | Build status: `passed`, `failed`, `review_required`, `safe_to_merge`, `blocked` |
-| `build-url` | Direct link to build results in Lastest |
-| `changed-count` | Number of visual changes detected |
-| `passed-count` | Number of passed tests |
-| `failed-count` | Number of failed tests |
-| `total-tests` | Total number of tests run |
+| Output          | Description                                                                     |
+| --------------- | ------------------------------------------------------------------------------- |
+| `status`        | Build status: `passed`, `failed`, `review_required`, `safe_to_merge`, `blocked` |
+| `build-url`     | Direct link to build results in Lastest                                         |
+| `changed-count` | Number of visual changes detected                                               |
+| `passed-count`  | Number of passed tests                                                          |
+| `failed-count`  | Number of failed tests                                                          |
+| `total-tests`   | Total number of tests run                                                       |
 
 ## Exit Codes
 
@@ -135,6 +135,7 @@ GitHub Actions ──> Lastest Server ──> Remote Runner
 ```
 
 Benefits:
+
 - No browser installation in CI (~2GB saved)
 - Consistent test environment
 - Centralized result management

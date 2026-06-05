@@ -12,17 +12,26 @@ npx -y @lastest/mcp-server@latest --url https://your-lastest-instance --api-key 
 ```
 
 ### Claude Code
+
 ```bash
 claude mcp add lastest -- npx -y @lastest/mcp-server@latest --url https://your-lastest-instance --api-key YOUR_API_KEY
 ```
 
 ### Claude Desktop / generic JSON
+
 ```json
 {
   "mcpServers": {
     "lastest": {
       "command": "npx",
-      "args": ["-y", "@lastest/mcp-server@latest", "--url", "https://your-lastest-instance", "--api-key", "YOUR_API_KEY"]
+      "args": [
+        "-y",
+        "@lastest/mcp-server@latest",
+        "--url",
+        "https://your-lastest-instance",
+        "--api-key",
+        "YOUR_API_KEY"
+      ]
     }
   }
 }
@@ -35,6 +44,7 @@ claude mcp add lastest -- npx -y @lastest/mcp-server@latest --url https://your-l
 The canonical, most-trafficked list. Linked from the MCP spec docs.
 
 **How to submit:**
+
 1. Fork https://github.com/modelcontextprotocol/servers
 2. Edit `README.md` → "🌎 Community Servers" section, alphabetical
 3. Add a one-line entry:
@@ -52,6 +62,7 @@ The canonical, most-trafficked list. Linked from the MCP spec docs.
 The new programmatic registry that downstream clients (Claude, Cursor, etc.) are starting to consume. This is the highest-leverage submission for 2026+.
 
 **How to submit:**
+
 1. Read https://github.com/modelcontextprotocol/registry
 2. Create a `server.json` at the repo root of `packages/mcp-server` (or top-level):
    ```json
@@ -72,8 +83,21 @@ The new programmatic registry that downstream clients (Claude, Cursor, etc.) are
          "version": "0.2.0",
          "transport": { "type": "stdio" },
          "runtime_arguments": [
-           { "type": "named", "name": "--url", "description": "Lastest instance URL", "is_required": true, "format": "string" },
-           { "type": "named", "name": "--api-key", "description": "API key", "is_required": true, "is_secret": true, "format": "string" }
+           {
+             "type": "named",
+             "name": "--url",
+             "description": "Lastest instance URL",
+             "is_required": true,
+             "format": "string"
+           },
+           {
+             "type": "named",
+             "name": "--api-key",
+             "description": "API key",
+             "is_required": true,
+             "is_secret": true,
+             "format": "string"
+           }
          ]
        }
      ]
@@ -90,6 +114,7 @@ The new programmatic registry that downstream clients (Claude, Cursor, etc.) are
 Largest third-party MCP marketplace, one-click install for many clients, ~tens of thousands of MAU.
 
 **How to submit:**
+
 1. Go to https://smithery.ai/new
 2. Sign in with GitHub, select `las-team/lastest`
 3. Add a `smithery.yaml` at `packages/mcp-server/`:
@@ -121,6 +146,7 @@ Largest third-party MCP marketplace, one-click install for many clients, ~tens o
 Auto-indexes public MCP servers; popular discovery surface, decent SEO.
 
 **How to submit:**
+
 1. Add GitHub topics to `las-team/lastest`: `mcp`, `model-context-protocol`, `mcp-server`
 2. Submit via https://glama.ai/mcp/servers (there is a "Submit a server" link at the bottom) — paste the GitHub URL.
 3. Glama auto-pulls README and bin info. Listing usually appears within 24h.
@@ -132,6 +158,7 @@ Auto-indexes public MCP servers; popular discovery surface, decent SEO.
 Curated discovery site, manual submission, fast review.
 
 **How to submit:**
+
 1. Go to https://www.pulsemcp.com/submit
 2. Fill the form: name `Lastest`, package `@lastest/mcp-server`, repo URL, short description, tools list, install snippet.
 3. Categories: pick **Testing / QA / Developer Tools**.

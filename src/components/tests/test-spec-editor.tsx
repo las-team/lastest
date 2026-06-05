@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -11,11 +11,21 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { CheckCircle, AlertTriangle, Wand2, Loader2, FileText } from 'lucide-react';
-import { toast } from 'sonner';
-import { saveTestSpec, regenerateTestFromSpec, detectSpecDrift } from '@/server/actions/specs';
-import type { TestSpec } from '@/lib/db/schema';
+} from "@/components/ui/dialog";
+import {
+  CheckCircle,
+  AlertTriangle,
+  Wand2,
+  Loader2,
+  FileText,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  saveTestSpec,
+  regenerateTestFromSpec,
+  detectSpecDrift,
+} from "@/server/actions/specs";
+import type { TestSpec } from "@/lib/db/schema";
 
 interface TestSpecEditorProps {
   testId: string;
@@ -25,42 +35,60 @@ interface TestSpecEditorProps {
   functionalAreaId?: string | null;
 }
 
-export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, functionalAreaId }: TestSpecEditorProps) {
-  const [spec, setSpec] = useState(initialSpec?.spec || '');
-  const [status, setStatus] = useState<string>(initialSpec?.status || 'draft');
+export function TestSpecEditor({
+  testId,
+  testName,
+  repositoryId,
+  initialSpec,
+  functionalAreaId,
+}: TestSpecEditorProps) {
+  const [spec, setSpec] = useState(initialSpec?.spec || "");
+  const [status, setStatus] = useState<string>(initialSpec?.status || "draft");
   const [specId, setSpecId] = useState<string | null>(initialSpec?.id || null);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [showRegenDialog, setShowRegenDialog] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef({ spec: initialSpec?.spec || '' });
+  const lastSavedRef = useRef({ spec: initialSpec?.spec || "" });
 
-  const doSave = useCallback(async (newSpec: string) => {
-    if (!newSpec.trim()) return;
-    if (newSpec === lastSavedRef.current.spec) return;
+  const doSave = useCallback(
+    async (newSpec: string) => {
+      if (!newSpec.trim()) return;
+      if (newSpec === lastSavedRef.current.spec) return;
 
-    setSaving(true);
-    try {
-      const id = await saveTestSpec(testId, testName, newSpec, repositoryId, functionalAreaId);
-      setSpecId(id);
-      lastSavedRef.current = { spec: newSpec };
+      setSaving(true);
+      try {
+        const id = await saveTestSpec(
+          testId,
+          testName,
+          newSpec,
+          repositoryId,
+          functionalAreaId,
+        );
+        setSpecId(id);
+        lastSavedRef.current = { spec: newSpec };
 
-      // Check drift
-      const drift = await detectSpecDrift(testId);
-      setStatus(drift.isDrifted ? 'outdated' : 'has_test');
+        // Check drift
+        const drift = await detectSpecDrift(testId);
+        setStatus(drift.isDrifted ? "outdated" : "has_test");
 
-      toast.success('Spec saved');
-    } catch {
-      toast.error('Failed to save spec');
-    } finally {
-      setSaving(false);
-    }
-  }, [testId, testName, repositoryId, functionalAreaId]);
+        toast.success("Spec saved");
+      } catch {
+        toast.error("Failed to save spec");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [testId, testName, repositoryId, functionalAreaId],
+  );
 
-  const scheduleAutoSave = useCallback((newSpec: string) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSave(newSpec), 1500);
-  }, [doSave]);
+  const scheduleAutoSave = useCallback(
+    (newSpec: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => doSave(newSpec), 1500);
+    },
+    [doSave],
+  );
 
   // Cleanup debounce on unmount
   useEffect(() => {
@@ -81,13 +109,13 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
     try {
       const result = await regenerateTestFromSpec(specId, repositoryId);
       if (result.success) {
-        setStatus('has_test');
-        toast.success('Test code regenerated');
+        setStatus("has_test");
+        toast.success("Test code regenerated");
       } else {
-        toast.error(result.error || 'Regeneration failed');
+        toast.error(result.error || "Regeneration failed");
       }
     } catch {
-      toast.error('Failed to regenerate test');
+      toast.error("Failed to regenerate test");
     } finally {
       setRegenerating(false);
     }
@@ -102,12 +130,16 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
               <FileText className="h-4 w-4" />
               Test Specification
             </CardTitle>
-            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            {saving && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Specification</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              Specification
+            </label>
             <Textarea
               value={spec}
               onChange={(e) => handleSpecChange(e.target.value)}
@@ -121,19 +153,23 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
           {spec.trim() && (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs">
-                {status === 'has_test' && (
+                {status === "has_test" && (
                   <>
                     <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
-                    <span className="text-muted-foreground">Spec saved — code matches</span>
+                    <span className="text-muted-foreground">
+                      Spec saved — code matches
+                    </span>
                   </>
                 )}
-                {status === 'outdated' && (
+                {status === "outdated" && (
                   <>
                     <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="text-amber-600 dark:text-amber-400">Spec updated — test code may be outdated</span>
+                    <span className="text-amber-600 dark:text-amber-400">
+                      Spec updated — test code may be outdated
+                    </span>
                   </>
                 )}
-                {(status === 'draft' || status === 'approved') && (
+                {(status === "draft" || status === "approved") && (
                   <>
                     <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-muted-foreground">Draft spec</span>
@@ -141,7 +177,7 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
                 )}
               </div>
 
-              {status === 'outdated' && specId && (
+              {status === "outdated" && specId && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -160,9 +196,16 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
             </div>
           )}
 
-          {initialSpec?.source && initialSpec.source !== 'manual' && (
+          {initialSpec?.source && initialSpec.source !== "manual" && (
             <p className="text-xs text-muted-foreground">
-              Source: {initialSpec.source === 'planner' ? 'AI Planner' : initialSpec.source === 'agent_prompt' ? 'Agent Prompt' : initialSpec.source === 'route_suggestion' ? 'Route Suggestion' : initialSpec.source}
+              Source:{" "}
+              {initialSpec.source === "planner"
+                ? "AI Planner"
+                : initialSpec.source === "agent_prompt"
+                  ? "Agent Prompt"
+                  : initialSpec.source === "route_suggestion"
+                    ? "Route Suggestion"
+                    : initialSpec.source}
             </p>
           )}
         </CardContent>
@@ -173,13 +216,20 @@ export function TestSpecEditor({ testId, testName, repositoryId, initialSpec, fu
           <DialogHeader>
             <DialogTitle>Regenerate Test Code</DialogTitle>
             <DialogDescription>
-              This will use AI to regenerate the test code based on the updated spec. The current code will be saved as a new version.
+              This will use AI to regenerate the test code based on the updated
+              spec. The current code will be saved as a new version.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRegenDialog(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowRegenDialog(false)}>
+              Cancel
+            </Button>
             <Button onClick={handleRegenerate} disabled={regenerating}>
-              {regenerating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+              {regenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4 mr-2" />
+              )}
               Regenerate
             </Button>
           </DialogFooter>

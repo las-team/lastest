@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Copy, Check, Code } from 'lucide-react';
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Copy, Check, Code } from "lucide-react";
 
 interface AICodePreviewProps {
   code: string;
@@ -17,7 +17,7 @@ export function AICodePreview({
   code,
   onChange,
   readOnly = false,
-  maxHeight = '400px',
+  maxHeight = "400px",
   showLineNumbers = true,
 }: AICodePreviewProps) {
   const [copied, setCopied] = useState(false);
@@ -28,7 +28,7 @@ export function AICodePreview({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const lines = code.split('\n');
+  const lines = code.split("\n");
 
   return (
     <div className="relative border rounded-lg bg-muted/30">

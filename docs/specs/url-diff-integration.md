@@ -12,10 +12,10 @@ Status: stable for v1. Endpoints live in `src/app/api/v1/[...slug]/route.ts`.
 
 Two endpoints that wrap Lastest's existing capture pipeline:
 
-| Endpoint | Behaviour | Returns |
-|---|---|---|
+| Endpoint                | Behaviour                                 | Returns                                                                           |
+| ----------------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
 | `POST /api/v1/snapshot` | Synchronous single-URL capture (~10–30 s) | Inline JSON with screenshotUrl + DOM + network + axe-core violations + WCAG score |
-| `POST /api/v1/diff` | Async two-URL diff (~20–60 s) | `{ jobId, statusUrl }` — poll `statusUrl` until `status === 'completed'` |
+| `POST /api/v1/diff`     | Async two-URL diff (~20–60 s)             | `{ jobId, statusUrl }` — poll `statusUrl` until `status === 'completed'`          |
 
 Captured artefacts:
 
@@ -75,18 +75,21 @@ Bearer-token requests **cannot** target private/loopback/link-local/cloud-metada
 
 Bypass options (configured server-side in the deployed Lastest pod):
 
-| Env | Effect |
-|---|---|
-| `URL_DIFF_ALLOW_PRIVATE_HOSTS=true` | Disables the block entirely. Use only for fully-internal deployments. |
-| `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST=<cidr,...>` | Source IPs in this list can target private hosts. |
+| Env                                             | Effect                                                                |
+| ----------------------------------------------- | --------------------------------------------------------------------- |
+| `URL_DIFF_ALLOW_PRIVATE_HOSTS=true`             | Disables the block entirely. Use only for fully-internal deployments. |
+| `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST=<cidr,...>` | Source IPs in this list can target private hosts.                     |
 
 Bypass is bound to environment, not auth type — set `URL_DIFF_ALLOW_PRIVATE_HOSTS=true` (alias: `LASTEST_ALLOW_PRIVATE_OUTBOUND`) or `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST=<cidr,...>` (alias: `LASTEST_OUTBOUND_PRIVATE_HOST_IP_ALLOWLIST`). Cookie-session and bearer requests are treated identically.
 
 Failure shape:
 
 ```json
-{ "error": "Target host telex.hu resolves to a private/internal address (10.0.0.5)" }
+{
+  "error": "Target host telex.hu resolves to a private/internal address (10.0.0.5)"
+}
 ```
+
 Status: `400 Bad Request`.
 
 ---
@@ -100,7 +103,7 @@ Synchronous. Returns when the capture completes (or fails).
 ```json
 {
   "url": "https://example.com",
-  "viewport": { "width": 1280, "height": 720 }   // optional; default 1280x720
+  "viewport": { "width": 1280, "height": 720 } // optional; default 1280x720
 }
 ```
 
@@ -162,13 +165,13 @@ The `accessibilityTree` (Playwright `page.accessibility.snapshot()`) is **not** 
 
 ### Errors
 
-| Status | When |
-|---|---|
-| `400` | Missing/invalid `url`, SSRF block, validation failure |
-| `401` | Missing/invalid bearer |
-| `403` | Token has no team |
-| `429` | Rate limited |
-| `502` | Capture failed (EB pool exhaustion, target site error, axe failure). `error` carries the message. |
+| Status | When                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| `400`  | Missing/invalid `url`, SSRF block, validation failure                                             |
+| `401`  | Missing/invalid bearer                                                                            |
+| `403`  | Token has no team                                                                                 |
+| `429`  | Rate limited                                                                                      |
+| `502`  | Capture failed (EB pool exhaustion, target site error, axe failure). `error` carries the message. |
 
 ---
 
@@ -217,7 +220,7 @@ Returns a `BackgroundJob` row:
 {
   "id": "1f2e3d4c-...",
   "type": "url_diff",
-  "status": "running",                    // "pending" | "running" | "completed" | "failed"
+  "status": "running", // "pending" | "running" | "completed" | "failed"
   "progress": 50,
   "completedSteps": 2,
   "totalSteps": 4,
@@ -345,35 +348,36 @@ If the artefact has been reaped (>1 h), you'll get `404`. Restart the diff.
 ## 9. End-to-end example (Node, fetch)
 
 ```ts
-const ORIGIN = 'https://app.lastest.cloud';
-const TOKEN  = process.env.LASTEST_API_KEY!;
+const ORIGIN = "https://app.lastest.cloud";
+const TOKEN = process.env.LASTEST_API_KEY!;
 
 async function diffUrls(urlA: string, urlB: string) {
   // 1. Kick off
   const start = await fetch(`${ORIGIN}/api/v1/diff`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${TOKEN}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ urlA, urlB }),
   });
-  if (!start.ok) throw new Error(`diff start: ${start.status} ${await start.text()}`);
+  if (!start.ok)
+    throw new Error(`diff start: ${start.status} ${await start.text()}`);
   const { jobId } = await start.json();
 
   // 2. Poll
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 2000));
     const res = await fetch(`${ORIGIN}/api/jobs/${jobId}`, {
-      headers: { 'Authorization': `Bearer ${TOKEN}` },
+      headers: { Authorization: `Bearer ${TOKEN}` },
     });
     if (!res.ok) throw new Error(`poll: ${res.status}`);
     const job = await res.json();
-    if (job.status === 'completed') return job.metadata.urlDiffResult;
-    if (job.status === 'failed')   throw new Error(job.error ?? 'diff failed');
+    if (job.status === "completed") return job.metadata.urlDiffResult;
+    if (job.status === "failed") throw new Error(job.error ?? "diff failed");
   }
-  throw new Error('diff timed out');
+  throw new Error("diff timed out");
 }
 ```
 

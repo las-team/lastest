@@ -15,9 +15,9 @@ import type {
   StepComparison,
   StepLayerFeedback,
   StepVerdict,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
-export type CaseStatus = 'regression' | 'done' | 'missed' | 'unknown';
+export type CaseStatus = "regression" | "done" | "missed" | "unknown";
 
 interface DeriveInput {
   step: StepComparison;
@@ -43,8 +43,8 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   const { step, feedback, isInChangedArea, testFailed } = input;
   const verdict = input.verdictOverride ?? step.verdict;
 
-  const anyRejected = feedback.some((f) => f.status === 'rejected');
-  if (anyRejected) return 'regression';
+  const anyRejected = feedback.some((f) => f.status === "rejected");
+  if (anyRejected) return "regression";
 
   // "Fully approved" — every evidence layer has an approval. Step.evidence
   // can carry multiple rows per layer, so we collapse to unique layers and
@@ -53,22 +53,27 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   const evidenceLayers = Array.from(new Set(step.evidence.map((e) => e.layer)));
   const approvedLayers = new Set(
     feedback
-      .filter((f) => f.status === 'approved' || f.status === 'auto_approved')
+      .filter((f) => f.status === "approved" || f.status === "auto_approved")
       .map((f) => f.layer),
   );
-  const fullyApproved = evidenceLayers.length > 0
-    ? evidenceLayers.every((l) => approvedLayers.has(l))
-    : approvedLayers.size > 0;
+  const fullyApproved =
+    evidenceLayers.length > 0
+      ? evidenceLayers.every((l) => approvedLayers.has(l))
+      : approvedLayers.size > 0;
 
   // Reviewer-flagged "missed" — produced by dragging a card onto the Missed
   // column. We model that as a fully-snoozed step with no approvals (and no
   // rejection, which we already short-circuited above). Distinct from
   // "no feedback at all", which falls through to the verdict-based logic.
-  const snoozedLayers = new Set(feedback.filter((f) => f.status === 'snoozed').map((f) => f.layer));
-  const fullySnoozed = evidenceLayers.length > 0
-    ? evidenceLayers.every((l) => snoozedLayers.has(l)) && approvedLayers.size === 0
-    : snoozedLayers.size > 0 && approvedLayers.size === 0;
-  if (fullySnoozed) return 'missed';
+  const snoozedLayers = new Set(
+    feedback.filter((f) => f.status === "snoozed").map((f) => f.layer),
+  );
+  const fullySnoozed =
+    evidenceLayers.length > 0
+      ? evidenceLayers.every((l) => snoozedLayers.has(l)) &&
+        approvedLayers.size === 0
+      : snoozedLayers.size > 0 && approvedLayers.size === 0;
+  if (fullySnoozed) return "missed";
 
   // Hard test failures dominate any layer-evidence verdict — they only count
   // as resolved if every evidence layer is explicitly approved by a reviewer.
@@ -78,25 +83,26 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   // slip into Verified without a human signing off.
   if (testFailed) {
     const explicitApprovedLayers = new Set(
-      feedback.filter((f) => f.status === 'approved').map((f) => f.layer),
+      feedback.filter((f) => f.status === "approved").map((f) => f.layer),
     );
-    const explicitFullyApproved = evidenceLayers.length > 0
-      ? evidenceLayers.every((l) => explicitApprovedLayers.has(l))
-      : explicitApprovedLayers.size > 0;
-    return explicitFullyApproved ? 'done' : 'regression';
+    const explicitFullyApproved =
+      evidenceLayers.length > 0
+        ? evidenceLayers.every((l) => explicitApprovedLayers.has(l))
+        : explicitApprovedLayers.size > 0;
+    return explicitFullyApproved ? "done" : "regression";
   }
 
-  if (verdict === 'red') {
-    return fullyApproved ? 'done' : 'regression';
+  if (verdict === "red") {
+    return fullyApproved ? "done" : "regression";
   }
 
-  if (verdict === 'yellow') {
-    if (fullyApproved) return 'done';
-    return isInChangedArea ? 'missed' : 'unknown';
+  if (verdict === "yellow") {
+    if (fullyApproved) return "done";
+    return isInChangedArea ? "missed" : "unknown";
   }
 
   // green verdict — 0 diff. Treat as done (the test passed cleanly).
-  return 'done';
+  return "done";
 }
 
 export interface CaseStatusCounts {

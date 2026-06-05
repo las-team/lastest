@@ -16,12 +16,12 @@
  * rule on the same page across runs.
  */
 
-import type { A11yViolation, A11yDiffSummary } from '@/lib/db/schema';
+import type { A11yViolation, A11yDiffSummary } from "@/lib/db/schema";
 
 function violationKey(v: A11yViolation): string {
   // Tags act as a coarse selector — rules fired with `wcag2aa` differ from
   // the same id fired with `best-practice`.
-  const tagKey = (v.tags ?? []).slice().sort().join(',');
+  const tagKey = (v.tags ?? []).slice().sort().join(",");
   return `${v.id}::${v.impact}::${tagKey}`;
 }
 
@@ -29,8 +29,8 @@ export function computeA11yDiff(
   baseline: A11yViolation[],
   current: A11yViolation[],
 ): A11yDiffSummary {
-  const baseMap = new Map(baseline.map(v => [violationKey(v), v]));
-  const currMap = new Map(current.map(v => [violationKey(v), v]));
+  const baseMap = new Map(baseline.map((v) => [violationKey(v), v]));
+  const currMap = new Map(current.map((v) => [violationKey(v), v]));
 
   const newViolations: A11yViolation[] = [];
   const disappeared: A11yViolation[] = [];
@@ -50,12 +50,16 @@ export function computeA11yDiff(
 }
 
 export function summarizeA11yDiff(d: A11yDiffSummary): string {
-  if (d.newViolations.length === 0 && d.disappeared.length === 0) return 'No a11y changes';
+  if (d.newViolations.length === 0 && d.disappeared.length === 0)
+    return "No a11y changes";
   const parts: string[] = [];
-  if (d.newBySeverity.critical) parts.push(`${d.newBySeverity.critical} new critical`);
-  if (d.newBySeverity.serious) parts.push(`${d.newBySeverity.serious} new serious`);
-  if (d.newBySeverity.moderate) parts.push(`${d.newBySeverity.moderate} new moderate`);
+  if (d.newBySeverity.critical)
+    parts.push(`${d.newBySeverity.critical} new critical`);
+  if (d.newBySeverity.serious)
+    parts.push(`${d.newBySeverity.serious} new serious`);
+  if (d.newBySeverity.moderate)
+    parts.push(`${d.newBySeverity.moderate} new moderate`);
   if (d.newBySeverity.minor) parts.push(`${d.newBySeverity.minor} new minor`);
   if (d.disappeared.length) parts.push(`${d.disappeared.length} resolved`);
-  return parts.join(', ') || 'No a11y changes';
+  return parts.join(", ") || "No a11y changes";
 }
