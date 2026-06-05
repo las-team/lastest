@@ -52,6 +52,8 @@ const SECTION_TO_TAB: Record<string, SettingsTabKey> = {
   notifications: "account",
   team: "account",
   storage: "account",
+  "run-usage": "account",
+  billing: "account",
   runners: "account",
   "api-tokens": "account",
   "test-migration": "account",

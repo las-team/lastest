@@ -8,7 +8,18 @@ import {
 import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
-import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
+import {
+  Github,
+  Check,
+  X,
+  Users,
+  Bot,
+  Mail,
+  Terminal,
+  CreditCard,
+} from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -58,13 +69,16 @@ import { TestMigrationCard } from "@/components/settings/test-migration-card";
 import { EmailPreferencesCard } from "@/components/settings/email-preferences-client";
 import { StorageUsageCard } from "@/components/settings/storage-usage-card-client";
 import { RunUsageCard } from "@/components/settings/run-usage-card-client";
+import { BillingCard } from "@/components/settings/billing-card-client";
+import { isStripeConfigured, getStripeClient } from "@/lib/billing/stripe";
+import { getCatalog, toUiCatalog } from "@/lib/billing/catalog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
 import { DeleteRepoDialog } from "@/components/settings/delete-repo-dialog";
 
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{ success?: string; error?: string; checkout?: string; billing?: string }>;
 }) {
   const params = await searchParams;
   const session = await getCurrentSession();
@@ -135,6 +149,35 @@ export default async function SettingsPage({
     ? await queries.getTeamStorageUsage(teamId)
     : null;
   const runUsage = teamId ? await queries.getTeamRunUsage(teamId) : null;
+  const teamBilling = teamId ? await queries.getTeamBilling(teamId) : null;
+  const stripeConfigured = isStripeConfigured();
+  const billingCatalog = teamBilling ? toUiCatalog(await getCatalog()) : [];
+
+  // Returning from the Stripe portal cancel flow: the return URL carries
+  // billing=cancel_pending whether or not the user confirmed inside the
+  // portal, and the webhook that mirrors the result may not have landed
+  // yet. Read the subscription live so the banner + card never lie in
+  // either direction (false "cancellation scheduled" / false "no changes").
+  let cancelAtPeriodEnd = Boolean(teamBilling?.subscriptionCancelAtPeriodEnd);
+  let billingPeriodEnd = teamBilling?.subscriptionCurrentPeriodEnd ?? null;
+  if (params.billing === "cancel_pending" && teamBilling?.stripeSubscriptionId) {
+    const stripe = getStripeClient();
+    if (stripe) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(
+          teamBilling.stripeSubscriptionId,
+        );
+        // Portal cancels schedule via `cancel_at` (timestamp); API/flag
+        // cancels via `cancel_at_period_end` — either means cancelled.
+        cancelAtPeriodEnd = sub.cancel_at_period_end || sub.cancel_at != null;
+        const periodEnd =
+          sub.cancel_at ?? sub.items?.data?.[0]?.current_period_end;
+        if (periodEnd) billingPeriodEnd = new Date(periodEnd * 1000);
+      } catch {
+        // Keep the DB mirror on transient Stripe errors.
+      }
+    }
+  }
   const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === "true";
   const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === "true";
 
@@ -570,6 +613,72 @@ export default async function SettingsPage({
             <PendingInvitations invitations={pendingInvitations} />
           </CardContent>
         </Card>
+      )}
+
+      {/* Billing — plan + checkout + cancel (admin-only) */}
+      {isAdmin && teamBilling && (
+        <div id="billing" className="space-y-2">
+          {params.checkout === 'success' && (
+            <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
+              Subscription updated. It may take a moment for the new plan to appear here while Stripe sends the webhook.
+            </div>
+          )}
+          {params.billing === 'plan_changed' && (
+            <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
+              Plan changed. Stripe will prorate the difference on your next invoice.
+            </div>
+          )}
+          {params.billing === 'downgrade_scheduled' && (
+            <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
+              Downgrade scheduled — your current plan stays active until the end of the billing
+              period, then the new plan takes over. Nothing is charged today.
+            </div>
+          )}
+          {/* State-aware: cancelAtPeriodEnd/billingPeriodEnd are read live
+              from Stripe on this param (see above), so this never claims a
+              cancellation that didn't happen — or misses one that did. */}
+          {params.billing === 'cancel_pending' &&
+            (cancelAtPeriodEnd ? (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+                Cancellation scheduled — your plan stays active until{' '}
+                {billingPeriodEnd
+                  ? billingPeriodEnd.toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })
+                  : 'the end of the billing period'}
+                .
+              </div>
+            ) : (
+              <div className="rounded-md border bg-muted/50 p-4 text-sm">
+                No changes made — your subscription is still active.
+              </div>
+            ))}
+          {(params.billing === 'error' || params.checkout === 'cancelled') && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+              {params.checkout === 'cancelled'
+                ? 'Checkout cancelled.'
+                : 'Something went wrong with the billing change. Please try again or contact support.'}
+            </div>
+          )}
+          <BillingCard
+            plan={teamBilling.plan}
+            catalog={billingCatalog}
+            subscriptionStatus={teamBilling.subscriptionStatus}
+            currentPeriodEnd={billingPeriodEnd?.toISOString() ?? null}
+            cancelAtPeriodEnd={cancelAtPeriodEnd}
+            pendingPlanChange={Boolean(teamBilling.subscriptionScheduleId)}
+            currentBillingInterval={teamBilling.billingInterval}
+            isAdmin={isAdmin}
+            stripeConfigured={stripeConfigured}
+          />
+          <div className="text-right">
+            <Button asChild variant="link" size="sm" className="text-xs h-auto p-0">
+              <Link href="/settings/billing">Open full billing page <CreditCard className="w-3 h-3 ml-1 inline" /></Link>
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Team Members (admin-only) */}

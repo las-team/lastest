@@ -1802,8 +1802,24 @@ export type UserRole = "owner" | "admin" | "member" | "viewer";
 // `src/lib/auth/capabilities.ts` derives the allowed action set from
 // (role, plan, status) — adding a new tier means one branch there, not
 // editing every server action.
-export type TeamPlan = "demo" | "free" | "trial" | "pro";
+//
+// Quotas, prices, and Stripe price IDs for the billable tiers live in
+// `src/lib/billing/plans.ts`; webhook handlers sync subscription state
+// back into the team row.
+export type TeamPlan = "demo" | "free" | "trial" | "starter" | "growth" | "pro";
 export type TeamStatus = "active" | "suspended";
+
+// Mirror of Stripe's subscription.status enum, narrowed to what we react to.
+// `null` means the team has never had a paid subscription (free plan).
+export type SubscriptionStatus =
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'unpaid'
+  | 'paused';
 
 // Teams - Multi-tenancy support
 export const teams = pgTable("teams", {
@@ -1839,6 +1855,13 @@ export const teams = pgTable("teams", {
   runMinutesThisMonth: doublePrecision("run_minutes_this_month").default(0),
   usageMonth: text("usage_month"), // 'YYYY-MM'
   runUsageLastCalculatedAt: timestamp("run_usage_last_calculated_at"),
+  // ── Stripe billing ────────────────────────────────────────────────────
+  // Per-team Stripe customer. The better-auth Stripe plugin reads/writes
+  // this column directly via its `organization` model mapping
+  // (src/lib/auth/auth.ts plugin schema override → modelName='teams').
+  // Live subscription state lives in the plugin's `subscription` table
+  // keyed by `referenceId = teams.id`; `getTeamBilling()` joins both.
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -4349,3 +4372,79 @@ export const launchMonthlyWinners = pgTable(
 
 export type LaunchMonthlyWinner = typeof launchMonthlyWinners.$inferSelect;
 export type NewLaunchMonthlyWinner = typeof launchMonthlyWinners.$inferInsert;
+
+// ============================================
+// Billing — Stripe integration
+// ============================================
+//
+// Subscription state is managed by the better-auth Stripe plugin
+// (@better-auth/stripe). The plugin auto-creates the `subscription`
+// table (defined below for type-safe reads); the team's Stripe
+// customer ID sits on `teams.stripeCustomerId` via the plugin's
+// organization-model schema override.
+//
+// What lives here, not in the plugin:
+//
+//  * `stripe_webhook_events` — durable idempotency for webhook
+//    deliveries. Stripe retries on 5xx, so we record every delivery by
+//    its event ID and process only on first insert. Survives restarts
+//    and gives admins a forensic record. Pure internal — never gates a
+//    user-visible flow.
+//
+// v1 is monthly + yearly subscriptions only. No metered overage, no
+// audit log, no admin gates: subscribe → pay → plan flips on the
+// `customer.subscription.created` webhook, no human in the loop.
+
+// ─────────────────────────────────────────────────────────────────────
+// `subscription` — managed by @better-auth/stripe; we mirror the
+// definition here so reads stay type-safe via drizzle. The plugin
+// performs all writes via the better-auth adapter; we treat this
+// table as read-only from app code.
+// ─────────────────────────────────────────────────────────────────────
+
+export const subscriptions = pgTable('subscription', {
+  id: text('id').primaryKey(),
+  /** Plan name from src/lib/billing/plans.ts (e.g. 'starter', 'pro'). */
+  plan: text('plan').notNull(),
+  /** Our internal teamId — set via plugin's `customerType: 'organization'`. */
+  referenceId: text('referenceId').notNull(),
+  stripeCustomerId: text('stripeCustomerId'),
+  stripeSubscriptionId: text('stripeSubscriptionId'),
+  status: text('status').$type<SubscriptionStatus>().default('incomplete'),
+  periodStart: timestamp('periodStart'),
+  periodEnd: timestamp('periodEnd'),
+  trialStart: timestamp('trialStart'),
+  trialEnd: timestamp('trialEnd'),
+  cancelAtPeriodEnd: boolean('cancelAtPeriodEnd').default(false),
+  cancelAt: timestamp('cancelAt'),
+  canceledAt: timestamp('canceledAt'),
+  endedAt: timestamp('endedAt'),
+  seats: integer('seats'),
+  billingInterval: text('billingInterval'),
+  stripeScheduleId: text('stripeScheduleId'),
+}, (table) => ([
+  index('idx_subscription_reference').on(table.referenceId),
+  index('idx_subscription_stripe_sub').on(table.stripeSubscriptionId),
+]));
+
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+
+export type StripeWebhookEventStatus = 'received' | 'processed' | 'failed';
+
+export const stripeWebhookEvents = pgTable('stripe_webhook_events', {
+  // Stripe's `evt_*` event ID — globally unique per delivery, guarantees
+  // idempotency across retries (Stripe Standard Webhooks spec).
+  eventId: text('event_id').primaryKey(),
+  type: text('type').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  receivedAt: timestamp('received_at').$defaultFn(() => new Date()).notNull(),
+  processedAt: timestamp('processed_at'),
+  error: text('error'),
+}, (table) => ([
+  index('idx_stripe_webhook_events_type').on(table.type),
+  index('idx_stripe_webhook_events_received').on(table.receivedAt),
+]));
+
+export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
+export type NewStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;

@@ -12,6 +12,7 @@ export default defineConfig({
       "**/node_modules/**",
       ".next/**",
       "playwright-visual-tests/**",
+      "scripts/**",
       "tests/**",
       "seed.spec.*",
     ],

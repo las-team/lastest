@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# Pre-commit guard: block commits whose staged changes contain Stripe
+# API keys (secret sk_, restricted rk_, or webhook whsec_ secrets).
+#
+# Install (one-time, per clone):
+#   cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# Bypass intentionally (e.g. docs mentioning the prefix in prose):
+#   git commit --no-verify
+#
+# Only ADDED lines in the staged diff are scanned, so pre-existing
+# matches elsewhere in the file don't block unrelated edits.
+
+# sk_live_/rk_live_/sk_test_/rk_test_ followed by a real key body, and
+# whsec_ webhook signing secrets. Placeholder-length strings like
+# "sk_test_..." in comments stay under the 20-char body and pass.
+PATTERN='(sk|rk)_(live|test)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}'
+
+matches=$(git diff --cached --unified=0 | grep -E '^\+' | grep -Ev '^\+\+\+' | grep -E "$PATTERN")
+
+if [ -n "$matches" ]; then
+    echo "✖ Commit blocked: staged changes appear to contain Stripe API keys:" >&2
+    echo >&2
+    echo "$matches" | head -10 >&2
+    echo >&2
+    echo "Move the key to .env.local (gitignored). If this is a false positive," >&2
+    echo "commit with --no-verify." >&2
+    exit 1
+fi
+
+exit 0
