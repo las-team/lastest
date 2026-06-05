@@ -161,6 +161,29 @@ export default async function PublicSharePage({ params }: PageProps) {
     0,
   );
 
+  // Recording clips, hoisted to page level so the player renders as the FIRST
+  // element in <main> — above the fold, at actual size, highest in the HTML.
+  // Google only indexes videos on "watch pages" where the video is the main
+  // content (GSC video indexing report: "Is on a watch page"), so prominence
+  // here is what makes the VideoObject markup below actually eligible.
+  const clips: { src: string; durationMs: number | null }[] = isTestShare
+    ? scopedResults
+        .map((r) => {
+          const src = r.videoPath ? toUrl(r.videoPath) : null;
+          return src ? { src, durationMs: r.durationMs ?? null } : null;
+        })
+        .filter((c): c is { src: string; durationMs: number | null } => !!c)
+    : [];
+  // Disk-fallback when no result has a persisted video_path. Use the primary
+  // result's recorded duration so the scrubber has a usable max even though
+  // we can't trust the webm to embed it.
+  if (clips.length === 0 && fallbackVideoUrl) {
+    clips.push({
+      src: fallbackVideoUrl,
+      durationMs: primaryResult?.durationMs ?? null,
+    });
+  }
+
   // VideoObject structured data — surface the test recording to Google per
   // https://support.google.com/webmasters/answer/7552505 so /r/ pages get
   // video-rich previews instead of plain links.
@@ -211,6 +234,12 @@ export default async function PublicSharePage({ params }: PageProps) {
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
 
       <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-8">
+        {clips.length > 0 && (
+          <section className="space-y-3">
+            <ShareVideoPlayer clips={clips} />
+          </section>
+        )}
+
         <OutcomeHeader
           variant={isTestShare ? "test" : "build"}
           domain={displayDomain}
@@ -228,7 +257,6 @@ export default async function PublicSharePage({ params }: PageProps) {
             diffs={diffs}
             results={scopedResults}
             toUrl={toUrl}
-            fallbackVideoUrl={fallbackVideoUrl}
             build={build}
             testResult={primaryResult}
             shareUrl={shareUrl}
@@ -347,8 +375,11 @@ function buildVideoSchema({
     description,
     thumbnailUrl: [thumbnailUrl],
     uploadDate,
+    // contentUrl ONLY — Google prefers it over embedUrl, and an embedUrl
+    // pointing at the page itself makes GSC report "multiple video URLs"
+    // (the page URL gets parsed as a second video). embedUrl is reserved
+    // for a dedicated iframe player URL, which we don't have.
     contentUrl: absVideo,
-    embedUrl: `${origin}/r/${slug}`,
   };
   if (durationMs && durationMs > 0) {
     schema.duration = msToIso8601Duration(durationMs);
@@ -1350,7 +1381,6 @@ function TestShareBody({
   diffs,
   results,
   toUrl,
-  fallbackVideoUrl,
   build,
   testResult,
   shareUrl,
@@ -1365,7 +1395,6 @@ function TestShareBody({
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
   toUrl: (p: string | null | undefined) => string | null;
-  fallbackVideoUrl: string | null;
   build: Build;
   testResult: ShareTestResult | null;
   shareUrl: string;
@@ -1377,23 +1406,6 @@ function TestShareBody({
   claimLink: string;
   signInLink: string;
 }) {
-  const clips = results
-    .map((r) => {
-      const src = r.videoPath ? toUrl(r.videoPath) : null;
-      return src ? { src, durationMs: r.durationMs ?? null } : null;
-    })
-    .filter((c): c is { src: string; durationMs: number | null } => !!c);
-
-  // Disk-fallback when no result has a persisted video_path. Use the
-  // primary result's recorded duration so the scrubber has a usable max
-  // even though we can't trust the webm to embed it.
-  if (clips.length === 0 && fallbackVideoUrl) {
-    clips.push({
-      src: fallbackVideoUrl,
-      durationMs: testResult?.durationMs ?? null,
-    });
-  }
-
   const steps = collectSteps(testResult, results, toUrl);
   const stepPaths = new Set<string>(collectStepPaths(testResult, results));
 
@@ -1427,12 +1439,8 @@ function TestShareBody({
 
   return (
     <>
-      {clips.length > 0 && (
-        <section className="space-y-3">
-          <ShareVideoPlayer clips={clips} />
-        </section>
-      )}
-
+      {/* Recording player renders at page level (first element in <main>)
+          so Google classifies /r/<slug> as a video watch page. */}
       <PostVideoCTA claimLink={claimLink} signInLink={signInLink} />
 
       <LayerOutcomesGrid

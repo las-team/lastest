@@ -62,31 +62,45 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 **Key paths:**
 
-- `src/lib/db/schema.ts` — all tables (~1680 lines)
+- `src/lib/db/schema.ts` — all tables (~3700 lines)
 - `src/lib/db/queries.ts` — barrel re-export of all query modules
 - `src/lib/db/queries/` — domain-focused query modules:
-  - `tests.ts` — tests, functional areas, test runs, results, versions, assertions
+  - `tests.ts` — tests, test runs, results, versions, assertions
+  - `areas.ts` — functional areas, tree/hierarchy
   - `builds.ts` — builds, build summaries, build status, a11y score trends
   - `visual-diffs.ts` — visual diffs, baselines, ignore regions, planned screenshots
+  - `step-comparisons.ts` — per-(build, test, step) multi-layer verdicts + evidence (v1.13)
+  - `change-maps.ts` — build-level Change Map (Verify phase, v1.14+)
+  - `layer-baselines.ts` / `layer-feedback.ts` — per-layer baselines + step feedback (Verify, v1.14+)
   - `repositories.ts` — repos, PRs, github/gitlab accounts
   - `settings.ts` — playwright, environment, diff, AI, notification settings
   - `routes.ts` — routes, scan status, route suggestions
-  - `suites.ts` — suites, functional area tree, hierarchy
   - `schedules.ts` — cron-based scheduled test runs
   - `background-jobs.ts` — background jobs
   - `auth.ts` — teams, users, sessions, oauth, tokens, invitations
+  - `storage.ts` — team storage usage/quota + run-minute usage/quota
   - `setup.ts` — setup/teardown scripts, configs, steps, resolution
   - `storage-states.ts` — browser storage state management
   - `runners.ts` — runners, runner commands
   - `integrations.ts` — spec imports, google sheets, compose, agent sessions
-  - `fixtures.ts` — test fixtures
+  - `gitlab-pipelines.ts` — GitLab pipeline configs
   - `github-actions.ts` — GitHub Actions integration
+  - `csv-sources.ts` — CSV test-data sources
+  - `fixtures.ts` — test fixtures
+  - `gamification.ts` / `awards.ts` — seasons, Bug Blitz, leaderboard scoring; repo awards
+  - `activity-events.ts` — activity events + live SSE broadcast
+  - `launch.ts` — launch cohorts/gating
+  - `public-shares.ts` / `demo-notes.ts` — public `/r/<slug>` share links + AI demo notes
+  - `inspector.ts` — inspector cache
   - `analytics.ts` — usage analytics
   - `misc.ts` — selector stats, bug reports, review todos
-- `src/lib/execution/executor.ts` — test executor (~650 lines)
-- `src/lib/playwright/` — recorder, runner, server manager, OCR, assertion-parser
+- `src/lib/execution/executor.ts` — test executor (~1800 lines)
+- `src/lib/verify/` — check-modes system: 9 layers (visual, text, dom, network, console, a11y, design, perf, url) × enforce/log/disable; case-status derivation
+- `src/lib/design-system/` — design-token comparison engine (the "design" check layer)
+- `src/lib/url-diff/` — URL trajectory capture + diffing, rate-limit, SSRF guards
+- `src/lib/playwright/` — recorder, runner, server manager, OCR, assertion-parser, selector-analysis ("Analyze URL")
 - `src/lib/diff/` — pixelmatch diffing + SHA256 baseline hashing
-- `src/lib/ai/` — AI providers: claude-cli, openrouter, claude-agent-sdk, anthropic-direct, ollama + failure-triage
+- `src/lib/ai/` — AI providers: claude-cli, openrouter, claude-agent-sdk, anthropic-direct, openai, ollama + failure-triage
 - `src/lib/a11y/` — WCAG 2.2 AA compliance scoring (wcag-score.ts)
 - `src/lib/scheduling/` — cron parser + scheduler for automated test runs
 - `src/server/actions/` — server actions for all domain ops
@@ -117,6 +131,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - **AI settings:** `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record — all new fields must be in the default
 - **Schema types:** use `$inferSelect` / `$inferInsert` patterns
 - **Monorepo:** pnpm workspaces, pnpm 10.x
+- **pnpm config:** `overrides` / `onlyBuiltDependencies` live in `pnpm-workspace.yaml` — never in a `package.json` `pnpm` block (deprecated)
 
 ## Gotchas
 
