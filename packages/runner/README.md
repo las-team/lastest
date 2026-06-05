@@ -57,12 +57,12 @@ lastest-runner start -t <token> -s <server-url>
 
 Spawns a detached background process. Logs go to `~/.lastest/runner.log`.
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-t, --token <token>` | Runner authentication token (required first run) | — |
-| `-s, --server <url>` | Lastest server URL (required first run) | — |
-| `-i, --interval <ms>` | Poll interval in milliseconds | `5000` |
-| `-b, --base-url <url>` | Override target URL for test execution | — |
+| Option                 | Description                                      | Default |
+| ---------------------- | ------------------------------------------------ | ------- |
+| `-t, --token <token>`  | Runner authentication token (required first run) | —       |
+| `-s, --server <url>`   | Lastest server URL (required first run)          | —       |
+| `-i, --interval <ms>`  | Poll interval in milliseconds                    | `5000`  |
+| `-b, --base-url <url>` | Override target URL for test execution           | —       |
 
 After the first run, options are saved to `~/.lastest/runner.config.json` (token encrypted with AES-256-CBC). Subsequent runs can omit them:
 
@@ -92,10 +92,10 @@ Stays attached to the terminal — ideal for CI, Docker, or debugging connection
 
 Stored under `~/.lastest/`:
 
-| File | Purpose |
-|------|---------|
-| `runner.pid` | PID of the running daemon |
-| `runner.log` | Daemon log output |
+| File                 | Purpose                                           |
+| -------------------- | ------------------------------------------------- |
+| `runner.pid`         | PID of the running daemon                         |
+| `runner.log`         | Daemon log output                                 |
 | `runner.config.json` | Saved configuration (token AES-256-CBC encrypted) |
 
 ## Capabilities
@@ -194,11 +194,11 @@ lastest-runner stop
 The runner is also exported as a library:
 
 ```typescript
-import { RunnerClient, TestRunner } from '@lastest/runner';
+import { RunnerClient, TestRunner } from "@lastest/runner";
 
 const client = new RunnerClient({
-  token: 'your-token',
-  serverUrl: 'https://your-lastest-server',
+  token: "your-token",
+  serverUrl: "https://your-lastest-server",
   pollInterval: 5000,
 });
 

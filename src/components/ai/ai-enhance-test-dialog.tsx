@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,14 +8,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { AICodePreview } from './ai-code-preview';
-import { aiEnhanceTest, updateTestCode } from '@/server/actions/ai';
-import { Loader2, Wand2, Save, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { AICodePreview } from "./ai-code-preview";
+import { aiEnhanceTest, updateTestCode } from "@/server/actions/ai";
+import { Loader2, Wand2, Save, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 interface AIEnhanceTestDialogProps {
   open: boolean;
@@ -36,26 +36,30 @@ export function AIEnhanceTestDialog({
   originalCode,
   onEnhanced,
 }: AIEnhanceTestDialogProps) {
-  const [step, setStep] = useState<'prompt' | 'preview'>('prompt');
+  const [step, setStep] = useState<"prompt" | "preview">("prompt");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [userPrompt, setUserPrompt] = useState('');
-  const [enhancedCode, setEnhancedCode] = useState('');
+  const [userPrompt, setUserPrompt] = useState("");
+  const [enhancedCode, setEnhancedCode] = useState("");
 
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const result = await aiEnhanceTest(repositoryId, testId, userPrompt || undefined);
+      const result = await aiEnhanceTest(
+        repositoryId,
+        testId,
+        userPrompt || undefined,
+      );
 
       if (result.success && result.code) {
         setEnhancedCode(result.code);
-        setStep('preview');
-        toast.success('Enhanced code generated');
+        setStep("preview");
+        toast.success("Enhanced code generated");
       } else {
-        toast.error(result.error || 'Failed to enhance test');
+        toast.error(result.error || "Failed to enhance test");
       }
     } catch (_error) {
-      toast.error('Failed to enhance test');
+      toast.error("Failed to enhance test");
     } finally {
       setIsGenerating(false);
     }
@@ -64,16 +68,20 @@ export function AIEnhanceTestDialog({
   const handleRegenerate = async () => {
     setIsGenerating(true);
     try {
-      const result = await aiEnhanceTest(repositoryId, testId, userPrompt || undefined);
+      const result = await aiEnhanceTest(
+        repositoryId,
+        testId,
+        userPrompt || undefined,
+      );
 
       if (result.success && result.code) {
         setEnhancedCode(result.code);
-        toast.success('Code regenerated');
+        toast.success("Code regenerated");
       } else {
-        toast.error(result.error || 'Failed to regenerate');
+        toast.error(result.error || "Failed to regenerate");
       }
     } catch (_error) {
-      toast.error('Failed to regenerate');
+      toast.error("Failed to regenerate");
     } finally {
       setIsGenerating(false);
     }
@@ -85,23 +93,23 @@ export function AIEnhanceTestDialog({
       const result = await updateTestCode(testId, enhancedCode);
 
       if (result.success) {
-        toast.success('Test code updated');
+        toast.success("Test code updated");
         onEnhanced?.();
         handleClose();
       } else {
-        toast.error(result.error || 'Failed to save');
+        toast.error(result.error || "Failed to save");
       }
     } catch (_error) {
-      toast.error('Failed to save');
+      toast.error("Failed to save");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleClose = () => {
-    setStep('prompt');
-    setUserPrompt('');
-    setEnhancedCode('');
+    setStep("prompt");
+    setUserPrompt("");
+    setEnhancedCode("");
     onOpenChange(false);
   };
 
@@ -114,13 +122,13 @@ export function AIEnhanceTestDialog({
             Enhance Test with AI
           </DialogTitle>
           <DialogDescription>
-            {step === 'prompt'
+            {step === "prompt"
               ? `Improve "${testName}" with additional assertions, better selectors, and edge case handling`
-              : 'Review and edit the enhanced code'}
+              : "Review and edit the enhanced code"}
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'prompt' ? (
+        {step === "prompt" ? (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Current Code</Label>
@@ -128,7 +136,9 @@ export function AIEnhanceTestDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="prompt">Enhancement Instructions (Optional)</Label>
+              <Label htmlFor="prompt">
+                Enhancement Instructions (Optional)
+              </Label>
               <Textarea
                 id="prompt"
                 value={userPrompt}
@@ -137,7 +147,8 @@ export function AIEnhanceTestDialog({
                 rows={3}
               />
               <p className="text-xs text-muted-foreground">
-                Leave empty for general improvements (more assertions, better waits, edge cases)
+                Leave empty for general improvements (more assertions, better
+                waits, edge cases)
               </p>
             </div>
           </div>
@@ -171,7 +182,7 @@ export function AIEnhanceTestDialog({
         )}
 
         <DialogFooter>
-          {step === 'prompt' ? (
+          {step === "prompt" ? (
             <>
               <Button variant="outline" onClick={handleClose}>
                 Cancel
@@ -187,7 +198,7 @@ export function AIEnhanceTestDialog({
             </>
           ) : (
             <>
-              <Button variant="outline" onClick={() => setStep('prompt')}>
+              <Button variant="outline" onClick={() => setStep("prompt")}>
                 Back
               </Button>
               <Button onClick={handleSave} disabled={isSaving}>

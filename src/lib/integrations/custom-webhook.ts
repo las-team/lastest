@@ -1,8 +1,8 @@
-import type { BuildStatus } from '@/lib/db/schema';
+import type { BuildStatus } from "@/lib/db/schema";
 
 export interface CustomWebhookConfig {
   url: string;
-  method: 'POST' | 'PUT';
+  method: "POST" | "PUT";
   headers?: Record<string, string>;
 }
 
@@ -20,9 +20,9 @@ export interface CustomWebhookNotification {
 }
 
 export interface CustomWebhookPayload {
-  event: 'build.completed';
+  event: "build.completed";
   buildId: string;
-  status: 'safe' | 'needs_review' | 'blocked';
+  status: "safe" | "needs_review" | "blocked";
   totalTests: number;
   passedCount: number;
   failedCount: number;
@@ -34,25 +34,29 @@ export interface CustomWebhookPayload {
   timestamp: string;
 }
 
-function mapStatusToPayload(status: BuildStatus): 'safe' | 'needs_review' | 'blocked' {
+function mapStatusToPayload(
+  status: BuildStatus,
+): "safe" | "needs_review" | "blocked" {
   switch (status) {
-    case 'safe_to_merge':
-      return 'safe';
-    case 'review_required':
-      return 'needs_review';
-    case 'blocked':
-      return 'blocked';
+    case "safe_to_merge":
+      return "safe";
+    case "review_required":
+      return "needs_review";
+    case "blocked":
+      return "blocked";
     default:
-      return 'needs_review';
+      return "needs_review";
   }
 }
 
 /**
  * Build the payload for custom webhook
  */
-export function buildWebhookPayload(notification: CustomWebhookNotification): CustomWebhookPayload {
+export function buildWebhookPayload(
+  notification: CustomWebhookNotification,
+): CustomWebhookPayload {
   return {
-    event: 'build.completed',
+    event: "build.completed",
     buildId: notification.buildId,
     status: mapStatusToPayload(notification.status),
     totalTests: notification.totalTests,
@@ -72,17 +76,17 @@ export function buildWebhookPayload(notification: CustomWebhookNotification): Cu
  */
 export function getPayloadPreview(): CustomWebhookPayload {
   return {
-    event: 'build.completed',
-    buildId: 'abc123-def456',
-    status: 'safe',
+    event: "build.completed",
+    buildId: "abc123-def456",
+    status: "safe",
     totalTests: 10,
     passedCount: 8,
     failedCount: 1,
     changesDetected: 1,
     flakyCount: 0,
-    gitBranch: 'main',
-    gitCommit: 'abc123',
-    buildUrl: 'https://example.com/builds/abc123-def456',
+    gitBranch: "main",
+    gitCommit: "abc123",
+    buildUrl: "https://example.com/builds/abc123-def456",
     timestamp: new Date().toISOString(),
   };
 }
@@ -92,7 +96,7 @@ export function getPayloadPreview(): CustomWebhookPayload {
  */
 export async function sendCustomWebhookNotification(
   config: CustomWebhookConfig,
-  notification: CustomWebhookNotification
+  notification: CustomWebhookNotification,
 ): Promise<{ success: boolean; error?: string }> {
   const payload = buildWebhookPayload(notification);
 
@@ -100,7 +104,7 @@ export async function sendCustomWebhookNotification(
     const response = await fetch(config.url, {
       method: config.method,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...config.headers,
       },
       body: JSON.stringify(payload),
@@ -108,14 +112,20 @@ export async function sendCustomWebhookNotification(
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Webhook failed: ${response.status} ${text}` };
+      return {
+        success: false,
+        error: `Webhook failed: ${response.status} ${text}`,
+      };
     }
 
     return { success: true };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error sending webhook',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error sending webhook",
     };
   }
 }
@@ -124,20 +134,20 @@ export async function sendCustomWebhookNotification(
  * Test custom webhook with a test payload
  */
 export async function testCustomWebhook(
-  config: CustomWebhookConfig
+  config: CustomWebhookConfig,
 ): Promise<{ success: boolean; statusCode?: number; error?: string }> {
   const testPayload: CustomWebhookPayload = {
-    event: 'build.completed',
-    buildId: 'test-webhook-verification',
-    status: 'safe',
+    event: "build.completed",
+    buildId: "test-webhook-verification",
+    status: "safe",
     totalTests: 1,
     passedCount: 1,
     failedCount: 0,
     changesDetected: 0,
     flakyCount: 0,
-    gitBranch: 'test',
-    gitCommit: 'test123',
-    buildUrl: 'https://example.com/test',
+    gitBranch: "test",
+    gitCommit: "test123",
+    buildUrl: "https://example.com/test",
     timestamp: new Date().toISOString(),
   };
 
@@ -145,7 +155,7 @@ export async function testCustomWebhook(
     const response = await fetch(config.url, {
       method: config.method,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...config.headers,
       },
       body: JSON.stringify(testPayload),
@@ -160,7 +170,10 @@ export async function testCustomWebhook(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error testing webhook',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error testing webhook",
     };
   }
 }

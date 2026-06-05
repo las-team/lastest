@@ -59,17 +59,28 @@
  *   DELETE /api/v1/functional-areas/:id - Soft-delete a functional area
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import * as queries from '@/lib/db/queries';
-import { createAndRunBuildCore } from '@/server/actions/builds';
-import { batchApproveDiffsCore, batchRejectDiffsCore, approveDiffCore, rejectDiffCore, approveAllDiffsCore, getDiffCore } from '@/lib/diff/core';
-import { awardScore } from '@/server/actions/gamification';
-import { getCurrentSession } from '@/lib/auth';
-import { startUrlDiff } from '@/server/actions/url-diff';
-import { captureUrl, loadCaptureFromDisk } from '@/lib/url-diff/capture';
-import { buildUrlDiff } from '@/lib/url-diff/engine';
-import { validateTargetUrl, SsrfBlockedError, extractSourceIp } from '@/lib/url-diff/ssrf';
-import { checkRateLimit } from '@/lib/url-diff/rate-limit';
+import { NextRequest, NextResponse } from "next/server";
+import * as queries from "@/lib/db/queries";
+import { createAndRunBuildCore } from "@/server/actions/builds";
+import {
+  batchApproveDiffsCore,
+  batchRejectDiffsCore,
+  approveDiffCore,
+  rejectDiffCore,
+  approveAllDiffsCore,
+  getDiffCore,
+} from "@/lib/diff/core";
+import { awardScore } from "@/server/actions/gamification";
+import { getCurrentSession } from "@/lib/auth";
+import { startUrlDiff } from "@/server/actions/url-diff";
+import { captureUrl, loadCaptureFromDisk } from "@/lib/url-diff/capture";
+import { buildUrlDiff } from "@/lib/url-diff/engine";
+import {
+  validateTargetUrl,
+  SsrfBlockedError,
+  extractSourceIp,
+} from "@/lib/url-diff/ssrf";
+import { checkRateLimit } from "@/lib/url-diff/rate-limit";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
@@ -82,18 +93,23 @@ async function verifyAuth(_request: NextRequest) {
 // (instead of opaque 500s). Server actions throw plain Errors with these
 // prefixes — see `src/lib/auth/session.ts`.
 function mapAuthError(error: unknown): NextResponse | null {
-  const message = error instanceof Error ? error.message : '';
-  if (message === 'Unauthorized') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Unauthorized") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (message.startsWith('Forbidden')) {
+  if (message.startsWith("Forbidden")) {
     return NextResponse.json({ error: message }, { status: 403 });
   }
   return null;
 }
 
 // Helper to parse slug (supports up to 4 levels: resource/id/subResource/action)
-function parseSlug(slug: string[]): { resource: string; id?: string; subResource?: string; action?: string } {
+function parseSlug(slug: string[]): {
+  resource: string;
+  id?: string;
+  subResource?: string;
+  action?: string;
+} {
   const [resource, id, subResource, action] = slug;
   return { resource, id, subResource, action };
 }
@@ -102,27 +118,33 @@ function parseSlug(slug: string[]): { resource: string; id?: string; subResource
 // slash) or `null` if invalid. The env_config layer trims again, but we
 // normalize here so the value persisted matches what GET returns.
 function normalizeBaseUrl(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    return trimmed.replace(/\/+$/, '');
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return trimmed.replace(/\/+$/, "");
   } catch {
     return null;
   }
 }
 
 // Helper to verify a repository belongs to the session's team
-async function verifyRepoOwnership(repoId: string, session: { team?: { id: string } | null }) {
+async function verifyRepoOwnership(
+  repoId: string,
+  session: { team?: { id: string } | null },
+) {
   const repo = await queries.getRepository(repoId);
   if (!repo || repo.teamId !== session.team?.id) return false;
   return true;
 }
 
 // Helper to verify a build belongs to the session's team (via test run → repo)
-async function verifyBuildOwnership(buildId: string, session: { team?: { id: string } | null }) {
+async function verifyBuildOwnership(
+  buildId: string,
+  session: { team?: { id: string } | null },
+) {
   const build = await queries.getBuild(buildId);
   if (!build) return false;
   if (build.testRunId) {
@@ -135,7 +157,10 @@ async function verifyBuildOwnership(buildId: string, session: { team?: { id: str
 }
 
 // Helper to verify a visual diff belongs to the session's team (via build)
-async function verifyDiffOwnership(diffId: string, session: { team?: { id: string } | null }) {
+async function verifyDiffOwnership(
+  diffId: string,
+  session: { team?: { id: string } | null },
+) {
   const diff = await queries.getVisualDiff(diffId);
   if (!diff) return false;
   return verifyBuildOwnership(diff.buildId, session);
@@ -147,7 +172,10 @@ async function verifyDiffOwnership(diffId: string, session: { team?: { id: strin
 // gate the secret material so a stolen cookie session can't trivially
 // exfiltrate every session in the team.
 type StorageStateRow = Awaited<ReturnType<typeof queries.getStorageState>>;
-function slimStorageState(state: NonNullable<StorageStateRow>, includeJson = false) {
+function slimStorageState(
+  state: NonNullable<StorageStateRow>,
+  includeJson = false,
+) {
   const { storageStateJson, ...rest } = state;
   return includeJson ? { ...rest, storageStateJson } : rest;
 }
@@ -155,7 +183,10 @@ function slimStorageState(state: NonNullable<StorageStateRow>, includeJson = fal
 // Verify a storage state belongs to the session's team (via its repository).
 // Team-wide rows (repositoryId === null) are refused for cross-tenant safety;
 // see requireStorageStateOwnership for the same reasoning.
-async function verifyStorageStateOwnership(stateId: string, session: { team?: { id: string } | null }) {
+async function verifyStorageStateOwnership(
+  stateId: string,
+  session: { team?: { id: string } | null },
+) {
   const state = await queries.getStorageState(stateId);
   if (!state || !state.repositoryId) return { ok: false, state: null } as const;
   if (!(await verifyRepoOwnership(state.repositoryId, session))) {
@@ -168,7 +199,10 @@ async function verifyStorageStateOwnership(stateId: string, session: { team?: { 
 // `ownerTeamId` (the team that published the share) and `repositoryId` (the
 // underlying repo) — we trust the team binding directly and don't fall back
 // to repo→team so a deleted repo can still be revoked.
-async function verifyShareOwnership(shareId: string, session: { team?: { id: string } | null }) {
+async function verifyShareOwnership(
+  shareId: string,
+  session: { team?: { id: string } | null },
+) {
   const share = await queries.getPublicShareById(shareId);
   if (!share) return { ok: false, share: null } as const;
   if (!session.team || share.ownerTeamId !== session.team.id) {
@@ -178,9 +212,13 @@ async function verifyShareOwnership(shareId: string, session: { team?: { id: str
 }
 
 // Verify a setup script belongs to the session's team (via its repository).
-async function verifySetupScriptOwnership(scriptId: string, session: { team?: { id: string } | null }) {
+async function verifySetupScriptOwnership(
+  scriptId: string,
+  session: { team?: { id: string } | null },
+) {
   const script = await queries.getSetupScript(scriptId);
-  if (!script || !script.repositoryId) return { ok: false, script: null } as const;
+  if (!script || !script.repositoryId)
+    return { ok: false, script: null } as const;
   if (!(await verifyRepoOwnership(script.repositoryId, session))) {
     return { ok: false, script: null } as const;
   }
@@ -192,52 +230,77 @@ async function verifySetupScriptOwnership(scriptId: string, session: { team?: { 
 // stuffing arbitrary keys (or wrong-typed values that crash the runner).
 // Unknown keys are dropped silently — easier on agents — and bad types
 // return an error so misuse fails loudly rather than persisting junk.
-function normalizePlaywrightOverrides(raw: unknown): { ok: true; value: Record<string, unknown> | null } | { ok: false; error: string } {
+function normalizePlaywrightOverrides(
+  raw: unknown,
+):
+  | { ok: true; value: Record<string, unknown> | null }
+  | { ok: false; error: string } {
   if (raw === null) return { ok: true, value: null };
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: 'playwrightOverrides must be an object or null' };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      ok: false,
+      error: "playwrightOverrides must be an object or null",
+    };
   }
   const r = raw as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   if (r.browser !== undefined) {
-    if (r.browser !== 'chromium' && r.browser !== 'firefox' && r.browser !== 'webkit') {
-      return { ok: false, error: 'browser must be "chromium" | "firefox" | "webkit"' };
+    if (
+      r.browser !== "chromium" &&
+      r.browser !== "firefox" &&
+      r.browser !== "webkit"
+    ) {
+      return {
+        ok: false,
+        error: 'browser must be "chromium" | "firefox" | "webkit"',
+      };
     }
     out.browser = r.browser;
   }
-  for (const key of ['navigationTimeout', 'actionTimeout', 'screenshotDelay', 'maxParallelTests', 'cursorPlaybackSpeed', 'selectorTimeoutMs'] as const) {
+  for (const key of [
+    "navigationTimeout",
+    "actionTimeout",
+    "screenshotDelay",
+    "maxParallelTests",
+    "cursorPlaybackSpeed",
+    "selectorTimeoutMs",
+  ] as const) {
     if (r[key] === undefined) continue;
-    if (typeof r[key] !== 'number' || !Number.isFinite(r[key]) || (r[key] as number) < 0) {
+    if (
+      typeof r[key] !== "number" ||
+      !Number.isFinite(r[key]) ||
+      (r[key] as number) < 0
+    ) {
       return { ok: false, error: `${key} must be a non-negative number` };
     }
     out[key] = r[key];
   }
-  for (const key of ['networkErrorMode', 'consoleErrorMode'] as const) {
+  for (const key of ["networkErrorMode", "consoleErrorMode"] as const) {
     if (r[key] === undefined) continue;
-    if (r[key] !== 'fail' && r[key] !== 'warn' && r[key] !== 'ignore') {
+    if (r[key] !== "fail" && r[key] !== "warn" && r[key] !== "ignore") {
       return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
     }
     out[key] = r[key];
   }
   if (r.acceptAnyCertificate !== undefined) {
-    if (typeof r.acceptAnyCertificate !== 'boolean') {
-      return { ok: false, error: 'acceptAnyCertificate must be boolean' };
+    if (typeof r.acceptAnyCertificate !== "boolean") {
+      return { ok: false, error: "acceptAnyCertificate must be boolean" };
     }
     out.acceptAnyCertificate = r.acceptAnyCertificate;
   }
   if (r.baseUrl !== undefined) {
-    if (typeof r.baseUrl !== 'string') {
-      return { ok: false, error: 'baseUrl must be a string' };
+    if (typeof r.baseUrl !== "string") {
+      return { ok: false, error: "baseUrl must be a string" };
     }
     // Allow empty string to clear; otherwise validate URL shape.
     if (r.baseUrl) {
       try {
         const u = new URL(r.baseUrl);
-        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-          return { ok: false, error: 'baseUrl must be http(s)' };
+        if (u.protocol !== "http:" && u.protocol !== "https:") {
+          return { ok: false, error: "baseUrl must be http(s)" };
         }
       } catch {
-        return { ok: false, error: 'baseUrl must be a valid URL' };
+        return { ok: false, error: "baseUrl must be a valid URL" };
       }
     }
     out.baseUrl = r.baseUrl;
@@ -249,55 +312,94 @@ function normalizePlaywrightOverrides(raw: unknown): { ok: true; value: Record<s
 // Only the runtime-relevant subset is accepted from the API — fields are
 // pre-validated so the agent can't insert garbage into the jsonb columns.
 // Unknown keys are dropped.
-function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return { ok: false, error: 'playwrightSettings must be an object' };
+function normalizePlaywrightSettingsPatch(
+  raw: unknown,
+): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: "playwrightSettings must be an object" };
   }
   const r = raw as Record<string, unknown>;
   const out: Record<string, unknown> = {};
 
   // Strings (enums)
   if (r.browser !== undefined) {
-    if (r.browser !== 'chromium' && r.browser !== 'firefox' && r.browser !== 'webkit') {
-      return { ok: false, error: 'browser must be "chromium" | "firefox" | "webkit"' };
+    if (
+      r.browser !== "chromium" &&
+      r.browser !== "firefox" &&
+      r.browser !== "webkit"
+    ) {
+      return {
+        ok: false,
+        error: 'browser must be "chromium" | "firefox" | "webkit"',
+      };
     }
     out.browser = r.browser;
   }
   if (r.headlessMode !== undefined) {
-    if (r.headlessMode !== 'true' && r.headlessMode !== 'false' && r.headlessMode !== 'shell') {
-      return { ok: false, error: 'headlessMode must be "true" | "false" | "shell"' };
+    if (
+      r.headlessMode !== "true" &&
+      r.headlessMode !== "false" &&
+      r.headlessMode !== "shell"
+    ) {
+      return {
+        ok: false,
+        error: 'headlessMode must be "true" | "false" | "shell"',
+      };
     }
     out.headlessMode = r.headlessMode;
   }
   if (r.defaultRecordingEngine !== undefined) {
-    if (r.defaultRecordingEngine !== 'lastest' && r.defaultRecordingEngine !== 'playwright-inspector') {
-      return { ok: false, error: 'defaultRecordingEngine must be "lastest" | "playwright-inspector"' };
+    if (
+      r.defaultRecordingEngine !== "lastest" &&
+      r.defaultRecordingEngine !== "playwright-inspector"
+    ) {
+      return {
+        ok: false,
+        error:
+          'defaultRecordingEngine must be "lastest" | "playwright-inspector"',
+      };
     }
     out.defaultRecordingEngine = r.defaultRecordingEngine;
   }
-  for (const key of ['networkErrorMode', 'consoleErrorMode'] as const) {
+  for (const key of ["networkErrorMode", "consoleErrorMode"] as const) {
     if (r[key] === undefined) continue;
-    if (r[key] !== 'fail' && r[key] !== 'warn' && r[key] !== 'ignore') {
+    if (r[key] !== "fail" && r[key] !== "warn" && r[key] !== "ignore") {
       return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
     }
     out[key] = r[key];
   }
   if (r.customAttributeName !== undefined) {
-    if (r.customAttributeName !== null && typeof r.customAttributeName !== 'string') {
-      return { ok: false, error: 'customAttributeName must be a string or null' };
+    if (
+      r.customAttributeName !== null &&
+      typeof r.customAttributeName !== "string"
+    ) {
+      return {
+        ok: false,
+        error: "customAttributeName must be a string or null",
+      };
     }
     out.customAttributeName = r.customAttributeName;
   }
   if (r.userAgentOverride !== undefined) {
-    if (r.userAgentOverride !== null && typeof r.userAgentOverride !== 'string') {
-      return { ok: false, error: 'userAgentOverride must be a string or null' };
+    if (
+      r.userAgentOverride !== null &&
+      typeof r.userAgentOverride !== "string"
+    ) {
+      return { ok: false, error: "userAgentOverride must be a string or null" };
     }
-    out.userAgentOverride = r.userAgentOverride === '' ? null : r.userAgentOverride;
+    out.userAgentOverride =
+      r.userAgentOverride === "" ? null : r.userAgentOverride;
   }
   if (r.consoleErrorIgnoreHosts !== undefined) {
     if (r.consoleErrorIgnoreHosts !== null) {
-      if (!Array.isArray(r.consoleErrorIgnoreHosts) || r.consoleErrorIgnoreHosts.some((s) => typeof s !== 'string')) {
-        return { ok: false, error: 'consoleErrorIgnoreHosts must be an array of strings or null' };
+      if (
+        !Array.isArray(r.consoleErrorIgnoreHosts) ||
+        r.consoleErrorIgnoreHosts.some((s) => typeof s !== "string")
+      ) {
+        return {
+          ok: false,
+          error: "consoleErrorIgnoreHosts must be an array of strings or null",
+        };
       }
     }
     out.consoleErrorIgnoreHosts = r.consoleErrorIgnoreHosts;
@@ -305,12 +407,26 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
 
   // Numbers (non-negative)
   for (const key of [
-    'viewportWidth', 'viewportHeight', 'navigationTimeout', 'actionTimeout', 'selectorTimeoutMs',
-    'cursorFPS', 'cursorPlaybackSpeed', 'screenshotDelay', 'maxParallelTests',
-    'maxParallelEBs', 'ebPoolMax', 'ebIdleTTLSeconds', 'autoRetryCount',
+    "viewportWidth",
+    "viewportHeight",
+    "navigationTimeout",
+    "actionTimeout",
+    "selectorTimeoutMs",
+    "cursorFPS",
+    "cursorPlaybackSpeed",
+    "screenshotDelay",
+    "maxParallelTests",
+    "maxParallelEBs",
+    "ebPoolMax",
+    "ebIdleTTLSeconds",
+    "autoRetryCount",
   ] as const) {
     if (r[key] === undefined) continue;
-    if (typeof r[key] !== 'number' || !Number.isFinite(r[key]) || (r[key] as number) < 0) {
+    if (
+      typeof r[key] !== "number" ||
+      !Number.isFinite(r[key]) ||
+      (r[key] as number) < 0
+    ) {
       return { ok: false, error: `${key} must be a non-negative number` };
     }
     out[key] = r[key];
@@ -318,12 +434,20 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
 
   // Booleans
   for (const key of [
-    'lockViewportToRecording', 'pointerGestures', 'freezeAnimations', 'enableVideoRecording',
-    'acceptAnyCertificate', 'ignoreExternalNetworkErrors', 'grantClipboardAccess',
-    'acceptDownloads', 'enableNetworkInterception', 'enableDomDiff', 'enableA11y',
+    "lockViewportToRecording",
+    "pointerGestures",
+    "freezeAnimations",
+    "enableVideoRecording",
+    "acceptAnyCertificate",
+    "ignoreExternalNetworkErrors",
+    "grantClipboardAccess",
+    "acceptDownloads",
+    "enableNetworkInterception",
+    "enableDomDiff",
+    "enableA11y",
   ] as const) {
     if (r[key] === undefined) continue;
-    if (typeof r[key] !== 'boolean') {
+    if (typeof r[key] !== "boolean") {
       return { ok: false, error: `${key} must be a boolean` };
     }
     out[key] = r[key];
@@ -331,17 +455,34 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
 
   // Arrays
   if (r.browsers !== undefined) {
-    if (!Array.isArray(r.browsers) || r.browsers.some(b => b !== 'chromium' && b !== 'firefox' && b !== 'webkit')) {
-      return { ok: false, error: 'browsers must be an array of "chromium" | "firefox" | "webkit"' };
+    if (
+      !Array.isArray(r.browsers) ||
+      r.browsers.some(
+        (b) => b !== "chromium" && b !== "firefox" && b !== "webkit",
+      )
+    ) {
+      return {
+        ok: false,
+        error: 'browsers must be an array of "chromium" | "firefox" | "webkit"',
+      };
     }
     if (r.browsers.length === 0) {
-      return { ok: false, error: 'browsers must contain at least one browser' };
+      return { ok: false, error: "browsers must contain at least one browser" };
     }
     out.browsers = r.browsers;
   }
   if (r.enabledRecordingEngines !== undefined) {
-    if (!Array.isArray(r.enabledRecordingEngines) || r.enabledRecordingEngines.some(e => e !== 'lastest' && e !== 'playwright-inspector')) {
-      return { ok: false, error: 'enabledRecordingEngines must be an array of "lastest" | "playwright-inspector"' };
+    if (
+      !Array.isArray(r.enabledRecordingEngines) ||
+      r.enabledRecordingEngines.some(
+        (e) => e !== "lastest" && e !== "playwright-inspector",
+      )
+    ) {
+      return {
+        ok: false,
+        error:
+          'enabledRecordingEngines must be an array of "lastest" | "playwright-inspector"',
+      };
     }
     out.enabledRecordingEngines = r.enabledRecordingEngines;
   }
@@ -349,20 +490,23 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
   // Pass-through jsonb (stabilization, selectorPriority) — accept as-is if
   // shaped like an object/array. Deep validation lives in the settings UI.
   if (r.stabilization !== undefined) {
-    if (r.stabilization !== null && (typeof r.stabilization !== 'object' || Array.isArray(r.stabilization))) {
-      return { ok: false, error: 'stabilization must be an object or null' };
+    if (
+      r.stabilization !== null &&
+      (typeof r.stabilization !== "object" || Array.isArray(r.stabilization))
+    ) {
+      return { ok: false, error: "stabilization must be an object or null" };
     }
     out.stabilization = r.stabilization;
   }
   if (r.selectorPriority !== undefined) {
     if (!Array.isArray(r.selectorPriority)) {
-      return { ok: false, error: 'selectorPriority must be an array' };
+      return { ok: false, error: "selectorPriority must be an array" };
     }
     out.selectorPriority = r.selectorPriority;
   }
 
   if (Object.keys(out).length === 0) {
-    return { ok: false, error: 'No recognized fields to update' };
+    return { ok: false, error: "No recognized fields to update" };
   }
   return { ok: true, value: out };
 }
@@ -376,11 +520,11 @@ const MAX_SETUP_SCRIPT_CODE_BYTES = 128 * 1024;
 // GET handler
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string[] }> }
+  { params }: { params: Promise<{ slug: string[] }> },
 ) {
   const session = await verifyAuth(request);
   if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { slug } = await params;
@@ -388,16 +532,22 @@ export async function GET(
 
   try {
     // Health check
-    if (resource === 'health') {
-      return NextResponse.json({ ok: true, timestamp: new Date().toISOString() });
+    if (resource === "health") {
+      return NextResponse.json({
+        ok: true,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     // Repositories
-    if (resource === 'repos') {
+    if (resource === "repos") {
       if (!id) {
         // GET /api/v1/repos - List all repos (each enriched with its env baseUrl)
         if (!session.team) {
-          return NextResponse.json({ error: 'No team access' }, { status: 403 });
+          return NextResponse.json(
+            { error: "No team access" },
+            { status: 403 },
+          );
         }
         const repos = await queries.getRepositoriesByTeam(session.team.id);
         const enriched = await Promise.all(
@@ -412,76 +562,96 @@ export async function GET(
       // GET /api/v1/repos/:id
       const repo = await queries.getRepository(id);
       if (!repo || repo.teamId !== session.team?.id) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
 
       // Sub-resources
-      if (subResource === 'functional-areas') {
+      if (subResource === "functional-areas") {
         const areas = await queries.getFunctionalAreasByRepo(id);
         return NextResponse.json(areas);
       }
 
-      if (subResource === 'tests') {
+      if (subResource === "tests") {
         const tests = await queries.getTestsByRepo(id);
         // Enrich with last run status
         const enrichedTests = await enrichTestsWithStatus(tests);
         return NextResponse.json(enrichedTests);
       }
 
-      if (subResource === 'builds') {
-        const rawLimit = parseInt(request.nextUrl.searchParams.get('limit') || '10');
-        const limit = Math.min(Math.max(Number.isNaN(rawLimit) ? 10 : rawLimit, 1), 100);
+      if (subResource === "builds") {
+        const rawLimit = parseInt(
+          request.nextUrl.searchParams.get("limit") || "10",
+        );
+        const limit = Math.min(
+          Math.max(Number.isNaN(rawLimit) ? 10 : rawLimit, 1),
+          100,
+        );
         const builds = await queries.getBuildsByRepo(id, limit);
         return NextResponse.json(builds);
       }
 
-      if (subResource === 'playwright-settings') {
+      if (subResource === "playwright-settings") {
         const settings = await queries.getPlaywrightSettings(id);
         return NextResponse.json(settings);
       }
 
-      if (subResource === 'storage-states') {
+      if (subResource === "storage-states") {
         const states = await queries.getStorageStates(id);
-        return NextResponse.json(states.map(s => slimStorageState(s)));
+        return NextResponse.json(states.map((s) => slimStorageState(s)));
       }
 
-      if (subResource === 'setup-scripts') {
+      if (subResource === "setup-scripts") {
         const scripts = await queries.getSetupScripts(id);
         return NextResponse.json(scripts);
       }
 
-      if (subResource === 'coverage') {
+      if (subResource === "coverage") {
         const routeCoverage = await queries.getRouteCoverageStats(id);
         const areas = await queries.getFunctionalAreasByRepo(id);
         const tests = await queries.getTestsByRepo(id);
-        const testedAreaIds = new Set(tests.filter(t => t.functionalAreaId).map(t => t.functionalAreaId));
+        const testedAreaIds = new Set(
+          tests
+            .filter((t) => t.functionalAreaId)
+            .map((t) => t.functionalAreaId),
+        );
         const areaCoverage = {
           total: areas.length,
-          tested: areas.filter(a => testedAreaIds.has(a.id)).length,
-          percentage: areas.length > 0 ? Math.round((areas.filter(a => testedAreaIds.has(a.id)).length / areas.length) * 100) : 0,
+          tested: areas.filter((a) => testedAreaIds.has(a.id)).length,
+          percentage:
+            areas.length > 0
+              ? Math.round(
+                  (areas.filter((a) => testedAreaIds.has(a.id)).length /
+                    areas.length) *
+                    100,
+                )
+              : 0,
         };
         return NextResponse.json({ routeCoverage, areaCoverage });
       }
 
       // GET /api/v1/repos/:id/export — full export for migration
-      if (subResource === 'export') {
+      if (subResource === "export") {
         const areas = await queries.getFunctionalAreasByRepo(id);
-        const areaMap = new Map(areas.map(a => [a.id, a]));
+        const areaMap = new Map(areas.map((a) => [a.id, a]));
 
-        const exportedAreas = areas.map(a => ({
+        const exportedAreas = areas.map((a) => ({
           name: a.name,
-          parentName: a.parentId ? areaMap.get(a.parentId)?.name ?? null : null,
+          parentName: a.parentId
+            ? (areaMap.get(a.parentId)?.name ?? null)
+            : null,
           orderIndex: a.orderIndex,
           isRouteFolder: a.isRouteFolder,
           agentPlan: a.agentPlan,
         }));
 
         const repoTests = await queries.getTestsByRepo(id);
-        const exportedTests = repoTests.map(t => ({
+        const exportedTests = repoTests.map((t) => ({
           name: t.name,
           code: t.code,
           targetUrl: t.targetUrl,
-          functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId)?.name ?? null : null,
+          functionalAreaName: t.functionalAreaId
+            ? (areaMap.get(t.functionalAreaId)?.name ?? null)
+            : null,
           executionMode: t.executionMode,
           assertions: t.assertions,
           setupOverrides: t.setupOverrides,
@@ -495,7 +665,10 @@ export async function GET(
           isPlaceholder: t.isPlaceholder,
         }));
 
-        return NextResponse.json({ functionalAreas: exportedAreas, tests: exportedTests });
+        return NextResponse.json({
+          functionalAreas: exportedAreas,
+          tests: exportedTests,
+        });
       }
 
       const env = await queries.getEnvironmentConfig(id);
@@ -503,19 +676,19 @@ export async function GET(
     }
 
     // Functional areas
-    if (resource === 'functional-areas' && id) {
+    if (resource === "functional-areas" && id) {
       const area = await queries.getFunctionalArea(id);
       if (!area) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Verify team ownership via repository
       if (area.repositoryId) {
         const areaRepo = await queries.getRepository(area.repositoryId);
         if (!areaRepo || areaRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
-      if (subResource === 'tests') {
+      if (subResource === "tests") {
         const tests = await queries.getTestsByFunctionalArea(id);
         const enrichedTests = await enrichTestsWithStatus(tests);
         return NextResponse.json(enrichedTests);
@@ -524,19 +697,19 @@ export async function GET(
     }
 
     // Tests
-    if (resource === 'tests' && id) {
+    if (resource === "tests" && id) {
       const test = await queries.getTest(id);
       if (!test) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Verify team ownership via repository
       if (test.repositoryId) {
         const testRepo = await queries.getRepository(test.repositoryId);
         if (!testRepo || testRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
-      if (subResource === 'shares') {
+      if (subResource === "shares") {
         const shares = await queries.listPublicSharesForTest(id);
         return NextResponse.json(shares);
       }
@@ -545,49 +718,55 @@ export async function GET(
     }
 
     // Public shares: GET /api/v1/shares/:id
-    if (resource === 'shares' && id) {
+    if (resource === "shares" && id) {
       const { ok, share } = await verifyShareOwnership(id, session);
       if (!ok || !share) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json(share);
     }
 
     // Storage states: GET /api/v1/storage-states/:id (?includeJson=true to
     // get the cookie/origin blob — bearer-token only).
-    if (resource === 'storage-states' && id) {
+    if (resource === "storage-states" && id) {
       const { ok, state } = await verifyStorageStateOwnership(id, session);
       if (!ok || !state) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const wantJson = request.nextUrl.searchParams.get('includeJson') === 'true';
-      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      const wantJson =
+        request.nextUrl.searchParams.get("includeJson") === "true";
+      const isBearer = !!request.headers
+        .get("authorization")
+        ?.startsWith("Bearer ");
       if (wantJson && !isBearer) {
-        return NextResponse.json({ error: 'includeJson requires bearer-token auth' }, { status: 403 });
+        return NextResponse.json(
+          { error: "includeJson requires bearer-token auth" },
+          { status: 403 },
+        );
       }
       return NextResponse.json(slimStorageState(state, wantJson));
     }
 
     // Setup scripts: GET /api/v1/setup-scripts/:id
-    if (resource === 'setup-scripts' && id) {
+    if (resource === "setup-scripts" && id) {
       const { ok, script } = await verifySetupScriptOwnership(id, session);
       if (!ok || !script) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json(script);
     }
 
     // Test runs
-    if (resource === 'runs' && id) {
+    if (resource === "runs" && id) {
       const run = await queries.getTestRun(id);
       if (!run) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Verify team ownership via repository
       if (run.repositoryId) {
         const runRepo = await queries.getRepository(run.repositoryId);
         if (!runRepo || runRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const results = await queries.getTestResultsByRun(id);
@@ -595,75 +774,96 @@ export async function GET(
     }
 
     // Visual diffs
-    if (resource === 'diffs' && id && !subResource) {
+    if (resource === "diffs" && id && !subResource) {
       // Verify team ownership via diff → build → test run → repo
       if (!(await verifyDiffOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const diff = await getDiffCore(id);
       if (!diff) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json(diff);
     }
 
     // Background jobs — filter to jobs belonging to the session's team
-    if (resource === 'jobs') {
-      if (!id || id === 'active') {
-        const activeJobs = await queries.getActiveBackgroundJobs() as Array<Record<string, unknown>>;
-        const teamRepos = session.team ? await queries.getRepositoriesByTeam(session.team.id) : [];
-        const teamRepoIds = new Set(teamRepos.map(r => r.id));
-        const filtered = activeJobs.filter(j => !j.repositoryId || teamRepoIds.has(j.repositoryId as string));
+    if (resource === "jobs") {
+      if (!id || id === "active") {
+        const activeJobs = (await queries.getActiveBackgroundJobs()) as Array<
+          Record<string, unknown>
+        >;
+        const teamRepos = session.team
+          ? await queries.getRepositoriesByTeam(session.team.id)
+          : [];
+        const teamRepoIds = new Set(teamRepos.map((r) => r.id));
+        const filtered = activeJobs.filter(
+          (j) => !j.repositoryId || teamRepoIds.has(j.repositoryId as string),
+        );
         return NextResponse.json(filtered);
       }
-      const job = await queries.getBackgroundJob(id) as Record<string, unknown> | null;
+      const job = (await queries.getBackgroundJob(id)) as Record<
+        string,
+        unknown
+      > | null;
       if (!job) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Verify team ownership if job has a repositoryId
       if (job.repositoryId) {
         if (!(await verifyRepoOwnership(job.repositoryId as string, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       return NextResponse.json(job);
     }
 
     // Builds
-    if (resource === 'builds' && id) {
+    if (resource === "builds" && id) {
       // Verify-phase routes (v1.14+)
       // GET /api/v1/builds/:id/change-map
-      if (subResource === 'change-map') {
+      if (subResource === "change-map") {
         if (!(await verifyBuildOwnership(id, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         const cached = await queries.getBuildChangeMap(id);
         if (cached) return NextResponse.json(cached);
         // Lazy compute on first request
-        const { computeChangeMap } = await import('@/server/actions/change-map');
+        const { computeChangeMap } =
+          await import("@/server/actions/change-map");
         const computed = await computeChangeMap(id).catch(() => null);
-        return NextResponse.json(computed ?? { error: 'Unable to compute change map' });
+        return NextResponse.json(
+          computed ?? { error: "Unable to compute change map" },
+        );
       }
 
       // GET /api/v1/builds/:id/verify — Change Map + step comparisons + verdict counts
       // + visual diff thumbnail URLs (C4) + per-test source/setup/storage map (C6).
-      if (subResource === 'verify') {
+      if (subResource === "verify") {
         if (!(await verifyBuildOwnership(id, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
-        const [changeMap, stepComparisons, counts, layerFeedback, visualDiffs] = await Promise.all([
-          queries.getBuildChangeMap(id),
-          queries.getStepComparisonsByBuild(id),
-          queries.countStepComparisonVerdicts(id),
-          queries.getLayerFeedbackByBuild(id),
-          queries.getVisualDiffsByBuild(id),
-        ]);
+        const [changeMap, stepComparisons, counts, layerFeedback, visualDiffs] =
+          await Promise.all([
+            queries.getBuildChangeMap(id),
+            queries.getStepComparisonsByBuild(id),
+            queries.countStepComparisonVerdicts(id),
+            queries.getLayerFeedbackByBuild(id),
+            queries.getVisualDiffsByBuild(id),
+          ]);
         // Build a {diffId → {baseline,current,diff} URL} map so each step
         // comparison's `visualDiffId` resolves to clickable image URLs without
         // an extra round-trip. URLs use `/api/media/<path>` — same bearer
         // token the MCP server already holds.
-        const mediaUrl = (p: string | null | undefined) => p ? `/api/media/${p.replace(/^\/+/, '')}` : null;
-        const visualUrlsByDiffId: Record<string, { baselineUrl: string | null; currentUrl: string | null; diffUrl: string | null }> = {};
+        const mediaUrl = (p: string | null | undefined) =>
+          p ? `/api/media/${p.replace(/^\/+/, "")}` : null;
+        const visualUrlsByDiffId: Record<
+          string,
+          {
+            baselineUrl: string | null;
+            currentUrl: string | null;
+            diffUrl: string | null;
+          }
+        > = {};
         for (const d of visualDiffs) {
           visualUrlsByDiffId[d.id] = {
             baselineUrl: mediaUrl(d.baselineImagePath),
@@ -674,11 +874,32 @@ export async function GET(
         // Per-test source / setup / storage resolution so the agent can read
         // the test code + how the test was wired without a chain of follow-up
         // calls. Keyed by testId — multiple step comparisons share one entry.
-        const distinctTestIds = Array.from(new Set(stepComparisons.map((s) => s.testId).filter((t): t is string => !!t)));
-        const testRows = distinctTestIds.length > 0
-          ? await Promise.all(distinctTestIds.map((tid) => queries.getTest(tid).catch(() => null)))
-          : [];
-        const testsByTestId: Record<string, { name: string; code: string; targetUrl: string | null; setupTestId: string | null; setupScriptId: string | null; storageStateId: string | null }> = {};
+        const distinctTestIds = Array.from(
+          new Set(
+            stepComparisons
+              .map((s) => s.testId)
+              .filter((t): t is string => !!t),
+          ),
+        );
+        const testRows =
+          distinctTestIds.length > 0
+            ? await Promise.all(
+                distinctTestIds.map((tid) =>
+                  queries.getTest(tid).catch(() => null),
+                ),
+              )
+            : [];
+        const testsByTestId: Record<
+          string,
+          {
+            name: string;
+            code: string;
+            targetUrl: string | null;
+            setupTestId: string | null;
+            setupScriptId: string | null;
+            storageStateId: string | null;
+          }
+        > = {};
         for (const t of testRows) {
           if (!t) continue;
           // storageStateId is sourced from a default_setup_step row if the
@@ -687,7 +908,9 @@ export async function GET(
           // hints; callers can use lastest_get_test for the full setup chain.
           const overrides = t.setupOverrides;
           const extraStorageStateStep = Array.isArray(overrides?.extraSteps)
-            ? overrides.extraSteps.find((s) => s.stepType === 'storage_state' && s.storageStateId)
+            ? overrides.extraSteps.find(
+                (s) => s.stepType === "storage_state" && s.storageStateId,
+              )
             : undefined;
           testsByTestId[t.id] = {
             name: t.name,
@@ -710,34 +933,37 @@ export async function GET(
       }
 
       // GET /api/v1/builds/:id/shares — list public shares anchored on this build
-      if (subResource === 'shares') {
+      if (subResource === "shares") {
         if (!(await verifyBuildOwnership(id, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         const shares = await queries.listPublicSharesForBuild(id);
         return NextResponse.json(shares);
       }
 
       // GET /api/v1/builds/:id/demo-notes — AI UI/UX summary from a demo run
-      if (subResource === 'demo-notes') {
+      if (subResource === "demo-notes") {
         if (!(await verifyBuildOwnership(id, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         const notes = await queries.getBuildDemoNotes(id);
-        if (!notes) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        if (!notes)
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         return NextResponse.json(notes);
       }
 
       const build = await queries.getBuild(id);
       if (!build) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+      const testRun = build.testRunId
+        ? await queries.getTestRun(build.testRunId)
+        : null;
       // Verify team ownership via repository on the test run
       if (testRun?.repositoryId) {
         const buildRepo = await queries.getRepository(testRun.repositoryId);
         if (!buildRepo || buildRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const diffs = await queries.getVisualDiffsWithTestStatus(id);
@@ -746,10 +972,20 @@ export async function GET(
       // commentary, etc.) and saturate an agent's context. Callers that need
       // those payloads pass `?full=true`, or fetch per-diff with
       // GET /api/v1/diffs/:id (which always returns the full row).
-      const full = request.nextUrl.searchParams.get('full') === 'true';
+      const full = request.nextUrl.searchParams.get("full") === "true";
       const responseDiffs = full
         ? diffs
-        : diffs.map(({ a11yViolations: _a, consoleErrors: _c, networkRequests: _n, downloads: _d, aiAnalysis: _ai, metadata: _m, ...slim }) => slim);
+        : diffs.map(
+            ({
+              a11yViolations: _a,
+              consoleErrors: _c,
+              networkRequests: _n,
+              downloads: _d,
+              aiAnalysis: _ai,
+              metadata: _m,
+              ...slim
+            }) => slim,
+          );
       return NextResponse.json({
         ...build,
         gitBranch: testRun?.gitBranch,
@@ -760,13 +996,13 @@ export async function GET(
     }
 
     // QuickStart agent session: GET /api/v1/quickstart/:sessionId
-    if (resource === 'quickstart' && id) {
+    if (resource === "quickstart" && id) {
       const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== 'quickstart') {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      if (!sessionRow || sessionRow.kind !== "quickstart") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json({
         id: sessionRow.id,
@@ -790,10 +1026,12 @@ export async function GET(
           publicScout: sessionRow.metadata.publicScout
             ? {
                 classification: sessionRow.metadata.publicScout.classification,
-                authAutomatable: sessionRow.metadata.publicScout.authAutomatable,
+                authAutomatable:
+                  sessionRow.metadata.publicScout.authAutomatable,
                 tagline: sessionRow.metadata.publicScout.tagline,
                 concept: sessionRow.metadata.publicScout.concept,
-                businessInteraction: sessionRow.metadata.publicScout.businessInteraction,
+                businessInteraction:
+                  sessionRow.metadata.publicScout.businessInteraction,
               }
             : undefined,
           authSetup: sessionRow.metadata.authSetup,
@@ -812,14 +1050,14 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
     if (mapped) return mapped;
-    console.error('[API v1] GET error:', error);
+    console.error("[API v1] GET error:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }
@@ -827,11 +1065,11 @@ export async function GET(
 // POST handler
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string[] }> }
+  { params }: { params: Promise<{ slug: string[] }> },
 ) {
   const session = await verifyAuth(request);
   if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { slug } = await params;
@@ -840,54 +1078,113 @@ export async function POST(
   try {
     // Create storage state: POST /api/v1/repos/:id/storage-states
     // Body: { name, storageStateJson }
-    if (resource === 'repos' && id && subResource === 'storage-states') {
+    if (resource === "repos" && id && subResource === "storage-states") {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json();
-      const { name, storageStateJson, authFlavor, tokenLocations, firebaseApiKey, expiresAt } = body;
-      if (!name || typeof name !== 'string' || !name.trim()) {
-        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      const {
+        name,
+        storageStateJson,
+        authFlavor,
+        tokenLocations,
+        firebaseApiKey,
+        expiresAt,
+      } = body;
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return NextResponse.json({ error: "name required" }, { status: 400 });
       }
-      if (!storageStateJson || typeof storageStateJson !== 'string') {
-        return NextResponse.json({ error: 'storageStateJson required' }, { status: 400 });
+      if (!storageStateJson || typeof storageStateJson !== "string") {
+        return NextResponse.json(
+          { error: "storageStateJson required" },
+          { status: 400 },
+        );
       }
-      if (Buffer.byteLength(storageStateJson, 'utf8') > MAX_STORAGE_STATE_JSON_BYTES) {
-        return NextResponse.json({ error: `storageStateJson exceeds ${MAX_STORAGE_STATE_JSON_BYTES} bytes` }, { status: 413 });
+      if (
+        Buffer.byteLength(storageStateJson, "utf8") >
+        MAX_STORAGE_STATE_JSON_BYTES
+      ) {
+        return NextResponse.json(
+          {
+            error: `storageStateJson exceeds ${MAX_STORAGE_STATE_JSON_BYTES} bytes`,
+          },
+          { status: 413 },
+        );
       }
       let parsed: { cookies?: unknown; origins?: unknown };
       try {
         parsed = JSON.parse(storageStateJson);
       } catch {
-        return NextResponse.json({ error: 'storageStateJson must be valid JSON' }, { status: 400 });
+        return NextResponse.json(
+          { error: "storageStateJson must be valid JSON" },
+          { status: 400 },
+        );
       }
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return NextResponse.json({ error: 'storageStateJson must be a Playwright storageState object' }, { status: 400 });
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        return NextResponse.json(
+          {
+            error: "storageStateJson must be a Playwright storageState object",
+          },
+          { status: 400 },
+        );
       }
       if (parsed.cookies !== undefined && !Array.isArray(parsed.cookies)) {
-        return NextResponse.json({ error: 'storageStateJson.cookies must be an array' }, { status: 400 });
+        return NextResponse.json(
+          { error: "storageStateJson.cookies must be an array" },
+          { status: 400 },
+        );
       }
       if (parsed.origins !== undefined && !Array.isArray(parsed.origins)) {
-        return NextResponse.json({ error: 'storageStateJson.origins must be an array' }, { status: 400 });
+        return NextResponse.json(
+          { error: "storageStateJson.origins must be an array" },
+          { status: 400 },
+        );
       }
       // Validate optional provenance metadata. Reject malformed values, but
       // accept absence — backwards-compatible with pre-2026-05-30 callers.
-      if (authFlavor !== undefined && authFlavor !== null && typeof authFlavor !== 'string') {
-        return NextResponse.json({ error: 'authFlavor must be a string' }, { status: 400 });
+      if (
+        authFlavor !== undefined &&
+        authFlavor !== null &&
+        typeof authFlavor !== "string"
+      ) {
+        return NextResponse.json(
+          { error: "authFlavor must be a string" },
+          { status: 400 },
+        );
       }
       if (tokenLocations !== undefined && tokenLocations !== null) {
-        if (!Array.isArray(tokenLocations) || tokenLocations.some((s: unknown) => typeof s !== 'string')) {
-          return NextResponse.json({ error: 'tokenLocations must be an array of strings' }, { status: 400 });
+        if (
+          !Array.isArray(tokenLocations) ||
+          tokenLocations.some((s: unknown) => typeof s !== "string")
+        ) {
+          return NextResponse.json(
+            { error: "tokenLocations must be an array of strings" },
+            { status: 400 },
+          );
         }
       }
-      if (firebaseApiKey !== undefined && firebaseApiKey !== null && typeof firebaseApiKey !== 'string') {
-        return NextResponse.json({ error: 'firebaseApiKey must be a string' }, { status: 400 });
+      if (
+        firebaseApiKey !== undefined &&
+        firebaseApiKey !== null &&
+        typeof firebaseApiKey !== "string"
+      ) {
+        return NextResponse.json(
+          { error: "firebaseApiKey must be a string" },
+          { status: 400 },
+        );
       }
       let expiresAtDate: Date | null = null;
       if (expiresAt !== undefined && expiresAt !== null) {
         const d = new Date(expiresAt as string | number);
         if (Number.isNaN(d.getTime())) {
-          return NextResponse.json({ error: 'expiresAt must be an ISO date string or epoch ms' }, { status: 400 });
+          return NextResponse.json(
+            { error: "expiresAt must be an ISO date string or epoch ms" },
+            { status: 400 },
+          );
         }
         expiresAtDate = d;
       }
@@ -905,29 +1202,38 @@ export async function POST(
 
     // Create setup script: POST /api/v1/repos/:id/setup-scripts
     // Body: { name, type, code, description? }
-    if (resource === 'repos' && id && subResource === 'setup-scripts') {
+    if (resource === "repos" && id && subResource === "setup-scripts") {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json();
       const { name, type, code, description } = body;
-      if (!name || typeof name !== 'string' || !name.trim()) {
-        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return NextResponse.json({ error: "name required" }, { status: 400 });
       }
-      if (type !== 'playwright' && type !== 'api') {
-        return NextResponse.json({ error: 'type must be "playwright" or "api"' }, { status: 400 });
+      if (type !== "playwright" && type !== "api") {
+        return NextResponse.json(
+          { error: 'type must be "playwright" or "api"' },
+          { status: 400 },
+        );
       }
-      if (!code || typeof code !== 'string') {
-        return NextResponse.json({ error: 'code required' }, { status: 400 });
+      if (!code || typeof code !== "string") {
+        return NextResponse.json({ error: "code required" }, { status: 400 });
       }
-      if (Buffer.byteLength(code, 'utf8') > MAX_SETUP_SCRIPT_CODE_BYTES) {
-        return NextResponse.json({ error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` }, { status: 413 });
+      if (Buffer.byteLength(code, "utf8") > MAX_SETUP_SCRIPT_CODE_BYTES) {
+        return NextResponse.json(
+          { error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` },
+          { status: 413 },
+        );
       }
-      if (type === 'api') {
-        const { validateApiScript } = await import('@/lib/setup/api-seeder');
+      if (type === "api") {
+        const { validateApiScript } = await import("@/lib/setup/api-seeder");
         const validation = validateApiScript(code);
         if (!validation.valid) {
-          return NextResponse.json({ error: `Invalid API script: ${validation.error}` }, { status: 400 });
+          return NextResponse.json(
+            { error: `Invalid API script: ${validation.error}` },
+            { status: 400 },
+          );
         }
       }
       const created = await queries.createSetupScript({
@@ -935,43 +1241,52 @@ export async function POST(
         name: name.trim(),
         type,
         code,
-        description: typeof description === 'string' ? description : undefined,
+        description: typeof description === "string" ? description : undefined,
       });
       return NextResponse.json(created, { status: 201 });
     }
 
     // Create local repository: POST /api/v1/repos
-    if (resource === 'repos' && !id) {
+    if (resource === "repos" && !id) {
       if (!session.team) {
-        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+        return NextResponse.json({ error: "No team access" }, { status: 403 });
       }
       const body = await request.json();
       const { name, baseUrl } = body;
-      if (!name || typeof name !== 'string' || !name.trim()) {
-        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return NextResponse.json({ error: "name required" }, { status: 400 });
       }
       const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
       if (baseUrl !== undefined && normalizedBaseUrl === null) {
-        return NextResponse.json({ error: 'baseUrl must be a valid http(s) URL' }, { status: 400 });
+        return NextResponse.json(
+          { error: "baseUrl must be a valid http(s) URL" },
+          { status: 400 },
+        );
       }
       const repo = await queries.createRepository({
         teamId: session.team.id,
-        provider: 'local',
-        owner: 'local',
+        provider: "local",
+        owner: "local",
         name: name.trim(),
         fullName: name.trim(),
       });
       if (normalizedBaseUrl) {
-        await queries.upsertEnvironmentConfig(repo.id, { baseUrl: normalizedBaseUrl });
+        await queries.upsertEnvironmentConfig(repo.id, {
+          baseUrl: normalizedBaseUrl,
+        });
       }
       const env = await queries.getEnvironmentConfig(repo.id);
-      return NextResponse.json({ ...repo, baseUrl: env?.baseUrl ?? null }, { status: 201 });
+      return NextResponse.json(
+        { ...repo, baseUrl: env?.baseUrl ?? null },
+        { status: 201 },
+      );
     }
 
     // Create test run
-    if (resource === 'runs' && !id) {
+    if (resource === "runs" && !id) {
       const body = await request.json();
-      const { testIds, functionalAreaId, repositoryId, forceVideoRecording } = body;
+      const { testIds, functionalAreaId, repositoryId, forceVideoRecording } =
+        body;
 
       let testIdsToRun: string[] = [];
       let scopedRepoId: string | null = null;
@@ -981,7 +1296,7 @@ export async function POST(
       // build under team B's repo by passing team B's testIds/repositoryId.
       if (repositoryId) {
         if (!(await verifyRepoOwnership(repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         scopedRepoId = repositoryId;
       }
@@ -990,13 +1305,16 @@ export async function POST(
         for (const tid of testIds) {
           const t = await queries.getTest(tid);
           if (!t || !t.repositoryId) {
-            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+            return NextResponse.json({ error: "Not found" }, { status: 404 });
           }
           if (!(await verifyRepoOwnership(t.repositoryId, session))) {
-            return NextResponse.json({ error: 'Not found' }, { status: 404 });
+            return NextResponse.json({ error: "Not found" }, { status: 404 });
           }
           if (scopedRepoId && t.repositoryId !== scopedRepoId) {
-            return NextResponse.json({ error: 'Tests must belong to the same repository' }, { status: 400 });
+            return NextResponse.json(
+              { error: "Tests must belong to the same repository" },
+              { status: 400 },
+            );
           }
           scopedRepoId ??= t.repositoryId;
         }
@@ -1004,13 +1322,16 @@ export async function POST(
       } else if (functionalAreaId) {
         const area = await queries.getFunctionalArea(functionalAreaId);
         if (!area || !area.repositoryId) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         if (!(await verifyRepoOwnership(area.repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         if (scopedRepoId && area.repositoryId !== scopedRepoId) {
-          return NextResponse.json({ error: 'Area does not belong to the supplied repository' }, { status: 400 });
+          return NextResponse.json(
+            { error: "Area does not belong to the supplied repository" },
+            { status: 400 },
+          );
         }
         scopedRepoId ??= area.repositoryId;
         const tests = await queries.getTestsByFunctionalArea(functionalAreaId);
@@ -1021,11 +1342,11 @@ export async function POST(
       }
 
       if (testIdsToRun.length === 0) {
-        return NextResponse.json({ error: 'No tests to run' }, { status: 400 });
+        return NextResponse.json({ error: "No tests to run" }, { status: 400 });
       }
 
       const result = await createAndRunBuildCore(
-        'manual',
+        "manual",
         testIdsToRun,
         scopedRepoId,
         undefined,
@@ -1040,25 +1361,36 @@ export async function POST(
     // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
     // Body: { url: string, viewport?: { width, height } }
     // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }
-    if (resource === 'snapshot' && !id) {
+    if (resource === "snapshot" && !id) {
       if (!session.team) {
-        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+        return NextResponse.json({ error: "No team access" }, { status: 403 });
       }
-      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      const isBearer = !!request.headers
+        .get("authorization")
+        ?.startsWith("Bearer ");
       const sourceIp = extractSourceIp(request.headers);
       const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
       if (!rl.ok) {
-        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: rl.headers });
+        return NextResponse.json(
+          { error: "Rate limit exceeded" },
+          { status: 429, headers: rl.headers },
+        );
       }
-      const body = (await request.json().catch(() => ({}))) as { url?: string; viewport?: { width: number; height: number } };
-      if (!body.url || typeof body.url !== 'string') {
-        return NextResponse.json({ error: 'url required' }, { status: 400 });
+      const body = (await request.json().catch(() => ({}))) as {
+        url?: string;
+        viewport?: { width: number; height: number };
+      };
+      if (!body.url || typeof body.url !== "string") {
+        return NextResponse.json({ error: "url required" }, { status: 400 });
       }
       try {
         await validateTargetUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
-          return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
+          return NextResponse.json(
+            { error: err.message },
+            { status: 400, headers: rl.headers },
+          );
         }
         throw err;
       }
@@ -1067,9 +1399,9 @@ export async function POST(
         const cap = await captureUrl({
           url: body.url,
           jobId: snapshotId,
-          side: 'a',
+          side: "a",
           viewport: body.viewport,
-          poolTier: isBearer ? 'build' : 'interactive',
+          poolTier: isBearer ? "build" : "interactive",
         });
         return NextResponse.json(
           {
@@ -1085,8 +1417,11 @@ export async function POST(
           { headers: rl.headers },
         );
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Capture failed';
-        return NextResponse.json({ error: msg }, { status: 502, headers: rl.headers });
+        const msg = err instanceof Error ? err.message : "Capture failed";
+        return NextResponse.json(
+          { error: msg },
+          { status: 502, headers: rl.headers },
+        );
       }
     }
 
@@ -1094,15 +1429,20 @@ export async function POST(
     // Body: { urlA, urlB, viewport?, snapshotIdA?, snapshotIdB? }
     // Returns: { jobId, statusUrl } when capturing; or full result when both
     // snapshotIdA/snapshotIdB are provided and present on disk.
-    if (resource === 'diff' && !id) {
+    if (resource === "diff" && !id) {
       if (!session.team) {
-        return NextResponse.json({ error: 'No team access' }, { status: 403 });
+        return NextResponse.json({ error: "No team access" }, { status: 403 });
       }
-      const isBearer = !!request.headers.get('authorization')?.startsWith('Bearer ');
+      const isBearer = !!request.headers
+        .get("authorization")
+        ?.startsWith("Bearer ");
       const sourceIp = extractSourceIp(request.headers);
       const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
       if (!rl.ok) {
-        return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: rl.headers });
+        return NextResponse.json(
+          { error: "Rate limit exceeded" },
+          { status: 429, headers: rl.headers },
+        );
       }
       const body = (await request.json().catch(() => ({}))) as {
         urlA?: string;
@@ -1115,12 +1455,12 @@ export async function POST(
       // Snapshot reuse: both ids supplied and present → diff synchronously.
       if (body.snapshotIdA && body.snapshotIdB) {
         const [capA, capB] = await Promise.all([
-          loadCaptureFromDisk(body.snapshotIdA, 'a'),
-          loadCaptureFromDisk(body.snapshotIdB, 'a'),
+          loadCaptureFromDisk(body.snapshotIdA, "a"),
+          loadCaptureFromDisk(body.snapshotIdB, "a"),
         ]);
         if (!capA || !capB) {
           return NextResponse.json(
-            { error: 'snapshot expired or not found — recapture and retry' },
+            { error: "snapshot expired or not found — recapture and retry" },
             { status: 404, headers: rl.headers },
           );
         }
@@ -1131,7 +1471,7 @@ export async function POST(
 
       if (!body.urlA || !body.urlB) {
         return NextResponse.json(
-          { error: 'urlA and urlB required (or both snapshotIdA/snapshotIdB)' },
+          { error: "urlA and urlB required (or both snapshotIdA/snapshotIdB)" },
           { status: 400, headers: rl.headers },
         );
       }
@@ -1142,7 +1482,10 @@ export async function POST(
         ]);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
-          return NextResponse.json({ error: err.message }, { status: 400, headers: rl.headers });
+          return NextResponse.json(
+            { error: err.message },
+            { status: 400, headers: rl.headers },
+          );
         }
         throw err;
       }
@@ -1151,7 +1494,7 @@ export async function POST(
         urlA: body.urlA,
         urlB: body.urlB,
         viewport: body.viewport,
-        poolTier: isBearer ? 'build' : 'interactive',
+        poolTier: isBearer ? "build" : "interactive",
         sourceIp,
         repositoryId: null,
       });
@@ -1162,16 +1505,19 @@ export async function POST(
     }
 
     // Batch approve diffs
-    if (resource === 'diffs' && slug[1] === 'approve') {
+    if (resource === "diffs" && slug[1] === "approve") {
       const body = await request.json();
       const { diffIds } = body;
       if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
-        return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
+        return NextResponse.json(
+          { error: "diffIds array required" },
+          { status: 400 },
+        );
       }
       // Verify team ownership for all diffs
       for (const did of diffIds) {
         if (!(await verifyDiffOwnership(did, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const result = await batchApproveDiffsCore(diffIds);
@@ -1179,16 +1525,19 @@ export async function POST(
     }
 
     // Batch reject diffs
-    if (resource === 'diffs' && slug[1] === 'reject') {
+    if (resource === "diffs" && slug[1] === "reject") {
       const body = await request.json();
       const { diffIds } = body;
       if (!diffIds || !Array.isArray(diffIds) || diffIds.length === 0) {
-        return NextResponse.json({ error: 'diffIds array required' }, { status: 400 });
+        return NextResponse.json(
+          { error: "diffIds array required" },
+          { status: 400 },
+        );
       }
       // Verify team ownership for all diffs
       for (const did of diffIds) {
         if (!(await verifyDiffOwnership(did, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const result = await batchRejectDiffsCore(diffIds);
@@ -1196,30 +1545,46 @@ export async function POST(
     }
 
     // Create test directly with raw code: POST /api/v1/tests
-    if (resource === 'tests' && !slug[1]) {
+    if (resource === "tests" && !slug[1]) {
       const body = await request.json();
-      const { repositoryId, name, code, functionalAreaId, targetUrl, description } = body;
+      const {
+        repositoryId,
+        name,
+        code,
+        functionalAreaId,
+        targetUrl,
+        description,
+      } = body;
       if (!repositoryId) {
-        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
       }
-      if (!name || typeof name !== 'string') {
-        return NextResponse.json({ error: 'name required' }, { status: 400 });
+      if (!name || typeof name !== "string") {
+        return NextResponse.json({ error: "name required" }, { status: 400 });
       }
-      if (!code || typeof code !== 'string') {
-        return NextResponse.json({ error: 'code required' }, { status: 400 });
+      if (!code || typeof code !== "string") {
+        return NextResponse.json({ error: "code required" }, { status: 400 });
       }
       if (!(await verifyRepoOwnership(repositoryId, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Validate functionalAreaId if provided
       if (functionalAreaId) {
         const area = await queries.getFunctionalArea(functionalAreaId);
-        if (!area || (area.repositoryId && area.repositoryId !== repositoryId)) {
-          return NextResponse.json({ error: 'Invalid functionalAreaId' }, { status: 400 });
+        if (
+          !area ||
+          (area.repositoryId && area.repositoryId !== repositoryId)
+        ) {
+          return NextResponse.json(
+            { error: "Invalid functionalAreaId" },
+            { status: 400 },
+          );
         }
       }
       // Stamp MCP bot as creator when available, so gamification & attribution work
-      const mcpBot = await queries.getBotByKind(session.team!.id, 'mcp_server');
+      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
       const created = await queries.createTest({
         repositoryId,
         name,
@@ -1231,17 +1596,17 @@ export async function POST(
       });
       // If a `description` was supplied via the legacy field, store it on the linked
       // test_specs row instead — that's where short-form intent lives now.
-      if (description && typeof description === 'string') {
-        const { createHash } = await import('crypto');
-        const codeHash = createHash('sha256').update(code).digest('hex');
+      if (description && typeof description === "string") {
+        const { createHash } = await import("crypto");
+        const codeHash = createHash("sha256").update(code).digest("hex");
         const specId = await queries.createTestSpec({
           repositoryId,
           testId: created.id,
           functionalAreaId: functionalAreaId ?? null,
           title: name,
           spec: description,
-          source: 'manual',
-          status: 'has_test',
+          source: "manual",
+          status: "has_test",
           codeHash,
         });
         await queries.linkSpecToTest(specId, created.id);
@@ -1250,14 +1615,17 @@ export async function POST(
     }
 
     // Create test via AI
-    if (resource === 'tests' && slug[1] === 'create' && !slug[2]) {
+    if (resource === "tests" && slug[1] === "create" && !slug[2]) {
       const body = await request.json();
       const { repositoryId, url, prompt, functionalAreaId } = body;
       if (!repositoryId) {
-        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { createTest } = await import('@/server/actions/ai');
+      const { createTest } = await import("@/server/actions/ai");
       const result = await createTest(repositoryId, {
         targetUrl: url,
         userPrompt: prompt,
@@ -1267,28 +1635,29 @@ export async function POST(
       // Map that back to a real HTTP status so MCP/REST callers can branch on it
       // — otherwise an overloaded LLM looks identical to a happy creation.
       if (!result.success) {
-        const message = result.error ?? 'AI test generation failed';
+        const message = result.error ?? "AI test generation failed";
         const lower = message.toLowerCase();
         const isConfig =
-          lower.includes('no api key') ||
-          lower.includes('api key') ||
-          lower.includes('not configured') ||
-          lower.includes('missing') && lower.includes('config');
+          lower.includes("no api key") ||
+          lower.includes("api key") ||
+          lower.includes("not configured") ||
+          (lower.includes("missing") && lower.includes("config"));
         const isOverloaded =
-          lower.includes('overload') ||
-          lower.includes('rate limit') ||
-          lower.includes('429') ||
-          lower.includes('503') ||
-          lower.includes('502') ||
-          lower.includes('timeout') ||
-          lower.includes('upstream');
+          lower.includes("overload") ||
+          lower.includes("rate limit") ||
+          lower.includes("429") ||
+          lower.includes("503") ||
+          lower.includes("502") ||
+          lower.includes("timeout") ||
+          lower.includes("upstream");
         const status = isConfig ? 503 : isOverloaded ? 502 : 422;
         return NextResponse.json(
           {
             success: false,
             error: message,
             retryable: !isConfig,
-            fallback: 'Try direct mode: POST /api/v1/tests with { name, code } using a Playwright snapshot you generate yourself.',
+            fallback:
+              "Try direct mode: POST /api/v1/tests with { name, code } using a Playwright snapshot you generate yourself.",
           },
           { status },
         );
@@ -1297,99 +1666,122 @@ export async function POST(
     }
 
     // Heal a failing test via AI
-    if (resource === 'tests' && slug[2] === 'heal') {
+    if (resource === "tests" && slug[2] === "heal") {
       const testId = slug[1];
       if (!testId) {
-        return NextResponse.json({ error: 'testId required' }, { status: 400 });
+        return NextResponse.json({ error: "testId required" }, { status: 400 });
       }
       const test = await queries.getTest(testId);
       if (!test) {
-        return NextResponse.json({ error: 'Test not found' }, { status: 404 });
+        return NextResponse.json({ error: "Test not found" }, { status: 404 });
       }
       // Verify team ownership via repository
       if (test.repositoryId) {
         if (!(await verifyRepoOwnership(test.repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { agentHealTestCore } = await import('@/lib/playwright/healer-agent');
+      const { agentHealTestCore } =
+        await import("@/lib/playwright/healer-agent");
       const result = await agentHealTestCore(test.repositoryId!, testId);
       return NextResponse.json(result);
     }
 
     // Approve single diff: POST /api/v1/diffs/:id/approve
-    if (resource === 'diffs' && id && subResource === 'approve') {
+    if (resource === "diffs" && id && subResource === "approve") {
       if (!(await verifyDiffOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      await approveDiffCore(id, 'mcp-agent');
+      await approveDiffCore(id, "mcp-agent");
       return NextResponse.json({ success: true });
     }
 
     // Reject single diff: POST /api/v1/diffs/:id/reject
-    if (resource === 'diffs' && id && subResource === 'reject') {
+    if (resource === "diffs" && id && subResource === "reject") {
       if (!(await verifyDiffOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       await rejectDiffCore(id);
       return NextResponse.json({ success: true });
     }
 
     // Approve all diffs in a build: POST /api/v1/builds/:id/approve-all
-    if (resource === 'builds' && id && subResource === 'approve-all') {
+    if (resource === "builds" && id && subResource === "approve-all") {
       if (!(await verifyBuildOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      await approveAllDiffsCore(id, 'mcp-agent');
+      await approveAllDiffsCore(id, "mcp-agent");
       return NextResponse.json({ success: true });
     }
 
     // Publish a public-share link for a build: POST /api/v1/builds/:id/share
     // Body: { scopedTestId?: string } — optional, scopes share to a single test
     // Returns: { shareId, slug, url }
-    if (resource === 'builds' && id && subResource === 'share') {
+    if (resource === "builds" && id && subResource === "share") {
       if (!(await verifyBuildOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json().catch(() => ({}));
-      const scopedTestId = typeof body?.scopedTestId === 'string' ? body.scopedTestId : null;
-      const { publishBuildShare } = await import('@/server/actions/public-shares');
+      const scopedTestId =
+        typeof body?.scopedTestId === "string" ? body.scopedTestId : null;
+      const { publishBuildShare } =
+        await import("@/server/actions/public-shares");
       const result = await publishBuildShare(id, { scopedTestId });
       return NextResponse.json(result, { status: 201 });
     }
 
     // Write build demo notes: POST /api/v1/builds/:id/demo-notes
     // Body: DemoNotes payload — see schema.ts. Idempotent (upsert).
-    if (resource === 'builds' && id && subResource === 'demo-notes') {
+    if (resource === "builds" && id && subResource === "demo-notes") {
       if (!(await verifyBuildOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json().catch(() => null);
-      if (!body || typeof body !== 'object') {
-        return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+      if (!body || typeof body !== "object") {
+        return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
       }
       // Minimal shape validation — refuse payloads that are obviously wrong
       // so accidental misuse fails loudly instead of writing junk JSON. We
       // accept missing arrays as empty (a summary-only note is still useful).
       const payload = {
-        uxSummary: typeof body.uxSummary === 'string' ? body.uxSummary : '',
+        uxSummary: typeof body.uxSummary === "string" ? body.uxSummary : "",
         highlights: Array.isArray(body.highlights) ? body.highlights : [],
-        frictionPoints: Array.isArray(body.frictionPoints) ? body.frictionPoints : [],
-        testingStruggles: Array.isArray(body.testingStruggles) ? body.testingStruggles : [],
-        skippedRoutes: Array.isArray(body.skippedRoutes) ? body.skippedRoutes : undefined,
-        generatedAt: typeof body.generatedAt === 'string' ? body.generatedAt : new Date().toISOString(),
-        modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+        frictionPoints: Array.isArray(body.frictionPoints)
+          ? body.frictionPoints
+          : [],
+        testingStruggles: Array.isArray(body.testingStruggles)
+          ? body.testingStruggles
+          : [],
+        skippedRoutes: Array.isArray(body.skippedRoutes)
+          ? body.skippedRoutes
+          : undefined,
+        generatedAt:
+          typeof body.generatedAt === "string"
+            ? body.generatedAt
+            : new Date().toISOString(),
+        modelId: typeof body.modelId === "string" ? body.modelId : undefined,
       };
-      if (!payload.uxSummary && payload.highlights.length === 0 && payload.frictionPoints.length === 0 && payload.testingStruggles.length === 0) {
-        return NextResponse.json({ error: 'Payload must contain at least one of uxSummary, highlights, frictionPoints, testingStruggles' }, { status: 400 });
+      if (
+        !payload.uxSummary &&
+        payload.highlights.length === 0 &&
+        payload.frictionPoints.length === 0 &&
+        payload.testingStruggles.length === 0
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Payload must contain at least one of uxSummary, highlights, frictionPoints, testingStruggles",
+          },
+          { status: 400 },
+        );
       }
       await queries.upsertBuildDemoNotes(id, payload);
       return NextResponse.json({ ok: true }, { status: 201 });
     }
 
     // Verify phase: POST /api/v1/verify/layer-feedback
-    if (resource === 'verify' && id === 'layer-feedback') {
+    if (resource === "verify" && id === "layer-feedback") {
       const body = await request.json();
       const { stepComparisonId, buildId, layer, status, note } = body as {
         stepComparisonId: string;
@@ -1399,17 +1791,28 @@ export async function POST(
         note?: string;
       };
       if (!stepComparisonId || !buildId || !layer || !status) {
-        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        return NextResponse.json(
+          { error: "Missing required fields" },
+          { status: 400 },
+        );
       }
       if (!(await verifyBuildOwnership(buildId, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const { decideLayer } = await import('@/server/actions/layer-feedback');
+      const { decideLayer } = await import("@/server/actions/layer-feedback");
       const result = await decideLayer({
         stepComparisonId,
         buildId,
-        layer: layer as 'visual' | 'dom' | 'a11y' | 'network' | 'console' | 'url' | 'perf' | 'variable',
-        status: status as 'approved' | 'rejected' | 'snoozed',
+        layer: layer as
+          | "visual"
+          | "dom"
+          | "a11y"
+          | "network"
+          | "console"
+          | "url"
+          | "perf"
+          | "variable",
+        status: status as "approved" | "rejected" | "snoozed",
         note: note ?? null,
       });
       return NextResponse.json(result);
@@ -1417,26 +1820,35 @@ export async function POST(
 
     // QuickStart agent: POST /api/v1/repos/:id/quickstart
     // Body: { emailTemplate?: string }
-    if (resource === 'repos' && id && subResource === 'quickstart') {
+    if (resource === "repos" && id && subResource === "quickstart") {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json().catch(() => ({}));
-      const emailTemplate = typeof body?.emailTemplate === 'string' ? body.emailTemplate : undefined;
+      const emailTemplate =
+        typeof body?.emailTemplate === "string"
+          ? body.emailTemplate
+          : undefined;
       try {
-        const { startQuickstart } = await import('@/server/actions/quickstart-agent');
-        const result = await startQuickstart(id, emailTemplate ? { emailTemplate } : undefined);
+        const { startQuickstart } =
+          await import("@/server/actions/quickstart-agent");
+        const result = await startQuickstart(
+          id,
+          emailTemplate ? { emailTemplate } : undefined,
+        );
         return NextResponse.json(result, { status: 201 });
       } catch (err) {
         const e = err as Error & { code?: string; reason?: string };
-        if (e.code === 'quickstart_disabled') {
-          const { gateReasonHint } = await import('@/lib/quickstart/gating');
-          const reason = e.reason ?? 'no_repo';
+        if (e.code === "quickstart_disabled") {
+          const { gateReasonHint } = await import("@/lib/quickstart/gating");
+          const reason = e.reason ?? "no_repo";
           return NextResponse.json(
             {
-              error: 'quickstart_disabled',
+              error: "quickstart_disabled",
               reason,
-              hint: gateReasonHint(reason as Parameters<typeof gateReasonHint>[0]),
+              hint: gateReasonHint(
+                reason as Parameters<typeof gateReasonHint>[0],
+              ),
             },
             { status: 400 },
           );
@@ -1446,9 +1858,9 @@ export async function POST(
     }
 
     // Import tests + functional areas: POST /api/v1/repos/:id/import
-    if (resource === 'repos' && id && subResource === 'import') {
+    if (resource === "repos" && id && subResource === "import") {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
 
       const body = await request.json();
@@ -1465,7 +1877,7 @@ export async function POST(
       for (const area of functionalAreas) {
         try {
           const existing = (await queries.getFunctionalAreasByRepo(id)).find(
-            (a) => a.name.toLowerCase() === area.name.toLowerCase()
+            (a) => a.name.toLowerCase() === area.name.toLowerCase(),
           );
           if (existing) {
             await queries.updateFunctionalArea(existing.id, {
@@ -1501,7 +1913,9 @@ export async function POST(
           try {
             await queries.updateFunctionalArea(areaId, { parentId });
           } catch (err) {
-            errors.push(`Area "${area.name}" parent link: ${(err as Error).message}`);
+            errors.push(
+              `Area "${area.name}" parent link: ${(err as Error).message}`,
+            );
           }
         }
       }
@@ -1511,14 +1925,14 @@ export async function POST(
       for (const t of importTests) {
         try {
           const functionalAreaId = t.functionalAreaName
-            ? nameToAreaId.get(t.functionalAreaName.toLowerCase()) ?? null
+            ? (nameToAreaId.get(t.functionalAreaName.toLowerCase()) ?? null)
             : null;
 
           // Find existing test by name + area
           const existing = repoTests.find(
             (et) =>
               et.name.toLowerCase() === t.name.toLowerCase() &&
-              et.functionalAreaId === functionalAreaId
+              et.functionalAreaId === functionalAreaId,
           );
 
           const testData = {
@@ -1528,7 +1942,7 @@ export async function POST(
             targetUrl: t.targetUrl ?? null,
             functionalAreaId,
             assertions: t.assertions ?? null,
-            executionMode: t.executionMode ?? 'procedural',
+            executionMode: t.executionMode ?? "procedural",
             setupOverrides: t.setupOverrides ?? null,
             teardownOverrides: t.teardownOverrides ?? null,
             stabilizationOverrides: t.stabilizationOverrides ?? null,
@@ -1541,7 +1955,11 @@ export async function POST(
           };
 
           if (existing) {
-            await queries.updateTestWithVersion(existing.id, testData, 'migration_import');
+            await queries.updateTestWithVersion(
+              existing.id,
+              testData,
+              "migration_import",
+            );
             testsUpdated++;
           } else {
             await queries.createTest(testData);
@@ -1563,16 +1981,16 @@ export async function POST(
     }
 
     // Create functional area: POST /api/v1/functional-areas
-    if (resource === 'functional-areas' && !id) {
+    if (resource === "functional-areas" && !id) {
       const body = await request.json();
       const { name, repositoryId, parentId } = body;
       if (!name) {
-        return NextResponse.json({ error: 'name required' }, { status: 400 });
+        return NextResponse.json({ error: "name required" }, { status: 400 });
       }
       // Verify team ownership of the target repository
       if (repositoryId) {
         if (!(await verifyRepoOwnership(repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const result = await queries.createFunctionalArea({
@@ -1583,14 +2001,14 @@ export async function POST(
       return NextResponse.json(result, { status: 201 });
     }
 
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
     if (mapped) return mapped;
-    console.error('[API v1] POST error:', error);
+    console.error("[API v1] POST error:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }
@@ -1598,11 +2016,11 @@ export async function POST(
 // PUT handler
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string[] }> }
+  { params }: { params: Promise<{ slug: string[] }> },
 ) {
   const session = await verifyAuth(request);
   if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { slug } = await params;
@@ -1611,9 +2029,9 @@ export async function PUT(
   try {
     // Update repo playwright settings: PUT /api/v1/repos/:id/playwright-settings
     // Body: partial PlaywrightSettings — only whitelisted fields are upserted.
-    if (resource === 'repos' && id && subResource === 'playwright-settings') {
+    if (resource === "repos" && id && subResource === "playwright-settings") {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json();
       const norm = normalizePlaywrightSettingsPatch(body);
@@ -1626,15 +2044,17 @@ export async function PUT(
     }
 
     // Update repository: PUT /api/v1/repos/:id
-    if (resource === 'repos' && id) {
+    if (resource === "repos" && id) {
       if (!(await verifyRepoOwnership(id, session))) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json();
       const updates: Record<string, unknown> = {};
       if (body.name !== undefined) updates.name = body.name;
-      if (body.defaultBranch !== undefined) updates.defaultBranch = body.defaultBranch;
-      if (body.selectedBranch !== undefined) updates.selectedBranch = body.selectedBranch;
+      if (body.defaultBranch !== undefined)
+        updates.defaultBranch = body.defaultBranch;
+      if (body.selectedBranch !== undefined)
+        updates.selectedBranch = body.selectedBranch;
 
       // baseUrl lives in environment_configs, not repositories — route it there
       // so MCP/REST clients have a single tool to point a repo at an external app.
@@ -1642,14 +2062,20 @@ export async function PUT(
       if (body.baseUrl !== undefined) {
         const normalized = normalizeBaseUrl(body.baseUrl);
         if (normalized === null) {
-          return NextResponse.json({ error: 'baseUrl must be a valid http(s) URL' }, { status: 400 });
+          return NextResponse.json(
+            { error: "baseUrl must be a valid http(s) URL" },
+            { status: 400 },
+          );
         }
         await queries.upsertEnvironmentConfig(id, { baseUrl: normalized });
         baseUrlChanged = true;
       }
 
       if (Object.keys(updates).length === 0 && !baseUrlChanged) {
-        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+        return NextResponse.json(
+          { error: "No fields to update" },
+          { status: 400 },
+        );
       }
       if (Object.keys(updates).length > 0) {
         await queries.updateRepository(id, updates);
@@ -1660,23 +2086,27 @@ export async function PUT(
     }
 
     // Update functional area: PUT /api/v1/functional-areas/:id
-    if (resource === 'functional-areas' && id) {
+    if (resource === "functional-areas" && id) {
       const area = await queries.getFunctionalArea(id);
       if (!area) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (area.repositoryId) {
         if (!(await verifyRepoOwnership(area.repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       const body = await request.json();
       const updates: Record<string, unknown> = {};
       if (body.name !== undefined) updates.name = body.name;
-      if (body.description !== undefined) updates.description = body.description;
+      if (body.description !== undefined)
+        updates.description = body.description;
       if (body.parentId !== undefined) updates.parentId = body.parentId;
       if (Object.keys(updates).length === 0) {
-        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+        return NextResponse.json(
+          { error: "No fields to update" },
+          { status: 400 },
+        );
       }
       await queries.updateFunctionalArea(id, updates);
       const updated = await queries.getFunctionalArea(id);
@@ -1684,50 +2114,78 @@ export async function PUT(
     }
 
     // Update setup script: PUT /api/v1/setup-scripts/:id
-    if (resource === 'setup-scripts' && id) {
+    if (resource === "setup-scripts" && id) {
       const { ok, script } = await verifySetupScriptOwnership(id, session);
       if (!ok || !script) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const body = await request.json();
-      const updates: { name?: string; type?: 'playwright' | 'api'; code?: string; description?: string } = {};
+      const updates: {
+        name?: string;
+        type?: "playwright" | "api";
+        code?: string;
+        description?: string;
+      } = {};
       if (body.name !== undefined) {
-        if (typeof body.name !== 'string' || !body.name.trim()) {
-          return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 });
+        if (typeof body.name !== "string" || !body.name.trim()) {
+          return NextResponse.json(
+            { error: "name must be a non-empty string" },
+            { status: 400 },
+          );
         }
         updates.name = body.name.trim();
       }
       if (body.type !== undefined) {
-        if (body.type !== 'playwright' && body.type !== 'api') {
-          return NextResponse.json({ error: 'type must be "playwright" or "api"' }, { status: 400 });
+        if (body.type !== "playwright" && body.type !== "api") {
+          return NextResponse.json(
+            { error: 'type must be "playwright" or "api"' },
+            { status: 400 },
+          );
         }
         updates.type = body.type;
       }
       if (body.code !== undefined) {
-        if (typeof body.code !== 'string') {
-          return NextResponse.json({ error: 'code must be a string' }, { status: 400 });
+        if (typeof body.code !== "string") {
+          return NextResponse.json(
+            { error: "code must be a string" },
+            { status: 400 },
+          );
         }
-        if (Buffer.byteLength(body.code, 'utf8') > MAX_SETUP_SCRIPT_CODE_BYTES) {
-          return NextResponse.json({ error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` }, { status: 413 });
+        if (
+          Buffer.byteLength(body.code, "utf8") > MAX_SETUP_SCRIPT_CODE_BYTES
+        ) {
+          return NextResponse.json(
+            { error: `code exceeds ${MAX_SETUP_SCRIPT_CODE_BYTES} bytes` },
+            { status: 413 },
+          );
         }
         updates.code = body.code;
       }
       if (body.description !== undefined) {
-        if (body.description !== null && typeof body.description !== 'string') {
-          return NextResponse.json({ error: 'description must be a string or null' }, { status: 400 });
+        if (body.description !== null && typeof body.description !== "string") {
+          return NextResponse.json(
+            { error: "description must be a string or null" },
+            { status: 400 },
+          );
         }
         updates.description = body.description ?? undefined;
       }
       if (Object.keys(updates).length === 0) {
-        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+        return NextResponse.json(
+          { error: "No fields to update" },
+          { status: 400 },
+        );
       }
       const effectiveType = updates.type ?? script.type;
       const effectiveCode = updates.code ?? script.code;
-      if (effectiveType === 'api' && updates.code !== undefined) {
-        const { validateApiScript } = await import('@/lib/setup/api-seeder');
+      if (effectiveType === "api" && updates.code !== undefined) {
+        const { validateApiScript } = await import("@/lib/setup/api-seeder");
         const validation = validateApiScript(effectiveCode);
         if (!validation.valid) {
-          return NextResponse.json({ error: `Invalid API script: ${validation.error}` }, { status: 400 });
+          return NextResponse.json(
+            { error: `Invalid API script: ${validation.error}` },
+            { status: 400 },
+          );
         }
       }
       await queries.updateSetupScript(id, updates);
@@ -1736,15 +2194,15 @@ export async function PUT(
     }
 
     // Update test: PUT /api/v1/tests/:id
-    if (resource === 'tests' && id) {
+    if (resource === "tests" && id) {
       const test = await queries.getTest(id);
       if (!test) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (test.repositoryId) {
         const testRepo = await queries.getRepository(test.repositoryId);
         if (!testRepo || testRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
 
@@ -1753,16 +2211,26 @@ export async function PUT(
       if (body.name !== undefined) updates.name = body.name;
       if (body.code !== undefined) updates.code = body.code;
       if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
-      if (body.functionalAreaId !== undefined) updates.functionalAreaId = body.functionalAreaId;
+      if (body.functionalAreaId !== undefined)
+        updates.functionalAreaId = body.functionalAreaId;
       if (body.quarantined !== undefined) {
-        if (typeof body.quarantined !== 'boolean') {
-          return NextResponse.json({ error: 'quarantined must be a boolean' }, { status: 400 });
+        if (typeof body.quarantined !== "boolean") {
+          return NextResponse.json(
+            { error: "quarantined must be a boolean" },
+            { status: 400 },
+          );
         }
         updates.quarantined = body.quarantined;
       }
       if (body.executionMode !== undefined) {
-        if (body.executionMode !== 'procedural' && body.executionMode !== 'agent') {
-          return NextResponse.json({ error: 'executionMode must be "procedural" | "agent"' }, { status: 400 });
+        if (
+          body.executionMode !== "procedural" &&
+          body.executionMode !== "agent"
+        ) {
+          return NextResponse.json(
+            { error: 'executionMode must be "procedural" | "agent"' },
+            { status: 400 },
+          );
         }
         updates.executionMode = body.executionMode;
       }
@@ -1771,30 +2239,61 @@ export async function PUT(
           updates.viewportOverride = null;
         } else {
           const vp = body.viewportOverride;
-          if (typeof vp !== 'object' || Array.isArray(vp)
-            || typeof vp.width !== 'number' || typeof vp.height !== 'number'
-            || vp.width <= 0 || vp.height <= 0) {
-            return NextResponse.json({ error: 'viewportOverride must be { width, height } with positive numbers, or null' }, { status: 400 });
+          if (
+            typeof vp !== "object" ||
+            Array.isArray(vp) ||
+            typeof vp.width !== "number" ||
+            typeof vp.height !== "number" ||
+            vp.width <= 0 ||
+            vp.height <= 0
+          ) {
+            return NextResponse.json(
+              {
+                error:
+                  "viewportOverride must be { width, height } with positive numbers, or null",
+              },
+              { status: 400 },
+            );
           }
-          updates.viewportOverride = { width: Math.floor(vp.width), height: Math.floor(vp.height) };
+          updates.viewportOverride = {
+            width: Math.floor(vp.width),
+            height: Math.floor(vp.height),
+          };
         }
       }
       if (body.playwrightOverrides !== undefined) {
         const norm = normalizePlaywrightOverrides(body.playwrightOverrides);
         if (!norm.ok) {
-          return NextResponse.json({ error: `playwrightOverrides: ${norm.error}` }, { status: 400 });
+          return NextResponse.json(
+            { error: `playwrightOverrides: ${norm.error}` },
+            { status: 400 },
+          );
         }
         updates.playwrightOverrides = norm.value;
       }
       if (body.diffOverrides !== undefined) {
-        if (body.diffOverrides !== null && (typeof body.diffOverrides !== 'object' || Array.isArray(body.diffOverrides))) {
-          return NextResponse.json({ error: 'diffOverrides must be an object or null' }, { status: 400 });
+        if (
+          body.diffOverrides !== null &&
+          (typeof body.diffOverrides !== "object" ||
+            Array.isArray(body.diffOverrides))
+        ) {
+          return NextResponse.json(
+            { error: "diffOverrides must be an object or null" },
+            { status: 400 },
+          );
         }
         updates.diffOverrides = body.diffOverrides;
       }
       if (body.stabilizationOverrides !== undefined) {
-        if (body.stabilizationOverrides !== null && (typeof body.stabilizationOverrides !== 'object' || Array.isArray(body.stabilizationOverrides))) {
-          return NextResponse.json({ error: 'stabilizationOverrides must be an object or null' }, { status: 400 });
+        if (
+          body.stabilizationOverrides !== null &&
+          (typeof body.stabilizationOverrides !== "object" ||
+            Array.isArray(body.stabilizationOverrides))
+        ) {
+          return NextResponse.json(
+            { error: "stabilizationOverrides must be an object or null" },
+            { status: 400 },
+          );
         }
         updates.stabilizationOverrides = body.stabilizationOverrides;
       }
@@ -1806,34 +2305,53 @@ export async function PUT(
       // same repo as the test being updated, otherwise a token holder could
       // chain in setup from a different repo (still same team, but wrong
       // wiring) or sniff for ID existence cross-tenant.
-      const setupTestIdProvided = Object.prototype.hasOwnProperty.call(body, 'setupTestId');
-      const setupScriptIdProvided = Object.prototype.hasOwnProperty.call(body, 'setupScriptId');
+      const setupTestIdProvided = Object.prototype.hasOwnProperty.call(
+        body,
+        "setupTestId",
+      );
+      const setupScriptIdProvided = Object.prototype.hasOwnProperty.call(
+        body,
+        "setupScriptId",
+      );
       if (setupTestIdProvided || setupScriptIdProvided) {
         const nextSetupTestId = setupTestIdProvided
-          ? (body.setupTestId === null || body.setupTestId === '' ? null : body.setupTestId)
-          : test.setupTestId ?? null;
+          ? body.setupTestId === null || body.setupTestId === ""
+            ? null
+            : body.setupTestId
+          : (test.setupTestId ?? null);
         const nextSetupScriptId = setupScriptIdProvided
-          ? (body.setupScriptId === null || body.setupScriptId === '' ? null : body.setupScriptId)
-          : test.setupScriptId ?? null;
+          ? body.setupScriptId === null || body.setupScriptId === ""
+            ? null
+            : body.setupScriptId
+          : (test.setupScriptId ?? null);
         if (nextSetupTestId && nextSetupScriptId) {
           return NextResponse.json(
-            { error: 'setupTestId and setupScriptId are mutually exclusive' },
+            { error: "setupTestId and setupScriptId are mutually exclusive" },
             { status: 400 },
           );
         }
         if (nextSetupTestId) {
           if (nextSetupTestId === id) {
-            return NextResponse.json({ error: 'Test cannot reference itself as setup' }, { status: 400 });
+            return NextResponse.json(
+              { error: "Test cannot reference itself as setup" },
+              { status: 400 },
+            );
           }
           const setupTest = await queries.getTest(nextSetupTestId);
           if (!setupTest || setupTest.repositoryId !== test.repositoryId) {
-            return NextResponse.json({ error: 'Invalid setupTestId' }, { status: 400 });
+            return NextResponse.json(
+              { error: "Invalid setupTestId" },
+              { status: 400 },
+            );
           }
         }
         if (nextSetupScriptId) {
           const script = await queries.getSetupScript(nextSetupScriptId);
           if (!script || script.repositoryId !== test.repositoryId) {
-            return NextResponse.json({ error: 'Invalid setupScriptId' }, { status: 400 });
+            return NextResponse.json(
+              { error: "Invalid setupScriptId" },
+              { status: 400 },
+            );
           }
         }
         if (setupTestIdProvided) updates.setupTestId = nextSetupTestId;
@@ -1842,81 +2360,148 @@ export async function PUT(
 
       // setupOverrides / teardownOverrides — validate any step ids inside the
       // extraSteps list against the same repo. We accept `null` to clear.
-      for (const key of ['setupOverrides', 'teardownOverrides'] as const) {
+      for (const key of ["setupOverrides", "teardownOverrides"] as const) {
         if (body[key] === undefined) continue;
         if (body[key] === null) {
           updates[key] = null;
           continue;
         }
         const v = body[key];
-        if (typeof v !== 'object' || Array.isArray(v)) {
-          return NextResponse.json({ error: `${key} must be an object or null` }, { status: 400 });
+        if (typeof v !== "object" || Array.isArray(v)) {
+          return NextResponse.json(
+            { error: `${key} must be an object or null` },
+            { status: 400 },
+          );
         }
-        const skipped = Array.isArray(v.skippedDefaultStepIds) ? v.skippedDefaultStepIds : [];
+        const skipped = Array.isArray(v.skippedDefaultStepIds)
+          ? v.skippedDefaultStepIds
+          : [];
         const extras = Array.isArray(v.extraSteps) ? v.extraSteps : [];
-        const normalizedExtras: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }> = [];
+        const normalizedExtras: Array<{
+          stepType: "test" | "script" | "storage_state";
+          testId?: string | null;
+          scriptId?: string | null;
+          storageStateId?: string | null;
+        }> = [];
         for (const step of extras) {
-          if (!step || typeof step !== 'object') {
-            return NextResponse.json({ error: `${key}.extraSteps entries must be objects` }, { status: 400 });
+          if (!step || typeof step !== "object") {
+            return NextResponse.json(
+              { error: `${key}.extraSteps entries must be objects` },
+              { status: 400 },
+            );
           }
           const stepType = step.stepType;
-          if (stepType !== 'test' && stepType !== 'script' && stepType !== 'storage_state') {
-            return NextResponse.json({ error: `${key}.extraSteps stepType must be 'test' | 'script' | 'storage_state'` }, { status: 400 });
+          if (
+            stepType !== "test" &&
+            stepType !== "script" &&
+            stepType !== "storage_state"
+          ) {
+            return NextResponse.json(
+              {
+                error: `${key}.extraSteps stepType must be 'test' | 'script' | 'storage_state'`,
+              },
+              { status: 400 },
+            );
           }
-          if (stepType === 'test') {
-            if (!step.testId || typeof step.testId !== 'string') {
-              return NextResponse.json({ error: `${key} test step requires testId` }, { status: 400 });
+          if (stepType === "test") {
+            if (!step.testId || typeof step.testId !== "string") {
+              return NextResponse.json(
+                { error: `${key} test step requires testId` },
+                { status: 400 },
+              );
             }
             const refTest = await queries.getTest(step.testId);
             if (!refTest || refTest.repositoryId !== test.repositoryId) {
-              return NextResponse.json({ error: `${key} testId ${step.testId} not in this repo` }, { status: 400 });
+              return NextResponse.json(
+                { error: `${key} testId ${step.testId} not in this repo` },
+                { status: 400 },
+              );
             }
-            normalizedExtras.push({ stepType, testId: step.testId, scriptId: null, storageStateId: null });
-          } else if (stepType === 'script') {
-            if (!step.scriptId || typeof step.scriptId !== 'string') {
-              return NextResponse.json({ error: `${key} script step requires scriptId` }, { status: 400 });
+            normalizedExtras.push({
+              stepType,
+              testId: step.testId,
+              scriptId: null,
+              storageStateId: null,
+            });
+          } else if (stepType === "script") {
+            if (!step.scriptId || typeof step.scriptId !== "string") {
+              return NextResponse.json(
+                { error: `${key} script step requires scriptId` },
+                { status: 400 },
+              );
             }
             const refScript = await queries.getSetupScript(step.scriptId);
             if (!refScript || refScript.repositoryId !== test.repositoryId) {
-              return NextResponse.json({ error: `${key} scriptId ${step.scriptId} not in this repo` }, { status: 400 });
+              return NextResponse.json(
+                { error: `${key} scriptId ${step.scriptId} not in this repo` },
+                { status: 400 },
+              );
             }
-            normalizedExtras.push({ stepType, testId: null, scriptId: step.scriptId, storageStateId: null });
+            normalizedExtras.push({
+              stepType,
+              testId: null,
+              scriptId: step.scriptId,
+              storageStateId: null,
+            });
           } else {
-            if (!step.storageStateId || typeof step.storageStateId !== 'string') {
-              return NextResponse.json({ error: `${key} storage_state step requires storageStateId` }, { status: 400 });
+            if (
+              !step.storageStateId ||
+              typeof step.storageStateId !== "string"
+            ) {
+              return NextResponse.json(
+                { error: `${key} storage_state step requires storageStateId` },
+                { status: 400 },
+              );
             }
             const refState = await queries.getStorageState(step.storageStateId);
             if (!refState || refState.repositoryId !== test.repositoryId) {
-              return NextResponse.json({ error: `${key} storageStateId ${step.storageStateId} not in this repo` }, { status: 400 });
+              return NextResponse.json(
+                {
+                  error: `${key} storageStateId ${step.storageStateId} not in this repo`,
+                },
+                { status: 400 },
+              );
             }
-            normalizedExtras.push({ stepType, testId: null, scriptId: null, storageStateId: step.storageStateId });
+            normalizedExtras.push({
+              stepType,
+              testId: null,
+              scriptId: null,
+              storageStateId: step.storageStateId,
+            });
           }
         }
         updates[key] = {
-          skippedDefaultStepIds: skipped.filter((s: unknown): s is string => typeof s === 'string'),
+          skippedDefaultStepIds: skipped.filter(
+            (s: unknown): s is string => typeof s === "string",
+          ),
           extraSteps: normalizedExtras,
         };
       }
 
       if (Object.keys(updates).length === 0) {
-        return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+        return NextResponse.json(
+          { error: "No fields to update" },
+          { status: 400 },
+        );
       }
 
-      await queries.updateTestWithVersion(id, updates, 'mcp_edit');
+      await queries.updateTestWithVersion(id, updates, "mcp_edit");
 
       // Award MCP bot points when a placeholder test gets real code via API
       if (updates.code && test.isPlaceholder && test.repositoryId) {
         const repo = await queries.getRepository(test.repositoryId);
         if (repo?.teamId) {
-          const mcpBot = await queries.getBotByKind(repo.teamId, 'mcp_server');
+          const mcpBot = await queries.getBotByKind(repo.teamId, "mcp_server");
           if (mcpBot) {
             // Stamp bot as creator for future regression/flake attribution
-            queries.updateTest(id, { createdByBotId: mcpBot.id }).catch(() => {});
+            queries
+              .updateTest(id, { createdByBotId: mcpBot.id })
+              .catch(() => {});
             awardScore({
               teamId: repo.teamId,
-              kind: 'test_created',
-              actor: { kind: 'bot', id: mcpBot.id },
-              sourceType: 'test',
+              kind: "test_created",
+              actor: { kind: "bot", id: mcpBot.id },
+              sourceType: "test",
               sourceId: id,
             }).catch(() => {});
           }
@@ -1927,14 +2512,14 @@ export async function PUT(
       return NextResponse.json(updated);
     }
 
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
     if (mapped) return mapped;
-    console.error('[API v1] PUT error:', error);
+    console.error("[API v1] PUT error:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }
@@ -1942,11 +2527,11 @@ export async function PUT(
 // DELETE handler
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string[] }> }
+  { params }: { params: Promise<{ slug: string[] }> },
 ) {
   const session = await verifyAuth(request);
   if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { slug } = await params;
@@ -1954,44 +2539,45 @@ export async function DELETE(
 
   try {
     // Revoke public share: DELETE /api/v1/shares/:id
-    if (resource === 'shares' && id) {
+    if (resource === "shares" && id) {
       const { ok } = await verifyShareOwnership(id, session);
       if (!ok) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       await queries.revokePublicShareById(id);
       return NextResponse.json({ success: true });
     }
 
     // Cancel QuickStart agent session: DELETE /api/v1/quickstart/:sessionId
-    if (resource === 'quickstart' && id) {
+    if (resource === "quickstart" && id) {
       const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== 'quickstart') {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      if (!sessionRow || sessionRow.kind !== "quickstart") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const { cancelQuickstart } = await import('@/server/actions/quickstart-agent');
+      const { cancelQuickstart } =
+        await import("@/server/actions/quickstart-agent");
       const result = await cancelQuickstart(id);
       return NextResponse.json(result);
     }
 
     // Delete storage state: DELETE /api/v1/storage-states/:id
-    if (resource === 'storage-states' && id) {
+    if (resource === "storage-states" && id) {
       const { ok } = await verifyStorageStateOwnership(id, session);
       if (!ok) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       await queries.deleteStorageState(id);
       return NextResponse.json({ success: true });
     }
 
     // Delete setup script: DELETE /api/v1/setup-scripts/:id
-    if (resource === 'setup-scripts' && id) {
+    if (resource === "setup-scripts" && id) {
       const { ok } = await verifySetupScriptOwnership(id, session);
       if (!ok) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Refuse delete if the script is still wired into a test as setup —
       // mirrors the server-action guard so we don't orphan setupScriptId
@@ -1999,7 +2585,10 @@ export async function DELETE(
       const inUse = await queries.getTestsUsingSetupScript(id);
       if (inUse.length > 0) {
         return NextResponse.json(
-          { error: `Cannot delete: script is used by ${inUse.length} test(s)`, tests: inUse.map(t => ({ id: t.id, name: t.name })) },
+          {
+            error: `Cannot delete: script is used by ${inUse.length} test(s)`,
+            tests: inUse.map((t) => ({ id: t.id, name: t.name })),
+          },
           { status: 409 },
         );
       }
@@ -2008,14 +2597,14 @@ export async function DELETE(
     }
 
     // Soft-delete functional area: DELETE /api/v1/functional-areas/:id
-    if (resource === 'functional-areas' && id) {
+    if (resource === "functional-areas" && id) {
       const area = await queries.getFunctionalArea(id);
       if (!area) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (area.repositoryId) {
         if (!(await verifyRepoOwnership(area.repositoryId, session))) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
       await queries.deleteFunctionalArea(id);
@@ -2023,15 +2612,15 @@ export async function DELETE(
     }
 
     // Soft-delete test: DELETE /api/v1/tests/:id
-    if (resource === 'tests' && id) {
+    if (resource === "tests" && id) {
       const test = await queries.getTest(id);
       if (!test) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       if (test.repositoryId) {
         const testRepo = await queries.getRepository(test.repositoryId);
         if (!testRepo || testRepo.teamId !== session.team?.id) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
       }
 
@@ -2039,21 +2628,27 @@ export async function DELETE(
       return NextResponse.json({ success: true });
     }
 
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
     if (mapped) return mapped;
-    console.error('[API v1] DELETE error:', error);
+    console.error("[API v1] DELETE error:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }
 
 // Helper to enrich tests with last run status
 async function enrichTestsWithStatus(
-  tests: { id: string; name: string; functionalAreaId: string | null; targetUrl: string | null; code: string }[]
+  tests: {
+    id: string;
+    name: string;
+    functionalAreaId: string | null;
+    targetUrl: string | null;
+    code: string;
+  }[],
 ) {
   const enriched = await Promise.all(
     tests.map(async (test) => {
@@ -2068,9 +2663,13 @@ async function enrichTestsWithStatus(
         targetUrl: test.targetUrl,
         code: test.code,
         lastRunStatus: latestResult?.status || null,
-        lastRunAt: latestResult ? (await queries.getTestRun(latestResult.testRunId!))?.startedAt?.toISOString() : null,
+        lastRunAt: latestResult
+          ? (
+              await queries.getTestRun(latestResult.testRunId!)
+            )?.startedAt?.toISOString()
+          : null,
       };
-    })
+    }),
   );
 
   return enriched;

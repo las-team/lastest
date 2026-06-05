@@ -1,17 +1,24 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+} from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -24,15 +31,15 @@ import {
   Microscope,
   RefreshCw,
   XCircle,
-} from 'lucide-react';
-import { toast } from 'sonner';
+} from "lucide-react";
+import { toast } from "sonner";
 import type {
   DiffEngineType,
   InspectionResult,
   InspectorClassification,
   InspectorDimension,
   InspectorSeverity,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 interface RunOption {
   id: string;
@@ -55,69 +62,79 @@ interface InspectTabClientProps {
 }
 
 const SEVERITY_DOT: Record<InspectorSeverity, string> = {
-  unchanged: 'bg-emerald-500',
-  minor: 'bg-amber-500',
-  changed: 'bg-rose-500',
-  unavailable: 'bg-zinc-300 dark:bg-zinc-600',
+  unchanged: "bg-emerald-500",
+  minor: "bg-amber-500",
+  changed: "bg-rose-500",
+  unavailable: "bg-zinc-300 dark:bg-zinc-600",
 };
 
 const SEVERITY_LABEL: Record<InspectorSeverity, string> = {
-  unchanged: 'no change',
-  minor: 'minor',
-  changed: 'changed',
-  unavailable: 'n/a',
+  unchanged: "no change",
+  minor: "minor",
+  changed: "changed",
+  unavailable: "n/a",
 };
 
-const DIMENSIONS: Array<{ key: keyof InspectorClassification; label: string }> = [
-  { key: 'visual', label: 'Visual' },
-  { key: 'dom', label: 'DOM' },
-  { key: 'text', label: 'Text' },
-  { key: 'network', label: 'Network' },
-  { key: 'variables', label: 'Variables' },
-];
+const DIMENSIONS: Array<{ key: keyof InspectorClassification; label: string }> =
+  [
+    { key: "visual", label: "Visual" },
+    { key: "dom", label: "DOM" },
+    { key: "text", label: "Text" },
+    { key: "network", label: "Network" },
+    { key: "variables", label: "Variables" },
+  ];
 
 function formatDate(d: Date | string | null): string {
-  if (!d) return '—';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function formatDuration(ms: number | null): string {
-  if (ms == null) return '—';
+  if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
 function StatusBadge({ status }: { status: string | null }) {
-  if (status === 'passed') {
+  if (status === "passed") {
     return (
       <Badge className="bg-green-600 hover:bg-green-600">
         <CheckCircle className="h-3 w-3 mr-1" /> passed
       </Badge>
     );
   }
-  if (status === 'failed') {
+  if (status === "failed") {
     return (
       <Badge variant="destructive">
         <XCircle className="h-3 w-3 mr-1" /> failed
       </Badge>
     );
   }
-  return <Badge variant="secondary">{status ?? 'unknown'}</Badge>;
+  return <Badge variant="secondary">{status ?? "unknown"}</Badge>;
 }
 
 function runShortLabel(r: RunOption): string {
-  const ts = r.startedAt ? formatDate(r.startedAt) : 'no timestamp';
-  const status = r.status ?? '—';
+  const ts = r.startedAt ? formatDate(r.startedAt) : "no timestamp";
+  const status = r.status ?? "—";
   return `${ts} · ${status}`;
 }
 
-function RunCard({ run, side }: { run: RunOption | undefined; side: 'baseline' | 'current' }) {
+function RunCard({
+  run,
+  side,
+}: {
+  run: RunOption | undefined;
+  side: "baseline" | "current";
+}) {
   if (!run) {
     return (
       <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs italic text-muted-foreground">
-        Pick a {side === 'baseline' ? 'baseline' : 'current'} run.
+        Pick a {side === "baseline" ? "baseline" : "current"} run.
       </div>
     );
   }
@@ -125,7 +142,9 @@ function RunCard({ run, side }: { run: RunOption | undefined; side: 'baseline' |
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
         <StatusBadge status={run.status} />
-        <span className="text-xs text-muted-foreground">{formatDate(run.startedAt)}</span>
+        <span className="text-xs text-muted-foreground">
+          {formatDate(run.startedAt)}
+        </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {run.gitBranch && (
@@ -134,7 +153,7 @@ function RunCard({ run, side }: { run: RunOption | undefined; side: 'baseline' |
             {run.gitBranch}
           </span>
         )}
-        {run.gitCommit && run.gitCommit !== 'unknown' && (
+        {run.gitCommit && run.gitCommit !== "unknown" && (
           <span className="inline-flex items-center gap-1 font-mono">
             <GitCommit className="h-3 w-3" />
             {run.gitCommit.slice(0, 7)}
@@ -150,10 +169,18 @@ function RunCard({ run, side }: { run: RunOption | undefined; side: 'baseline' |
         {run.browser && <span>{run.browser}</span>}
       </div>
       <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">
-        {run.hasScreenshot && <span className="rounded bg-muted px-1.5 py-0.5">screenshot</span>}
-        {run.hasDom && <span className="rounded bg-muted px-1.5 py-0.5">dom</span>}
-        {run.hasNetwork && <span className="rounded bg-muted px-1.5 py-0.5">network</span>}
-        {run.hasVariables && <span className="rounded bg-muted px-1.5 py-0.5">vars</span>}
+        {run.hasScreenshot && (
+          <span className="rounded bg-muted px-1.5 py-0.5">screenshot</span>
+        )}
+        {run.hasDom && (
+          <span className="rounded bg-muted px-1.5 py-0.5">dom</span>
+        )}
+        {run.hasNetwork && (
+          <span className="rounded bg-muted px-1.5 py-0.5">network</span>
+        )}
+        {run.hasVariables && (
+          <span className="rounded bg-muted px-1.5 py-0.5">vars</span>
+        )}
       </div>
     </div>
   );
@@ -179,7 +206,7 @@ function SeverityRow({
             type="button"
             onClick={() => onSelect(key)}
             className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
-              isActive ? 'border-foreground/30 bg-accent' : 'hover:bg-muted/60'
+              isActive ? "border-foreground/30 bg-accent" : "hover:bg-muted/60"
             }`}
             title={`${label}: ${SEVERITY_LABEL[sev]}`}
           >
@@ -195,7 +222,12 @@ function SeverityRow({
 
 function VisualPane({ result }: { result: InspectionResult }) {
   const v = result.visual;
-  if (!v) return <p className="text-sm text-muted-foreground">Visual dimension not requested.</p>;
+  if (!v)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Visual dimension not requested.
+      </p>
+    );
   if (v.error) {
     return (
       <div className="space-y-3">
@@ -214,8 +246,12 @@ function VisualPane({ result }: { result: InspectionResult }) {
       <div className="flex flex-wrap gap-2 text-xs">
         <Badge variant="secondary">engine: {v.engine}</Badge>
         <Badge variant="secondary">{v.classification}</Badge>
-        <Badge variant="secondary">{v.percentageDifference.toFixed(3)}% diff</Badge>
-        <Badge variant="secondary">{v.pixelDifference.toLocaleString()} px</Badge>
+        <Badge variant="secondary">
+          {v.percentageDifference.toFixed(3)}% diff
+        </Badge>
+        <Badge variant="secondary">
+          {v.pixelDifference.toLocaleString()} px
+        </Badge>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <ImagePane label="Baseline" path={v.baselineImagePath} />
@@ -239,13 +275,18 @@ function ImagePane({
     <figure className="space-y-1">
       <figcaption className="text-xs text-muted-foreground">{label}</figcaption>
       {path ? (
-        <a href={path} target="_blank" rel="noopener noreferrer" className="block">
+        <a
+          href={path}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={path}
             alt={label}
             className={`w-full rounded border transition-opacity hover:opacity-90 ${
-              highlight ? 'border-amber-500' : 'border-border'
+              highlight ? "border-amber-500" : "border-border"
             }`}
           />
         </a>
@@ -261,25 +302,41 @@ function ImagePane({
 
 function DomPane({ result }: { result: InspectionResult }) {
   const d = result.dom;
-  if (!d) return <p className="text-sm text-muted-foreground">DOM dimension not requested.</p>;
+  if (!d)
+    return (
+      <p className="text-sm text-muted-foreground">
+        DOM dimension not requested.
+      </p>
+    );
   if (d.error) return <p className="text-sm text-rose-500">{d.error}</p>;
   const { added, removed, changed, unchangedCount } = d.diff;
   return (
     <div className="space-y-4 text-sm">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary" className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+        >
           +{added.length} added
         </Badge>
-        <Badge variant="secondary" className="bg-rose-600/10 text-rose-700 dark:text-rose-400">
+        <Badge
+          variant="secondary"
+          className="bg-rose-600/10 text-rose-700 dark:text-rose-400"
+        >
           −{removed.length} removed
         </Badge>
-        <Badge variant="secondary" className="bg-amber-600/10 text-amber-700 dark:text-amber-400">
+        <Badge
+          variant="secondary"
+          className="bg-amber-600/10 text-amber-700 dark:text-amber-400"
+        >
           ~{changed.length} changed
         </Badge>
         <Badge variant="outline">{unchangedCount} unchanged</Badge>
       </div>
       {added.length === 0 && removed.length === 0 && changed.length === 0 ? (
-        <p className="text-muted-foreground">DOM trees match — no structural differences.</p>
+        <p className="text-muted-foreground">
+          DOM trees match — no structural differences.
+        </p>
       ) : (
         <div className="space-y-3">
           {added.length > 0 && (
@@ -290,10 +347,14 @@ function DomPane({ result }: { result: InspectionResult }) {
               <ul className="max-h-72 space-y-1 overflow-y-auto border-t bg-background px-3 py-2 font-mono text-xs">
                 {added.slice(0, 200).map((el, i) => (
                   <li key={`a-${i}`}>
-                    <span className="text-emerald-600 dark:text-emerald-400">+ </span>
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      +{" "}
+                    </span>
                     &lt;{el.tag}&gt;
-                    {el.id ? ` #${el.id}` : ''}
-                    {el.textContent ? ` — "${el.textContent.slice(0, 80)}"` : ''}
+                    {el.id ? ` #${el.id}` : ""}
+                    {el.textContent
+                      ? ` — "${el.textContent.slice(0, 80)}"`
+                      : ""}
                   </li>
                 ))}
               </ul>
@@ -309,8 +370,10 @@ function DomPane({ result }: { result: InspectionResult }) {
                   <li key={`r-${i}`}>
                     <span className="text-rose-600 dark:text-rose-400">− </span>
                     &lt;{el.tag}&gt;
-                    {el.id ? ` #${el.id}` : ''}
-                    {el.textContent ? ` — "${el.textContent.slice(0, 80)}"` : ''}
+                    {el.id ? ` #${el.id}` : ""}
+                    {el.textContent
+                      ? ` — "${el.textContent.slice(0, 80)}"`
+                      : ""}
                   </li>
                 ))}
               </ul>
@@ -324,13 +387,16 @@ function DomPane({ result }: { result: InspectionResult }) {
               <ul className="max-h-72 space-y-1 overflow-y-auto border-t bg-background px-3 py-2 font-mono text-xs">
                 {changed.slice(0, 200).map((c, i) => (
                   <li key={`c-${i}`}>
-                    <span className="text-amber-600 dark:text-amber-400">~ </span>
-                    &lt;{c.current.tag}&gt; [{c.changes.join(', ')}]
-                    {c.changes.includes('text') ? (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      ~{" "}
+                    </span>
+                    &lt;{c.current.tag}&gt; [{c.changes.join(", ")}]
+                    {c.changes.includes("text") ? (
                       <span>
-                        {' '}
-                        &ldquo;{c.baseline.textContent?.slice(0, 40) ?? ''}&rdquo; → &ldquo;
-                        {c.current.textContent?.slice(0, 40) ?? ''}&rdquo;
+                        {" "}
+                        &ldquo;{c.baseline.textContent?.slice(0, 40) ?? ""}
+                        &rdquo; → &ldquo;
+                        {c.current.textContent?.slice(0, 40) ?? ""}&rdquo;
                       </span>
                     ) : null}
                   </li>
@@ -346,16 +412,27 @@ function DomPane({ result }: { result: InspectionResult }) {
 
 function TextPane({ result }: { result: InspectionResult }) {
   const t = result.text;
-  if (!t) return <p className="text-sm text-muted-foreground">Text dimension not requested.</p>;
+  if (!t)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Text dimension not requested.
+      </p>
+    );
   if (t.error) return <p className="text-sm text-rose-500">{t.error}</p>;
-  const visible = t.lines.filter((l) => l.op !== 'eq').slice(0, 500);
+  const visible = t.lines.filter((l) => l.op !== "eq").slice(0, 500);
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary" className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+        >
           +{t.added} added
         </Badge>
-        <Badge variant="secondary" className="bg-rose-600/10 text-rose-700 dark:text-rose-400">
+        <Badge
+          variant="secondary"
+          className="bg-rose-600/10 text-rose-700 dark:text-rose-400"
+        >
           −{t.removed} removed
         </Badge>
         <Badge variant="outline">
@@ -363,12 +440,17 @@ function TextPane({ result }: { result: InspectionResult }) {
         </Badge>
       </div>
       {visible.length === 0 ? (
-        <p className="text-muted-foreground">Visible text is identical between the two runs.</p>
+        <p className="text-muted-foreground">
+          Visible text is identical between the two runs.
+        </p>
       ) : (
         <pre className="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 font-mono text-xs leading-relaxed">
           {visible
-            .map((l) => `${l.op === 'add' ? '+' : l.op === 'del' ? '-' : ' '} ${l.line}`)
-            .join('\n')}
+            .map(
+              (l) =>
+                `${l.op === "add" ? "+" : l.op === "del" ? "-" : " "} ${l.line}`,
+            )
+            .join("\n")}
         </pre>
       )}
     </div>
@@ -377,15 +459,20 @@ function TextPane({ result }: { result: InspectionResult }) {
 
 function NetworkPane({ result }: { result: InspectionResult }) {
   const n = result.network;
-  if (!n) return <p className="text-sm text-muted-foreground">Network dimension not requested.</p>;
+  if (!n)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Network dimension not requested.
+      </p>
+    );
   if (n.error) return <p className="text-sm text-rose-500">{n.error}</p>;
   const failedDelta = n.summary.failedCountB - n.summary.failedCountA;
   const groups: Array<{ kind: string; rows: typeof n.added }> = [
-    { kind: 'added', rows: n.added },
-    { kind: 'removed', rows: n.removed },
-    { kind: 'changedStatus', rows: n.changedStatus },
-    { kind: 'changedSize', rows: n.changedSize },
-    { kind: 'slowdowns', rows: n.slowdowns },
+    { kind: "added", rows: n.added },
+    { kind: "removed", rows: n.removed },
+    { kind: "changedStatus", rows: n.changedStatus },
+    { kind: "changedSize", rows: n.changedSize },
+    { kind: "slowdowns", rows: n.slowdowns },
   ];
   const interesting = groups.flatMap((g) =>
     g.rows.slice(0, 500).map((row) => ({ ...row, _kind: g.kind })),
@@ -393,10 +480,16 @@ function NetworkPane({ result }: { result: InspectionResult }) {
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="secondary" className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+        <Badge
+          variant="secondary"
+          className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+        >
           +{n.added.length} new
         </Badge>
-        <Badge variant="secondary" className="bg-rose-600/10 text-rose-700 dark:text-rose-400">
+        <Badge
+          variant="secondary"
+          className="bg-rose-600/10 text-rose-700 dark:text-rose-400"
+        >
           −{n.removed.length} dropped
         </Badge>
         <Badge variant="secondary">{n.changedStatus.length} status</Badge>
@@ -407,7 +500,7 @@ function NetworkPane({ result }: { result: InspectionResult }) {
         </Badge>
         {failedDelta !== 0 ? (
           <Badge variant="destructive">
-            failed Δ {failedDelta > 0 ? '+' : ''}
+            failed Δ {failedDelta > 0 ? "+" : ""}
             {failedDelta}
           </Badge>
         ) : null}
@@ -441,20 +534,26 @@ function NetworkPane({ result }: { result: InspectionResult }) {
                   <tr key={`${row._kind}-${i}-${row.url}`} className="border-t">
                     <td className="px-2 py-1.5 font-mono">{row._kind}</td>
                     <td className="px-2 py-1.5 font-mono">{row.method}</td>
-                    <td className="break-all px-2 py-1.5 font-mono">{row.url}</td>
+                    <td className="break-all px-2 py-1.5 font-mono">
+                      {row.url}
+                    </td>
                     <td className="px-2 py-1.5 font-mono">
-                      {row.baseline?.status ?? '—'}
-                      {row.current && row.baseline && row.current.status !== row.baseline.status
+                      {row.baseline?.status ?? "—"}
+                      {row.current &&
+                      row.baseline &&
+                      row.current.status !== row.baseline.status
                         ? ` → ${row.current.status}`
                         : row.current && !row.baseline
                           ? ` → ${row.current.status}`
-                          : ''}
+                          : ""}
                     </td>
                     <td className="px-2 py-1.5 font-mono">
-                      {dMs !== undefined ? `${dMs > 0 ? '+' : ''}${dMs}` : '—'}
+                      {dMs !== undefined ? `${dMs > 0 ? "+" : ""}${dMs}` : "—"}
                     </td>
                     <td className="px-2 py-1.5 font-mono">
-                      {dBytes !== undefined ? `${dBytes > 0 ? '+' : ''}${dBytes}` : '—'}
+                      {dBytes !== undefined
+                        ? `${dBytes > 0 ? "+" : ""}${dBytes}`
+                        : "—"}
                     </td>
                   </tr>
                 );
@@ -469,10 +568,15 @@ function NetworkPane({ result }: { result: InspectionResult }) {
 
 function VariablesPane({ result }: { result: InspectionResult }) {
   const v = result.variables;
-  if (!v) return <p className="text-sm text-muted-foreground">Variables dimension not requested.</p>;
+  if (!v)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Variables dimension not requested.
+      </p>
+    );
   if (v.error) return <p className="text-sm text-rose-500">{v.error}</p>;
-  const ext = v.extracted.filter((e) => e.kind !== 'unchanged');
-  const asg = v.assigned.filter((e) => e.kind !== 'unchanged');
+  const ext = v.extracted.filter((e) => e.kind !== "unchanged");
+  const asg = v.assigned.filter((e) => e.kind !== "unchanged");
   return (
     <div className="space-y-5 text-sm">
       <section className="space-y-2">
@@ -494,8 +598,12 @@ function VariablesPane({ result }: { result: InspectionResult }) {
                 {ext.map((e) => (
                   <tr key={`ex-${e.key}`} className="border-t">
                     <td className="px-2 py-1.5 font-mono">{e.key}</td>
-                    <td className="break-all px-2 py-1.5 font-mono">{e.baseline ?? '∅'}</td>
-                    <td className="break-all px-2 py-1.5 font-mono">{e.current ?? '∅'}</td>
+                    <td className="break-all px-2 py-1.5 font-mono">
+                      {e.baseline ?? "∅"}
+                    </td>
+                    <td className="break-all px-2 py-1.5 font-mono">
+                      {e.current ?? "∅"}
+                    </td>
                     <td className="px-2 py-1.5">{e.kind}</td>
                   </tr>
                 ))}
@@ -523,8 +631,12 @@ function VariablesPane({ result }: { result: InspectionResult }) {
                 {asg.map((e) => (
                   <tr key={`as-${e.key}`} className="border-t">
                     <td className="px-2 py-1.5 font-mono">{e.key}</td>
-                    <td className="break-all px-2 py-1.5 font-mono">{e.baseline ?? '∅'}</td>
-                    <td className="break-all px-2 py-1.5 font-mono">{e.current ?? '∅'}</td>
+                    <td className="break-all px-2 py-1.5 font-mono">
+                      {e.baseline ?? "∅"}
+                    </td>
+                    <td className="break-all px-2 py-1.5 font-mono">
+                      {e.current ?? "∅"}
+                    </td>
                     <td className="px-2 py-1.5">{e.kind}</td>
                   </tr>
                 ))}
@@ -552,7 +664,7 @@ function VariablesPane({ result }: { result: InspectionResult }) {
         </div>
         {v.consoleErrors.added.length > 0 ? (
           <pre className="max-h-48 overflow-auto rounded-md border bg-muted/20 p-2 font-mono text-xs">
-            {v.consoleErrors.added.map((line) => `+ ${line}`).join('\n')}
+            {v.consoleErrors.added.map((line) => `+ ${line}`).join("\n")}
           </pre>
         ) : null}
       </section>
@@ -564,7 +676,7 @@ function VariablesPane({ result }: { result: InspectionResult }) {
         </div>
         {v.logs.sample.length > 0 ? (
           <pre className="max-h-48 overflow-auto rounded-md border bg-muted/20 p-2 font-mono text-xs">
-            {v.logs.sample.map((line) => `+ ${line}`).join('\n')}
+            {v.logs.sample.map((line) => `+ ${line}`).join("\n")}
           </pre>
         ) : null}
       </section>
@@ -574,11 +686,11 @@ function VariablesPane({ result }: { result: InspectionResult }) {
 
 export function InspectTabClient({ testId }: InspectTabClientProps) {
   const [runs, setRuns] = useState<RunOption[]>([]);
-  const [currentId, setCurrentId] = useState<string>('');
-  const [baselineId, setBaselineId] = useState<string>('');
-  const [engine, setEngine] = useState<DiffEngineType>('pixelmatch');
+  const [currentId, setCurrentId] = useState<string>("");
+  const [baselineId, setBaselineId] = useState<string>("");
+  const [engine, setEngine] = useState<DiffEngineType>("pixelmatch");
   const [result, setResult] = useState<InspectionResult | null>(null);
-  const [activeDim, setActiveDim] = useState<InspectorDimension>('visual');
+  const [activeDim, setActiveDim] = useState<InspectorDimension>("visual");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
@@ -600,7 +712,8 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled)
+          setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -620,7 +733,7 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
     (force = false) => {
       if (!currentId || !baselineId) return;
       if (currentId === baselineId) {
-        setError('Current and baseline must differ');
+        setError("Current and baseline must differ");
         setResult(null);
         return;
       }
@@ -630,8 +743,8 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
       startTransition(() => {
         setError(null);
         fetch(`/api/tests/${testId}/inspect`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({
             currentResultId: currentId,
             baselineResultId: baselineId,
@@ -679,13 +792,16 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
     );
   }
   if (error && runs.length === 0) {
-    return <p className="text-sm text-rose-500">Failed to load runs: {error}</p>;
+    return (
+      <p className="text-sm text-rose-500">Failed to load runs: {error}</p>
+    );
   }
   if (runs.length < 2) {
     return (
       <Card>
         <CardContent className="p-6 text-center text-sm text-muted-foreground">
-          Need at least two prior runs of this test to inspect. Found {runs.length}.
+          Need at least two prior runs of this test to inspect. Found{" "}
+          {runs.length}.
         </CardContent>
       </Card>
     );
@@ -754,7 +870,10 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
 
           <div className="flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
             <span className="text-muted-foreground">Visual engine</span>
-            <Select value={engine} onValueChange={(v) => setEngine(v as DiffEngineType)}>
+            <Select
+              value={engine}
+              onValueChange={(v) => setEngine(v as DiffEngineType)}
+            >
               <SelectTrigger className="h-7 w-40">
                 <SelectValue />
               </SelectTrigger>
@@ -775,7 +894,12 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
                 size="sm"
                 variant="outline"
                 onClick={() => recompute(true)}
-                disabled={pending || !currentId || !baselineId || currentId === baselineId}
+                disabled={
+                  pending ||
+                  !currentId ||
+                  !baselineId ||
+                  currentId === baselineId
+                }
                 className="gap-1.5"
               >
                 {pending ? (
@@ -792,7 +916,9 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
 
       {error && !pending ? (
         <Card>
-          <CardContent className="p-4 text-sm text-rose-500">{error}</CardContent>
+          <CardContent className="p-4 text-sm text-rose-500">
+            {error}
+          </CardContent>
         </Card>
       ) : null}
 
@@ -803,7 +929,10 @@ export function InspectTabClient({ testId }: InspectTabClientProps) {
             active={activeDim}
             onSelect={setActiveDim}
           />
-          <Tabs value={activeDim} onValueChange={(v) => setActiveDim(v as InspectorDimension)}>
+          <Tabs
+            value={activeDim}
+            onValueChange={(v) => setActiveDim(v as InspectorDimension)}
+          >
             <TabsList className="hidden">
               {DIMENSIONS.map(({ key, label }) => (
                 <TabsTrigger key={key} value={key}>

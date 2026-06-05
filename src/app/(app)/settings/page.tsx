@@ -1,8 +1,14 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import * as queries from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { Github, Check, X, Users, Bot, Mail, Terminal } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import * as queries from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -12,45 +18,48 @@ function GitLabIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-import { PlaywrightSettingsCard } from '@/components/settings/playwright-settings-card';
-import { DiffSensitivityCard } from '@/components/settings/diff-sensitivity-card';
-import { AISettingsCard } from '@/components/settings/ai-settings-card';
-import { AILogsCard } from '@/components/settings/ai-logs-card';
-import { NotificationSettingsCard } from '@/components/settings/notification-settings-card';
-import { ResetSetupGuide } from '@/components/setup-guide/reset-setup-guide';
-import { SettingsHighlighter } from '@/components/settings/settings-highlighter';
-import { BranchSelector } from '@/components/settings/branch-selector';
-import { SettingsTabs } from '@/components/settings/settings-tabs';
-import { UserList } from '@/components/users/user-list';
-import { PendingInvitations } from '@/components/users/pending-invitations';
-import { InviteUserDialog } from '@/components/users/invite-user-dialog';
-import { RunnerList } from '@/components/runners/runner-list';
-import { CreateRunnerDialog } from '@/components/runners/create-runner-dialog';
-import { getRunners, getSystemRunners } from '@/server/actions/runners';
-import { listSystemEmbeddedSessions } from '@/server/actions/embedded-sessions';
-import { listApiTokens } from '@/server/actions/api-tokens';
-import { ApiTokensSection } from '@/components/api-tokens/api-tokens-section';
-import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
-import { TestingTemplateSelector } from '@/components/settings/testing-template-selector';
-import { AutoApproveToggle } from '@/components/settings/auto-approve-toggle';
-import { EarlyAdopterToggle } from '@/components/settings/early-adopter-toggle';
-import { QuickstartEmailTemplateInput } from '@/components/settings/quickstart-email-template-input';
-import { BanAiModeToggle } from '@/components/settings/ban-ai-mode-toggle';
-import { GamificationToggle } from '@/components/settings/gamification-toggle';
-import { VerifyPhaseToggle } from '@/components/settings/verify-phase-toggle';
-import { GamificationAdminCard } from '@/components/settings/gamification-admin-card';
-import { ConnectGithubButton, ReconnectGithubLink } from '@/components/settings/connect-github-button';
-import { GithubActionsCard } from '@/components/settings/github-actions-card-client';
-import { ConnectGitlabButton } from '@/components/settings/connect-gitlab-button';
-import { GitlabPipelinesCard } from '@/components/settings/gitlab-pipelines-card-client';
-import { ScheduleManagerCard } from '@/components/settings/schedule-manager-client';
-import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
-import { TestMigrationCard } from '@/components/settings/test-migration-card';
-import { EmailPreferencesCard } from '@/components/settings/email-preferences-client';
-import { StorageUsageCard } from '@/components/settings/storage-usage-card-client';
-import { RunUsageCard } from '@/components/settings/run-usage-card-client';
-import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
-import { DeleteRepoDialog } from '@/components/settings/delete-repo-dialog';
+import { PlaywrightSettingsCard } from "@/components/settings/playwright-settings-card";
+import { DiffSensitivityCard } from "@/components/settings/diff-sensitivity-card";
+import { AISettingsCard } from "@/components/settings/ai-settings-card";
+import { AILogsCard } from "@/components/settings/ai-logs-card";
+import { NotificationSettingsCard } from "@/components/settings/notification-settings-card";
+import { ResetSetupGuide } from "@/components/setup-guide/reset-setup-guide";
+import { SettingsHighlighter } from "@/components/settings/settings-highlighter";
+import { BranchSelector } from "@/components/settings/branch-selector";
+import { SettingsTabs } from "@/components/settings/settings-tabs";
+import { UserList } from "@/components/users/user-list";
+import { PendingInvitations } from "@/components/users/pending-invitations";
+import { InviteUserDialog } from "@/components/users/invite-user-dialog";
+import { RunnerList } from "@/components/runners/runner-list";
+import { CreateRunnerDialog } from "@/components/runners/create-runner-dialog";
+import { getRunners, getSystemRunners } from "@/server/actions/runners";
+import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
+import { listApiTokens } from "@/server/actions/api-tokens";
+import { ApiTokensSection } from "@/components/api-tokens/api-tokens-section";
+import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
+import { TestingTemplateSelector } from "@/components/settings/testing-template-selector";
+import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
+import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
+import { QuickstartEmailTemplateInput } from "@/components/settings/quickstart-email-template-input";
+import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
+import { GamificationToggle } from "@/components/settings/gamification-toggle";
+import { VerifyPhaseToggle } from "@/components/settings/verify-phase-toggle";
+import { GamificationAdminCard } from "@/components/settings/gamification-admin-card";
+import {
+  ConnectGithubButton,
+  ReconnectGithubLink,
+} from "@/components/settings/connect-github-button";
+import { GithubActionsCard } from "@/components/settings/github-actions-card-client";
+import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
+import { GitlabPipelinesCard } from "@/components/settings/gitlab-pipelines-card-client";
+import { ScheduleManagerCard } from "@/components/settings/schedule-manager-client";
+import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
+import { TestMigrationCard } from "@/components/settings/test-migration-card";
+import { EmailPreferencesCard } from "@/components/settings/email-preferences-client";
+import { StorageUsageCard } from "@/components/settings/storage-usage-card-client";
+import { RunUsageCard } from "@/components/settings/run-usage-card-client";
+import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
+import { DeleteRepoDialog } from "@/components/settings/delete-repo-dialog";
 
 export default async function SettingsPage({
   searchParams,
@@ -67,7 +76,13 @@ export default async function SettingsPage({
     teamId ? queries.getGitlabAccountByTeam(teamId) : null,
     teamId ? queries.getSelectedRepository(userId, teamId) : null,
   ]);
-  const [githubActionConfigs, gitlabPipelineConfigs, teamRepos, runners, sysRunners] = await Promise.all([
+  const [
+    githubActionConfigs,
+    gitlabPipelineConfigs,
+    teamRepos,
+    runners,
+    sysRunners,
+  ] = await Promise.all([
     teamId ? queries.getGithubActionConfigs(teamId) : [],
     teamId ? queries.getGitlabPipelineConfigs(teamId) : [],
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
@@ -78,39 +93,52 @@ export default async function SettingsPage({
     listApiTokens(),
     listSystemEmbeddedSessions(),
   ]);
-  const playwrightSettings = await queries.getPlaywrightSettings(selectedRepo?.id);
-  const diffSensitivitySettings = await queries.getDiffSensitivitySettings(selectedRepo?.id);
+  const playwrightSettings = await queries.getPlaywrightSettings(
+    selectedRepo?.id,
+  );
+  const diffSensitivitySettings = await queries.getDiffSensitivitySettings(
+    selectedRepo?.id,
+  );
   const aiSettings = await queries.getAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
-  const notificationSettings = await queries.getNotificationSettings(selectedRepo?.id);
+  const notificationSettings = await queries.getNotificationSettings(
+    selectedRepo?.id,
+  );
   const googleSheetsAccount = currentUser?.teamId
     ? await queries.getGoogleSheetsAccount(currentUser.teamId)
     : null;
-  const googleSheetsDataSources = await queries.getGoogleSheetsDataSources(selectedRepo?.id);
+  const googleSheetsDataSources = await queries.getGoogleSheetsDataSources(
+    selectedRepo?.id,
+  );
 
   // Fetch admin-only data
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
-  const [teamMembers, pendingInvitations] = isAdmin && currentUser?.teamId
-    ? await Promise.all([
-        queries.getTeamMembers(currentUser.teamId),
-        queries.getPendingInvitationsByTeam(currentUser.teamId),
-      ])
-    : [[], []];
+  const isAdmin =
+    currentUser?.role === "admin" || currentUser?.role === "owner";
+  const [teamMembers, pendingInvitations] =
+    isAdmin && currentUser?.teamId
+      ? await Promise.all([
+          queries.getTeamMembers(currentUser.teamId),
+          queries.getPendingInvitationsByTeam(currentUser.teamId),
+        ])
+      : [[], []];
 
   // Gamification admin data
-  const [activeGamificationSeason, activeBugBlitz] = session?.team?.gamificationEnabled && teamId
-    ? await Promise.all([
-        queries.getActiveSeason(teamId),
-        queries.getActiveBugBlitz(teamId),
-      ])
-    : [null, null];
+  const [activeGamificationSeason, activeBugBlitz] =
+    session?.team?.gamificationEnabled && teamId
+      ? await Promise.all([
+          queries.getActiveSeason(teamId),
+          queries.getActiveBugBlitz(teamId),
+        ])
+      : [null, null];
 
-  const storageUsage = teamId ? await queries.getTeamStorageUsage(teamId) : null;
+  const storageUsage = teamId
+    ? await queries.getTeamStorageUsage(teamId)
+    : null;
   const runUsage = teamId ? await queries.getTeamRunUsage(teamId) : null;
-  const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === 'true';
-  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === 'true';
+  const enforcementEnabled = process.env.ENFORCE_STORAGE_LIMITS === "true";
+  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === "true";
 
-  const serverUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const serverUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
   const banAiMode = session?.team?.banAiMode ?? false;
 
@@ -120,14 +148,14 @@ export default async function SettingsPage({
       <Card id="repository">
         <CardHeader>
           <CardTitle>Repository</CardTitle>
-          <CardDescription>
-            Selected repository information
-          </CardDescription>
+          <CardDescription>Selected repository information</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Repository</span>
-            <span className="font-medium">{selectedRepo?.fullName || 'None selected'}</span>
+            <span className="font-medium">
+              {selectedRepo?.fullName || "None selected"}
+            </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">Selected Branch</span>
@@ -143,13 +171,15 @@ export default async function SettingsPage({
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Default Branch</span>
-            <code className="text-sm">{selectedRepo?.defaultBranch || '-'}</code>
+            <code className="text-sm">
+              {selectedRepo?.defaultBranch || "-"}
+            </code>
           </div>
           {selectedRepo && (
             <AutoApproveToggle
               repositoryId={selectedRepo.id}
               enabled={selectedRepo.autoApproveDefaultBranch ?? false}
-              defaultBranch={selectedRepo.defaultBranch || 'main'}
+              defaultBranch={selectedRepo.defaultBranch || "main"}
             />
           )}
         </CardContent>
@@ -159,19 +189,26 @@ export default async function SettingsPage({
       <Card id="features">
         <CardHeader>
           <CardTitle>Features</CardTitle>
-          <CardDescription>
-            Toggle experimental features
-          </CardDescription>
+          <CardDescription>Toggle experimental features</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <EarlyAdopterToggle enabled={session?.team?.earlyAdopterMode ?? false} />
+          <EarlyAdopterToggle
+            enabled={session?.team?.earlyAdopterMode ?? false}
+          />
           {earlyAdopterMode && (
             <QuickstartEmailTemplateInput
-              initial={session?.team?.quickstartEmailTemplate ?? 'viktor+{slug}{stamp}@lastest.cloud'}
+              initial={
+                session?.team?.quickstartEmailTemplate ??
+                "viktor+{slug}{stamp}@lastest.cloud"
+              }
             />
           )}
-          <GamificationToggle enabled={session?.team?.gamificationEnabled ?? false} />
-          <VerifyPhaseToggle enabled={session?.team?.verifyPhaseEnabled ?? false} />
+          <GamificationToggle
+            enabled={session?.team?.gamificationEnabled ?? false}
+          />
+          <VerifyPhaseToggle
+            enabled={session?.team?.verifyPhaseEnabled ?? false}
+          />
         </CardContent>
       </Card>
 
@@ -201,15 +238,19 @@ export default async function SettingsPage({
         <CardContent className="space-y-4">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Version</span>
-            <span className="font-mono">0.1.{process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT ?? '0'}</span>
+            <span className="font-mono">
+              0.1.{process.env.NEXT_PUBLIC_GIT_COMMIT_COUNT ?? "0"}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Commit</span>
-            <span className="font-mono text-xs">{process.env.NEXT_PUBLIC_GIT_HASH ?? 'dev'}</span>
+            <span className="font-mono text-xs">
+              {process.env.NEXT_PUBLIC_GIT_HASH ?? "dev"}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Built</span>
-            <span>{process.env.NEXT_PUBLIC_BUILD_DATE ?? 'unknown'}</span>
+            <span>{process.env.NEXT_PUBLIC_BUILD_DATE ?? "unknown"}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Framework</span>
@@ -228,10 +269,10 @@ export default async function SettingsPage({
           <CardHeader>
             <CardTitle className="text-destructive">Danger Zone</CardTitle>
             <CardDescription>
-              {selectedRepo.provider === 'local'
-                ? 'Permanently delete this repository and everything attached to it.'
+              {selectedRepo.provider === "local"
+                ? "Permanently delete this repository and everything attached to it."
                 : `Remove Lastest's data for this repository. Your ${
-                    selectedRepo.provider === 'gitlab' ? 'GitLab' : 'GitHub'
+                    selectedRepo.provider === "gitlab" ? "GitLab" : "GitHub"
                   } repository will not be affected.`}
             </CardDescription>
           </CardHeader>
@@ -239,14 +280,15 @@ export default async function SettingsPage({
             <div className="space-y-1">
               <p className="text-sm font-medium">Delete repository</p>
               <p className="text-xs text-muted-foreground">
-                You will need to type{' '}
-                <span className="font-mono">{selectedRepo.fullName}</span> to confirm.
+                You will need to type{" "}
+                <span className="font-mono">{selectedRepo.fullName}</span> to
+                confirm.
               </p>
             </div>
             <DeleteRepoDialog
               repoId={selectedRepo.id}
               fullName={selectedRepo.fullName}
-              provider={selectedRepo.provider ?? 'github'}
+              provider={selectedRepo.provider ?? "github"}
             />
           </CardContent>
         </Card>
@@ -283,8 +325,12 @@ export default async function SettingsPage({
                     <Github className="w-6 h-6" />
                   </div>
                   <div>
-                    <div className="font-medium">@{githubAccount.githubUsername}</div>
-                    <div className="text-sm text-muted-foreground">Connected</div>
+                    <div className="font-medium">
+                      @{githubAccount.githubUsername}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Connected
+                    </div>
                   </div>
                 </div>
                 <ReconnectGithubLink />
@@ -324,9 +370,13 @@ export default async function SettingsPage({
                     <GitLabIcon className="w-6 h-6" />
                   </div>
                   <div>
-                    <div className="font-medium">@{gitlabAccount.gitlabUsername}</div>
+                    <div className="font-medium">
+                      @{gitlabAccount.gitlabUsername}
+                    </div>
                     <div className="text-sm text-muted-foreground">
-                      {gitlabAccount.instanceUrl === 'https://gitlab.com' ? 'Connected' : gitlabAccount.instanceUrl}
+                      {gitlabAccount.instanceUrl === "https://gitlab.com"
+                        ? "Connected"
+                        : gitlabAccount.instanceUrl}
                     </div>
                   </div>
                 </div>
@@ -346,7 +396,8 @@ export default async function SettingsPage({
           ) : (
             <>
               <p className="text-muted-foreground">
-                Connect your GitLab account to link builds with merge requests. Self-hosted instances supported via PAT or per-account OAuth.
+                Connect your GitLab account to link builds with merge requests.
+                Self-hosted instances supported via PAT or per-account OAuth.
               </p>
               <ConnectGitlabButton />
             </>
@@ -357,11 +408,15 @@ export default async function SettingsPage({
       {/* Google Sheets Test Data */}
       <div id="google-sheets">
         <GoogleSheetsSettingsCard
-          account={googleSheetsAccount ? {
-            id: googleSheetsAccount.id,
-            googleEmail: googleSheetsAccount.googleEmail,
-            googleName: googleSheetsAccount.googleName,
-          } : null}
+          account={
+            googleSheetsAccount
+              ? {
+                  id: googleSheetsAccount.id,
+                  googleEmail: googleSheetsAccount.googleEmail,
+                  googleName: googleSheetsAccount.googleName,
+                }
+              : null
+          }
           dataSources={googleSheetsDataSources}
           repositoryId={selectedRepo?.id}
         />
@@ -402,11 +457,14 @@ export default async function SettingsPage({
           <CardHeader>
             <CardTitle>Testing Template</CardTitle>
             <CardDescription>
-              Apply a preset that configures Playwright and diff sensitivity for a common app style.
+              Apply a preset that configures Playwright and diff sensitivity for
+              a common app style.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-between items-center">
-            <span className="text-sm text-muted-foreground">Active template</span>
+            <span className="text-sm text-muted-foreground">
+              Active template
+            </span>
             <TestingTemplateSelector
               repositoryId={selectedRepo.id}
               currentTemplate={selectedRepo.testingTemplate}
@@ -458,10 +516,7 @@ export default async function SettingsPage({
           </div>
 
           <div id="ai-logs">
-            <AILogsCard
-              logs={aiLogs}
-              repositoryId={selectedRepo?.id}
-            />
+            <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
           </div>
         </>
       )}
@@ -476,7 +531,9 @@ export default async function SettingsPage({
           <StorageUsageCard
             usedBytes={storageUsage.storageUsedBytes}
             quotaBytes={storageUsage.storageQuotaBytes}
-            lastCalculatedAt={storageUsage.storageLastCalculatedAt?.toISOString() ?? null}
+            lastCalculatedAt={
+              storageUsage.storageLastCalculatedAt?.toISOString() ?? null
+            }
             isAdmin={isAdmin}
             enforcementEnabled={enforcementEnabled}
           />
@@ -490,8 +547,10 @@ export default async function SettingsPage({
             runsThisMonth={runUsage.runsThisMonth}
             monthlyRunQuota={runUsage.monthlyRunQuota}
             runMinutesThisMonth={runUsage.runMinutesThisMonth}
-            usageMonth={runUsage.usageMonth ?? ''}
-            lastCalculatedAt={runUsage.runUsageLastCalculatedAt?.toISOString() ?? null}
+            usageMonth={runUsage.usageMonth ?? ""}
+            lastCalculatedAt={
+              runUsage.runUsageLastCalculatedAt?.toISOString() ?? null
+            }
             enforcementEnabled={runEnforcementEnabled}
           />
         </div>
@@ -505,9 +564,7 @@ export default async function SettingsPage({
               <Mail className="w-5 h-5" />
               Pending Invitations
             </CardTitle>
-            <CardDescription>
-              Invitations awaiting acceptance
-            </CardDescription>
+            <CardDescription>Invitations awaiting acceptance</CardDescription>
           </CardHeader>
           <CardContent>
             <PendingInvitations invitations={pendingInvitations} />
@@ -524,9 +581,7 @@ export default async function SettingsPage({
                 <Users className="w-5 h-5" />
                 Team Members ({teamMembers.length})
               </CardTitle>
-              <CardDescription>
-                Manage members of your team
-              </CardDescription>
+              <CardDescription>Manage members of your team</CardDescription>
             </div>
             <InviteUserDialog />
           </CardHeader>
@@ -538,96 +593,154 @@ export default async function SettingsPage({
 
       {/* Runners & API Access (admin-only) */}
       {isAdmin && (
-      <Card id="runners">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="w-5 h-5" />
-              Runners & API Access
-            </CardTitle>
-            <CardDescription>
-              Local/remote runners that execute tests, plus API keys for the MCP server, VS Code extension, and scripts.
-            </CardDescription>
-          </div>
-          <CreateRunnerDialog />
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div id="api-tokens">
-            <ApiTokensSection tokens={apiTokens} serverUrl={serverUrl} />
-          </div>
-
-          <div className="border-t pt-4 space-y-4">
-            <div>
-              <p className="text-sm font-medium flex items-center gap-2">
-                <Bot className="w-4 h-4" /> Runners ({runners.length})
-              </p>
-              <p className="text-xs text-muted-foreground">CLI agents and embedded browsers that run tests on your machines.</p>
+        <Card id="runners">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="w-5 h-5" />
+                Runners & API Access
+              </CardTitle>
+              <CardDescription>
+                Local/remote runners that execute tests, plus API keys for the
+                MCP server, VS Code extension, and scripts.
+              </CardDescription>
             </div>
-          {runners.length === 0 && sysRunners.length === 0 ? (
-            <div className="text-center py-4 text-muted-foreground">
-              <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p className="mb-1">No runners configured</p>
-              <p className="text-sm">Create a runner above to get a token, then start it with the CLI.</p>
+            <CreateRunnerDialog />
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div id="api-tokens">
+              <ApiTokensSection tokens={apiTokens} serverUrl={serverUrl} />
             </div>
-          ) : (
-            <RunnerList runners={runners} systemRunners={sysRunners} systemSessions={systemEBSessions} />
-          )}
 
-          <details open={runners.length === 0 ? true : undefined}>
-            <summary className="text-sm font-medium flex items-center gap-2 cursor-pointer select-none py-1">
-              <Terminal className="w-4 h-4" />
-              Setup Guide
-            </summary>
-            <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-3 text-xs text-muted-foreground">
-              <DiagramThumbnail
-                src="/docs/runner-logic.png"
-                alt="Remote Runners Architecture Diagram"
-                width={140}
-                height={90}
-              />
+            <div className="border-t pt-4 space-y-4">
               <div>
-                <p className="font-medium mb-1">1. Install Playwright browser:</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono">npx playwright install chromium</pre>
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <Bot className="w-4 h-4" /> Runners ({runners.length})
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  CLI agents and embedded browsers that run tests on your
+                  machines.
+                </p>
               </div>
-              <div>
-                <p className="font-medium mb-1">2. Start as background daemon:</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}</pre>
-                <p className="text-[11px] mt-1 opacity-75">Logs: ~/.lastest/runner.log · Config saved for subsequent runs</p>
-              </div>
-              <div>
-                <p className="font-medium mb-1">3. Or run in foreground (Docker / CI):</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}</pre>
-              </div>
-              <div>
-                <p className="font-medium mb-1">Manage daemon:</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
+              {runners.length === 0 && sysRunners.length === 0 ? (
+                <div className="text-center py-4 text-muted-foreground">
+                  <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p className="mb-1">No runners configured</p>
+                  <p className="text-sm">
+                    Create a runner above to get a token, then start it with the
+                    CLI.
+                  </p>
+                </div>
+              ) : (
+                <RunnerList
+                  runners={runners}
+                  systemRunners={sysRunners}
+                  systemSessions={systemEBSessions}
+                />
+              )}
+
+              <details open={runners.length === 0 ? true : undefined}>
+                <summary className="text-sm font-medium flex items-center gap-2 cursor-pointer select-none py-1">
+                  <Terminal className="w-4 h-4" />
+                  Setup Guide
+                </summary>
+                <div className="bg-muted/50 border rounded-md p-4 mt-2 space-y-3 text-xs text-muted-foreground">
+                  <DiagramThumbnail
+                    src="/docs/runner-logic.png"
+                    alt="Remote Runners Architecture Diagram"
+                    width={140}
+                    height={90}
+                  />
+                  <div>
+                    <p className="font-medium mb-1">
+                      1. Install Playwright browser:
+                    </p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">
+                      npx playwright install chromium
+                    </pre>
+                  </div>
+                  <div>
+                    <p className="font-medium mb-1">
+                      2. Start as background daemon:
+                    </p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">
+                      npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}
+                    </pre>
+                    <p className="text-[11px] mt-1 opacity-75">
+                      Logs: ~/.lastest/runner.log · Config saved for subsequent
+                      runs
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium mb-1">
+                      3. Or run in foreground (Docker / CI):
+                    </p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">
+                      npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}
+                    </pre>
+                  </div>
+                  <div>
+                    <p className="font-medium mb-1">Manage daemon:</p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
 npx @lastest/runner status    # Check if running
 npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
-              </div>
-              <div>
-                <p className="font-medium mb-1">Trigger builds from CI:</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
-                <p className="text-[11px] mt-1 opacity-75">Options: <code className="bg-muted px-1 py-0.5 rounded">--timeout</code> ms, <code className="bg-muted px-1 py-0.5 rounded">--commit</code> SHA, <code className="bg-muted px-1 py-0.5 rounded">--target-url</code> override, <code className="bg-muted px-1 py-0.5 rounded">--fail-on-changes</code></p>
-              </div>
-              <div>
-                <p className="font-medium mb-1">List available repositories:</p>
-                <pre className="bg-muted p-2 rounded text-xs font-mono">npx @lastest/runner repos</pre>
-              </div>
-              <p className="pt-1">
-                Options: <code className="bg-muted px-1 py-0.5 rounded">-b, --base-url</code> override target URL, <code className="bg-muted px-1 py-0.5 rounded">-i, --interval</code> poll frequency (ms, default 5000)
-              </p>
+                  </div>
+                  <div>
+                    <p className="font-medium mb-1">Trigger builds from CI:</p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
+                    <p className="text-[11px] mt-1 opacity-75">
+                      Options:{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        --timeout
+                      </code>{" "}
+                      ms,{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        --commit
+                      </code>{" "}
+                      SHA,{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        --target-url
+                      </code>{" "}
+                      override,{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        --fail-on-changes
+                      </code>
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-medium mb-1">
+                      List available repositories:
+                    </p>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">
+                      npx @lastest/runner repos
+                    </pre>
+                  </div>
+                  <p className="pt-1">
+                    Options:{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded">
+                      -b, --base-url
+                    </code>{" "}
+                    override target URL,{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded">
+                      -i, --interval
+                    </code>{" "}
+                    poll frequency (ms, default 5000)
+                  </p>
+                </div>
+              </details>
             </div>
-          </details>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
       )}
 
       {/* Test Migration (Early Adopter, admin-only) */}
       {isAdmin && earlyAdopterMode && teamRepos.length > 0 && (
         <div id="test-migration">
           <TestMigrationCard
-            repositories={teamRepos.map(r => ({ id: r.id, fullName: r.fullName ?? `${r.owner}/${r.name}` }))}
+            repositories={teamRepos.map((r) => ({
+              id: r.id,
+              fullName: r.fullName ?? `${r.owner}/${r.name}`,
+            }))}
             defaultRepositoryId={selectedRepo?.id}
           />
         </div>
@@ -640,15 +753,16 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
       <CardHeader>
         <CardTitle className="text-destructive">Danger Zone</CardTitle>
         <CardDescription>
-          Permanently delete your account and associated data. This cannot be undone.
+          Permanently delete your account and associated data. This cannot be
+          undone.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex items-center justify-between gap-4">
         <div className="space-y-1">
           <p className="text-sm font-medium">Delete account</p>
           <p className="text-xs text-muted-foreground">
-            You will need to type your{' '}
-            {currentUser.name ? 'name' : 'email'} to confirm.
+            You will need to type your {currentUser.name ? "name" : "email"} to
+            confirm.
           </p>
         </div>
         <DeleteAccountDialog
@@ -663,19 +777,19 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
       <div id="settings-scroll" className="flex-1 p-6 overflow-auto">
         <div className="max-w-3xl mx-auto space-y-6">
           {/* Status Messages */}
-          {params.success === 'github_connected' && (
+          {params.success === "github_connected" && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitHub account connected successfully!
             </div>
           )}
-          {params.success === 'gitlab_connected' && (
+          {params.success === "gitlab_connected" && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
               <Check className="w-5 h-5" />
               GitLab account connected successfully!
             </div>
           )}
-          {params.success === 'google_sheets_connected' && (
+          {params.success === "google_sheets_connected" && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700">
               <Check className="w-5 h-5" />
               Google Sheets connected successfully!
@@ -684,7 +798,7 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
           {params.error && (
             <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2 text-destructive">
               <X className="w-5 h-5" />
-              Failed to connect GitHub: {params.error.replace(/_/g, ' ')}
+              Failed to connect GitHub: {params.error.replace(/_/g, " ")}
             </div>
           )}
 
@@ -693,13 +807,17 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
 
           <SettingsTabs
             tabs={[
-              { value: 'general', label: 'General', content: generalTab },
-              { value: 'integrations', label: 'Integrations', content: integrationsTab },
-              { value: 'testing', label: 'Testing', content: testingTab },
-              { value: 'ai', label: 'AI', content: aiTab },
+              { value: "general", label: "General", content: generalTab },
               {
-                value: 'account',
-                label: 'Account',
+                value: "integrations",
+                label: "Integrations",
+                content: integrationsTab,
+              },
+              { value: "testing", label: "Testing", content: testingTab },
+              { value: "ai", label: "AI", content: aiTab },
+              {
+                value: "account",
+                label: "Account",
                 hidden: !currentUser,
                 content: (
                   <>

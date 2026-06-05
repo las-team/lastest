@@ -8,8 +8,8 @@
  * needs to return the auth blob to the caller, not a Lastest test run.
  */
 
-import { chromium } from 'playwright';
-import * as queries from '@/lib/db/queries';
+import { chromium } from "playwright";
+import * as queries from "@/lib/db/queries";
 
 export interface CaptureStorageStateInput {
   repositoryId: string;
@@ -49,12 +49,15 @@ function buildExpectStub() {
 // Transient infrastructure failures that warrant an automatic retry.
 // Content failures (form validation, disposable email, captcha) are NOT
 // retried — the user needs to see those verbatim and adjust the email template.
-const TRANSIENT_ERROR_RE = /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|net::ERR_(?:CONNECTION|NETWORK|TIMED_OUT|SOCKET|EMPTY|TUNNEL)|Target page, context or browser has been closed|Protocol error/i;
+const TRANSIENT_ERROR_RE =
+  /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|net::ERR_(?:CONNECTION|NETWORK|TIMED_OUT|SOCKET|EMPTY|TUNNEL)|Target page, context or browser has been closed|Protocol error/i;
 
 async function attemptCapture(
   input: CaptureStorageStateInput,
   body: string,
-): Promise<{ ok: true; storageStateJson: string } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; storageStateJson: string } | { ok: false; reason: string }
+> {
   const timeoutMs = input.timeoutMs ?? 90_000;
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
@@ -69,21 +72,42 @@ async function attemptCapture(
       warn: (msg: string) => console.warn(`[QuickStart auth-setup] ${msg}`),
     };
 
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    const fn = new AsyncFunction('page', 'baseUrl', 'screenshotPath', 'stepLogger', 'expect', body);
-    const exec = fn(page, input.baseUrl, '/tmp/quickstart-auth.png', stepLogger, buildExpectStub());
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
+    const fn = new AsyncFunction(
+      "page",
+      "baseUrl",
+      "screenshotPath",
+      "stepLogger",
+      "expect",
+      body,
+    );
+    const exec = fn(
+      page,
+      input.baseUrl,
+      "/tmp/quickstart-auth.png",
+      stepLogger,
+      buildExpectStub(),
+    );
 
     await Promise.race([
       exec,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`auth-setup timed out after ${timeoutMs}ms`)), timeoutMs),
+        setTimeout(
+          () => reject(new Error(`auth-setup timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        ),
       ),
     ]);
 
     const storageStateJson = JSON.stringify(await context.storageState());
     return { ok: true, storageStateJson };
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
@@ -97,7 +121,7 @@ export async function captureStorageState(
   if (!body) {
     return {
       captured: false,
-      failureReason: 'could not extract test() body from rendered code',
+      failureReason: "could not extract test() body from rendered code",
       durationMs: Date.now() - start,
     };
   }
@@ -105,7 +129,9 @@ export async function captureStorageState(
   // First attempt; one retry on transient network/browser errors.
   let attempt = await attemptCapture(input, body);
   if (!attempt.ok && TRANSIENT_ERROR_RE.test(attempt.reason)) {
-    console.warn(`[QuickStart auth-setup] transient error, retrying once: ${attempt.reason}`);
+    console.warn(
+      `[QuickStart auth-setup] transient error, retrying once: ${attempt.reason}`,
+    );
     attempt = await attemptCapture(input, body);
   }
 
@@ -125,11 +151,14 @@ export async function captureStorageState(
   try {
     const parsed = JSON.parse(attempt.storageStateJson);
     cookieCount = Array.isArray(parsed.cookies) ? parsed.cookies.length : 0;
-  } catch { /* parse failure handled below */ }
+  } catch {
+    /* parse failure handled below */
+  }
   if (cookieCount === 0) {
     return {
       captured: false,
-      failureReason: 'auth-setup completed but captured 0 cookies — storage state would not authenticate the walkthrough. Likely the script navigated off the auth URL without actually signing in.',
+      failureReason:
+        "auth-setup completed but captured 0 cookies — storage state would not authenticate the walkthrough. Likely the script navigated off the auth URL without actually signing in.",
       durationMs: Date.now() - start,
     };
   }

@@ -8,7 +8,10 @@ interface UmamiIdentifyClientProps {
   teamId: string | null;
 }
 
-export function UmamiIdentifyClient({ userId, teamId }: UmamiIdentifyClientProps) {
+export function UmamiIdentifyClient({
+  userId,
+  teamId,
+}: UmamiIdentifyClientProps) {
   useEffect(() => {
     if (!userId) return;
 

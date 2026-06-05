@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page } from "playwright";
 
 /**
  * Core stabilization settings shared across all runner types.
@@ -33,5 +33,10 @@ export interface CoreStabilizationSettings {
  */
 export type StabilizationPage = Pick<
   Page,
-  'addInitScript' | 'evaluate' | 'waitForLoadState' | 'waitForTimeout' | 'waitForSelector' | 'addStyleTag'
+  | "addInitScript"
+  | "evaluate"
+  | "waitForLoadState"
+  | "waitForTimeout"
+  | "waitForSelector"
+  | "addStyleTag"
 >;

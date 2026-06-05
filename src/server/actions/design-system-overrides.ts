@@ -1,28 +1,37 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { eq } from 'drizzle-orm';
-import JSZip from 'jszip';
-import { db } from '@/lib/db';
-import { tests, playwrightSettings } from '@/lib/db/schema';
-import type { DesignSystemConfig } from '@/lib/db/schema';
-import { requireTestOwnership } from '@/lib/auth/ownership';
-import { requireRepoAccess } from '@/lib/auth';
-import { parseDesignSystemCss, mergeDesignSystemConfig } from '@/lib/design-system/tokens';
+import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import JSZip from "jszip";
+import { db } from "@/lib/db";
+import { tests, playwrightSettings } from "@/lib/db/schema";
+import type { DesignSystemConfig } from "@/lib/db/schema";
+import { requireTestOwnership } from "@/lib/auth/ownership";
+import { requireRepoAccess } from "@/lib/auth";
+import {
+  parseDesignSystemCss,
+  mergeDesignSystemConfig,
+} from "@/lib/design-system/tokens";
 
 export async function saveTestDesignSystemOverrides(
   testId: string,
   overrides: Partial<DesignSystemConfig> | null,
 ) {
   await requireTestOwnership(testId);
-  await db.update(tests).set({ designSystemOverrides: overrides, updatedAt: new Date() }).where(eq(tests.id, testId));
+  await db
+    .update(tests)
+    .set({ designSystemOverrides: overrides, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
 
 export async function resetTestDesignSystemOverrides(testId: string) {
   await requireTestOwnership(testId);
-  await db.update(tests).set({ designSystemOverrides: null, updatedAt: new Date() }).where(eq(tests.id, testId));
+  await db
+    .update(tests)
+    .set({ designSystemOverrides: null, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
@@ -35,12 +44,18 @@ export async function resetTestDesignSystemOverrides(testId: string) {
 export async function saveTestDesignSystemFromCss(testId: string, css: string) {
   await requireTestOwnership(testId);
   const parsed = parseDesignSystemCss(css);
-  await db.update(tests).set({ designSystemOverrides: parsed, updatedAt: new Date() }).where(eq(tests.id, testId));
+  await db
+    .update(tests)
+    .set({ designSystemOverrides: parsed, updatedAt: new Date() })
+    .where(eq(tests.id, testId));
   revalidatePath(`/tests/${testId}`);
   return { success: true, config: parsed };
 }
 
-export async function saveRepoDesignSystemFromCss(repositoryId: string, css: string) {
+export async function saveRepoDesignSystemFromCss(
+  repositoryId: string,
+  css: string,
+) {
   await requireRepoAccess(repositoryId);
   const parsed = parseDesignSystemCss(css);
   await db
@@ -69,28 +84,31 @@ export async function saveRepoDesignSystemFromCss(repositoryId: string, css: str
 const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 
 export async function uploadRepoDesignSystemBundle(formData: FormData) {
-  const repositoryId = formData.get('repositoryId');
-  const file = formData.get('file');
-  if (typeof repositoryId !== 'string' || !repositoryId) {
-    return { success: false as const, error: 'Missing repositoryId' };
+  const repositoryId = formData.get("repositoryId");
+  const file = formData.get("file");
+  if (typeof repositoryId !== "string" || !repositoryId) {
+    return { success: false as const, error: "Missing repositoryId" };
   }
   if (!(file instanceof File)) {
-    return { success: false as const, error: 'Missing file' };
+    return { success: false as const, error: "Missing file" };
   }
   if (file.size === 0) {
-    return { success: false as const, error: 'File is empty' };
+    return { success: false as const, error: "File is empty" };
   }
   if (file.size > MAX_BUNDLE_BYTES) {
-    return { success: false as const, error: `Bundle exceeds 5 MB (got ${(file.size / 1024 / 1024).toFixed(1)} MB)` };
+    return {
+      success: false as const,
+      error: `Bundle exceeds 5 MB (got ${(file.size / 1024 / 1024).toFixed(1)} MB)`,
+    };
   }
   await requireRepoAccess(repositoryId);
 
   const buf = Buffer.from(await file.arrayBuffer());
-  const name = (file.name || '').toLowerCase();
+  const name = (file.name || "").toLowerCase();
 
   // Single-file CSS upload — no archive to walk.
-  if (name.endsWith('.css')) {
-    const css = buf.toString('utf-8');
+  if (name.endsWith(".css")) {
+    const css = buf.toString("utf-8");
     const parsed = parseDesignSystemCss(css);
     parsed.meta = { files: [file.name], assets: [], hasFontFiles: false };
     await persist(repositoryId, parsed);
@@ -107,7 +125,8 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
   } catch {
     return {
       success: false as const,
-      error: 'Unsupported file. Upload a .zip bundle (or a single .css file). For .tar.gz exports, re-archive as zip first.',
+      error:
+        "Unsupported file. Upload a .zip bundle (or a single .css file). For .tar.gz exports, re-archive as zip first.",
     };
   }
 
@@ -121,13 +140,24 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
     if (entry.dir) continue;
     allFiles.push(entry.name);
     const lower = entry.name.toLowerCase();
-    if (lower.endsWith('.css')) {
-      cssFiles.push({ path: entry.name, content: await entry.async('string') });
-    } else if (lower.endsWith('readme.md') && readmeContent === null) {
-      readmeContent = await entry.async('string');
-    } else if (lower.endsWith('.svg') || lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp')) {
+    if (lower.endsWith(".css")) {
+      cssFiles.push({ path: entry.name, content: await entry.async("string") });
+    } else if (lower.endsWith("readme.md") && readmeContent === null) {
+      readmeContent = await entry.async("string");
+    } else if (
+      lower.endsWith(".svg") ||
+      lower.endsWith(".png") ||
+      lower.endsWith(".jpg") ||
+      lower.endsWith(".jpeg") ||
+      lower.endsWith(".webp")
+    ) {
       assetFiles.push(entry.name);
-    } else if (lower.endsWith('.woff') || lower.endsWith('.woff2') || lower.endsWith('.otf') || lower.endsWith('.ttf')) {
+    } else if (
+      lower.endsWith(".woff") ||
+      lower.endsWith(".woff2") ||
+      lower.endsWith(".otf") ||
+      lower.endsWith(".ttf")
+    ) {
       assetFiles.push(entry.name);
       hasFontFiles = true;
     }
@@ -136,7 +166,8 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
   if (cssFiles.length === 0) {
     return {
       success: false as const,
-      error: 'No .css files found in the bundle. Expected a design-system handoff with at least one .css token file.',
+      error:
+        "No .css files found in the bundle. Expected a design-system handoff with at least one .css token file.",
     };
   }
 
@@ -148,7 +179,10 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
     merged = mergeDesignSystemConfig(merged, parsed);
   }
   if (!merged) {
-    return { success: false as const, error: 'Parsed 0 tokens from the bundle CSS files.' };
+    return {
+      success: false as const,
+      error: "Parsed 0 tokens from the bundle CSS files.",
+    };
   }
 
   // Attach README-derived metadata so the preview can show a friendly
@@ -163,18 +197,26 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
   };
 
   await persist(repositoryId, merged);
-  return summarize(merged, cssFiles.map((f) => f.path));
+  return summarize(
+    merged,
+    cssFiles.map((f) => f.path),
+  );
 }
 
 /** Pull a friendly title + first-paragraph blurb out of a bundle README
  *  for the Setup preview. Returns undefined fields when the README is
  *  missing or shaped unexpectedly. */
-function extractReadmeMeta(md: string | null): { title?: string; description?: string } {
+function extractReadmeMeta(md: string | null): {
+  title?: string;
+  description?: string;
+} {
   if (!md) return {};
   // First H1 (skip Claude's "CODING AGENTS: READ THIS FIRST" handoff
   // header if it's the first H1 — that's bundle scaffolding, not the
   // user's title).
-  const headings = Array.from(md.matchAll(/^#\s+(.+)$/gm)).map((m) => m[1].trim());
+  const headings = Array.from(md.matchAll(/^#\s+(.+)$/gm)).map((m) =>
+    m[1].trim(),
+  );
   const title = headings.find((h) => !/coding agents/i.test(h));
 
   // First non-empty paragraph after the chosen heading. We scan after the
@@ -183,17 +225,22 @@ function extractReadmeMeta(md: string | null): { title?: string; description?: s
   let description: string | undefined;
   if (title) {
     const idx = md.indexOf(`# ${title}`);
-    const after = idx >= 0 ? md.slice(idx + (`# ${title}`).length) : md;
-    const paragraphs = after.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-    const para = paragraphs.find((p) => !p.startsWith('#') && !p.startsWith('---'));
+    const after = idx >= 0 ? md.slice(idx + `# ${title}`.length) : md;
+    const paragraphs = after
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const para = paragraphs.find(
+      (p) => !p.startsWith("#") && !p.startsWith("---"),
+    );
     if (para) {
       // Strip markdown emphasis and inline backticks, collapse whitespace,
       // cap at 280 chars so the description fits in the header card.
       description = para
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\*\*([^*]+)\*\*/g, '$1')
-        .replace(/\*([^*]+)\*/g, '$1')
-        .replace(/\s+/g, ' ')
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/\*([^*]+)\*/g, "$1")
+        .replace(/\s+/g, " ")
         .trim()
         .slice(0, 280);
     }
@@ -214,7 +261,7 @@ async function persist(repositoryId: string, config: DesignSystemConfig) {
       .set({ designSystem: config, updatedAt: new Date() })
       .where(eq(playwrightSettings.id, existing.id));
   } else {
-    const { v4: uuid } = await import('uuid');
+    const { v4: uuid } = await import("uuid");
     await db.insert(playwrightSettings).values({
       id: uuid(),
       repositoryId,
@@ -223,12 +270,15 @@ async function persist(repositoryId: string, config: DesignSystemConfig) {
       updatedAt: new Date(),
     });
   }
-  revalidatePath('/tests');
+  revalidatePath("/tests");
 }
 
 function summarize(config: DesignSystemConfig, files: string[]) {
   const counts = Object.fromEntries(
-    Object.entries(config.tokens ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0]),
+    Object.entries(config.tokens ?? {}).map(([k, v]) => [
+      k,
+      Array.isArray(v) ? v.length : 0,
+    ]),
   );
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return { success: true as const, config, total, counts, files };
@@ -240,6 +290,6 @@ export async function clearRepoDesignSystem(repositoryId: string) {
     .update(playwrightSettings)
     .set({ designSystem: null, updatedAt: new Date() })
     .where(eq(playwrightSettings.repositoryId, repositoryId));
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { success: true };
 }

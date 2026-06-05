@@ -11,16 +11,16 @@ import type {
   DomSnapshotData,
   TextDiffLine,
   TextInspectionPayload,
-} from '../db/schema';
-import { diffLines, diffStats } from './text-diff';
+} from "../db/schema";
+import { diffLines, diffStats } from "./text-diff";
 
 export interface TextDiffOptions {
   ignorePatterns?: string[];
 }
 
 function normalize(raw: string, masks: RegExp[]): string {
-  let s = raw.replace(/\s+/g, ' ').trim();
-  for (const m of masks) s = s.replace(m, '⟨masked⟩');
+  let s = raw.replace(/\s+/g, " ").trim();
+  for (const m of masks) s = s.replace(m, "⟨masked⟩");
   return s;
 }
 
@@ -29,7 +29,7 @@ function compileMasks(patterns: string[] | undefined): RegExp[] {
   const out: RegExp[] = [];
   for (const p of patterns) {
     try {
-      out.push(new RegExp(p, 'g'));
+      out.push(new RegExp(p, "g"));
     } catch {
       // Invalid regex from user settings — silently skip rather than crash.
     }
@@ -37,7 +37,10 @@ function compileMasks(patterns: string[] | undefined): RegExp[] {
   return out;
 }
 
-function extractVisibleLines(snapshot: DomSnapshotData, masks: RegExp[]): string[] {
+function extractVisibleLines(
+  snapshot: DomSnapshotData,
+  masks: RegExp[],
+): string[] {
   const out: string[] = [];
   for (const el of snapshot.elements) {
     const raw = el.textContent;
@@ -54,17 +57,20 @@ function extractVisibleLines(snapshot: DomSnapshotData, masks: RegExp[]): string
 // side and switch to a hash-based set-diff above that — coarser but bounded.
 const TEXT_DIFF_LINE_CAP = 4000;
 
-function setDiffFallback(baseLines: string[], currLines: string[]): TextDiffLine[] {
+function setDiffFallback(
+  baseLines: string[],
+  currLines: string[],
+): TextDiffLine[] {
   const baseSet = new Set(baseLines);
   const currSet = new Set(currLines);
   const out: TextDiffLine[] = [];
   for (let i = 0; i < baseLines.length; i++) {
     const line = baseLines[i];
-    if (!currSet.has(line)) out.push({ op: 'del', line, oldLineNo: i + 1 });
+    if (!currSet.has(line)) out.push({ op: "del", line, oldLineNo: i + 1 });
   }
   for (let j = 0; j < currLines.length; j++) {
     const line = currLines[j];
-    if (!baseSet.has(line)) out.push({ op: 'add', line, newLineNo: j + 1 });
+    if (!baseSet.has(line)) out.push({ op: "add", line, newLineNo: j + 1 });
   }
   return out;
 }
@@ -85,13 +91,24 @@ export function diffVisibleText(
   if (baseLines.length === 0 && currLines.length === 0) {
     lines = [];
   } else if (baseLines.length === 0) {
-    lines = currLines.map((line, i) => ({ op: 'add' as const, line, newLineNo: i + 1 }));
+    lines = currLines.map((line, i) => ({
+      op: "add" as const,
+      line,
+      newLineNo: i + 1,
+    }));
   } else if (currLines.length === 0) {
-    lines = baseLines.map((line, i) => ({ op: 'del' as const, line, oldLineNo: i + 1 }));
-  } else if (baseLines.length > TEXT_DIFF_LINE_CAP || currLines.length > TEXT_DIFF_LINE_CAP) {
+    lines = baseLines.map((line, i) => ({
+      op: "del" as const,
+      line,
+      oldLineNo: i + 1,
+    }));
+  } else if (
+    baseLines.length > TEXT_DIFF_LINE_CAP ||
+    currLines.length > TEXT_DIFF_LINE_CAP
+  ) {
     lines = setDiffFallback(baseLines, currLines);
   } else {
-    lines = diffLines(baseLines.join('\n'), currLines.join('\n'));
+    lines = diffLines(baseLines.join("\n"), currLines.join("\n"));
   }
 
   const { added, removed } = diffStats(lines);

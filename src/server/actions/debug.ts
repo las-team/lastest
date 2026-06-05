@@ -1,21 +1,41 @@
-'use server';
+"use server";
 
-import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
-import type { DebugState, DebugCommand } from '@/lib/playwright/types';
-import { getTest, getPlaywrightSettings, getEnvironmentConfig, getRepository } from '@/lib/db/queries';
-import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
-import { stripTypeAnnotations } from '@/lib/playwright/types';
-import { queueCommandToDB } from '@/app/api/ws/runner/route';
-import { createRemoteDebugSession, getRemoteDebugSession, clearRemoteDebugSession } from '@/app/api/ws/runner/route';
-import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
-import { executeSetupViaRunner } from '@/lib/execution/executor';
-import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
-import type { Message } from '@/lib/ws/protocol';
+import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
+import type { DebugState, DebugCommand } from "@/lib/playwright/types";
+import {
+  getTest,
+  getPlaywrightSettings,
+  getEnvironmentConfig,
+  getRepository,
+} from "@/lib/db/queries";
+import {
+  extractTestBody,
+  removeInlineLocateWithFallback,
+  removeInlineReplayCursorPath,
+  parseSteps,
+} from "@/lib/playwright/debug-parser";
+import { stripTypeAnnotations } from "@/lib/playwright/types";
+import { queueCommandToDB } from "@/app/api/ws/runner/route";
+import {
+  createRemoteDebugSession,
+  getRemoteDebugSession,
+  clearRemoteDebugSession,
+} from "@/app/api/ws/runner/route";
+import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
+import { executeSetupViaRunner } from "@/lib/execution/executor";
+import {
+  claimOrProvisionPoolEB,
+  releasePoolEB,
+} from "@/server/actions/embedded-sessions";
+import type { Message } from "@/lib/ws/protocol";
 
 // Confirm the debug session's repository belongs to the caller's team. Used
 // to gate getDebugState / sendDebugCommand / stopDebugSession against
 // cross-team session-ID guesses.
-async function assertDebugSessionAccess(remoteSession: { repositoryId: string | null; testId: string }) {
+async function assertDebugSessionAccess(remoteSession: {
+  repositoryId: string | null;
+  testId: string;
+}) {
   const session = await requireTeamAccess();
   let repoId = remoteSession.repositoryId;
   if (!repoId) {
@@ -24,17 +44,18 @@ async function assertDebugSessionAccess(remoteSession: { repositoryId: string | 
     const test = await getTest(remoteSession.testId);
     repoId = test?.repositoryId ?? null;
   }
-  if (!repoId) throw new Error('Forbidden: debug session has no repository binding');
+  if (!repoId)
+    throw new Error("Forbidden: debug session has no repository binding");
   const repo = await getRepository(repoId);
   if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: debug session does not belong to your team');
+    throw new Error("Forbidden: debug session does not belong to your team");
   }
 }
 
 export async function startDebugSession(
   testId: string,
   repositoryId?: string | null,
-  runnerId?: string | null
+  runnerId?: string | null,
 ): Promise<{ sessionId: string; error?: string; actualRunnerId?: string }> {
   const session = repositoryId
     ? await requireRepoAccess(repositoryId)
@@ -42,21 +63,30 @@ export async function startDebugSession(
 
   const test = await getTest(testId);
   if (!test) {
-    return { sessionId: '', error: 'Test not found' };
+    return { sessionId: "", error: "Test not found" };
   }
 
   // Must verify the test belongs to the caller's team. Without this, an
   // attacker can pass their own repositoryId + a victim's testId, and the
   // function will load the victim's test code into the debug session.
   if (!test.repositoryId) {
-    return { sessionId: '', error: 'Forbidden: test has no repository binding' };
+    return {
+      sessionId: "",
+      error: "Forbidden: test has no repository binding",
+    };
   }
   if (repositoryId && test.repositoryId !== repositoryId) {
-    return { sessionId: '', error: 'Forbidden: test does not belong to that repository' };
+    return {
+      sessionId: "",
+      error: "Forbidden: test does not belong to that repository",
+    };
   }
   const testRepo = await getRepository(test.repositoryId);
   if (!testRepo || testRepo.teamId !== session.team.id) {
-    return { sessionId: '', error: 'Forbidden: test does not belong to your team' };
+    return {
+      sessionId: "",
+      error: "Forbidden: test does not belong to your team",
+    };
   }
 
   const repoId = repositoryId || test.repositoryId;
@@ -65,37 +95,44 @@ export async function startDebugSession(
 
   // Resolve 'auto' to a pool-managed system EB (claim idle or provision fresh
   // when EB_PROVISIONER=kubernetes and the pool has room).
-  if (runnerId === 'auto') {
+  if (runnerId === "auto") {
     const poolEB = await claimOrProvisionPoolEB();
     if (!poolEB) {
-      return { sessionId: '', error: 'All browsers are busy. Please try again later.' };
+      return {
+        sessionId: "",
+        error: "All browsers are busy. Please try again later.",
+      };
     }
     runnerId = poolEB.runnerId;
   }
 
   // Require a runner or EB — local debug is not supported
-  if (!runnerId || runnerId === 'local') {
-    return { sessionId: '', error: 'Please select a runner or embedded browser for debugging.' };
+  if (!runnerId || runnerId === "local") {
+    return {
+      sessionId: "",
+      error: "Please select a runner or embedded browser for debugging.",
+    };
   }
 
-  const code = test.code || '';
+  const code = test.code || "";
   const body = extractTestBody(code);
   if (!body) {
-    return { sessionId: '', error: 'Could not parse test function body' };
+    return { sessionId: "", error: "Could not parse test function body" };
   }
 
   const cleanBody = removeInlineReplayCursorPath(
-    removeInlineLocateWithFallback(stripTypeAnnotations(body))
+    removeInlineLocateWithFallback(stripTypeAnnotations(body)),
   );
   const steps = parseSteps(cleanBody);
   const sessionId = crypto.randomUUID();
 
   await createRemoteDebugSession(sessionId, runnerId, repoId || null, testId);
 
-  const targetUrl = envConfig?.baseUrl || 'about:blank';
-  const viewport = settings?.viewportWidth && settings?.viewportHeight
-    ? { width: settings.viewportWidth, height: settings.viewportHeight }
-    : undefined;
+  const targetUrl = envConfig?.baseUrl || "about:blank";
+  const viewport =
+    settings?.viewportWidth && settings?.viewportHeight
+      ? { width: settings.viewportWidth, height: settings.viewportHeight }
+      : undefined;
 
   // Run setup on the remote runner if needed (get storageState for auth)
   let storageState: string | undefined;
@@ -125,13 +162,16 @@ export async function startDebugSession(
     } catch (err) {
       await clearRemoteDebugSession(sessionId);
       await releasePoolEB(runnerId);
-      return { sessionId: '', error: `Setup failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        sessionId: "",
+        error: `Setup failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 
   await queueCommandToDB(runnerId, {
     id: crypto.randomUUID(),
-    type: 'command:start_debug',
+    type: "command:start_debug",
     timestamp: Date.now(),
     payload: {
       sessionId,
@@ -151,7 +191,7 @@ export async function startDebugSession(
 }
 
 export async function getDebugState(
-  sessionId: string
+  sessionId: string,
 ): Promise<DebugState | null> {
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
@@ -162,11 +202,11 @@ export async function getDebugState(
       return {
         sessionId,
         testId: remoteSession.testId,
-        status: 'initializing',
+        status: "initializing",
         currentStepIndex: -1,
         steps: [],
         stepResults: [],
-        code: '',
+        code: "",
         networkEntries: [],
         consoleEntries: [],
         codeVersion: 0,
@@ -190,28 +230,29 @@ export async function getDebugState(
 
 export async function sendDebugCommand(
   sessionId: string,
-  command: DebugCommand
+  command: DebugCommand,
 ): Promise<{ ok: boolean; error?: string }> {
-
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
     await assertDebugSessionAccess(remoteSession);
-    if (command.type === 'update_code' && 'code' in command) {
+    if (command.type === "update_code" && "code" in command) {
       // Re-parse steps on server
       const body = extractTestBody(command.code);
       const cleanBody = body
-        ? removeInlineReplayCursorPath(removeInlineLocateWithFallback(stripTypeAnnotations(body)))
-        : '';
+        ? removeInlineReplayCursorPath(
+            removeInlineLocateWithFallback(stripTypeAnnotations(body)),
+          )
+        : "";
       const steps = cleanBody ? parseSteps(cleanBody) : [];
 
       await queueCommandToDB(remoteSession.runnerId, {
         id: crypto.randomUUID(),
-        type: 'command:debug_action',
+        type: "command:debug_action",
         timestamp: Date.now(),
         payload: {
           sessionId,
-          action: 'update_code',
+          action: "update_code",
           code: command.code,
           cleanBody,
           steps,
@@ -220,31 +261,29 @@ export async function sendDebugCommand(
     } else {
       await queueCommandToDB(remoteSession.runnerId, {
         id: crypto.randomUUID(),
-        type: 'command:debug_action',
+        type: "command:debug_action",
         timestamp: Date.now(),
         payload: {
           sessionId,
           action: command.type,
-          ...('stepIndex' in command ? { stepIndex: command.stepIndex } : {}),
+          ...("stepIndex" in command ? { stepIndex: command.stepIndex } : {}),
         },
       } as unknown as Message);
     }
     return { ok: true };
   }
 
-  return { ok: false, error: 'Session not found' };
+  return { ok: false, error: "Session not found" };
 }
 
-export async function stopDebugSession(
-  sessionId: string
-): Promise<void> {
+export async function stopDebugSession(sessionId: string): Promise<void> {
   // Check remote session
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (remoteSession) {
     await assertDebugSessionAccess(remoteSession);
     await queueCommandToDB(remoteSession.runnerId, {
       id: crypto.randomUUID(),
-      type: 'command:stop_debug',
+      type: "command:stop_debug",
       timestamp: Date.now(),
       payload: { sessionId },
     } as unknown as Message);
@@ -258,7 +297,7 @@ export async function stopDebugSession(
 }
 
 export async function flushDebugTrace(
-  _sessionId: string
+  _sessionId: string,
 ): Promise<{ url: string | null }> {
   return { url: null };
 }

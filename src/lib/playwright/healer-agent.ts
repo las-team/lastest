@@ -7,14 +7,14 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { revalidatePath } from 'next/cache';
-import { getCurrentBranchForRepo } from '@/lib/git-utils';
-import { generateWithAI } from '@/lib/ai';
-import { extractCodeFromResponse } from '@/lib/ai/prompts';
-import { runValidationWithRetry } from '@/lib/ai/validation-retry';
-import { getAIConfig, buildSeedFixture } from './agent-context';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { getCurrentBranchForRepo } from "@/lib/git-utils";
+import { generateWithAI } from "@/lib/ai";
+import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import { runValidationWithRetry } from "@/lib/ai/validation-retry";
+import { getAIConfig, buildSeedFixture } from "./agent-context";
 
 // ---------------------------------------------------------------------------
 // Healer system prompt (derived from Playwright's healer agent definition)
@@ -74,25 +74,31 @@ export async function agentHealTestCore(
   try {
     const test = await queries.getTest(testId);
     if (!test) {
-      return { success: false, error: 'Test not found' };
+      return { success: false, error: "Test not found" };
     }
 
     // Get latest error
     const results = await queries.getTestResultsByTest(testId);
     const latestResult = results[results.length - 1];
-    const errorMessage = latestResult?.errorMessage || 'Test failed with unknown error';
+    const errorMessage =
+      latestResult?.errorMessage || "Test failed with unknown error";
 
     const settings = await queries.getAISettings(repositoryId);
     const config = getAIConfig(settings);
     const seed = await buildSeedFixture(repositoryId);
 
     // Build DOM diff context if snapshots available
-    let domDiffContext = '';
+    let domDiffContext = "";
     if (test.domSnapshot && latestResult?.domSnapshot) {
       try {
-        const { computeDomDiff, summarizeDomDiff } = await import('@/lib/diff/dom-diff');
+        const { computeDomDiff, summarizeDomDiff } =
+          await import("@/lib/diff/dom-diff");
         const diff = computeDomDiff(test.domSnapshot, latestResult.domSnapshot);
-        if (diff.added.length > 0 || diff.removed.length > 0 || diff.changed.length > 0) {
+        if (
+          diff.added.length > 0 ||
+          diff.removed.length > 0 ||
+          diff.changed.length > 0
+        ) {
           domDiffContext = `\n**DOM changes since recording (selectors/elements that changed):**\n\`\`\`\n${summarizeDomDiff(diff)}\n\`\`\`\n\nUse these DOM changes to understand what selectors broke and why. The removed/changed elements are likely the root cause of the failure.\n`;
         }
       } catch {
@@ -122,56 +128,85 @@ ${seed.seedPrompt}`;
 
     // Configure Playwright MCP for the AI provider (matches generator-agent pattern)
     const mcpArgs = options?.cdpEndpoint
-      ? ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless']
-      : ['@playwright/mcp@latest', '--headless'];
+      ? [
+          "@playwright/mcp@latest",
+          "--cdp-endpoint",
+          options.cdpEndpoint,
+          "--headless",
+        ]
+      : ["@playwright/mcp@latest", "--headless"];
 
     if (options?.cdpEndpoint) {
-      console.log(`[HealerAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+      console.log(
+        `[HealerAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
+      );
     }
 
-    if (config.provider === 'claude-agent-sdk') {
+    if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;
-      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
-      config.agentSdkAllowedTools = ['mcp__playwright__*'];
-      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+      config.agentSdkMcpServers = {
+        playwright: { command: "npx", args: mcpArgs },
+      };
+      config.agentSdkAllowedTools = ["mcp__playwright__*"];
+      config.agentSdkDisallowedTools = [
+        "Bash",
+        "Write",
+        "Edit",
+        "NotebookEdit",
+      ];
     }
 
-    const useMCP = config.provider !== 'claude-agent-sdk';
+    const useMCP = config.provider !== "claude-agent-sdk";
 
     const callLLM = async (userPrompt: string): Promise<string> => {
-      const response = await generateWithAI(config, userPrompt, HEALER_SYSTEM_PROMPT, {
-        repositoryId,
-        actionType: 'agent_heal',
-        signal: options?.signal,
-        useMCP,
-        ...(useMCP && {
-          mcpConfig: {
-            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-            cdpEndpoint: options?.cdpEndpoint,
-          },
-        }),
-      });
-      return extractCodeFromResponse(response) ?? '';
+      const response = await generateWithAI(
+        config,
+        userPrompt,
+        HEALER_SYSTEM_PROMPT,
+        {
+          repositoryId,
+          actionType: "agent_heal",
+          signal: options?.signal,
+          useMCP,
+          ...(useMCP && {
+            mcpConfig: {
+              servers: { playwright: { command: "npx", args: mcpArgs } },
+              cdpEndpoint: options?.cdpEndpoint,
+            },
+          }),
+        },
+      );
+      return extractCodeFromResponse(response) ?? "";
     };
 
     const initial = await callLLM(prompt);
     if (!initial) {
-      return { success: false, error: 'Healer agent produced no fixed code' };
+      return { success: false, error: "Healer agent produced no fixed code" };
     }
 
-    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
-      console.log(`[HealerAgent] Validation failed, retry ${attempt}/2 with feedback`);
-      const retryPrompt = `${prompt}\n\n---\n\nPrevious fix attempt failed validation. ${feedback}\n\nRegenerate the fixed test code addressing the validation errors. Output ONLY the corrected code block.`;
-      return callLLM(retryPrompt);
-    });
+    const validated = await runValidationWithRetry(
+      initial,
+      seed.baseUrl,
+      async (feedback, attempt) => {
+        console.log(
+          `[HealerAgent] Validation failed, retry ${attempt}/2 with feedback`,
+        );
+        const retryPrompt = `${prompt}\n\n---\n\nPrevious fix attempt failed validation. ${feedback}\n\nRegenerate the fixed test code addressing the validation errors. Output ONLY the corrected code block.`;
+        return callLLM(retryPrompt);
+      },
+    );
 
     if (!validated.valid) {
-      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+      return {
+        success: false,
+        error: `Validation failed after retries: ${validated.feedback}`,
+      };
     }
 
     return { success: true, code: validated.code };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Healer agent failed';
+    const message =
+      error instanceof Error ? error.message : "Healer agent failed";
     return { success: false, error: message };
   }
 }
@@ -192,7 +227,12 @@ export async function agentHealTests(
   testIds: string[],
   repositoryId: string,
   options?: { cdpEndpoint?: string },
-): Promise<{ success: boolean; fixed: number; failed: number; errors: string[] }> {
+): Promise<{
+  success: boolean;
+  fixed: number;
+  failed: number;
+  errors: string[];
+}> {
   await requireRepoAccess(repositoryId);
   const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
@@ -207,7 +247,12 @@ export async function agentHealTests(
       batch.map(async (testId) => {
         const result = await agentHealTest(repositoryId, testId, options);
         if (result.success && result.code) {
-          await queries.updateTestWithVersion(testId, { code: result.code }, 'ai_fix', branch ?? undefined);
+          await queries.updateTestWithVersion(
+            testId,
+            { code: result.code },
+            "ai_fix",
+            branch ?? undefined,
+          );
           return { testId, success: true };
         }
         return { testId, success: false, error: result.error };
@@ -215,16 +260,17 @@ export async function agentHealTests(
     );
 
     for (const r of results) {
-      if (r.status === 'fulfilled' && r.value.success) {
+      if (r.status === "fulfilled" && r.value.success) {
         fixed++;
       } else {
         failed++;
-        const error = r.status === 'fulfilled' ? r.value.error : r.reason?.message;
-        errors.push(error || 'Unknown error');
+        const error =
+          r.status === "fulfilled" ? r.value.error : r.reason?.message;
+        errors.push(error || "Unknown error");
       }
     }
   }
 
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { success: true, fixed, failed, errors };
 }

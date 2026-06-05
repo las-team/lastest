@@ -1,22 +1,22 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { ChevronDown, Code, FileCode, X, Search } from 'lucide-react';
-import type { Test, SetupScript } from '@/lib/db/schema';
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { ChevronDown, Code, FileCode, X, Search } from "lucide-react";
+import type { Test, SetupScript } from "@/lib/db/schema";
 
 export type SetupSelection =
-  | { type: 'none' }
-  | { type: 'test'; id: string; name: string }
-  | { type: 'script'; id: string; name: string };
+  | { type: "none" }
+  | { type: "test"; id: string; name: string }
+  | { type: "script"; id: string; name: string };
 
 interface SetupSelectorProps {
   value: SetupSelection;
@@ -38,9 +38,9 @@ export function SetupSelector({
   showInherited = false,
 }: SetupSelectorProps) {
   const [open, setOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'test' | 'script'>(
-    value.type === 'script' ? 'script' : 'test'
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"test" | "script">(
+    value.type === "script" ? "script" : "test",
   );
 
   // Filter tests (exclude self-reference)
@@ -49,39 +49,39 @@ export function SetupSelector({
     .filter((t) =>
       searchQuery
         ? t.name.toLowerCase().includes(searchQuery.toLowerCase())
-        : true
+        : true,
     );
 
   // Filter scripts
   const filteredScripts = availableScripts.filter((s) =>
     searchQuery
       ? s.name.toLowerCase().includes(searchQuery.toLowerCase())
-      : true
+      : true,
   );
 
   const handleSelect = (selection: SetupSelection) => {
     onChange(selection);
     setOpen(false);
-    setSearchQuery('');
+    setSearchQuery("");
   };
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onChange({ type: 'none' });
+    onChange({ type: "none" });
   };
 
   const getDisplayValue = () => {
-    if (value.type === 'none') {
-      return showInherited ? 'Inherited from repository' : 'None';
+    if (value.type === "none") {
+      return showInherited ? "Inherited from repository" : "None";
     }
     return value.name;
   };
 
   const getIcon = () => {
-    if (value.type === 'test') {
+    if (value.type === "test") {
       return <FileCode className="h-4 w-4 text-blue-500" />;
     }
-    if (value.type === 'script') {
+    if (value.type === "script") {
       return <Code className="h-4 w-4 text-green-500" />;
     }
     return null;
@@ -98,14 +98,14 @@ export function SetupSelector({
           <div className="flex items-center gap-2 min-w-0">
             {getIcon()}
             <span className="truncate">{getDisplayValue()}</span>
-            {value.type !== 'none' && (
+            {value.type !== "none" && (
               <Badge variant="secondary" className="shrink-0">
                 {value.type}
               </Badge>
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {value.type !== 'none' && (
+            {value.type !== "none" && (
               <X
                 className="h-4 w-4 hover:text-destructive cursor-pointer"
                 onClick={handleClear}
@@ -128,7 +128,10 @@ export function SetupSelector({
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'test' | 'script')}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as "test" | "script")}
+        >
           <TabsList className="w-full rounded-none border-b">
             <TabsTrigger value="test" className="flex-1">
               Use Test ({filteredTests.length})
@@ -142,7 +145,7 @@ export function SetupSelector({
             <div className="max-h-60 overflow-y-auto">
               <button
                 className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
-                onClick={() => handleSelect({ type: 'none' })}
+                onClick={() => handleSelect({ type: "none" })}
               >
                 <span className="text-muted-foreground">None</span>
               </button>
@@ -155,12 +158,16 @@ export function SetupSelector({
                   <button
                     key={test.id}
                     className={`w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 ${
-                      value.type === 'test' && value.id === test.id
-                        ? 'bg-muted'
-                        : ''
+                      value.type === "test" && value.id === test.id
+                        ? "bg-muted"
+                        : ""
                     }`}
                     onClick={() =>
-                      handleSelect({ type: 'test', id: test.id, name: test.name })
+                      handleSelect({
+                        type: "test",
+                        id: test.id,
+                        name: test.name,
+                      })
                     }
                   >
                     <FileCode className="h-4 w-4 text-blue-500 shrink-0" />
@@ -175,7 +182,7 @@ export function SetupSelector({
             <div className="max-h-60 overflow-y-auto">
               <button
                 className="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2"
-                onClick={() => handleSelect({ type: 'none' })}
+                onClick={() => handleSelect({ type: "none" })}
               >
                 <span className="text-muted-foreground">None</span>
               </button>
@@ -188,12 +195,16 @@ export function SetupSelector({
                   <button
                     key={script.id}
                     className={`w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 ${
-                      value.type === 'script' && value.id === script.id
-                        ? 'bg-muted'
-                        : ''
+                      value.type === "script" && value.id === script.id
+                        ? "bg-muted"
+                        : ""
                     }`}
                     onClick={() =>
-                      handleSelect({ type: 'script', id: script.id, name: script.name })
+                      handleSelect({
+                        type: "script",
+                        id: script.id,
+                        name: script.name,
+                      })
                     }
                   >
                     <Code className="h-4 w-4 text-green-500 shrink-0" />

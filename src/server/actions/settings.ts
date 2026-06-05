@@ -1,10 +1,15 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import type { SelectorConfig, RecordingEngine, StabilizationSettings, DesignSystemConfig } from '@/lib/db/schema';
-import type { CheckMode } from '@/lib/verify/check-modes';
-import { revalidatePath } from 'next/cache';
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import type {
+  SelectorConfig,
+  RecordingEngine,
+  StabilizationSettings,
+  DesignSystemConfig,
+} from "@/lib/db/schema";
+import type { CheckMode } from "@/lib/verify/check-modes";
+import { revalidatePath } from "next/cache";
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
   await requireTeamAccess();
@@ -71,22 +76,27 @@ export async function savePlaywrightSettings(data: {
   // Mirror it so the executor's textCaptureEnabled lookup stays in sync.
   if (data.textMode !== undefined) {
     await queries.upsertDiffSensitivitySettings(repositoryId || null, {
-      textDiffEnabled: data.textMode !== 'disable',
+      textDiffEnabled: data.textMode !== "disable",
     });
   }
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
 
   return { success: true };
 }
 
-export async function setPlaywrightDomDiff(repositoryId: string | null | undefined, enabled: boolean) {
+export async function setPlaywrightDomDiff(
+  repositoryId: string | null | undefined,
+  enabled: boolean,
+) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
 
-  await queries.upsertPlaywrightSettings(repositoryId || null, { enableDomDiff: enabled });
+  await queries.upsertPlaywrightSettings(repositoryId || null, {
+    enableDomDiff: enabled,
+  });
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
 
   return { success: true };
 }
@@ -100,13 +110,15 @@ export async function resetPlaywrightSettings(repositoryId?: string | null) {
     await queries.deletePlaywrightSettings(settings.id);
   }
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
 
   return { success: true };
 }
 
 // Diff Sensitivity Settings
-export async function getDiffSensitivitySettingsAction(repositoryId?: string | null) {
+export async function getDiffSensitivitySettingsAction(
+  repositoryId?: string | null,
+) {
   await requireTeamAccess();
   return queries.getDiffSensitivitySettings(repositoryId);
 }
@@ -129,15 +141,20 @@ export async function saveDiffSensitivitySettings(data: {
   else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
 
-  await queries.upsertDiffSensitivitySettings(repositoryId || null, settingsData);
+  await queries.upsertDiffSensitivitySettings(
+    repositoryId || null,
+    settingsData,
+  );
 
-  revalidatePath('/settings');
-  revalidatePath('/builds');
+  revalidatePath("/settings");
+  revalidatePath("/builds");
 
   return { success: true };
 }
 
-export async function resetDiffSensitivitySettings(repositoryId?: string | null) {
+export async function resetDiffSensitivitySettings(
+  repositoryId?: string | null,
+) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
@@ -146,8 +163,8 @@ export async function resetDiffSensitivitySettings(repositoryId?: string | null)
     await queries.deleteDiffSensitivitySettings(settings.id);
   }
 
-  revalidatePath('/settings');
-  revalidatePath('/builds');
+  revalidatePath("/settings");
+  revalidatePath("/builds");
 
   return { success: true };
 }
@@ -159,11 +176,13 @@ function maskWebhookUrl(value: string | null | undefined): string | null {
     const url = new URL(value);
     return `${url.protocol}//${url.host}/••••••••`;
   } catch {
-    return '••••••••';
+    return "••••••••";
   }
 }
 
-export async function getNotificationSettingsAction(repositoryId?: string | null) {
+export async function getNotificationSettingsAction(
+  repositoryId?: string | null,
+) {
   await requireTeamAccess();
   const settings = await queries.getNotificationSettings(repositoryId);
   return {
@@ -178,7 +197,7 @@ export async function getNotificationSettingsAction(repositoryId?: string | null
 }
 
 function isMaskedWebhookUrl(value: string | null | undefined): boolean {
-  return !!value && value.includes('••••••••');
+  return !!value && value.includes("••••••••");
 }
 
 export async function saveNotificationSettings(data: {
@@ -193,38 +212,42 @@ export async function saveNotificationSettings(data: {
   customWebhookUrl?: string | null;
   customWebhookMethod?: string;
   customWebhookHeaders?: string | null;
-  issueTrackerProvider?: 'github' | 'gitlab';
+  issueTrackerProvider?: "github" | "gitlab";
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
 
   // Don't overwrite real URLs with masked placeholders
-  if (isMaskedWebhookUrl(settingsData.slackWebhookUrl)) delete settingsData.slackWebhookUrl;
-  if (isMaskedWebhookUrl(settingsData.discordWebhookUrl)) delete settingsData.discordWebhookUrl;
-  if (isMaskedWebhookUrl(settingsData.customWebhookUrl)) delete settingsData.customWebhookUrl;
+  if (isMaskedWebhookUrl(settingsData.slackWebhookUrl))
+    delete settingsData.slackWebhookUrl;
+  if (isMaskedWebhookUrl(settingsData.discordWebhookUrl))
+    delete settingsData.discordWebhookUrl;
+  if (isMaskedWebhookUrl(settingsData.customWebhookUrl))
+    delete settingsData.customWebhookUrl;
 
   await queries.upsertNotificationSettings(repositoryId || null, settingsData);
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
 
   return { success: true };
 }
 
 export async function testCustomWebhookAction(data: {
   url: string;
-  method: 'POST' | 'PUT';
+  method: "POST" | "PUT";
   headers?: string | null;
 }): Promise<{ success: boolean; statusCode?: number; error?: string }> {
   await requireTeamAccess();
-  const { testCustomWebhook } = await import('@/lib/integrations/custom-webhook');
+  const { testCustomWebhook } =
+    await import("@/lib/integrations/custom-webhook");
 
   let parsedHeaders: Record<string, string> | undefined;
   if (data.headers) {
     try {
       parsedHeaders = JSON.parse(data.headers);
     } catch {
-      return { success: false, error: 'Invalid JSON in headers' };
+      return { success: false, error: "Invalid JSON in headers" };
     }
   }
 
@@ -239,8 +262,8 @@ export async function testCustomWebhookAction(data: {
 export async function updateEarlyAdopterMode(enabled: boolean) {
   const session = await requireTeamAccess();
   await queries.updateTeam(session.team.id, { earlyAdopterMode: enabled });
-  revalidatePath('/settings');
-  revalidatePath('/');
+  revalidatePath("/settings");
+  revalidatePath("/");
 }
 
 // QuickStart agent: per-team email template (e.g. viktor+{slug}{stamp}@lastest.cloud).
@@ -248,21 +271,24 @@ export async function updateEarlyAdopterMode(enabled: boolean) {
 export async function updateQuickstartEmailTemplate(template: string) {
   const session = await requireTeamAccess();
   const trimmed = template.trim();
-  if (!trimmed) throw new Error('Template cannot be empty');
-  if (!trimmed.includes('{slug}') || !trimmed.includes('{stamp}')) {
-    throw new Error('Template must contain both {slug} and {stamp} tokens');
+  if (!trimmed) throw new Error("Template cannot be empty");
+  if (!trimmed.includes("{slug}") || !trimmed.includes("{stamp}")) {
+    throw new Error("Template must contain both {slug} and {stamp} tokens");
   }
-  if (trimmed.length > 200) throw new Error('Template too long (max 200 chars)');
-  await queries.updateTeam(session.team.id, { quickstartEmailTemplate: trimmed });
-  revalidatePath('/settings');
+  if (trimmed.length > 200)
+    throw new Error("Template too long (max 200 chars)");
+  await queries.updateTeam(session.team.id, {
+    quickstartEmailTemplate: trimmed,
+  });
+  revalidatePath("/settings");
 }
 
 // Ban AI Mode
 export async function updateBanAiMode(enabled: boolean) {
   const session = await requireTeamAccess();
   await queries.updateTeam(session.team.id, { banAiMode: enabled });
-  revalidatePath('/settings');
-  revalidatePath('/');
+  revalidatePath("/settings");
+  revalidatePath("/");
 }
 
 // Selector Stats

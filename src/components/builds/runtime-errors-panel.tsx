@@ -1,9 +1,17 @@
-'use client';
+"use client";
 
-import { useState, useCallback } from 'react';
-import { Terminal, Globe, Filter, ChevronDown, ChevronRight, Loader2, Download } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import type { NetworkRequest, DownloadRecord } from '@/lib/db/schema';
+import { useState, useCallback } from "react";
+import {
+  Terminal,
+  Globe,
+  Filter,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Download,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import type { NetworkRequest, DownloadRecord } from "@/lib/db/schema";
 
 interface RuntimeErrorsPanelProps {
   consoleErrors?: string[] | null;
@@ -13,32 +21,44 @@ interface RuntimeErrorsPanelProps {
 }
 
 /** Strip "Console errors detected: ..." and "Network failures detected: ..." from an errorMessage. */
-export function stripRuntimeErrorsFromMessage(errorMessage: string | null | undefined): string | null {
+export function stripRuntimeErrorsFromMessage(
+  errorMessage: string | null | undefined,
+): string | null {
   if (!errorMessage) return null;
   const cleaned = errorMessage
-    .split(' | ')
-    .filter(part => !part.startsWith('Console errors detected:') && !part.startsWith('Network failures detected:'))
-    .join(' | ')
+    .split(" | ")
+    .filter(
+      (part) =>
+        !part.startsWith("Console errors detected:") &&
+        !part.startsWith("Network failures detected:"),
+    )
+    .join(" | ")
     .trim();
   return cleaned || null;
 }
 
 function getStatusTextColor(status: number, failed?: boolean) {
-  if (failed) return 'text-destructive';
-  if (status >= 400) return 'text-destructive';
-  if (status >= 300) return 'text-warning';
-  if (status >= 200) return 'text-success';
-  return 'text-muted-foreground';
+  if (failed) return "text-destructive";
+  if (status >= 400) return "text-destructive";
+  if (status >= 300) return "text-warning";
+  if (status >= 200) return "text-success";
+  return "text-muted-foreground";
 }
 
 function getMethodColor(method: string) {
   switch (method.toUpperCase()) {
-    case 'GET': return 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300';
-    case 'POST': return 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300';
-    case 'PUT': return 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300';
-    case 'PATCH': return 'bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300';
-    case 'DELETE': return 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300';
-    default: return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+    case "GET":
+      return "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300";
+    case "POST":
+      return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
+    case "PUT":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
+    case "PATCH":
+      return "bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300";
+    case "DELETE":
+      return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
+    default:
+      return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
   }
 }
 
@@ -47,10 +67,10 @@ function truncateUrl(url: string, maxLength = 80): string {
   try {
     const u = new URL(url);
     const path = u.pathname + u.search;
-    if (path.length > maxLength - 3) return path.slice(0, maxLength - 3) + '…';
+    if (path.length > maxLength - 3) return path.slice(0, maxLength - 3) + "…";
     return path;
   } catch {
-    return url.slice(0, maxLength - 3) + '…';
+    return url.slice(0, maxLength - 3) + "…";
   }
 }
 
@@ -73,21 +93,39 @@ function dedupeErrors(errors: string[]): { message: string; count: number }[] {
       order.push(err);
     }
   }
-  return order.map(msg => ({ message: msg, count: map.get(msg)! }));
+  return order.map((msg) => ({ message: msg, count: map.get(msg)! }));
 }
 
-function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkRequest; index: number; networkBodiesPath?: string | null }) {
+function NetworkRequestDetail({
+  req,
+  index,
+  networkBodiesPath,
+}: {
+  req: NetworkRequest;
+  index: number;
+  networkBodiesPath?: string | null;
+}) {
   // Lazy-load body data from file when bodies aren't inline
-  const hasInlineBodies = !!(req.postData || req.responseBody || req.requestHeaders || req.responseHeaders);
-  const [bodyData, setBodyData] = useState<NetworkRequest | null>(hasInlineBodies ? req : null);
+  const hasInlineBodies = !!(
+    req.postData ||
+    req.responseBody ||
+    req.requestHeaders ||
+    req.responseHeaders
+  );
+  const [bodyData, setBodyData] = useState<NetworkRequest | null>(
+    hasInlineBodies ? req : null,
+  );
   const [loadingBodies, setLoadingBodies] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
   const loadBodies = useCallback(() => {
-    if (hasInlineBodies || !networkBodiesPath || bodyData || loadingBodies) return;
+    if (hasInlineBodies || !networkBodiesPath || bodyData || loadingBodies)
+      return;
     setLoadingBodies(true);
     fetch(`/api/media${networkBodiesPath}`)
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load')))
+      .then((r) =>
+        r.ok ? r.json() : Promise.reject(new Error("Failed to load")),
+      )
       .then((bodies: NetworkRequest[]) => {
         setBodyData(bodies[index] || null);
         setLoadingBodies(false);
@@ -99,7 +137,13 @@ function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkR
   }, [hasInlineBodies, networkBodiesPath, bodyData, loadingBodies, index]);
 
   // Trigger load on first render (component only mounts when expanded)
-  if (!hasInlineBodies && networkBodiesPath && !bodyData && !loadingBodies && !loadError) {
+  if (
+    !hasInlineBodies &&
+    networkBodiesPath &&
+    !bodyData &&
+    !loadingBodies &&
+    !loadError
+  ) {
     loadBodies();
   }
 
@@ -117,7 +161,9 @@ function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkR
       {req.errorText && (
         <div>
           <span className="font-medium text-red-500">Error</span>
-          <p className="font-mono text-red-600 dark:text-red-400 mt-0.5">{req.errorText}</p>
+          <p className="font-mono text-red-600 dark:text-red-400 mt-0.5">
+            {req.errorText}
+          </p>
         </div>
       )}
 
@@ -150,13 +196,17 @@ function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkR
       )}
 
       {loadError && (
-        <div className="text-muted-foreground italic">Body data unavailable</div>
+        <div className="text-muted-foreground italic">
+          Body data unavailable
+        </div>
       )}
 
       {/* Post Data */}
       {detail.postData && (
         <div>
-          <span className="font-medium text-muted-foreground">Request Body</span>
+          <span className="font-medium text-muted-foreground">
+            Request Body
+          </span>
           <pre className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-40 overflow-auto break-all whitespace-pre-wrap">
             {tryFormatJson(detail.postData)}
           </pre>
@@ -166,7 +216,9 @@ function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkR
       {/* Response Body */}
       {detail.responseBody && (
         <div>
-          <span className="font-medium text-muted-foreground">Response Body</span>
+          <span className="font-medium text-muted-foreground">
+            Response Body
+          </span>
           <pre className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-48 overflow-auto break-all whitespace-pre-wrap text-[11px]">
             {tryFormatJson(detail.responseBody)}
           </pre>
@@ -174,36 +226,38 @@ function NetworkRequestDetail({ req, index, networkBodiesPath }: { req: NetworkR
       )}
 
       {/* Request Headers */}
-      {detail.requestHeaders && Object.keys(detail.requestHeaders).length > 0 && (
-        <details>
-          <summary className="font-medium text-muted-foreground cursor-pointer select-none">
-            Request Headers ({Object.keys(detail.requestHeaders).length})
-          </summary>
-          <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
-            {Object.entries(detail.requestHeaders).map(([k, v]) => (
-              <div key={k} className="break-all">
-                <span className="text-muted-foreground">{k}:</span> {v}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
+      {detail.requestHeaders &&
+        Object.keys(detail.requestHeaders).length > 0 && (
+          <details>
+            <summary className="font-medium text-muted-foreground cursor-pointer select-none">
+              Request Headers ({Object.keys(detail.requestHeaders).length})
+            </summary>
+            <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
+              {Object.entries(detail.requestHeaders).map(([k, v]) => (
+                <div key={k} className="break-all">
+                  <span className="text-muted-foreground">{k}:</span> {v}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
       {/* Response Headers */}
-      {detail.responseHeaders && Object.keys(detail.responseHeaders).length > 0 && (
-        <details>
-          <summary className="font-medium text-muted-foreground cursor-pointer select-none">
-            Response Headers ({Object.keys(detail.responseHeaders).length})
-          </summary>
-          <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
-            {Object.entries(detail.responseHeaders).map(([k, v]) => (
-              <div key={k} className="break-all">
-                <span className="text-muted-foreground">{k}:</span> {v}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
+      {detail.responseHeaders &&
+        Object.keys(detail.responseHeaders).length > 0 && (
+          <details>
+            <summary className="font-medium text-muted-foreground cursor-pointer select-none">
+              Response Headers ({Object.keys(detail.responseHeaders).length})
+            </summary>
+            <div className="font-mono bg-muted/50 rounded p-1.5 mt-0.5 max-h-32 overflow-auto">
+              {Object.entries(detail.responseHeaders).map(([k, v]) => (
+                <div key={k} className="break-all">
+                  <span className="text-muted-foreground">{k}:</span> {v}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
     </div>
   );
 }
@@ -216,12 +270,20 @@ function tryFormatJson(str: string): string {
   }
 }
 
-function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkRequest[]; networkBodiesPath?: string | null }) {
+function NetworkTraceTable({
+  requests,
+  networkBodiesPath,
+}: {
+  requests: NetworkRequest[];
+  networkBodiesPath?: string | null;
+}) {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
-  const errorCount = requests.filter(r => r.status >= 400 || r.failed).length;
-  const filtered = errorsOnly ? requests.filter(r => r.status >= 400 || r.failed) : requests;
+  const errorCount = requests.filter((r) => r.status >= 400 || r.failed).length;
+  const filtered = errorsOnly
+    ? requests.filter((r) => r.status >= 400 || r.failed)
+    : requests;
   const hasErrors = errorCount > 0;
 
   return (
@@ -229,15 +291,20 @@ function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkR
       {/* Filter bar */}
       {hasErrors && (
         <button
-          onClick={() => { setErrorsOnly(!errorsOnly); setExpandedIdx(null); }}
+          onClick={() => {
+            setErrorsOnly(!errorsOnly);
+            setExpandedIdx(null);
+          }}
           className={`flex items-center gap-1.5 text-[10px] px-2 py-1 mb-1 rounded-md transition-colors ${
             errorsOnly
-              ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-              : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+              ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+              : "bg-muted/50 text-muted-foreground hover:bg-muted"
           }`}
         >
           <Filter className="w-3 h-3" />
-          {errorsOnly ? `Showing ${errorCount} error${errorCount !== 1 ? 's' : ''}` : `Filter errors (${errorCount})`}
+          {errorsOnly
+            ? `Showing ${errorCount} error${errorCount !== 1 ? "s" : ""}`
+            : `Filter errors (${errorCount})`}
         </button>
       )}
 
@@ -258,17 +325,25 @@ function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkR
           return (
             <div key={i}>
               <div
-                className={`flex items-center gap-2 py-1 border-b border-border/30 text-xs cursor-pointer hover:bg-muted/40 ${isError ? 'bg-red-500/5' : ''}`}
+                className={`flex items-center gap-2 py-1 border-b border-border/30 text-xs cursor-pointer hover:bg-muted/40 ${isError ? "bg-red-500/5" : ""}`}
                 onClick={() => setExpandedIdx(isExpanded ? null : i)}
               >
                 <span className="w-3 shrink-0 text-muted-foreground">
-                  {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  {isExpanded ? (
+                    <ChevronDown className="w-3 h-3" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3" />
+                  )}
                 </span>
-                <Badge className={`${getMethodColor(req.method)} shrink-0 text-[10px] px-1.5 py-0 font-mono w-14 justify-center`}>
+                <Badge
+                  className={`${getMethodColor(req.method)} shrink-0 text-[10px] px-1.5 py-0 font-mono w-14 justify-center`}
+                >
                   {req.method}
                 </Badge>
-                <span className={`w-12 shrink-0 text-right font-mono text-[11px] ${getStatusTextColor(req.status, req.failed)}`}>
-                  {req.failed ? 'ERR' : req.status || '...'}
+                <span
+                  className={`w-12 shrink-0 text-right font-mono text-[11px] ${getStatusTextColor(req.status, req.failed)}`}
+                >
+                  {req.failed ? "ERR" : req.status || "..."}
                 </span>
                 <span
                   className="flex-1 min-w-0 truncate font-mono text-muted-foreground text-[11px]"
@@ -277,18 +352,26 @@ function NetworkTraceTable({ requests, networkBodiesPath }: { requests: NetworkR
                   {truncateUrl(req.url)}
                 </span>
                 <span className="w-14 shrink-0 text-right text-muted-foreground text-[10px]">
-                  {req.duration > 0 ? `${req.duration}ms` : '—'}
+                  {req.duration > 0 ? `${req.duration}ms` : "—"}
                 </span>
                 <span className="w-16 shrink-0 truncate text-muted-foreground text-[10px]">
                   {req.resourceType}
                 </span>
               </div>
-              {isExpanded && <NetworkRequestDetail req={req} index={i} networkBodiesPath={networkBodiesPath} />}
+              {isExpanded && (
+                <NetworkRequestDetail
+                  req={req}
+                  index={i}
+                  networkBodiesPath={networkBodiesPath}
+                />
+              )}
             </div>
           );
         })}
         {filtered.length === 0 && (
-          <div className="py-3 text-center text-xs text-muted-foreground">No matching requests</div>
+          <div className="py-3 text-center text-xs text-muted-foreground">
+            No matching requests
+          </div>
         )}
       </div>
     </div>
@@ -306,21 +389,27 @@ function DownloadTraceTable({ downloads }: { downloads: DownloadRecord[] }) {
           <span className="flex-1 min-w-0">URL</span>
         </div>
         {downloads.map((dl, i) => (
-          <div key={i} className="flex items-center gap-2 py-1.5 border-b border-border/30 text-xs">
-            <span className="flex-1 min-w-0 truncate font-mono text-foreground" title={dl.suggestedFilename}>
+          <div
+            key={i}
+            className="flex items-center gap-2 py-1.5 border-b border-border/30 text-xs"
+          >
+            <span
+              className="flex-1 min-w-0 truncate font-mono text-foreground"
+              title={dl.suggestedFilename}
+            >
               {dl.suggestedFilename}
             </span>
             <span className="w-16 shrink-0 text-right text-muted-foreground text-[10px]">
-              {dl.sizeBytes !== undefined ? formatBytes(dl.sizeBytes) : '—'}
+              {dl.sizeBytes !== undefined ? formatBytes(dl.sizeBytes) : "—"}
             </span>
             <span className="w-14 shrink-0 text-right text-muted-foreground text-[10px]">
-              {dl.durationMs ? `${dl.durationMs}ms` : '—'}
+              {dl.durationMs ? `${dl.durationMs}ms` : "—"}
             </span>
             <span
               className="flex-1 min-w-0 truncate font-mono text-muted-foreground text-[11px]"
               title={dl.url}
             >
-              {dl.url ? truncateUrl(dl.url) : '—'}
+              {dl.url ? truncateUrl(dl.url) : "—"}
             </span>
           </div>
         ))}
@@ -329,16 +418,26 @@ function DownloadTraceTable({ downloads }: { downloads: DownloadRecord[] }) {
   );
 }
 
-export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodiesPath, downloads }: RuntimeErrorsPanelProps) {
+export function RuntimeErrorsPanel({
+  consoleErrors,
+  networkRequests,
+  networkBodiesPath,
+  downloads,
+}: RuntimeErrorsPanelProps) {
   const hasConsole = consoleErrors && consoleErrors.length > 0;
   const hasNetwork = networkRequests && networkRequests.length > 0;
   const hasDownloads = downloads && downloads.length > 0;
 
   if (!hasConsole && !hasNetwork && !hasDownloads) return null;
 
-  const networkErrors = networkRequests?.filter(r => r.status >= 400 || r.failed) ?? [];
+  const networkErrors =
+    networkRequests?.filter((r) => r.status >= 400 || r.failed) ?? [];
   const hasErrors = networkErrors.length > 0;
-  const isFullTrace = hasNetwork && networkRequests!.some(r => r.startTime !== undefined || (r.status >= 200 && r.status < 400));
+  const isFullTrace =
+    hasNetwork &&
+    networkRequests!.some(
+      (r) => r.startTime !== undefined || (r.status >= 200 && r.status < 400),
+    );
 
   return (
     <div className="mt-2 space-y-2">
@@ -346,7 +445,9 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodi
         <details className="border border-amber-200 bg-amber-50 rounded-lg dark:border-amber-800 dark:bg-amber-950/30">
           <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
             <Terminal className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span className="font-medium text-amber-800 dark:text-amber-200">Console Errors</span>
+            <span className="font-medium text-amber-800 dark:text-amber-200">
+              Console Errors
+            </span>
             <Badge variant="secondary" className="ml-auto text-xs">
               {consoleErrors.length}
             </Badge>
@@ -361,7 +462,10 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodi
                   {entry.message}
                 </pre>
                 {entry.count > 1 && (
-                  <Badge variant="outline" className="shrink-0 text-[10px] px-1.5 py-0">
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 text-[10px] px-1.5 py-0"
+                  >
                     x{entry.count}
                   </Badge>
                 )}
@@ -376,33 +480,48 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodi
         <details className="border border-red-200 bg-red-50 rounded-lg dark:border-red-800 dark:bg-red-950/30">
           <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
             <Globe className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
-            <span className="font-medium text-red-800 dark:text-red-200">Network Errors</span>
+            <span className="font-medium text-red-800 dark:text-red-200">
+              Network Errors
+            </span>
             <Badge variant="secondary" className="ml-auto text-xs">
               {networkRequests!.length}
             </Badge>
           </summary>
-          <NetworkTraceTable requests={networkRequests!} networkBodiesPath={networkBodiesPath} />
+          <NetworkTraceTable
+            requests={networkRequests!}
+            networkBodiesPath={networkBodiesPath}
+          />
         </details>
       )}
 
       {/* Full network trace — new format with all requests */}
       {hasNetwork && isFullTrace && (
-        <details className={`border rounded-lg ${hasErrors ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30' : 'border-border bg-muted/30'}`}>
+        <details
+          className={`border rounded-lg ${hasErrors ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : "border-border bg-muted/30"}`}
+        >
           <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
-            <Globe className={`w-4 h-4 shrink-0 ${hasErrors ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`} />
-            <span className={`font-medium ${hasErrors ? 'text-red-800 dark:text-red-200' : 'text-foreground'}`}>
+            <Globe
+              className={`w-4 h-4 shrink-0 ${hasErrors ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}
+            />
+            <span
+              className={`font-medium ${hasErrors ? "text-red-800 dark:text-red-200" : "text-foreground"}`}
+            >
               Network Requests
             </span>
             {hasErrors && (
               <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                {networkErrors.length} error{networkErrors.length !== 1 ? 's' : ''}
+                {networkErrors.length} error
+                {networkErrors.length !== 1 ? "s" : ""}
               </Badge>
             )}
             <Badge variant="secondary" className="ml-auto text-xs">
               {networkRequests!.length}
             </Badge>
           </summary>
-          <NetworkTraceTable requests={networkRequests!} networkBodiesPath={networkBodiesPath} />
+          <NetworkTraceTable
+            requests={networkRequests!}
+            networkBodiesPath={networkBodiesPath}
+          />
         </details>
       )}
 
@@ -410,7 +529,9 @@ export function RuntimeErrorsPanel({ consoleErrors, networkRequests, networkBodi
         <details className="border border-blue-200 bg-blue-50 rounded-lg dark:border-blue-800 dark:bg-blue-950/30">
           <summary className="flex items-center gap-2 p-2.5 cursor-pointer select-none text-sm">
             <Download className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <span className="font-medium text-blue-800 dark:text-blue-200">Downloads</span>
+            <span className="font-medium text-blue-800 dark:text-blue-200">
+              Downloads
+            </span>
             <Badge variant="secondary" className="ml-auto text-xs">
               {downloads!.length}
             </Badge>

@@ -1,24 +1,28 @@
-import { ReviewClient } from './review-client';
+import { ReviewClient } from "./review-client";
 import {
   getSelectedRepository,
   getReviewTodosByBranch,
   getLastBuildByBranch,
   getVisualDiffsWithTestStatus,
-} from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
+} from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export default async function ReviewPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
+  const selectedRepo = teamId
+    ? await getSelectedRepository(userId, teamId)
+    : null;
 
-  const activeBranch = selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || 'main';
+  const activeBranch =
+    selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || "main";
 
   let initialTodos: Awaited<ReturnType<typeof getReviewTodosByBranch>> = [];
-  let initialDiffs: Awaited<ReturnType<typeof getVisualDiffsWithTestStatus>> = [];
+  let initialDiffs: Awaited<ReturnType<typeof getVisualDiffsWithTestStatus>> =
+    [];
   let latestBuildId: string | null = null;
 
   if (selectedRepo) {

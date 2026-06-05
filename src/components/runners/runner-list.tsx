@@ -1,18 +1,30 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import { Bot, MoreVertical, Trash2, RefreshCw, Copy, Check, Settings, Layers, Square, Tv2, Server } from 'lucide-react';
-import type { Runner, EmbeddedSession } from '@/lib/db/schema';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { useState } from "react";
+import { formatDistanceToNow } from "date-fns";
+import {
+  Bot,
+  MoreVertical,
+  Trash2,
+  RefreshCw,
+  Copy,
+  Check,
+  Settings,
+  Layers,
+  Square,
+  Tv2,
+  Server,
+} from "lucide-react";
+import type { Runner, EmbeddedSession } from "@/lib/db/schema";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -20,11 +32,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { deleteRunner, regenerateRunnerToken, updateRunnerSettings, stopRunner } from '@/server/actions/runners';
-import { Slider } from '@/components/ui/slider';
-import { Label } from '@/components/ui/label';
-import { useRouter } from 'next/navigation';
+} from "@/components/ui/dialog";
+import {
+  deleteRunner,
+  regenerateRunnerToken,
+  updateRunnerSettings,
+  stopRunner,
+} from "@/server/actions/runners";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { useRouter } from "next/navigation";
 
 interface RunnerListProps {
   runners: Runner[];
@@ -32,7 +49,11 @@ interface RunnerListProps {
   systemSessions?: EmbeddedSession[];
 }
 
-export function RunnerList({ runners, systemRunners = [], systemSessions = [] }: RunnerListProps) {
+export function RunnerList({
+  runners,
+  systemRunners = [],
+  systemSessions = [],
+}: RunnerListProps) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
@@ -49,7 +70,7 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
     try {
       const result = await deleteRunner(selectedRunner.id);
       setDeleteDialogOpen(false);
-      if (!('error' in result)) {
+      if (!("error" in result)) {
         router.refresh();
       }
     } catch {
@@ -64,7 +85,7 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
     setLoading(true);
     try {
       const result = await regenerateRunnerToken(selectedRunner.id);
-      if ('token' in result) {
+      if ("token" in result) {
         setNewToken(result.token);
       }
     } catch {
@@ -82,7 +103,7 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
       maxParallelTests: parallelTests,
     });
     setLoading(false);
-    if (!('error' in result)) {
+    if (!("error" in result)) {
       setSettingsDialogOpen(false);
       router.refresh();
     }
@@ -90,8 +111,8 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
 
   const handleStopRunner = async (runner: Runner) => {
     const result = await stopRunner(runner.id);
-    if ('error' in result) {
-      console.error('Failed to stop runner:', result.error);
+    if ("error" in result) {
+      console.error("Failed to stop runner:", result.error);
     } else {
       // Refresh to show updated status
       setTimeout(() => router.refresh(), 1000);
@@ -113,10 +134,18 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'online':
-        return <Badge variant="default" className="bg-green-500">Online</Badge>;
-      case 'busy':
-        return <Badge variant="default" className="bg-yellow-500">Busy</Badge>;
+      case "online":
+        return (
+          <Badge variant="default" className="bg-green-500">
+            Online
+          </Badge>
+        );
+      case "busy":
+        return (
+          <Badge variant="default" className="bg-yellow-500">
+            Busy
+          </Badge>
+        );
       default:
         return <Badge variant="secondary">Offline</Badge>;
     }
@@ -131,23 +160,35 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
             className="flex items-center justify-between p-3 rounded-lg border bg-card"
           >
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${
-                runner.status === 'online' ? 'bg-green-500/10' :
-                runner.status === 'busy' ? 'bg-yellow-500/10' :
-                'bg-muted'
-              }`}>
-                {runner.type === 'embedded' ? (
-                  <Tv2 className={`w-5 h-5 ${
-                    runner.status === 'online' ? 'text-green-500' :
-                    runner.status === 'busy' ? 'text-yellow-500' :
-                    'text-muted-foreground'
-                  }`} />
+              <div
+                className={`p-2 rounded-lg ${
+                  runner.status === "online"
+                    ? "bg-green-500/10"
+                    : runner.status === "busy"
+                      ? "bg-yellow-500/10"
+                      : "bg-muted"
+                }`}
+              >
+                {runner.type === "embedded" ? (
+                  <Tv2
+                    className={`w-5 h-5 ${
+                      runner.status === "online"
+                        ? "text-green-500"
+                        : runner.status === "busy"
+                          ? "text-yellow-500"
+                          : "text-muted-foreground"
+                    }`}
+                  />
                 ) : (
-                  <Bot className={`w-5 h-5 ${
-                    runner.status === 'online' ? 'text-green-500' :
-                    runner.status === 'busy' ? 'text-yellow-500' :
-                    'text-muted-foreground'
-                  }`} />
+                  <Bot
+                    className={`w-5 h-5 ${
+                      runner.status === "online"
+                        ? "text-green-500"
+                        : runner.status === "busy"
+                          ? "text-yellow-500"
+                          : "text-muted-foreground"
+                    }`}
+                  />
                 )}
               </div>
               <div>
@@ -163,7 +204,12 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {runner.lastSeen ? (
-                    <>Last seen {formatDistanceToNow(runner.lastSeen, { addSuffix: true })}</>
+                    <>
+                      Last seen{" "}
+                      {formatDistanceToNow(runner.lastSeen, {
+                        addSuffix: true,
+                      })}
+                    </>
                   ) : (
                     <>Never connected</>
                   )}
@@ -178,7 +224,7 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {runner.status !== 'offline' && (
+                {runner.status !== "offline" && (
                   <DropdownMenuItem onClick={() => handleStopRunner(runner)}>
                     <Square className="w-4 h-4 mr-2" />
                     Stop Runner
@@ -219,7 +265,11 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
           const session = systemSessions.find((s) => s.runnerId === runner.id);
           // Use session status as source of truth when available
           const effectiveStatus = session
-            ? session.status === 'ready' ? 'online' : session.status === 'busy' ? 'busy' : runner.status
+            ? session.status === "ready"
+              ? "online"
+              : session.status === "busy"
+                ? "busy"
+                : runner.status
             : runner.status;
           return (
             <div
@@ -227,22 +277,33 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
               className="flex items-center justify-between p-3 rounded-lg border bg-card opacity-80"
             >
               <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${
-                  effectiveStatus === 'online' ? 'bg-blue-500/10' :
-                  effectiveStatus === 'busy' ? 'bg-yellow-500/10' :
-                  'bg-muted'
-                }`}>
-                  <Server className={`w-5 h-5 ${
-                    effectiveStatus === 'online' ? 'text-blue-500' :
-                    effectiveStatus === 'busy' ? 'text-yellow-500' :
-                    'text-muted-foreground'
-                  }`} />
+                <div
+                  className={`p-2 rounded-lg ${
+                    effectiveStatus === "online"
+                      ? "bg-blue-500/10"
+                      : effectiveStatus === "busy"
+                        ? "bg-yellow-500/10"
+                        : "bg-muted"
+                  }`}
+                >
+                  <Server
+                    className={`w-5 h-5 ${
+                      effectiveStatus === "online"
+                        ? "text-blue-500"
+                        : effectiveStatus === "busy"
+                          ? "text-yellow-500"
+                          : "text-muted-foreground"
+                    }`}
+                  />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{runner.name}</span>
                     {getStatusBadge(effectiveStatus)}
-                    <Badge variant="outline" className="text-xs text-blue-500 border-blue-500/30">
+                    <Badge
+                      variant="outline"
+                      className="text-xs text-blue-500 border-blue-500/30"
+                    >
                       System
                     </Badge>
                     {session?.viewport && (
@@ -252,12 +313,23 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
                     )}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    {session?.status === 'busy' && session.busySince ? (
+                    {session?.status === "busy" && session.busySince ? (
                       <>Busy for {formatDistanceToNow(session.busySince)}</>
-                    ) : session?.status === 'ready' && session.lastActivityAt ? (
-                      <>Idle since {formatDistanceToNow(session.lastActivityAt, { addSuffix: true })}</>
+                    ) : session?.status === "ready" &&
+                      session.lastActivityAt ? (
+                      <>
+                        Idle since{" "}
+                        {formatDistanceToNow(session.lastActivityAt, {
+                          addSuffix: true,
+                        })}
+                      </>
                     ) : runner.lastSeen ? (
-                      <>Last seen {formatDistanceToNow(runner.lastSeen, { addSuffix: true })}</>
+                      <>
+                        Last seen{" "}
+                        {formatDistanceToNow(runner.lastSeen, {
+                          addSuffix: true,
+                        })}
+                      </>
                     ) : (
                       <>Never connected</>
                     )}
@@ -275,15 +347,23 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
           <DialogHeader>
             <DialogTitle>Delete Runner</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &quot;{selectedRunner?.name}&quot;? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedRunner?.name}
+              &quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={loading}>
-              {loading ? 'Deleting...' : 'Delete'}
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={loading}
+            >
+              {loading ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -317,17 +397,22 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
                   step={1}
                   className="flex-1"
                 />
-                <span className="text-sm font-medium w-8 text-center">{parallelTests}</span>
+                <span className="text-sm font-medium w-8 text-center">
+                  {parallelTests}
+                </span>
               </div>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSettingsDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setSettingsDialogOpen(false)}
+            >
               Cancel
             </Button>
             <Button onClick={handleSaveSettings} disabled={loading}>
-              {loading ? 'Saving...' : 'Save'}
+              {loading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -339,11 +424,9 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
           <DialogHeader>
             <DialogTitle>Regenerate Token</DialogTitle>
             <DialogDescription>
-              {newToken ? (
-                'Copy this token now. It will not be shown again.'
-              ) : (
-                `Regenerating the token for "${selectedRunner?.name}" will invalidate the current token. The runner will need to be reconfigured with the new token.`
-              )}
+              {newToken
+                ? "Copy this token now. It will not be shown again."
+                : `Regenerating the token for "${selectedRunner?.name}" will invalidate the current token. The runner will need to be reconfigured with the new token.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -372,11 +455,14 @@ export function RunnerList({ runners, systemRunners = [], systemSessions = [] }:
               <Button onClick={() => setTokenDialogOpen(false)}>Done</Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setTokenDialogOpen(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setTokenDialogOpen(false)}
+                >
                   Cancel
                 </Button>
                 <Button onClick={handleRegenerateToken} disabled={loading}>
-                  {loading ? 'Regenerating...' : 'Regenerate'}
+                  {loading ? "Regenerating..." : "Regenerate"}
                 </Button>
               </>
             )}

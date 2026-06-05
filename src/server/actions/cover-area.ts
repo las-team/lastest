@@ -1,9 +1,9 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { revalidatePath } from 'next/cache';
-import { createPlaceholderTestCase, createStandaloneSpec } from './specs';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { createPlaceholderTestCase, createStandaloneSpec } from "./specs";
 
 interface CoverAreaInput {
   areaId: string;
@@ -39,22 +39,27 @@ export interface CoverAreaResult {
  * The drafted spec leans on existing infrastructure — no new prompting path —
  * so the UX is consistent with the planner-generated specs that already exist.
  */
-export async function coverArea(input: CoverAreaInput): Promise<CoverAreaResult> {
+export async function coverArea(
+  input: CoverAreaInput,
+): Promise<CoverAreaResult> {
   const area = await queries.getFunctionalArea(input.areaId);
-  if (!area) return { ok: false, error: 'Area not found' };
-  if (!area.repositoryId) return { ok: false, error: 'Area is not bound to a repository' };
+  if (!area) return { ok: false, error: "Area not found" };
+  if (!area.repositoryId)
+    return { ok: false, error: "Area is not bound to a repository" };
   const repositoryId = area.repositoryId;
   await requireRepoAccess(repositoryId);
 
   // Pull the build's change-map narrative if available — gives the spec a
   // concrete "what changed and why this might break" framing.
   let narrative: string[] = [];
-  let intentSummary = '';
+  let intentSummary = "";
   if (input.buildId) {
-    const map = await queries.getBuildChangeMap(input.buildId).catch(() => null);
+    const map = await queries
+      .getBuildChangeMap(input.buildId)
+      .catch(() => null);
     const areaEntry = map?.areas.find((a) => a.areaId === input.areaId);
     if (areaEntry) narrative = areaEntry.aiNarrative ?? [];
-    intentSummary = map?.intentSummary ?? '';
+    intentSummary = map?.intentSummary ?? "";
   }
 
   // Drafted title prefers existing covered-tests gap framing if we have one.
@@ -90,7 +95,12 @@ export async function coverArea(input: CoverAreaInput): Promise<CoverAreaResult>
   if (!specId) {
     // Belt-and-braces — never let coverArea silently fail to surface anything
     // in the UI. createStandaloneSpec is idempotent w.r.t. duplicate titles.
-    specId = await createStandaloneSpec(repositoryId, input.areaId, title, body);
+    specId = await createStandaloneSpec(
+      repositoryId,
+      input.areaId,
+      title,
+      body,
+    );
   }
 
   revalidatePath(`/areas`);
@@ -109,27 +119,27 @@ interface SpecBodyInput {
 
 function buildSpecBody(input: SpecBodyInput): string {
   const lines: string[] = [];
-  lines.push(`# Coverage gap: ${input.areaName}`, '');
+  lines.push(`# Coverage gap: ${input.areaName}`, "");
   if (input.intentSummary) {
-    lines.push('## Build intent', '', input.intentSummary, '');
+    lines.push("## Build intent", "", input.intentSummary, "");
   }
   if (input.narrative.length > 0) {
-    lines.push('## Why this area is suspect', '');
+    lines.push("## Why this area is suspect", "");
     for (const n of input.narrative) lines.push(`- ${n}`);
-    lines.push('');
+    lines.push("");
   }
   if (input.hint) {
-    lines.push('## Reviewer hint', '', input.hint, '');
+    lines.push("## Reviewer hint", "", input.hint, "");
   }
   if (input.agentPlan && input.agentPlan.trim().length > 0) {
-    lines.push('## Area plan (existing)', '', input.agentPlan.trim(), '');
+    lines.push("## Area plan (existing)", "", input.agentPlan.trim(), "");
   }
   lines.push(
-    '## Acceptance',
-    '',
-    '- The new test exercises the path described above end-to-end.',
-    '- Add assertions for any state the build intent says should change.',
-    '- Capture a baseline screenshot at each meaningful state transition.',
+    "## Acceptance",
+    "",
+    "- The new test exercises the path described above end-to-end.",
+    "- Add assertions for any state the build intent says should change.",
+    "- Capture a baseline screenshot at each meaningful state transition.",
   );
-  return lines.join('\n');
+  return lines.join("\n");
 }

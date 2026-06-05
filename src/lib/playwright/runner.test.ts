@@ -1,148 +1,164 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FREEZE_ANIMATIONS_CSS, FREEZE_ANIMATIONS_SCRIPT, DEFAULT_SCREENSHOT_DELAY } from './constants';
-import { createMockPage } from '../__tests__/setup';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  FREEZE_ANIMATIONS_CSS,
+  FREEZE_ANIMATIONS_SCRIPT,
+  DEFAULT_SCREENSHOT_DELAY,
+} from "./constants";
+import { createMockPage } from "../__tests__/setup";
 
-describe('Animation Freezing', () => {
-  describe('FREEZE_ANIMATIONS_CSS', () => {
-    it('exports CSS constant for animation freezing', () => {
+describe("Animation Freezing", () => {
+  describe("FREEZE_ANIMATIONS_CSS", () => {
+    it("exports CSS constant for animation freezing", () => {
       expect(FREEZE_ANIMATIONS_CSS).toBeDefined();
-      expect(typeof FREEZE_ANIMATIONS_CSS).toBe('string');
+      expect(typeof FREEZE_ANIMATIONS_CSS).toBe("string");
     });
 
-    it('disables CSS animations with !important', () => {
-      expect(FREEZE_ANIMATIONS_CSS).toContain('animation: none !important');
+    it("disables CSS animations with !important", () => {
+      expect(FREEZE_ANIMATIONS_CSS).toContain("animation: none !important");
     });
 
-    it('disables CSS transitions with !important', () => {
-      expect(FREEZE_ANIMATIONS_CSS).toContain('transition: none !important');
+    it("disables CSS transitions with !important", () => {
+      expect(FREEZE_ANIMATIONS_CSS).toContain("transition: none !important");
     });
 
-    it('sets animation-delay to 0s', () => {
-      expect(FREEZE_ANIMATIONS_CSS).toContain('animation-delay: 0s !important');
+    it("sets animation-delay to 0s", () => {
+      expect(FREEZE_ANIMATIONS_CSS).toContain("animation-delay: 0s !important");
     });
 
-    it('sets transition-delay to 0s', () => {
-      expect(FREEZE_ANIMATIONS_CSS).toContain('transition-delay: 0s !important');
+    it("sets transition-delay to 0s", () => {
+      expect(FREEZE_ANIMATIONS_CSS).toContain(
+        "transition-delay: 0s !important",
+      );
     });
 
-    it('applies to all elements including pseudo-elements', () => {
-      expect(FREEZE_ANIMATIONS_CSS).toContain('*');
-      expect(FREEZE_ANIMATIONS_CSS).toContain('*::before');
-      expect(FREEZE_ANIMATIONS_CSS).toContain('*::after');
+    it("applies to all elements including pseudo-elements", () => {
+      expect(FREEZE_ANIMATIONS_CSS).toContain("*");
+      expect(FREEZE_ANIMATIONS_CSS).toContain("*::before");
+      expect(FREEZE_ANIMATIONS_CSS).toContain("*::after");
     });
   });
 
-  describe('FREEZE_ANIMATIONS_SCRIPT', () => {
-    it('exports init script for comprehensive animation freezing', () => {
+  describe("FREEZE_ANIMATIONS_SCRIPT", () => {
+    it("exports init script for comprehensive animation freezing", () => {
       expect(FREEZE_ANIMATIONS_SCRIPT).toBeDefined();
-      expect(typeof FREEZE_ANIMATIONS_SCRIPT).toBe('string');
+      expect(typeof FREEZE_ANIMATIONS_SCRIPT).toBe("string");
     });
 
-    it('contains CSS injection for animations and transitions', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('animation: none !important');
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('transition: none !important');
+    it("contains CSS injection for animations and transitions", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("animation: none !important");
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("transition: none !important");
     });
 
-    it('blocks Element.prototype.animate', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('Element.prototype.animate');
+    it("blocks Element.prototype.animate", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("Element.prototype.animate");
     });
 
-    it('overrides setInterval to prevent auto-advancing', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setInterval');
+    it("overrides setInterval to prevent auto-advancing", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("setInterval");
     });
 
-    it('pauses Web Animations API', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('getAnimations');
+    it("pauses Web Animations API", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("getAnimations");
     });
 
-    it('handles both DOMContentLoaded and load events', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('DOMContentLoaded');
+    it("handles both DOMContentLoaded and load events", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("DOMContentLoaded");
       expect(FREEZE_ANIMATIONS_SCRIPT).toContain("'load'");
     });
 
-    it('contains GIF freezing via canvas replacement', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('freezeGifImage');
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('isGifSrc');
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('processAllGifs');
+    it("contains GIF freezing via canvas replacement", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("freezeGifImage");
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("isGifSrc");
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("processAllGifs");
     });
 
-    it('detects .gif extension in URLs', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('.gif');
+    it("detects .gif extension in URLs", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain(".gif");
     });
 
-    it('uses MutationObserver for dynamically added GIFs', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('MutationObserver');
+    it("uses MutationObserver for dynamically added GIFs", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("MutationObserver");
     });
 
-    it('replaces GIF src with static PNG via canvas toDataURL', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('toDataURL');
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('image/png');
+    it("replaces GIF src with static PNG via canvas toDataURL", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("toDataURL");
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("image/png");
     });
 
-    it('handles cross-origin GIFs gracefully with try/catch', () => {
+    it("handles cross-origin GIFs gracefully with try/catch", () => {
       // The canvas freezing has try/catch for cross-origin GIFs
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('Cross-origin');
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain("Cross-origin");
     });
 
-    it('runs delayed passes for late-loading GIFs', () => {
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setTimeout(processAllGifs, 200)');
-      expect(FREEZE_ANIMATIONS_SCRIPT).toContain('setTimeout(processAllGifs, 600)');
+    it("runs delayed passes for late-loading GIFs", () => {
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain(
+        "setTimeout(processAllGifs, 200)",
+      );
+      expect(FREEZE_ANIMATIONS_SCRIPT).toContain(
+        "setTimeout(processAllGifs, 600)",
+      );
     });
   });
 
-  describe('reducedMotion context option', () => {
-    it('sets reducedMotion when freezeAnimations is enabled', () => {
+  describe("reducedMotion context option", () => {
+    it("sets reducedMotion when freezeAnimations is enabled", () => {
       const settings = { freezeAnimations: true };
       const contextOptions = {
-        ...(settings.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        ...(settings.freezeAnimations
+          ? { reducedMotion: "reduce" as const }
+          : {}),
       };
-      expect(contextOptions.reducedMotion).toBe('reduce');
+      expect(contextOptions.reducedMotion).toBe("reduce");
     });
 
-    it('does not set reducedMotion when freezeAnimations is disabled', () => {
+    it("does not set reducedMotion when freezeAnimations is disabled", () => {
       const settings = { freezeAnimations: false };
       const contextOptions = {
-        ...(settings.freezeAnimations ? { reducedMotion: 'reduce' as const } : {}),
+        ...(settings.freezeAnimations
+          ? { reducedMotion: "reduce" as const }
+          : {}),
       };
       expect(contextOptions.reducedMotion).toBeUndefined();
     });
   });
 
-  describe('freezeAnimations setting behavior', () => {
-    it('when enabled, injects init script to freeze all animations', () => {
+  describe("freezeAnimations setting behavior", () => {
+    it("when enabled, injects init script to freeze all animations", () => {
       const settings = { freezeAnimations: true };
       expect(settings.freezeAnimations).toBe(true);
     });
 
-    it('when disabled, does not inject animation script', () => {
+    it("when disabled, does not inject animation script", () => {
       const settings = { freezeAnimations: false };
       expect(settings.freezeAnimations).toBe(false);
     });
 
-    it('defaults to false when not specified', () => {
-      const settings = {};
+    it("defaults to false when not specified", () => {
+      const settings: { freezeAnimations?: boolean } = {};
       expect(settings.freezeAnimations ?? false).toBe(false);
     });
   });
 
-  describe('animation freezing integration', () => {
+  describe("animation freezing integration", () => {
     let mockPage: ReturnType<typeof createMockPage>;
 
     beforeEach(() => {
       mockPage = createMockPage();
     });
 
-    it('injects init script when freezeAnimations is true', async () => {
+    it("injects init script when freezeAnimations is true", async () => {
       const settings = { freezeAnimations: true };
 
       if (settings.freezeAnimations) {
         await mockPage.addInitScript(FREEZE_ANIMATIONS_SCRIPT);
       }
 
-      expect(mockPage.addInitScript).toHaveBeenCalledWith(FREEZE_ANIMATIONS_SCRIPT);
+      expect(mockPage.addInitScript).toHaveBeenCalledWith(
+        FREEZE_ANIMATIONS_SCRIPT,
+      );
     });
 
-    it('does not inject script when freezeAnimations is false', async () => {
+    it("does not inject script when freezeAnimations is false", async () => {
       const settings = { freezeAnimations: false };
 
       if (settings.freezeAnimations) {
@@ -152,7 +168,7 @@ describe('Animation Freezing', () => {
       expect(mockPage.addInitScript).not.toHaveBeenCalled();
     });
 
-    it('uses addInitScript (persists across navigations) not addStyleTag', async () => {
+    it("uses addInitScript (persists across navigations) not addStyleTag", async () => {
       const settings = { freezeAnimations: true };
 
       if (settings.freezeAnimations) {
@@ -166,45 +182,45 @@ describe('Animation Freezing', () => {
   });
 });
 
-describe('Screenshot Stabilization Delay', () => {
-  describe('screenshotDelay setting behavior', () => {
-    it('applies delay before taking screenshot when > 0', () => {
+describe("Screenshot Stabilization Delay", () => {
+  describe("screenshotDelay setting behavior", () => {
+    it("applies delay before taking screenshot when > 0", () => {
       // The runner intercepts page.screenshot() and waits for screenshotDelay ms
       const settings = { screenshotDelay: 500 };
       expect(settings.screenshotDelay).toBe(500);
       expect(settings.screenshotDelay > 0).toBe(true);
     });
 
-    it('skips delay when set to 0', () => {
+    it("skips delay when set to 0", () => {
       const settings = { screenshotDelay: 0 };
       expect(settings.screenshotDelay).toBe(0);
       // When delay is 0, the runner skips waitForTimeout
     });
 
-    it('defaults to 0 when not specified', () => {
-      const settings = {};
+    it("defaults to 0 when not specified", () => {
+      const settings: { screenshotDelay?: number } = {};
       expect(settings.screenshotDelay ?? DEFAULT_SCREENSHOT_DELAY).toBe(0);
     });
 
-    it('exports DEFAULT_SCREENSHOT_DELAY constant as 0', () => {
+    it("exports DEFAULT_SCREENSHOT_DELAY constant as 0", () => {
       expect(DEFAULT_SCREENSHOT_DELAY).toBe(0);
     });
 
-    it('accepts various delay values for different stabilization needs', () => {
+    it("accepts various delay values for different stabilization needs", () => {
       // Common use cases:
       // - 100ms: Minor layout settling
       // - 500ms: Animation completion
       // - 1000ms+: Heavy async content loading
       const delays = [100, 250, 500, 1000, 2000];
-      delays.forEach(delay => {
-        expect(typeof delay).toBe('number');
+      delays.forEach((delay) => {
+        expect(typeof delay).toBe("number");
         expect(delay).toBeGreaterThan(0);
       });
     });
   });
 
-  describe('screenshot proxy behavior', () => {
-    it('creates proxy that intercepts screenshot calls', async () => {
+  describe("screenshot proxy behavior", () => {
+    it("creates proxy that intercepts screenshot calls", async () => {
       // The runner creates a Proxy around the page object
       // that intercepts 'screenshot' property access
       const mockPage = {
@@ -223,13 +239,13 @@ describe('Screenshot Stabilization Delay', () => {
         return originalScreenshot(options);
       };
 
-      await proxiedScreenshot({ path: '/test.png' });
+      await proxiedScreenshot({ path: "/test.png" });
 
       expect(mockPage.waitForTimeout).toHaveBeenCalledWith(100);
       expect(mockPage.screenshot).toHaveBeenCalled();
     });
 
-    it('skips waitForTimeout when delay is 0', async () => {
+    it("skips waitForTimeout when delay is 0", async () => {
       const mockPage = {
         screenshot: vi.fn().mockResolvedValue(Buffer.from([])),
         waitForTimeout: vi.fn().mockResolvedValue(undefined),
@@ -245,20 +261,20 @@ describe('Screenshot Stabilization Delay', () => {
         return originalScreenshot(options);
       };
 
-      await proxiedScreenshot({ path: '/test.png' });
+      await proxiedScreenshot({ path: "/test.png" });
 
       expect(mockPage.waitForTimeout).not.toHaveBeenCalled();
       expect(mockPage.screenshot).toHaveBeenCalled();
     });
 
-    it('passes options through to original screenshot method', async () => {
+    it("passes options through to original screenshot method", async () => {
       const mockPage = {
         screenshot: vi.fn().mockResolvedValue(Buffer.from([])),
         waitForTimeout: vi.fn().mockResolvedValue(undefined),
       };
 
       const screenshotDelay = 100;
-      const options = { path: '/test.png', fullPage: true };
+      const options = { path: "/test.png", fullPage: true };
 
       const originalScreenshot = mockPage.screenshot;
       const proxiedScreenshot = async (opts?: Record<string, unknown>) => {
@@ -275,26 +291,26 @@ describe('Screenshot Stabilization Delay', () => {
   });
 });
 
-describe('Selector Fallback Strategy', () => {
-  describe('selector priority', () => {
-    it('follows priority: data-testid -> id -> role -> aria -> text -> css -> ocr', () => {
+describe("Selector Fallback Strategy", () => {
+  describe("selector priority", () => {
+    it("follows priority: data-testid -> id -> role -> aria -> text -> css -> ocr", () => {
       const priority = [
-        'data-testid',
-        'id',
-        'role-name',
-        'aria-label',
-        'text',
-        'css-path',
-        'ocr-text',
+        "data-testid",
+        "id",
+        "role-name",
+        "aria-label",
+        "text",
+        "css-path",
+        "ocr-text",
       ];
 
       // Verify priority order is correct
-      expect(priority[0]).toBe('data-testid');
-      expect(priority[6]).toBe('ocr-text');
+      expect(priority[0]).toBe("data-testid");
+      expect(priority[6]).toBe("ocr-text");
       expect(priority.length).toBe(7);
     });
 
-    it('tries next selector when current fails', async () => {
+    it("tries next selector when current fails", async () => {
       const mockPage = createMockPage();
 
       // First locator fails, second succeeds
@@ -320,7 +336,7 @@ describe('Selector Fallback Strategy', () => {
       let count = await locator.count();
 
       if (count === 0) {
-        locator = mockPage.locator('#button');
+        locator = mockPage.locator("#button");
         count = await locator.count();
       }
 
@@ -330,9 +346,9 @@ describe('Selector Fallback Strategy', () => {
     });
   });
 
-  describe('selector stat recording', () => {
-    it('records successful selector usage', () => {
-      const selectorType = 'data-testid';
+  describe("selector stat recording", () => {
+    it("records successful selector usage", () => {
+      const selectorType = "data-testid";
       const selector = '[data-testid="submit-button"]';
       const success = true;
 
@@ -352,9 +368,9 @@ describe('Selector Fallback Strategy', () => {
       expect(stats.get(key)?.failure).toBe(0);
     });
 
-    it('records failed selector usage', () => {
-      const selectorType = 'css-path';
-      const selector = 'div > button.submit';
+    it("records failed selector usage", () => {
+      const selectorType = "css-path";
+      const selector = "div > button.submit";
       const success = false;
 
       // Simulate recording
@@ -373,7 +389,7 @@ describe('Selector Fallback Strategy', () => {
       expect(stats.get(key)?.failure).toBe(1);
     });
 
-    it('accumulates stats over multiple uses', () => {
+    it("accumulates stats over multiple uses", () => {
       const stats = new Map<string, { success: number; failure: number }>();
       const key = 'data-testid:[data-testid="button"]';
 
@@ -391,34 +407,34 @@ describe('Selector Fallback Strategy', () => {
   });
 });
 
-describe('createAppState Helper', () => {
+describe("createAppState Helper", () => {
   let mockPage: ReturnType<typeof createMockPage>;
 
   beforeEach(() => {
     mockPage = createMockPage();
   });
 
-  describe('get() method', () => {
-    it('retrieves state value by dot-notation path', async () => {
-      mockPage.evaluate = vi.fn().mockResolvedValue('test-value');
+  describe("get() method", () => {
+    it("retrieves state value by dot-notation path", async () => {
+      mockPage.evaluate = vi.fn().mockResolvedValue("test-value");
 
       // Simulate createAppState
       const appState = {
         get: async (path: string) => {
-          return mockPage.evaluate((p) => {
+          return mockPage.evaluate((p: string) => {
             return p; // Simplified mock
           }, path);
         },
       };
 
-      const value = await appState.get('history.length');
+      const value = await appState.get("history.length");
 
       expect(mockPage.evaluate).toHaveBeenCalled();
-      expect(value).toBe('test-value');
+      expect(value).toBe("test-value");
     });
 
-    it('looks for state in multiple common locations', async () => {
-      mockPage.evaluate = vi.fn().mockImplementation((_fn) => {
+    it("looks for state in multiple common locations", async () => {
+      mockPage.evaluate = vi.fn().mockImplementation((_fn: unknown) => {
         // Simulate looking for state in __APP_STATE__, store, __EXCALIDRAW_STATE__
         return Promise.resolve(undefined);
       });
@@ -427,24 +443,26 @@ describe('createAppState Helper', () => {
         get: async (_path: string) => {
           return mockPage.evaluate(() => {
             // Check common locations
-            const state = (window as Record<string, unknown>).__APP_STATE__ ||
-                         (window as Record<string, unknown>).store ||
-                         (window as Record<string, unknown>).__EXCALIDRAW_STATE__;
+            const state =
+              (window as unknown as Record<string, unknown>).__APP_STATE__ ||
+              (window as unknown as Record<string, unknown>).store ||
+              (window as unknown as Record<string, unknown>)
+                .__EXCALIDRAW_STATE__;
             return state;
           });
         },
       };
 
-      await appState.get('test.path');
+      await appState.get("test.path");
 
       expect(mockPage.evaluate).toHaveBeenCalled();
     });
 
-    it('handles nested path traversal', async () => {
+    it("handles nested path traversal", async () => {
       const mockState = {
         user: {
           settings: {
-            theme: 'dark',
+            theme: "dark",
           },
         },
       };
@@ -452,22 +470,27 @@ describe('createAppState Helper', () => {
       mockPage.evaluate = vi.fn().mockImplementation((fn, path: string) => {
         // Simulate path traversal
         return Promise.resolve(
-          path.split('.').reduce((obj, key) => obj?.[key], mockState as unknown as Record<string, unknown>)
+          path
+            .split(".")
+            .reduce<unknown>(
+              (obj, key) => (obj as Record<string, unknown>)?.[key],
+              mockState as unknown as Record<string, unknown>,
+            ),
         );
       });
 
       const appState = {
         get: async (path: string) => {
-          return mockPage.evaluate((p) => p, path);
+          return mockPage.evaluate((p: string) => p, path);
         },
       };
 
-      const value = await appState.get('user.settings.theme');
+      const value = await appState.get("user.settings.theme");
 
-      expect(value).toBe('dark');
+      expect(value).toBe("dark");
     });
 
-    it('returns undefined for non-existent paths', async () => {
+    it("returns undefined for non-existent paths", async () => {
       mockPage.evaluate = vi.fn().mockResolvedValue(undefined);
 
       const appState = {
@@ -476,14 +499,14 @@ describe('createAppState Helper', () => {
         },
       };
 
-      const value = await appState.get('non.existent.path');
+      const value = await appState.get("non.existent.path");
 
       expect(value).toBeUndefined();
     });
   });
 
-  describe('getHistoryLength() method', () => {
-    it('retrieves Excalidraw history length', async () => {
+  describe("getHistoryLength() method", () => {
+    it("retrieves Excalidraw history length", async () => {
       mockPage.evaluate = vi.fn().mockResolvedValue(5);
 
       const appState = {
@@ -501,7 +524,7 @@ describe('createAppState Helper', () => {
       expect(mockPage.evaluate).toHaveBeenCalled();
     });
 
-    it('returns -1 when Excalidraw API is not available', async () => {
+    it("returns -1 when Excalidraw API is not available", async () => {
       mockPage.evaluate = vi.fn().mockResolvedValue(-1);
 
       const appState = {
@@ -515,7 +538,7 @@ describe('createAppState Helper', () => {
       expect(length).toBe(-1);
     });
 
-    it('checks multiple Excalidraw state locations', async () => {
+    it("checks multiple Excalidraw state locations", async () => {
       mockPage.evaluate = vi.fn().mockImplementation(() => {
         // Simulate checking excalidrawAPI, __EXCALIDRAW_STATE__, __APP_STATE__
         return Promise.resolve(3);
@@ -536,11 +559,11 @@ describe('createAppState Helper', () => {
     });
   });
 
-  describe('getAll() method', () => {
-    it('retrieves entire app state object', async () => {
+  describe("getAll() method", () => {
+    it("retrieves entire app state object", async () => {
       const mockState = {
         user: { id: 1 },
-        settings: { theme: 'dark' },
+        settings: { theme: "dark" },
       };
 
       mockPage.evaluate = vi.fn().mockResolvedValue(mockState);
@@ -557,7 +580,7 @@ describe('createAppState Helper', () => {
       expect(mockPage.evaluate).toHaveBeenCalled();
     });
 
-    it('returns null when no state is available', async () => {
+    it("returns null when no state is available", async () => {
       mockPage.evaluate = vi.fn().mockResolvedValue(null);
 
       const appState = {
@@ -572,36 +595,36 @@ describe('createAppState Helper', () => {
     });
   });
 
-  describe('evaluate() method', () => {
-    it('executes custom accessor function', async () => {
-      mockPage.evaluate = vi.fn().mockResolvedValue('custom-value');
+  describe("evaluate() method", () => {
+    it("executes custom accessor function", async () => {
+      mockPage.evaluate = vi.fn().mockResolvedValue("custom-value");
 
       const appState = {
         evaluate: async <T>(accessor: string): Promise<T> => {
-          return mockPage.evaluate((fn) => {
-            const func = new Function('window', `return ${fn}`);
+          return mockPage.evaluate((fn: string) => {
+            const func = new Function("window", `return ${fn}`);
             return func(window);
           }, accessor) as Promise<T>;
         },
       };
 
-      const _value = await appState.evaluate<string>('window.customValue');
+      const _value = await appState.evaluate<string>("window.customValue");
 
       expect(mockPage.evaluate).toHaveBeenCalled();
     });
   });
 });
 
-describe('createExpect Helper', () => {
+describe("createExpect Helper", () => {
   let mockPage: ReturnType<typeof createMockPage>;
 
   beforeEach(() => {
     mockPage = createMockPage();
   });
 
-  describe('Page assertions', () => {
-    it('provides toHaveURL matcher', async () => {
-      mockPage.url = vi.fn().mockReturnValue('https://example.com/test');
+  describe("Page assertions", () => {
+    it("provides toHaveURL matcher", async () => {
+      mockPage.url = vi.fn().mockReturnValue("https://example.com/test");
 
       // Simulate expect(page).toHaveURL()
       const expectPage = {
@@ -611,14 +634,14 @@ describe('createExpect Helper', () => {
         },
       };
 
-      const result = await expectPage.toHaveURL('https://example.com/test');
+      const result = await expectPage.toHaveURL("https://example.com/test");
 
       expect(result).toBe(true);
       expect(mockPage.url).toHaveBeenCalled();
     });
 
-    it('provides toHaveTitle matcher', async () => {
-      mockPage.title = vi.fn().mockResolvedValue('Test Page');
+    it("provides toHaveTitle matcher", async () => {
+      mockPage.title = vi.fn().mockResolvedValue("Test Page");
 
       // Simulate expect(page).toHaveTitle()
       const expectPage = {
@@ -628,15 +651,15 @@ describe('createExpect Helper', () => {
         },
       };
 
-      const result = await expectPage.toHaveTitle('Test Page');
+      const result = await expectPage.toHaveTitle("Test Page");
 
       expect(result).toBe(true);
       expect(mockPage.title).toHaveBeenCalled();
     });
   });
 
-  describe('Locator assertions', () => {
-    it('provides toBeVisible matcher', async () => {
+  describe("Locator assertions", () => {
+    it("provides toBeVisible matcher", async () => {
       const mockLocator = {
         isVisible: vi.fn().mockResolvedValue(true),
       };
@@ -654,9 +677,9 @@ describe('createExpect Helper', () => {
       expect(mockLocator.isVisible).toHaveBeenCalled();
     });
 
-    it('provides toHaveText matcher', async () => {
+    it("provides toHaveText matcher", async () => {
       const mockLocator = {
-        textContent: vi.fn().mockResolvedValue('Button Text'),
+        textContent: vi.fn().mockResolvedValue("Button Text"),
       };
 
       // Simulate expect(locator).toHaveText()
@@ -667,13 +690,13 @@ describe('createExpect Helper', () => {
         },
       };
 
-      const result = await expectLocator.toHaveText('Button Text');
+      const result = await expectLocator.toHaveText("Button Text");
 
       expect(result).toBe(true);
       expect(mockLocator.textContent).toHaveBeenCalled();
     });
 
-    it('provides toBeEnabled matcher', async () => {
+    it("provides toBeEnabled matcher", async () => {
       const mockLocator = {
         isEnabled: vi.fn().mockResolvedValue(true),
       };
@@ -692,17 +715,17 @@ describe('createExpect Helper', () => {
     });
   });
 
-  describe('timeout configuration', () => {
-    it('accepts custom timeout parameter', () => {
+  describe("timeout configuration", () => {
+    it("accepts custom timeout parameter", () => {
       const defaultTimeout = 5000;
       const customTimeout = 10000;
 
       // Verify timeout can be configured
       expect(customTimeout).toBeGreaterThan(defaultTimeout);
-      expect(typeof customTimeout).toBe('number');
+      expect(typeof customTimeout).toBe("number");
     });
 
-    it('uses default timeout when not specified', () => {
+    it("uses default timeout when not specified", () => {
       const defaultTimeout = 5000;
 
       expect(defaultTimeout).toBe(5000);
@@ -710,25 +733,25 @@ describe('createExpect Helper', () => {
   });
 });
 
-describe('Multi-Browser Support', () => {
-  it('supports chromium browser', () => {
-    const browserType = 'chromium';
-    expect(browserType).toBe('chromium');
+describe("Multi-Browser Support", () => {
+  it("supports chromium browser", () => {
+    const browserType = "chromium";
+    expect(browserType).toBe("chromium");
   });
 
-  it('supports firefox browser', () => {
-    const browserType = 'firefox';
-    expect(browserType).toBe('firefox');
+  it("supports firefox browser", () => {
+    const browserType = "firefox";
+    expect(browserType).toBe("firefox");
   });
 
-  it('supports webkit browser', () => {
-    const browserType = 'webkit';
-    expect(browserType).toBe('webkit');
+  it("supports webkit browser", () => {
+    const browserType = "webkit";
+    expect(browserType).toBe("webkit");
   });
 
-  it('validates browser type is one of the supported browsers', () => {
-    const validBrowsers = ['chromium', 'firefox', 'webkit'];
-    const testBrowser = 'chromium';
+  it("validates browser type is one of the supported browsers", () => {
+    const validBrowsers = ["chromium", "firefox", "webkit"];
+    const testBrowser = "chromium";
 
     expect(validBrowsers).toContain(testBrowser);
   });

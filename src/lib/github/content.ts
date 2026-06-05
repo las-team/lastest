@@ -23,7 +23,7 @@ function setCache(key: string, data: unknown): void {
 export interface TreeEntry {
   path: string;
   mode: string;
-  type: 'blob' | 'tree';
+  type: "blob" | "tree";
   sha: string;
   size?: number;
   url: string;
@@ -42,7 +42,7 @@ export interface FileContent {
   sha: string;
   size: number;
   content: string; // Base64 encoded
-  encoding: 'base64';
+  encoding: "base64";
 }
 
 export interface BranchInfo {
@@ -60,7 +60,7 @@ export async function getRepoTree(
   accessToken: string,
   owner: string,
   repo: string,
-  branch: string
+  branch: string,
 ): Promise<RepoTree | null> {
   const cacheKey = `tree:${owner}/${repo}:${branch}`;
   const cached = getCached<RepoTree>(cacheKey);
@@ -72,9 +72,9 @@ export async function getRepoTree(
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -95,7 +95,7 @@ export async function getFileContent(
   owner: string,
   repo: string,
   path: string,
-  ref: string
+  ref: string,
 ): Promise<string | null> {
   const cacheKey = `file:${owner}/${repo}:${ref}:${path}`;
   const cached = getCached<string>(cacheKey);
@@ -107,9 +107,9 @@ export async function getFileContent(
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -117,7 +117,7 @@ export async function getFileContent(
     const data: FileContent = await response.json();
 
     // Decode base64 content
-    const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
     setCache(cacheKey, content);
     return content;
   } catch {
@@ -132,7 +132,7 @@ export async function getBranchInfo(
   accessToken: string,
   owner: string,
   repo: string,
-  branch: string
+  branch: string,
 ): Promise<BranchInfo | null> {
   try {
     const response = await fetch(
@@ -140,9 +140,9 @@ export async function getBranchInfo(
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -157,14 +157,14 @@ export async function getBranchInfo(
  * Filter tree entries by glob-like pattern
  */
 export function filterTree(tree: TreeEntry[], patterns: string[]): TreeEntry[] {
-  return tree.filter(entry => {
-    return patterns.some(pattern => {
+  return tree.filter((entry) => {
+    return patterns.some((pattern) => {
       // Convert glob pattern to regex
       const regexPattern = pattern
-        .replace(/\*\*/g, '<<DOUBLESTAR>>')
-        .replace(/\*/g, '[^/]*')
-        .replace(/<<DOUBLESTAR>>/g, '.*')
-        .replace(/\//g, '\\/');
+        .replace(/\*\*/g, "<<DOUBLESTAR>>")
+        .replace(/\*/g, "[^/]*")
+        .replace(/<<DOUBLESTAR>>/g, ".*")
+        .replace(/\//g, "\\/");
       const regex = new RegExp(`^${regexPattern}$`);
       return regex.test(entry.path);
     });
@@ -175,30 +175,45 @@ export function filterTree(tree: TreeEntry[], patterns: string[]): TreeEntry[] {
  * Check if a path exists in the tree
  */
 export function pathExists(tree: TreeEntry[], path: string): boolean {
-  return tree.some(entry => entry.path === path || entry.path.startsWith(path + '/'));
+  return tree.some(
+    (entry) => entry.path === path || entry.path.startsWith(path + "/"),
+  );
 }
 
 /**
  * Get all files in a directory from the tree
  */
-export function getFilesInDirectory(tree: TreeEntry[], directory: string): TreeEntry[] {
-  const normalizedDir = directory.endsWith('/') ? directory : directory + '/';
-  return tree.filter(entry =>
-    entry.type === 'blob' &&
-    entry.path.startsWith(normalizedDir === '/' ? '' : normalizedDir)
+export function getFilesInDirectory(
+  tree: TreeEntry[],
+  directory: string,
+): TreeEntry[] {
+  const normalizedDir = directory.endsWith("/") ? directory : directory + "/";
+  return tree.filter(
+    (entry) =>
+      entry.type === "blob" &&
+      entry.path.startsWith(normalizedDir === "/" ? "" : normalizedDir),
   );
 }
 
 /**
  * Get direct children of a directory
  */
-export function getDirectoryChildren(tree: TreeEntry[], directory: string): TreeEntry[] {
-  const normalizedDir = directory === '' ? '' : (directory.endsWith('/') ? directory : directory + '/');
-  const dirDepth = normalizedDir === '' ? 0 : normalizedDir.split('/').length - 1;
+export function getDirectoryChildren(
+  tree: TreeEntry[],
+  directory: string,
+): TreeEntry[] {
+  const normalizedDir =
+    directory === ""
+      ? ""
+      : directory.endsWith("/")
+        ? directory
+        : directory + "/";
+  const dirDepth =
+    normalizedDir === "" ? 0 : normalizedDir.split("/").length - 1;
 
-  return tree.filter(entry => {
+  return tree.filter((entry) => {
     if (!entry.path.startsWith(normalizedDir)) return false;
-    const entryDepth = entry.path.split('/').length - 1;
+    const entryDepth = entry.path.split("/").length - 1;
     return entryDepth === dirDepth;
   });
 }
@@ -211,13 +226,20 @@ export function clearCache(): void {
 }
 
 export interface CompareResult {
-  status: 'ahead' | 'behind' | 'diverged' | 'identical';
+  status: "ahead" | "behind" | "diverged" | "identical";
   aheadBy: number;
   behindBy: number;
   totalCommits: number;
   files: Array<{
     filename: string;
-    status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+    status:
+      | "added"
+      | "removed"
+      | "modified"
+      | "renamed"
+      | "copied"
+      | "changed"
+      | "unchanged";
     additions: number;
     deletions: number;
     changes: number;
@@ -235,7 +257,7 @@ export async function compareBranches(
   owner: string,
   repo: string,
   baseBranch: string,
-  headBranch: string
+  headBranch: string,
 ): Promise<CompareResult | null> {
   const cacheKey = `compare:${owner}/${repo}:${baseBranch}...${headBranch}`;
   const cached = getCached<CompareResult>(cacheKey);
@@ -247,9 +269,9 @@ export async function compareBranches(
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -267,13 +289,21 @@ export async function compareBranches(
       aheadBy: data.ahead_by,
       behindBy: data.behind_by,
       totalCommits: data.total_commits,
-      files: (data.files || []).map((f: { filename: string; status: string; additions: number; deletions: number; changes: number }) => ({
-        filename: f.filename,
-        status: f.status,
-        additions: f.additions,
-        deletions: f.deletions,
-        changes: f.changes,
-      })),
+      files: (data.files || []).map(
+        (f: {
+          filename: string;
+          status: string;
+          additions: number;
+          deletions: number;
+          changes: number;
+        }) => ({
+          filename: f.filename,
+          status: f.status,
+          additions: f.additions,
+          deletions: f.deletions,
+          changes: f.changes,
+        }),
+      ),
       baseBranch,
       headBranch,
     };

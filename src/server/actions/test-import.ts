@@ -1,9 +1,13 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { createTest, getEnvironmentConfig, upsertEnvironmentConfig } from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { startPlayAgent } from '@/server/actions/play-agent';
+import { revalidatePath } from "next/cache";
+import {
+  createTest,
+  getEnvironmentConfig,
+  upsertEnvironmentConfig,
+} from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { startPlayAgent } from "@/server/actions/play-agent";
 
 export async function createTestFromCode(data: {
   repositoryId: string;
@@ -17,8 +21,10 @@ export async function createTestFromCode(data: {
   try {
     const { user } = await requireRepoAccess(data.repositoryId);
 
-    if (!data.name.trim()) return { success: false, error: 'Test name is required' };
-    if (!data.code.trim()) return { success: false, error: 'Test code is required' };
+    if (!data.name.trim())
+      return { success: false, error: "Test name is required" };
+    if (!data.code.trim())
+      return { success: false, error: "Test code is required" };
 
     const test = await createTest(
       {
@@ -35,12 +41,13 @@ export async function createTestFromCode(data: {
         : null,
     );
 
-    revalidatePath('/tests');
-    revalidatePath('/record');
+    revalidatePath("/tests");
+    revalidatePath("/record");
 
     return { success: true, testId: test.id };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to import test';
+    const message =
+      error instanceof Error ? error.message : "Failed to import test";
     return { success: false, error: message };
   }
 }
@@ -53,13 +60,13 @@ export async function startAutoExploreFromUrl(data: {
     await requireRepoAccess(data.repositoryId);
 
     const trimmed = data.baseUrl.trim();
-    if (!trimmed) return { success: false, error: 'Target URL is required' };
+    if (!trimmed) return { success: false, error: "Target URL is required" };
 
     let origin: string;
     try {
       origin = new URL(trimmed).origin;
     } catch {
-      return { success: false, error: 'Invalid URL' };
+      return { success: false, error: "Invalid URL" };
     }
 
     const current = await getEnvironmentConfig(data.repositoryId);
@@ -70,7 +77,8 @@ export async function startAutoExploreFromUrl(data: {
     const { sessionId } = await startPlayAgent(data.repositoryId);
     return { success: true, sessionId };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to start auto-explore';
+    const message =
+      error instanceof Error ? error.message : "Failed to start auto-explore";
     return { success: false, error: message };
   }
 }

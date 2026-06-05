@@ -7,16 +7,16 @@
  * Then streams individual job updates as they happen
  */
 
-import { NextResponse } from 'next/server';
-import * as queries from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { subscribeToJobEvents, type JobEvent } from '@/lib/ws/job-events';
-import { cleanupStaleJobs } from '@/server/actions/jobs';
-import { processPoolQueue } from '@/server/actions/embedded-sessions';
-import { ensureSchedulerStarted } from '@/lib/scheduling/scheduler';
-import type { BackgroundJob } from '@/lib/db/schema';
+import { NextResponse } from "next/server";
+import * as queries from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { subscribeToJobEvents, type JobEvent } from "@/lib/ws/job-events";
+import { cleanupStaleJobs } from "@/server/actions/jobs";
+import { processPoolQueue } from "@/server/actions/embedded-sessions";
+import { ensureSchedulerStarted } from "@/lib/scheduling/scheduler";
+import type { BackgroundJob } from "@/lib/db/schema";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 // Track last cleanup time (shared with /api/jobs/active)
 let lastCleanupTime = 0;
@@ -24,19 +24,29 @@ const CLEANUP_INTERVAL_MS = 60000;
 
 export type JobWithChildren = BackgroundJob & {
   _children?: BackgroundJob[];
-  _childSummary?: { total: number; completed: number; failed: number; running: number; pending: number };
+  _childSummary?: {
+    total: number;
+    completed: number;
+    failed: number;
+    running: number;
+    pending: number;
+  };
 };
 
-async function getEnrichedJobs(teamRepoIds: Set<string>): Promise<JobWithChildren[]> {
+async function getEnrichedJobs(
+  teamRepoIds: Set<string>,
+): Promise<JobWithChildren[]> {
   const allJobs = await queries.getRecentBackgroundJobs(10000);
   // Only the team's own repo-bound jobs. Repo-less ("global") jobs have no
   // team binding on the row, so we deliberately drop them here instead of
   // broadcasting them to every team.
-  const teamJobs = allJobs.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
+  const teamJobs = allJobs.filter(
+    (j) => j.repositoryId !== null && teamRepoIds.has(j.repositoryId),
+  );
 
   const activeParentIds = teamJobs
-    .filter(j => j.status === 'running' || j.status === 'pending')
-    .map(j => j.id);
+    .filter((j) => j.status === "running" || j.status === "pending")
+    .map((j) => j.id);
   const allChildren = await queries.getChildJobsByParentIds(activeParentIds);
   const childrenByParent = new Map<string, typeof allChildren>();
   for (const child of allChildren) {
@@ -50,10 +60,10 @@ async function getEnrichedJobs(teamRepoIds: Set<string>): Promise<JobWithChildre
     if (children && children.length > 0) {
       const summary = {
         total: children.length,
-        completed: children.filter(c => c.status === 'completed').length,
-        failed: children.filter(c => c.status === 'failed').length,
-        running: children.filter(c => c.status === 'running').length,
-        pending: children.filter(c => c.status === 'pending').length,
+        completed: children.filter((c) => c.status === "completed").length,
+        failed: children.filter((c) => c.status === "failed").length,
+        running: children.filter((c) => c.status === "running").length,
+        pending: children.filter((c) => c.status === "pending").length,
       };
       return { ...job, _children: children, _childSummary: summary };
     }
@@ -66,12 +76,12 @@ export async function GET(request: Request) {
 
   const session = await getCurrentSession();
   if (!session?.team) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const teamId = session.team.id;
   const teamRepos = await queries.getRepositoriesByTeam(teamId);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
 
   // Run periodic cleanup
   const now = Date.now();
@@ -91,10 +101,22 @@ export async function GET(request: Request) {
   const teardown = () => {
     if (closed) return;
     closed = true;
-    if (keepalive) { clearInterval(keepalive); keepalive = null; }
-    if (cleanupTimer) { clearInterval(cleanupTimer); cleanupTimer = null; }
-    if (lifetimeCap) { clearTimeout(lifetimeCap); lifetimeCap = null; }
-    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (keepalive) {
+      clearInterval(keepalive);
+      keepalive = null;
+    }
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer);
+      cleanupTimer = null;
+    }
+    if (lifetimeCap) {
+      clearTimeout(lifetimeCap);
+      lifetimeCap = null;
+    }
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
   };
 
   const stream = new ReadableStream({
@@ -102,10 +124,12 @@ export async function GET(request: Request) {
       // Send initial snapshot of active jobs
       try {
         const jobs = await getEnrichedJobs(teamRepoIds);
-        const snapshotData = { type: 'snapshot', jobs };
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(snapshotData)}\n\n`));
+        const snapshotData = { type: "snapshot", jobs };
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(snapshotData)}\n\n`),
+        );
       } catch (error) {
-        console.error('[JobSSE] Failed to send snapshot:', error);
+        console.error("[JobSSE] Failed to send snapshot:", error);
       }
 
       // Subscribe to job events
@@ -120,12 +144,14 @@ export async function GET(request: Request) {
         }
 
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+          );
         } catch (error) {
           // Controller was closed underneath us — drop the listener now.
           teardown();
-          if ((error as { code?: string })?.code !== 'ERR_INVALID_STATE') {
-            console.error('[JobSSE] Failed to send event:', error);
+          if ((error as { code?: string })?.code !== "ERR_INVALID_STATE") {
+            console.error("[JobSSE] Failed to send event:", error);
           }
         }
       });
@@ -134,7 +160,7 @@ export async function GET(request: Request) {
       // any 30s intermediary idle limit; previous 8s was too close to bound).
       keepalive = setInterval(() => {
         try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
           teardown();
         }
@@ -156,7 +182,11 @@ export async function GET(request: Request) {
       // any client that wants to log the cycle.
       lifetimeCap = setTimeout(() => {
         try {
-          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.enqueue(
+            encoder.encode(
+              'event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n',
+            ),
+          );
           controller.close();
         } catch {
           // already closed
@@ -164,7 +194,7 @@ export async function GET(request: Request) {
         teardown();
       }, 90_000);
 
-      request.signal.addEventListener('abort', teardown);
+      request.signal.addEventListener("abort", teardown);
     },
     cancel() {
       teardown();
@@ -173,9 +203,9 @@ export async function GET(request: Request) {
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
     },
   });
 }

@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { RotateCcw, Loader2 } from 'lucide-react';
-import { resetOnboarding } from '@/server/actions/onboarding';
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { RotateCcw, Loader2 } from "lucide-react";
+import { resetOnboarding } from "@/server/actions/onboarding";
 
-const STORAGE_KEY = 'lastest-setup-guide';
+const STORAGE_KEY = "lastest-setup-guide";
 
 export function ResetSetupGuide() {
   const router = useRouter();
@@ -16,11 +16,11 @@ export function ResetSetupGuide() {
     startTransition(async () => {
       try {
         localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem('lastest-ai-configured');
-        localStorage.removeItem('lastest-results-viewed');
+        localStorage.removeItem("lastest-ai-configured");
+        localStorage.removeItem("lastest-results-viewed");
       } catch {}
       await resetOnboarding();
-      router.push('/onboarding');
+      router.push("/onboarding");
       router.refresh();
     });
   }

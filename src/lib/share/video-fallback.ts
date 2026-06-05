@@ -1,7 +1,7 @@
-import { readdir, stat } from 'fs/promises';
-import path from 'path';
+import { readdir, stat } from "fs/promises";
+import path from "path";
 
-const VIDEO_ROOT = path.join(process.cwd(), 'storage', 'videos');
+const VIDEO_ROOT = path.join(process.cwd(), "storage", "videos");
 
 /**
  * Fallback video discovery: executor.ts writes webms to

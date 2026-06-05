@@ -1,9 +1,11 @@
-import { Resend } from 'resend';
+import { Resend } from "resend";
 
 // Only instantiate Resend if API key is available
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@example.com';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@example.com";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export interface SendEmailOptions {
   to: string;
@@ -14,12 +16,19 @@ export interface SendEmailOptions {
   unsubscribePostUrl?: string;
 }
 
-export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsubscribePostUrl }: SendEmailOptions) {
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  text,
+  unsubscribeUrl,
+  unsubscribePostUrl,
+}: SendEmailOptions) {
   if (!resend) {
-    console.log('[Email] No RESEND_API_KEY configured, skipping email');
+    console.log("[Email] No RESEND_API_KEY configured, skipping email");
     console.log(`[Email] Would send to: ${to}`);
     console.log(`[Email] Subject: ${subject}`);
-    return { success: true, messageId: 'dev-mode' };
+    return { success: true, messageId: "dev-mode" };
   }
 
   try {
@@ -29,7 +38,7 @@ export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsub
     const listUnsubscribeUrls = [unsubscribePostUrl, unsubscribeUrl]
       .filter((u): u is string => Boolean(u))
       .map((u) => `<${u}>`)
-      .join(', ');
+      .join(", ");
 
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
@@ -39,28 +48,30 @@ export async function sendEmail({ to, subject, html, text, unsubscribeUrl, unsub
       text,
       headers: listUnsubscribeUrls
         ? {
-            'List-Unsubscribe': listUnsubscribeUrls,
-            ...(unsubscribePostUrl ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
+            "List-Unsubscribe": listUnsubscribeUrls,
+            ...(unsubscribePostUrl
+              ? { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }
+              : {}),
           }
         : undefined,
     });
 
     if (error) {
-      console.error('[Email] Send error:', error);
+      console.error("[Email] Send error:", error);
       return { success: false, error: error.message };
     }
 
     return { success: true, messageId: data?.id };
   } catch (error) {
-    console.error('[Email] Exception:', error);
-    return { success: false, error: 'Failed to send email' };
+    console.error("[Email] Exception:", error);
+    return { success: false, error: "Failed to send email" };
   }
 }
 
 function emailShell(content: string, unsubscribeUrl?: string) {
   const unsubFooter = unsubscribeUrl
     ? `<br/><a href="${unsubscribeUrl}" style="color:#0891b2;text-decoration:underline;">Unsubscribe from these emails</a>`
-    : '';
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -86,7 +97,7 @@ function emailShell(content: string, unsubscribeUrl?: string) {
   <tr><td align="center" style="padding-top:28px;">
     <p style="margin:0;font-size:12px;line-height:18px;color:#4a4a6a;">
       Lastest &mdash; Visual Regression Testing Platform<br/>
-      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace('https://', '')}</a>${unsubFooter}
+      <a href="${APP_URL}" style="color:#0891b2;text-decoration:none;">${APP_URL.replace("https://", "")}</a>${unsubFooter}
     </p>
   </td></tr>
 </table>
@@ -139,16 +150,20 @@ This link expires in 1 hour. If you didn't request this, you can safely ignore t
 
   return sendEmail({
     to,
-    subject: 'Reset your password — Lastest',
+    subject: "Reset your password — Lastest",
     html,
     text,
   });
 }
 
-export async function sendInvitationEmail(to: string, token: string, inviterName?: string) {
+export async function sendInvitationEmail(
+  to: string,
+  token: string,
+  inviterName?: string,
+) {
   // Transactional: no List-Unsubscribe (see sendPasswordResetEmail).
   const inviteUrl = `${APP_URL}/invite?token=${token}`;
-  const inviter = inviterName || 'Your team';
+  const inviter = inviterName || "Your team";
 
   const html = emailShell(`
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">You're invited</h1>

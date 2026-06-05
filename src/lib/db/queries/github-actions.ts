@@ -1,7 +1,7 @@
-import { db } from '../index';
-import { githubActionConfigs } from '../schema';
-import type { NewGithubActionConfig } from '../schema';
-import { eq, and } from 'drizzle-orm';
+import { db } from "../index";
+import { githubActionConfigs } from "../schema";
+import type { NewGithubActionConfig } from "../schema";
+import { eq, and } from "drizzle-orm";
 
 export async function getGithubActionConfigs(teamId: string) {
   return db
@@ -14,35 +14,58 @@ export async function getGithubActionConfig(id: string, teamId: string) {
   const [row] = await db
     .select()
     .from(githubActionConfigs)
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+    .where(
+      and(
+        eq(githubActionConfigs.id, id),
+        eq(githubActionConfigs.teamId, teamId),
+      ),
+    );
   return row;
 }
 
 export async function createGithubActionConfig(data: NewGithubActionConfig) {
   const id = data.id || crypto.randomUUID();
   await db.insert(githubActionConfigs).values({ ...data, id });
-  const [row] = await db.select().from(githubActionConfigs).where(eq(githubActionConfigs.id, id));
+  const [row] = await db
+    .select()
+    .from(githubActionConfigs)
+    .where(eq(githubActionConfigs.id, id));
   return row!;
 }
 
 export async function updateGithubActionConfig(
   id: string,
   teamId: string,
-  data: Partial<Omit<NewGithubActionConfig, 'id' | 'teamId' | 'createdAt'>>,
+  data: Partial<Omit<NewGithubActionConfig, "id" | "teamId" | "createdAt">>,
 ) {
   await db
     .update(githubActionConfigs)
     .set({ ...data, updatedAt: new Date() })
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+    .where(
+      and(
+        eq(githubActionConfigs.id, id),
+        eq(githubActionConfigs.teamId, teamId),
+      ),
+    );
   const [row] = await db
     .select()
     .from(githubActionConfigs)
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+    .where(
+      and(
+        eq(githubActionConfigs.id, id),
+        eq(githubActionConfigs.teamId, teamId),
+      ),
+    );
   return row;
 }
 
 export async function deleteGithubActionConfig(id: string, teamId: string) {
   await db
     .delete(githubActionConfigs)
-    .where(and(eq(githubActionConfigs.id, id), eq(githubActionConfigs.teamId, teamId)));
+    .where(
+      and(
+        eq(githubActionConfigs.id, id),
+        eq(githubActionConfigs.teamId, teamId),
+      ),
+    );
 }

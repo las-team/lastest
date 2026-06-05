@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useMemo, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { formatDistanceToNow } from 'date-fns';
-import { Badge } from '@/components/ui/badge';
-import type { Build, BuildStatus } from '@/lib/db/schema';
+import { useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { formatDistanceToNow } from "date-fns";
+import { Badge } from "@/components/ui/badge";
+import type { Build, BuildStatus } from "@/lib/db/schema";
 
 interface BuildWithBranch extends Build {
   gitBranch?: string;
@@ -29,34 +29,34 @@ const PAD_Y = 40;
 // Anchored on the brand 5-stop where possible, then extended with neutral
 // complements (purple, pink) to keep adjacent branches readable.
 const BRANCH_COLORS = [
-  '#3674A8', // brand blue
-  '#36A88E', // brand teal
-  '#E09836', // brand amber
-  '#1F2A33', // brand ink
-  '#8B5CF6', // violet (extended)
-  '#EC4899', // pink (extended)
-  '#84CC16', // lime (extended)
+  "#3674A8", // brand blue
+  "#36A88E", // brand teal
+  "#E09836", // brand amber
+  "#1F2A33", // brand ink
+  "#8B5CF6", // violet (extended)
+  "#EC4899", // pink (extended)
+  "#84CC16", // lime (extended)
 ];
 
 const STATUS_COLORS: Record<BuildStatus, string> = {
-  safe_to_merge: '#36A88E',  // brand teal (--c-teal)
-  review_required: '#E09836', // brand amber (--c-amber)
-  blocked: '#E03E36',         // brand red (--c-red)
-  has_todos: '#E09836',       // brand amber (--c-amber)
-  executor_failed: '#7C2D12', // dark red — distinct from 'blocked' so the build graph
-                              // makes infra failures visible at a glance.
+  safe_to_merge: "#36A88E", // brand teal (--c-teal)
+  review_required: "#E09836", // brand amber (--c-amber)
+  blocked: "#E03E36", // brand red (--c-red)
+  has_todos: "#E09836", // brand amber (--c-amber)
+  executor_failed: "#7C2D12", // dark red — distinct from 'blocked' so the build graph
+  // makes infra failures visible at a glance.
 };
 
 const STATUS_LABELS: Record<BuildStatus, string> = {
-  safe_to_merge: 'Safe to Merge',
-  review_required: 'Review Required',
-  blocked: 'Blocked',
-  has_todos: 'Has Todos',
-  executor_failed: 'Executor Failed',
+  safe_to_merge: "Safe to Merge",
+  review_required: "Review Required",
+  blocked: "Blocked",
+  has_todos: "Has Todos",
+  executor_failed: "Executor Failed",
 };
 
 function formatDuration(elapsedMs: number | null): string {
-  if (!elapsedMs) return '-';
+  if (!elapsedMs) return "-";
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
 
@@ -66,26 +66,40 @@ interface TooltipData {
   y: number;
 }
 
-export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, branchBaselineBuildId, branchHeads }: BuildGraphViewProps) {
+export function BuildGraphView({
+  builds,
+  defaultBranch,
+  mainBaselineBuildId,
+  branchBaselineBuildId,
+  branchHeads,
+}: BuildGraphViewProps) {
   const router = useRouter();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [hiddenBranches, setHiddenBranches] = useState<Set<string>>(new Set());
 
-  const { nodes, branchColumns, svgWidth, svgHeight, curvePath, aheadIndicators } = useMemo(() => {
+  const {
+    nodes,
+    branchColumns,
+    svgWidth,
+    svgHeight,
+    curvePath,
+    aheadIndicators,
+  } = useMemo(() => {
     // Filter out hidden branches
-    const filtered = builds.filter(b => {
-      const branch = b.gitBranch || defaultBranch || 'main';
+    const filtered = builds.filter((b) => {
+      const branch = b.gitBranch || defaultBranch || "main";
       return !hiddenBranches.has(branch);
     });
 
     // Sort builds newest first (top of graph)
     const sorted = [...filtered].sort(
-      (a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+      (a, b) =>
+        new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime(),
     );
 
     // Assign column indices: default branch = 0, others by most recent build (newest first)
     const colMap = new Map<string, number>();
-    const defBranch = defaultBranch || 'main';
+    const defBranch = defaultBranch || "main";
     colMap.set(defBranch, 0);
 
     // sorted is already newest-first, so first appearance = most recent
@@ -115,15 +129,27 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
     });
 
     // Find branches that are ahead — place one step above that branch's latest build
-    const positionedAhead: Array<{ branch: string; col: number; x: number; y: number; buildY: number; headSha: string }> = [];
+    const positionedAhead: Array<{
+      branch: string;
+      col: number;
+      x: number;
+      y: number;
+      buildY: number;
+      headSha: string;
+    }> = [];
     if (branchHeads) {
       for (const [branch, col] of colMap.entries()) {
         const headSha = branchHeads[branch];
         if (!headSha) continue;
-        const latestBuild = sorted.find(b => (b.gitBranch || defBranch) === branch);
+        const latestBuild = sorted.find(
+          (b) => (b.gitBranch || defBranch) === branch,
+        );
         if (!latestBuild?.gitCommit) continue;
-        if (!headSha.startsWith(latestBuild.gitCommit) && !latestBuild.gitCommit.startsWith(headSha)) {
-          const topNode = nodeList.find(n => n.branch === branch);
+        if (
+          !headSha.startsWith(latestBuild.gitCommit) &&
+          !latestBuild.gitCommit.startsWith(headSha)
+        ) {
+          const topNode = nodeList.find((n) => n.branch === branch);
           const buildY = topNode?.y ?? PAD_Y;
           const aheadY = buildY - ROW_HEIGHT * 0.6;
           positionedAhead.push({
@@ -141,7 +167,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
     // Build a single curved path through all nodes (bottom→top, i.e. reversed nodeList)
     // Nodes are newest-first, so reverse to go oldest→newest (bottom→top)
     const chronoNodes = [...nodeList].reverse();
-    let curvePath = '';
+    let curvePath = "";
     if (chronoNodes.length > 0) {
       curvePath = `M${chronoNodes[0].x},${chronoNodes[0].y}`;
       for (let i = 1; i < chronoNodes.length; i++) {
@@ -177,14 +203,14 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
     (buildId: string) => {
       router.push(`/builds/${buildId}`);
     },
-    [router]
+    [router],
   );
 
   const handleNodeHover = useCallback(
     (build: BuildWithBranch, x: number, y: number) => {
       setTooltip({ build, x, y });
     },
-    []
+    [],
   );
 
   const handleNodeLeave = useCallback(() => {
@@ -192,11 +218,11 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
   }, []);
 
   const handleHideBranch = useCallback((branch: string) => {
-    setHiddenBranches(prev => new Set(prev).add(branch));
+    setHiddenBranches((prev) => new Set(prev).add(branch));
   }, []);
 
   const handleRestoreBranch = useCallback((branch: string) => {
-    setHiddenBranches(prev => {
+    setHiddenBranches((prev) => {
       const next = new Set(prev);
       next.delete(branch);
       return next;
@@ -211,7 +237,7 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
       {hiddenBranches.size > 0 && (
         <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
           <span>Hidden:</span>
-          {Array.from(hiddenBranches).map(branch => (
+          {Array.from(hiddenBranches).map((branch) => (
             <Badge
               key={branch}
               variant="secondary"
@@ -224,201 +250,227 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
         </div>
       )}
 
-      {nodes.length > 0 && <svg
-        width={svgWidth}
-        height={svgHeight}
-        className="block"
-      >
-        {/* Branch header labels */}
-        {branchColumns.map((bc) => (
-          <g key={bc.name}>
-            <text
-              x={bc.x}
-              y={18}
-              textAnchor="middle"
-              fill={bc.color}
-              fontSize={11}
-              fontWeight={600}
-            >
-              {bc.name.length > 12 ? bc.name.slice(0, 12) + '\u2026' : bc.name}
-            </text>
-            {/* Hide button — skip for default branch (col 0) */}
-            {bc.col > 0 && (
+      {nodes.length > 0 && (
+        <svg width={svgWidth} height={svgHeight} className="block">
+          {/* Branch header labels */}
+          {branchColumns.map((bc) => (
+            <g key={bc.name}>
               <text
-                x={bc.x + (bc.name.length > 12 ? 42 : bc.name.length * 3.3 + 8)}
+                x={bc.x}
                 y={18}
-                fontSize={11}
+                textAnchor="middle"
                 fill={bc.color}
-                opacity={0.4}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => e.currentTarget.setAttribute('opacity', '1')}
-                onMouseLeave={(e) => e.currentTarget.setAttribute('opacity', '0.4')}
-                onClick={(e) => { e.stopPropagation(); handleHideBranch(bc.name); }}
+                fontSize={11}
+                fontWeight={600}
               >
-                &times;
+                {bc.name.length > 12
+                  ? bc.name.slice(0, 12) + "\u2026"
+                  : bc.name}
               </text>
-            )}
-          </g>
-        ))}
-
-        {/* Single curved line through all build nodes */}
-        {curvePath && (
-          <path
-            d={curvePath}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            opacity={0.15}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
-
-        {/* Ahead-of-build indicators */}
-        {aheadIndicators.map((a) => {
-          const color = BRANCH_COLORS[a.col % BRANCH_COLORS.length];
-          return (
-            <g key={`ahead-${a.branch}`}>
-              {/* Dotted line from commit to latest build */}
-              <line
-                x1={a.x}
-                y1={a.y + 7}
-                x2={a.x}
-                y2={a.buildY - NODE_R}
-                stroke={color}
-                strokeWidth={1.5}
-                strokeDasharray="3 3"
-                opacity={0.4}
-              />
-              {/* Diamond shape for unbuilt commit */}
-              <rect
-                x={a.x - 5}
-                y={a.y - 5}
-                width={10}
-                height={10}
-                rx={2}
-                fill="none"
-                stroke={color}
-                strokeWidth={1.5}
-                strokeDasharray="3 2"
-                transform={`rotate(45 ${a.x} ${a.y})`}
-              />
-              {/* Arrow-up icon inside */}
-              <path
-                d={`M${a.x} ${a.y - 3} L${a.x} ${a.y + 2} M${a.x - 2} ${a.y - 1} L${a.x} ${a.y - 3} L${a.x + 2} ${a.y - 1}`}
-                fill="none"
-                stroke={color}
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              {/* Label */}
-              <text
-                x={a.x + 12}
-                y={a.y + 3}
-                fontSize={9}
-                fill={color}
-                opacity={0.8}
-              >
-                <tspan fontFamily="monospace">{a.headSha.slice(0, 7)}</tspan>
-                <tspan fill={color} opacity={0.6}> ahead</tspan>
-              </text>
+              {/* Hide button — skip for default branch (col 0) */}
+              {bc.col > 0 && (
+                <text
+                  x={
+                    bc.x + (bc.name.length > 12 ? 42 : bc.name.length * 3.3 + 8)
+                  }
+                  y={18}
+                  fontSize={11}
+                  fill={bc.color}
+                  opacity={0.4}
+                  style={{ cursor: "pointer" }}
+                  onMouseEnter={(e) =>
+                    e.currentTarget.setAttribute("opacity", "1")
+                  }
+                  onMouseLeave={(e) =>
+                    e.currentTarget.setAttribute("opacity", "0.4")
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHideBranch(bc.name);
+                  }}
+                >
+                  &times;
+                </text>
+              )}
             </g>
-          );
-        })}
+          ))}
 
-        {/* Build nodes */}
-        {nodes.map((node) => {
-          const status = node.build.overallStatus as BuildStatus;
-          const fill = STATUS_COLORS[status] || '#6b7280';
-          const isMainBaseline = node.build.id === mainBaselineBuildId;
-          const isBranchBaseline = node.build.id === branchBaselineBuildId;
-          const isBaseline = isMainBaseline || isBranchBaseline;
+          {/* Single curved line through all build nodes */}
+          {curvePath && (
+            <path
+              d={curvePath}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              opacity={0.15}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
 
-          return (
-            <g
-              key={node.build.id}
-              style={{ cursor: 'pointer' }}
-              role="link"
-              tabIndex={0}
-              onClick={() => handleNodeClick(node.build.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleNodeClick(node.build.id);
-                }
-              }}
-              onMouseEnter={(e) => {
-                const scrollParent = (e.currentTarget.ownerSVGElement as SVGSVGElement).parentElement!;
-                handleNodeHover(
-                  node.build,
-                  node.x - scrollParent.scrollLeft,
-                  node.y - scrollParent.scrollTop
-                );
-              }}
-              onMouseLeave={handleNodeLeave}
-            >
-              {/* Invisible larger hit target */}
-              <circle
-                cx={node.x}
-                cy={node.y}
-                r={NODE_R + 8}
-                fill="transparent"
-              />
-              {/* Baseline outer ring */}
-              {isBaseline && (
+          {/* Ahead-of-build indicators */}
+          {aheadIndicators.map((a) => {
+            const color = BRANCH_COLORS[a.col % BRANCH_COLORS.length];
+            return (
+              <g key={`ahead-${a.branch}`}>
+                {/* Dotted line from commit to latest build */}
+                <line
+                  x1={a.x}
+                  y1={a.y + 7}
+                  x2={a.x}
+                  y2={a.buildY - NODE_R}
+                  stroke={color}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                  opacity={0.4}
+                />
+                {/* Diamond shape for unbuilt commit */}
+                <rect
+                  x={a.x - 5}
+                  y={a.y - 5}
+                  width={10}
+                  height={10}
+                  rx={2}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 2"
+                  transform={`rotate(45 ${a.x} ${a.y})`}
+                />
+                {/* Arrow-up icon inside */}
+                <path
+                  d={`M${a.x} ${a.y - 3} L${a.x} ${a.y + 2} M${a.x - 2} ${a.y - 1} L${a.x} ${a.y - 3} L${a.x + 2} ${a.y - 1}`}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {/* Label */}
+                <text
+                  x={a.x + 12}
+                  y={a.y + 3}
+                  fontSize={9}
+                  fill={color}
+                  opacity={0.8}
+                >
+                  <tspan fontFamily="monospace">{a.headSha.slice(0, 7)}</tspan>
+                  <tspan fill={color} opacity={0.6}>
+                    {" "}
+                    ahead
+                  </tspan>
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Build nodes */}
+          {nodes.map((node) => {
+            const status = node.build.overallStatus as BuildStatus;
+            const fill = STATUS_COLORS[status] || "#6b7280";
+            const isMainBaseline = node.build.id === mainBaselineBuildId;
+            const isBranchBaseline = node.build.id === branchBaselineBuildId;
+            const isBaseline = isMainBaseline || isBranchBaseline;
+
+            return (
+              <g
+                key={node.build.id}
+                style={{ cursor: "pointer" }}
+                role="link"
+                tabIndex={0}
+                onClick={() => handleNodeClick(node.build.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleNodeClick(node.build.id);
+                  }
+                }}
+                onMouseEnter={(e) => {
+                  const scrollParent = (
+                    e.currentTarget.ownerSVGElement as SVGSVGElement
+                  ).parentElement!;
+                  handleNodeHover(
+                    node.build,
+                    node.x - scrollParent.scrollLeft,
+                    node.y - scrollParent.scrollTop,
+                  );
+                }}
+                onMouseLeave={handleNodeLeave}
+              >
+                {/* Invisible larger hit target */}
                 <circle
                   cx={node.x}
                   cy={node.y}
-                  r={NODE_R + 4}
-                  fill="none"
-                  stroke={isMainBaseline ? '#a855f7' : '#3b82f6'}
-                  strokeWidth={2}
-                  strokeDasharray="3 2"
+                  r={NODE_R + 8}
+                  fill="transparent"
                 />
-              )}
-              {/* Visible node */}
-              <circle
-                cx={node.x}
-                cy={node.y}
-                r={NODE_R}
-                fill={fill}
-                stroke="white"
-                strokeWidth={2}
-              />
-              {/* Stats label to the right */}
-              <text
-                x={node.x + NODE_R + 6}
-                y={node.y - 2}
-                fontSize={10}
-                fill="currentColor"
-                opacity={0.6}
-              >
-                <tspan fill="#22c55e">{node.build.passedCount ?? 0}</tspan>
-                <tspan fill="currentColor" opacity={0.3}>/</tspan>
-                <tspan fill="#eab308">{node.build.changesDetected ?? 0}</tspan>
-                <tspan fill="currentColor" opacity={0.3}>/</tspan>
-                <tspan fill="#ef4444">{node.build.failedCount ?? 0}</tspan>
-              </text>
-              <text
-                x={node.x + NODE_R + 6}
-                y={node.y + 10}
-                fontSize={9}
-                fill="currentColor"
-                opacity={0.4}
-              >
-                {formatDuration(node.build.elapsedMs)}
-                {isMainBaseline && (
-                  <tspan fill="#a855f7" opacity={1}> baseline</tspan>
+                {/* Baseline outer ring */}
+                {isBaseline && (
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={NODE_R + 4}
+                    fill="none"
+                    stroke={isMainBaseline ? "#a855f7" : "#3b82f6"}
+                    strokeWidth={2}
+                    strokeDasharray="3 2"
+                  />
                 )}
-                {isBranchBaseline && (
-                  <tspan fill="#3b82f6" opacity={1}> baseline</tspan>
-                )}
-              </text>
-            </g>
-          );
-        })}
-      </svg>}
+                {/* Visible node */}
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={NODE_R}
+                  fill={fill}
+                  stroke="white"
+                  strokeWidth={2}
+                />
+                {/* Stats label to the right */}
+                <text
+                  x={node.x + NODE_R + 6}
+                  y={node.y - 2}
+                  fontSize={10}
+                  fill="currentColor"
+                  opacity={0.6}
+                >
+                  <tspan fill="#22c55e">{node.build.passedCount ?? 0}</tspan>
+                  <tspan fill="currentColor" opacity={0.3}>
+                    /
+                  </tspan>
+                  <tspan fill="#eab308">
+                    {node.build.changesDetected ?? 0}
+                  </tspan>
+                  <tspan fill="currentColor" opacity={0.3}>
+                    /
+                  </tspan>
+                  <tspan fill="#ef4444">{node.build.failedCount ?? 0}</tspan>
+                </text>
+                <text
+                  x={node.x + NODE_R + 6}
+                  y={node.y + 10}
+                  fontSize={9}
+                  fill="currentColor"
+                  opacity={0.4}
+                >
+                  {formatDuration(node.build.elapsedMs)}
+                  {isMainBaseline && (
+                    <tspan fill="#a855f7" opacity={1}>
+                      {" "}
+                      baseline
+                    </tspan>
+                  )}
+                  {isBranchBaseline && (
+                    <tspan fill="#3b82f6" opacity={1}>
+                      {" "}
+                      baseline
+                    </tspan>
+                  )}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      )}
 
       {/* HTML Tooltip overlay */}
       {tooltip && (
@@ -432,14 +484,21 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
           <div className="flex items-center gap-1.5 font-medium mb-1">
             <span
               className="inline-block w-2 h-2 rounded-full"
-              style={{ backgroundColor: STATUS_COLORS[tooltip.build.overallStatus as BuildStatus] }}
+              style={{
+                backgroundColor:
+                  STATUS_COLORS[tooltip.build.overallStatus as BuildStatus],
+              }}
             />
             {STATUS_LABELS[tooltip.build.overallStatus as BuildStatus]}
             {tooltip.build.id === mainBaselineBuildId && (
-              <span className="text-purple-500 font-normal ml-1">Main Baseline</span>
+              <span className="text-purple-500 font-normal ml-1">
+                Main Baseline
+              </span>
             )}
             {tooltip.build.id === branchBaselineBuildId && (
-              <span className="text-blue-500 font-normal ml-1">Branch Baseline</span>
+              <span className="text-blue-500 font-normal ml-1">
+                Branch Baseline
+              </span>
             )}
           </div>
           <div className="text-muted-foreground space-y-0.5">
@@ -447,19 +506,29 @@ export function BuildGraphView({ builds, defaultBranch, mainBaselineBuildId, bra
               <div>
                 {tooltip.build.gitBranch}
                 {tooltip.build.gitCommit && (
-                  <span className="font-mono ml-1">{tooltip.build.gitCommit.slice(0, 7)}</span>
+                  <span className="font-mono ml-1">
+                    {tooltip.build.gitCommit.slice(0, 7)}
+                  </span>
                 )}
               </div>
             )}
             <div className="flex items-center gap-2">
               <span>{tooltip.build.totalTests ?? 0} tests</span>
-              <span className="text-warning">{tooltip.build.changesDetected ?? 0} changed</span>
-              <span className="text-destructive">{tooltip.build.failedCount ?? 0} failed</span>
+              <span className="text-warning">
+                {tooltip.build.changesDetected ?? 0} changed
+              </span>
+              <span className="text-destructive">
+                {tooltip.build.failedCount ?? 0} failed
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <span>{formatDuration(tooltip.build.elapsedMs)}</span>
               {tooltip.build.createdAt && (
-                <span>{formatDistanceToNow(new Date(tooltip.build.createdAt), { addSuffix: true })}</span>
+                <span>
+                  {formatDistanceToNow(new Date(tooltip.build.createdAt), {
+                    addSuffix: true,
+                  })}
+                </span>
               )}
             </div>
           </div>

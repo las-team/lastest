@@ -1,19 +1,28 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
 import {
   verifyWebhookSignature,
   isPullRequestEvent,
   isPushEvent,
   isIssuesEvent,
-} from '@/lib/github/webhooks';
-import { createAndRunBuild, createAndRunBuildCore } from '@/server/actions/builds';
-import { mergeBaselinesFromBranch, cleanupBranchBaselines, promoteTestVersionsFromBranch } from '@/server/actions/baselines';
-import { markWebhookSeen } from '@/lib/integrations/webhook-guard';
-import * as queries from '@/lib/db/queries';
+} from "@/lib/github/webhooks";
+import {
+  createAndRunBuild,
+  createAndRunBuildCore,
+} from "@/server/actions/builds";
+import {
+  mergeBaselinesFromBranch,
+  cleanupBranchBaselines,
+  promoteTestVersionsFromBranch,
+} from "@/server/actions/baselines";
+import { markWebhookSeen } from "@/lib/integrations/webhook-guard";
+import * as queries from "@/lib/db/queries";
 
 /**
  * Resolve the internal repository ID from a GitHub webhook payload.
  */
-async function resolveRepositoryId(data: { repository?: { id?: number } }): Promise<string | undefined> {
+async function resolveRepositoryId(data: {
+  repository?: { id?: number };
+}): Promise<string | undefined> {
   const githubRepoId = data.repository?.id;
   if (!githubRepoId) return undefined;
 
@@ -22,43 +31,48 @@ async function resolveRepositoryId(data: { repository?: { id?: number } }): Prom
 }
 
 export async function POST(request: NextRequest) {
-  const signature = request.headers.get('x-hub-signature-256');
-  const event = request.headers.get('x-github-event');
+  const signature = request.headers.get("x-hub-signature-256");
+  const event = request.headers.get("x-github-event");
   const payload = await request.text();
 
   // Verify webhook signature (mandatory)
   const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!webhookSecret) {
-    console.error('[webhook] GITHUB_WEBHOOK_SECRET is not configured');
-    return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
+    console.error("[webhook] GITHUB_WEBHOOK_SECRET is not configured");
+    return NextResponse.json(
+      { error: "Webhook not configured" },
+      { status: 500 },
+    );
   }
   if (!verifyWebhookSignature(payload, signature)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   // Replay protection: GitHub guarantees a unique delivery id per webhook.
   // A captured payload + signature can otherwise be re-sent indefinitely.
-  const deliveryId = request.headers.get('x-github-delivery');
+  const deliveryId = request.headers.get("x-github-delivery");
   if (deliveryId && !markWebhookSeen(`github:${deliveryId}`)) {
-    return NextResponse.json({ message: 'Duplicate delivery, ignored' });
+    return NextResponse.json({ message: "Duplicate delivery, ignored" });
   }
 
   const data = JSON.parse(payload);
 
   // Sanitize webhook string fields to prevent injection
   function sanitizeStr(val: unknown, maxLen = 500): string {
-    if (typeof val !== 'string') return '';
-    return val.replace(/[^\x20-\x7E]/g, '').slice(0, maxLen);
+    if (typeof val !== "string") return "";
+    return val.replace(/[^\x20-\x7E]/g, "").slice(0, maxLen);
   }
 
   try {
-    if (event === 'pull_request' && isPullRequestEvent(data)) {
+    if (event === "pull_request" && isPullRequestEvent(data)) {
       const repositoryId = await resolveRepositoryId(data);
 
       // Handle pull request events
-      if (data.action === 'opened' || data.action === 'synchronize') {
+      if (data.action === "opened" || data.action === "synchronize") {
         // Create or update PR record
-        const existingPR = await queries.getPullRequestByBranch(data.pull_request.head.ref);
+        const existingPR = await queries.getPullRequestByBranch(
+          data.pull_request.head.ref,
+        );
 
         if (existingPR) {
           await queries.updatePullRequest(existingPR.id, {
@@ -82,17 +96,19 @@ export async function POST(request: NextRequest) {
         }
 
         // Trigger build for PR
-        await createAndRunBuild('webhook', undefined, repositoryId);
+        await createAndRunBuild("webhook", undefined, repositoryId);
 
-        return NextResponse.json({ message: 'Build triggered for PR' });
+        return NextResponse.json({ message: "Build triggered for PR" });
       }
 
-      if (data.action === 'closed') {
+      if (data.action === "closed") {
         // Update PR status
-        const existingPR = await queries.getPullRequestByBranch(data.pull_request.head.ref);
+        const existingPR = await queries.getPullRequestByBranch(
+          data.pull_request.head.ref,
+        );
         if (existingPR) {
           await queries.updatePullRequest(existingPR.id, {
-            status: data.pull_request.merged ? 'merged' : 'closed',
+            status: data.pull_request.merged ? "merged" : "closed",
             ...(data.pull_request.merged ? { mergedAt: new Date() } : {}),
           });
         }
@@ -103,33 +119,44 @@ export async function POST(request: NextRequest) {
           const baseBranch = data.pull_request.base.ref;
 
           try {
-            await mergeBaselinesFromBranch(repositoryId, headBranch, baseBranch);
+            await mergeBaselinesFromBranch(
+              repositoryId,
+              headBranch,
+              baseBranch,
+            );
             await promoteTestVersionsFromBranch(repositoryId, headBranch);
             await cleanupBranchBaselines(repositoryId, headBranch);
-            console.log(`[webhook] Merged baselines + test versions from ${headBranch} → ${baseBranch} and cleaned up`);
+            console.log(
+              `[webhook] Merged baselines + test versions from ${headBranch} → ${baseBranch} and cleaned up`,
+            );
           } catch (error) {
-            console.error('[webhook] Failed to merge/cleanup baselines:', error);
+            console.error(
+              "[webhook] Failed to merge/cleanup baselines:",
+              error,
+            );
           }
         }
 
-        return NextResponse.json({ message: 'PR status updated' });
+        return NextResponse.json({ message: "PR status updated" });
       }
     }
 
-    if (event === 'push' && isPushEvent(data)) {
+    if (event === "push" && isPushEvent(data)) {
       // Handle push events
-      const branch = data.ref.replace('refs/heads/', '');
+      const branch = data.ref.replace("refs/heads/", "");
       const repositoryId = await resolveRepositoryId(data);
 
       // Only trigger for certain branches (configurable)
-      const monitoredBranches = (process.env.MONITORED_BRANCHES || 'main,develop').split(',');
+      const monitoredBranches = (
+        process.env.MONITORED_BRANCHES || "main,develop"
+      ).split(",");
 
       if (monitoredBranches.includes(branch)) {
-        await createAndRunBuild('push', undefined, repositoryId);
-        return NextResponse.json({ message: 'Build triggered for push' });
+        await createAndRunBuild("push", undefined, repositoryId);
+        return NextResponse.json({ message: "Build triggered for push" });
       }
 
-      return NextResponse.json({ message: 'Branch not monitored' });
+      return NextResponse.json({ message: "Branch not monitored" });
     }
 
     // Verify phase (v1.14+) — issue-close auto-rerun.
@@ -137,24 +164,32 @@ export async function POST(request: NextRequest) {
     // linked to that issue and kick a focused build for just those tests.
     // The build's `confirm-on-green` post-processing flips cases back to
     // done if the rerun shows green, replacing the manual "I fixed it" step.
-    if (event === 'issues' && isIssuesEvent(data)) {
-      if (data.action !== 'closed' || data.issue.state !== 'closed') {
-        return NextResponse.json({ message: 'Issue event ignored (not a close)' });
+    if (event === "issues" && isIssuesEvent(data)) {
+      if (data.action !== "closed" || data.issue.state !== "closed") {
+        return NextResponse.json({
+          message: "Issue event ignored (not a close)",
+        });
       }
       const labels = data.issue.labels?.map((l) => l.name) ?? [];
-      if (!labels.includes('verify')) {
-        return NextResponse.json({ message: 'Issue event ignored (not a verify ticket)' });
+      if (!labels.includes("verify")) {
+        return NextResponse.json({
+          message: "Issue event ignored (not a verify ticket)",
+        });
       }
 
-      const steps = await queries.getStepComparisonsByGithubIssue(data.issue.number);
+      const steps = await queries.getStepComparisonsByGithubIssue(
+        data.issue.number,
+      );
       if (steps.length === 0) {
-        return NextResponse.json({ message: 'No linked step comparisons' });
+        return NextResponse.json({ message: "No linked step comparisons" });
       }
 
       // Mark each linked case as closed so the verify board reflects the
       // close immediately, even before the rerun lands.
       await Promise.all(
-        steps.map((s) => queries.updateStepComparisonIssueState(s.id, 'closed')),
+        steps.map((s) =>
+          queries.updateStepComparisonIssueState(s.id, "closed"),
+        ),
       );
 
       // Kick a focused build per repo grouping. createAndRunBuildCore is the
@@ -166,23 +201,28 @@ export async function POST(request: NextRequest) {
       if (repositoryId) {
         const testIds = Array.from(new Set(steps.map((s) => s.testId)));
         try {
-          await createAndRunBuildCore('webhook', testIds, repositoryId);
+          await createAndRunBuildCore("webhook", testIds, repositoryId);
         } catch (err) {
-          console.error('[webhook] verify rerun failed:', err);
+          console.error("[webhook] verify rerun failed:", err);
         }
       }
 
-      return NextResponse.json({ message: `Rerun queued for ${steps.length} verify case(s)` });
+      return NextResponse.json({
+        message: `Rerun queued for ${steps.length} verify case(s)`,
+      });
     }
 
     // Ping event (used when setting up webhook)
-    if (event === 'ping') {
-      return NextResponse.json({ message: 'Pong!' });
+    if (event === "ping") {
+      return NextResponse.json({ message: "Pong!" });
     }
 
-    return NextResponse.json({ message: 'Event ignored' });
+    return NextResponse.json({ message: "Event ignored" });
   } catch (error) {
-    console.error('Webhook error:', error);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+    console.error("Webhook error:", error);
+    return NextResponse.json(
+      { error: "Webhook processing failed" },
+      { status: 500 },
+    );
   }
 }

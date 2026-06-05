@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Copy, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { generateCiYaml, type CiYamlConfig } from '@/lib/gitlab/ci-yaml';
+import { useState } from "react";
+import { Copy, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { generateCiYaml, type CiYamlConfig } from "@/lib/gitlab/ci-yaml";
 
 interface CiYamlPreviewProps {
   config: CiYamlConfig;
@@ -22,8 +22,17 @@ export function CiYamlPreview({ config }: CiYamlPreviewProps) {
   return (
     <div className="relative">
       <div className="absolute right-2 top-2 z-10">
-        <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCopy}
+          className="h-7 px-2"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
         </Button>
       </div>
       <pre className="bg-muted rounded-md p-4 text-xs overflow-auto h-full max-h-[60vh]">

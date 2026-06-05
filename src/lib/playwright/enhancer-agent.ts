@@ -7,12 +7,12 @@
  * hallucination of selectors that may not exist.
  */
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { generateWithAI } from '@/lib/ai';
-import { extractCodeFromResponse } from '@/lib/ai/prompts';
-import { runValidationWithRetry } from '@/lib/ai/validation-retry';
-import { getAIConfig, buildSeedFixture } from './agent-context';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { generateWithAI } from "@/lib/ai";
+import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import { runValidationWithRetry } from "@/lib/ai/validation-retry";
+import { getAIConfig, buildSeedFixture } from "./agent-context";
 
 // ---------------------------------------------------------------------------
 // Enhancer system prompt
@@ -74,7 +74,7 @@ export async function agentEnhanceTest(
   try {
     const test = await queries.getTest(testId);
     if (!test) {
-      return { success: false, error: 'Test not found' };
+      return { success: false, error: "Test not found" };
     }
 
     const settings = await queries.getAISettings(repositoryId);
@@ -83,7 +83,7 @@ export async function agentEnhanceTest(
 
     const enhanceInstructions = userPrompt
       ? `\n\n**Enhancement request:**\n${userPrompt}`
-      : '\n\n**Enhancement request:**\nImprove this test by adding better assertions, additional edge cases, and more robust selectors verified against the live page.';
+      : "\n\n**Enhancement request:**\nImprove this test by adding better assertions, additional edge cases, and more robust selectors verified against the live page.";
 
     const prompt = `Enhance this Playwright test by inspecting the live page and improving it.
 
@@ -105,49 +105,74 @@ ${seed.seedPrompt}`;
     // The system prompt above expects browser_snapshot/browser_navigate from
     // @playwright/mcp — NOT the test-runner MCP that generateWithAI's fallback
     // would otherwise inject for claude-agent-sdk.
-    const mcpArgs = ['@playwright/mcp@latest', '--headless'];
+    const mcpArgs = ["@playwright/mcp@latest", "--headless"];
 
-    if (config.provider === 'claude-agent-sdk') {
+    if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;
-      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
-      config.agentSdkAllowedTools = ['mcp__playwright__*'];
-      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+      config.agentSdkMcpServers = {
+        playwright: { command: "npx", args: mcpArgs },
+      };
+      config.agentSdkAllowedTools = ["mcp__playwright__*"];
+      config.agentSdkDisallowedTools = [
+        "Bash",
+        "Write",
+        "Edit",
+        "NotebookEdit",
+      ];
     }
 
-    const useMCP = config.provider !== 'claude-agent-sdk';
+    const useMCP = config.provider !== "claude-agent-sdk";
 
     const callLLM = async (userPrompt: string): Promise<string> => {
-      const response = await generateWithAI(config, userPrompt, ENHANCER_SYSTEM_PROMPT, {
-        repositoryId,
-        actionType: 'enhance_test',
-        useMCP,
-        ...(useMCP && {
-          mcpConfig: {
-            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-          },
-        }),
-      });
-      return extractCodeFromResponse(response) ?? '';
+      const response = await generateWithAI(
+        config,
+        userPrompt,
+        ENHANCER_SYSTEM_PROMPT,
+        {
+          repositoryId,
+          actionType: "enhance_test",
+          useMCP,
+          ...(useMCP && {
+            mcpConfig: {
+              servers: { playwright: { command: "npx", args: mcpArgs } },
+            },
+          }),
+        },
+      );
+      return extractCodeFromResponse(response) ?? "";
     };
 
     const initial = await callLLM(prompt);
     if (!initial) {
-      return { success: false, error: 'Enhancer agent produced no enhanced code' };
+      return {
+        success: false,
+        error: "Enhancer agent produced no enhanced code",
+      };
     }
 
-    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
-      console.log(`[EnhancerAgent] Validation failed, retry ${attempt}/2 with feedback`);
-      const retryPrompt = `${prompt}\n\n---\n\nPrevious enhancement attempt failed validation. ${feedback}\n\nRegenerate the enhanced test code addressing the validation errors. Output ONLY the corrected code block.`;
-      return callLLM(retryPrompt);
-    });
+    const validated = await runValidationWithRetry(
+      initial,
+      seed.baseUrl,
+      async (feedback, attempt) => {
+        console.log(
+          `[EnhancerAgent] Validation failed, retry ${attempt}/2 with feedback`,
+        );
+        const retryPrompt = `${prompt}\n\n---\n\nPrevious enhancement attempt failed validation. ${feedback}\n\nRegenerate the enhanced test code addressing the validation errors. Output ONLY the corrected code block.`;
+        return callLLM(retryPrompt);
+      },
+    );
 
     if (!validated.valid) {
-      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+      return {
+        success: false,
+        error: `Validation failed after retries: ${validated.feedback}`,
+      };
     }
 
     return { success: true, code: validated.code };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Enhancer agent failed';
+    const message =
+      error instanceof Error ? error.message : "Enhancer agent failed";
     return { success: false, error: message };
   }
 }

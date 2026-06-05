@@ -5,7 +5,11 @@
  * profile endpoint all emit identical fields.
  */
 
-import type { LaunchCohort, LaunchProfile, LaunchMonthlyWinner } from '@/lib/db/schema';
+import type {
+  LaunchCohort,
+  LaunchProfile,
+  LaunchMonthlyWinner,
+} from "@/lib/db/schema";
 
 export interface SerializedCohort {
   id: string;
@@ -70,6 +74,9 @@ export function serializeProfile(
 
 // Top-level array element for GET /winners/monthly. The build script reads
 // `.slug` (or a bare string); we expose both `slug` and `month`.
-export function serializeMonthlyWinner(w: LaunchMonthlyWinner): { slug: string; month: string } {
+export function serializeMonthlyWinner(w: LaunchMonthlyWinner): {
+  slug: string;
+  month: string;
+} {
   return { slug: w.profileSlug, month: w.month };
 }

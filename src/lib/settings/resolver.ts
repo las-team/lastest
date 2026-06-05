@@ -1,12 +1,15 @@
-import * as queries from '@/lib/db/queries';
+import * as queries from "@/lib/db/queries";
 import type {
   Test,
   StabilizationSettings,
   DiffEngineType,
   TextDetectionGranularity,
   RegionDetectionMode,
-} from '@/lib/db/schema';
-import { DEFAULT_STABILIZATION_SETTINGS, DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
+} from "@/lib/db/schema";
+import {
+  DEFAULT_STABILIZATION_SETTINGS,
+  DEFAULT_DIFF_THRESHOLDS,
+} from "@/lib/db/schema";
 
 export interface ResolvedDiffSettings {
   unchangedThreshold: number;
@@ -22,12 +25,12 @@ export interface ResolvedDiffSettings {
 }
 
 export interface ResolvedPlaywrightSettings {
-  browser: 'chromium' | 'firefox' | 'webkit';
+  browser: "chromium" | "firefox" | "webkit";
   navigationTimeout: number;
   actionTimeout: number;
   screenshotDelay: number;
-  networkErrorMode: 'fail' | 'warn' | 'ignore';
-  consoleErrorMode: 'fail' | 'warn' | 'ignore';
+  networkErrorMode: "fail" | "warn" | "ignore";
+  consoleErrorMode: "fail" | "warn" | "ignore";
   acceptAnyCertificate: boolean;
   maxParallelTests: number;
 }
@@ -58,16 +61,33 @@ export async function resolveTestSettings(
 
   // --- Diff resolution ---
   const diffBase: ResolvedDiffSettings = {
-    unchangedThreshold: repoDiff?.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
-    flakyThreshold: repoDiff?.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
-    includeAntiAliasing: repoDiff?.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
-    ignorePageShift: repoDiff?.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
-    diffEngine: (repoDiff?.diffEngine as DiffEngineType) ?? DEFAULT_DIFF_THRESHOLDS.diffEngine,
-    textRegionAwareDiffing: repoDiff?.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
-    textRegionThreshold: repoDiff?.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
-    textRegionPadding: repoDiff?.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
-    textDetectionGranularity: (repoDiff?.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
-    regionDetectionMode: (repoDiff?.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    unchangedThreshold:
+      repoDiff?.unchangedThreshold ??
+      DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+    flakyThreshold:
+      repoDiff?.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    includeAntiAliasing:
+      repoDiff?.includeAntiAliasing ??
+      DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+    ignorePageShift:
+      repoDiff?.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    diffEngine:
+      (repoDiff?.diffEngine as DiffEngineType) ??
+      DEFAULT_DIFF_THRESHOLDS.diffEngine,
+    textRegionAwareDiffing:
+      repoDiff?.textRegionAwareDiffing ??
+      DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+    textRegionThreshold:
+      repoDiff?.textRegionThreshold ??
+      DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+    textRegionPadding:
+      repoDiff?.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+    textDetectionGranularity:
+      (repoDiff?.textDetectionGranularity as TextDetectionGranularity) ??
+      DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    regionDetectionMode:
+      (repoDiff?.regionDetectionMode as RegionDetectionMode) ??
+      DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
   };
   const diff: ResolvedDiffSettings = test.diffOverrides
     ? { ...diffBase, ...stripUndefined(test.diffOverrides) }
@@ -75,12 +95,18 @@ export async function resolveTestSettings(
 
   // --- Playwright resolution ---
   const playwrightBase: ResolvedPlaywrightSettings = {
-    browser: (repoPlaywright?.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
+    browser:
+      (repoPlaywright?.browser as "chromium" | "firefox" | "webkit") ??
+      "chromium",
     navigationTimeout: repoPlaywright?.navigationTimeout ?? 30000,
     actionTimeout: repoPlaywright?.actionTimeout ?? 30000,
     screenshotDelay: repoPlaywright?.screenshotDelay ?? 0,
-    networkErrorMode: (repoPlaywright?.networkErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
-    consoleErrorMode: (repoPlaywright?.consoleErrorMode as 'fail' | 'warn' | 'ignore') ?? 'fail',
+    networkErrorMode:
+      (repoPlaywright?.networkErrorMode as "fail" | "warn" | "ignore") ??
+      "fail",
+    consoleErrorMode:
+      (repoPlaywright?.consoleErrorMode as "fail" | "warn" | "ignore") ??
+      "fail",
     acceptAnyCertificate: repoPlaywright?.acceptAnyCertificate ?? false,
     maxParallelTests: repoPlaywright?.maxParallelTests ?? 2,
   };
@@ -92,7 +118,9 @@ export async function resolveTestSettings(
   // --- Stabilization resolution ---
   const stabilizationBase: StabilizationSettings = {
     ...DEFAULT_STABILIZATION_SETTINGS,
-    ...(repoPlaywright?.stabilization ? stripUndefined(repoPlaywright.stabilization) : {}),
+    ...(repoPlaywright?.stabilization
+      ? stripUndefined(repoPlaywright.stabilization)
+      : {}),
   };
   const stabilization: StabilizationSettings = test.stabilizationOverrides
     ? { ...stabilizationBase, ...stripUndefined(test.stabilizationOverrides) }
@@ -105,7 +133,8 @@ export async function resolveTestSettings(
   };
 
   // --- Base URL ---
-  const baseUrl = pwOverrides?.baseUrl ?? repoEnv?.baseUrl ?? 'http://localhost:3000';
+  const baseUrl =
+    pwOverrides?.baseUrl ?? repoEnv?.baseUrl ?? "http://localhost:3000";
 
   return { playwright, diff, stabilization, viewport, baseUrl };
 }

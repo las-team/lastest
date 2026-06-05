@@ -7,9 +7,9 @@
  * - butteraugli — human-perception-aligned via CIELAB color space
  */
 
-import pixelmatch from 'pixelmatch';
+import pixelmatch from "pixelmatch";
 
-export type DiffEngineType = 'pixelmatch' | 'ssim' | 'butteraugli';
+export type DiffEngineType = "pixelmatch" | "ssim" | "butteraugli";
 
 export interface EngineResult {
   diffPixelCount: number;
@@ -25,7 +25,7 @@ export function computePixelmatch(
   width: number,
   height: number,
   threshold: number,
-  includeAA: boolean
+  includeAA: boolean,
 ): EngineResult {
   const diffData = Buffer.alloc(width * height * 4);
   const diffPixelCount = pixelmatch(
@@ -34,7 +34,7 @@ export function computePixelmatch(
     diffData,
     width,
     height,
-    { threshold, includeAA }
+    { threshold, includeAA },
   );
   return { diffPixelCount, diffData };
 }
@@ -59,7 +59,7 @@ export function computeSSIM(
   baselineData: Buffer | Uint8Array,
   currentData: Buffer | Uint8Array,
   width: number,
-  height: number
+  height: number,
 ): EngineResult {
   const diffData = Buffer.alloc(width * height * 4);
   let diffPixelCount = 0;
@@ -69,8 +69,16 @@ export function computeSSIM(
   const lumB = new Float64Array(width * height);
   for (let i = 0; i < width * height; i++) {
     const idx = i * 4;
-    lumA[i] = toLuminance(baselineData[idx], baselineData[idx + 1], baselineData[idx + 2]);
-    lumB[i] = toLuminance(currentData[idx], currentData[idx + 1], currentData[idx + 2]);
+    lumA[i] = toLuminance(
+      baselineData[idx],
+      baselineData[idx + 1],
+      baselineData[idx + 2],
+    );
+    lumB[i] = toLuminance(
+      currentData[idx],
+      currentData[idx + 1],
+      currentData[idx + 2],
+    );
   }
 
   // Per-pixel SSIM from overlapping windows
@@ -79,7 +87,11 @@ export function computeSSIM(
 
   for (let wy = 0; wy <= height - SSIM_WINDOW; wy++) {
     for (let wx = 0; wx <= width - SSIM_WINDOW; wx++) {
-      let sumA = 0, sumB = 0, sumA2 = 0, sumB2 = 0, sumAB = 0;
+      let sumA = 0,
+        sumB = 0,
+        sumA2 = 0,
+        sumB2 = 0,
+        sumAB = 0;
       const n = SSIM_WINDOW * SSIM_WINDOW;
 
       for (let dy = 0; dy < SSIM_WINDOW; dy++) {
@@ -101,8 +113,9 @@ export function computeSSIM(
       const sigB2 = sumB2 / n - muB * muB;
       const sigAB = sumAB / n - muA * muB;
 
-      const ssim = ((2 * muA * muB + SSIM_C1) * (2 * sigAB + SSIM_C2)) /
-                   ((muA * muA + muB * muB + SSIM_C1) * (sigA2 + sigB2 + SSIM_C2));
+      const ssim =
+        ((2 * muA * muB + SSIM_C1) * (2 * sigAB + SSIM_C2)) /
+        ((muA * muA + muB * muB + SSIM_C1) * (sigA2 + sigB2 + SSIM_C2));
 
       // Apply to all pixels in the window (take min of overlapping windows)
       for (let dy = 0; dy < SSIM_WINDOW; dy++) {
@@ -123,10 +136,10 @@ export function computeSSIM(
       diffPixelCount++;
       // 4× intensity boost for visibility, clamped to 255
       const vis = Math.min(255, Math.round(intensity * 4 * 255));
-      diffData[idx] = vis;       // R
-      diffData[idx + 1] = 0;     // G
-      diffData[idx + 2] = 0;     // B
-      diffData[idx + 3] = 255;   // A
+      diffData[idx] = vis; // R
+      diffData[idx + 1] = 0; // G
+      diffData[idx + 2] = 0; // B
+      diffData[idx + 3] = 255; // A
     } else {
       diffData[idx] = 0;
       diffData[idx + 1] = 0;
@@ -148,17 +161,21 @@ function srgbToLinear(c: number): number {
   return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
 }
 
-function linearToXYZ(r: number, g: number, b: number): [number, number, number] {
+function linearToXYZ(
+  r: number,
+  g: number,
+  b: number,
+): [number, number, number] {
   return [
     0.4124564 * r + 0.3575761 * g + 0.1804375 * b,
-    0.2126729 * r + 0.7151522 * g + 0.0721750 * b,
-    0.0193339 * r + 0.1191920 * g + 0.9503041 * b,
+    0.2126729 * r + 0.7151522 * g + 0.072175 * b,
+    0.0193339 * r + 0.119192 * g + 0.9503041 * b,
   ];
 }
 
 // D65 white point
 const XN = 0.95047;
-const YN = 1.00000;
+const YN = 1.0;
 const ZN = 1.08883;
 
 function labF(t: number): number {
@@ -192,7 +209,7 @@ function downscale2x(
   lab: Float64Array,
   width: number,
   height: number,
-  components: number
+  components: number,
 ): { data: Float64Array; w: number; h: number } {
   const w2 = Math.floor(width / 2);
   const h2 = Math.floor(height / 2);
@@ -202,9 +219,9 @@ function downscale2x(
     for (let x = 0; x < w2; x++) {
       for (let c = 0; c < components; c++) {
         const idx = (y * w2 + x) * components + c;
-        const s00 = lab[((y * 2) * width + (x * 2)) * components + c];
-        const s10 = lab[((y * 2) * width + (x * 2 + 1)) * components + c];
-        const s01 = lab[((y * 2 + 1) * width + (x * 2)) * components + c];
+        const s00 = lab[(y * 2 * width + x * 2) * components + c];
+        const s10 = lab[(y * 2 * width + (x * 2 + 1)) * components + c];
+        const s01 = lab[((y * 2 + 1) * width + x * 2) * components + c];
         const s11 = lab[((y * 2 + 1) * width + (x * 2 + 1)) * components + c];
         out[idx] = (s00 + s10 + s01 + s11) / 4;
       }
@@ -218,7 +235,7 @@ function deltaEMap(
   labA: Float64Array,
   labB: Float64Array,
   width: number,
-  height: number
+  height: number,
 ): Float64Array {
   const map = new Float64Array(width * height);
   for (let i = 0; i < width * height; i++) {
@@ -227,7 +244,9 @@ function deltaEMap(
     const da = labA[idx + 1] - labB[idx + 1];
     const db = labA[idx + 2] - labB[idx + 2];
     // CIE76 delta-E with luminance/chroma weighting
-    map[i] = Math.sqrt(LUMINANCE_WEIGHT * dL * dL + CHROMA_WEIGHT * (da * da + db * db));
+    map[i] = Math.sqrt(
+      LUMINANCE_WEIGHT * dL * dL + CHROMA_WEIGHT * (da * da + db * db),
+    );
   }
   return map;
 }
@@ -237,13 +256,13 @@ function upscale(
   srcW: number,
   srcH: number,
   targetW: number,
-  targetH: number
+  targetH: number,
 ): Float64Array {
   const out = new Float64Array(targetW * targetH);
   for (let y = 0; y < targetH; y++) {
     for (let x = 0; x < targetW; x++) {
-      const sx = Math.min(Math.floor(x * srcW / targetW), srcW - 1);
-      const sy = Math.min(Math.floor(y * srcH / targetH), srcH - 1);
+      const sx = Math.min(Math.floor((x * srcW) / targetW), srcW - 1);
+      const sy = Math.min(Math.floor((y * srcH) / targetH), srcH - 1);
       out[y * targetW + x] = map[sy * srcW + sx];
     }
   }
@@ -254,7 +273,7 @@ export function computeButteraugli(
   baselineData: Buffer | Uint8Array,
   currentData: Buffer | Uint8Array,
   width: number,
-  height: number
+  height: number,
 ): EngineResult {
   const diffData = Buffer.alloc(width * height * 4);
   let diffPixelCount = 0;
@@ -267,12 +286,20 @@ export function computeButteraugli(
 
   for (let i = 0; i < n; i++) {
     const idx = i * 4;
-    const [lA, aA, bA] = rgbToLab(baselineData[idx], baselineData[idx + 1], baselineData[idx + 2]);
+    const [lA, aA, bA] = rgbToLab(
+      baselineData[idx],
+      baselineData[idx + 1],
+      baselineData[idx + 2],
+    );
     labA[i * 3] = lA;
     labA[i * 3 + 1] = aA;
     labA[i * 3 + 2] = bA;
 
-    const [lB, aB, bB] = rgbToLab(currentData[idx], currentData[idx + 1], currentData[idx + 2]);
+    const [lB, aB, bB] = rgbToLab(
+      currentData[idx],
+      currentData[idx + 1],
+      currentData[idx + 2],
+    );
     labB[i * 3] = lB;
     labB[i * 3 + 1] = aB;
     labB[i * 3 + 2] = bB;
@@ -290,9 +317,10 @@ export function computeButteraugli(
     const dMap = deltaEMap(curLabA, curLabB, curW, curH);
 
     // Upscale to original resolution if needed
-    const fullMap = (curW === width && curH === height)
-      ? dMap
-      : upscale(dMap, curW, curH, width, height);
+    const fullMap =
+      curW === width && curH === height
+        ? dMap
+        : upscale(dMap, curW, curH, width, height);
 
     for (let i = 0; i < n; i++) {
       combinedMap[i] += SCALE_WEIGHTS[s] * fullMap[i];
@@ -366,15 +394,22 @@ export function runDiffEngine(
   width: number,
   height: number,
   threshold: number,
-  includeAA: boolean
+  includeAA: boolean,
 ): EngineResult {
   switch (engineType) {
-    case 'ssim':
+    case "ssim":
       return computeSSIM(baselineData, currentData, width, height);
-    case 'butteraugli':
+    case "butteraugli":
       return computeButteraugli(baselineData, currentData, width, height);
-    case 'pixelmatch':
+    case "pixelmatch":
     default:
-      return computePixelmatch(baselineData, currentData, width, height, threshold, includeAA);
+      return computePixelmatch(
+        baselineData,
+        currentData,
+        width,
+        height,
+        threshold,
+        includeAA,
+      );
   }
 }

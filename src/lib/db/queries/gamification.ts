@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   bots,
   gamificationSeasons,
@@ -8,8 +8,8 @@ import {
   achievements,
   users,
   tests,
-} from '../schema';
-import { getTeamMembers } from './auth';
+} from "../schema";
+import { getTeamMembers } from "./auth";
 import type {
   NewBot,
   NewGamificationSeason,
@@ -26,26 +26,41 @@ import type {
   Bot,
   Achievement,
   AchievementCode,
-} from '../schema';
-import { and, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
+} from "../schema";
+import { and, desc, eq, gte, inArray, lte, sql, sum } from "drizzle-orm";
 
 // ── Seasons ──────────────────────────────────────────────────────────────
 
-export async function getActiveSeason(teamId: string): Promise<GamificationSeason | null> {
+export async function getActiveSeason(
+  teamId: string,
+): Promise<GamificationSeason | null> {
   const rows = await db
     .select()
     .from(gamificationSeasons)
-    .where(and(eq(gamificationSeasons.teamId, teamId), eq(gamificationSeasons.status, 'active')))
+    .where(
+      and(
+        eq(gamificationSeasons.teamId, teamId),
+        eq(gamificationSeasons.status, "active"),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function getSeasonById(id: string): Promise<GamificationSeason | null> {
-  const rows = await db.select().from(gamificationSeasons).where(eq(gamificationSeasons.id, id)).limit(1);
+export async function getSeasonById(
+  id: string,
+): Promise<GamificationSeason | null> {
+  const rows = await db
+    .select()
+    .from(gamificationSeasons)
+    .where(eq(gamificationSeasons.id, id))
+    .limit(1);
   return rows[0] ?? null;
 }
 
-export async function listSeasons(teamId: string): Promise<GamificationSeason[]> {
+export async function listSeasons(
+  teamId: string,
+): Promise<GamificationSeason[]> {
   return db
     .select()
     .from(gamificationSeasons)
@@ -53,7 +68,9 @@ export async function listSeasons(teamId: string): Promise<GamificationSeason[]>
     .orderBy(desc(gamificationSeasons.startsAt));
 }
 
-export async function createSeason(data: NewGamificationSeason): Promise<GamificationSeason> {
+export async function createSeason(
+  data: NewGamificationSeason,
+): Promise<GamificationSeason> {
   const [row] = await db.insert(gamificationSeasons).values(data).returning();
   return row;
 }
@@ -61,13 +78,16 @@ export async function createSeason(data: NewGamificationSeason): Promise<Gamific
 export async function endSeasonById(id: string): Promise<void> {
   await db
     .update(gamificationSeasons)
-    .set({ status: 'ended', endsAt: new Date() })
+    .set({ status: "ended", endsAt: new Date() })
     .where(eq(gamificationSeasons.id, id));
 }
 
 // ── Bug Blitz ────────────────────────────────────────────────────────────
 
-export async function getActiveBugBlitz(teamId: string, now: Date = new Date()): Promise<BugBlitzEvent | null> {
+export async function getActiveBugBlitz(
+  teamId: string,
+  now: Date = new Date(),
+): Promise<BugBlitzEvent | null> {
   const rows = await db
     .select()
     .from(bugBlitzEvents)
@@ -90,13 +110,21 @@ export async function listBugBlitzes(teamId: string): Promise<BugBlitzEvent[]> {
     .orderBy(desc(bugBlitzEvents.startsAt));
 }
 
-export async function createBugBlitz(data: NewBugBlitzEvent): Promise<BugBlitzEvent> {
+export async function createBugBlitz(
+  data: NewBugBlitzEvent,
+): Promise<BugBlitzEvent> {
   const [row] = await db.insert(bugBlitzEvents).values(data).returning();
   return row;
 }
 
-export async function updateBugBlitzStatus(id: string, status: 'scheduled' | 'active' | 'ended'): Promise<void> {
-  await db.update(bugBlitzEvents).set({ status }).where(eq(bugBlitzEvents.id, id));
+export async function updateBugBlitzStatus(
+  id: string,
+  status: "scheduled" | "active" | "ended",
+): Promise<void> {
+  await db
+    .update(bugBlitzEvents)
+    .set({ status })
+    .where(eq(bugBlitzEvents.id, id));
 }
 
 // ── Bots ─────────────────────────────────────────────────────────────────
@@ -110,7 +138,10 @@ export async function getBotById(id: string): Promise<Bot | null> {
   return rows[0] ?? null;
 }
 
-export async function getBotByKind(teamId: string, kind: 'play_agent' | 'generate_agent' | 'mcp_server'): Promise<Bot | null> {
+export async function getBotByKind(
+  teamId: string,
+  kind: "play_agent" | "generate_agent" | "mcp_server",
+): Promise<Bot | null> {
   const rows = await db
     .select()
     .from(bots)
@@ -120,7 +151,10 @@ export async function getBotByKind(teamId: string, kind: 'play_agent' | 'generat
 }
 
 export async function upsertBot(data: NewBot): Promise<Bot> {
-  const existing = data.teamId && data.kind ? await getBotByKind(data.teamId, data.kind) : null;
+  const existing =
+    data.teamId && data.kind
+      ? await getBotByKind(data.teamId, data.kind)
+      : null;
   if (existing) return existing;
   const [row] = await db.insert(bots).values(data).returning();
   return row;
@@ -130,15 +164,22 @@ export async function upsertBot(data: NewBot): Promise<Bot> {
 export async function ensureDefaultBots(teamId: string): Promise<Bot[]> {
   const existing = await listBots(teamId);
   if (existing.length >= 3) return existing;
-  const wanted: Array<{ name: string; kind: NewBot['kind']; avatarEmoji: string }> = [
-    { name: 'Play Agent', kind: 'play_agent', avatarEmoji: '🤖' },
-    { name: 'Generate Agent', kind: 'generate_agent', avatarEmoji: '🛸' },
-    { name: 'MCP Bot', kind: 'mcp_server', avatarEmoji: '👾' },
+  const wanted: Array<{
+    name: string;
+    kind: NewBot["kind"];
+    avatarEmoji: string;
+  }> = [
+    { name: "Play Agent", kind: "play_agent", avatarEmoji: "🤖" },
+    { name: "Generate Agent", kind: "generate_agent", avatarEmoji: "🛸" },
+    { name: "MCP Bot", kind: "mcp_server", avatarEmoji: "👾" },
   ];
   const out: Bot[] = [...existing];
   for (const w of wanted) {
     if (existing.find((b) => b.kind === w.kind)) continue;
-    const [row] = await db.insert(bots).values({ teamId, ...w }).returning();
+    const [row] = await db
+      .insert(bots)
+      .values({ teamId, ...w })
+      .returning();
     out.push(row);
   }
   return out;
@@ -210,9 +251,14 @@ export async function getRecentScoreEventsForActor(
     eq(scoreEvents.seasonId, seasonId),
   ];
   if (sinceId) {
-    const cursor = await db.select().from(scoreEvents).where(eq(scoreEvents.id, sinceId)).limit(1);
+    const cursor = await db
+      .select()
+      .from(scoreEvents)
+      .where(eq(scoreEvents.id, sinceId))
+      .limit(1);
     const cursorRow = cursor[0];
-    if (cursorRow?.createdAt) conditions.push(sql`${scoreEvents.createdAt} > ${cursorRow.createdAt}`);
+    if (cursorRow?.createdAt)
+      conditions.push(sql`${scoreEvents.createdAt} > ${cursorRow.createdAt}`);
   }
   return db
     .select()
@@ -243,8 +289,14 @@ export async function getUserScoreRow(
   return rows[0] ?? null;
 }
 
-export async function ensureUserScoreRow(data: NewUserScore): Promise<UserScore> {
-  const existing = await getUserScoreRow(data.seasonId, data.actorKind, data.actorId);
+export async function ensureUserScoreRow(
+  data: NewUserScore,
+): Promise<UserScore> {
+  const existing = await getUserScoreRow(
+    data.seasonId,
+    data.actorKind,
+    data.actorId,
+  );
   if (existing) return existing;
   const [row] = await db.insert(userScores).values(data).returning();
   return row;
@@ -252,7 +304,13 @@ export async function ensureUserScoreRow(data: NewUserScore): Promise<UserScore>
 
 export async function bumpUserScore(
   id: string,
-  fields: { total: number; testsCreated?: number; regressionsCaught?: number; flakesIncurred?: number; lastEventAt: Date },
+  fields: {
+    total: number;
+    testsCreated?: number;
+    regressionsCaught?: number;
+    flakesIncurred?: number;
+    lastEventAt: Date;
+  },
 ): Promise<void> {
   await db
     .update(userScores)
@@ -286,7 +344,11 @@ export interface LeaderboardRow {
  * Read the leaderboard for a season. Joins users & bots for display info.
  * Limit applied post-enrichment; caller appends viewer's own row if outside top-N.
  */
-export async function getSeasonLeaderboard(seasonId: string, teamId: string, limit: number = 50): Promise<LeaderboardRow[]> {
+export async function getSeasonLeaderboard(
+  seasonId: string,
+  teamId: string,
+  limit: number = 50,
+): Promise<LeaderboardRow[]> {
   const scores = await db
     .select()
     .from(userScores)
@@ -305,7 +367,7 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
         id: `stub:user:${member.id}`,
         teamId,
         seasonId,
-        actorKind: 'user' as const,
+        actorKind: "user" as const,
         actorId: member.id,
         total: 0,
         testsCreated: 0,
@@ -323,7 +385,7 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
         id: `stub:bot:${bot.id}`,
         teamId,
         seasonId,
-        actorKind: 'bot' as const,
+        actorKind: "bot" as const,
         actorId: bot.id,
         total: 0,
         testsCreated: 0,
@@ -338,15 +400,32 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
   scores.sort((a, b) => b.total - a.total);
   const limited = scores.slice(0, limit);
 
-  const userIds = limited.filter((s) => s.actorKind === 'user').map((s) => s.actorId);
-  const botIds = limited.filter((s) => s.actorKind === 'bot').map((s) => s.actorId);
+  const userIds = limited
+    .filter((s) => s.actorKind === "user")
+    .map((s) => s.actorId);
+  const botIds = limited
+    .filter((s) => s.actorKind === "bot")
+    .map((s) => s.actorId);
 
   const [userRows, botRows] = await Promise.all([
     userIds.length > 0
-      ? db.select({ id: users.id, name: users.name, email: users.email, avatarUrl: users.avatarUrl })
+      ? db
+          .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            avatarUrl: users.avatarUrl,
+          })
           .from(users)
           .where(inArray(users.id, userIds))
-      : Promise.resolve([] as { id: string; name: string | null; email: string; avatarUrl: string | null }[]),
+      : Promise.resolve(
+          [] as {
+            id: string;
+            name: string | null;
+            email: string;
+            avatarUrl: string | null;
+          }[],
+        ),
     botIds.length > 0
       ? db.select().from(bots).where(inArray(bots.id, botIds))
       : Promise.resolve([] as Bot[]),
@@ -356,13 +435,13 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
   const botMap = new Map(botRows.map((b) => [b.id, b]));
 
   return limited.map((s, idx): LeaderboardRow => {
-    if (s.actorKind === 'user') {
+    if (s.actorKind === "user") {
       const u = userMap.get(s.actorId);
       return {
         rank: idx + 1,
-        actorKind: 'user',
+        actorKind: "user",
         actorId: s.actorId,
-        displayName: u?.name || u?.email || 'Unknown',
+        displayName: u?.name || u?.email || "Unknown",
         avatarUrl: u?.avatarUrl ?? null,
         avatarEmoji: null,
         total: s.total,
@@ -374,11 +453,11 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
     const b = botMap.get(s.actorId);
     return {
       rank: idx + 1,
-      actorKind: 'bot',
+      actorKind: "bot",
       actorId: s.actorId,
-      displayName: b?.name || 'Bot',
+      displayName: b?.name || "Bot",
       avatarUrl: null,
-      avatarEmoji: b?.avatarEmoji ?? '🤖',
+      avatarEmoji: b?.avatarEmoji ?? "🤖",
       total: s.total,
       testsCreated: s.testsCreated,
       regressionsCaught: s.regressionsCaught,
@@ -388,11 +467,15 @@ export async function getSeasonLeaderboard(seasonId: string, teamId: string, lim
 }
 
 /** Look up the current highest-scoring bot in a season (for beat-the-bot checks). */
-export async function getTopBotScore(seasonId: string): Promise<UserScore | null> {
+export async function getTopBotScore(
+  seasonId: string,
+): Promise<UserScore | null> {
   const rows = await db
     .select()
     .from(userScores)
-    .where(and(eq(userScores.seasonId, seasonId), eq(userScores.actorKind, 'bot')))
+    .where(
+      and(eq(userScores.seasonId, seasonId), eq(userScores.actorKind, "bot")),
+    )
     .orderBy(desc(userScores.total))
     .limit(1);
   return rows[0] ?? null;
@@ -421,14 +504,24 @@ export async function hasAchievement(
   return rows.length > 0;
 }
 
-export async function insertAchievement(data: NewAchievement): Promise<Achievement | null> {
-  const exists = await hasAchievement(data.seasonId, data.actorKind, data.actorId, data.code);
+export async function insertAchievement(
+  data: NewAchievement,
+): Promise<Achievement | null> {
+  const exists = await hasAchievement(
+    data.seasonId,
+    data.actorKind,
+    data.actorId,
+    data.code,
+  );
   if (exists) return null;
   const [row] = await db.insert(achievements).values(data).returning();
   return row;
 }
 
-export async function listRecentAchievements(teamId: string, limit: number = 20): Promise<Achievement[]> {
+export async function listRecentAchievements(
+  teamId: string,
+  limit: number = 20,
+): Promise<Achievement[]> {
   return db
     .select()
     .from(achievements)
@@ -456,7 +549,7 @@ export async function getTestCreator(
     .limit(1);
   const row = rows[0];
   if (!row) return null;
-  if (row.createdByUserId) return { kind: 'user', id: row.createdByUserId };
-  if (row.createdByBotId) return { kind: 'bot', id: row.createdByBotId };
+  if (row.createdByUserId) return { kind: "user", id: row.createdByUserId };
+  if (row.createdByBotId) return { kind: "bot", id: row.createdByBotId };
   return null;
 }

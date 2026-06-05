@@ -12,9 +12,9 @@
  * `setupContext`). Replaces ad-hoc copies of this logic in builds.ts / runs.ts
  * / debug.ts.
  */
-import type { Test } from '@/lib/db/schema';
-import * as queries from '@/lib/db/queries';
-import { resolveSetupCodeForRunner } from '@/lib/execution/setup-capture';
+import type { Test } from "@/lib/db/schema";
+import * as queries from "@/lib/db/queries";
+import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
 
 export interface ResolveBuildSetupArgs {
   tests: Test[];
@@ -24,7 +24,10 @@ export interface ResolveBuildSetupArgs {
    * build row (e.g. ad-hoc test runs, debug). When both `buildSetupTestId` and
    * `buildSetupScriptId` are set, the test wins (matches prior builds.ts order).
    */
-  build?: { buildSetupTestId: string | null; buildSetupScriptId: string | null } | null;
+  build?: {
+    buildSetupTestId: string | null;
+    buildSetupScriptId: string | null;
+  } | null;
   /** Optional log tag — `[build]` for builds, `[test-run]` for runs, etc. */
   logTag?: string;
 }
@@ -40,20 +43,24 @@ export interface ResolvedBuildSetup {
   buildSetupResolved: boolean;
 }
 
-export async function resolveBuildSetup(args: ResolveBuildSetupArgs): Promise<ResolvedBuildSetup> {
+export async function resolveBuildSetup(
+  args: ResolveBuildSetupArgs,
+): Promise<ResolvedBuildSetup> {
   const { tests, repositoryId, build, logTag } = args;
-  const tag = logTag ?? '[setup-resolve]';
-  const setupContext: ResolvedBuildSetup['setupContext'] = { variables: {} };
+  const tag = logTag ?? "[setup-resolve]";
+  const setupContext: ResolvedBuildSetup["setupContext"] = { variables: {} };
 
   // 1a. Pre-load first matching storage_state from repo-level default_setup_steps.
   if (repositoryId) {
     const defaultSteps = await queries.getDefaultSetupSteps(repositoryId);
     for (const step of defaultSteps) {
-      if (step.stepType === 'storage_state' && step.storageStateId) {
+      if (step.stepType === "storage_state" && step.storageStateId) {
         const ss = await queries.getStorageState(step.storageStateId);
         if (ss) {
           setupContext.storageState = ss.storageStateJson;
-          console.log(`${tag} Pre-loaded storage state "${ss.name}" for setup context`);
+          console.log(
+            `${tag} Pre-loaded storage state "${ss.name}" for setup context`,
+          );
           break;
         }
       }
@@ -74,19 +81,21 @@ export async function resolveBuildSetup(args: ResolveBuildSetupArgs): Promise<Re
     if (!extras?.length) continue;
     const ssStep = extras.find(
       (s): s is typeof s & { storageStateId: string } =>
-        s.stepType === 'storage_state' && !!s.storageStateId,
+        s.stepType === "storage_state" && !!s.storageStateId,
     );
     if (!ssStep) continue;
     const ss = await queries.getStorageState(ssStep.storageStateId);
     if (ss) {
       setupContext.storageState = ss.storageStateJson;
-      console.log(`${tag} Pre-loaded storage state "${ss.name}" from per-test override (test "${test.name}")`);
+      console.log(
+        `${tag} Pre-loaded storage state "${ss.name}" from per-test override (test "${test.name}")`,
+      );
       break;
     }
   }
 
   // 2. Resolve setup code, build-level override first
-  let setupInfo: ResolvedBuildSetup['setupInfo'];
+  let setupInfo: ResolvedBuildSetup["setupInfo"];
   let buildSetupResolved = false;
 
   if (build?.buildSetupTestId) {
@@ -95,22 +104,28 @@ export async function resolveBuildSetup(args: ResolveBuildSetupArgs): Promise<Re
       setupInfo = { code: setupTest.code, setupId: setupTest.id };
       buildSetupResolved = true;
     } else {
-      console.warn(`${tag} Build setup test not found: ${build.buildSetupTestId} - skipping`);
+      console.warn(
+        `${tag} Build setup test not found: ${build.buildSetupTestId} - skipping`,
+      );
     }
   } else if (build?.buildSetupScriptId) {
     const setupScript = await queries.getSetupScript(build.buildSetupScriptId);
-    if (setupScript?.type === 'playwright') {
+    if (setupScript?.type === "playwright") {
       setupInfo = { code: setupScript.code, setupId: setupScript.id };
       buildSetupResolved = true;
     } else {
-      console.warn(`${tag} Build setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`);
+      console.warn(
+        `${tag} Build setup script not found or not playwright type: ${build.buildSetupScriptId} - skipping`,
+      );
     }
   }
 
   if (!setupInfo) {
     setupInfo = await resolveSetupCodeForRunner(tests);
     if (setupInfo) {
-      console.log(`${tag} Resolved per-test setup for runner: setupId=${setupInfo.setupId}`);
+      console.log(
+        `${tag} Resolved per-test setup for runner: setupId=${setupInfo.setupId}`,
+      );
     }
   }
 

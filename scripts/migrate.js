@@ -6,7 +6,7 @@
  * Pre-creates tables that drizzle-kit might confuse with renames
  * (e.g. user_consents vs suites) to avoid interactive prompts.
  */
-const { execSync } = require('child_process');
+const { execSync } = require("child_process");
 
 // Tables drizzle-kit may wrongly interpret as renames of existing tables.
 // Add CREATE TABLE IF NOT EXISTS statements here as needed.
@@ -42,11 +42,11 @@ async function preCreate() {
   if (!process.env.DATABASE_URL) return;
   let sql;
   try {
-    sql = require('postgres')(process.env.DATABASE_URL);
+    sql = require("postgres")(process.env.DATABASE_URL);
     await sql.unsafe(PRE_CREATE_SQL);
-    console.log('[migrate] Pre-create done');
+    console.log("[migrate] Pre-create done");
   } catch (e) {
-    console.log('[migrate] Pre-create skipped:', e.message);
+    console.log("[migrate] Pre-create skipped:", e.message);
   } finally {
     if (sql) await sql.end();
   }
@@ -59,10 +59,20 @@ async function nullOrphans() {
   if (!process.env.DATABASE_URL) return;
   let sql;
   try {
-    sql = require('postgres')(process.env.DATABASE_URL);
+    sql = require("postgres")(process.env.DATABASE_URL);
     const targets = [
-      { table: 'routes', col: 'functional_area_id', refTable: 'functional_areas', refCol: 'id' },
-      { table: 'tests',  col: 'functional_area_id', refTable: 'functional_areas', refCol: 'id' },
+      {
+        table: "routes",
+        col: "functional_area_id",
+        refTable: "functional_areas",
+        refCol: "id",
+      },
+      {
+        table: "tests",
+        col: "functional_area_id",
+        refTable: "functional_areas",
+        refCol: "id",
+      },
     ];
     for (const t of targets) {
       try {
@@ -74,14 +84,19 @@ async function nullOrphans() {
         `);
         const c = (r && r.count) || 0;
         if (c > 0) {
-          console.warn(`[migrate] nulled ${c} orphan(s) in ${t.table}.${t.col}`);
+          console.warn(
+            `[migrate] nulled ${c} orphan(s) in ${t.table}.${t.col}`,
+          );
         }
       } catch (e) {
-        console.warn(`[migrate] orphan-null skipped for ${t.table}.${t.col}:`, e.message);
+        console.warn(
+          `[migrate] orphan-null skipped for ${t.table}.${t.col}:`,
+          e.message,
+        );
       }
     }
   } catch (e) {
-    console.log('[migrate] orphan cleanup skipped:', e.message);
+    console.log("[migrate] orphan cleanup skipped:", e.message);
   } finally {
     if (sql) await sql.end();
   }
@@ -95,7 +110,7 @@ async function bumpPoolDefaults() {
   if (!process.env.DATABASE_URL) return;
   let sql;
   try {
-    sql = require('postgres')(process.env.DATABASE_URL);
+    sql = require("postgres")(process.env.DATABASE_URL);
     const r = await sql.unsafe(`
       UPDATE "playwright_settings"
       SET "max_parallel_ebs"      = GREATEST(COALESCE("max_parallel_ebs", 0), 30),
@@ -108,10 +123,12 @@ async function bumpPoolDefaults() {
     `);
     const c = (r && r.count) || 0;
     if (c > 0) {
-      console.log(`[migrate] bumped pool defaults on global playwright_settings (rows=${c})`);
+      console.log(
+        `[migrate] bumped pool defaults on global playwright_settings (rows=${c})`,
+      );
     }
   } catch (e) {
-    console.warn('[migrate] pool default bump skipped:', e.message);
+    console.warn("[migrate] pool default bump skipped:", e.message);
   } finally {
     if (sql) await sql.end();
   }
@@ -122,12 +139,14 @@ async function main() {
   await nullOrphans();
   await bumpPoolDefaults();
 
-  console.log('[migrate] Running drizzle-kit push...');
+  console.log("[migrate] Running drizzle-kit push...");
   try {
-    execSync('./node_modules/.bin/drizzle-kit push --force 2>&1', { stdio: 'inherit' });
-    console.log('[migrate] Done');
+    execSync("./node_modules/.bin/drizzle-kit push --force 2>&1", {
+      stdio: "inherit",
+    });
+    console.log("[migrate] Done");
   } catch (e) {
-    console.error('[migrate] Failed:', e.message);
+    console.error("[migrate] Failed:", e.message);
     process.exit(1);
   }
 }

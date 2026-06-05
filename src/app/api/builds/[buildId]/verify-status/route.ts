@@ -1,13 +1,13 @@
-import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
-import * as queries from '@/lib/db/queries';
-import { ensureStepComparisonsForBuild } from '@/lib/verify/backfill-step-comparisons';
-import { computeChangeMap } from '@/server/actions/change-map';
+import { NextResponse } from "next/server";
+import { getCurrentSession } from "@/lib/auth";
+import * as queries from "@/lib/db/queries";
+import { ensureStepComparisonsForBuild } from "@/lib/verify/backfill-step-comparisons";
+import { computeChangeMap } from "@/server/actions/change-map";
 import {
   deriveCheckModes,
   pickTestModeOverrides,
   type CheckModeMap,
-} from '@/lib/verify/check-modes';
+} from "@/lib/verify/check-modes";
 
 export async function GET(
   request: Request,
@@ -15,13 +15,13 @@ export async function GET(
 ) {
   const session = await getCurrentSession();
   if (!session?.team) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const teamId = session.team.id;
 
   const { buildId } = await params;
   const build = await queries.getBuild(buildId);
-  if (!build) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!build) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Authorize via the build's repo and remember repoId for downstream
   // lookups (playwright settings).
@@ -31,7 +31,7 @@ export async function GET(
     if (run?.repositoryId) {
       const repo = await queries.getRepository(run.repositoryId);
       if (!repo || repo.teamId !== teamId) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       repoId = run.repositoryId;
     }
@@ -70,22 +70,24 @@ export async function GET(
 
   let stepComparisons = initialStepComparisons;
   if (
-    build.testRunId
-    && build.completedAt
-    && stepComparisons.length === 0
-    && runningTestRows.length > 0
+    build.testRunId &&
+    build.completedAt &&
+    stepComparisons.length === 0 &&
+    runningTestRows.length > 0
   ) {
     await ensureStepComparisonsForBuild(buildId).catch((err) => {
-      console.error('[verify-status] backfill failed:', err);
+      console.error("[verify-status] backfill failed:", err);
     });
-    stepComparisons = await queries.getStepComparisonsByBuild(buildId).catch(() => []);
+    stepComparisons = await queries
+      .getStepComparisonsByBuild(buildId)
+      .catch(() => []);
   }
 
-  const changeMap = cachedChangeMap
-    ?? (await computeChangeMap(buildId).catch(() => null));
+  const changeMap =
+    cachedChangeMap ?? (await computeChangeMap(buildId).catch(() => null));
 
   const slimDiffs = visualDiffs.map((d) => {
-    const meta = d.metadata as import('@/lib/db/schema').DiffMetadata | null;
+    const meta = d.metadata as import("@/lib/db/schema").DiffMetadata | null;
     return {
       id: d.id,
       testId: d.testId,
@@ -134,7 +136,7 @@ export async function GET(
   // "running tests" = test_results in 'running' status without an end timestamp.
   // Used to show in-flight cards on the verify board.
   const runningTests = runningTestRows
-    .filter((r) => r.status === 'running')
+    .filter((r) => r.status === "running")
     .map((r) => ({ testId: r.testId, name: r.testId }));
 
   // Per-check 3-way modes drive the focus toolbar's broken/warn/clean pills
@@ -152,10 +154,17 @@ export async function GET(
     textDiffEnabled: diffSettings?.textDiffEnabled ?? null,
   });
 
-  const distinctTestIds = Array.from(new Set(runningTestRows.map((r) => r.testId).filter((id): id is string => !!id)));
-  const perTestOverrides = distinctTestIds.length > 0
-    ? await queries.getPlaywrightOverridesByTestIds(distinctTestIds).catch(() => [])
-    : [];
+  const distinctTestIds = Array.from(
+    new Set(
+      runningTestRows.map((r) => r.testId).filter((id): id is string => !!id),
+    ),
+  );
+  const perTestOverrides =
+    distinctTestIds.length > 0
+      ? await queries
+          .getPlaywrightOverridesByTestIds(distinctTestIds)
+          .catch(() => [])
+      : [];
   const checkModesByTestId: Record<string, Partial<CheckModeMap>> = {};
   for (const t of perTestOverrides) {
     const partial = pickTestModeOverrides(t.playwrightOverrides ?? null);
@@ -186,7 +195,7 @@ export async function GET(
     },
     {
       headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        "Cache-Control": "no-store, no-cache, must-revalidate",
       },
     },
   );

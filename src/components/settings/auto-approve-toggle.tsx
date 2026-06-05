@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useOptimistic, useTransition } from 'react';
-import { Switch } from '@/components/ui/switch';
-import { toast } from 'sonner';
-import { updateAutoApproveDefaultBranch } from '@/server/actions/repos';
+import { useOptimistic, useTransition } from "react";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import { updateAutoApproveDefaultBranch } from "@/server/actions/repos";
 
 interface AutoApproveToggleProps {
   repositoryId: string;
@@ -11,7 +11,11 @@ interface AutoApproveToggleProps {
   defaultBranch: string;
 }
 
-export function AutoApproveToggle({ repositoryId, enabled, defaultBranch }: AutoApproveToggleProps) {
+export function AutoApproveToggle({
+  repositoryId,
+  enabled,
+  defaultBranch,
+}: AutoApproveToggleProps) {
   const [isPending, startTransition] = useTransition();
   const [optimisticEnabled, setOptimisticEnabled] = useOptimistic(enabled);
 
@@ -20,9 +24,11 @@ export function AutoApproveToggle({ repositoryId, enabled, defaultBranch }: Auto
       setOptimisticEnabled(checked);
       try {
         await updateAutoApproveDefaultBranch(repositoryId, checked);
-        toast.success(checked ? 'Auto-approve enabled' : 'Auto-approve disabled');
+        toast.success(
+          checked ? "Auto-approve enabled" : "Auto-approve disabled",
+        );
       } catch {
-        toast.error('Failed to update setting');
+        toast.error("Failed to update setting");
       }
     });
   }
@@ -30,9 +36,12 @@ export function AutoApproveToggle({ repositoryId, enabled, defaultBranch }: Auto
   return (
     <div className="flex items-center justify-between">
       <div className="space-y-0.5">
-        <span className="text-muted-foreground text-sm">Auto-approve default branch</span>
+        <span className="text-muted-foreground text-sm">
+          Auto-approve default branch
+        </span>
         <p className="text-xs text-muted-foreground/70">
-          Automatically approve builds on <code>{defaultBranch}</code> and set screenshots as baselines
+          Automatically approve builds on <code>{defaultBranch}</code> and set
+          screenshots as baselines
         </p>
       </div>
       <Switch

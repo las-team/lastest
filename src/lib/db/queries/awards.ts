@@ -1,5 +1,5 @@
-import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
-import { db } from '../index';
+import { and, desc, eq, gte, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { db } from "../index";
 import {
   builds,
   publicShares,
@@ -8,11 +8,16 @@ import {
   tests,
   testRuns,
   visualDiffs,
-} from '../schema';
-import type { NewRepoAward, RepoAward } from '../schema';
+} from "../schema";
+import type { NewRepoAward, RepoAward } from "../schema";
 
-export async function getRepoAward(repositoryId: string): Promise<RepoAward | undefined> {
-  const [row] = await db.select().from(repoAwards).where(eq(repoAwards.repositoryId, repositoryId));
+export async function getRepoAward(
+  repositoryId: string,
+): Promise<RepoAward | undefined> {
+  const [row] = await db
+    .select()
+    .from(repoAwards)
+    .where(eq(repoAwards.repositoryId, repositoryId));
   return row;
 }
 
@@ -34,7 +39,10 @@ export async function upsertRepoAward(data: NewRepoAward): Promise<RepoAward> {
         lastDowngradeReason: data.lastDowngradeReason ?? null,
       },
     });
-  const [row] = await db.select().from(repoAwards).where(eq(repoAwards.repositoryId, data.repositoryId));
+  const [row] = await db
+    .select()
+    .from(repoAwards)
+    .where(eq(repoAwards.repositoryId, data.repositoryId));
   return row;
 }
 
@@ -43,7 +51,11 @@ export async function upsertRepoAward(data: NewRepoAward): Promise<RepoAward> {
  * this — embed URL stays stable, repo state stays live.
  */
 export async function getRepoAwardBySlug(slug: string): Promise<{
-  share: { slug: string; targetDomain: string | null; repositoryId: string | null };
+  share: {
+    slug: string;
+    targetDomain: string | null;
+    repositoryId: string | null;
+  };
   repo: { id: string; fullName: string; owner: string; name: string } | null;
   award: RepoAward | null;
 } | null> {
@@ -59,10 +71,20 @@ export async function getRepoAwardBySlug(slug: string): Promise<{
 
   const repoId = shareRow.repositoryId;
 
-  let repo: { id: string; fullName: string; owner: string; name: string } | null = null;
+  let repo: {
+    id: string;
+    fullName: string;
+    owner: string;
+    name: string;
+  } | null = null;
   if (repoId) {
     const [r] = await db
-      .select({ id: repositories.id, fullName: repositories.fullName, owner: repositories.owner, name: repositories.name })
+      .select({
+        id: repositories.id,
+        fullName: repositories.fullName,
+        owner: repositories.owner,
+        name: repositories.name,
+      })
       .from(repositories)
       .where(eq(repositories.id, repoId));
     repo = r ?? null;
@@ -70,12 +92,19 @@ export async function getRepoAwardBySlug(slug: string): Promise<{
 
   let award: RepoAward | null = null;
   if (repoId) {
-    const [a] = await db.select().from(repoAwards).where(eq(repoAwards.repositoryId, repoId));
+    const [a] = await db
+      .select()
+      .from(repoAwards)
+      .where(eq(repoAwards.repositoryId, repoId));
     award = a ?? null;
   }
 
   return {
-    share: { slug: shareRow.slug, targetDomain: shareRow.targetDomain, repositoryId: repoId },
+    share: {
+      slug: shareRow.slug,
+      targetDomain: shareRow.targetDomain,
+      repositoryId: repoId,
+    },
     repo,
     award,
   };
@@ -115,7 +144,12 @@ export async function getRecentCompletedBuildsForRepo(
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(eq(testRuns.repositoryId, repositoryId), isNotNull(builds.completedAt)))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        isNotNull(builds.completedAt),
+      ),
+    )
     .orderBy(desc(builds.completedAt))
     .limit(limit);
   return rows;
@@ -133,17 +167,27 @@ export async function getRepoTestCount(repositoryId: string): Promise<number> {
  * Total rejected visual diffs across the repo's build history (any time).
  * Used to detect any confirmed regression ever.
  */
-export async function getRejectedDiffCountForRepo(repositoryId: string): Promise<number> {
+export async function getRejectedDiffCountForRepo(
+  repositoryId: string,
+): Promise<number> {
   const [row] = await db
     .select({ c: sql<number>`COUNT(*)::int` })
     .from(visualDiffs)
     .innerJoin(builds, eq(visualDiffs.buildId, builds.id))
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(eq(testRuns.repositoryId, repositoryId), eq(visualDiffs.status, 'rejected')));
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        eq(visualDiffs.status, "rejected"),
+      ),
+    );
   return Number(row?.c ?? 0);
 }
 
-export async function getRejectedDiffCountForRepoSince(repositoryId: string, sinceMs: number): Promise<number> {
+export async function getRejectedDiffCountForRepoSince(
+  repositoryId: string,
+  sinceMs: number,
+): Promise<number> {
   const since = new Date(sinceMs);
   const [row] = await db
     .select({ c: sql<number>`COUNT(*)::int` })
@@ -153,8 +197,11 @@ export async function getRejectedDiffCountForRepoSince(repositoryId: string, sin
     .where(
       and(
         eq(testRuns.repositoryId, repositoryId),
-        eq(visualDiffs.status, 'rejected'),
-        or(gte(visualDiffs.approvedAt, since), gte(visualDiffs.createdAt, since)),
+        eq(visualDiffs.status, "rejected"),
+        or(
+          gte(visualDiffs.approvedAt, since),
+          gte(visualDiffs.createdAt, since),
+        ),
       ),
     );
   return Number(row?.c ?? 0);
@@ -168,11 +215,19 @@ export async function getRejectedDiffCountForRepoSince(repositoryId: string, sin
  * Repos with no award row yet are returned with award=null so the UI can
  * grey them out as "not yet earned".
  */
-export async function getTeamTrophyRoom(teamId: string): Promise<Array<{
-  repo: { id: string; fullName: string; owner: string; name: string; testCount: number };
-  award: RepoAward | null;
-  proofSlug: string | null;
-}>> {
+export async function getTeamTrophyRoom(teamId: string): Promise<
+  Array<{
+    repo: {
+      id: string;
+      fullName: string;
+      owner: string;
+      name: string;
+      testCount: number;
+    };
+    award: RepoAward | null;
+    proofSlug: string | null;
+  }>
+> {
   // Only include repos that have at least one non-deleted test, so empty/
   // placeholder repos don't fill the trophy room with locked rows.
   const repos = await db
@@ -186,24 +241,44 @@ export async function getTeamTrophyRoom(teamId: string): Promise<Array<{
     .from(repositories)
     .innerJoin(tests, eq(tests.repositoryId, repositories.id))
     .where(and(eq(repositories.teamId, teamId), isNull(tests.deletedAt)))
-    .groupBy(repositories.id, repositories.fullName, repositories.owner, repositories.name, repositories.createdAt)
+    .groupBy(
+      repositories.id,
+      repositories.fullName,
+      repositories.owner,
+      repositories.name,
+      repositories.createdAt,
+    )
     .having(sql`COUNT(${tests.id}) > 0`)
     .orderBy(desc(repositories.createdAt));
 
   if (repos.length === 0) return [];
 
-  const repoIds = repos.map(r => r.id);
+  const repoIds = repos.map((r) => r.id);
   const awards = await db
     .select()
     .from(repoAwards)
-    .where(sql`${repoAwards.repositoryId} IN (${sql.join(repoIds.map(id => sql`${id}`), sql`, `)})`);
-  const awardByRepo = new Map(awards.map(a => [a.repositoryId, a]));
+    .where(
+      sql`${repoAwards.repositoryId} IN (${sql.join(
+        repoIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})`,
+    );
+  const awardByRepo = new Map(awards.map((a) => [a.repositoryId, a]));
 
   // Latest public share slug per repo, used as the proof link.
   const shares = await db
-    .select({ repositoryId: publicShares.repositoryId, slug: publicShares.slug, createdAt: publicShares.createdAt })
+    .select({
+      repositoryId: publicShares.repositoryId,
+      slug: publicShares.slug,
+      createdAt: publicShares.createdAt,
+    })
     .from(publicShares)
-    .where(sql`${publicShares.repositoryId} IN (${sql.join(repoIds.map(id => sql`${id}`), sql`, `)}) AND ${publicShares.status} = 'public'`)
+    .where(
+      sql`${publicShares.repositoryId} IN (${sql.join(
+        repoIds.map((id) => sql`${id}`),
+        sql`, `,
+      )}) AND ${publicShares.status} = 'public'`,
+    )
     .orderBy(desc(publicShares.createdAt));
   const slugByRepo = new Map<string, string>();
   for (const s of shares) {
@@ -212,18 +287,25 @@ export async function getTeamTrophyRoom(teamId: string): Promise<Array<{
     }
   }
 
-  return repos.map(repo => ({
+  return repos.map((repo) => ({
     repo,
     award: awardByRepo.get(repo.id) ?? null,
     proofSlug: slugByRepo.get(repo.id) ?? null,
   }));
 }
 
-export async function getLatestProofShareSlug(repositoryId: string): Promise<string | null> {
+export async function getLatestProofShareSlug(
+  repositoryId: string,
+): Promise<string | null> {
   const [row] = await db
     .select({ slug: publicShares.slug })
     .from(publicShares)
-    .where(and(eq(publicShares.repositoryId, repositoryId), eq(publicShares.status, 'public')))
+    .where(
+      and(
+        eq(publicShares.repositoryId, repositoryId),
+        eq(publicShares.status, "public"),
+      ),
+    )
     .orderBy(desc(publicShares.createdAt))
     .limit(1);
   return row?.slug ?? null;

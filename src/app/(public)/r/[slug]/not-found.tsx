@@ -7,10 +7,12 @@ export default function ShareNotFound() {
             ·
           </span>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">This share isn&apos;t available</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          This share isn&apos;t available
+        </h1>
         <p className="text-sm text-muted-foreground">
-          The page may have been revoked or removed. If you believe this is a mistake,
-          contact the person who shared the link with you.
+          The page may have been revoked or removed. If you believe this is a
+          mistake, contact the person who shared the link with you.
         </p>
         <div className="pt-2">
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}

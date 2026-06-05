@@ -6,7 +6,11 @@
  * Falls back to monolithic exploration if scout fails.
  */
 
-import type { PlannerArea, PlannerResult, ScoutOutput } from '@/lib/playwright/planner-types';
+import type {
+  PlannerArea,
+  PlannerResult,
+  ScoutOutput,
+} from "@/lib/playwright/planner-types";
 
 const DEEP_DIVE_CONCURRENCY = 3;
 
@@ -14,7 +18,12 @@ export interface BrowserPlannerOptions {
   otherPlannerAreas?: PlannerArea[];
   onScoutComplete?: (scout: ScoutOutput) => void;
   onDeepDiveStart?: (areaName: string) => void;
-  onDeepDiveComplete?: (areaName: string, areasFound: number, durationMs: number, promptLogId?: string) => void;
+  onDeepDiveComplete?: (
+    areaName: string,
+    areasFound: number,
+    durationMs: number,
+    promptLogId?: string,
+  ) => void;
   signal?: AbortSignal;
   onLogCreated?: (logId: string) => void;
 }
@@ -35,7 +44,8 @@ export async function runBrowserPlanner(
   // Phase 1: Scout classification (no MCP, fast)
   let scoutOutput: ScoutOutput;
   try {
-    const { runScoutClassification } = await import('@/lib/playwright/planner-agent');
+    const { runScoutClassification } =
+      await import("@/lib/playwright/planner-agent");
     scoutOutput = await runScoutClassification(repositoryId, otherAreas, {
       onLogCreated: options?.onLogCreated,
     });
@@ -51,13 +61,18 @@ export async function runBrowserPlanner(
   options?.onScoutComplete?.(scoutOutput);
 
   if (options?.signal?.aborted) {
-    return { source: 'browser', areas: [], durationMs: Date.now() - start, inputSummary: 'Aborted' };
+    return {
+      source: "browser",
+      areas: [],
+      durationMs: Date.now() - start,
+      inputSummary: "Aborted",
+    };
   }
 
   // Collect skip areas directly from scout
   const skipAreas: PlannerArea[] = scoutOutput.areas
-    .filter(a => a.classification === 'skip' && a.testPlan)
-    .map(a => ({
+    .filter((a) => a.classification === "skip" && a.testPlan)
+    .map((a) => ({
       name: a.name,
       routes: a.routes,
       testPlan: a.testPlan!,
@@ -68,11 +83,15 @@ export async function runBrowserPlanner(
   // gets real MCP discovery. If Scout classified everything as "skip", promote
   // the first DEEP_DIVE_CONCURRENCY areas (preferring ones with routes) so the
   // Diver has something meaningful to navigate to.
-  const exploreAreas = scoutOutput.areas.filter(a => a.classification === 'explore');
+  const exploreAreas = scoutOutput.areas.filter(
+    (a) => a.classification === "explore",
+  );
   if (exploreAreas.length === 0 && scoutOutput.areas.length > 0) {
-    const promotable = [...scoutOutput.areas].sort((a, b) => b.routes.length - a.routes.length);
+    const promotable = [...scoutOutput.areas].sort(
+      (a, b) => b.routes.length - a.routes.length,
+    );
     for (const area of promotable.slice(0, DEEP_DIVE_CONCURRENCY)) {
-      exploreAreas.push({ ...area, classification: 'explore' });
+      exploreAreas.push({ ...area, classification: "explore" });
     }
   }
 
@@ -84,9 +103,14 @@ export async function runBrowserPlanner(
   const deepDiveResults: PlannerArea[] = [];
 
   if (exploreAreas.length > 0) {
-    const { runDeepDiveExploration } = await import('@/lib/playwright/planner-agent');
+    const { runDeepDiveExploration } =
+      await import("@/lib/playwright/planner-agent");
 
-    for (let batch = 0; batch < exploreAreas.length; batch += DEEP_DIVE_CONCURRENCY) {
+    for (
+      let batch = 0;
+      batch < exploreAreas.length;
+      batch += DEEP_DIVE_CONCURRENCY
+    ) {
       if (options?.signal?.aborted) break;
 
       const chunk = exploreAreas.slice(batch, batch + DEEP_DIVE_CONCURRENCY);
@@ -104,26 +128,46 @@ export async function runBrowserPlanner(
               area.focusPoints,
               repositoryId,
               baseUrl,
-              { onLogCreated: (id) => { diveLogId = id; } },
+              {
+                onLogCreated: (id) => {
+                  diveLogId = id;
+                },
+              },
             );
             const diveDuration = Date.now() - diveStart;
-            options?.onDeepDiveComplete?.(area.name, areas.length, diveDuration, diveLogId);
+            options?.onDeepDiveComplete?.(
+              area.name,
+              areas.length,
+              diveDuration,
+              diveLogId,
+            );
             return areas;
           } catch (_err) {
             const diveDuration = Date.now() - diveStart;
-            options?.onDeepDiveComplete?.(area.name, 0, diveDuration, diveLogId);
+            options?.onDeepDiveComplete?.(
+              area.name,
+              0,
+              diveDuration,
+              diveLogId,
+            );
             // On failure, create a basic plan from scout's focus points
-            return [{
-              name: area.name,
-              routes: area.routes,
-              testPlan: buildFallbackPlanFromFocusPoints(area.name, area.routes, area.focusPoints),
-            }] as PlannerArea[];
+            return [
+              {
+                name: area.name,
+                routes: area.routes,
+                testPlan: buildFallbackPlanFromFocusPoints(
+                  area.name,
+                  area.routes,
+                  area.focusPoints,
+                ),
+              },
+            ] as PlannerArea[];
           }
         }),
       );
 
       for (const r of batchResults) {
-        if (r.status === 'fulfilled') {
+        if (r.status === "fulfilled") {
           deepDiveResults.push(...r.value);
         }
       }
@@ -133,7 +177,7 @@ export async function runBrowserPlanner(
   const allAreas = [...skipAreas, ...deepDiveResults];
 
   return {
-    source: 'browser',
+    source: "browser",
     areas: allAreas,
     durationMs: Date.now() - start,
     promptLogId: scoutOutput.promptLogId,
@@ -151,42 +195,52 @@ async function runFallbackExploration(
   let promptLogId: string | undefined;
 
   try {
-    const { agentDiscoverAreas } = await import('@/lib/playwright/planner-agent');
+    const { agentDiscoverAreas } =
+      await import("@/lib/playwright/planner-agent");
     const result = await agentDiscoverAreas(repositoryId, baseUrl, {
-      onLogCreated: (id) => { promptLogId = id; options?.onLogCreated?.(id); },
+      onLogCreated: (id) => {
+        promptLogId = id;
+        options?.onLogCreated?.(id);
+      },
     });
     const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
       return {
-        source: 'browser',
+        source: "browser",
         areas: [],
         rawOutput: result.rawResponse,
-        error: result.error || 'No areas discovered',
+        error: result.error || "No areas discovered",
         promptLogId,
         durationMs,
         inputSummary: `Fallback: baseUrl=${baseUrl}`,
       };
     }
 
-    const dbQueries = await import('@/lib/db/queries');
+    const dbQueries = await import("@/lib/db/queries");
     const dbAreas = await dbQueries.getFunctionalAreasByRepo(repositoryId);
-    const areas = result.functionalAreas.map(fa => {
-      const dbArea = dbAreas.find(a => a.name === fa.name);
+    const areas = result.functionalAreas.map((fa) => {
+      const dbArea = dbAreas.find((a) => a.name === fa.name);
       return {
         name: fa.name,
         description: fa.description,
-        routes: fa.routes.map(r => r.path),
-        testPlan: dbArea?.agentPlan || '',
+        routes: fa.routes.map((r) => r.path),
+        testPlan: dbArea?.agentPlan || "",
       };
     });
 
-    return { source: 'browser', areas, promptLogId, durationMs, inputSummary: `Fallback: baseUrl=${baseUrl}` };
+    return {
+      source: "browser",
+      areas,
+      promptLogId,
+      durationMs,
+      inputSummary: `Fallback: baseUrl=${baseUrl}`,
+    };
   } catch (error) {
     return {
-      source: 'browser',
+      source: "browser",
       areas: [],
-      error: error instanceof Error ? error.message : 'Browser planner failed',
+      error: error instanceof Error ? error.message : "Browser planner failed",
       promptLogId,
       durationMs: Date.now() - start,
       inputSummary: `Fallback: baseUrl=${baseUrl}`,
@@ -195,7 +249,11 @@ async function runFallbackExploration(
 }
 
 /** Generate a basic test plan from scout focus points when deep-diver fails */
-function buildFallbackPlanFromFocusPoints(name: string, routes: string[], focusPoints?: string[]): string {
+function buildFallbackPlanFromFocusPoints(
+  name: string,
+  routes: string[],
+  focusPoints?: string[],
+): string {
   const lines = [`## ${name}\n`];
   for (const route of routes) {
     lines.push(`### Route: ${route}`);
@@ -208,5 +266,5 @@ function buildFallbackPlanFromFocusPoints(name: string, routes: string[], focusP
       lines.push(`- ${fp}`);
     }
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }

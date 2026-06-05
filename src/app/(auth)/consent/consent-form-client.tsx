@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
-import { recordRegistrationConsent } from '@/server/actions/consent';
+import { useState } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { recordRegistrationConsent } from "@/server/actions/consent";
 
-export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
+export function ConsentFormClient({ nextUrl = "/" }: { nextUrl?: string }) {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
     try {
       await recordRegistrationConsent({ marketingEmails: marketingConsent });
     } catch (err) {
-      console.error('recordRegistrationConsent failed', err);
+      console.error("recordRegistrationConsent failed", err);
     }
     window.location.href = nextUrl;
   }
@@ -41,13 +41,24 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
             onCheckedChange={(checked) => setTermsAccepted(checked === true)}
             className="mt-0.5"
           />
-          <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground leading-snug">
-            I have read and agree to the{' '}
-            <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+          <Label
+            htmlFor="terms"
+            className="text-sm font-normal text-muted-foreground leading-snug"
+          >
+            I have read and agree to the{" "}
+            <Link
+              href="/terms"
+              className="underline underline-offset-4 hover:text-foreground"
+              target="_blank"
+            >
               Terms of Service
-            </Link>{' '}
-            and{' '}
-            <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/privacy"
+              className="underline underline-offset-4 hover:text-foreground"
+              target="_blank"
+            >
               Privacy Policy
             </Link>
             .
@@ -55,7 +66,10 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
+          <Label
+            htmlFor="marketing"
+            className="text-sm font-normal text-muted-foreground leading-snug"
+          >
             Send me product updates, tips, and feature announcements
           </Label>
           <Switch
@@ -65,8 +79,12 @@ export function ConsentFormClient({ nextUrl = '/' }: { nextUrl?: string }) {
           />
         </div>
 
-        <Button className="w-full" onClick={handleContinue} disabled={loading || !termsAccepted}>
-          {loading ? 'Setting up...' : 'Continue'}
+        <Button
+          className="w-full"
+          onClick={handleContinue}
+          disabled={loading || !termsAccepted}
+        >
+          {loading ? "Setting up..." : "Continue"}
         </Button>
       </div>
     </div>

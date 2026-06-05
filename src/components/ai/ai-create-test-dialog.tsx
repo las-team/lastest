@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,25 +8,25 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { startGenerateTestAgent } from '@/server/actions/ai';
-import { Switch } from '@/components/ui/switch';
-import { Loader2, Sparkles } from 'lucide-react';
-import { toast } from 'sonner';
-import type { FunctionalArea } from '@/lib/db/schema';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+} from "@/components/ui/select";
+import { startGenerateTestAgent } from "@/server/actions/ai";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import type { FunctionalArea } from "@/lib/db/schema";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 interface AICreateTestDialogProps {
   open: boolean;
@@ -42,19 +42,25 @@ export function AICreateTestDialog({
   areas,
 }: AICreateTestDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [prompt, setPrompt] = useState('');
-  const [targetUrl, setTargetUrl] = useState('');
-  const [testName, setTestName] = useState('');
-  const [functionalAreaId, setFunctionalAreaId] = useState<string>('');
+  const [prompt, setPrompt] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [testName, setTestName] = useState("");
+  const [functionalAreaId, setFunctionalAreaId] = useState<string>("");
   const [headless, setHeadless] = useState(true);
 
   const handleSubmit = async () => {
     if (!prompt.trim()) {
-      toast.error('Please enter a prompt');
+      toast.error("Please enter a prompt");
       return;
     }
 
-    const name = testName.trim() || prompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'AI Generated Test';
+    const name =
+      testName.trim() ||
+      prompt
+        .slice(0, 50)
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .trim() ||
+      "AI Generated Test";
 
     setIsSubmitting(true);
     try {
@@ -63,34 +69,42 @@ export function AICreateTestDialog({
         userPrompt: prompt,
         targetUrl: targetUrl || undefined,
         testName: name,
-        functionalAreaId: functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
+        functionalAreaId:
+          functionalAreaId && functionalAreaId !== "__none__"
+            ? functionalAreaId
+            : undefined,
         headless,
       });
 
       if (result.success) {
         track(Events.test_created, {
-          source: 'ai',
+          source: "ai",
           repoId: repositoryId,
-          hasArea: functionalAreaId && functionalAreaId !== '__none__' ? 'true' : 'false',
-          hasTargetUrl: targetUrl ? 'true' : 'false',
+          hasArea:
+            functionalAreaId && functionalAreaId !== "__none__"
+              ? "true"
+              : "false",
+          hasTargetUrl: targetUrl ? "true" : "false",
         });
-        toast.success('Test generation started — check the activity feed for progress');
+        toast.success(
+          "Test generation started — check the activity feed for progress",
+        );
         handleClose();
       } else {
-        toast.error(result.error || 'Failed to start test generation');
+        toast.error(result.error || "Failed to start test generation");
       }
     } catch (_error) {
-      toast.error('Failed to start test generation');
+      toast.error("Failed to start test generation");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleClose = () => {
-    setPrompt('');
-    setTargetUrl('');
-    setTestName('');
-    setFunctionalAreaId('');
+    setPrompt("");
+    setTargetUrl("");
+    setTestName("");
+    setFunctionalAreaId("");
     setHeadless(true);
     onOpenChange(false);
   };
@@ -104,7 +118,8 @@ export function AICreateTestDialog({
             Create Test with AI
           </DialogTitle>
           <DialogDescription>
-            Describe what you want to test. AI will explore the page via browser and generate test code with real selectors.
+            Describe what you want to test. AI will explore the page via browser
+            and generate test code with real selectors.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,7 +161,10 @@ export function AICreateTestDialog({
             {areas.length > 0 && (
               <div className="flex-1 space-y-2">
                 <Label>Functional Area</Label>
-                <Select value={functionalAreaId} onValueChange={setFunctionalAreaId}>
+                <Select
+                  value={functionalAreaId}
+                  onValueChange={setFunctionalAreaId}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select area (optional)" />
                   </SelectTrigger>
@@ -163,8 +181,14 @@ export function AICreateTestDialog({
             )}
 
             <div className="flex items-center gap-2 pt-6">
-              <Switch id="headless" checked={headless} onCheckedChange={setHeadless} />
-              <Label htmlFor="headless" className="text-sm">Headless</Label>
+              <Switch
+                id="headless"
+                checked={headless}
+                onCheckedChange={setHeadless}
+              />
+              <Label htmlFor="headless" className="text-sm">
+                Headless
+              </Label>
             </div>
           </div>
         </div>
@@ -173,7 +197,10 @@ export function AICreateTestDialog({
           <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting || !prompt.trim()}>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || !prompt.trim()}
+          >
             {isSubmitting ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (

@@ -9,7 +9,7 @@ const DEFAULT_LIMIT = 5;
 
 type Slot = { count: number; resetAt: number };
 
-const KEY = '__urlDiffRateBucket' as const;
+const KEY = "__urlDiffRateBucket" as const;
 type Bucket = Map<string, Slot>;
 
 function bucket(): Bucket {
@@ -31,7 +31,11 @@ export interface RateLimitOutcome {
   headers: Record<string, string>;
 }
 
-export function checkRateLimit({ ip, userId, limit = DEFAULT_LIMIT }: RateLimitOptions): RateLimitOutcome {
+export function checkRateLimit({
+  ip,
+  userId,
+  limit = DEFAULT_LIMIT,
+}: RateLimitOptions): RateLimitOutcome {
   const now = Date.now();
   const key = `${ip}:${userId}`;
   const b = bucket();
@@ -44,9 +48,9 @@ export function checkRateLimit({ ip, userId, limit = DEFAULT_LIMIT }: RateLimitO
       remaining: limit - 1,
       resetAt,
       headers: {
-        'X-RateLimit-Limit': String(limit),
-        'X-RateLimit-Remaining': String(limit - 1),
-        'X-RateLimit-Reset': String(Math.ceil(resetAt / 1000)),
+        "X-RateLimit-Limit": String(limit),
+        "X-RateLimit-Remaining": String(limit - 1),
+        "X-RateLimit-Reset": String(Math.ceil(resetAt / 1000)),
       },
     };
   }
@@ -56,10 +60,12 @@ export function checkRateLimit({ ip, userId, limit = DEFAULT_LIMIT }: RateLimitO
       remaining: 0,
       resetAt: slot.resetAt,
       headers: {
-        'X-RateLimit-Limit': String(limit),
-        'X-RateLimit-Remaining': '0',
-        'X-RateLimit-Reset': String(Math.ceil(slot.resetAt / 1000)),
-        'Retry-After': String(Math.max(1, Math.ceil((slot.resetAt - now) / 1000))),
+        "X-RateLimit-Limit": String(limit),
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": String(Math.ceil(slot.resetAt / 1000)),
+        "Retry-After": String(
+          Math.max(1, Math.ceil((slot.resetAt - now) / 1000)),
+        ),
       },
     };
   }
@@ -69,9 +75,9 @@ export function checkRateLimit({ ip, userId, limit = DEFAULT_LIMIT }: RateLimitO
     remaining: limit - slot.count,
     resetAt: slot.resetAt,
     headers: {
-      'X-RateLimit-Limit': String(limit),
-      'X-RateLimit-Remaining': String(limit - slot.count),
-      'X-RateLimit-Reset': String(Math.ceil(slot.resetAt / 1000)),
+      "X-RateLimit-Limit": String(limit),
+      "X-RateLimit-Remaining": String(limit - slot.count),
+      "X-RateLimit-Reset": String(Math.ceil(slot.resetAt / 1000)),
     },
   };
 }

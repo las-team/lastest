@@ -17,7 +17,7 @@
  * header-only diffs.
  */
 
-import type { NetworkRequest, NetworkDiffSummary } from '@/lib/db/schema';
+import type { NetworkRequest, NetworkDiffSummary } from "@/lib/db/schema";
 
 /** Strip nonces and IDs from URLs so the same logical request keys match
  *  across runs. Conservative — leaves real path segments alone. */
@@ -34,23 +34,26 @@ export function normalizeRequestUrl(url: string): string {
     keep.sort();
     // Replace digit-only path segments with `:id` so /users/123 == /users/456.
     // Same for hash-like segments (32+ hex chars).
-    const path = u.pathname.split('/').map(seg => {
-      if (/^\d+$/.test(seg)) return ':id';
-      if (/^[a-f0-9]{24,}$/i.test(seg)) return ':hash';
-      return seg;
-    }).join('/');
-    return `${u.origin}${path}${keep.length ? '?' + keep.join('&') : ''}`;
+    const path = u.pathname
+      .split("/")
+      .map((seg) => {
+        if (/^\d+$/.test(seg)) return ":id";
+        if (/^[a-f0-9]{24,}$/i.test(seg)) return ":hash";
+        return seg;
+      })
+      .join("/");
+    return `${u.origin}${path}${keep.length ? "?" + keep.join("&") : ""}`;
   } catch {
     return url;
   }
 }
 
-function statusClass(status: number): 'ok' | '3xx' | '4xx' | '5xx' | 'other' {
-  if (status >= 200 && status < 300) return 'ok';
-  if (status >= 300 && status < 400) return '3xx';
-  if (status >= 400 && status < 500) return '4xx';
-  if (status >= 500 && status < 600) return '5xx';
-  return 'other';
+function statusClass(status: number): "ok" | "3xx" | "4xx" | "5xx" | "other" {
+  if (status >= 200 && status < 300) return "ok";
+  if (status >= 300 && status < 400) return "3xx";
+  if (status >= 400 && status < 500) return "4xx";
+  if (status >= 500 && status < 600) return "5xx";
+  return "other";
 }
 
 interface NetworkDiffOptions {
@@ -121,12 +124,20 @@ export function computeNetworkDiff(
             from: baseReq.status,
             to: currReq.status,
           });
-          if (currClass === '4xx' && baseClass !== '4xx') {
-            summary.newClientErrors.push({ url: currReq.url, method: currReq.method, status: currReq.status });
+          if (currClass === "4xx" && baseClass !== "4xx") {
+            summary.newClientErrors.push({
+              url: currReq.url,
+              method: currReq.method,
+              status: currReq.status,
+            });
             summary.newErrorCount++;
           }
-          if (currClass === '5xx' && baseClass !== '5xx') {
-            summary.newServerErrors.push({ url: currReq.url, method: currReq.method, status: currReq.status });
+          if (currClass === "5xx" && baseClass !== "5xx") {
+            summary.newServerErrors.push({
+              url: currReq.url,
+              method: currReq.method,
+              status: currReq.status,
+            });
             summary.newErrorCount++;
           }
         }
@@ -138,11 +149,19 @@ export function computeNetworkDiff(
       summary.added++;
       bucketAdded++;
       const cls = statusClass(c[i].status);
-      if (cls === '4xx') {
-        summary.newClientErrors.push({ url: c[i].url, method: c[i].method, status: c[i].status });
+      if (cls === "4xx") {
+        summary.newClientErrors.push({
+          url: c[i].url,
+          method: c[i].method,
+          status: c[i].status,
+        });
         summary.newErrorCount++;
-      } else if (cls === '5xx') {
-        summary.newServerErrors.push({ url: c[i].url, method: c[i].method, status: c[i].status });
+      } else if (cls === "5xx") {
+        summary.newServerErrors.push({
+          url: c[i].url,
+          method: c[i].method,
+          status: c[i].status,
+        });
         summary.newErrorCount++;
       }
     }
@@ -156,9 +175,12 @@ export function computeNetworkDiff(
     // Promote per-bucket totals to endpoint-level counts so a single endpoint
     // firing N times (cache warmup, retries) reports as 1, not N. (Field is
     // typed optional for read-back of legacy rows; here we always populate it.)
-    if (bucketAdded > 0) summary.addedEndpoints = (summary.addedEndpoints ?? 0) + 1;
-    if (bucketRemoved > 0) summary.removedEndpoints = (summary.removedEndpoints ?? 0) + 1;
-    if (bucketChanged > 0) summary.changedEndpoints = (summary.changedEndpoints ?? 0) + 1;
+    if (bucketAdded > 0)
+      summary.addedEndpoints = (summary.addedEndpoints ?? 0) + 1;
+    if (bucketRemoved > 0)
+      summary.removedEndpoints = (summary.removedEndpoints ?? 0) + 1;
+    if (bucketChanged > 0)
+      summary.changedEndpoints = (summary.changedEndpoints ?? 0) + 1;
   }
 
   return summary;
@@ -166,13 +188,17 @@ export function computeNetworkDiff(
 
 export function summarizeNetworkDiff(d: NetworkDiffSummary): string {
   const parts: string[] = [];
-  if (d.newServerErrors.length) parts.push(`${d.newServerErrors.length} new 5xx`);
-  if (d.newClientErrors.length) parts.push(`${d.newClientErrors.length} new 4xx`);
+  if (d.newServerErrors.length)
+    parts.push(`${d.newServerErrors.length} new 5xx`);
+  if (d.newClientErrors.length)
+    parts.push(`${d.newClientErrors.length} new 4xx`);
   // Endpoint-level counts: a single endpoint firing N extra times reports as 1,
   // not N. Avoids inflated "84 added" lines when an auth retry loop fires.
   if (d.addedEndpoints) parts.push(`${d.addedEndpoints} endpoint(s) added`);
-  if (d.removedEndpoints) parts.push(`${d.removedEndpoints} endpoint(s) removed`);
-  if (d.changedEndpoints && !d.newErrorCount) parts.push(`${d.changedEndpoints} endpoint(s) changed`);
-  if (parts.length === 0) return 'No network changes';
-  return parts.join(', ');
+  if (d.removedEndpoints)
+    parts.push(`${d.removedEndpoints} endpoint(s) removed`);
+  if (d.changedEndpoints && !d.newErrorCount)
+    parts.push(`${d.changedEndpoints} endpoint(s) changed`);
+  if (parts.length === 0) return "No network changes";
+  return parts.join(", ");
 }

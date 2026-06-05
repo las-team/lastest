@@ -1,15 +1,18 @@
-import { db } from '../index';
+import { db } from "../index";
+import { backgroundJobs, builds, testRuns } from "../schema";
+import type { NewBackgroundJob, BackgroundJobType } from "../schema";
 import {
-  backgroundJobs,
-  builds,
-  testRuns,
-} from '../schema';
-import type {
-  NewBackgroundJob,
-  BackgroundJobType,
-} from '../schema';
-import { eq, desc, and, or, gte, lt, isNull, isNotNull, inArray } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+  eq,
+  desc,
+  and,
+  or,
+  gte,
+  lt,
+  isNull,
+  isNotNull,
+  inArray,
+} from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // Background Jobs
 export async function createBackgroundJob(data: {
@@ -26,7 +29,7 @@ export async function createBackgroundJob(data: {
   await db.insert(backgroundJobs).values({
     id,
     type: data.type,
-    status: 'pending',
+    status: "pending",
     label: data.label,
     totalSteps: data.totalSteps ?? null,
     completedSteps: 0,
@@ -40,7 +43,10 @@ export async function createBackgroundJob(data: {
   return { id };
 }
 
-export async function updateBackgroundJob(id: string, data: Partial<NewBackgroundJob>) {
+export async function updateBackgroundJob(
+  id: string,
+  data: Partial<NewBackgroundJob>,
+) {
   await db.update(backgroundJobs).set(data).where(eq(backgroundJobs.id, id));
 }
 
@@ -48,9 +54,13 @@ export async function getActiveBackgroundJobs() {
   return db
     .select()
     .from(backgroundJobs)
-    .where(or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')))
-    .orderBy(desc(backgroundJobs.createdAt))
-    ;
+    .where(
+      or(
+        eq(backgroundJobs.status, "pending"),
+        eq(backgroundJobs.status, "running"),
+      ),
+    )
+    .orderBy(desc(backgroundJobs.createdAt));
 }
 
 export async function getRecentBackgroundJobs(sinceMs = 10000) {
@@ -62,16 +72,21 @@ export async function getRecentBackgroundJobs(sinceMs = 10000) {
       and(
         isNull(backgroundJobs.parentJobId),
         or(
-          or(eq(backgroundJobs.status, 'pending'), eq(backgroundJobs.status, 'running')),
+          or(
+            eq(backgroundJobs.status, "pending"),
+            eq(backgroundJobs.status, "running"),
+          ),
           and(
-            or(eq(backgroundJobs.status, 'completed'), eq(backgroundJobs.status, 'failed')),
-            gte(backgroundJobs.completedAt, since)
-          )
-        )
-      )
+            or(
+              eq(backgroundJobs.status, "completed"),
+              eq(backgroundJobs.status, "failed"),
+            ),
+            gte(backgroundJobs.completedAt, since),
+          ),
+        ),
+      ),
     )
-    .orderBy(desc(backgroundJobs.createdAt))
-    ;
+    .orderBy(desc(backgroundJobs.createdAt));
 }
 
 export async function getChildJobs(parentJobId: string) {
@@ -79,8 +94,7 @@ export async function getChildJobs(parentJobId: string) {
     .select()
     .from(backgroundJobs)
     .where(eq(backgroundJobs.parentJobId, parentJobId))
-    .orderBy(desc(backgroundJobs.createdAt))
-    ;
+    .orderBy(desc(backgroundJobs.createdAt));
 }
 
 export async function getChildJobsByParentIds(parentIds: string[]) {
@@ -89,12 +103,14 @@ export async function getChildJobsByParentIds(parentIds: string[]) {
     .select()
     .from(backgroundJobs)
     .where(inArray(backgroundJobs.parentJobId, parentIds))
-    .orderBy(desc(backgroundJobs.createdAt))
-    ;
+    .orderBy(desc(backgroundJobs.createdAt));
 }
 
 export async function getBackgroundJob(id: string) {
-  const [row] = await db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id));
+  const [row] = await db
+    .select()
+    .from(backgroundJobs)
+    .where(eq(backgroundJobs.id, id));
   return row;
 }
 
@@ -103,10 +119,13 @@ export async function deleteBackgroundJob(id: string) {
   await db.delete(backgroundJobs).where(eq(backgroundJobs.id, id));
 }
 
-export async function getPendingBuildJobs(repositoryId?: string | null, targetRunnerId?: string) {
+export async function getPendingBuildJobs(
+  repositoryId?: string | null,
+  targetRunnerId?: string,
+) {
   const conditions = [
-    eq(backgroundJobs.status, 'pending'),
-    eq(backgroundJobs.type, 'build_run'),
+    eq(backgroundJobs.status, "pending"),
+    eq(backgroundJobs.type, "build_run"),
   ];
   if (repositoryId) {
     conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
@@ -121,14 +140,16 @@ export async function getPendingBuildJobs(repositoryId?: string | null, targetRu
     .select()
     .from(backgroundJobs)
     .where(and(...conditions))
-    .orderBy(backgroundJobs.createdAt)
-    ;
+    .orderBy(backgroundJobs.createdAt);
 }
 
-export async function getPendingTestRunJobs(repositoryId?: string | null, targetRunnerId?: string) {
+export async function getPendingTestRunJobs(
+  repositoryId?: string | null,
+  targetRunnerId?: string,
+) {
   const conditions = [
-    eq(backgroundJobs.status, 'pending'),
-    eq(backgroundJobs.type, 'test_run'),
+    eq(backgroundJobs.status, "pending"),
+    eq(backgroundJobs.type, "test_run"),
   ];
   if (repositoryId) {
     conditions.push(eq(backgroundJobs.repositoryId, repositoryId));
@@ -143,8 +164,7 @@ export async function getPendingTestRunJobs(repositoryId?: string | null, target
     .select()
     .from(backgroundJobs)
     .where(and(...conditions))
-    .orderBy(backgroundJobs.createdAt)
-    ;
+    .orderBy(backgroundJobs.createdAt);
 }
 
 export async function getRunningJobsForRunner(targetRunnerId: string) {
@@ -153,30 +173,28 @@ export async function getRunningJobsForRunner(targetRunnerId: string) {
     .from(backgroundJobs)
     .where(
       and(
-        eq(backgroundJobs.status, 'running'),
+        eq(backgroundJobs.status, "running"),
         eq(backgroundJobs.targetRunnerId, targetRunnerId),
-        or(eq(backgroundJobs.type, 'build_run'), eq(backgroundJobs.type, 'test_run'))
-      )
-    )
-    ;
+        or(
+          eq(backgroundJobs.type, "build_run"),
+          eq(backgroundJobs.type, "test_run"),
+        ),
+      ),
+    );
 }
 
 export async function getBackgroundJobByBuildId(buildId: string) {
   const jobs = await db
     .select()
     .from(backgroundJobs)
-    .where(
-      and(
-        eq(backgroundJobs.type, 'build_run'),
-      )
-    )
-    .orderBy(desc(backgroundJobs.createdAt))
-    ;
-
-  return jobs.find(job => {
-    const meta = job.metadata as { buildId?: string } | null;
-    return meta?.buildId === buildId;
-  }) ?? null;
+    .where(and(eq(backgroundJobs.type, "build_run")))
+    .orderBy(desc(backgroundJobs.createdAt));
+  return (
+    jobs.find((job) => {
+      const meta = job.metadata as { buildId?: string } | null;
+      return meta?.buildId === buildId;
+    }) ?? null
+  );
 }
 
 export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
@@ -188,45 +206,52 @@ export async function markStaleJobsAsCrashed(staleThresholdMs = 300000) {
     .from(backgroundJobs)
     .where(
       and(
-        eq(backgroundJobs.status, 'running'),
+        eq(backgroundJobs.status, "running"),
         or(
           // Job has lastActivityAt set and it's stale
           and(
             isNotNull(backgroundJobs.lastActivityAt),
-            lt(backgroundJobs.lastActivityAt, threshold)
+            lt(backgroundJobs.lastActivityAt, threshold),
           ),
           // Job has no lastActivityAt (legacy) and startedAt is stale
           and(
             isNull(backgroundJobs.lastActivityAt),
-            lt(backgroundJobs.startedAt, threshold)
-          )
-        )
-      )
-    )
-    ;
-
+            lt(backgroundJobs.startedAt, threshold),
+          ),
+        ),
+      ),
+    );
   const now = new Date();
   for (const job of staleJobs) {
-    await db.update(backgroundJobs).set({
-      status: 'failed',
-      error: 'Job timed out (no progress for 5 minutes)',
-      completedAt: now,
-    }).where(eq(backgroundJobs.id, job.id));
+    await db
+      .update(backgroundJobs)
+      .set({
+        status: "failed",
+        error: "Job timed out (no progress for 5 minutes)",
+        completedAt: now,
+      })
+      .where(eq(backgroundJobs.id, job.id));
 
     // Also update associated build and test run if this is a build_run job
-    if (job.type === 'build_run' && job.metadata) {
+    if (job.type === "build_run" && job.metadata) {
       const meta = job.metadata as { buildId?: string; testRunId?: string };
       if (meta.buildId) {
-        await db.update(builds).set({
-          overallStatus: 'blocked',
-          completedAt: now,
-        }).where(eq(builds.id, meta.buildId));
+        await db
+          .update(builds)
+          .set({
+            overallStatus: "blocked",
+            completedAt: now,
+          })
+          .where(eq(builds.id, meta.buildId));
       }
       if (meta.testRunId) {
-        await db.update(testRuns).set({
-          status: 'failed',
-          completedAt: now,
-        }).where(eq(testRuns.id, meta.testRunId));
+        await db
+          .update(testRuns)
+          .set({
+            status: "failed",
+            completedAt: now,
+          })
+          .where(eq(testRuns.id, meta.testRunId));
       }
     }
   }

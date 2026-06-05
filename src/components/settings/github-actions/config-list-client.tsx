@@ -1,10 +1,24 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Check, Trash2, Rocket, Cloud, Server, Zap, AlertTriangle, Loader2, ShieldCheck, Pencil } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Check,
+  Trash2,
+  Rocket,
+  Cloud,
+  Server,
+  Zap,
+  AlertTriangle,
+  Loader2,
+  ShieldCheck,
+  Pencil,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -12,14 +26,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import type { GithubActionConfig, GithubActionMode, GithubActionTriggerEvent, Runner } from '@/lib/db/schema';
-import { WorkflowPreview } from '@/components/settings/github-actions/workflow-preview-client';
-import { DeployDialog } from '@/components/settings/github-actions/deploy-dialog-client';
-import { ValidateDialog } from '@/components/settings/github-actions/validate-dialog-client';
-import { EditConfigDialog } from '@/components/settings/github-actions/edit-config-dialog-client';
-import { deleteGithubActionConfigAction } from '@/server/actions/github-actions';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import type {
+  GithubActionConfig,
+  GithubActionMode,
+  GithubActionTriggerEvent,
+  Runner,
+} from "@/lib/db/schema";
+import { WorkflowPreview } from "@/components/settings/github-actions/workflow-preview-client";
+import { DeployDialog } from "@/components/settings/github-actions/deploy-dialog-client";
+import { ValidateDialog } from "@/components/settings/github-actions/validate-dialog-client";
+import { EditConfigDialog } from "@/components/settings/github-actions/edit-config-dialog-client";
+import { deleteGithubActionConfigAction } from "@/server/actions/github-actions";
+import { toast } from "sonner";
 
 interface ConfigListProps {
   configs: GithubActionConfig[];
@@ -39,8 +58,17 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
       <p className="text-xs text-muted-foreground">{label}</p>
       <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2">
         <code className="text-xs flex-1 truncate">{value}</code>
-        <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 px-1.5 shrink-0">
-          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCopy}
+          className="h-6 px-1.5 shrink-0"
+        >
+          {copied ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <Copy className="h-3 w-3" />
+          )}
         </Button>
       </div>
     </div>
@@ -71,9 +99,9 @@ function ConfigCard({
     try {
       await deleteGithubActionConfigAction(config.id);
       setDeleteOpen(false);
-      toast.success('Config deleted');
+      toast.success("Config deleted");
     } catch {
-      toast.error('Failed to delete config');
+      toast.error("Failed to delete config");
     } finally {
       setDeleting(false);
     }
@@ -83,7 +111,11 @@ function ConfigCard({
     mode,
     repositoryOwner: config.repositoryOwner,
     repositoryName: config.repositoryName,
-    triggerEvents: (config.triggerEvents ?? ['push', 'pull_request', 'workflow_dispatch']) as GithubActionTriggerEvent[],
+    triggerEvents: (config.triggerEvents ?? [
+      "push",
+      "pull_request",
+      "workflow_dispatch",
+    ]) as GithubActionTriggerEvent[],
     branchFilter: (config.branchFilter ?? []) as string[],
     cronSchedule: config.cronSchedule,
     targetUrl: config.targetUrl,
@@ -109,34 +141,75 @@ function ConfigCard({
                 <span className="font-mono text-sm font-medium truncate">
                   {config.repositoryOwner}/{config.repositoryName}
                 </span>
-                <Badge variant={mode === 'ephemeral' ? 'default' : mode === 'auto' ? 'default' : 'secondary'} className="text-xs">
-                  {mode === 'ephemeral' ? (
-                    <><Cloud className="h-3 w-3 mr-1" /> Ephemeral</>
-                  ) : mode === 'auto' ? (
-                    <><Zap className="h-3 w-3 mr-1" /> Auto</>
+                <Badge
+                  variant={
+                    mode === "ephemeral"
+                      ? "default"
+                      : mode === "auto"
+                        ? "default"
+                        : "secondary"
+                  }
+                  className="text-xs"
+                >
+                  {mode === "ephemeral" ? (
+                    <>
+                      <Cloud className="h-3 w-3 mr-1" /> Ephemeral
+                    </>
+                  ) : mode === "auto" ? (
+                    <>
+                      <Zap className="h-3 w-3 mr-1" /> Auto
+                    </>
                   ) : (
-                    <><Server className="h-3 w-3 mr-1" /> Persistent</>
+                    <>
+                      <Server className="h-3 w-3 mr-1" /> Persistent
+                    </>
                   )}
                 </Badge>
                 {config.workflowDeployed && (
-                  <Badge variant="outline" className="text-xs text-green-600 border-green-600/30">
+                  <Badge
+                    variant="outline"
+                    className="text-xs text-green-600 border-green-600/30"
+                  >
                     Deployed
                   </Badge>
                 )}
               </div>
               {runner && (
-                <p className="text-xs text-muted-foreground mt-0.5">Runner: {runner.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Runner: {runner.name}
+                </p>
               )}
             </div>
-            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-              <Button variant="ghost" size="icon" onClick={() => setEditOpen(true)} className="h-8 w-8" title="Edit">
+            <div
+              className="flex items-center gap-0.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setEditOpen(true)}
+                className="h-8 w-8"
+                title="Edit"
+              >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setValidateOpen(true)} className="h-8 w-8" title="Validate">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setValidateOpen(true)}
+                className="h-8 w-8"
+                title="Validate"
+              >
                 <ShieldCheck className="h-3.5 w-3.5" />
               </Button>
               {hasGithubAccount && (
-                <Button variant="ghost" size="icon" onClick={() => setDeployOpen(true)} className="h-8 w-8" title="Deploy">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setDeployOpen(true)}
+                  className="h-8 w-8"
+                  title="Deploy"
+                >
                   <Rocket className="h-3.5 w-3.5" />
                 </Button>
               )}
@@ -167,12 +240,16 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_TOKEN</code> as
-                      a repository secret in GitHub
+                      Add{" "}
+                      <code className="text-xs bg-muted px-1 py-0.5 rounded">
+                        LASTEST_TOKEN
+                      </code>{" "}
+                      as a repository secret in GitHub
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Go to your repo → Settings → Secrets and variables → Actions → New repository
-                      secret. Use a runner token from Settings → Runners.
+                      Go to your repo → Settings → Secrets and variables →
+                      Actions → New repository secret. Use a runner token from
+                      Settings → Runners.
                     </p>
                   </div>
                 </div>
@@ -183,12 +260,19 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Add <code className="text-xs bg-muted px-1 py-0.5 rounded">LASTEST_URL</code> as
-                      a repository secret
+                      Add{" "}
+                      <code className="text-xs bg-muted px-1 py-0.5 rounded">
+                        LASTEST_URL
+                      </code>{" "}
+                      as a repository secret
                     </p>
                     <CopyBlock
                       label="Your Lastest instance URL"
-                      value={typeof window !== 'undefined' ? window.location.origin : ''}
+                      value={
+                        typeof window !== "undefined"
+                          ? window.location.origin
+                          : ""
+                      }
                     />
                   </div>
                 </div>
@@ -199,13 +283,14 @@ function ConfigCard({
                   </span>
                   <div className="flex-1 space-y-2">
                     <p className="text-sm">
-                      Create the workflow file at{' '}
+                      Create the workflow file at{" "}
                       <code className="text-xs bg-muted px-1 py-0.5 rounded">
                         .github/workflows/lastest.yml
                       </code>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Copy the YAML below, or use the Deploy button to push it directly.
+                      Copy the YAML below, or use the Deploy button to push it
+                      directly.
                     </p>
                   </div>
                 </div>
@@ -221,16 +306,29 @@ function ConfigCard({
         )}
       </Card>
 
-      <EditConfigDialog open={editOpen} onOpenChange={setEditOpen} config={config} runners={runners} />
-      <ValidateDialog open={validateOpen} onOpenChange={setValidateOpen} config={config} />
-      <DeployDialog open={deployOpen} onOpenChange={setDeployOpen} config={config} />
+      <EditConfigDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        config={config}
+        runners={runners}
+      />
+      <ValidateDialog
+        open={validateOpen}
+        onOpenChange={setValidateOpen}
+        config={config}
+      />
+      <DeployDialog
+        open={deployOpen}
+        onOpenChange={setDeployOpen}
+        config={config}
+      />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete GitHub Actions Config</DialogTitle>
             <DialogDescription>
-              Remove the config for{' '}
+              Remove the config for{" "}
               <span className="font-mono text-foreground">
                 {config.repositoryOwner}/{config.repositoryName}
               </span>
@@ -244,23 +342,36 @@ function ConfigCard({
               <ul className="list-disc ml-4 mt-1 space-y-0.5">
                 {config.workflowDeployed && (
                   <>
-                    <li>Delete <code className="font-mono">.github/workflows/lastest.yml</code> from the repo</li>
+                    <li>
+                      Delete{" "}
+                      <code className="font-mono">
+                        .github/workflows/lastest.yml
+                      </code>{" "}
+                      from the repo
+                    </li>
                     <li>Remove LASTEST_TOKEN and LASTEST_URL secrets</li>
                   </>
                 )}
-                {(mode === 'ephemeral' || mode === 'auto') && config.runnerId && (
-                  <li>Delete the auto-created runner</li>
-                )}
+                {(mode === "ephemeral" || mode === "auto") &&
+                  config.runnerId && <li>Delete the auto-created runner</li>}
                 <li>Delete this configuration</li>
               </ul>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
               {deleting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Delete
             </Button>
@@ -271,7 +382,11 @@ function ConfigCard({
   );
 }
 
-export function ConfigList({ configs, runners, hasGithubAccount }: ConfigListProps) {
+export function ConfigList({
+  configs,
+  runners,
+  hasGithubAccount,
+}: ConfigListProps) {
   return (
     <div className="space-y-3">
       {configs.map((config) => (

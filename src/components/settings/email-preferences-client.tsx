@@ -1,12 +1,21 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Mail } from 'lucide-react';
-import { getMyConsents, updateMarketingConsent } from '@/server/actions/consent';
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Mail } from "lucide-react";
+import {
+  getMyConsents,
+  updateMarketingConsent,
+} from "@/server/actions/consent";
 
 export function EmailPreferencesCard() {
   const [marketingEnabled, setMarketingEnabled] = useState(false);
@@ -16,7 +25,8 @@ export function EmailPreferencesCard() {
   useEffect(() => {
     getMyConsents().then((consents) => {
       const hasMarketing = consents.some(
-        (c) => c.consentType === 'marketing_emails' && c.granted && !c.revokedAt
+        (c) =>
+          c.consentType === "marketing_emails" && c.granted && !c.revokedAt,
       );
       setMarketingEnabled(hasMarketing);
       setLoaded(true);
@@ -39,7 +49,9 @@ export function EmailPreferencesCard() {
           <Mail className="h-5 w-5" />
           Email Preferences
         </CardTitle>
-        <CardDescription>Manage your email communication preferences</CardDescription>
+        <CardDescription>
+          Manage your email communication preferences
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between gap-4">
@@ -48,7 +60,8 @@ export function EmailPreferencesCard() {
               Marketing emails
             </Label>
             <p className="text-xs text-muted-foreground">
-              Receive product updates, tips, tutorials, and feature announcements
+              Receive product updates, tips, tutorials, and feature
+              announcements
             </p>
           </div>
           <Switch
@@ -59,8 +72,13 @@ export function EmailPreferencesCard() {
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Transactional emails (password resets, security alerts) are always sent regardless of this setting.{' '}
-          <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+          Transactional emails (password resets, security alerts) are always
+          sent regardless of this setting.{" "}
+          <Link
+            href="/privacy"
+            className="underline underline-offset-4 hover:text-foreground"
+            target="_blank"
+          >
             Privacy Policy
           </Link>
         </p>

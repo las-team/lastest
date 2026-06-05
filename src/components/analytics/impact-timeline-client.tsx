@@ -1,6 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useTransition, useRef, useCallback, memo, useMemo } from 'react';
+import {
+  useState,
+  useTransition,
+  useRef,
+  useCallback,
+  memo,
+  useMemo,
+} from "react";
 import {
   AreaChart,
   Area,
@@ -11,17 +18,17 @@ import {
   ReferenceLine,
   ResponsiveContainer,
   Brush,
-} from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+} from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { TrendingDown, TrendingUp, GitPullRequest, Bug } from 'lucide-react';
-import { getImpactTimelineData } from '@/server/actions/analytics';
+} from "@/components/ui/select";
+import { TrendingDown, TrendingUp, GitPullRequest, Bug } from "lucide-react";
+import { getImpactTimelineData } from "@/server/actions/analytics";
 
 type TimelineEntry = {
   week: string;
@@ -70,7 +77,7 @@ type ChartPoint = {
 };
 
 function weekKeyToDate(weekKey: string): Date {
-  const [yearStr, weekStr] = weekKey.split('-');
+  const [yearStr, weekStr] = weekKey.split("-");
   const year = parseInt(yearStr, 10);
   const week = parseInt(weekStr, 10);
   const jan4 = new Date(Date.UTC(year, 0, 4));
@@ -81,7 +88,20 @@ function weekKeyToDate(weekKey: string): Date {
 }
 
 function formatWeekLabel(d: Date): string {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
 }
 
@@ -93,9 +113,13 @@ function getWeekNumber(d: Date): number {
 }
 
 function formatDate(d: Date | string | null | undefined): string {
-  if (!d) return '';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (!d) return "";
+  const date = typeof d === "string" ? new Date(d) : d;
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function buildContinuousTimeline(
@@ -109,13 +133,18 @@ function buildContinuousTimeline(
     dataMap.set(entry.week, { issues: entry.count, closed: entry.closedCount });
   }
 
-  const prMap = new Map<string, { number: number | null; title: string | null; author: string | null }[]>();
+  const prMap = new Map<
+    string,
+    { number: number | null; title: string | null; author: string | null }[]
+  >();
   for (const pr of mergedPRs) {
     if (!pr.mergedAt) continue;
     const d = new Date(pr.mergedAt);
-    const wk = `${d.getUTCFullYear()}-${String(getWeekNumber(d)).padStart(2, '0')}`;
+    const wk = `${d.getUTCFullYear()}-${String(getWeekNumber(d)).padStart(2, "0")}`;
     if (!prMap.has(wk)) prMap.set(wk, []);
-    prMap.get(wk)!.push({ number: pr.githubPrNumber, title: pr.title, author: pr.author });
+    prMap
+      .get(wk)!
+      .push({ number: pr.githubPrNumber, title: pr.title, author: pr.author });
   }
 
   const allKeys = [...dataMap.keys(), ...prMap.keys()].sort();
@@ -129,7 +158,7 @@ function buildContinuousTimeline(
   while (current <= endDate) {
     const year = current.getUTCFullYear();
     const wn = getWeekNumber(current);
-    const key = `${year}-${String(wn).padStart(2, '0')}`;
+    const key = `${year}-${String(wn).padStart(2, "0")}`;
     const d = dataMap.get(key);
     const prs = prMap.get(key) ?? [];
 
@@ -160,11 +189,12 @@ function computeMetrics(chartData: ChartPoint[], splitIndex: number) {
   const beforeRate = issuesBefore / beforeWeeks;
   const afterRate = issuesAfter / afterWeeks;
 
-  const percentChange = beforeRate > 0
-    ? Math.round(((afterRate - beforeRate) / beforeRate) * 100)
-    : 0;
+  const percentChange =
+    beforeRate > 0
+      ? Math.round(((afterRate - beforeRate) / beforeRate) * 100)
+      : 0;
 
-  const splitLabel = chartData[splitIndex]?.weekLabel ?? '';
+  const splitLabel = chartData[splitIndex]?.weekLabel ?? "";
 
   return {
     issuesBefore,
@@ -190,19 +220,37 @@ function CustomTooltip(props: Record<string, unknown>) {
     <div className="rounded-lg border bg-card p-3 shadow-md text-sm min-w-[180px]">
       <p className="font-medium mb-1">Week of {point.weekLabel}</p>
       <div className="flex items-center gap-2 text-xs">
-        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: 'oklch(0.55 0.17 195)' }} />
-        <span>Opened: <strong>{point.issues}</strong></span>
+        <span
+          className="inline-block w-2 h-2 rounded-full"
+          style={{ backgroundColor: "oklch(0.55 0.17 195)" }}
+        />
+        <span>
+          Opened: <strong>{point.issues}</strong>
+        </span>
       </div>
       <div className="flex items-center gap-2 text-xs">
-        <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: 'oklch(0.68 0.14 195)' }} />
-        <span>Closed: <strong>{point.closed}</strong></span>
+        <span
+          className="inline-block w-2 h-2 rounded-full"
+          style={{ backgroundColor: "oklch(0.68 0.14 195)" }}
+        />
+        <span>
+          Closed: <strong>{point.closed}</strong>
+        </span>
       </div>
       {point.prs.length > 0 && (
         <div className="mt-2 pt-2 border-t space-y-1">
           {point.prs.map((pr, i) => (
-            <div key={i} className="flex items-center gap-1 text-xs text-muted-foreground">
-              <GitPullRequest className="h-3 w-3 shrink-0" style={{ color: 'oklch(0.65 0.15 280)' }} />
-              <span className="truncate">#{pr.number} {pr.title?.slice(0, 35)}</span>
+            <div
+              key={i}
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+            >
+              <GitPullRequest
+                className="h-3 w-3 shrink-0"
+                style={{ color: "oklch(0.65 0.15 280)" }}
+              />
+              <span className="truncate">
+                #{pr.number} {pr.title?.slice(0, 35)}
+              </span>
             </div>
           ))}
         </div>
@@ -224,15 +272,34 @@ const ImpactChart = memo(function ImpactChart({
 }) {
   return (
     <ResponsiveContainer width="100%" height={500}>
-      <AreaChart data={chartData} margin={{ top: 30, right: 30, left: 0, bottom: 10 }}>
+      <AreaChart
+        data={chartData}
+        margin={{ top: 30, right: 30, left: 0, bottom: 10 }}
+      >
         <defs>
           <linearGradient id="issueGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="oklch(0.55 0.17 195)" stopOpacity={0.05} />
+            <stop
+              offset="5%"
+              stopColor="oklch(0.55 0.17 195)"
+              stopOpacity={0.3}
+            />
+            <stop
+              offset="95%"
+              stopColor="oklch(0.55 0.17 195)"
+              stopOpacity={0.05}
+            />
           </linearGradient>
           <linearGradient id="closedGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.2} />
-            <stop offset="95%" stopColor="oklch(0.68 0.14 195)" stopOpacity={0.02} />
+            <stop
+              offset="5%"
+              stopColor="oklch(0.68 0.14 195)"
+              stopOpacity={0.2}
+            />
+            <stop
+              offset="95%"
+              stopColor="oklch(0.68 0.14 195)"
+              stopOpacity={0.02}
+            />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -280,9 +347,9 @@ const ImpactChart = memo(function ImpactChart({
               strokeDasharray="3 3"
               strokeWidth={1.5}
               label={{
-                value: `${point.prs.length} PR${point.prs.length > 1 ? 's' : ''}`,
-                position: 'top',
-                fill: 'oklch(0.65 0.15 280)',
+                value: `${point.prs.length} PR${point.prs.length > 1 ? "s" : ""}`,
+                position: "top",
+                fill: "oklch(0.65 0.15 280)",
                 fontSize: 10,
               }}
             />
@@ -294,9 +361,9 @@ const ImpactChart = memo(function ImpactChart({
           stroke="hsl(var(--border))"
           fill="transparent"
           travellerWidth={10}
-          tickFormatter={() => ''}
+          tickFormatter={() => ""}
           onChange={(range) => {
-            if (range && typeof range.startIndex === 'number') {
+            if (range && typeof range.startIndex === "number") {
               onBrushChange(range.startIndex);
             }
           }}
@@ -319,7 +386,7 @@ const ImpactChart = memo(function ImpactChart({
 
 export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
   const [data, setData] = useState<ImpactData | null>(initialData);
-  const [selectedAuthor, setSelectedAuthor] = useState<string>('all');
+  const [selectedAuthor, setSelectedAuthor] = useState<string>("all");
   const [_isPending, startTransition] = useTransition();
   const [splitIndex, setSplitIndex] = useState<number | null>(null);
 
@@ -336,7 +403,7 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
   }, []);
 
   const chartData = useMemo(
-    () => data ? buildContinuousTimeline(data.timeline, data.mergedPRs) : [],
+    () => (data ? buildContinuousTimeline(data.timeline, data.mergedPRs) : []),
     [data],
   );
 
@@ -353,7 +420,7 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
     startTransition(async () => {
       const result = await getImpactTimelineData(
         repositoryId,
-        author === 'all' ? undefined : author,
+        author === "all" ? undefined : author,
       );
       setData(result);
       setSplitIndex(null);
@@ -371,9 +438,10 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
   const { mergedPRs, authors, summary } = data;
 
   const effectiveSplit = splitIndex ?? Math.floor(chartData.length / 2);
-  const metrics = chartData.length > 0 ? computeMetrics(chartData, effectiveSplit) : null;
+  const metrics =
+    chartData.length > 0 ? computeMetrics(chartData, effectiveSplit) : null;
   const isImproving = metrics ? metrics.percentChange < 0 : false;
-  const splitWeekLabel = chartData[effectiveSplit]?.weekLabel ?? '';
+  const splitWeekLabel = chartData[effectiveSplit]?.weekLabel ?? "";
 
   return (
     <div className="space-y-6">
@@ -413,7 +481,9 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
             <CardContent>
               <div className="flex items-center gap-2">
                 <Bug className="h-5 w-5 text-primary" />
-                <span className="text-2xl font-bold">{metrics.issuesBefore}</span>
+                <span className="text-2xl font-bold">
+                  {metrics.issuesBefore}
+                </span>
                 <span className="text-xs text-muted-foreground">
                   ({metrics.beforeRate}/wk over {metrics.beforeWeeks}wk)
                 </span>
@@ -430,7 +500,9 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
             <CardContent>
               <div className="flex items-center gap-2">
                 <Bug className="h-5 w-5 text-chart-2" />
-                <span className="text-2xl font-bold">{metrics.issuesAfter}</span>
+                <span className="text-2xl font-bold">
+                  {metrics.issuesAfter}
+                </span>
                 <span className="text-xs text-muted-foreground">
                   ({metrics.afterRate}/wk over {metrics.afterWeeks}wk)
                 </span>
@@ -451,8 +523,11 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
                 ) : (
                   <TrendingUp className="h-5 w-5 text-destructive" />
                 )}
-                <span className={`text-2xl font-bold ${isImproving ? 'text-primary' : 'text-destructive'}`}>
-                  {metrics.percentChange > 0 ? '+' : ''}{metrics.percentChange}%
+                <span
+                  className={`text-2xl font-bold ${isImproving ? "text-primary" : "text-destructive"}`}
+                >
+                  {metrics.percentChange > 0 ? "+" : ""}
+                  {metrics.percentChange}%
                 </span>
               </div>
             </CardContent>
@@ -467,7 +542,9 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
             <CardContent>
               <div className="flex items-center gap-2">
                 <GitPullRequest className="h-5 w-5 text-chart-3" />
-                <span className="text-2xl font-bold">{summary.totalMergedPRs}</span>
+                <span className="text-2xl font-bold">
+                  {summary.totalMergedPRs}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -480,10 +557,14 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
           <CardContent className="pt-6">
             <p className="text-sm">
               Comparing before and after {splitWeekLabel}
-              {selectedAuthor !== 'all' ? ` (filtered to ${selectedAuthor})` : ''},
-              the issue rate decreased by{' '}
-              <strong className="text-primary">{Math.abs(metrics.percentChange)}%</strong> —
-              from {metrics.beforeRate}/wk to {metrics.afterRate}/wk.
+              {selectedAuthor !== "all"
+                ? ` (filtered to ${selectedAuthor})`
+                : ""}
+              , the issue rate decreased by{" "}
+              <strong className="text-primary">
+                {Math.abs(metrics.percentChange)}%
+              </strong>{" "}
+              — from {metrics.beforeRate}/wk to {metrics.afterRate}/wk.
             </p>
           </CardContent>
         </Card>
@@ -500,7 +581,10 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
               No issue data to display.
             </div>
           ) : (
-            <ImpactChart chartData={chartData} onBrushChange={handleBrushChange} />
+            <ImpactChart
+              chartData={chartData}
+              onBrushChange={handleBrushChange}
+            />
           )}
         </CardContent>
       </Card>
@@ -514,17 +598,20 @@ export function ImpactTimelineClient({ repositoryId, initialData }: Props) {
           <CardContent>
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {mergedPRs.map((pr) => (
-                <div key={pr.id} className="flex items-center justify-between text-sm py-1 border-b last:border-0">
+                <div
+                  key={pr.id}
+                  className="flex items-center justify-between text-sm py-1 border-b last:border-0"
+                >
                   <div className="flex items-center gap-2">
                     <GitPullRequest className="h-4 w-4 text-chart-3" />
                     <span className="font-medium">#{pr.githubPrNumber}</span>
-                    <span className="text-muted-foreground truncate max-w-md">{pr.title}</span>
+                    <span className="text-muted-foreground truncate max-w-md">
+                      {pr.title}
+                    </span>
                   </div>
                   <div className="flex items-center gap-3 text-muted-foreground shrink-0">
                     {pr.author && <span>{pr.author}</span>}
-                    {pr.mergedAt && (
-                      <span>{formatDate(pr.mergedAt)}</span>
-                    )}
+                    {pr.mergedAt && <span>{formatDate(pr.mergedAt)}</span>}
                   </div>
                 </div>
               ))}

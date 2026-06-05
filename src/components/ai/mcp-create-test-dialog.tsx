@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,26 +8,34 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { AICodePreview } from './ai-code-preview';
-import { createTest, saveGeneratedTest } from '@/server/actions/ai';
-import { mcpValidateTest } from '@/server/actions/ai-mcp';
-import { Switch } from '@/components/ui/switch';
-import { Loader2, Wand2, Save, RefreshCw, CheckCircle2, XCircle, Zap } from 'lucide-react';
-import { toast } from 'sonner';
-import type { FunctionalArea } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { AICodePreview } from "./ai-code-preview";
+import { createTest, saveGeneratedTest } from "@/server/actions/ai";
+import { mcpValidateTest } from "@/server/actions/ai-mcp";
+import { Switch } from "@/components/ui/switch";
+import {
+  Loader2,
+  Wand2,
+  Save,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Zap,
+} from "lucide-react";
+import { toast } from "sonner";
+import type { FunctionalArea } from "@/lib/db/schema";
 
 interface ValidationResult {
   selector: string;
@@ -51,27 +59,31 @@ export function MCPCreateTestDialog({
   areas,
   baseUrl,
 }: MCPCreateTestDialogProps) {
-  const [step, setStep] = useState<'prompt' | 'validating' | 'preview'>('prompt');
+  const [step, setStep] = useState<"prompt" | "validating" | "preview">(
+    "prompt",
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Prompt step state
-  const [prompt, setPrompt] = useState('');
-  const [targetUrl, setTargetUrl] = useState('');
+  const [prompt, setPrompt] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
   const [useMCP, setUseMCP] = useState(false);
 
   // Preview step state
-  const [generatedCode, setGeneratedCode] = useState('');
-  const [testName, setTestName] = useState('');
-  const [functionalAreaId, setFunctionalAreaId] = useState<string>('');
-  const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
+  const [generatedCode, setGeneratedCode] = useState("");
+  const [testName, setTestName] = useState("");
+  const [functionalAreaId, setFunctionalAreaId] = useState<string>("");
+  const [validationResults, setValidationResults] = useState<
+    ValidationResult[]
+  >([]);
   const [iterationCount, setIterationCount] = useState(0);
   const [maxIterations, setMaxIterations] = useState(1);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
-      toast.error('Please enter a prompt');
+      toast.error("Please enter a prompt");
       return;
     }
 
@@ -87,18 +99,22 @@ export function MCPCreateTestDialog({
 
       if (result.success && result.code) {
         setGeneratedCode(result.code);
-        const defaultName = prompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'AI Generated Test';
+        const defaultName =
+          prompt
+            .slice(0, 50)
+            .replace(/[^a-zA-Z0-9\s]/g, "")
+            .trim() || "AI Generated Test";
         setTestName(defaultName);
 
         // Validate the generated code
         await validateCode(result.code);
       } else {
-        toast.error(result.error || 'Failed to generate test');
-        setStep('prompt');
+        toast.error(result.error || "Failed to generate test");
+        setStep("prompt");
       }
     } catch (_error) {
-      toast.error('Failed to generate test');
-      setStep('prompt');
+      toast.error("Failed to generate test");
+      setStep("prompt");
     } finally {
       setIsGenerating(false);
     }
@@ -106,12 +122,12 @@ export function MCPCreateTestDialog({
 
   const validateCode = async (code: string, currentIteration = 0) => {
     setIsValidating(true);
-    setStep('validating');
+    setStep("validating");
 
     try {
-      const fullUrl = targetUrl.startsWith('http')
+      const fullUrl = targetUrl.startsWith("http")
         ? targetUrl
-        : `${baseUrl}${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+        : `${baseUrl}${targetUrl.startsWith("/") ? "" : "/"}${targetUrl}`;
 
       const result = await mcpValidateTest(code, fullUrl);
 
@@ -120,7 +136,7 @@ export function MCPCreateTestDialog({
         setGeneratedCode(code);
 
         if (result.valid) {
-          toast.success('All selectors validated');
+          toast.success("All selectors validated");
           await autoSaveTest(code);
         } else {
           // Check if we can auto-fix
@@ -129,32 +145,38 @@ export function MCPCreateTestDialog({
             await handleAutoFix(code, result.results || [], currentIteration);
           } else {
             if (currentIteration >= maxIterations) {
-              toast.warning('Max iterations reached. Saving with current selectors.');
+              toast.warning(
+                "Max iterations reached. Saving with current selectors.",
+              );
             }
             await autoSaveTest(code);
           }
         }
       } else {
-        toast.error(result.error || 'Validation failed');
-        setStep('preview');
+        toast.error(result.error || "Validation failed");
+        setStep("preview");
       }
     } catch (_error) {
-      toast.error('Validation failed');
-      setStep('preview');
+      toast.error("Validation failed");
+      setStep("preview");
     } finally {
       setIsValidating(false);
     }
   };
 
-  const handleAutoFix = async (code: string, results: ValidationResult[], currentIteration: number) => {
+  const handleAutoFix = async (
+    code: string,
+    results: ValidationResult[],
+    currentIteration: number,
+  ) => {
     const nextIteration = currentIteration + 1;
     setIterationCount(nextIteration);
     setIsGenerating(true);
 
     const invalidSelectors = results
       .filter((r) => !r.valid)
-      .map((r) => `"${r.selector}": ${r.error || 'No matching elements'}`)
-      .join('\n');
+      .map((r) => `"${r.selector}": ${r.error || "No matching elements"}`)
+      .join("\n");
 
     try {
       const fixPrompt = `${prompt}\n\nThe following selectors in your previous code are invalid:\n${invalidSelectors}\n\nPlease regenerate the test with valid selectors. Use more robust selectors like data-testid, aria-label, or text content.`;
@@ -169,12 +191,12 @@ export function MCPCreateTestDialog({
         setGeneratedCode(result.code);
         await validateCode(result.code, nextIteration);
       } else {
-        toast.error('Failed to auto-fix test');
-        setStep('preview');
+        toast.error("Failed to auto-fix test");
+        setStep("preview");
       }
     } catch (_error) {
-      toast.error('Failed to auto-fix test');
-      setStep('preview');
+      toast.error("Failed to auto-fix test");
+      setStep("preview");
     } finally {
       setIsGenerating(false);
     }
@@ -185,7 +207,12 @@ export function MCPCreateTestDialog({
   };
 
   const generateTestName = (userPrompt: string): string => {
-    return userPrompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'AI Generated Test';
+    return (
+      userPrompt
+        .slice(0, 50)
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .trim() || "AI Generated Test"
+    );
   };
 
   const autoSaveTest = async (code: string) => {
@@ -196,22 +223,25 @@ export function MCPCreateTestDialog({
     try {
       const result = await saveGeneratedTest({
         repositoryId,
-        functionalAreaId: functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
+        functionalAreaId:
+          functionalAreaId && functionalAreaId !== "__none__"
+            ? functionalAreaId
+            : undefined,
         name,
         code,
         targetUrl: targetUrl || undefined,
       });
 
       if (result.success) {
-        toast.success('Test created and saved');
+        toast.success("Test created and saved");
         handleClose();
       } else {
-        toast.error(result.error || 'Failed to save test');
-        setStep('preview');
+        toast.error(result.error || "Failed to save test");
+        setStep("preview");
       }
     } catch (_error) {
-      toast.error('Failed to save test');
-      setStep('preview');
+      toast.error("Failed to save test");
+      setStep("preview");
     } finally {
       setIsSaving(false);
     }
@@ -219,7 +249,7 @@ export function MCPCreateTestDialog({
 
   const handleSave = async () => {
     if (!testName.trim()) {
-      toast.error('Please enter a test name');
+      toast.error("Please enter a test name");
       return;
     }
 
@@ -227,34 +257,37 @@ export function MCPCreateTestDialog({
     try {
       const result = await saveGeneratedTest({
         repositoryId,
-        functionalAreaId: functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
+        functionalAreaId:
+          functionalAreaId && functionalAreaId !== "__none__"
+            ? functionalAreaId
+            : undefined,
         name: testName.trim(),
         code: generatedCode,
         targetUrl: targetUrl || undefined,
       });
 
       if (result.success) {
-        toast.success('Test saved successfully');
+        toast.success("Test saved successfully");
         handleClose();
       } else {
-        toast.error(result.error || 'Failed to save test');
+        toast.error(result.error || "Failed to save test");
       }
     } catch (_error) {
-      toast.error('Failed to save test');
+      toast.error("Failed to save test");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleClose = () => {
-    setStep('prompt');
-    setPrompt('');
-    setTargetUrl('');
+    setStep("prompt");
+    setPrompt("");
+    setTargetUrl("");
     setUseMCP(false);
     setMaxIterations(1);
-    setGeneratedCode('');
-    setTestName('');
-    setFunctionalAreaId('');
+    setGeneratedCode("");
+    setTestName("");
+    setFunctionalAreaId("");
     setValidationResults([]);
     setIterationCount(0);
     onOpenChange(false);
@@ -272,15 +305,15 @@ export function MCPCreateTestDialog({
             Create Test with MCP Validation
           </DialogTitle>
           <DialogDescription>
-            {step === 'prompt'
-              ? 'AI will generate test code and validate selectors against the live page'
-              : step === 'validating'
-              ? 'Validating selectors against the live page...'
-              : 'Review the validated test code'}
+            {step === "prompt"
+              ? "AI will generate test code and validate selectors against the live page"
+              : step === "validating"
+                ? "Validating selectors against the live page..."
+                : "Review the validated test code"}
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'prompt' ? (
+        {step === "prompt" ? (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="prompt">Describe your test</Label>
@@ -294,7 +327,9 @@ export function MCPCreateTestDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="targetUrl">Target URL (required for MCP validation)</Label>
+              <Label htmlFor="targetUrl">
+                Target URL (required for MCP validation)
+              </Label>
               <Input
                 id="targetUrl"
                 value={targetUrl}
@@ -302,15 +337,20 @@ export function MCPCreateTestDialog({
                 placeholder="e.g., /login"
               />
               <p className="text-xs text-muted-foreground">
-                Full URL: {baseUrl}{targetUrl.startsWith('/') ? '' : '/'}{targetUrl || '/'}
+                Full URL: {baseUrl}
+                {targetUrl.startsWith("/") ? "" : "/"}
+                {targetUrl || "/"}
               </p>
             </div>
 
             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
               <div className="space-y-0.5">
-                <Label htmlFor="useMCP" className="cursor-pointer">MCP Exploration Mode</Label>
+                <Label htmlFor="useMCP" className="cursor-pointer">
+                  MCP Exploration Mode
+                </Label>
                 <p className="text-xs text-muted-foreground">
-                  AI navigates the live page to discover accurate selectors before generating test code
+                  AI navigates the live page to discover accurate selectors
+                  before generating test code
                 </p>
               </div>
               <Switch
@@ -332,17 +372,23 @@ export function MCPCreateTestDialog({
                   variant="outline"
                   size="icon"
                   className="h-8 w-8"
-                  onClick={() => setMaxIterations(Math.max(0, maxIterations - 1))}
+                  onClick={() =>
+                    setMaxIterations(Math.max(0, maxIterations - 1))
+                  }
                   disabled={maxIterations <= 0}
                 >
                   -
                 </Button>
-                <span className="w-6 text-center font-medium">{maxIterations}</span>
+                <span className="w-6 text-center font-medium">
+                  {maxIterations}
+                </span>
                 <Button
                   variant="outline"
                   size="icon"
                   className="h-8 w-8"
-                  onClick={() => setMaxIterations(Math.min(5, maxIterations + 1))}
+                  onClick={() =>
+                    setMaxIterations(Math.min(5, maxIterations + 1))
+                  }
                   disabled={maxIterations >= 5}
                 >
                   +
@@ -350,11 +396,13 @@ export function MCPCreateTestDialog({
               </div>
             </div>
           </div>
-        ) : step === 'validating' ? (
+        ) : step === "validating" ? (
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
             <p className="text-muted-foreground">
-              {isGenerating ? 'Generating test code...' : 'Validating selectors against live page...'}
+              {isGenerating
+                ? "Generating test code..."
+                : "Validating selectors against live page..."}
             </p>
             {iterationCount > 0 && (
               <p className="text-xs text-muted-foreground mt-2">
@@ -403,8 +451,12 @@ export function MCPCreateTestDialog({
                     .map((r, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm">
                         <XCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
-                        <code className="text-xs bg-muted px-1 rounded">{r.selector}</code>
-                        <span className="text-xs text-muted-foreground">{r.error || 'Not found'}</span>
+                        <code className="text-xs bg-muted px-1 rounded">
+                          {r.selector}
+                        </code>
+                        <span className="text-xs text-muted-foreground">
+                          {r.error || "Not found"}
+                        </span>
                       </div>
                     ))}
                 </div>
@@ -424,7 +476,10 @@ export function MCPCreateTestDialog({
 
               <div className="space-y-2">
                 <Label>Functional Area</Label>
-                <Select value={functionalAreaId} onValueChange={setFunctionalAreaId}>
+                <Select
+                  value={functionalAreaId}
+                  onValueChange={setFunctionalAreaId}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select area (optional)" />
                   </SelectTrigger>
@@ -468,12 +523,15 @@ export function MCPCreateTestDialog({
         )}
 
         <DialogFooter>
-          {step === 'prompt' ? (
+          {step === "prompt" ? (
             <>
               <Button variant="outline" onClick={handleClose}>
                 Cancel
               </Button>
-              <Button onClick={handleGenerate} disabled={isGenerating || !prompt.trim() || !targetUrl.trim()}>
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating || !prompt.trim() || !targetUrl.trim()}
+              >
                 {isGenerating ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
@@ -482,16 +540,19 @@ export function MCPCreateTestDialog({
                 Generate & Validate
               </Button>
             </>
-          ) : step === 'validating' ? (
+          ) : step === "validating" ? (
             <Button variant="outline" onClick={handleClose}>
               Cancel
             </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={() => setStep('prompt')}>
+              <Button variant="outline" onClick={() => setStep("prompt")}>
                 Back
               </Button>
-              <Button onClick={handleSave} disabled={isSaving || !testName.trim()}>
+              <Button
+                onClick={handleSave}
+                disabled={isSaving || !testName.trim()}
+              >
                 {isSaving ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (

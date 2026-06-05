@@ -11,15 +11,15 @@
  * aiDiffingModel from settings).
  */
 
-import type { ChangeRisk, ChangeMapFile, ChangeMapArea } from '@/lib/db/schema';
-import { createOpenRouterProvider } from './openrouter';
-import { createAnthropicDirectProvider } from './anthropic-direct';
-import { ClaudeAgentSDKProvider } from './claude-agent-sdk';
-import { createOllamaProvider } from './ollama';
-import type { AIProvider } from './types';
+import type { ChangeRisk, ChangeMapFile, ChangeMapArea } from "@/lib/db/schema";
+import { createOpenRouterProvider } from "./openrouter";
+import { createAnthropicDirectProvider } from "./anthropic-direct";
+import { ClaudeAgentSDKProvider } from "./claude-agent-sdk";
+import { createOllamaProvider } from "./ollama";
+import type { AIProvider } from "./types";
 
 export interface ChangeMapProviderConfig {
-  provider: 'openrouter' | 'anthropic' | 'claude-agent-sdk' | 'ollama';
+  provider: "openrouter" | "anthropic" | "claude-agent-sdk" | "ollama";
   apiKey: string;
   model: string;
   baseUrl?: string;
@@ -40,7 +40,7 @@ export interface ChangeMapAIInput {
 export interface ChangeMapAIResponse {
   intentSummary: string;
   riskSummary: string;
-  areas: Array<Pick<ChangeMapArea, 'areaId' | 'risk' | 'aiNarrative'>>;
+  areas: Array<Pick<ChangeMapArea, "areaId" | "risk" | "aiNarrative">>;
 }
 
 const SYSTEM_PROMPT = `You analyze a code-change map for a visual-regression review tool.
@@ -61,32 +61,39 @@ Respond ONLY with a JSON object of this exact shape:
 Do not include any prose outside the JSON.`;
 
 function buildUserPrompt(input: ChangeMapAIInput): string {
-  const fileLines = input.files.slice(0, 60).map((f) =>
-    `  ${f.status} ${f.path}  (+${f.insertions}/-${f.deletions})`,
-  ).join('\n');
-  const areaLines = input.candidateAreas.map((a) =>
-    `  - id: ${a.areaId}\n    name: ${a.areaName}\n    hints: ${a.sourceHints.join(', ') || '(none)'}\n    files: ${a.affectedFiles.slice(0, 8).join(', ') || '(none)'}`,
-  ).join('\n');
+  const fileLines = input.files
+    .slice(0, 60)
+    .map((f) => `  ${f.status} ${f.path}  (+${f.insertions}/-${f.deletions})`)
+    .join("\n");
+  const areaLines = input.candidateAreas
+    .map(
+      (a) =>
+        `  - id: ${a.areaId}\n    name: ${a.areaName}\n    hints: ${a.sourceHints.join(", ") || "(none)"}\n    files: ${a.affectedFiles.slice(0, 8).join(", ") || "(none)"}`,
+    )
+    .join("\n");
   return [
     `branch: ${input.branch} (vs ${input.baseBranch})`,
     `\nchanged files (${input.files.length}):\n${fileLines}`,
     `\ncandidate areas (${input.candidateAreas.length}):\n${areaLines}`,
     `\nRespond with the JSON object described above. Use the exact area IDs as given.`,
-  ].join('\n');
+  ].join("\n");
 }
 
 function createProvider(config: ChangeMapProviderConfig): AIProvider {
-  if (config.provider === 'claude-agent-sdk') {
-    const sdkModel = config.model?.replace(/^anthropic\//, '') || undefined;
-    return new ClaudeAgentSDKProvider({ permissionMode: 'plan', model: sdkModel });
+  if (config.provider === "claude-agent-sdk") {
+    const sdkModel = config.model?.replace(/^anthropic\//, "") || undefined;
+    return new ClaudeAgentSDKProvider({
+      permissionMode: "plan",
+      model: sdkModel,
+    });
   }
-  if (config.provider === 'ollama') {
+  if (config.provider === "ollama") {
     return createOllamaProvider({
-      baseUrl: config.baseUrl || 'http://localhost:11434',
+      baseUrl: config.baseUrl || "http://localhost:11434",
       model: config.model,
     });
   }
-  if (config.provider === 'anthropic') {
+  if (config.provider === "anthropic") {
     return createAnthropicDirectProvider({
       apiKey: config.apiKey,
       model: config.model,
@@ -99,24 +106,40 @@ function createProvider(config: ChangeMapProviderConfig): AIProvider {
 }
 
 function extractJsonObject(text: string): string | null {
-  const start = text.indexOf('{');
+  const start = text.indexOf("{");
   if (start === -1) return null;
   let depth = 0;
   let inString = false;
   let escape = false;
   for (let i = start; i < text.length; i++) {
     const char = text[i];
-    if (escape) { escape = false; continue; }
-    if (char === '\\' && inString) { escape = true; continue; }
-    if (char === '"') { inString = !inString; continue; }
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
     if (inString) continue;
-    if (char === '{') depth++;
-    else if (char === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+    if (char === "{") depth++;
+    else if (char === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
   }
   return null;
 }
 
-const VALID_RISKS: ReadonlySet<ChangeRisk> = new Set<ChangeRisk>(['low', 'medium', 'high']);
+const VALID_RISKS: ReadonlySet<ChangeRisk> = new Set<ChangeRisk>([
+  "low",
+  "medium",
+  "high",
+]);
 
 export async function analyzeChangeMap(
   input: ChangeMapAIInput,
@@ -129,11 +152,13 @@ export async function analyzeChangeMap(
     systemPrompt: SYSTEM_PROMPT,
     maxTokens: 1500,
     temperature: 0.2,
-    responseFormat: 'json_object',
+    responseFormat: "json_object",
   });
   const jsonStr = extractJsonObject(response);
   if (!jsonStr) {
-    throw new Error(`AI response did not contain valid JSON. Response: ${response.slice(0, 500)}`);
+    throw new Error(
+      `AI response did not contain valid JSON. Response: ${response.slice(0, 500)}`,
+    );
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let parsed: any;
@@ -144,27 +169,35 @@ export async function analyzeChangeMap(
   }
 
   // Defensive normalization — accept partial responses without crashing.
-  const areas: ChangeMapAIResponse['areas'] = Array.isArray(parsed.areas)
+  const areas: ChangeMapAIResponse["areas"] = Array.isArray(parsed.areas)
     ? parsed.areas
-        .map((raw: unknown): ChangeMapAIResponse['areas'][number] | null => {
-          if (!raw || typeof raw !== 'object') return null;
+        .map((raw: unknown): ChangeMapAIResponse["areas"][number] | null => {
+          if (!raw || typeof raw !== "object") return null;
           const r = raw as Record<string, unknown>;
-          const areaId = typeof r.areaId === 'string' ? r.areaId : null;
+          const areaId = typeof r.areaId === "string" ? r.areaId : null;
           if (!areaId) return null;
-          const risk = (typeof r.risk === 'string' && VALID_RISKS.has(r.risk as ChangeRisk)
-            ? r.risk
-            : 'medium') as ChangeRisk;
+          const risk = (
+            typeof r.risk === "string" && VALID_RISKS.has(r.risk as ChangeRisk)
+              ? r.risk
+              : "medium"
+          ) as ChangeRisk;
           const aiNarrative = Array.isArray(r.aiNarrative)
-            ? r.aiNarrative.filter((b: unknown): b is string => typeof b === 'string').slice(0, 3)
+            ? r.aiNarrative
+                .filter((b: unknown): b is string => typeof b === "string")
+                .slice(0, 3)
             : [];
           return { areaId, risk, aiNarrative };
         })
-        .filter((a: unknown): a is ChangeMapAIResponse['areas'][number] => a !== null)
+        .filter(
+          (a: unknown): a is ChangeMapAIResponse["areas"][number] => a !== null,
+        )
     : [];
 
   return {
-    intentSummary: typeof parsed.intentSummary === 'string' ? parsed.intentSummary : '',
-    riskSummary: typeof parsed.riskSummary === 'string' ? parsed.riskSummary : '',
+    intentSummary:
+      typeof parsed.intentSummary === "string" ? parsed.intentSummary : "",
+    riskSummary:
+      typeof parsed.riskSummary === "string" ? parsed.riskSummary : "",
     areas,
   };
 }

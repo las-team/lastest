@@ -5,9 +5,12 @@ export function UmamiScript({ nonce }: { nonce?: string }) {
   if (!websiteId) return null;
 
   const sampleRate = process.env.NEXT_PUBLIC_UMAMI_REPLAY_SAMPLE_RATE ?? "1.0";
-  const maskLevel = process.env.NEXT_PUBLIC_UMAMI_REPLAY_MASK_LEVEL ?? "moderate";
-  const maxDuration = process.env.NEXT_PUBLIC_UMAMI_REPLAY_MAX_DURATION ?? "600000";
-  const enableRecorder = process.env.NEXT_PUBLIC_UMAMI_REPLAY_ENABLED !== "false";
+  const maskLevel =
+    process.env.NEXT_PUBLIC_UMAMI_REPLAY_MASK_LEVEL ?? "moderate";
+  const maxDuration =
+    process.env.NEXT_PUBLIC_UMAMI_REPLAY_MAX_DURATION ?? "600000";
+  const enableRecorder =
+    process.env.NEXT_PUBLIC_UMAMI_REPLAY_ENABLED !== "false";
 
   return (
     <>

@@ -1,7 +1,7 @@
-import { notFound } from 'next/navigation';
-import { headers } from 'next/headers';
-import type { Metadata } from 'next';
-import type { CSSProperties } from 'react';
+import { notFound } from "next/navigation";
+import { headers } from "next/headers";
+import type { Metadata } from "next";
+import type { CSSProperties } from "react";
 import {
   getPublicShareContext,
   getShareDataBySlug,
@@ -10,35 +10,37 @@ import {
   type ShareVisualDiff,
   type ShareTestResult,
   type ShareStepComparison,
-} from '@/lib/db/queries/public-shares';
+} from "@/lib/db/queries/public-shares";
 import {
   getBuildDemoNotes,
   getLatestDemoNotesForRepo,
-} from '@/lib/db/queries/demo-notes';
-import { getRepoAward } from '@/lib/db/queries/awards';
-import type { Baseline, DemoNotes, RepoAward } from '@/lib/db/schema';
-import { isValidShareSlug, buildShareUrl } from '@/lib/share/slug';
-import { resolveTestVideoUrl } from '@/lib/share/video-fallback';
-import { ShareVideoPlayer } from './share-video-player';
-import { AwardBadgeRow } from '@/components/awards/award-badge-row';
+} from "@/lib/db/queries/demo-notes";
+import { getRepoAward } from "@/lib/db/queries/awards";
+import type { Baseline, DemoNotes, RepoAward } from "@/lib/db/schema";
+import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
+import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
+import { ShareVideoPlayer } from "./share-video-player";
+import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
 
-type Build = PublicShareContext['build'];
+type Build = PublicShareContext["build"];
 
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  if (!isValidShareSlug(slug)) return { title: 'Not Found' };
+  if (!isValidShareSlug(slug)) return { title: "Not Found" };
 
   const ctx = await getPublicShareContext(slug);
-  if (!ctx) return { title: 'Share removed' };
+  if (!ctx) return { title: "Share removed" };
 
-  const domain = ctx.share.targetDomain || ctx.test?.name || 'this site';
+  const domain = ctx.share.targetDomain || ctx.test?.name || "this site";
   const title = `${domain} · Lastest`;
   const description = ctx.build.changesDetected
     ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
@@ -64,8 +66,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       title,
       description,
       url: buildShareUrl(slug),
-      type: 'article',
-      siteName: 'Lastest',
+      type: "article",
+      siteName: "Lastest",
       images: [
         {
           url: absoluteOgImage,
@@ -73,12 +75,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
           width: 1200,
           height: 630,
           alt: ogAlt,
-          type: 'image/png',
+          type: "image/png",
         },
       ],
     },
     twitter: {
-      card: 'summary_large_image',
+      card: "summary_large_image",
       title,
       description,
       images: [{ url: absoluteOgImage, alt: ogAlt }],
@@ -89,17 +91,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 async function resolveRequestOrigin(): Promise<string> {
   try {
     const h = await headers();
-    const forwardedProto = h.get('x-forwarded-proto')?.split(',')[0]?.trim();
-    const forwardedHost = h.get('x-forwarded-host')?.split(',')[0]?.trim();
-    const host = forwardedHost || h.get('host');
+    const forwardedProto = h.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const forwardedHost = h.get("x-forwarded-host")?.split(",")[0]?.trim();
+    const host = forwardedHost || h.get("host");
     if (host) {
-      const proto = forwardedProto || (host.startsWith('localhost') ? 'http' : 'https');
+      const proto =
+        forwardedProto || (host.startsWith("localhost") ? "http" : "https");
       return `${proto}://${host}`;
     }
   } catch {
     // headers() unavailable during static analysis / preview builds — fall through.
   }
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 }
 
 export default async function PublicSharePage({ params }: PageProps) {
@@ -111,7 +114,7 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   // CSP nonce — required under strict-dynamic for the plain <script src> tag
   // below. See src/proxy.ts for the generation site.
-  const nonce = (await headers()).get('x-nonce') ?? undefined;
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   const {
     share,
@@ -125,11 +128,11 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const toUrl = (p: string | null | undefined): string | null => {
     if (!p) return null;
-    const rel = p.replace(/^\/+/, '');
+    const rel = p.replace(/^\/+/, "");
     return `/share/${slug}/${rel}`;
   };
 
-  const displayDomain = share.targetDomain || test?.name || 'this site';
+  const displayDomain = share.targetDomain || test?.name || "this site";
   const claimLink = `/register?claim=${slug}`;
   const signInLink = `/login?claim=${slug}`;
 
@@ -148,10 +151,15 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const shareUrl = buildShareUrl(slug);
   const primaryResult: ShareTestResult | null = isTestShare
-    ? (scopedResults.find((r) => r.testId === share.testId) ?? scopedResults[0] ?? null)
+    ? (scopedResults.find((r) => r.testId === share.testId) ??
+      scopedResults[0] ??
+      null)
     : null;
 
-  const totalPixelsChanged = diffs.reduce((sum, d) => sum + (d.pixelDifference ?? 0), 0);
+  const totalPixelsChanged = diffs.reduce(
+    (sum, d) => sum + (d.pixelDifference ?? 0),
+    0,
+  );
 
   // Recording clips, hoisted to page level so the player renders as the FIRST
   // element in <main> — above the fold, at actual size, highest in the HTML.
@@ -170,7 +178,10 @@ export default async function PublicSharePage({ params }: PageProps) {
   // result's recorded duration so the scrubber has a usable max even though
   // we can't trust the webm to embed it.
   if (clips.length === 0 && fallbackVideoUrl) {
-    clips.push({ src: fallbackVideoUrl, durationMs: primaryResult?.durationMs ?? null });
+    clips.push({
+      src: fallbackVideoUrl,
+      durationMs: primaryResult?.durationMs ?? null,
+    });
   }
 
   // VideoObject structured data — surface the test recording to Google per
@@ -199,16 +210,16 @@ export default async function PublicSharePage({ params }: PageProps) {
   // and finally to null when neither exists.
   const repoIdForNotes = testRun?.repositoryId ?? share.repositoryId ?? null;
   const demoNotes = repoIdForNotes
-    ? (await getLatestDemoNotesForRepo(repoIdForNotes)) ??
-      (await getBuildDemoNotes(build.id))
+    ? ((await getLatestDemoNotesForRepo(repoIdForNotes)) ??
+      (await getBuildDemoNotes(build.id)))
     : await getBuildDemoNotes(build.id);
 
   // Lastest awards: render the earned-badges + embed block when the repo has
   // a tier. Resolved by repositoryId — works for both build and test shares.
   const award: RepoAward | null = repoIdForNotes
-    ? (await getRepoAward(repoIdForNotes)) ?? null
+    ? ((await getRepoAward(repoIdForNotes)) ?? null)
     : null;
-  const showAwardBadges = !!award && award.currentTier !== 'none';
+  const showAwardBadges = !!award && award.currentTier !== "none";
 
   // Passing tests produce zero visual_diffs rows. Fall back to the test's
   // active baselines so viewers still see a side-by-side comparison rather
@@ -230,10 +241,10 @@ export default async function PublicSharePage({ params }: PageProps) {
         )}
 
         <OutcomeHeader
-          variant={isTestShare ? 'test' : 'build'}
+          variant={isTestShare ? "test" : "build"}
           domain={displayDomain}
           targetDomain={share.targetDomain}
-          testName={isTestShare ? test?.name ?? null : null}
+          testName={isTestShare ? (test?.name ?? null) : null}
           build={build}
           testResult={primaryResult}
           pixelsChanged={totalPixelsChanged}
@@ -273,7 +284,11 @@ export default async function PublicSharePage({ params }: PageProps) {
               targetDomain={share.targetDomain}
               branch={testRun?.gitBranch ?? null}
             />
-            <BuildDiffsGallery diffs={diffs} results={scopedResults} toUrl={toUrl} />
+            <BuildDiffsGallery
+              diffs={diffs}
+              results={scopedResults}
+              toUrl={toUrl}
+            />
           </>
         )}
 
@@ -305,14 +320,19 @@ export default async function PublicSharePage({ params }: PageProps) {
           evaluation as a side-channel mitigation, so the client sees
           nonce="" during hydration. The script has already loaded
           correctly under the original nonce; suppress the cosmetic mismatch. */}
-      <script src="/share-slider.js" async nonce={nonce} suppressHydrationWarning />
+      <script
+        src="/share-slider.js"
+        async
+        nonce={nonce}
+        suppressHydrationWarning
+      />
       {videoSchema && (
         <script
           type="application/ld+json"
           nonce={nonce}
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(videoSchema).replace(/</g, '\\u003c'),
+            __html: JSON.stringify(videoSchema).replace(/</g, "\\u003c"),
           }}
         />
       )}
@@ -339,15 +359,18 @@ function buildVideoSchema({
   uploadedAt: Date | null;
   changesDetected: number;
 }): Record<string, unknown> {
-  const absVideo = videoPath.startsWith('http') ? videoPath : `${origin}${videoPath}`;
+  const absVideo = videoPath.startsWith("http")
+    ? videoPath
+    : `${origin}${videoPath}`;
   const thumbnailUrl = `${origin}/api/og/share/${slug}`;
   const uploadDate = (uploadedAt ?? new Date()).toISOString();
-  const description = changesDetected > 0
-    ? `Visual regression recording for ${domain} — ${changesDetected} change${changesDetected === 1 ? '' : 's'} detected.`
-    : `Visual regression recording for ${domain} — no changes detected against baseline.`;
+  const description =
+    changesDetected > 0
+      ? `Visual regression recording for ${domain} — ${changesDetected} change${changesDetected === 1 ? "" : "s"} detected.`
+      : `Visual regression recording for ${domain} — no changes detected against baseline.`;
   const schema: Record<string, unknown> = {
-    '@context': 'https://schema.org',
-    '@type': 'VideoObject',
+    "@context": "https://schema.org",
+    "@type": "VideoObject",
     name: `${displayName} · Lastest visual regression run`,
     description,
     thumbnailUrl: [thumbnailUrl],
@@ -369,7 +392,7 @@ function msToIso8601Duration(ms: number): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  let out = 'PT';
+  let out = "PT";
   if (h > 0) out += `${h}H`;
   if (m > 0) out += `${m}M`;
   if (s > 0 || (h === 0 && m === 0)) out += `${s}S`;
@@ -394,7 +417,10 @@ function ShareHeader({
           <span>Lastest</span>
         </a>
         <div className="flex items-center gap-4">
-          <a href={signInLink} className="text-sm underline-offset-4 hover:underline">
+          <a
+            href={signInLink}
+            className="text-sm underline-offset-4 hover:underline"
+          >
             Sign in
           </a>
           <a
@@ -434,73 +460,79 @@ function LastestLogo() {
 
 type Verdict = {
   label: string;
-  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+  tone: "ok" | "warn" | "danger" | "neutral";
 };
 
 function buildVerdict(status: string | null | undefined): Verdict {
   switch (status) {
-    case 'safe_to_merge':
-      return { label: 'Safe to merge', tone: 'ok' };
-    case 'review_required':
-      return { label: 'Review required', tone: 'warn' };
-    case 'blocked':
-      return { label: 'Blocked', tone: 'danger' };
+    case "safe_to_merge":
+      return { label: "Safe to merge", tone: "ok" };
+    case "review_required":
+      return { label: "Review required", tone: "warn" };
+    case "blocked":
+      return { label: "Blocked", tone: "danger" };
     default:
-      return { label: status ? humanize(status) : 'Run complete', tone: 'neutral' };
+      return {
+        label: status ? humanize(status) : "Run complete",
+        tone: "neutral",
+      };
   }
 }
 
 function testVerdict(status: string | null | undefined): Verdict {
   switch (status) {
-    case 'passed':
-    case 'approved':
-      return { label: 'Passed', tone: 'ok' };
-    case 'failed':
-    case 'regression':
-      return { label: 'Failed', tone: 'danger' };
-    case 'changed':
-    case 'pending_review':
-      return { label: 'Changed', tone: 'warn' };
-    case 'skipped':
-      return { label: 'Skipped', tone: 'neutral' };
+    case "passed":
+    case "approved":
+      return { label: "Passed", tone: "ok" };
+    case "failed":
+    case "regression":
+      return { label: "Failed", tone: "danger" };
+    case "changed":
+    case "pending_review":
+      return { label: "Changed", tone: "warn" };
+    case "skipped":
+      return { label: "Skipped", tone: "neutral" };
     default:
-      return { label: status ? humanize(status) : 'Run complete', tone: 'neutral' };
+      return {
+        label: status ? humanize(status) : "Run complete",
+        tone: "neutral",
+      };
   }
 }
 
 function humanize(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function toneClasses(tone: Verdict['tone']): {
+function toneClasses(tone: Verdict["tone"]): {
   card: string;
   pill: string;
   title: string;
 } {
   switch (tone) {
-    case 'ok':
+    case "ok":
       return {
-        card: 'border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900',
-        pill: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
-        title: 'text-emerald-900 dark:text-emerald-100',
+        card: "border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900",
+        pill: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
+        title: "text-emerald-900 dark:text-emerald-100",
       };
-    case 'warn':
+    case "warn":
       return {
-        card: 'border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900',
-        pill: 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100',
-        title: 'text-amber-900 dark:text-amber-100',
+        card: "border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900",
+        pill: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
+        title: "text-amber-900 dark:text-amber-100",
       };
-    case 'danger':
+    case "danger":
       return {
-        card: 'border-rose-200 bg-rose-50/60 dark:bg-rose-950/20 dark:border-rose-900',
-        pill: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200',
-        title: 'text-rose-900 dark:text-rose-100',
+        card: "border-rose-200 bg-rose-50/60 dark:bg-rose-950/20 dark:border-rose-900",
+        pill: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200",
+        title: "text-rose-900 dark:text-rose-100",
       };
     default:
       return {
-        card: 'border bg-muted/40',
-        pill: 'bg-muted text-foreground',
-        title: 'text-foreground',
+        card: "border bg-muted/40",
+        pill: "bg-muted text-foreground",
+        title: "text-foreground",
       };
   }
 }
@@ -512,7 +544,7 @@ function formatDuration(ms: number | null | undefined): string | null {
   if (totalSec < 60) return `${totalSec}s`;
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
-  return `${m}m ${s.toString().padStart(2, '0')}s`;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 function OutcomeHeader({
@@ -526,7 +558,7 @@ function OutcomeHeader({
   branch,
   commit,
 }: {
-  variant: 'build' | 'test';
+  variant: "build" | "test";
   domain: string;
   targetDomain: string | null;
   testName: string | null;
@@ -537,19 +569,19 @@ function OutcomeHeader({
   commit: string | null;
 }) {
   const verdict =
-    variant === 'test'
+    variant === "test"
       ? testVerdict(testResult?.status ?? null)
       : buildVerdict(build.overallStatus);
   const tone = toneClasses(verdict.tone);
 
-  const title = variant === 'test' ? (testName ?? domain) : domain;
+  const title = variant === "test" ? (testName ?? domain) : domain;
 
   const metaBits: string[] = [];
-  if (variant === 'build') {
+  if (variant === "build") {
     const total = build.totalTests ?? 0;
-    if (total > 0) metaBits.push(`${total} test${total === 1 ? '' : 's'}`);
+    if (total > 0) metaBits.push(`${total} test${total === 1 ? "" : "s"}`);
     if (branch) metaBits.push(branch);
-    if (commit && commit !== 'unknown') metaBits.push(commit.slice(0, 7));
+    if (commit && commit !== "unknown") metaBits.push(commit.slice(0, 7));
     const dur = formatDuration(build.elapsedMs);
     if (dur) metaBits.push(dur);
   } else {
@@ -558,12 +590,12 @@ function OutcomeHeader({
     metaBits.push(
       pixelsChanged > 0
         ? `${pixelsChanged.toLocaleString()} pixels changed`
-        : '0 pixels changed · matches baseline',
+        : "0 pixels changed · matches baseline",
     );
   }
 
   const shortCommit =
-    commit && commit !== 'unknown' ? commit.slice(0, 7).toUpperCase() : null;
+    commit && commit !== "unknown" ? commit.slice(0, 7).toUpperCase() : null;
 
   return (
     <section className={`rounded-xl border p-5 sm:p-6 ${tone.card}`}>
@@ -575,10 +607,10 @@ function OutcomeHeader({
               className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone.pill}`}
             >
               {verdict.label}
-              {verdict.tone === 'ok' ? ' ✓' : ''}
+              {verdict.tone === "ok" ? " ✓" : ""}
             </span>
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              {variant === 'test' ? 'Test recording' : 'Build summary'}
+              {variant === "test" ? "Test recording" : "Build summary"}
             </p>
           </div>
           <h1
@@ -588,18 +620,20 @@ function OutcomeHeader({
           </h1>
           {metaBits.length > 0 && (
             <p className="text-sm text-muted-foreground font-mono break-words">
-              {metaBits.join(' · ')}
+              {metaBits.join(" · ")}
             </p>
           )}
         </div>
         {shortCommit && (
           <div className="hidden sm:flex flex-col items-end shrink-0 text-right">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">
-              {variant === 'test' ? 'Run' : 'Build'}
+              {variant === "test" ? "Run" : "Build"}
             </span>
             <span className="text-sm font-mono">{shortCommit}</span>
             {branch && (
-              <span className="text-xs font-mono text-muted-foreground">{branch}</span>
+              <span className="text-xs font-mono text-muted-foreground">
+                {branch}
+              </span>
             )}
           </div>
         )}
@@ -617,7 +651,7 @@ function OutcomeHeader({
 // alongside text-anchor steps) and reads as "—" when the run didn't exercise
 // any text-bound assertions.
 
-type LayerTone = 'ok' | 'warn' | 'danger' | 'neutral' | 'muted';
+type LayerTone = "ok" | "warn" | "danger" | "neutral" | "muted";
 type LayerOutcome = {
   key: string;
   label: string;
@@ -633,7 +667,7 @@ function computeLayerOutcomes({
   diffs,
   stepComparisons,
 }: {
-  variant: 'build' | 'test';
+  variant: "build" | "test";
   testResult: ShareTestResult | null;
   results: ShareTestResult[];
   diffs: ShareVisualDiff[];
@@ -641,41 +675,41 @@ function computeLayerOutcomes({
 }): LayerOutcome[] {
   // Run — test pass/fail or build verdict roll-up.
   const run: LayerOutcome = (() => {
-    if (variant === 'test') {
+    if (variant === "test") {
       const status = testResult?.status ?? null;
-      if (status === 'passed' || status === 'approved')
-        return { key: 'run', label: 'Run', value: '✓', tone: 'ok' };
-      if (status === 'failed' || status === 'regression')
-        return { key: 'run', label: 'Run', value: '✕', tone: 'danger' };
-      if (status === 'changed' || status === 'pending_review')
-        return { key: 'run', label: 'Run', value: '~', tone: 'warn' };
-      if (status === 'skipped')
-        return { key: 'run', label: 'Run', value: '⊘', tone: 'muted' };
-      return { key: 'run', label: 'Run', value: '—', tone: 'muted' };
+      if (status === "passed" || status === "approved")
+        return { key: "run", label: "Run", value: "✓", tone: "ok" };
+      if (status === "failed" || status === "regression")
+        return { key: "run", label: "Run", value: "✕", tone: "danger" };
+      if (status === "changed" || status === "pending_review")
+        return { key: "run", label: "Run", value: "~", tone: "warn" };
+      if (status === "skipped")
+        return { key: "run", label: "Run", value: "⊘", tone: "muted" };
+      return { key: "run", label: "Run", value: "—", tone: "muted" };
     }
     const passed = results.filter(
-      (r) => r.status === 'passed' || r.status === 'approved',
+      (r) => r.status === "passed" || r.status === "approved",
     ).length;
     const failed = results.filter(
-      (r) => r.status === 'failed' || r.status === 'regression',
+      (r) => r.status === "failed" || r.status === "regression",
     ).length;
     if (failed > 0)
       return {
-        key: 'run',
-        label: 'Run',
+        key: "run",
+        label: "Run",
         value: `${failed} failed`,
-        tone: 'danger',
+        tone: "danger",
         title: `${passed} passed, ${failed} failed`,
       };
     if (results.length > 0)
       return {
-        key: 'run',
-        label: 'Run',
-        value: '✓',
-        tone: 'ok',
+        key: "run",
+        label: "Run",
+        value: "✓",
+        tone: "ok",
         title: `${passed} passed`,
       };
-    return { key: 'run', label: 'Run', value: '—', tone: 'muted' };
+    return { key: "run", label: "Run", value: "—", tone: "muted" };
   })();
 
   // Visual — biggest % across diffs; ✓ if everything matched baseline.
@@ -683,19 +717,24 @@ function computeLayerOutcomes({
     let maxPct = 0;
     let totalPx = 0;
     for (const d of diffs) {
-      const pct = d.percentageDifference ? parseFloat(d.percentageDifference) : 0;
+      const pct = d.percentageDifference
+        ? parseFloat(d.percentageDifference)
+        : 0;
       if (Number.isFinite(pct) && pct > maxPct) maxPct = pct;
       totalPx += d.pixelDifference ?? 0;
     }
     if (totalPx <= 0)
-      return { key: 'visual', label: 'Visual', value: '✓', tone: 'ok' };
-    const valueStr = maxPct >= 0.01 ? `${maxPct.toFixed(2)}%` : `${totalPx.toLocaleString()}px`;
+      return { key: "visual", label: "Visual", value: "✓", tone: "ok" };
+    const valueStr =
+      maxPct >= 0.01
+        ? `${maxPct.toFixed(2)}%`
+        : `${totalPx.toLocaleString()}px`;
     return {
-      key: 'visual',
-      label: 'Visual',
+      key: "visual",
+      label: "Visual",
       value: valueStr,
-      tone: maxPct >= 1 ? 'warn' : 'neutral',
-      title: `${totalPx.toLocaleString()} pixels changed across ${diffs.length} step${diffs.length === 1 ? '' : 's'}`,
+      tone: maxPct >= 1 ? "warn" : "neutral",
+      title: `${totalPx.toLocaleString()} pixels changed across ${diffs.length} step${diffs.length === 1 ? "" : "s"}`,
     };
   })();
 
@@ -704,11 +743,12 @@ function computeLayerOutcomes({
   // Kept as a visible chip so users see what Lastest checks; the dash tells
   // them this run didn't exercise it.
   const text: LayerOutcome = {
-    key: 'text',
-    label: 'Text',
-    value: '—',
-    tone: 'muted',
-    title: 'Text-diff is an on-demand inspector dimension; not captured by this run',
+    key: "text",
+    label: "Text",
+    value: "—",
+    tone: "muted",
+    title:
+      "Text-diff is an on-demand inspector dimension; not captured by this run",
   };
 
   // DOM — verdict roll-up from step_comparisons.layers.dom. We don't have a
@@ -719,13 +759,25 @@ function computeLayerOutcomes({
     const domSteps = stepComparisons.filter((s) => s.layers?.dom);
     if (domSteps.length === 0) {
       return stepComparisons.length > 0
-        ? { key: 'dom', label: 'DOM', value: '✓', tone: 'ok' }
-        : { key: 'dom', label: 'DOM', value: '—', tone: 'muted' };
+        ? { key: "dom", label: "DOM", value: "✓", tone: "ok" }
+        : { key: "dom", label: "DOM", value: "—", tone: "muted" };
     }
-    const reds = stepComparisons.filter((s) => s.verdict === 'red' && s.layers?.dom).length;
+    const reds = stepComparisons.filter(
+      (s) => s.verdict === "red" && s.layers?.dom,
+    ).length;
     if (reds > 0)
-      return { key: 'dom', label: 'DOM', value: `${reds} changed`, tone: 'warn' };
-    return { key: 'dom', label: 'DOM', value: `${domSteps.length} changed`, tone: 'neutral' };
+      return {
+        key: "dom",
+        label: "DOM",
+        value: `${reds} changed`,
+        tone: "warn",
+      };
+    return {
+      key: "dom",
+      label: "DOM",
+      value: `${domSteps.length} changed`,
+      tone: "neutral",
+    };
   })();
 
   // Network — added/removed across all step comparisons.
@@ -742,15 +794,19 @@ function computeLayerOutcomes({
       removed += n.removed ?? 0;
       newErrors += n.newErrorCount ?? 0;
     }
-    if (!touched) return { key: 'network', label: 'Network', value: '—', tone: 'muted' };
+    if (!touched)
+      return { key: "network", label: "Network", value: "—", tone: "muted" };
     if (added === 0 && removed === 0 && newErrors === 0)
-      return { key: 'network', label: 'Network', value: '✓', tone: 'ok' };
+      return { key: "network", label: "Network", value: "✓", tone: "ok" };
     return {
-      key: 'network',
-      label: 'Network',
+      key: "network",
+      label: "Network",
       value: `+${added} −${removed}`,
-      tone: newErrors > 0 ? 'danger' : 'neutral',
-      title: newErrors > 0 ? `${newErrors} new 4xx/5xx response${newErrors === 1 ? '' : 's'}` : undefined,
+      tone: newErrors > 0 ? "danger" : "neutral",
+      title:
+        newErrors > 0
+          ? `${newErrors} new 4xx/5xx response${newErrors === 1 ? "" : "s"}`
+          : undefined,
     };
   })();
 
@@ -764,14 +820,15 @@ function computeLayerOutcomes({
       touched = true;
       newCount += c.newFingerprints?.length ?? 0;
     }
-    if (!touched) return { key: 'console', label: 'Console', value: '✓', tone: 'ok' };
+    if (!touched)
+      return { key: "console", label: "Console", value: "✓", tone: "ok" };
     if (newCount === 0)
-      return { key: 'console', label: 'Console', value: '✓', tone: 'ok' };
+      return { key: "console", label: "Console", value: "✓", tone: "ok" };
     return {
-      key: 'console',
-      label: 'Console',
+      key: "console",
+      label: "Console",
       value: `${newCount} new`,
-      tone: 'danger',
+      tone: "danger",
     };
   })();
 
@@ -791,14 +848,16 @@ function computeLayerOutcomes({
       moderate += a.newBySeverity?.moderate ?? 0;
       minor += a.newBySeverity?.minor ?? 0;
     }
-    if (!touched) return { key: 'a11y', label: 'A11y', value: '—', tone: 'muted' };
+    if (!touched)
+      return { key: "a11y", label: "A11y", value: "—", tone: "muted" };
     const total = critical + serious + moderate + minor;
-    if (total === 0) return { key: 'a11y', label: 'A11y', value: '✓', tone: 'ok' };
+    if (total === 0)
+      return { key: "a11y", label: "A11y", value: "✓", tone: "ok" };
     return {
-      key: 'a11y',
-      label: 'A11y',
+      key: "a11y",
+      label: "A11y",
       value: `${total} new`,
-      tone: critical + serious > 0 ? 'danger' : 'warn',
+      tone: critical + serious > 0 ? "danger" : "warn",
       title: `crit ${critical} · serious ${serious} · mod ${moderate} · minor ${minor}`,
     };
   })();
@@ -817,12 +876,23 @@ function computeLayerOutcomes({
         else if (d.drifted) drifted++;
       }
     }
-    if (!touched) return { key: 'perf', label: 'Perf', value: '—', tone: 'muted' };
+    if (!touched)
+      return { key: "perf", label: "Perf", value: "—", tone: "muted" };
     if (breached === 0 && drifted === 0)
-      return { key: 'perf', label: 'Perf', value: '✓', tone: 'ok' };
+      return { key: "perf", label: "Perf", value: "✓", tone: "ok" };
     if (breached > 0)
-      return { key: 'perf', label: 'Perf', value: `${breached} over`, tone: 'danger' };
-    return { key: 'perf', label: 'Perf', value: `${drifted} drift`, tone: 'warn' };
+      return {
+        key: "perf",
+        label: "Perf",
+        value: `${breached} over`,
+        tone: "danger",
+      };
+    return {
+      key: "perf",
+      label: "Perf",
+      value: `${drifted} drift`,
+      tone: "warn",
+    };
   })();
 
   // URL — trajectory divergence count.
@@ -835,13 +905,14 @@ function computeLayerOutcomes({
       touched = true;
       diverged += u.divergedSteps?.length ?? 0;
     }
-    if (!touched) return { key: 'url', label: 'URL', value: '✓', tone: 'ok' };
-    if (diverged === 0) return { key: 'url', label: 'URL', value: '✓', tone: 'ok' };
+    if (!touched) return { key: "url", label: "URL", value: "✓", tone: "ok" };
+    if (diverged === 0)
+      return { key: "url", label: "URL", value: "✓", tone: "ok" };
     return {
-      key: 'url',
-      label: 'URL',
+      key: "url",
+      label: "URL",
       value: `${diverged} diverged`,
-      tone: 'danger',
+      tone: "danger",
     };
   })();
 
@@ -856,49 +927,66 @@ function computeLayerOutcomes({
       touched = true;
       for (const c of v.changes ?? []) {
         changes++;
-        if (c.tier === 'structural-break' || c.tier === 'type-change') breaks++;
+        if (c.tier === "structural-break" || c.tier === "type-change") breaks++;
       }
     }
-    if (!touched) return { key: 'variables', label: 'Variables', value: '—', tone: 'muted' };
+    if (!touched)
+      return {
+        key: "variables",
+        label: "Variables",
+        value: "—",
+        tone: "muted",
+      };
     if (changes === 0)
-      return { key: 'variables', label: 'Variables', value: '✓', tone: 'ok' };
+      return { key: "variables", label: "Variables", value: "✓", tone: "ok" };
     return {
-      key: 'variables',
-      label: 'Variables',
+      key: "variables",
+      label: "Variables",
       value: `${changes} changed`,
-      tone: breaks > 0 ? 'danger' : 'warn',
+      tone: breaks > 0 ? "danger" : "warn",
     };
   })();
 
-  return [run, visual, text, dom, network, consoleLayer, a11y, perf, url, variables];
+  return [
+    run,
+    visual,
+    text,
+    dom,
+    network,
+    consoleLayer,
+    a11y,
+    perf,
+    url,
+    variables,
+  ];
 }
 
 function layerToneClasses(tone: LayerTone): { card: string; value: string } {
   switch (tone) {
-    case 'ok':
+    case "ok":
       return {
-        card: 'border-emerald-200 bg-white dark:bg-card dark:border-emerald-900',
-        value: 'text-emerald-700 dark:text-emerald-300',
+        card: "border-emerald-200 bg-white dark:bg-card dark:border-emerald-900",
+        value: "text-emerald-700 dark:text-emerald-300",
       };
-    case 'warn':
+    case "warn":
       return {
-        card: 'border-amber-200 bg-white dark:bg-card dark:border-amber-900',
-        value: 'text-amber-800 dark:text-amber-200',
+        card: "border-amber-200 bg-white dark:bg-card dark:border-amber-900",
+        value: "text-amber-800 dark:text-amber-200",
       };
-    case 'danger':
+    case "danger":
       return {
-        card: 'border-rose-200 bg-white dark:bg-card dark:border-rose-900',
-        value: 'text-rose-700 dark:text-rose-300',
+        card: "border-rose-200 bg-white dark:bg-card dark:border-rose-900",
+        value: "text-rose-700 dark:text-rose-300",
       };
-    case 'neutral':
+    case "neutral":
       return {
-        card: 'border bg-white dark:bg-card',
-        value: 'text-foreground',
+        card: "border bg-white dark:bg-card",
+        value: "text-foreground",
       };
     default:
       return {
-        card: 'border bg-white dark:bg-card',
-        value: 'text-muted-foreground',
+        card: "border bg-white dark:bg-card",
+        value: "text-muted-foreground",
       };
   }
 }
@@ -911,7 +999,7 @@ function LayerOutcomesGrid({
   stepComparisons,
   signInLink,
 }: {
-  variant: 'build' | 'test';
+  variant: "build" | "test";
   testResult: ShareTestResult | null;
   results: ShareTestResult[];
   diffs: ShareVisualDiff[];
@@ -925,7 +1013,7 @@ function LayerOutcomesGrid({
     diffs,
     stepComparisons,
   });
-  const loginHint = 'Log in for more details';
+  const loginHint = "Log in for more details";
   return (
     <section className="space-y-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -952,7 +1040,9 @@ function LayerOutcomesGrid({
               <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
                 {o.label}
               </div>
-              <div className={`text-sm font-semibold tabular-nums truncate ${t.value}`}>
+              <div
+                className={`text-sm font-semibold tabular-nums truncate ${t.value}`}
+              >
                 {o.value}
               </div>
             </>
@@ -985,9 +1075,9 @@ function hasDemoContent(n: DemoNotes | null | undefined): n is DemoNotes {
   if (!n) return false;
   return Boolean(
     n.uxSummary ||
-      (n.highlights && n.highlights.length > 0) ||
-      (n.frictionPoints && n.frictionPoints.length > 0) ||
-      (n.skippedRoutes && n.skippedRoutes.length > 0),
+    (n.highlights && n.highlights.length > 0) ||
+    (n.frictionPoints && n.frictionPoints.length > 0) ||
+    (n.skippedRoutes && n.skippedRoutes.length > 0),
   );
 }
 
@@ -995,7 +1085,8 @@ function DemoNotesPanel({ notes }: { notes: DemoNotes }) {
   const hasHighlights = notes.highlights && notes.highlights.length > 0;
   const hasFriction = notes.frictionPoints && notes.frictionPoints.length > 0;
   const hasSkipped = notes.skippedRoutes && notes.skippedRoutes.length > 0;
-  if (!notes.uxSummary && !hasHighlights && !hasFriction && !hasSkipped) return null;
+  if (!notes.uxSummary && !hasHighlights && !hasFriction && !hasSkipped)
+    return null;
   return (
     <section className="rounded-xl border bg-card p-5 sm:p-6 space-y-4">
       <header className="flex items-center justify-between gap-3">
@@ -1011,11 +1102,7 @@ function DemoNotesPanel({ notes }: { notes: DemoNotes }) {
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         {hasHighlights && (
-          <DemoNoteList
-            title="Highlights"
-            items={notes.highlights}
-            tone="ok"
-          />
+          <DemoNoteList title="Highlights" items={notes.highlights} tone="ok" />
         )}
         {hasFriction && (
           <DemoNoteList
@@ -1027,7 +1114,9 @@ function DemoNotesPanel({ notes }: { notes: DemoNotes }) {
       </div>
       {hasSkipped && (
         <div className="pt-3 border-t text-xs text-muted-foreground space-y-1">
-          <div className="uppercase tracking-wide font-medium">Couldn&apos;t reach</div>
+          <div className="uppercase tracking-wide font-medium">
+            Couldn&apos;t reach
+          </div>
           <ul className="space-y-0.5">
             {notes.skippedRoutes!.map((r) => (
               <li key={r.path} className="font-mono">
@@ -1050,15 +1139,17 @@ function DemoNoteList({
 }: {
   title: string;
   items: { label: string; note: string }[];
-  tone: 'ok' | 'warn';
+  tone: "ok" | "warn";
 }) {
   const accent =
-    tone === 'ok'
-      ? 'text-emerald-700 dark:text-emerald-300'
-      : 'text-amber-800 dark:text-amber-200';
+    tone === "ok"
+      ? "text-emerald-700 dark:text-emerald-300"
+      : "text-amber-800 dark:text-amber-200";
   return (
     <div className="space-y-2">
-      <div className={`text-xs font-semibold uppercase tracking-wide ${accent}`}>
+      <div
+        className={`text-xs font-semibold uppercase tracking-wide ${accent}`}
+      >
         {title}
       </div>
       <ul className="space-y-2">
@@ -1074,10 +1165,12 @@ function DemoNoteList({
 }
 
 function CustomerFavicon({ domain }: { domain: string | null }) {
-  const letter = (domain ?? '?').charAt(0).toUpperCase();
+  const letter = (domain ?? "?").charAt(0).toUpperCase();
   return (
     <div className="relative w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-lg border bg-card shadow-sm flex items-center justify-center overflow-hidden">
-      <span className="text-xl font-semibold text-muted-foreground">{letter}</span>
+      <span className="text-xl font-semibold text-muted-foreground">
+        {letter}
+      </span>
       {domain && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -1116,33 +1209,38 @@ function BuildSummary({
   if (build.triggerType) configBits.push(humanize(build.triggerType));
   if (branch) configBits.push(branch);
   if (targetDomain) configBits.push(`→ ${targetDomain}`);
-  if (total > 0) configBits.push(`${total} test${total === 1 ? '' : 's'}`);
+  if (total > 0) configBits.push(`${total} test${total === 1 ? "" : "s"}`);
 
   return (
     <section className="space-y-4">
       {configBits.length > 0 && (
         <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono text-muted-foreground truncate">
-          {configBits.join(' · ')}
+          {configBits.join(" · ")}
         </div>
       )}
 
-      <TickBar total={total} passed={passed} failed={failed} changed={changed} />
+      <TickBar
+        total={total}
+        passed={passed}
+        failed={failed}
+        changed={changed}
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard value={passed} label="Passed" tone="ok" />
         <StatCard value={failed} label="Failed" tone="danger" />
         <StatCard value={changed} label="Changed" tone="warn" />
         <StatCard
-          value={a11y == null ? '—' : a11y}
+          value={a11y == null ? "—" : a11y}
           label="A11y"
-          sublabel={a11y == null ? undefined : 'WCAG 2.2'}
+          sublabel={a11y == null ? undefined : "WCAG 2.2"}
           tone="neutral"
         />
       </div>
 
       {pending > 0 && (
         <p className="text-xs text-muted-foreground">
-          {pending} test{pending === 1 ? '' : 's'} did not report a status.
+          {pending} test{pending === 1 ? "" : "s"} did not report a status.
         </p>
       )}
     </section>
@@ -1168,11 +1266,11 @@ function TickBar({
   const pFail = Math.round(failed * scale);
   const pChg = Math.round(changed * scale);
   const pNone = Math.max(0, visible - pOk - pFail - pChg);
-  const cells: Array<'ok' | 'fail' | 'chg' | 'none'> = [
-    ...Array(pOk).fill('ok' as const),
-    ...Array(pChg).fill('chg' as const),
-    ...Array(pFail).fill('fail' as const),
-    ...Array(pNone).fill('none' as const),
+  const cells: Array<"ok" | "fail" | "chg" | "none"> = [
+    ...Array(pOk).fill("ok" as const),
+    ...Array(pChg).fill("chg" as const),
+    ...Array(pFail).fill("fail" as const),
+    ...Array(pNone).fill("none" as const),
   ];
   return (
     <div
@@ -1184,13 +1282,13 @@ function TickBar({
         <div
           key={i}
           className={`flex-1 border-r border-background last:border-r-0 ${
-            c === 'ok'
-              ? 'bg-emerald-500/80'
-              : c === 'fail'
-                ? 'bg-rose-500/80'
-                : c === 'chg'
-                  ? 'bg-amber-500/80'
-                  : ''
+            c === "ok"
+              ? "bg-emerald-500/80"
+              : c === "fail"
+                ? "bg-rose-500/80"
+                : c === "chg"
+                  ? "bg-amber-500/80"
+                  : ""
           }`}
         />
       ))}
@@ -1207,24 +1305,28 @@ function StatCard({
   value: number | string;
   label: string;
   sublabel?: string;
-  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+  tone: "ok" | "warn" | "danger" | "neutral";
 }) {
   const color =
-    tone === 'ok'
-      ? 'text-emerald-700 dark:text-emerald-300'
-      : tone === 'danger'
-        ? 'text-rose-700 dark:text-rose-300'
-        : tone === 'warn'
-          ? 'text-amber-700 dark:text-amber-300'
-          : 'text-foreground';
+    tone === "ok"
+      ? "text-emerald-700 dark:text-emerald-300"
+      : tone === "danger"
+        ? "text-rose-700 dark:text-rose-300"
+        : tone === "warn"
+          ? "text-amber-700 dark:text-amber-300"
+          : "text-foreground";
   return (
     <div className="rounded-md border bg-card p-3 text-center">
-      <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
+      <div className={`text-2xl font-semibold tabular-nums ${color}`}>
+        {value}
+      </div>
       <div className="text-[11px] uppercase tracking-wide font-medium text-muted-foreground mt-0.5">
         {label}
       </div>
       {sublabel && (
-        <div className="text-[11px] text-muted-foreground mt-0.5">{sublabel}</div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          {sublabel}
+        </div>
       )}
     </div>
   );
@@ -1251,7 +1353,7 @@ function BuildDiffsGallery({
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
             {sliderDiffs.length === 1
-              ? 'Visual change'
+              ? "Visual change"
               : `${sliderDiffs.length} visual changes`}
           </h2>
           {sliderDiffs.map((d) => (
@@ -1268,9 +1370,7 @@ function BuildDiffsGallery({
         </section>
       )}
 
-      {gallery.length > 0 && (
-        <GallerySection items={gallery} />
-      )}
+      {gallery.length > 0 && <GallerySection items={gallery} />}
     </>
   );
 }
@@ -1307,9 +1407,7 @@ function TestShareBody({
   signInLink: string;
 }) {
   const steps = collectSteps(testResult, results, toUrl);
-  const stepPaths = new Set<string>(
-    collectStepPaths(testResult, results),
-  );
+  const stepPaths = new Set<string>(collectStepPaths(testResult, results));
 
   const durationMs = testResult?.durationMs ?? null;
   const approxSecPerStep =
@@ -1337,7 +1435,7 @@ function TestShareBody({
       ? `${pixelsChanged.toLocaleString()} pixels changed — review before ship.`
       : durationMs
         ? `Recorded once. Ran in ${durationMs.toLocaleString()} ms. Zero regressions.`
-        : 'Recorded once. Runs on every build. Zero regressions.';
+        : "Recorded once. Runs on every build. Zero regressions.";
 
   return (
     <>
@@ -1360,19 +1458,23 @@ function TestShareBody({
 
       <div className="grid grid-cols-3 gap-3">
         <StatCard
-          value={pixelsChanged > 0 ? pixelsChanged.toLocaleString() : '0'}
+          value={pixelsChanged > 0 ? pixelsChanged.toLocaleString() : "0"}
           label="Diff px"
-          tone={pixelsChanged > 0 ? 'warn' : 'ok'}
+          tone={pixelsChanged > 0 ? "warn" : "ok"}
         />
         <StatCard
-          value={durationMs != null ? formatDuration(durationMs) ?? `${durationMs}` : '—'}
+          value={
+            durationMs != null
+              ? (formatDuration(durationMs) ?? `${durationMs}`)
+              : "—"
+          }
           label="Duration"
           tone="neutral"
         />
         <StatCard
-          value={build.a11yScore == null ? '—' : build.a11yScore}
+          value={build.a11yScore == null ? "—" : build.a11yScore}
           label="A11y"
-          sublabel={build.a11yScore == null ? undefined : 'WCAG 2.2'}
+          sublabel={build.a11yScore == null ? undefined : "WCAG 2.2"}
           tone="neutral"
         />
       </div>
@@ -1387,7 +1489,7 @@ function TestShareBody({
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
             {sliderDiffs.length === 1
-              ? 'Visual change'
+              ? "Visual change"
               : `${sliderDiffs.length} visual changes`}
           </h2>
           {sliderDiffs.map((d) => (
@@ -1408,7 +1510,7 @@ function TestShareBody({
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
             {passedSliders.length === 1
-              ? 'Tested view'
+              ? "Tested view"
               : `${passedSliders.length} tested views`}
             <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
               matches baseline
@@ -1470,7 +1572,7 @@ function collectSteps(
   }
   if (source.screenshotPath && !seen.has(source.screenshotPath)) {
     const url = toUrl(source.screenshotPath);
-    if (url) out.push({ src: url, label: 'Final' });
+    if (url) out.push({ src: url, label: "Final" });
   }
   return out;
 }
@@ -1485,7 +1587,7 @@ function StepStrip({
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium text-muted-foreground">
-        {steps.length} step{steps.length === 1 ? '' : 's'} captured
+        {steps.length} step{steps.length === 1 ? "" : "s"} captured
       </h2>
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
         {steps.map((s, i) => {
@@ -1630,15 +1732,13 @@ function buildBaselineSliders(
   for (const bl of baselines) {
     const baselineUrl = toUrl(bl.imagePath);
     if (!baselineUrl) continue;
-    const label = (bl.stepLabel ?? '').trim();
-    const isFinal = !label || label.toLowerCase() === 'final';
+    const label = (bl.stepLabel ?? "").trim();
+    const isFinal = !label || label.toLowerCase() === "final";
     let currentPath: string | null = null;
     if (isFinal) {
       currentPath = result.screenshotPath;
     } else {
-      const match = steps.find(
-        (s) => (s.label ?? '').trim() === label,
-      );
+      const match = steps.find((s) => (s.label ?? "").trim() === label);
       currentPath = match?.path ?? null;
     }
     if (!currentPath) continue;
@@ -1647,7 +1747,7 @@ function buildBaselineSliders(
     seen.add(key);
     const currentUrl = toUrl(currentPath);
     if (!currentUrl) continue;
-    const stepLabel = bl.stepLabel ?? (isFinal ? 'Final' : null);
+    const stepLabel = bl.stepLabel ?? (isFinal ? "Final" : null);
     out.push({
       id: bl.id,
       baseline: baselineUrl,
@@ -1713,14 +1813,15 @@ function buildGallery(
     ) {
       seenGallery.add(r.screenshotPath);
       const url = toUrl(r.screenshotPath);
-      if (url) gallery.push({ src: url, label: 'Primary' });
+      if (url) gallery.push({ src: url, label: "Primary" });
     }
     const captured = r.screenshots ?? [];
     for (const s of captured) {
-      if (!s.path || shownPaths.has(s.path) || seenGallery.has(s.path)) continue;
+      if (!s.path || shownPaths.has(s.path) || seenGallery.has(s.path))
+        continue;
       seenGallery.add(s.path);
       const url = toUrl(s.path);
-      if (url) gallery.push({ src: url, label: s.label || 'Step' });
+      if (url) gallery.push({ src: url, label: s.label || "Step" });
     }
   }
   return gallery;
@@ -1730,7 +1831,7 @@ function GallerySection({ items }: { items: GalleryItem[] }) {
   return (
     <section className="space-y-4">
       <h2 className="text-sm font-medium text-muted-foreground">
-        {items.length === 1 ? 'Screenshot' : `${items.length} screenshots`}
+        {items.length === 1 ? "Screenshot" : `${items.length} screenshots`}
       </h2>
       {/* Stacked full-width frames mirror the DiffSlider stage so a passing /
           no-diff share shows screenshots at the same scale as a comparison
@@ -1777,23 +1878,25 @@ function DiffSlider({
   // page bottom) binds pointer move on .share-slider-stage to this variable
   // and flips data-active between 'false' (diff overlay visible) and 'true'
   // (baseline/current slider comparison revealed). Pure DOM, zero hydration.
-  const style = { '--pct': '50%' } as CSSProperties;
+  const style = { "--pct": "50%" } as CSSProperties;
   const hasDiff = !!diff;
   const isStepIndex = Number.isFinite(stepNumber);
   return (
     <figure
       className="share-slider space-y-2 scroll-mt-20"
       style={style}
-      data-active={hasDiff ? 'false' : 'true'}
-      data-has-diff={hasDiff ? 'true' : 'false'}
+      data-active={hasDiff ? "false" : "true"}
+      data-has-diff={hasDiff ? "true" : "false"}
       // Scroll target for thumbnail clicks in <StepStrip>. Only set when the
       // label parsed to a real number — "Final" / unlabelled rows aren't
       // jumpable from the strip.
-      {...(isStepIndex ? { 'data-step': String(stepNumber), id: `share-step-${stepNumber}` } : {})}
+      {...(isStepIndex
+        ? { "data-step": String(stepNumber), id: `share-step-${stepNumber}` }
+        : {})}
     >
       <header className="flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-foreground truncate">
-          {stepLabel || 'Visual diff'}
+          {stepLabel || "Visual diff"}
         </span>
         {pixelDifference > 0 && (
           <span className="tabular-nums text-muted-foreground">
@@ -1839,7 +1942,7 @@ function DiffSlider({
           alt="After"
           draggable={false}
           className="share-slider-current col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
-          style={{ clipPath: 'inset(0 0 0 var(--pct, 50%))' }}
+          style={{ clipPath: "inset(0 0 0 var(--pct, 50%))" }}
         />
         {/* Diff heat-map overlay — the idle view. Hidden once the slider
             becomes active. */}
@@ -1855,7 +1958,7 @@ function DiffSlider({
         {/* Divider + drag handle — only visible while active. */}
         <div
           className="share-slider-divider absolute top-0 bottom-0 w-px bg-primary pointer-events-none transition-opacity duration-150"
-          style={{ left: 'var(--pct, 50%)' }}
+          style={{ left: "var(--pct, 50%)" }}
           aria-hidden
         >
           <div className="share-slider-handle absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border-2 border-primary bg-background shadow flex items-center justify-center text-primary text-xs font-bold">
@@ -1897,7 +2000,8 @@ function PostVideoCTA({
           Take this test with you
         </h2>
         <p className="text-sm text-muted-foreground">
-          Download the test code, or claim it to re-run on demand — both are free.
+          Download the test code, or claim it to re-run on demand — both are
+          free.
         </p>
       </div>
       <div className="flex flex-col sm:flex-row gap-2 shrink-0">
@@ -1927,10 +2031,12 @@ function ClaimCTA({
 }) {
   return (
     <section className="rounded-xl border bg-white dark:bg-card p-6 sm:p-8 space-y-4">
-      <h2 className="text-xl sm:text-2xl font-semibold">Claim this test — free</h2>
+      <h2 className="text-xl sm:text-2xl font-semibold">
+        Claim this test — free
+      </h2>
       <p className="text-sm text-muted-foreground">
-        We&apos;ll copy the test into your own Lastest workspace. You supply the ideas,
-        we supply the regression coverage.
+        We&apos;ll copy the test into your own Lastest workspace. You supply the
+        ideas, we supply the regression coverage.
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
         <a
@@ -1954,7 +2060,7 @@ function ShareFooter({ slug }: { slug: string }) {
   return (
     <footer className="pt-6 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 justify-between">
       <span>
-        Run by{' '}
+        Run by{" "}
         <a
           href="https://lastest.cloud"
           target="_blank"
@@ -1965,8 +2071,12 @@ function ShareFooter({ slug }: { slug: string }) {
         </a>
       </span>
       <div className="flex items-center gap-4">
-        <a href="/terms" className="hover:text-foreground">Terms</a>
-        <a href="/privacy" className="hover:text-foreground">Privacy</a>
+        <a href="/terms" className="hover:text-foreground">
+          Terms
+        </a>
+        <a href="/privacy" className="hover:text-foreground">
+          Privacy
+        </a>
         <a
           href={`mailto:abuse@lastest.cloud?subject=Takedown%20request:%20${slug}`}
           className="hover:text-foreground"

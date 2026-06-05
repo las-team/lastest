@@ -7,36 +7,61 @@
  *   pnpm tsx autoresearch/harness/metrics.ts --repo-id=<id>
  */
 
-import { db } from '@/lib/db';
-import { testResults, tests, testRuns, builds, routes, functionalAreas } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { db } from "@/lib/db";
+import {
+  testResults,
+  tests,
+  testRuns,
+  builds,
+  routes,
+  functionalAreas,
+} from "@/lib/db/schema";
+import { eq, desc } from "drizzle-orm";
 
 // ─── Failure Classification ─────────────────────────────────────
 
 export type FailureCategory =
-  | '404_route'
-  | 'syntax_error'
-  | 'auth_redirect'
-  | 'selector_timeout'
-  | 'assertion'
-  | 'other';
+  | "404_route"
+  | "syntax_error"
+  | "auth_redirect"
+  | "selector_timeout"
+  | "assertion"
+  | "other";
 
 export function classifyFailure(errorMessage: string | null): FailureCategory {
-  if (!errorMessage) return 'other';
+  if (!errorMessage) return "other";
   const msg = errorMessage.toLowerCase();
 
-  if (msg.includes('404') || msg.includes('not found') || msg.includes('network failure') || msg.includes('net::err'))
-    return '404_route';
-  if (msg.includes('syntax') || msg.includes('unexpected token') || msg.includes('not a function'))
-    return 'syntax_error';
-  if (msg.includes('login') || msg.includes('redirect') || msg.includes('sign in') || msg.includes('unauthorized'))
-    return 'auth_redirect';
-  if (msg.includes('timeout') || msg.includes('selector') || msg.includes('locator') || msg.includes('waiting for'))
-    return 'selector_timeout';
-  if (msg.includes('expect') || msg.includes('assert'))
-    return 'assertion';
+  if (
+    msg.includes("404") ||
+    msg.includes("not found") ||
+    msg.includes("network failure") ||
+    msg.includes("net::err")
+  )
+    return "404_route";
+  if (
+    msg.includes("syntax") ||
+    msg.includes("unexpected token") ||
+    msg.includes("not a function")
+  )
+    return "syntax_error";
+  if (
+    msg.includes("login") ||
+    msg.includes("redirect") ||
+    msg.includes("sign in") ||
+    msg.includes("unauthorized")
+  )
+    return "auth_redirect";
+  if (
+    msg.includes("timeout") ||
+    msg.includes("selector") ||
+    msg.includes("locator") ||
+    msg.includes("waiting for")
+  )
+    return "selector_timeout";
+  if (msg.includes("expect") || msg.includes("assert")) return "assertion";
 
-  return 'other';
+  return "other";
 }
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -68,7 +93,9 @@ export interface BuildMetrics {
 
 // ─── Metric Queries ─────────────────────────────────────────────
 
-export async function getLatestBuildMetrics(repositoryId: string): Promise<BuildMetrics | null> {
+export async function getLatestBuildMetrics(
+  repositoryId: string,
+): Promise<BuildMetrics | null> {
   // Get latest build for this repo via testRuns
   const [latestBuild] = await db
     .select({
@@ -111,21 +138,21 @@ export async function getLatestBuildMetrics(repositoryId: string): Promise<Build
   // Classify failures
   const failures: FailureDetail[] = [];
   const categoryCounts: Record<FailureCategory, number> = {
-    '404_route': 0,
-    'syntax_error': 0,
-    'auth_redirect': 0,
-    'selector_timeout': 0,
-    'assertion': 0,
-    'other': 0,
+    "404_route": 0,
+    syntax_error: 0,
+    auth_redirect: 0,
+    selector_timeout: 0,
+    assertion: 0,
+    other: 0,
   };
 
   for (const r of results) {
-    if (r.status === 'failed') {
+    if (r.status === "failed") {
       const cat = classifyFailure(r.errorMessage);
       categoryCounts[cat]++;
       failures.push({
         testId: r.testId!,
-        testName: r.testName || 'Unknown',
+        testName: r.testName || "Unknown",
         targetUrl: r.targetUrl,
         errorMessage: r.errorMessage,
         category: cat,
@@ -135,21 +162,23 @@ export async function getLatestBuildMetrics(repositoryId: string): Promise<Build
   }
 
   const total = results.length;
-  const passed = results.filter(r => r.status === 'passed').length;
+  const passed = results.filter((r) => r.status === "passed").length;
   const failed = total - passed;
 
   // Route coverage: how many routes have at least one test
-  const routesWithTests = repoRoutes.filter(r => r.hasTest).length;
+  const routesWithTests = repoRoutes.filter((r) => r.hasTest).length;
   const totalRoutes = repoRoutes.length;
 
   // Route accuracy: 1 - (404 failures / total)
-  const routeAccuracy = total > 0 ? 1 - (categoryCounts['404_route'] / total) : 1;
+  const routeAccuracy = total > 0 ? 1 - categoryCounts["404_route"] / total : 1;
 
   // Syntax quality: 1 - (syntax errors / total)
-  const syntaxQuality = total > 0 ? 1 - (categoryCounts['syntax_error'] / total) : 1;
+  const syntaxQuality =
+    total > 0 ? 1 - categoryCounts["syntax_error"] / total : 1;
 
   // Auth success: 1 - (auth redirect / total)
-  const authSuccess = total > 0 ? 1 - (categoryCounts['auth_redirect'] / total) : 1;
+  const authSuccess =
+    total > 0 ? 1 - categoryCounts["auth_redirect"] / total : 1;
 
   // Route coverage
   const routeCoverage = totalRoutes > 0 ? routesWithTests / totalRoutes : 0;
@@ -176,7 +205,7 @@ export async function getLatestBuildMetrics(repositoryId: string): Promise<Build
 
 export async function getRouteHallucinationRate(
   repositoryId: string,
-  buildId: string
+  buildId: string,
 ): Promise<{ hallucinated: string[]; valid: string[] }> {
   // Get all routes for this repo
   const repoRoutes = await db
@@ -184,7 +213,7 @@ export async function getRouteHallucinationRate(
     .from(routes)
     .where(eq(routes.repositoryId, repositoryId));
 
-  const routePaths = new Set(repoRoutes.map(r => r.path));
+  const routePaths = new Set(repoRoutes.map((r) => r.path));
 
   // Get the build's test run
   const [build] = await db
@@ -215,10 +244,11 @@ export async function getRouteHallucinationRate(
     }
 
     // Check if path matches any known route (exact or pattern match)
-    const matches = routePaths.has(urlPath) ||
-      Array.from(routePaths).some(rp => {
+    const matches =
+      routePaths.has(urlPath) ||
+      Array.from(routePaths).some((rp) => {
         // Handle dynamic route patterns like /tests/[id]
-        const pattern = rp.replace(/\[[\w]+\]/g, '[^/]+');
+        const pattern = rp.replace(/\[[\w]+\]/g, "[^/]+");
         return new RegExp(`^${pattern}$`).test(urlPath);
       });
 
@@ -234,50 +264,56 @@ export async function getRouteHallucinationRate(
 
 // ─── CLI Entry ──────────────────────────────────────────────────
 
-if (process.argv[1]?.includes('metrics')) {
-  const repoIdArg = process.argv.find(a => a.startsWith('--repo-id='));
+if (process.argv[1]?.includes("metrics")) {
+  const repoIdArg = process.argv.find((a) => a.startsWith("--repo-id="));
   if (!repoIdArg) {
-    console.error('Usage: pnpm tsx autoresearch/harness/metrics.ts --repo-id=<id>');
+    console.error(
+      "Usage: pnpm tsx autoresearch/harness/metrics.ts --repo-id=<id>",
+    );
     process.exit(1);
   }
 
-  const repositoryId = repoIdArg.split('=')[1];
+  const repositoryId = repoIdArg.split("=")[1];
 
-  getLatestBuildMetrics(repositoryId).then(metrics => {
-    if (!metrics) {
-      console.error('No builds found for this repository');
-      process.exit(1);
-    }
-
-    console.log('---');
-    console.log(`build_id:        ${metrics.buildId}`);
-    console.log(`pass_rate:       ${metrics.pass_rate.toFixed(6)}`);
-    console.log(`route_accuracy:  ${metrics.route_accuracy.toFixed(6)}`);
-    console.log(`syntax_quality:  ${metrics.syntax_quality.toFixed(6)}`);
-    console.log(`auth_success:    ${metrics.auth_success.toFixed(6)}`);
-    console.log(`route_coverage:  ${metrics.route_coverage.toFixed(6)}`);
-    console.log(`efficiency:      ${metrics.efficiency.toFixed(3)}`);
-    console.log(`passed:          ${metrics.passed}`);
-    console.log(`failed:          ${metrics.failed}`);
-    console.log(`total:           ${metrics.total}`);
-    console.log('---');
-    console.log('failure_breakdown:');
-    for (const [cat, count] of Object.entries(metrics.category_counts)) {
-      if (count > 0) console.log(`  ${cat}: ${count}`);
-    }
-    console.log('---');
-    console.log('failures:');
-    for (const f of metrics.failure_details.slice(0, 30)) {
-      console.log(`  [${f.category}] ${f.testName} → ${f.targetUrl || 'no-url'}`);
-      if (f.errorMessage) {
-        console.log(`    ${f.errorMessage.split('\n')[0].slice(0, 100)}`);
+  getLatestBuildMetrics(repositoryId)
+    .then((metrics) => {
+      if (!metrics) {
+        console.error("No builds found for this repository");
+        process.exit(1);
       }
-    }
-    if (metrics.failure_details.length > 30) {
-      console.log(`  ... and ${metrics.failure_details.length - 30} more`);
-    }
-  }).catch(e => {
-    console.error('Error:', e);
-    process.exit(1);
-  });
+
+      console.log("---");
+      console.log(`build_id:        ${metrics.buildId}`);
+      console.log(`pass_rate:       ${metrics.pass_rate.toFixed(6)}`);
+      console.log(`route_accuracy:  ${metrics.route_accuracy.toFixed(6)}`);
+      console.log(`syntax_quality:  ${metrics.syntax_quality.toFixed(6)}`);
+      console.log(`auth_success:    ${metrics.auth_success.toFixed(6)}`);
+      console.log(`route_coverage:  ${metrics.route_coverage.toFixed(6)}`);
+      console.log(`efficiency:      ${metrics.efficiency.toFixed(3)}`);
+      console.log(`passed:          ${metrics.passed}`);
+      console.log(`failed:          ${metrics.failed}`);
+      console.log(`total:           ${metrics.total}`);
+      console.log("---");
+      console.log("failure_breakdown:");
+      for (const [cat, count] of Object.entries(metrics.category_counts)) {
+        if (count > 0) console.log(`  ${cat}: ${count}`);
+      }
+      console.log("---");
+      console.log("failures:");
+      for (const f of metrics.failure_details.slice(0, 30)) {
+        console.log(
+          `  [${f.category}] ${f.testName} → ${f.targetUrl || "no-url"}`,
+        );
+        if (f.errorMessage) {
+          console.log(`    ${f.errorMessage.split("\n")[0].slice(0, 100)}`);
+        }
+      }
+      if (metrics.failure_details.length > 30) {
+        console.log(`  ... and ${metrics.failure_details.length - 30} more`);
+      }
+    })
+    .catch((e) => {
+      console.error("Error:", e);
+      process.exit(1);
+    });
 }

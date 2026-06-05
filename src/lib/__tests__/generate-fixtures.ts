@@ -2,11 +2,11 @@
  * Script to generate PNG test fixtures
  * Run with: ts-node src/lib/__tests__/generate-fixtures.ts
  */
-import { PNG } from 'pngjs';
-import fs from 'fs';
-import path from 'path';
+import { PNG } from "pngjs";
+import fs from "fs";
+import path from "path";
 
-const fixturesDir = path.join(__dirname, 'fixtures');
+const fixturesDir = path.join(__dirname, "fixtures");
 
 // Ensure directory exists
 if (!fs.existsSync(fixturesDir)) {
@@ -20,7 +20,7 @@ function createBaseline() {
   for (let y = 0; y < png.height; y++) {
     for (let x = 0; x < png.width; x++) {
       const idx = (png.width * y + x) << 2;
-      png.data[idx] = 255;     // R
+      png.data[idx] = 255; // R
       png.data[idx + 1] = 255; // G
       png.data[idx + 2] = 255; // B
       png.data[idx + 3] = 255; // A
@@ -31,22 +31,22 @@ function createBaseline() {
   for (let y = 225; y < 375; y++) {
     for (let x = 300; x < 500; x++) {
       const idx = (png.width * y + x) << 2;
-      png.data[idx] = 0;       // R
-      png.data[idx + 1] = 0;   // G
-      png.data[idx + 2] = 0;   // B
+      png.data[idx] = 0; // R
+      png.data[idx + 1] = 0; // G
+      png.data[idx + 2] = 0; // B
       png.data[idx + 3] = 255; // A
     }
   }
 
   const buffer = PNG.sync.write(png);
-  fs.writeFileSync(path.join(fixturesDir, 'baseline.png'), buffer);
-  console.log('✓ Created baseline.png');
+  fs.writeFileSync(path.join(fixturesDir, "baseline.png"), buffer);
+  console.log("✓ Created baseline.png");
 }
 
 function createIdentical() {
-  const baseline = fs.readFileSync(path.join(fixturesDir, 'baseline.png'));
-  fs.writeFileSync(path.join(fixturesDir, 'identical.png'), baseline);
-  console.log('✓ Created identical.png');
+  const baseline = fs.readFileSync(path.join(fixturesDir, "baseline.png"));
+  fs.writeFileSync(path.join(fixturesDir, "identical.png"), baseline);
+  console.log("✓ Created identical.png");
 }
 
 function createShifted() {
@@ -75,8 +75,8 @@ function createShifted() {
   }
 
   const buffer = PNG.sync.write(png);
-  fs.writeFileSync(path.join(fixturesDir, 'shifted.png'), buffer);
-  console.log('✓ Created shifted.png');
+  fs.writeFileSync(path.join(fixturesDir, "shifted.png"), buffer);
+  console.log("✓ Created shifted.png");
 }
 
 function createColorChanged() {
@@ -97,16 +97,16 @@ function createColorChanged() {
   for (let y = 225; y < 375; y++) {
     for (let x = 300; x < 500; x++) {
       const idx = (png.width * y + x) << 2;
-      png.data[idx] = 255;     // R
-      png.data[idx + 1] = 0;   // G
-      png.data[idx + 2] = 0;   // B
+      png.data[idx] = 255; // R
+      png.data[idx + 1] = 0; // G
+      png.data[idx + 2] = 0; // B
       png.data[idx + 3] = 255; // A
     }
   }
 
   const buffer = PNG.sync.write(png);
-  fs.writeFileSync(path.join(fixturesDir, 'color-changed.png'), buffer);
-  console.log('✓ Created color-changed.png');
+  fs.writeFileSync(path.join(fixturesDir, "color-changed.png"), buffer);
+  console.log("✓ Created color-changed.png");
 }
 
 function createSizeChanged() {
@@ -135,8 +135,8 @@ function createSizeChanged() {
   }
 
   const buffer = PNG.sync.write(png);
-  fs.writeFileSync(path.join(fixturesDir, 'size-changed.png'), buffer);
-  console.log('✓ Created size-changed.png');
+  fs.writeFileSync(path.join(fixturesDir, "size-changed.png"), buffer);
+  console.log("✓ Created size-changed.png");
 }
 
 // Generate all fixtures
@@ -146,4 +146,4 @@ createShifted();
 createColorChanged();
 createSizeChanged();
 
-console.log('\n✅ All fixtures created successfully!');
+console.log("\n✅ All fixtures created successfully!");

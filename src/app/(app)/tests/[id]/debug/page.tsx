@@ -1,7 +1,7 @@
-import { getTest, getSelectedRepository } from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { notFound } from 'next/navigation';
-import { DebugClient } from './debug-client';
+import { getTest, getSelectedRepository } from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { notFound } from "next/navigation";
+import { DebugClient } from "./debug-client";
 
 interface DebugPageProps {
   params: Promise<{ id: string }>;
@@ -18,15 +18,14 @@ export default async function DebugPage({ params }: DebugPageProps) {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
+  const selectedRepo = teamId
+    ? await getSelectedRepository(userId, teamId)
+    : null;
   const repositoryId = test.repositoryId || selectedRepo?.id || null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <DebugClient
-        test={test}
-        repositoryId={repositoryId}
-      />
+      <DebugClient test={test} repositoryId={repositoryId} />
     </div>
   );
 }

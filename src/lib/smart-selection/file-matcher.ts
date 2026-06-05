@@ -1,7 +1,7 @@
-import * as queries from '@/lib/db/queries';
-import type { Route, FunctionalArea } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import type { Route, FunctionalArea } from "@/lib/db/schema";
 
-export type MatchReason = 'route_match' | 'url_match' | 'area_match';
+export type MatchReason = "route_match" | "url_match" | "area_match";
 
 export interface AffectedTest {
   testId: string;
@@ -17,21 +17,21 @@ export interface AffectedTest {
  */
 function extractPathSegments(filePath: string): string[] {
   return filePath
-    .replace(/\.(tsx?|jsx?|vue|svelte|astro)$/, '') // Remove extensions
-    .split('/')
+    .replace(/\.(tsx?|jsx?|vue|svelte|astro)$/, "") // Remove extensions
+    .split("/")
     .filter((segment) => {
       // Filter out common non-meaningful segments
       if (!segment) return false;
-      if (segment.startsWith('(') && segment.endsWith(')')) return false; // Route groups like (app)
-      if (segment === 'src') return false;
-      if (segment === 'app') return false;
-      if (segment === 'pages') return false;
-      if (segment === 'components') return false;
-      if (segment === 'lib') return false;
-      if (segment === 'utils') return false;
-      if (segment === 'index') return false;
-      if (segment === 'page') return false;
-      if (segment === 'layout') return false;
+      if (segment.startsWith("(") && segment.endsWith(")")) return false; // Route groups like (app)
+      if (segment === "src") return false;
+      if (segment === "app") return false;
+      if (segment === "pages") return false;
+      if (segment === "components") return false;
+      if (segment === "lib") return false;
+      if (segment === "utils") return false;
+      if (segment === "index") return false;
+      if (segment === "page") return false;
+      if (segment === "layout") return false;
       return true;
     })
     .map((s) => s.toLowerCase());
@@ -45,8 +45,8 @@ function extractUrlSegments(url: string): string[] {
   try {
     const urlObj = new URL(url);
     return urlObj.pathname
-      .split('/')
-      .filter((s) => s && s !== 'index.html')
+      .split("/")
+      .filter((s) => s && s !== "index.html")
       .map((s) => s.toLowerCase());
   } catch {
     return [];
@@ -58,7 +58,7 @@ function extractUrlSegments(url: string): string[] {
  */
 function calculateSegmentMatch(
   sourceSegments: string[],
-  targetSegments: string[]
+  targetSegments: string[],
 ): number {
   if (sourceSegments.length === 0 || targetSegments.length === 0) return 0;
 
@@ -89,7 +89,7 @@ function calculateSegmentMatch(
  */
 export async function findAffectedTests(
   changedFiles: string[],
-  repositoryId: string
+  repositoryId: string,
 ): Promise<AffectedTest[]> {
   const affectedTests: AffectedTest[] = [];
   const seenTestIds = new Set<string>();
@@ -131,7 +131,7 @@ export async function findAffectedTests(
               affectedTests.push({
                 testId: test.id,
                 testName: test.name,
-                matchReason: 'route_match',
+                matchReason: "route_match",
                 confidence: 100,
                 matchedFile: changedFile,
               });
@@ -148,13 +148,16 @@ export async function findAffectedTests(
     // 2. URL match - match test's targetUrl against changed file paths
     if (test.targetUrl) {
       const urlSegments = extractUrlSegments(test.targetUrl);
-      const matchScore = calculateSegmentMatch(urlSegments, uniqueChangedSegments);
+      const matchScore = calculateSegmentMatch(
+        urlSegments,
+        uniqueChangedSegments,
+      );
       if (matchScore >= 0.3) {
         // At least 30% segment match
         affectedTests.push({
           testId: test.id,
           testName: test.name,
-          matchReason: 'url_match',
+          matchReason: "url_match",
           confidence: Math.round(80 * matchScore),
           matchedFile: changedFiles.find((f) => {
             const fileSegments = extractPathSegments(f);
@@ -175,12 +178,14 @@ export async function findAffectedTests(
           const fileLower = changedFile.toLowerCase();
           if (
             fileLower.includes(areaName) ||
-            areaName.split(/[^a-z0-9]+/).some((word) => word && fileLower.includes(word))
+            areaName
+              .split(/[^a-z0-9]+/)
+              .some((word) => word && fileLower.includes(word))
           ) {
             affectedTests.push({
               testId: test.id,
               testName: test.name,
-              matchReason: 'area_match',
+              matchReason: "area_match",
               confidence: 60,
               matchedFile: changedFile,
             });
@@ -201,7 +206,7 @@ export async function findAffectedTests(
  */
 export async function findUnaffectedTests(
   changedFiles: string[],
-  repositoryId: string
+  repositoryId: string,
 ): Promise<{ id: string; name: string }[]> {
   const tests = await queries.getTestsByRepo(repositoryId);
   const affectedTests = await findAffectedTests(changedFiles, repositoryId);

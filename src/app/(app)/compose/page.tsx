@@ -1,20 +1,27 @@
-import { ComposeClient } from './compose-client';
-import { getTestsWithVersions } from '@/server/actions/builds';
-import { getSelectedRepository, getLastBuildByBranch, getBuildTestSummaries, getComposeConfig } from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { redirect } from 'next/navigation';
+import { ComposeClient } from "./compose-client";
+import { getTestsWithVersions } from "@/server/actions/builds";
+import {
+  getSelectedRepository,
+  getLastBuildByBranch,
+  getBuildTestSummaries,
+  getComposeConfig,
+} from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export default async function ComposePage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-  const selectedRepo = teamId ? await getSelectedRepository(userId, teamId) : null;
+  const selectedRepo = teamId
+    ? await getSelectedRepository(userId, teamId)
+    : null;
 
   if (!selectedRepo) {
-    redirect('/');
+    redirect("/");
   }
 
-  const defaultBranch = selectedRepo.defaultBranch ?? 'main';
+  const defaultBranch = selectedRepo.defaultBranch ?? "main";
   const currentBranch = selectedRepo.selectedBranch ?? defaultBranch;
 
   const [testsWithVersions, mainBuild, savedConfig] = await Promise.all([
@@ -36,11 +43,15 @@ export default async function ComposePage() {
         defaultBranch={defaultBranch}
         mainBuild={mainBuild ?? null}
         mainBuildTests={mainBuildTests}
-        savedConfig={savedConfig ? {
-          selectedTestIds: savedConfig.selectedTestIds ?? [],
-          excludedTestIds: savedConfig.excludedTestIds ?? [],
-          versionOverrides: savedConfig.versionOverrides ?? {},
-        } : null}
+        savedConfig={
+          savedConfig
+            ? {
+                selectedTestIds: savedConfig.selectedTestIds ?? [],
+                excludedTestIds: savedConfig.excludedTestIds ?? [],
+                versionOverrides: savedConfig.versionOverrides ?? {},
+              }
+            : null
+        }
       />
     </div>
   );

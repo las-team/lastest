@@ -1,5 +1,5 @@
-import Link from 'next/link';
-import { LegalLinks } from '@/components/layout/legal-links';
+import Link from "next/link";
+import { LegalLinks } from "@/components/layout/legal-links";
 
 export default function AuthLayout({
   children,

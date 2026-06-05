@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Repo-level Design System bundle uploader. Lives in the Setup tab under
@@ -13,19 +13,25 @@
  * against this token set during test runs — see the Verify "Design"
  * tab for the violation rollup.
  */
-import { useCallback, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Palette, Upload, FileArchive, Loader2, RotateCcw } from 'lucide-react';
-import { toast } from 'sonner';
+import { useCallback, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Palette, Upload, FileArchive, Loader2, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import {
   uploadRepoDesignSystemBundle,
   clearRepoDesignSystem,
-} from '@/server/actions/design-system-overrides';
-import { DesignSystemPreview } from './design-system-preview';
-import type { DesignSystemConfig, DesignTokenCategory } from '@/lib/db/schema';
+} from "@/server/actions/design-system-overrides";
+import { DesignSystemPreview } from "./design-system-preview";
+import type { DesignSystemConfig, DesignTokenCategory } from "@/lib/db/schema";
 
 interface DesignSystemBundleUploadProps {
   repositoryId: string;
@@ -37,19 +43,25 @@ interface DesignSystemBundleUploadProps {
 }
 
 const CATEGORY_LABEL: Record<DesignTokenCategory, string> = {
-  color: 'Colors',
-  'border-radius': 'Radii',
-  'font-family': 'Fonts',
-  'font-size': 'Type scale',
-  spacing: 'Spacing',
+  color: "Colors",
+  "border-radius": "Radii",
+  "font-family": "Fonts",
+  "font-size": "Type scale",
+  spacing: "Spacing",
 };
 
 function tokenCounts(config: DesignSystemConfig | null) {
   const out: Record<DesignTokenCategory, number> = {
-    color: 0, 'border-radius': 0, 'font-family': 0, 'font-size': 0, spacing: 0,
+    color: 0,
+    "border-radius": 0,
+    "font-family": 0,
+    "font-size": 0,
+    spacing: 0,
   };
   if (!config?.tokens) return out;
-  for (const [cat, list] of Object.entries(config.tokens) as Array<[DesignTokenCategory, unknown]>) {
+  for (const [cat, list] of Object.entries(config.tokens) as Array<
+    [DesignTokenCategory, unknown]
+  >) {
     if (Array.isArray(list)) out[cat] = list.length;
   }
   return out;
@@ -70,40 +82,51 @@ export function DesignSystemBundleUpload({
   const counts = tokenCounts(config);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  const submit = useCallback((file: File) => {
-    startTransition(async () => {
-      const fd = new FormData();
-      fd.append('repositoryId', repositoryId);
-      fd.append('file', file);
-      const res = await uploadRepoDesignSystemBundle(fd);
-      if (!res.success) {
-        toast.error(res.error);
-        return;
-      }
-      setLastFiles(res.files);
-      toast.success(`Imported ${res.total} token${res.total === 1 ? '' : 's'} from ${file.name}`);
-      router.refresh();
-    });
-  }, [repositoryId, router]);
+  const submit = useCallback(
+    (file: File) => {
+      startTransition(async () => {
+        const fd = new FormData();
+        fd.append("repositoryId", repositoryId);
+        fd.append("file", file);
+        const res = await uploadRepoDesignSystemBundle(fd);
+        if (!res.success) {
+          toast.error(res.error);
+          return;
+        }
+        setLastFiles(res.files);
+        toast.success(
+          `Imported ${res.total} token${res.total === 1 ? "" : "s"} from ${file.name}`,
+        );
+        router.refresh();
+      });
+    },
+    [repositoryId, router],
+  );
 
-  const onPick = useCallback((file: File | null | undefined) => {
-    if (!file) return;
-    submit(file);
-  }, [submit]);
+  const onPick = useCallback(
+    (file: File | null | undefined) => {
+      if (!file) return;
+      submit(file);
+    },
+    [submit],
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDraggedOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) onPick(file);
-  }, [onPick]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDraggedOver(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) onPick(file);
+    },
+    [onPick],
+  );
 
   const handleClear = useCallback(() => {
-    if (!confirm('Remove the design system tokens for this repo?')) return;
+    if (!confirm("Remove the design system tokens for this repo?")) return;
     startTransition(async () => {
       await clearRepoDesignSystem(repositoryId);
       setLastFiles([]);
-      toast.success('Design system cleared');
+      toast.success("Design system cleared");
       router.refresh();
     });
   }, [repositoryId, router]);
@@ -121,8 +144,8 @@ export function DesignSystemBundleUpload({
           </CardTitle>
           <CardDescription>
             Upload a token bundle (zip from Claude Design, or a single CSS
-            file). Tests in this repo compare colors, radii, fonts, and
-            spacing against this set, like accessibility checks.
+            file). Tests in this repo compare colors, radii, fonts, and spacing
+            against this set, like accessibility checks.
           </CardDescription>
         </div>
         {hasConfig && (
@@ -157,7 +180,9 @@ export function DesignSystemBundleUpload({
                 Need to update? Drop a fresh bundle to replace the current set.
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
-                {(Object.entries(counts) as Array<[DesignTokenCategory, number]>)
+                {(
+                  Object.entries(counts) as Array<[DesignTokenCategory, number]>
+                )
                   .filter(([, n]) => n > 0)
                   .map(([cat, n]) => (
                     <Badge key={cat} variant="outline" className="text-[10px]">
@@ -182,14 +207,14 @@ export function DesignSystemBundleUpload({
             relative flex flex-col items-center justify-center gap-2
             border-2 border-dashed rounded-lg p-6 cursor-pointer
             transition-colors
-            ${draggedOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 hover:bg-muted/30'}
-            ${isPending ? 'pointer-events-none opacity-60' : ''}
+            ${draggedOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"}
+            ${isPending ? "pointer-events-none opacity-60" : ""}
           `}
           role="button"
           tabIndex={0}
           aria-label="Upload design system bundle"
           onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
+            if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
               inputRef.current?.click();
             }
@@ -205,8 +230,8 @@ export function DesignSystemBundleUpload({
               <FileArchive className="h-8 w-8 text-muted-foreground" />
               <div className="text-center space-y-1">
                 <p className="text-sm font-medium">
-                  Drop a <code className="font-mono text-xs">.zip</code> bundle or{' '}
-                  <code className="font-mono text-xs">.css</code> file here
+                  Drop a <code className="font-mono text-xs">.zip</code> bundle
+                  or <code className="font-mono text-xs">.css</code> file here
                 </p>
                 <p className="text-xs text-muted-foreground">
                   or click to browse · max 5 MB
@@ -236,7 +261,7 @@ export function DesignSystemBundleUpload({
               const file = e.target.files?.[0];
               onPick(file);
               // Reset so re-picking the same filename re-fires onChange.
-              if (inputRef.current) inputRef.current.value = '';
+              if (inputRef.current) inputRef.current.value = "";
             }}
           />
         </div>

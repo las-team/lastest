@@ -1,10 +1,8 @@
-import { db } from '../index';
-import { githubIssues, pullRequests, repositories } from '../schema';
-import { eq, and, gte, lt, isNotNull, sql } from 'drizzle-orm';
+import { db } from "../index";
+import { githubIssues, pullRequests, repositories } from "../schema";
+import { eq, and, gte, lt, isNotNull, sql } from "drizzle-orm";
 
-export async function getIssueTimeline(
-  repositoryId: string,
-) {
+export async function getIssueTimeline(repositoryId: string) {
   const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
@@ -14,9 +12,14 @@ export async function getIssueTimeline(
 
   return db
     .select({
-      week: sql<string>`to_char(${githubIssues.createdAt}, 'IYYY-IW')`.as('week'),
-      count: sql<number>`count(*)`.as('count'),
-      closedCount: sql<number>`sum(case when ${githubIssues.state} = 'closed' then 1 else 0 end)`.as('closed_count'),
+      week: sql<string>`to_char(${githubIssues.createdAt}, 'IYYY-IW')`.as(
+        "week",
+      ),
+      count: sql<number>`count(*)`.as("count"),
+      closedCount:
+        sql<number>`sum(case when ${githubIssues.state} = 'closed' then 1 else 0 end)`.as(
+          "closed_count",
+        ),
     })
     .from(githubIssues)
     .where(eq(githubIssues.repositoryId, repositoryId))
@@ -24,10 +27,7 @@ export async function getIssueTimeline(
     .orderBy(sql`week`);
 }
 
-export async function getMergedPRs(
-  repositoryId: string,
-  author?: string,
-) {
+export async function getMergedPRs(repositoryId: string, author?: string) {
   const [repo] = await db
     .select({ owner: repositories.owner, name: repositories.name })
     .from(repositories)
@@ -76,15 +76,10 @@ export async function getPRAuthors(repositoryId: string) {
         isNotNull(pullRequests.author),
       ),
     );
-  return rows
-    .map((r) => r.author!)
-    .filter(Boolean);
+  return rows.map((r) => r.author!).filter(Boolean);
 }
 
-export async function getImpactSummary(
-  repositoryId: string,
-  author?: string,
-) {
+export async function getImpactSummary(repositoryId: string, author?: string) {
   const mergedPRs = await getMergedPRs(repositoryId, author);
 
   // Get all issues for this repo
@@ -161,9 +156,10 @@ export async function getImpactSummary(
   const afterRate = after / afterWeeks;
 
   // % change in weekly issue rate
-  const percentChange = beforeRate > 0
-    ? Math.round(((afterRate - beforeRate) / beforeRate) * 100)
-    : 0;
+  const percentChange =
+    beforeRate > 0
+      ? Math.round(((afterRate - beforeRate) / beforeRate) * 100)
+      : 0;
 
   return {
     firstMergedAt,

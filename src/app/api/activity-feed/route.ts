@@ -8,19 +8,22 @@
  * - source: filter by sourceType (play_agent | mcp_server)
  */
 
-import { NextRequest } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
-import { verifyBearerToken } from '@/lib/auth/api-key';
-import { subscribeToActivityFeed, type ActivityFeedEvent } from '@/lib/ws/activity-events';
+import { NextRequest } from "next/server";
+import { getCurrentSession } from "@/lib/auth";
+import { verifyBearerToken } from "@/lib/auth/api-key";
+import {
+  subscribeToActivityFeed,
+  type ActivityFeedEvent,
+} from "@/lib/ws/activity-events";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 async function verifyAuth(request: NextRequest) {
   const session = await getCurrentSession();
   if (session) return session;
 
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
     return verifyBearerToken(authHeader.slice(7));
   }
 
@@ -29,14 +32,14 @@ async function verifyAuth(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const session = await verifyAuth(request);
-  if (!session) return new Response('Unauthorized', { status: 401 });
+  if (!session) return new Response("Unauthorized", { status: 401 });
 
   const teamId = session.team?.id;
-  if (!teamId) return new Response('No team', { status: 403 });
+  if (!teamId) return new Response("No team", { status: 403 });
 
   const { searchParams } = new URL(request.url);
-  const repoFilter = searchParams.get('repo');
-  const sourceFilter = searchParams.get('source');
+  const repoFilter = searchParams.get("repo");
+  const sourceFilter = searchParams.get("source");
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
@@ -44,7 +47,9 @@ export async function GET(request: NextRequest) {
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: 'connected', timestamp: Date.now() })}\n\n`),
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "connected", timestamp: Date.now() })}\n\n`,
+        ),
       );
 
       unsubscribe = subscribeToActivityFeed((event: ActivityFeedEvent) => {
@@ -53,7 +58,9 @@ export async function GET(request: NextRequest) {
         if (sourceFilter && event.sourceType !== sourceFilter) return;
 
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+          );
         } catch {
           // Stream closed
         }
@@ -61,7 +68,7 @@ export async function GET(request: NextRequest) {
 
       const keepalive = setInterval(() => {
         try {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
           clearInterval(keepalive);
         }
@@ -70,14 +77,18 @@ export async function GET(request: NextRequest) {
       // Cloudflare 524 prevention — close at 90s; EventSource auto-reconnects.
       const lifetimeCap = setTimeout(() => {
         try {
-          controller.enqueue(encoder.encode('event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n'));
+          controller.enqueue(
+            encoder.encode(
+              'event: reconnect\ndata: {"reason":"lifetime-cap"}\n\n',
+            ),
+          );
           controller.close();
         } catch {
           // already closed
         }
       }, 90_000);
 
-      request.signal.addEventListener('abort', () => {
+      request.signal.addEventListener("abort", () => {
         clearInterval(keepalive);
         clearTimeout(lifetimeCap);
         if (unsubscribe) {
@@ -96,10 +107,10 @@ export async function GET(request: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

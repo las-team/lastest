@@ -5,13 +5,13 @@
  */
 
 export const PRESET_SCHEDULES = {
-  every_15m: { cron: '*/15 * * * *', label: 'Every 15 minutes' },
-  hourly: { cron: '0 * * * *', label: 'Every hour' },
-  every_6h: { cron: '0 */6 * * *', label: 'Every 6 hours' },
-  daily_3am: { cron: '0 3 * * *', label: 'Daily at 3:00 AM' },
-  daily_midnight: { cron: '0 0 * * *', label: 'Daily at midnight' },
-  weekly_sunday: { cron: '0 3 * * 0', label: 'Weekly on Sunday at 3:00 AM' },
-  weekly_monday: { cron: '0 3 * * 1', label: 'Weekly on Monday at 3:00 AM' },
+  every_15m: { cron: "*/15 * * * *", label: "Every 15 minutes" },
+  hourly: { cron: "0 * * * *", label: "Every hour" },
+  every_6h: { cron: "0 */6 * * *", label: "Every 6 hours" },
+  daily_3am: { cron: "0 3 * * *", label: "Daily at 3:00 AM" },
+  daily_midnight: { cron: "0 0 * * *", label: "Daily at midnight" },
+  weekly_sunday: { cron: "0 3 * * 0", label: "Weekly on Sunday at 3:00 AM" },
+  weekly_monday: { cron: "0 3 * * 1", label: "Weekly on Monday at 3:00 AM" },
 } as const;
 
 export type PresetScheduleKey = keyof typeof PRESET_SCHEDULES;
@@ -24,11 +24,11 @@ export function isValidCron(expression: string): boolean {
   if (parts.length !== 5) return false;
 
   const ranges = [
-    { min: 0, max: 59 },  // minute
-    { min: 0, max: 23 },  // hour
-    { min: 1, max: 31 },  // day of month
-    { min: 1, max: 12 },  // month
-    { min: 0, max: 7 },   // day of week (0 and 7 = Sunday)
+    { min: 0, max: 59 }, // minute
+    { min: 0, max: 23 }, // hour
+    { min: 1, max: 31 }, // day of month
+    { min: 1, max: 12 }, // month
+    { min: 0, max: 7 }, // day of week (0 and 7 = Sunday)
   ];
 
   for (let i = 0; i < 5; i++) {
@@ -38,13 +38,13 @@ export function isValidCron(expression: string): boolean {
 }
 
 function isValidCronField(field: string, min: number, max: number): boolean {
-  if (field === '*') return true;
+  if (field === "*") return true;
 
   // Handle lists: 1,2,3
-  const parts = field.split(',');
+  const parts = field.split(",");
   for (const part of parts) {
     // Handle step: */5 or 1-10/2
-    const stepParts = part.split('/');
+    const stepParts = part.split("/");
     if (stepParts.length > 2) return false;
 
     if (stepParts.length === 2) {
@@ -53,10 +53,10 @@ function isValidCronField(field: string, min: number, max: number): boolean {
     }
 
     const range = stepParts[0];
-    if (range === '*') continue;
+    if (range === "*") continue;
 
     // Handle range: 1-5
-    const rangeParts = range.split('-');
+    const rangeParts = range.split("-");
     if (rangeParts.length > 2) return false;
 
     for (const r of rangeParts) {
@@ -73,15 +73,15 @@ function isValidCronField(field: string, min: number, max: number): boolean {
 function expandCronField(field: string, min: number, max: number): number[] {
   const values = new Set<number>();
 
-  for (const part of field.split(',')) {
-    const [range, stepStr] = part.split('/');
+  for (const part of field.split(",")) {
+    const [range, stepStr] = part.split("/");
     const step = stepStr ? parseInt(stepStr, 10) : 1;
 
     let start = min;
     let end = max;
 
-    if (range !== '*') {
-      const rangeParts = range.split('-');
+    if (range !== "*") {
+      const rangeParts = range.split("-");
       start = parseInt(rangeParts[0], 10);
       end = rangeParts.length > 1 ? parseInt(rangeParts[1], 10) : start;
     }
@@ -97,18 +97,24 @@ function expandCronField(field: string, min: number, max: number): number[] {
 /**
  * Compute the next run time from a cron expression, starting from a given date.
  */
-export function getNextRunTime(cronExpression: string, from: Date = new Date()): Date {
+export function getNextRunTime(
+  cronExpression: string,
+  from: Date = new Date(),
+): Date {
   const parts = cronExpression.trim().split(/\s+/);
-  if (parts.length !== 5) throw new Error(`Invalid cron expression: ${cronExpression}`);
+  if (parts.length !== 5)
+    throw new Error(`Invalid cron expression: ${cronExpression}`);
 
   const minutes = expandCronField(parts[0], 0, 59);
   const hours = expandCronField(parts[1], 0, 23);
   const daysOfMonth = expandCronField(parts[2], 1, 31);
   const months = expandCronField(parts[3], 1, 12);
-  const daysOfWeek = expandCronField(parts[4], 0, 7).map(d => d === 7 ? 0 : d); // normalize Sunday
+  const daysOfWeek = expandCronField(parts[4], 0, 7).map((d) =>
+    d === 7 ? 0 : d,
+  ); // normalize Sunday
 
-  const hasDayOfMonthConstraint = parts[2] !== '*';
-  const hasDayOfWeekConstraint = parts[4] !== '*';
+  const hasDayOfMonthConstraint = parts[2] !== "*";
+  const hasDayOfWeekConstraint = parts[4] !== "*";
 
   // Start one minute after `from`
   const candidate = new Date(from);
@@ -132,12 +138,15 @@ export function getNextRunTime(cronExpression: string, from: Date = new Date()):
     }
 
     // Day matching: if both day-of-month and day-of-week are constrained, match either (union)
-    const dayOfMonthMatch = !hasDayOfMonthConstraint || daysOfMonth.includes(dayOfMonth);
-    const dayOfWeekMatch = !hasDayOfWeekConstraint || daysOfWeek.includes(dayOfWeek);
+    const dayOfMonthMatch =
+      !hasDayOfMonthConstraint || daysOfMonth.includes(dayOfMonth);
+    const dayOfWeekMatch =
+      !hasDayOfWeekConstraint || daysOfWeek.includes(dayOfWeek);
 
-    const dayMatch = (hasDayOfMonthConstraint && hasDayOfWeekConstraint)
-      ? (dayOfMonthMatch || dayOfWeekMatch)
-      : (dayOfMonthMatch && dayOfWeekMatch);
+    const dayMatch =
+      hasDayOfMonthConstraint && hasDayOfWeekConstraint
+        ? dayOfMonthMatch || dayOfWeekMatch
+        : dayOfMonthMatch && dayOfWeekMatch;
 
     if (!dayMatch) {
       candidate.setDate(candidate.getDate() + 1);
@@ -176,20 +185,40 @@ export function describeCron(expression: string): string {
   const [min, hour, dom, mon, dow] = parts;
 
   // Common patterns
-  if (min.startsWith('*/') && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+  if (
+    min.startsWith("*/") &&
+    hour === "*" &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
     return `Every ${min.slice(2)} minutes`;
   }
-  if (hour.startsWith('*/') && min === '0' && dom === '*' && mon === '*' && dow === '*') {
+  if (
+    hour.startsWith("*/") &&
+    min === "0" &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
     return `Every ${hour.slice(2)} hours`;
   }
-  if (dom === '*' && mon === '*' && dow === '*') {
-    return `Daily at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+  if (dom === "*" && mon === "*" && dow === "*") {
+    return `Daily at ${hour.padStart(2, "0")}:${min.padStart(2, "0")}`;
   }
-  if (dom === '*' && mon === '*' && dow !== '*') {
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  if (dom === "*" && mon === "*" && dow !== "*") {
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
     const dayNum = parseInt(dow, 10);
     const dayName = days[dayNum] ?? dow;
-    return `${dayName} at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+    return `${dayName} at ${hour.padStart(2, "0")}:${min.padStart(2, "0")}`;
   }
 
   return expression;

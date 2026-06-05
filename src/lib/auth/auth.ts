@@ -10,14 +10,19 @@ import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
 import { syncUserToTwentyCRM } from "@/lib/integrations/twenty-crm";
 
-async function syncGithubAccount(account: { userId: string; accessToken?: string | null }) {
+async function syncGithubAccount(account: {
+  userId: string;
+  accessToken?: string | null;
+}) {
   if (!account.accessToken) return;
   try {
     const ghUser = await getGitHubUser(account.accessToken);
     if (!ghUser) return;
     const user = await queries.getUserById(account.userId);
     const teamId = user?.teamId ?? null;
-    const existing = teamId ? await queries.getGithubAccountByTeam(teamId) : null;
+    const existing = teamId
+      ? await queries.getGithubAccountByTeam(teamId)
+      : null;
     if (existing) {
       await queries.updateGithubAccount(existing.id, {
         accessToken: account.accessToken,
@@ -49,14 +54,22 @@ async function syncGithubAccount(account: { userId: string; accessToken?: string
 // We honour env overrides so prod can opt into SameSite=None + Secure +
 // shared cookie domain (`.lastest.cloud`) without a code change. The defaults
 // stay dev-friendly (lax / non-secure / no domain) so localhost still works.
-const COOKIE_SAMESITE = (process.env.BETTER_AUTH_COOKIE_SAMESITE as 'strict' | 'lax' | 'none' | undefined) || 'lax';
+const COOKIE_SAMESITE =
+  (process.env.BETTER_AUTH_COOKIE_SAMESITE as
+    | "strict"
+    | "lax"
+    | "none"
+    | undefined) || "lax";
 const COOKIE_SECURE = process.env.BETTER_AUTH_COOKIE_SECURE
-  ? process.env.BETTER_AUTH_COOKIE_SECURE === 'true'
-  : process.env.NODE_ENV === 'production';
+  ? process.env.BETTER_AUTH_COOKIE_SECURE === "true"
+  : process.env.NODE_ENV === "production";
 const COOKIE_DOMAIN = process.env.BETTER_AUTH_COOKIE_DOMAIN || undefined;
 
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  baseURL:
+    process.env.BETTER_AUTH_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "http://localhost:3000",
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
     : undefined,
@@ -133,7 +146,7 @@ export const auth = betterAuth({
       clientSecret: process.env.DISCORD_CLIENT_SECRET!,
       // Phone-only Discord accounts return email: null even with the `email` scope.
       // Fall back to a synthetic .local placeholder so onboarding doesn't fail.
-      mapProfileToUser: (profile: { id: string; email: string | null }) => ({
+      mapProfileToUser: (profile: { id: string; email?: string | null }) => ({
         email: profile.email ?? `${profile.id}@discord.placeholder.local`,
       }),
     },
@@ -175,7 +188,12 @@ export const auth = betterAuth({
             return;
           }
           const invite = await queries.getInvitationByEmail(user.email);
-          if (invite && !invite.acceptedAt && invite.expiresAt && invite.expiresAt > new Date()) {
+          if (
+            invite &&
+            !invite.acceptedAt &&
+            invite.expiresAt &&
+            invite.expiresAt > new Date()
+          ) {
             await queries.updateUser(user.id, {
               teamId: invite.teamId ?? undefined,
               role: (invite.role as schema.UserRole) ?? "member",
@@ -185,9 +203,15 @@ export const auth = betterAuth({
             const team = await queries.createTeam({
               name: `${user.name || user.email.split("@")[0]}'s Team`,
             });
-            await queries.updateUser(user.id, { teamId: team.id, role: "owner" });
+            await queries.updateUser(user.id, {
+              teamId: team.id,
+              role: "owner",
+            });
           }
-          syncUserToTwentyCRM({ name: user.name || '', email: user.email }).catch(() => {});
+          syncUserToTwentyCRM({
+            name: user.name || "",
+            email: user.email,
+          }).catch(() => {});
         },
       },
     },

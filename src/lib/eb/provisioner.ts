@@ -31,40 +31,47 @@
  * The provisioner is a no-op unless EB_PROVISIONER === 'kubernetes'.
  */
 
-import { execFileSync } from 'child_process';
-import { readFileSync } from 'fs';
-import https from 'https';
-import { db } from '@/lib/db';
-import { runners } from '@/lib/db/schema';
-import { and, eq, ne } from 'drizzle-orm';
+import { execFileSync } from "child_process";
+import { readFileSync } from "fs";
+import https from "https";
+import { db } from "@/lib/db";
+import { runners } from "@/lib/db/schema";
+import { and, eq, ne } from "drizzle-orm";
 
-const SA_PATH = '/var/run/secrets/kubernetes.io/serviceaccount';
+const SA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount";
 
-type Mode = 'kubernetes' | 'none';
+type Mode = "kubernetes" | "none";
 
 function provisionerMode(): Mode {
-  const m = (process.env.EB_PROVISIONER || 'none').toLowerCase();
-  if (m === 'kubernetes') return m;
-  return 'none';
+  const m = (process.env.EB_PROVISIONER || "none").toLowerCase();
+  if (m === "kubernetes") return m;
+  return "none";
 }
 
 export function isKubernetesMode(): boolean {
-  return provisionerMode() === 'kubernetes';
+  return provisionerMode() === "kubernetes";
 }
 
 // Cluster-wide EB pool limits live in the global `playwright_settings` row.
 // Short in-process cache so hot paths (isPoolBusy, claimOrProvisionPoolEB) don't
 // hammer the DB — cap changes are rare, pool decisions are frequent.
-let _limitsCache: { value: { ebPoolMax: number; ebIdleTTLSeconds: number }; expiresAt: number } | null = null;
+let _limitsCache: {
+  value: { ebPoolMax: number; ebIdleTTLSeconds: number };
+  expiresAt: number;
+} | null = null;
 const LIMITS_CACHE_TTL_MS = 5000;
 
-async function readPoolLimits(): Promise<{ ebPoolMax: number; ebIdleTTLSeconds: number }> {
-  if (_limitsCache && Date.now() < _limitsCache.expiresAt) return _limitsCache.value;
-  const { getGlobalPoolLimits } = await import('@/lib/db/queries/settings');
+async function readPoolLimits(): Promise<{
+  ebPoolMax: number;
+  ebIdleTTLSeconds: number;
+}> {
+  if (_limitsCache && Date.now() < _limitsCache.expiresAt)
+    return _limitsCache.value;
+  const { getGlobalPoolLimits } = await import("@/lib/db/queries/settings");
   const row = await getGlobalPoolLimits();
   if (!row) {
     throw new Error(
-      'Global playwright_settings row missing — call ensureGlobalPlaywrightSettings() during app boot or create one via the settings UI',
+      "Global playwright_settings row missing — call ensureGlobalPlaywrightSettings() during app boot or create one via the settings UI",
     );
   }
   _limitsCache = { value: row, expiresAt: Date.now() + LIMITS_CACHE_TTL_MS };
@@ -80,7 +87,7 @@ export async function ebIdleTTLMs(): Promise<number> {
 }
 
 export function warmPoolMin(): number {
-  const n = parseInt(process.env.EB_WARM_POOL_MIN || '2', 10);
+  const n = parseInt(process.env.EB_WARM_POOL_MIN || "2", 10);
   return Number.isFinite(n) && n >= 0 ? n : 2;
 }
 
@@ -90,16 +97,16 @@ export function warmPoolMin(): number {
 // failures traced to bursty cron-build overlap pushing currentPoolSize() to
 // ebPoolMax before a recording test could provision its target EB.
 export function interactiveReservedSlots(): number {
-  const n = parseInt(process.env.EB_RESERVED_INTERACTIVE_SLOTS || '2', 10);
+  const n = parseInt(process.env.EB_RESERVED_INTERACTIVE_SLOTS || "2", 10);
   return Number.isFinite(n) && n >= 0 ? n : 2;
 }
 
 interface ClusterCreds {
   host: string;
   port: string;
-  token?: string;          // bearer token — in-pod SA, or kubeconfig with user.token
-  cert?: Buffer;           // client cert (mTLS) — kubeconfig with user.client-certificate
-  key?: Buffer;            // client key (mTLS)
+  token?: string; // bearer token — in-pod SA, or kubeconfig with user.token
+  cert?: Buffer; // client cert (mTLS) — kubeconfig with user.client-certificate
+  key?: Buffer; // client key (mTLS)
   ca: Buffer;
   namespace: string;
   insecureSkipTLSVerify?: boolean;
@@ -110,12 +117,15 @@ let cachedCreds: ClusterCreds | null = null;
 function loadClusterCreds(): ClusterCreds {
   if (cachedCreds) return cachedCreds;
   const host = process.env.KUBERNETES_SERVICE_HOST;
-  const port = process.env.KUBERNETES_SERVICE_PORT || '443';
+  const port = process.env.KUBERNETES_SERVICE_PORT || "443";
   if (host) {
     // In-pod: ServiceAccount token mount. Unchanged from before.
-    const token = readFileSync(`${SA_PATH}/token`, 'utf8').trim();
+    const token = readFileSync(`${SA_PATH}/token`, "utf8").trim();
     const ca = readFileSync(`${SA_PATH}/ca.crt`);
-    const namespace = process.env.EB_NAMESPACE || readFileSync(`${SA_PATH}/namespace`, 'utf8').trim() || 'default';
+    const namespace =
+      process.env.EB_NAMESPACE ||
+      readFileSync(`${SA_PATH}/namespace`, "utf8").trim() ||
+      "default";
     cachedCreds = { host, port, token, ca, namespace };
     return cachedCreds;
   }
@@ -131,18 +141,34 @@ function loadClusterCreds(): ClusterCreds {
 // --minify -o json` returns a single-context config, so clusters/users/contexts
 // are length-1 arrays after --minify.
 interface KubectlConfigView {
-  clusters?: Array<{ cluster?: { server?: string; 'certificate-authority-data'?: string; 'insecure-skip-tls-verify'?: boolean } }>;
-  users?: Array<{ user?: { token?: string; 'client-certificate-data'?: string; 'client-key-data'?: string } }>;
+  clusters?: Array<{
+    cluster?: {
+      server?: string;
+      "certificate-authority-data"?: string;
+      "insecure-skip-tls-verify"?: boolean;
+    };
+  }>;
+  users?: Array<{
+    user?: {
+      token?: string;
+      "client-certificate-data"?: string;
+      "client-key-data"?: string;
+    };
+  }>;
   contexts?: Array<{ context?: { namespace?: string } }>;
 }
 
 function loadKubeconfigCreds(): ClusterCreds {
   let raw: string;
   try {
-    raw = execFileSync('kubectl', ['config', 'view', '--raw', '--minify', '-o', 'json'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    raw = execFileSync(
+      "kubectl",
+      ["config", "view", "--raw", "--minify", "-o", "json"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
   } catch (err) {
     throw new Error(
       `EB_PROVISIONER=kubernetes but no in-pod SA token and kubectl config view failed: ${(err as Error).message}. ` +
@@ -154,39 +180,58 @@ function loadKubeconfigCreds(): ClusterCreds {
   const user = cfg.users?.[0]?.user;
   const ctx = cfg.contexts?.[0]?.context;
   if (!cluster?.server) {
-    throw new Error('kubeconfig has no current cluster.server — check `kubectl config current-context`');
+    throw new Error(
+      "kubeconfig has no current cluster.server — check `kubectl config current-context`",
+    );
   }
   const url = new URL(cluster.server);
   const host = url.hostname;
-  const kcPort = url.port || (url.protocol === 'https:' ? '443' : '80');
-  const ca = cluster['certificate-authority-data']
-    ? Buffer.from(cluster['certificate-authority-data'], 'base64')
+  const kcPort = url.port || (url.protocol === "https:" ? "443" : "80");
+  const ca = cluster["certificate-authority-data"]
+    ? Buffer.from(cluster["certificate-authority-data"], "base64")
     : Buffer.alloc(0);
-  const insecureSkipTLSVerify = cluster['insecure-skip-tls-verify'] === true;
+  const insecureSkipTLSVerify = cluster["insecure-skip-tls-verify"] === true;
 
   let token: string | undefined;
   let cert: Buffer | undefined;
   let key: Buffer | undefined;
   if (user?.token) {
     token = user.token;
-  } else if (user?.['client-certificate-data'] && user?.['client-key-data']) {
-    cert = Buffer.from(user['client-certificate-data'], 'base64');
-    key = Buffer.from(user['client-key-data'], 'base64');
+  } else if (user?.["client-certificate-data"] && user?.["client-key-data"]) {
+    cert = Buffer.from(user["client-certificate-data"], "base64");
+    key = Buffer.from(user["client-key-data"], "base64");
   } else {
-    throw new Error('kubeconfig user has neither token nor client-certificate-data — unsupported auth mode');
+    throw new Error(
+      "kubeconfig user has neither token nor client-certificate-data — unsupported auth mode",
+    );
   }
 
-  const namespace = process.env.EB_NAMESPACE || ctx?.namespace || 'default';
-  return { host, port: kcPort, token, cert, key, ca, namespace, insecureSkipTLSVerify };
+  const namespace = process.env.EB_NAMESPACE || ctx?.namespace || "default";
+  return {
+    host,
+    port: kcPort,
+    token,
+    cert,
+    key,
+    ca,
+    namespace,
+    insecureSkipTLSVerify,
+  };
 }
 
-async function k8sRequest(method: string, path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
+async function k8sRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; data: unknown }> {
   const creds = loadClusterCreds();
   const payload = body ? JSON.stringify(body) : undefined;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(payload ? { 'Content-Length': Buffer.byteLength(payload).toString() } : {}),
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(payload
+      ? { "Content-Length": Buffer.byteLength(payload).toString() }
+      : {}),
   };
   if (creds.token) headers.Authorization = `Bearer ${creds.token}`;
   return new Promise((resolve, reject) => {
@@ -204,16 +249,20 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          const raw = Buffer.concat(chunks).toString('utf8');
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
           let data: unknown = raw;
-          try { data = raw ? JSON.parse(raw) : null; } catch { /* keep raw */ }
+          try {
+            data = raw ? JSON.parse(raw) : null;
+          } catch {
+            /* keep raw */
+          }
           resolve({ status: res.statusCode || 0, data });
         });
       },
     );
-    req.on('error', reject);
+    req.on("error", reject);
     if (payload) req.write(payload);
     req.end();
   });
@@ -227,9 +276,15 @@ async function k8sRequest(method: string, path: string, body?: unknown): Promise
 // safe to provision" and collectively blow past the cap. Observed in prod as
 // 29 EB pods created while app was restarting (pool size log stayed at 3/30).
 let _inFlightProvisions = 0;
-export function incInFlightProvisions(): void { _inFlightProvisions++; }
-export function decInFlightProvisions(): void { _inFlightProvisions = Math.max(0, _inFlightProvisions - 1); }
-export function inFlightProvisions(): number { return _inFlightProvisions; }
+export function incInFlightProvisions(): void {
+  _inFlightProvisions++;
+}
+export function decInFlightProvisions(): void {
+  _inFlightProvisions = Math.max(0, _inFlightProvisions - 1);
+}
+export function inFlightProvisions(): number {
+  return _inFlightProvisions;
+}
 
 /**
  * Count currently-known system EB runners (online + busy) — proxy for pool size.
@@ -244,50 +299,66 @@ export async function currentPoolSize(): Promise<number> {
   const rows = await db
     .select({ id: runners.id })
     .from(runners)
-    .where(and(
-      eq(runners.isSystem, true),
-      eq(runners.type, 'embedded'),
-      ne(runners.status, 'offline'),
-    ));
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.type, "embedded"),
+        ne(runners.status, "offline"),
+      ),
+    );
   return rows.length + _inFlightProvisions;
 }
 
 function jobSpec(name: string, instanceId: string): Record<string, unknown> {
-  const creds = (() => { try { return loadClusterCreds(); } catch { return null; } })();
-  const image = process.env.EB_IMAGE || 'lastest-embedded-browser:latest';
-  const lastestUrl = process.env.LASTEST_URL || 'http://lastest-app.lastest.svc.cluster.local:3000';
+  const creds = (() => {
+    try {
+      return loadClusterCreds();
+    } catch {
+      return null;
+    }
+  })();
+  const image = process.env.EB_IMAGE || "lastest-embedded-browser:latest";
+  const lastestUrl =
+    process.env.LASTEST_URL ||
+    "http://lastest-app.lastest.svc.cluster.local:3000";
   // Public-facing URL the self-test repo targets (e.g. https://app.lastest.cloud)
   // — used by the executor's rate-limit bypass to recognize "this test is
   // hitting our own platform" when the public URL differs from LASTEST_URL
   // (Olares: internal cluster DNS vs. external envoy hostname). Optional;
   // when unset the bypass falls back to LASTEST_URL only.
-  const lastestPublicUrl = process.env.LASTEST_PUBLIC_URL || '';
+  const lastestPublicUrl = process.env.LASTEST_PUBLIC_URL || "";
   // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
   // (auto-register validates by splitting on `,`). Each EB sends the env var
   // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
   // every register attempt. Take the first entry — the one the app prefers.
-  const systemToken = (process.env.SYSTEM_EB_TOKEN || '').split(',')[0].trim();
-  const cpuRequest = process.env.EB_CPU_REQUEST || '1000m';
-  const cpuLimit = process.env.EB_CPU_LIMIT || '2000m';
-  const memRequest = process.env.EB_MEM_REQUEST || '2Gi';
-  const memLimit = process.env.EB_MEM_LIMIT || '4Gi';
-  const shmSize = process.env.EB_SHM_SIZE || '512Mi';
-  const activeDeadline = parseInt(process.env.EB_ACTIVE_DEADLINE_SECONDS || '1800', 10);
+  const systemToken = (process.env.SYSTEM_EB_TOKEN || "").split(",")[0].trim();
+  const cpuRequest = process.env.EB_CPU_REQUEST || "1000m";
+  const cpuLimit = process.env.EB_CPU_LIMIT || "2000m";
+  const memRequest = process.env.EB_MEM_REQUEST || "2Gi";
+  const memLimit = process.env.EB_MEM_LIMIT || "4Gi";
+  const shmSize = process.env.EB_SHM_SIZE || "512Mi";
+  const activeDeadline = parseInt(
+    process.env.EB_ACTIVE_DEADLINE_SECONDS || "1800",
+    10,
+  );
   // `ttlSecondsAfterFinished` controls how long k8s keeps the Pod (and its
   // logs) around after the Job completes / fails. Was 60s — too short for
   // forensic investigation when the executor's dead-EB path tags a test as
   // `[EB-dead]`: by the time anyone looks, the pod is GC'd and logs are gone.
   // 600s (10 min) is long enough to grab logs from a recent failure
   // (`getEBPodInfo`) and short enough that Completed pods don't accumulate.
-  const ttlSeconds = parseInt(process.env.EB_TTL_SECONDS_AFTER_FINISHED || '600', 10);
+  const ttlSeconds = parseInt(
+    process.env.EB_TTL_SECONDS_AFTER_FINISHED || "600",
+    10,
+  );
 
   return {
-    apiVersion: 'batch/v1',
-    kind: 'Job',
+    apiVersion: "batch/v1",
+    kind: "Job",
     metadata: {
       name,
-      namespace: creds?.namespace ?? 'lastest',
-      labels: { app: 'lastest-eb', 'lastest.dev/eb-instance': instanceId },
+      namespace: creds?.namespace ?? "lastest",
+      labels: { app: "lastest-eb", "lastest.dev/eb-instance": instanceId },
     },
     spec: {
       activeDeadlineSeconds: activeDeadline,
@@ -295,51 +366,61 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
       backoffLimit: 0,
       template: {
         metadata: {
-          labels: { app: 'lastest-eb', 'lastest.dev/eb-instance': instanceId },
+          labels: { app: "lastest-eb", "lastest.dev/eb-instance": instanceId },
         },
         spec: {
-          restartPolicy: 'Never',
+          restartPolicy: "Never",
           // Allow enough time for runnerClient.drain() to flush pending
           // test_result / screenshot / network_bodies POSTs after SIGTERM.
           // Must be ≥ drain timeout in index.ts shutdown() (15s) plus headroom.
           terminationGracePeriodSeconds: 60,
           // `/dev/shm` size ≥512Mi is required — default 64Mi crashes Chromium under load
           volumes: [
-            { name: 'dshm', emptyDir: { medium: 'Memory', sizeLimit: shmSize } },
+            {
+              name: "dshm",
+              emptyDir: { medium: "Memory", sizeLimit: shmSize },
+            },
           ],
           containers: [
             {
-              name: 'embedded-browser',
+              name: "embedded-browser",
               image,
-              imagePullPolicy: 'IfNotPresent',
+              imagePullPolicy: "IfNotPresent",
               env: [
-                { name: 'LASTEST_URL', value: lastestUrl },
-                ...(lastestPublicUrl ? [{ name: 'LASTEST_PUBLIC_URL', value: lastestPublicUrl }] : []),
-                { name: 'SYSTEM_EB_TOKEN', value: systemToken },
-                { name: 'INSTANCE_ID', value: instanceId },
-                { name: 'STREAM_PORT', value: '9223' },
-                { name: 'CDP_PORT', value: '9222' },
-                { name: 'EB_SETUP_CONTEXT_TTL_MS', value: process.env.EB_SETUP_CONTEXT_TTL_MS || String(60 * 60 * 1000) },
+                { name: "LASTEST_URL", value: lastestUrl },
+                ...(lastestPublicUrl
+                  ? [{ name: "LASTEST_PUBLIC_URL", value: lastestPublicUrl }]
+                  : []),
+                { name: "SYSTEM_EB_TOKEN", value: systemToken },
+                { name: "INSTANCE_ID", value: instanceId },
+                { name: "STREAM_PORT", value: "9223" },
+                { name: "CDP_PORT", value: "9222" },
+                {
+                  name: "EB_SETUP_CONTEXT_TTL_MS",
+                  value:
+                    process.env.EB_SETUP_CONTEXT_TTL_MS ||
+                    String(60 * 60 * 1000),
+                },
               ],
               ports: [
-                { containerPort: 9222, name: 'cdp-local' }, // Chromium's own CDP, localhost-only
-                { containerPort: 9223, name: 'stream' },
-                { containerPort: 9224, name: 'health' },
-                { containerPort: 9232, name: 'cdp' }, // TCP proxy exposing CDP across the cluster
+                { containerPort: 9222, name: "cdp-local" }, // Chromium's own CDP, localhost-only
+                { containerPort: 9223, name: "stream" },
+                { containerPort: 9224, name: "health" },
+                { containerPort: 9232, name: "cdp" }, // TCP proxy exposing CDP across the cluster
               ],
               resources: {
                 requests: { cpu: cpuRequest, memory: memRequest },
                 limits: { cpu: cpuLimit, memory: memLimit },
               },
-              volumeMounts: [{ name: 'dshm', mountPath: '/dev/shm' }],
+              volumeMounts: [{ name: "dshm", mountPath: "/dev/shm" }],
               readinessProbe: {
-                httpGet: { path: '/health', port: 9224 },
+                httpGet: { path: "/health", port: 9224 },
                 initialDelaySeconds: 2,
                 periodSeconds: 2,
                 failureThreshold: 30,
               },
               livenessProbe: {
-                httpGet: { path: '/health', port: 9224 },
+                httpGet: { path: "/health", port: 9224 },
                 initialDelaySeconds: 15,
                 periodSeconds: 10,
                 failureThreshold: 3,
@@ -370,11 +451,13 @@ function generateInstanceId(): string {
 // Set EB_LAUNCH_INTERVAL_MS=0 to disable.
 let _launchChain: Promise<void> = Promise.resolve();
 async function awaitLaunchSlot(): Promise<void> {
-  const intervalMs = parseInt(process.env.EB_LAUNCH_INTERVAL_MS || '500', 10);
+  const intervalMs = parseInt(process.env.EB_LAUNCH_INTERVAL_MS || "500", 10);
   if (intervalMs <= 0) return;
   const prev = _launchChain;
   let release!: () => void;
-  _launchChain = new Promise<void>((r) => { release = r; });
+  _launchChain = new Promise<void>((r) => {
+    release = r;
+  });
   try {
     await prev;
   } finally {
@@ -382,7 +465,10 @@ async function awaitLaunchSlot(): Promise<void> {
   }
 }
 
-export async function launchEBJob(): Promise<{ jobName: string; instanceId: string }> {
+export async function launchEBJob(): Promise<{
+  jobName: string;
+  instanceId: string;
+}> {
   if (!isKubernetesMode()) {
     throw new Error('launchEBJob called but EB_PROVISIONER !== "kubernetes"');
   }
@@ -401,15 +487,19 @@ export async function launchEBJob(): Promise<{ jobName: string; instanceId: stri
   const spec = jobSpec(jobName, instanceId);
 
   const { status, data } = await k8sRequest(
-    'POST',
+    "POST",
     `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs`,
     spec,
   );
   if (status < 200 || status >= 300) {
-    throw new Error(`k8s Job create failed: ${status} ${JSON.stringify(data).slice(0, 500)}`);
+    throw new Error(
+      `k8s Job create failed: ${status} ${JSON.stringify(data).slice(0, 500)}`,
+    );
   }
 
-  console.log(`[EB Provisioner] Created Job ${jobName} (pool size ${poolSize + 1}/${cap})`);
+  console.log(
+    `[EB Provisioner] Created Job ${jobName} (pool size ${poolSize + 1}/${cap})`,
+  );
   return { jobName, instanceId };
 }
 
@@ -421,11 +511,13 @@ export async function terminateEBJob(jobName: string): Promise<void> {
   if (!isKubernetesMode()) return;
   const creds = loadClusterCreds();
   const { status } = await k8sRequest(
-    'DELETE',
+    "DELETE",
     `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs/${encodeURIComponent(jobName)}?propagationPolicy=Background`,
   );
   if (status !== 200 && status !== 202 && status !== 404) {
-    console.warn(`[EB Provisioner] Job delete for ${jobName} returned status ${status}`);
+    console.warn(
+      `[EB Provisioner] Job delete for ${jobName} returned status ${status}`,
+    );
     return;
   }
   console.log(`[EB Provisioner] Deleted Job ${jobName}`);
@@ -445,14 +537,17 @@ export async function terminateEBJob(jobName: string): Promise<void> {
  */
 export interface EBPodInfo {
   podName: string;
-  phase: string;                   // Pending | Running | Succeeded | Failed | Unknown
-  reason?: string;                 // OOMKilled / Error / Completed / Evicted / ...
+  phase: string; // Pending | Running | Succeeded | Failed | Unknown
+  reason?: string; // OOMKilled / Error / Completed / Evicted / ...
   exitCode?: number;
-  message?: string;                // kubelet-reported reason (e.g. "DeadlineExceeded")
-  logs: string;                    // tail of the container's stdout/stderr
+  message?: string; // kubelet-reported reason (e.g. "DeadlineExceeded")
+  logs: string; // tail of the container's stdout/stderr
 }
 
-export async function getEBPodInfo(jobName: string, tailLines = 80): Promise<EBPodInfo | null> {
+export async function getEBPodInfo(
+  jobName: string,
+  tailLines = 80,
+): Promise<EBPodInfo | null> {
   if (!isKubernetesMode()) return null;
   try {
     const creds = loadClusterCreds();
@@ -460,23 +555,38 @@ export async function getEBPodInfo(jobName: string, tailLines = 80): Promise<EBP
     //    label by default; we add `app=lastest-eb` for filtering and a
     //    per-instance label, but `job-name` is the surest match.
     const listResp = await k8sRequest(
-      'GET',
+      "GET",
       `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods?labelSelector=${encodeURIComponent(`job-name=${jobName}`)}&limit=1`,
     );
     if (listResp.status < 200 || listResp.status >= 300) return null;
-    const items = (listResp.data as {
-      items?: Array<{
-        metadata?: { name?: string };
-        status?: {
-          phase?: string;
-          message?: string;
-          containerStatuses?: Array<{
-            state?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
-            lastState?: { terminated?: { reason?: string; exitCode?: number; message?: string } };
+    const items =
+      (
+        listResp.data as {
+          items?: Array<{
+            metadata?: { name?: string };
+            status?: {
+              phase?: string;
+              message?: string;
+              containerStatuses?: Array<{
+                state?: {
+                  terminated?: {
+                    reason?: string;
+                    exitCode?: number;
+                    message?: string;
+                  };
+                };
+                lastState?: {
+                  terminated?: {
+                    reason?: string;
+                    exitCode?: number;
+                    message?: string;
+                  };
+                };
+              }>;
+            };
           }>;
-        };
-      }>;
-    } | null)?.items ?? [];
+        } | null
+      )?.items ?? [];
     if (items.length === 0) return null;
     const pod = items[0]!;
     const podName = pod.metadata?.name;
@@ -489,23 +599,29 @@ export async function getEBPodInfo(jobName: string, tailLines = 80): Promise<EBP
     //    instance (k8s only retains `previous=true` for restarted containers,
     //    and our EBs have backoffLimit=0 so they don't restart).
     const logsResp = await k8sRequest(
-      'GET',
+      "GET",
       `/api/v1/namespaces/${encodeURIComponent(creds.namespace)}/pods/${encodeURIComponent(podName)}/log?tailLines=${tailLines}&previous=false`,
     );
-    const logsRaw = typeof logsResp.data === 'string'
-      ? logsResp.data
-      : (logsResp.status >= 200 && logsResp.status < 300 ? '' : `<log fetch failed status=${logsResp.status}>`);
+    const logsRaw =
+      typeof logsResp.data === "string"
+        ? logsResp.data
+        : logsResp.status >= 200 && logsResp.status < 300
+          ? ""
+          : `<log fetch failed status=${logsResp.status}>`;
 
     return {
       podName,
-      phase: pod.status?.phase ?? 'Unknown',
+      phase: pod.status?.phase ?? "Unknown",
       reason: terminated?.reason,
       exitCode: terminated?.exitCode,
       message: terminated?.message ?? pod.status?.message,
       logs: logsRaw,
     };
   } catch (err) {
-    console.warn('[EB Provisioner] getEBPodInfo failed:', err instanceof Error ? err.message : err);
+    console.warn(
+      "[EB Provisioner] getEBPodInfo failed:",
+      err instanceof Error ? err.message : err,
+    );
     return null;
   }
 }
@@ -531,15 +647,19 @@ export async function listEBJobNames(): Promise<Set<string>> {
   if (!isKubernetesMode()) return new Set();
   const creds = loadClusterCreds();
   const { status, data } = await k8sRequest(
-    'GET',
-    `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs?labelSelector=${encodeURIComponent('app=lastest-eb')}`,
+    "GET",
+    `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs?labelSelector=${encodeURIComponent("app=lastest-eb")}`,
   );
   if (status < 200 || status >= 300) {
     console.warn(`[EB Provisioner] listEBJobNames failed: ${status}`);
     return new Set();
   }
-  const items = (data as { items?: Array<{ metadata?: { name?: string } }> } | null)?.items ?? [];
-  return new Set(items.map((j) => j.metadata?.name).filter((n): n is string => !!n));
+  const items =
+    (data as { items?: Array<{ metadata?: { name?: string } }> } | null)
+      ?.items ?? [];
+  return new Set(
+    items.map((j) => j.metadata?.name).filter((n): n is string => !!n),
+  );
 }
 
 // Build-dispatch in-flight counter. Incremented by `executeViaPoolWorkers`
@@ -549,11 +669,15 @@ export async function listEBJobNames(): Promise<Set<string>> {
 // is pure waste (the spawned warm EB never gets claimed before TTL). Saves
 // ~10 EB launches on a 16-test build (`docs/eb-and-setup-plan.md` B1).
 let _buildDispatchInFlight = 0;
-export function incBuildDispatch(): void { _buildDispatchInFlight++; }
+export function incBuildDispatch(): void {
+  _buildDispatchInFlight++;
+}
 export function decBuildDispatch(): void {
   _buildDispatchInFlight = Math.max(0, _buildDispatchInFlight - 1);
 }
-export function inBuildDispatch(): number { return _buildDispatchInFlight; }
+export function inBuildDispatch(): number {
+  return _buildDispatchInFlight;
+}
 
 /**
  * Ensure the pool has at least `warmPoolMin()` idle EBs launched.
@@ -573,9 +697,9 @@ export async function ensureWarmPool(): Promise<number> {
   if (want <= 0) return 0;
 
   // Count EBs currently online and idle (ready for immediate claim)
-  const { db } = await import('@/lib/db');
-  const { runners, embeddedSessions } = await import('@/lib/db/schema');
-  const { and, eq } = await import('drizzle-orm');
+  const { db } = await import("@/lib/db");
+  const { runners, embeddedSessions } = await import("@/lib/db/schema");
+  const { and, eq } = await import("drizzle-orm");
 
   const idle = await db
     .select({ id: runners.id })
@@ -584,9 +708,9 @@ export async function ensureWarmPool(): Promise<number> {
     .where(
       and(
         eq(runners.isSystem, true),
-        eq(runners.type, 'embedded'),
-        eq(runners.status, 'online'),
-        eq(embeddedSessions.status, 'ready'),
+        eq(runners.type, "embedded"),
+        eq(runners.status, "online"),
+        eq(embeddedSessions.status, "ready"),
       ),
     );
 
@@ -609,11 +733,14 @@ export async function ensureWarmPool(): Promise<number> {
       setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
       decInFlightProvisions();
-      console.warn('[EB Provisioner] ensureWarmPool launch failed:', err);
+      console.warn("[EB Provisioner] ensureWarmPool launch failed:", err);
       break;
     }
   }
-  if (launched > 0) console.log(`[EB Provisioner] Warm pool topped up (+${launched}, target ${want})`);
+  if (launched > 0)
+    console.log(
+      `[EB Provisioner] Warm pool topped up (+${launched}, target ${want})`,
+    );
   return launched;
 }
 
@@ -648,12 +775,14 @@ export async function prewarmForBuild(targetCount: number): Promise<number> {
       setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
       decInFlightProvisions();
-      console.warn('[EB Provisioner] prewarmForBuild launch failed:', err);
+      console.warn("[EB Provisioner] prewarmForBuild launch failed:", err);
       break;
     }
   }
   if (launched > 0) {
-    console.log(`[EB Provisioner] Prewarmed ${launched} EB(s) for build (target ${targetCount})`);
+    console.log(
+      `[EB Provisioner] Prewarmed ${launched} EB(s) for build (target ${targetCount})`,
+    );
   }
   return launched;
 }

@@ -11,7 +11,7 @@ import type {
   DesignSystemScoreSummary,
   DesignSystemTokenUsage,
   DesignTokenCategory,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 const SEVERITY_WEIGHTS: Record<string, number> = {
   critical: 10,
@@ -22,9 +22,9 @@ const SEVERITY_WEIGHTS: Record<string, number> = {
 
 const CATEGORY_MULTIPLIERS: Record<string, number> = {
   color: 1.5,
-  'font-family': 1.5,
-  'border-radius': 1.0,
-  'font-size': 1.0,
+  "font-family": 1.5,
+  "border-radius": 1.0,
+  "font-size": 1.0,
   spacing: 0.5,
 };
 
@@ -36,10 +36,13 @@ export function calculateDesignSystemScore(
   let totalDeduction = 0;
 
   for (const v of violations) {
-    const severity = v.impact ?? 'moderate';
+    const severity = v.impact ?? "moderate";
     bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
     const weight = SEVERITY_WEIGHTS[severity] ?? 2;
-    const nodeMultiplier = Math.min(typeof v.nodes === 'number' ? v.nodes : 1, 3);
+    const nodeMultiplier = Math.min(
+      typeof v.nodes === "number" ? v.nodes : 1,
+      3,
+    );
     const catMultiplier = CATEGORY_MULTIPLIERS[v.category] ?? 1.0;
     totalDeduction += weight * nodeMultiplier * catMultiplier;
   }
@@ -77,12 +80,12 @@ export function aggregateDesignSystemForBuild(
 
   for (const r of results) {
     if (r.designSystemViolations) all.push(...r.designSystemViolations);
-    if (typeof r.designSystemRulesChecked === 'number') totalChecked += r.designSystemRulesChecked;
+    if (typeof r.designSystemRulesChecked === "number")
+      totalChecked += r.designSystemRulesChecked;
     if (r.designSystemTokenUsage) {
-      for (const [cat, map] of Object.entries(r.designSystemTokenUsage) as Array<[
-        DesignTokenCategory,
-        Record<string, number>,
-      ]>) {
+      for (const [cat, map] of Object.entries(
+        r.designSystemTokenUsage,
+      ) as Array<[DesignTokenCategory, Record<string, number>]>) {
         if (!map) continue;
         const dest = (tokenUsage[cat] ??= {});
         for (const [value, count] of Object.entries(map)) {
@@ -93,7 +96,8 @@ export function aggregateDesignSystemForBuild(
   }
 
   const summary = calculateDesignSystemScore(all, totalChecked);
-  const criticalCount = summary.bySeverity.critical + summary.bySeverity.serious;
+  const criticalCount =
+    summary.bySeverity.critical + summary.bySeverity.serious;
 
   return {
     score: summary.score,

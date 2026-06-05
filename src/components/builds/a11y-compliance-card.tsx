@@ -1,28 +1,32 @@
-'use client';
+"use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Accessibility, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Accessibility, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface A11yComplianceCardProps {
   score: number | null;
   violationCount: number | null;
   criticalCount: number | null;
   totalRulesChecked: number | null;
-  trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+  trend?: Array<{
+    id: string;
+    a11yScore: number | null;
+    createdAt: Date | null;
+  }>;
 }
 
 function getScoreColor(score: number): string {
-  if (score >= 90) return 'text-success';
-  if (score >= 70) return 'text-warning';
-  return 'text-destructive';
+  if (score >= 90) return "text-success";
+  if (score >= 70) return "text-warning";
+  return "text-destructive";
 }
 
 function getScoreBg(score: number): string {
-  if (score >= 90) return 'bg-success/15';
-  if (score >= 70) return 'bg-warning/15';
-  return 'bg-destructive/15';
+  if (score >= 90) return "bg-success/15";
+  if (score >= 70) return "bg-warning/15";
+  return "bg-destructive/15";
 }
 
 export function A11yComplianceCard({
@@ -35,8 +39,10 @@ export function A11yComplianceCard({
   if (score == null) return null;
 
   const passedRules = (totalRulesChecked ?? 0) - (violationCount ?? 0);
-  const trendScores = trend?.map(t => t.a11yScore).filter((s): s is number => s != null) ?? [];
-  const previousScore = trendScores.length >= 2 ? trendScores[trendScores.length - 2] : null;
+  const trendScores =
+    trend?.map((t) => t.a11yScore).filter((s): s is number => s != null) ?? [];
+  const previousScore =
+    trendScores.length >= 2 ? trendScores[trendScores.length - 2] : null;
   const scoreDelta = previousScore != null ? score - previousScore : null;
 
   return (
@@ -50,22 +56,45 @@ export function A11yComplianceCard({
       <CardContent className="space-y-3">
         {/* Score */}
         <div className="flex items-center gap-4">
-          <div className={cn('flex items-center justify-center w-16 h-16 rounded-full', getScoreBg(score))}>
-            <span className={cn('text-2xl font-bold', getScoreColor(score))}>{score}</span>
+          <div
+            className={cn(
+              "flex items-center justify-center w-16 h-16 rounded-full",
+              getScoreBg(score),
+            )}
+          >
+            <span className={cn("text-2xl font-bold", getScoreColor(score))}>
+              {score}
+            </span>
           </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">
-                {totalRulesChecked ? `${passedRules}/${totalRulesChecked} rules passed` : 'No rules data collected'}
+                {totalRulesChecked
+                  ? `${passedRules}/${totalRulesChecked} rules passed`
+                  : "No rules data collected"}
               </span>
               {scoreDelta != null && scoreDelta !== 0 && (
-                <Badge variant="outline" className={cn('text-xs', scoreDelta > 0 ? 'text-success' : 'text-destructive')}>
-                  {scoreDelta > 0 ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
-                  {scoreDelta > 0 ? '+' : ''}{scoreDelta}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs",
+                    scoreDelta > 0 ? "text-success" : "text-destructive",
+                  )}
+                >
+                  {scoreDelta > 0 ? (
+                    <TrendingUp className="h-3 w-3 mr-1" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 mr-1" />
+                  )}
+                  {scoreDelta > 0 ? "+" : ""}
+                  {scoreDelta}
                 </Badge>
               )}
               {scoreDelta === 0 && (
-                <Badge variant="outline" className="text-xs text-muted-foreground">
+                <Badge
+                  variant="outline"
+                  className="text-xs text-muted-foreground"
+                >
                   <Minus className="h-3 w-3 mr-1" />
                   No change
                 </Badge>
@@ -73,7 +102,9 @@ export function A11yComplianceCard({
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {(criticalCount ?? 0) > 0 && (
-                <span className="text-destructive">{criticalCount} critical/serious</span>
+                <span className="text-destructive">
+                  {criticalCount} critical/serious
+                </span>
               )}
               {(violationCount ?? 0) > 0 && (
                 <span>{violationCount} total violations</span>
@@ -88,7 +119,9 @@ export function A11yComplianceCard({
         {/* Trend sparkline */}
         {trendScores.length >= 2 && (
           <div className="pt-2 border-t">
-            <div className="text-xs text-muted-foreground mb-1">Recent trend</div>
+            <div className="text-xs text-muted-foreground mb-1">
+              Recent trend
+            </div>
             <div className="flex items-end gap-0.5 h-8">
               {trendScores.map((s, i) => {
                 const height = Math.max(4, (s / 100) * 32);
@@ -97,10 +130,19 @@ export function A11yComplianceCard({
                   <div
                     key={i}
                     className={cn(
-                      'w-3 rounded-sm transition-all',
-                      isLatest ? 'bg-primary' : 'bg-muted-foreground/30',
-                      s >= 90 ? 'bg-success/60' : s >= 70 ? 'bg-warning/60' : 'bg-destructive/60',
-                      isLatest && (s >= 90 ? 'bg-success' : s >= 70 ? 'bg-warning' : 'bg-destructive'),
+                      "w-3 rounded-sm transition-all",
+                      isLatest ? "bg-primary" : "bg-muted-foreground/30",
+                      s >= 90
+                        ? "bg-success/60"
+                        : s >= 70
+                          ? "bg-warning/60"
+                          : "bg-destructive/60",
+                      isLatest &&
+                        (s >= 90
+                          ? "bg-success"
+                          : s >= 70
+                            ? "bg-warning"
+                            : "bg-destructive"),
                     )}
                     style={{ height: `${height}px` }}
                     title={`Score: ${s}`}

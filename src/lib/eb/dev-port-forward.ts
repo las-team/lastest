@@ -7,11 +7,16 @@
  * never set in k8s deployment manifests or the production Dockerfile, so this
  * module contributes nothing in prod even though the register routes import it.
  */
-import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process';
-import net from 'net';
+import {
+  execFile,
+  execFileSync,
+  spawn,
+  type ChildProcess,
+} from "child_process";
+import net from "net";
 
-const ENABLED = process.env.EB_DEV_PORT_FORWARD === '1';
-const NAMESPACE = process.env.EB_NAMESPACE || 'lastest';
+const ENABLED = process.env.EB_DEV_PORT_FORWARD === "1";
+const NAMESPACE = process.env.EB_NAMESPACE || "lastest";
 const STREAM_PORT = 9223;
 const CDP_PORT = 9232;
 
@@ -30,23 +35,35 @@ function installExitHooks() {
   exitHooksInstalled = true;
   const kill = () => {
     for (const { child } of forwards.values()) {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
     }
     forwards.clear();
   };
-  process.on('exit', kill);
-  process.on('SIGINT', () => { kill(); process.exit(130); });
-  process.on('SIGTERM', () => { kill(); process.exit(143); });
+  process.on("exit", kill);
+  process.on("SIGINT", () => {
+    kill();
+    process.exit(130);
+  });
+  process.on("SIGTERM", () => {
+    kill();
+    process.exit(143);
+  });
 }
 
 function allocatePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
       const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close(() => (port ? resolve(port) : reject(new Error('port alloc failed'))));
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() =>
+        port ? resolve(port) : reject(new Error("port alloc failed")),
+      );
     });
   });
 }
@@ -54,18 +71,23 @@ function allocatePort(): Promise<number> {
 function findPodName(instanceId: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
-      'kubectl',
+      "kubectl",
       [
-        '-n', NAMESPACE,
-        'get', 'pod',
-        '-l', `lastest.dev/eb-instance=${instanceId}`,
-        '-o', 'jsonpath={.items[0].metadata.name}',
+        "-n",
+        NAMESPACE,
+        "get",
+        "pod",
+        "-l",
+        `lastest.dev/eb-instance=${instanceId}`,
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
       ],
       { timeout: 10_000 },
       (err, stdout) => {
         if (err) return reject(err);
         const name = stdout.trim();
-        if (!name) return reject(new Error(`no pod found for instance ${instanceId}`));
+        if (!name)
+          return reject(new Error(`no pod found for instance ${instanceId}`));
         resolve(name);
       },
     );
@@ -78,41 +100,64 @@ async function startForward(instanceId: string): Promise<Forward> {
     allocatePort(),
     findPodName(instanceId),
   ]);
-  const child = spawn('kubectl', [
-    '-n', NAMESPACE,
-    'port-forward',
-    `pod/${podName}`,
-    `${streamPort}:${STREAM_PORT}`,
-    `${cdpPort}:${CDP_PORT}`,
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(
+    "kubectl",
+    [
+      "-n",
+      NAMESPACE,
+      "port-forward",
+      `pod/${podName}`,
+      `${streamPort}:${STREAM_PORT}`,
+      `${cdpPort}:${CDP_PORT}`,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
 
   const ready = new Promise<void>((resolve, reject) => {
-    const watchdog = setTimeout(() => reject(new Error(`port-forward for ${instanceId} did not become ready in 15s`)), 15_000);
+    const watchdog = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `port-forward for ${instanceId} did not become ready in 15s`,
+          ),
+        ),
+      15_000,
+    );
     let streamReady = false;
     let cdpReady = false;
     const maybeResolve = () => {
-      if (streamReady && cdpReady) { clearTimeout(watchdog); resolve(); }
+      if (streamReady && cdpReady) {
+        clearTimeout(watchdog);
+        resolve();
+      }
     };
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const s = chunk.toString('utf8');
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const s = chunk.toString("utf8");
       if (s.includes(`127.0.0.1:${streamPort}`)) streamReady = true;
       if (s.includes(`127.0.0.1:${cdpPort}`)) cdpReady = true;
       maybeResolve();
     });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      console.warn(`[EB dev-pf ${instanceId}] ${chunk.toString('utf8').trim()}`);
+    child.stderr?.on("data", (chunk: Buffer) => {
+      console.warn(
+        `[EB dev-pf ${instanceId}] ${chunk.toString("utf8").trim()}`,
+      );
     });
-    child.once('exit', (code) => {
+    child.once("exit", (code) => {
       clearTimeout(watchdog);
-      if (!(streamReady && cdpReady)) reject(new Error(`port-forward exited (${code}) before ready`));
+      if (!(streamReady && cdpReady))
+        reject(new Error(`port-forward exited (${code}) before ready`));
     });
   });
 
-  child.once('exit', () => { forwards.delete(instanceId); });
+  child.once("exit", () => {
+    forwards.delete(instanceId);
+  });
 
   const fw: Forward = { streamPort, cdpPort, child, ready };
   forwards.set(instanceId, fw);
-  console.log(`[EB dev-pf] ${instanceId} → stream=127.0.0.1:${streamPort} cdp=127.0.0.1:${cdpPort} (pod ${podName})`);
+  console.log(
+    `[EB dev-pf] ${instanceId} → stream=127.0.0.1:${streamPort} cdp=127.0.0.1:${cdpPort} (pod ${podName})`,
+  );
   return fw;
 }
 
@@ -147,20 +192,26 @@ async function getOrStart(instanceId: string): Promise<Forward> {
  * dev server can reach the EB. Throws on failure — a raw pod IP in the DB is
  * unroutable from the host and silently breaks recording.
  */
-export async function rewriteDevStreamUrl(instanceId: string, streamUrl: string | undefined): Promise<string | undefined> {
+export async function rewriteDevStreamUrl(
+  instanceId: string,
+  streamUrl: string | undefined,
+): Promise<string | undefined> {
   if (!ENABLED || !streamUrl) return streamUrl;
   const fw = await getOrStart(instanceId);
   const u = new URL(streamUrl);
-  u.hostname = '127.0.0.1';
+  u.hostname = "127.0.0.1";
   u.port = String(fw.streamPort);
   return u.toString();
 }
 
-export async function rewriteDevCdpUrl(instanceId: string, cdpUrl: string | undefined): Promise<string | undefined> {
+export async function rewriteDevCdpUrl(
+  instanceId: string,
+  cdpUrl: string | undefined,
+): Promise<string | undefined> {
   if (!ENABLED || !cdpUrl) return cdpUrl;
   const fw = await getOrStart(instanceId);
   const u = new URL(cdpUrl);
-  u.hostname = '127.0.0.1';
+  u.hostname = "127.0.0.1";
   u.port = String(fw.cdpPort);
   return u.toString();
 }
@@ -170,7 +221,11 @@ export function stopDevPortForward(instanceId: string): void {
   if (!ENABLED) return;
   const fw = forwards.get(instanceId);
   if (!fw) return;
-  try { fw.child.kill('SIGTERM'); } catch { /* ignore */ }
+  try {
+    fw.child.kill("SIGTERM");
+  } catch {
+    /* ignore */
+  }
   forwards.delete(instanceId);
 }
 
@@ -184,15 +239,27 @@ export function stopDevPortForward(instanceId: string): void {
 export async function refreshDevPoolAfterRestart(): Promise<void> {
   if (!ENABLED) return;
   try {
-    execFileSync('kubectl', [
-      '-n', NAMESPACE,
-      'delete', 'job',
-      '-l', 'app=lastest-eb',
-      '--wait=false',
-      '--ignore-not-found=true',
-    ], { stdio: 'pipe' });
-    console.log('[EB dev-pf] Deleted existing EB Jobs (warm-pool will provision fresh ones)');
+    execFileSync(
+      "kubectl",
+      [
+        "-n",
+        NAMESPACE,
+        "delete",
+        "job",
+        "-l",
+        "app=lastest-eb",
+        "--wait=false",
+        "--ignore-not-found=true",
+      ],
+      { stdio: "pipe" },
+    );
+    console.log(
+      "[EB dev-pf] Deleted existing EB Jobs (warm-pool will provision fresh ones)",
+    );
   } catch (err) {
-    console.warn('[EB dev-pf] Failed to delete stale EB Jobs:', (err as Error).message);
+    console.warn(
+      "[EB dev-pf] Failed to delete stale EB Jobs:",
+      (err as Error).message,
+    );
   }
 }

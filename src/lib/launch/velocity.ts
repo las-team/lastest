@@ -6,10 +6,14 @@
  * early lead from being unbeatable and rewards sustained momentum.
  */
 
-import type { LaunchProfile } from '@/lib/db/schema';
+import type { LaunchProfile } from "@/lib/db/schema";
 
 /** Avg upvotes/hour since `weekStartAt`, floored at a 1h denominator. */
-export function velocityScore(upvoteCount: number, weekStartAt: Date, now: Date = new Date()): number {
+export function velocityScore(
+  upvoteCount: number,
+  weekStartAt: Date,
+  now: Date = new Date(),
+): number {
   const elapsedMs = now.getTime() - weekStartAt.getTime();
   const hours = Math.max(1, elapsedMs / 3_600_000);
   return upvoteCount / hours;
@@ -31,7 +35,10 @@ export function rankProfiles(
   now: Date = new Date(),
 ): RankedProfile[] {
   return profiles
-    .map((profile) => ({ profile, score: velocityScore(profile.upvoteCount, weekStartAt, now) }))
+    .map((profile) => ({
+      profile,
+      score: velocityScore(profile.upvoteCount, weekStartAt, now),
+    }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       if (b.profile.upvoteCount !== a.profile.upvoteCount) {

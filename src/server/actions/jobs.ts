@@ -1,10 +1,10 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import type { BackgroundJob, BackgroundJobType } from '@/lib/db/schema';
-import { queueCancelCommandToDB } from '@/app/api/ws/runner/route';
-import { emitJobEvent, type JobUpdateEvent } from '@/lib/ws/job-events';
-import { requireTeamAccess } from '@/lib/auth';
+import * as queries from "@/lib/db/queries";
+import type { BackgroundJob, BackgroundJobType } from "@/lib/db/schema";
+import { queueCancelCommandToDB } from "@/app/api/ws/runner/route";
+import { emitJobEvent, type JobUpdateEvent } from "@/lib/ws/job-events";
+import { requireTeamAccess } from "@/lib/auth";
 
 // Verify the caller's team owns this job before mutating it. Without this guard,
 // any signed-in user who knows a jobId can cancel/dismiss jobs from other teams.
@@ -12,12 +12,12 @@ import { requireTeamAccess } from '@/lib/auth';
 async function assertJobMutateAccess(jobId: string): Promise<BackgroundJob> {
   const session = await requireTeamAccess();
   const job = await queries.getBackgroundJob(jobId);
-  if (!job) throw new Error('Job not found');
+  if (!job) throw new Error("Job not found");
 
   if (job.repositoryId) {
     const repo = await queries.getRepository(job.repositoryId);
     if (!repo || repo.teamId !== session.team.id) {
-      throw new Error('Forbidden: Job does not belong to your team');
+      throw new Error("Forbidden: Job does not belong to your team");
     }
     return job;
   }
@@ -25,15 +25,15 @@ async function assertJobMutateAccess(jobId: string): Promise<BackgroundJob> {
   // Repo-less ("global") jobs have no team binding on the row; refuse to
   // mutate them from a per-team server action so one team can't interfere
   // with another team's system-level work.
-  throw new Error('Forbidden: Job does not belong to your team');
+  throw new Error("Forbidden: Job does not belong to your team");
 }
 
 function jobToEvent(job: BackgroundJob): JobUpdateEvent {
   return {
-    type: 'job:update',
+    type: "job:update",
     jobId: job.id,
     jobType: job.type as BackgroundJobType,
-    status: job.status as JobUpdateEvent['status'],
+    status: job.status as JobUpdateEvent["status"],
     progress: job.progress ?? 0,
     completedSteps: job.completedSteps ?? 0,
     totalSteps: job.totalSteps ?? null,
@@ -64,7 +64,7 @@ async function emitJobUpdate(jobId: string) {
 // only refuse when we have proof of a foreign user session.
 async function safeCurrentSession() {
   try {
-    const { getCurrentSession } = await import('@/lib/auth');
+    const { getCurrentSession } = await import("@/lib/auth");
     return await getCurrentSession();
   } catch {
     return null;
@@ -79,17 +79,19 @@ async function refuseCrossTeamJobMutation(jobId: string): Promise<void> {
   if (!job.repositoryId) return;
   const repo = await queries.getRepository(job.repositoryId);
   if (!repo || repo.teamId !== sess.team.id) {
-    throw new Error('Forbidden: job does not belong to your team');
+    throw new Error("Forbidden: job does not belong to your team");
   }
 }
 
-async function refuseCrossTeamRepoMutation(repositoryId?: string | null): Promise<void> {
+async function refuseCrossTeamRepoMutation(
+  repositoryId?: string | null,
+): Promise<void> {
   if (!repositoryId) return;
   const sess = await safeCurrentSession();
   if (!sess?.team) return;
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== sess.team.id) {
-    throw new Error('Forbidden: repository does not belong to your team');
+    throw new Error("Forbidden: repository does not belong to your team");
   }
 }
 
@@ -117,7 +119,7 @@ export async function createJob(
   });
   const now = new Date();
   await queries.updateBackgroundJob(id, {
-    status: 'running',
+    status: "running",
     startedAt: now,
     lastActivityAt: now,
   });
@@ -150,7 +152,7 @@ export async function startJob(jobId: string) {
   await refuseCrossTeamJobMutation(jobId);
   const now = new Date();
   await queries.updateBackgroundJob(jobId, {
-    status: 'running',
+    status: "running",
     startedAt: now,
     lastActivityAt: now,
   });
@@ -161,23 +163,29 @@ export async function updateJobProgress(
   jobId: string,
   completedSteps: number,
   totalSteps?: number,
-  parallelInfo?: { activeCount?: number; activeTests?: string[] }
+  parallelInfo?: { activeCount?: number; activeTests?: string[] },
 ) {
   await refuseCrossTeamJobMutation(jobId);
-  const progress = totalSteps && totalSteps > 0
-    ? Math.round((completedSteps / totalSteps) * 100)
-    : 0;
+  const progress =
+    totalSteps && totalSteps > 0
+      ? Math.round((completedSteps / totalSteps) * 100)
+      : 0;
 
   // Build metadata update for parallel execution info
-  const metadataUpdate = parallelInfo ? {
-    activeCount: parallelInfo.activeCount ?? 0,
-    activeTests: parallelInfo.activeTests ?? [],
-  } : undefined;
+  const metadataUpdate = parallelInfo
+    ? {
+        activeCount: parallelInfo.activeCount ?? 0,
+        activeTests: parallelInfo.activeTests ?? [],
+      }
+    : undefined;
 
   // Get existing job to merge metadata
   const existingJob = await queries.getBackgroundJob(jobId);
   const mergedMetadata = existingJob?.metadata
-    ? { ...(existingJob.metadata as Record<string, unknown>), ...metadataUpdate }
+    ? {
+        ...(existingJob.metadata as Record<string, unknown>),
+        ...metadataUpdate,
+      }
     : metadataUpdate;
 
   await queries.updateBackgroundJob(jobId, {
@@ -216,7 +224,7 @@ export async function updateJobActivity(
 export async function completeJob(jobId: string) {
   await refuseCrossTeamJobMutation(jobId);
   await queries.updateBackgroundJob(jobId, {
-    status: 'completed',
+    status: "completed",
     progress: 100,
     completedAt: new Date(),
   });
@@ -226,7 +234,7 @@ export async function completeJob(jobId: string) {
 export async function failJob(jobId: string, error: string) {
   await refuseCrossTeamJobMutation(jobId);
   await queries.updateBackgroundJob(jobId, {
-    status: 'failed',
+    status: "failed",
     error,
     completedAt: new Date(),
   });
@@ -238,7 +246,7 @@ export async function createChildJob(
   label: string,
   parentJobId: string,
   repositoryId?: string | null,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
 ) {
   await refuseCrossTeamJobMutation(parentJobId);
   await refuseCrossTeamRepoMutation(repositoryId);
@@ -251,7 +259,7 @@ export async function createChildJob(
   });
   const now = new Date();
   await queries.updateBackgroundJob(id, {
-    status: 'running',
+    status: "running",
     startedAt: now,
     lastActivityAt: now,
   });
@@ -259,18 +267,25 @@ export async function createChildJob(
   return id;
 }
 
-export async function cancelJob(jobId: string, repositoryId?: string | null, runnerId?: string | null) {
+export async function cancelJob(
+  jobId: string,
+  repositoryId?: string | null,
+  runnerId?: string | null,
+) {
   let job: BackgroundJob;
   try {
     job = await assertJobMutateAccess(jobId);
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Forbidden' };
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Forbidden",
+    };
   }
 
   // For pending (queued) jobs that haven't started, just delete them entirely
-  if (job.status === 'pending') {
+  if (job.status === "pending") {
     await queries.deleteBackgroundJob(jobId);
-    emitJobEvent({ type: 'job:delete', jobId, repositoryId: job.repositoryId });
+    emitJobEvent({ type: "job:delete", jobId, repositoryId: job.repositoryId });
     return { success: true };
   }
 
@@ -278,27 +293,37 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   const effectiveRunnerId = job.targetRunnerId || runnerId;
 
   // If a remote runner is assigned, send cancel command
-  if (effectiveRunnerId && effectiveRunnerId !== 'auto' && job.status === 'running') {
+  if (
+    effectiveRunnerId &&
+    effectiveRunnerId !== "auto" &&
+    job.status === "running"
+  ) {
     // Extract testRunId from job metadata if available
-    const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as string | undefined;
+    const testRunId = (job.metadata as Record<string, unknown>)?.testRunId as
+      | string
+      | undefined;
     if (testRunId) {
-      await queueCancelCommandToDB(effectiveRunnerId, testRunId, 'Cancelled by user');
+      await queueCancelCommandToDB(
+        effectiveRunnerId,
+        testRunId,
+        "Cancelled by user",
+      );
     }
   }
 
   // Update build/testRun statuses so they don't stay stuck
-  if (job.type === 'build_run' && job.status === 'running' && job.metadata) {
+  if (job.type === "build_run" && job.status === "running" && job.metadata) {
     const meta = job.metadata as { buildId?: string; testRunId?: string };
     const now = new Date();
     if (meta.buildId) {
       await queries.updateBuild(meta.buildId, {
-        overallStatus: 'blocked',
+        overallStatus: "blocked",
         completedAt: now,
       });
     }
     if (meta.testRunId) {
       await queries.updateTestRun(meta.testRunId, {
-        status: 'failed',
+        status: "failed",
         completedAt: now,
       });
     }
@@ -307,32 +332,35 @@ export async function cancelJob(jobId: string, repositoryId?: string | null, run
   // Cascade-cancel running/pending child jobs
   const children = await queries.getChildJobs(jobId);
   for (const child of children) {
-    if (child.status === 'running' || child.status === 'pending') {
+    if (child.status === "running" || child.status === "pending") {
       await queries.updateBackgroundJob(child.id, {
-        status: 'failed',
-        error: 'Parent job cancelled',
+        status: "failed",
+        error: "Parent job cancelled",
         completedAt: new Date(),
       });
     }
   }
 
   await queries.updateBackgroundJob(jobId, {
-    status: 'failed',
-    error: 'Cancelled by user',
+    status: "failed",
+    error: "Cancelled by user",
     completedAt: new Date(),
   });
   emitJobUpdate(jobId).catch(() => {});
 
   // If this was the active job, process next queued job
-  if (job.status === 'running' && (job.type === 'build_run' || job.type === 'test_run')) {
+  if (
+    job.status === "running" &&
+    (job.type === "build_run" || job.type === "test_run")
+  ) {
     const targetRunner = job.targetRunnerId || undefined;
     // Process runner-specific queue (pool-managed jobs are handled by periodic consumer)
     if (targetRunner) {
-      if (job.type === 'build_run') {
-        const { processNextQueuedBuild } = await import('./builds');
+      if (job.type === "build_run") {
+        const { processNextQueuedBuild } = await import("./builds");
         processNextQueuedBuild(repositoryId, targetRunner);
       } else {
-        const { processNextQueuedTestRun } = await import('./runs');
+        const { processNextQueuedTestRun } = await import("./runs");
         processNextQueuedTestRun(repositoryId, targetRunner);
       }
     }
@@ -346,24 +374,29 @@ export async function dismissJob(jobId: string) {
   try {
     job = await assertJobMutateAccess(jobId);
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Forbidden' };
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Forbidden",
+    };
   }
-  if (job.status === 'running' || job.status === 'pending') {
-    return { success: false, error: 'Cannot dismiss an active job' };
+  if (job.status === "running" || job.status === "pending") {
+    return { success: false, error: "Cannot dismiss an active job" };
   }
   await queries.deleteBackgroundJob(jobId);
-  emitJobEvent({ type: 'job:delete', jobId, repositoryId: job.repositoryId });
+  emitJobEvent({ type: "job:delete", jobId, repositoryId: job.repositoryId });
   return { success: true };
 }
 
 export async function getActiveJobs() {
   const session = await requireTeamAccess();
   const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
   const all = await queries.getRecentBackgroundJobs(10000);
   // Only surface jobs that belong to one of this team's repos. Repo-less
   // ("global") jobs are deliberately excluded — see assertJobMutateAccess.
-  return all.filter(j => j.repositoryId !== null && teamRepoIds.has(j.repositoryId));
+  return all.filter(
+    (j) => j.repositoryId !== null && teamRepoIds.has(j.repositoryId),
+  );
 }
 
 export async function cleanupStaleJobs(staleThresholdMs = 300000) {
@@ -377,8 +410,8 @@ export async function cleanupStaleJobs(staleThresholdMs = 300000) {
       if (!jobsByRunner.has(rId)) jobsByRunner.set(rId, new Set());
       jobsByRunner.get(rId)!.add(j.repositoryId);
     }
-    const { processNextQueuedBuild } = await import('./builds');
-    const { processNextQueuedTestRun } = await import('./runs');
+    const { processNextQueuedBuild } = await import("./builds");
+    const { processNextQueuedTestRun } = await import("./runs");
     for (const [rId, repoIds] of jobsByRunner) {
       // Pool-managed jobs (rId=undefined) are handled by periodic consumer
       if (!rId) continue;

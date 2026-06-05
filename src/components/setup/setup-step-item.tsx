@@ -1,14 +1,21 @@
-'use client';
+"use client";
 
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, X, FlaskConical, FileCode, Pencil, Cookie } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  GripVertical,
+  X,
+  FlaskConical,
+  FileCode,
+  Pencil,
+  Cookie,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface SetupStepItemProps {
   id: string;
-  stepType: 'test' | 'script' | 'storage_state';
+  stepType: "test" | "script" | "storage_state";
   name: string;
   index: number;
   onRemove: () => void;
@@ -40,24 +47,41 @@ export function SetupStepItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const Icon = stepType === 'test' ? FlaskConical : stepType === 'storage_state' ? Cookie : FileCode;
-  const iconColor = stepType === 'test' ? 'text-blue-500' : stepType === 'storage_state' ? 'text-amber-500' : 'text-green-500';
-  const bgColor = stepType === 'test' ? 'bg-blue-500/10' : stepType === 'storage_state' ? 'bg-amber-500/10' : 'bg-green-500/10';
+  const Icon =
+    stepType === "test"
+      ? FlaskConical
+      : stepType === "storage_state"
+        ? Cookie
+        : FileCode;
+  const iconColor =
+    stepType === "test"
+      ? "text-blue-500"
+      : stepType === "storage_state"
+        ? "text-amber-500"
+        : "text-green-500";
+  const bgColor =
+    stepType === "test"
+      ? "bg-blue-500/10"
+      : stepType === "storage_state"
+        ? "bg-amber-500/10"
+        : "bg-green-500/10";
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-3 p-3 bg-background border rounded-lg group',
-        isDragging && 'shadow-lg ring-2 ring-primary',
-        !isDragging && 'shadow-sm'
+        "flex items-center gap-3 p-3 bg-background border rounded-lg group",
+        isDragging && "shadow-lg ring-2 ring-primary",
+        !isDragging && "shadow-sm",
       )}
     >
       <button
         className={cn(
-          'text-muted-foreground hover:text-foreground',
-          disabled ? 'cursor-not-allowed opacity-50' : 'cursor-grab active:cursor-grabbing'
+          "text-muted-foreground hover:text-foreground",
+          disabled
+            ? "cursor-not-allowed opacity-50"
+            : "cursor-grab active:cursor-grabbing",
         )}
         disabled={disabled}
         {...attributes}
@@ -70,14 +94,23 @@ export function SetupStepItem({
         {index + 1}
       </span>
 
-      <div className={cn('flex items-center justify-center w-7 h-7 rounded', bgColor)}>
-        <Icon className={cn('w-4 h-4', iconColor)} />
+      <div
+        className={cn(
+          "flex items-center justify-center w-7 h-7 rounded",
+          bgColor,
+        )}
+      >
+        <Icon className={cn("w-4 h-4", iconColor)} />
       </div>
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{name}</p>
         <p className="text-xs text-muted-foreground">
-          {stepType === 'test' ? 'Test' : stepType === 'storage_state' ? 'Auth State' : 'Script'}
+          {stepType === "test"
+            ? "Test"
+            : stepType === "storage_state"
+              ? "Auth State"
+              : "Script"}
         </p>
       </div>
 

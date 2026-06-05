@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { approveAllDiffs, acceptAIApprovals } from '@/server/actions/diffs';
-import { CheckCircle, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { approveAllDiffs, acceptAIApprovals } from "@/server/actions/diffs";
+import { CheckCircle, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface BuildActionsClientProps {
   buildId: string;
@@ -13,7 +13,12 @@ interface BuildActionsClientProps {
   banAiMode?: boolean;
 }
 
-export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 0, banAiMode = false }: BuildActionsClientProps) {
+export function BuildActionsClient({
+  buildId,
+  hasPendingDiffs,
+  aiApproveCount = 0,
+  banAiMode = false,
+}: BuildActionsClientProps) {
   const router = useRouter();
   const [isApproving, setIsApproving] = useState(false);
   const [isAIApproving, setIsAIApproving] = useState(false);
@@ -26,7 +31,7 @@ export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 
       await approveAllDiffs(buildId);
       router.refresh();
     } catch (error) {
-      console.error('Failed to approve all:', error);
+      console.error("Failed to approve all:", error);
     } finally {
       setIsApproving(false);
     }
@@ -38,7 +43,7 @@ export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 
       await acceptAIApprovals(buildId);
       router.refresh();
     } catch (error) {
-      console.error('Failed to accept AI approvals:', error);
+      console.error("Failed to accept AI approvals:", error);
     } finally {
       setIsAIApproving(false);
     }
@@ -53,16 +58,15 @@ export function BuildActionsClient({ buildId, hasPendingDiffs, aiApproveCount = 
           className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Sparkles className="w-4 h-4" />
-          {isAIApproving ? 'Approving...' : `Accept AI Approvals (${aiApproveCount})`}
+          {isAIApproving
+            ? "Approving..."
+            : `Accept AI Approvals (${aiApproveCount})`}
         </button>
       )}
       {hasPendingDiffs && (
-        <Button
-          onClick={handleApproveAll}
-          disabled={isApproving}
-        >
+        <Button onClick={handleApproveAll} disabled={isApproving}>
           <CheckCircle className="w-4 h-4" />
-          {isApproving ? 'Marking...' : 'Mark All Expected'}
+          {isApproving ? "Marking..." : "Mark All Expected"}
         </Button>
       )}
     </div>

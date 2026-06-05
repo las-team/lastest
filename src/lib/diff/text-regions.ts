@@ -6,10 +6,10 @@
  * text (timestamps, counters) and cross-OS font rendering differences.
  */
 
-import { PNG } from 'pngjs';
-import type { DiffEngineType } from '../db/schema';
-import { runDiffEngine } from './engines';
-import type { Rectangle } from './generator';
+import { PNG } from "pngjs";
+import type { DiffEngineType } from "../db/schema";
+import { runDiffEngine } from "./engines";
+import type { Rectangle } from "./generator";
 
 export interface TextRegionResult {
   regions: Rectangle[];
@@ -19,11 +19,11 @@ export interface TextRegionResult {
 }
 
 export interface TextAwareDiffOptions {
-  textRegionThreshold: number;     // lenient threshold for text (e.g., 0.3)
-  nonTextThreshold: number;        // strict threshold for non-text (e.g., 0.1)
-  textRegionPadding: number;       // bbox expansion in pixels (default: 4)
+  textRegionThreshold: number; // lenient threshold for text (e.g., 0.3)
+  nonTextThreshold: number; // strict threshold for non-text (e.g., 0.1)
+  textRegionPadding: number; // bbox expansion in pixels (default: 4)
   includeAntiAliasing: boolean;
-  textDetectionGranularity: 'word' | 'line' | 'block';
+  textDetectionGranularity: "word" | "line" | "block";
   diffEngine?: DiffEngineType;
 }
 
@@ -40,7 +40,11 @@ export function expandRectangle(rect: Rectangle, padding: number): Rectangle {
   };
 }
 
-export function clampRectangle(rect: Rectangle, width: number, height: number): Rectangle {
+export function clampRectangle(
+  rect: Rectangle,
+  width: number,
+  height: number,
+): Rectangle {
   const x = Math.max(0, rect.x);
   const y = Math.max(0, rect.y);
   return {
@@ -52,8 +56,12 @@ export function clampRectangle(rect: Rectangle, width: number, height: number): 
 }
 
 function rectanglesOverlap(a: Rectangle, b: Rectangle): boolean {
-  return !(a.x + a.width <= b.x || b.x + b.width <= a.x ||
-           a.y + a.height <= b.y || b.y + b.height <= a.y);
+  return !(
+    a.x + a.width <= b.x ||
+    b.x + b.width <= a.x ||
+    a.y + a.height <= b.y ||
+    b.y + b.height <= a.y
+  );
 }
 
 function mergeTwo(a: Rectangle, b: Rectangle): Rectangle {
@@ -103,7 +111,7 @@ export function mergeOverlappingRectangles(rects: Rectangle[]): Rectangle[] {
 export function createTextMaskBitmap(
   regions: Rectangle[],
   width: number,
-  height: number
+  height: number,
 ): Uint8Array {
   const mask = new Uint8Array(width * height);
   for (const r of regions) {
@@ -128,18 +136,21 @@ export async function detectTextRegions(
   imageData: Buffer | Uint8Array,
   width: number,
   height: number,
-  granularity: 'word' | 'line' | 'block' = 'word',
-  minConfidence: number = 50
+  granularity: "word" | "line" | "block" = "word",
+  minConfidence: number = 50,
 ): Promise<TextRegionResult> {
   const start = performance.now();
 
   // Dynamically import Tesseract.js
-  let Tesseract: typeof import('tesseract.js');
+  let Tesseract: typeof import("tesseract.js");
   try {
     Tesseract = await Promise.race([
-      import('tesseract.js'),
+      import("tesseract.js"),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Tesseract.js import timeout')), 10_000)
+        setTimeout(
+          () => reject(new Error("Tesseract.js import timeout")),
+          10_000,
+        ),
       ),
     ]);
   } catch {
@@ -164,23 +175,27 @@ export async function detectTextRegions(
     // failure propagates as an uncaughtException that kills the executor's event loop.
     let workerCrashed = false;
     const suppressTesseractCrash = (err: Error) => {
-      const stack = err.stack || '';
-      const isTesseract = stack.includes('tesseract') || stack.includes('worker-script') || stack.includes('createWorker');
+      const stack = err.stack || "";
+      const isTesseract =
+        stack.includes("tesseract") ||
+        stack.includes("worker-script") ||
+        stack.includes("createWorker");
       if (isTesseract) {
         workerCrashed = true;
         return; // Swallow — handled below
       }
       throw err; // Re-throw non-tesseract errors
     };
-    process.on('uncaughtException', suppressTesseractCrash);
+    process.on("uncaughtException", suppressTesseractCrash);
 
     try {
-      const worker = await Tesseract.createWorker('eng');
-      if (workerCrashed) throw new Error('Tesseract worker crashed during init');
+      const worker = await Tesseract.createWorker("eng");
+      if (workerCrashed)
+        throw new Error("Tesseract worker crashed during init");
       result = await worker.recognize(pngBuffer);
       await worker.terminate();
     } finally {
-      process.removeListener('uncaughtException', suppressTesseractCrash);
+      process.removeListener("uncaughtException", suppressTesseractCrash);
     }
   } catch {
     // Tesseract worker failed (e.g. broken module resolution in Docker)
@@ -197,7 +212,7 @@ export async function detectTextRegions(
 
   if (result.data.blocks) {
     for (const block of result.data.blocks) {
-      if (granularity === 'block') {
+      if (granularity === "block") {
         if (block.confidence >= minConfidence) {
           rawRegions.push({
             x: block.bbox.x0,
@@ -213,7 +228,7 @@ export async function detectTextRegions(
         for (const para of block.paragraphs) {
           if (para.lines) {
             for (const line of para.lines) {
-              if (granularity === 'line') {
+              if (granularity === "line") {
                 if (line.confidence >= minConfidence) {
                   rawRegions.push({
                     x: line.bbox.x0,
@@ -271,7 +286,7 @@ function blankMaskedPixels(
   width: number,
   height: number,
   mask: Uint8Array,
-  maskValue: number // 1 = blank text pixels, 0 = blank non-text pixels
+  maskValue: number, // 1 = blank text pixels, 0 = blank non-text pixels
 ): Buffer {
   const out = Buffer.from(imageData);
   for (let i = 0; i < width * height; i++) {
@@ -292,7 +307,7 @@ export async function generateTextAwareDiff(
   currentData: Buffer | Uint8Array,
   width: number,
   height: number,
-  options: TextAwareDiffOptions
+  options: TextAwareDiffOptions,
 ): Promise<{
   diffData: Buffer;
   diffPixelCount: number;
@@ -301,20 +316,30 @@ export async function generateTextAwareDiff(
   nonTextRegionDiffPixels: number;
   ocrDurationMs: number;
 }> {
-  const engine = options.diffEngine || 'pixelmatch';
+  const engine = options.diffEngine || "pixelmatch";
 
   // Detect text regions from both images in parallel
   const [baselineOcr, currentOcr] = await Promise.all([
-    detectTextRegions(baselineData, width, height, options.textDetectionGranularity),
-    detectTextRegions(currentData, width, height, options.textDetectionGranularity),
+    detectTextRegions(
+      baselineData,
+      width,
+      height,
+      options.textDetectionGranularity,
+    ),
+    detectTextRegions(
+      currentData,
+      width,
+      height,
+      options.textDetectionGranularity,
+    ),
   ]);
 
   const ocrDurationMs = baselineOcr.ocrDurationMs + currentOcr.ocrDurationMs;
 
   // Expand and merge regions from both images
   const allRegions = [...baselineOcr.regions, ...currentOcr.regions]
-    .map(r => expandRectangle(r, options.textRegionPadding))
-    .map(r => clampRectangle(r, width, height));
+    .map((r) => expandRectangle(r, options.textRegionPadding))
+    .map((r) => clampRectangle(r, width, height));
 
   const mergedRegions = mergeOverlappingRectangles(allRegions);
   const combinedMask = createTextMaskBitmap(mergedRegions, width, height);
@@ -328,7 +353,7 @@ export async function generateTextAwareDiff(
       width,
       height,
       options.nonTextThreshold,
-      options.includeAntiAliasing
+      options.includeAntiAliasing,
     );
     return {
       diffData: Buffer.from(result.diffData),
@@ -341,8 +366,20 @@ export async function generateTextAwareDiff(
   }
 
   // Pass 1: Non-text regions (blank text areas, strict threshold)
-  const baselineNonText = blankMaskedPixels(baselineData, width, height, combinedMask, 1);
-  const currentNonText = blankMaskedPixels(currentData, width, height, combinedMask, 1);
+  const baselineNonText = blankMaskedPixels(
+    baselineData,
+    width,
+    height,
+    combinedMask,
+    1,
+  );
+  const currentNonText = blankMaskedPixels(
+    currentData,
+    width,
+    height,
+    combinedMask,
+    1,
+  );
   const nonTextResult = runDiffEngine(
     engine,
     baselineNonText,
@@ -350,12 +387,24 @@ export async function generateTextAwareDiff(
     width,
     height,
     options.nonTextThreshold,
-    options.includeAntiAliasing
+    options.includeAntiAliasing,
   );
 
   // Pass 2: Text regions (blank non-text areas, lenient threshold)
-  const baselineText = blankMaskedPixels(baselineData, width, height, combinedMask, 0);
-  const currentText = blankMaskedPixels(currentData, width, height, combinedMask, 0);
+  const baselineText = blankMaskedPixels(
+    baselineData,
+    width,
+    height,
+    combinedMask,
+    0,
+  );
+  const currentText = blankMaskedPixels(
+    currentData,
+    width,
+    height,
+    combinedMask,
+    0,
+  );
   const textResult = runDiffEngine(
     engine,
     baselineText,
@@ -363,7 +412,7 @@ export async function generateTextAwareDiff(
     width,
     height,
     options.textRegionThreshold,
-    options.includeAntiAliasing
+    options.includeAntiAliasing,
   );
 
   // Combine: merge non-zero pixels from both diff outputs

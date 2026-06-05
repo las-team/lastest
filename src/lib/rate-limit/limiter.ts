@@ -49,7 +49,11 @@ export interface RateLimitResult {
  * @param limit     max requests per window.
  * @param windowMs  window length.
  */
-export function check(key: string, limit: number, windowMs: number): RateLimitResult {
+export function check(
+  key: string,
+  limit: number,
+  windowMs: number,
+): RateLimitResult {
   const now = Date.now();
   maybeSweep(now, windowMs);
 

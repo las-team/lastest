@@ -1,14 +1,19 @@
-import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getCurrentSession } from '@/lib/auth';
-import { getGitHubAuthUrl } from '@/lib/github/oauth';
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { getCurrentSession } from "@/lib/auth";
+import { getGitHubAuthUrl } from "@/lib/github/oauth";
 
-const GITHUB_OAUTH_STATE_COOKIE = 'github_oauth_state';
+const GITHUB_OAUTH_STATE_COOKIE = "github_oauth_state";
 
 export async function GET() {
   const session = await getCurrentSession();
   if (!session) {
-    return NextResponse.redirect(new URL('/login', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'));
+    return NextResponse.redirect(
+      new URL(
+        "/login",
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+      ),
+    );
   }
 
   // Generate a fresh state, persist it as an HttpOnly cookie scoped to the
@@ -20,10 +25,10 @@ export async function GET() {
   const cookieStore = await cookies();
   cookieStore.set(GITHUB_OAUTH_STATE_COOKIE, payload, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     maxAge: 600,
-    path: '/api/connect/github',
+    path: "/api/connect/github",
   });
 
   const authUrl = getGitHubAuthUrl(state);

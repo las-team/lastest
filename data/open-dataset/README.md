@@ -6,13 +6,13 @@ If you're researching test reliability, training a model, building a diagnostic 
 
 ## Files
 
-| File | Records | What it is |
-|---|---|---|
-| `flake_runs.jsonl` | 1 per non-retry test result | Outcome, retry count, scrubbed error signature, AI triage class, duration bucket. |
-| `visual_diffs.jsonl` | 1 per visual diff | Pixel diff metrics, classification (unchanged/flaky/changed), AI analysis class, page-shift / DOM-diff flags. |
-| `selector_fragility.jsonl` | 1 per (test, selector) pair | Success/failure counts by selector _kind_ — never the selector value itself. |
-| `summary.json` | aggregate object | Totals, distributions, top error categories, selector ranking. |
-| `schema.json` | JSON Schema | Field types and value enums for all three record types. |
+| File                       | Records                     | What it is                                                                                                    |
+| -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `flake_runs.jsonl`         | 1 per non-retry test result | Outcome, retry count, scrubbed error signature, AI triage class, duration bucket.                             |
+| `visual_diffs.jsonl`       | 1 per visual diff           | Pixel diff metrics, classification (unchanged/flaky/changed), AI analysis class, page-shift / DOM-diff flags. |
+| `selector_fragility.jsonl` | 1 per (test, selector) pair | Success/failure counts by selector _kind_ — never the selector value itself.                                  |
+| `summary.json`             | aggregate object            | Totals, distributions, top error categories, selector ranking.                                                |
+| `schema.json`              | JSON Schema                 | Field types and value enums for all three record types.                                                       |
 
 Each JSONL file is one record per line; load with `pd.read_json("flake_runs.jsonl", lines=True)` or any streaming reader.
 
@@ -28,6 +28,7 @@ Each JSONL file is one record per line; load with `pd.read_json("flake_runs.json
    - whitespace collapsed, truncated to 500 chars.
 
    The cleaned signature is then matched against ~10 patterns to derive `error_category`.
+
 3. **k-anonymity floor.** Any team contributing fewer than **50 runs** is dropped entirely. This protects small teams from re-identification through unique error signatures.
 4. **Timestamps bucketed to YYYY-MM only.** No per-day temporal fingerprinting.
 5. **Excluded fields** (never exported, even hashed): `target_url`, `base_url`, `git_branch`, `git_commit`, `repository.full_name`, screenshot/video/network-bodies file paths, console error contents, raw assertion strings, storage state contents, all auth tables, all selector _values_.

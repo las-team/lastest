@@ -13,4 +13,4 @@ export {
   DETERMINISTIC_RENDERING_CSS,
   PLACEHOLDER_IMAGE_BASE64,
   PLACEHOLDER_IMAGE_BUFFER,
-} from '@lastest/shared';
+} from "@lastest/shared";

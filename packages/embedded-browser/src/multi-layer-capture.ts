@@ -9,8 +9,8 @@
  * shared state, no external deps beyond `playwright` and `crypto`.
  */
 
-import type { BrowserContext, Page } from 'playwright';
-import { createHash } from 'crypto';
+import type { BrowserContext, Page } from "playwright";
+import { createHash } from "crypto";
 
 // ── Types — duplicated from src/lib/db/schema.ts because the EB package can't
 // reach into the host's @/ alias. Keep in sync.
@@ -41,7 +41,7 @@ export interface StorageStateSnapshot {
     path: string;
     httpOnly: boolean;
     secure: boolean;
-    sameSite?: 'Strict' | 'Lax' | 'None';
+    sameSite?: "Strict" | "Lax" | "None";
     valueHash?: string;
     redacted?: boolean;
   }>;
@@ -69,22 +69,33 @@ export class UrlTrajectoryRecorder {
   private lastSampledLength = 0;
 
   constructor(page: Page) {
-    page.on('framenavigated', (frame) => {
+    page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
       try {
         const url = frame.url();
-        if (url && url !== 'about:blank') this.currentChain.push(url);
-      } catch { /* page may be tearing down */ }
+        if (url && url !== "about:blank") this.currentChain.push(url);
+      } catch {
+        /* page may be tearing down */
+      }
     });
   }
 
   /** Snapshot the navigation chain that occurred between the previous sample
    *  and now, plus the page's current URL. */
-  sampleAtStep(page: Page, stepIndex: number, stepLabel: string | undefined, capturedAtMs: number): UrlTrajectoryStep {
+  sampleAtStep(
+    page: Page,
+    stepIndex: number,
+    stepLabel: string | undefined,
+    capturedAtMs: number,
+  ): UrlTrajectoryStep {
     const newSlice = this.currentChain.slice(this.lastSampledLength);
     this.lastSampledLength = this.currentChain.length;
-    let finalUrl = '';
-    try { finalUrl = page.url(); } catch { /* page closed */ }
+    let finalUrl = "";
+    try {
+      finalUrl = page.url();
+    } catch {
+      /* page closed */
+    }
     return {
       stepIndex,
       stepLabel,
@@ -175,7 +186,12 @@ export async function sampleWebVitals(
 ): Promise<WebVitalsSample | null> {
   try {
     const sample = await page.evaluate(() => {
-      const v = (window as unknown as { __lastestVitals?: Record<string, number | undefined> }).__lastestVitals || {};
+      const v =
+        (
+          window as unknown as {
+            __lastestVitals?: Record<string, number | undefined>;
+          }
+        ).__lastestVitals || {};
       return {
         url: window.location.href,
         lcp: v.lcp,
@@ -194,8 +210,17 @@ export async function sampleWebVitals(
 // ── Storage state ─────────────────────────────────────────────────────────
 
 const TOKEN_NAME_PATTERNS = [
-  /token/i, /sid$/i, /session/i, /csrf/i, /xsrf/i, /auth/i, /jwt/i,
-  /bearer/i, /access[-_]key/i, /api[-_]key/i, /refresh/i,
+  /token/i,
+  /sid$/i,
+  /session/i,
+  /csrf/i,
+  /xsrf/i,
+  /auth/i,
+  /jwt/i,
+  /bearer/i,
+  /access[-_]key/i,
+  /api[-_]key/i,
+  /refresh/i,
 ];
 
 function looksLikeToken(name: string): boolean {
@@ -203,7 +228,7 @@ function looksLikeToken(name: string): boolean {
 }
 
 function shortHash(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
 /**
@@ -244,7 +269,11 @@ export async function captureStorageStateSnapshot(
           });
         } else {
           let parsed: unknown = item.value;
-          try { parsed = JSON.parse(item.value); } catch { /* keep string */ }
+          try {
+            parsed = JSON.parse(item.value);
+          } catch {
+            /* keep string */
+          }
           snapshot.localStorage.push({
             origin: origin.origin,
             name: item.name,
@@ -267,7 +296,8 @@ export async function captureStorageStateSnapshot(
       const out: Array<{ name: string; value: string }> = [];
       for (let i = 0; i < sessionStorage.length; i++) {
         const k = sessionStorage.key(i);
-        if (k != null) out.push({ name: k, value: sessionStorage.getItem(k) ?? '' });
+        if (k != null)
+          out.push({ name: k, value: sessionStorage.getItem(k) ?? "" });
       }
       return { origin: window.location.origin, entries: out };
     });
@@ -278,14 +308,24 @@ export async function captureStorageStateSnapshot(
         name: item.name,
         ...(isToken
           ? { valueHash: shortHash(item.value), redacted: true }
-          : { value: tryParseJson(item.value), valueHash: shortHash(item.value), redacted: false }),
+          : {
+              value: tryParseJson(item.value),
+              valueHash: shortHash(item.value),
+              redacted: false,
+            }),
       });
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return snapshot;
 }
 
 function tryParseJson(s: string): unknown {
-  try { return JSON.parse(s); } catch { return s; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }

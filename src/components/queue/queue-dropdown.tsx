@@ -1,11 +1,15 @@
-'use client';
+"use client";
 
-import type { JobWithChildren } from './job-polling-context';
-import { QueueJobItem } from './queue-job-item';
+import type { JobWithChildren } from "./job-polling-context";
+import { QueueJobItem } from "./queue-job-item";
 
 export function QueueDropdown({ jobs }: { jobs: JobWithChildren[] }) {
-  const active = jobs.filter(j => j.status === 'running' || j.status === 'pending');
-  const completed = jobs.filter(j => j.status === 'completed' || j.status === 'failed');
+  const active = jobs.filter(
+    (j) => j.status === "running" || j.status === "pending",
+  );
+  const completed = jobs.filter(
+    (j) => j.status === "completed" || j.status === "failed",
+  );
 
   if (jobs.length === 0) {
     return (
@@ -22,7 +26,7 @@ export function QueueDropdown({ jobs }: { jobs: JobWithChildren[] }) {
           <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Active
           </div>
-          {active.map(job => (
+          {active.map((job) => (
             <QueueJobItem key={job.id} job={job} />
           ))}
         </div>
@@ -32,7 +36,7 @@ export function QueueDropdown({ jobs }: { jobs: JobWithChildren[] }) {
           <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-t">
             Recent
           </div>
-          {completed.map(job => (
+          {completed.map((job) => (
             <QueueJobItem key={job.id} job={job} />
           ))}
         </div>

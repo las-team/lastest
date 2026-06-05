@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
 /**
  * CSS injected to freeze all animations and transitions for stable screenshots.
@@ -291,29 +291,29 @@ export const SYSTEM_FONTS_CSS = `
  * Chromium launch args for cross-OS rendering consistency.
  */
 export const CROSS_OS_CHROMIUM_ARGS = [
-  '--font-render-hinting=none',
-  '--disable-font-subpixel-positioning',
-  '--disable-lcd-text',
-  '--disable-gpu',
-  '--force-color-profile=srgb',
-  '--hide-scrollbars',
-  '--disable-skia-runtime-opts',
-  '--disable-accelerated-2d-canvas',
-  '--run-all-compositor-stages-before-draw',
-  '--disable-threaded-animation',
-  '--disable-partial-raster',
-  '--disable-checker-imaging',
-  '--force-device-scale-factor=1',
-  '--disable-gpu-rasterization',
-  '--disable-oop-rasterization',
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
+  "--font-render-hinting=none",
+  "--disable-font-subpixel-positioning",
+  "--disable-lcd-text",
+  "--disable-gpu",
+  "--force-color-profile=srgb",
+  "--hide-scrollbars",
+  "--disable-skia-runtime-opts",
+  "--disable-accelerated-2d-canvas",
+  "--run-all-compositor-stages-before-draw",
+  "--disable-threaded-animation",
+  "--disable-partial-raster",
+  "--disable-checker-imaging",
+  "--force-device-scale-factor=1",
+  "--disable-gpu-rasterization",
+  "--disable-oop-rasterization",
+  "--disable-background-timer-throttling",
+  "--disable-renderer-backgrounding",
+  "--disable-backgrounding-occluded-windows",
   // Sandbox args — harmless on non-Docker hosts, ensures identical compositing
   // behavior between containerized (embedded) and bare-metal (runner) environments
-  '--no-sandbox',
-  '--disable-setuid-sandbox',
-  '--disable-dev-shm-usage',
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
 ];
 
 /**
@@ -328,9 +328,14 @@ let _crossOsFontCSSCache: string | null = null;
 export function getCrossOsFontCSS(): string {
   if (_crossOsFontCSSCache) return _crossOsFontCSSCache;
 
-  const fontPath = path.join(process.cwd(), 'public', 'fonts', 'inter-regular.woff2');
+  const fontPath = path.join(
+    process.cwd(),
+    "public",
+    "fonts",
+    "inter-regular.woff2",
+  );
   const fontBuffer = fs.readFileSync(fontPath);
-  const base64 = fontBuffer.toString('base64');
+  const base64 = fontBuffer.toString("base64");
 
   _crossOsFontCSSCache = `
 @font-face {
@@ -368,9 +373,13 @@ export const DETERMINISTIC_RENDERING_CSS = `*, *::before, *::after {
 /**
  * 1x1 transparent PNG placeholder for mocked third-party images.
  */
-export const PLACEHOLDER_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+export const PLACEHOLDER_IMAGE_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 /**
  * Buffer of the placeholder image for route fulfillment.
  */
-export const PLACEHOLDER_IMAGE_BUFFER = Buffer.from(PLACEHOLDER_IMAGE_BASE64, 'base64');
+export const PLACEHOLDER_IMAGE_BUFFER = Buffer.from(
+  PLACEHOLDER_IMAGE_BASE64,
+  "base64",
+);

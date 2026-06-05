@@ -13,9 +13,12 @@
  * with `fullPage: true` everywhere.
  */
 
-export const SAFE_CTA_PATTERN = /^(create|new|add|view|open|explore|browse|start|continue|get started)\b/i;
-export const DESTRUCTIVE_CTA_PATTERN = /\b(delete|pay|subscribe|upgrade|scan|import|sync|send)\b/i;
-export const CAPTCHA_LOCATOR = 'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="cloudflare"][src*="challenge"]';
+export const SAFE_CTA_PATTERN =
+  /^(create|new|add|view|open|explore|browse|start|continue|get started)\b/i;
+export const DESTRUCTIVE_CTA_PATTERN =
+  /\b(delete|pay|subscribe|upgrade|scan|import|sync|send)\b/i;
+export const CAPTCHA_LOCATOR =
+  'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="cloudflare"][src*="challenge"]';
 
 export interface RenderAuthSetupOptions {
   email: string;
@@ -48,7 +51,11 @@ export interface RenderWalkthroughOptions {
 
 function jsString(value: string): string {
   // Single-quoted JS literal with escapes for ' and \ and newlines.
-  return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
+  return (
+    "'" +
+    value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n") +
+    "'"
+  );
 }
 
 function gotoExpr(target: string): string {
@@ -57,12 +64,12 @@ function gotoExpr(target: string): string {
   if (/^https?:\/\//i.test(target)) {
     return `await page.goto(${jsString(target)}, { waitUntil: 'domcontentloaded' });`;
   }
-  const path = target.startsWith('/') ? target : `/${target}`;
+  const path = target.startsWith("/") ? target : `/${target}`;
   return `await page.goto(\`\${baseUrl}${path}\`, { waitUntil: 'domcontentloaded' });`;
 }
 
 export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
-  const name = opts.name ?? 'Lastest Demo';
+  const name = opts.name ?? "Lastest Demo";
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const DEMO_EMAIL = ${jsString(opts.email)};
   const DEMO_PASSWORD = ${jsString(opts.password)};
@@ -227,9 +234,9 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
 
 export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const authAutomatable = opts.authAutomatable;
-  const inputLabel = opts.primaryInputLabel?.trim() ?? '';
-  const ctaLabel = opts.primaryCtaLabel?.trim() ?? '';
-  const demoValue = opts.demoInputValue?.trim() ?? '';
+  const inputLabel = opts.primaryInputLabel?.trim() ?? "";
+  const ctaLabel = opts.primaryCtaLabel?.trim() ?? "";
+  const demoValue = opts.demoInputValue?.trim() ?? "";
   const hasBizInteraction = inputLabel.length > 0 && demoValue.length > 0;
 
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
@@ -425,7 +432,11 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
 `;
 }
 
-export function renderQuickstartEmail(template: string, slug: string, stamp: string): string {
+export function renderQuickstartEmail(
+  template: string,
+  slug: string,
+  stamp: string,
+): string {
   return template.replace(/\{slug\}/g, slug).replace(/\{stamp\}/g, stamp);
 }
 
@@ -434,7 +445,7 @@ export function renderQuickstartPassword(stamp: string): string {
 }
 
 export function utcStamp(now: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, "0");
   return (
     now.getUTCFullYear().toString() +
     pad(now.getUTCMonth() + 1) +
@@ -445,9 +456,11 @@ export function utcStamp(now: Date = new Date()): string {
 }
 
 export function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 32) || 'quickstart';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 32) || "quickstart"
+  );
 }

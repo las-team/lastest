@@ -20,7 +20,11 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, selectorPriority: priority }: {
+export const browserRecordingScript = ({
+  pointerGestures: pg,
+  cursorFPS: fps,
+  selectorPriority: priority,
+}: {
   pointerGestures: boolean;
   cursorFPS: number;
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>;
@@ -36,31 +40,52 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     priority: number;
   }
 
-  type BrowserKeyboardModifier = 'Alt' | 'Control' | 'Shift' | 'Meta';
+  type BrowserKeyboardModifier = "Alt" | "Control" | "Shift" | "Meta";
   const activeModifiers: Set<BrowserKeyboardModifier> = new Set();
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
-      activeModifiers.add(e.key as BrowserKeyboardModifier);
-    } else {
-      const target = e.target as HTMLElement;
-      const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-      const isSpecialKey = e.key.length > 1 || activeModifiers.size > 0;
-      if (!isEditable || isSpecialKey) {
-        const modifiers = getActiveModifiers();
-        // @ts-expect-error - exposed function
-        window.__recordKeypress?.(e.key, modifiers);
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (
+        e.key === "Alt" ||
+        e.key === "Control" ||
+        e.key === "Shift" ||
+        e.key === "Meta"
+      ) {
+        activeModifiers.add(e.key as BrowserKeyboardModifier);
+      } else {
+        const target = e.target as HTMLElement;
+        const isEditable =
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable;
+        const isSpecialKey = e.key.length > 1 || activeModifiers.size > 0;
+        if (!isEditable || isSpecialKey) {
+          const modifiers = getActiveModifiers();
+          // @ts-expect-error - exposed function
+          window.__recordKeypress?.(e.key, modifiers);
+        }
       }
-    }
-  }, true);
+    },
+    true,
+  );
 
-  document.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt' || e.key === 'Control' || e.key === 'Shift' || e.key === 'Meta') {
-      activeModifiers.delete(e.key as BrowserKeyboardModifier);
-    }
-  }, true);
+  document.addEventListener(
+    "keyup",
+    (e) => {
+      if (
+        e.key === "Alt" ||
+        e.key === "Control" ||
+        e.key === "Shift" ||
+        e.key === "Meta"
+      ) {
+        activeModifiers.delete(e.key as BrowserKeyboardModifier);
+      }
+    },
+    true,
+  );
 
-  window.addEventListener('blur', () => {
+  window.addEventListener("blur", () => {
     activeModifiers.clear();
   });
 
@@ -73,13 +98,23 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   const DRAG_THRESHOLD_PX = 10;
   const DRAG_THRESHOLD_MS = 300;
 
-  document.addEventListener('mousedown', (e) => {
-    mouseDownState = { x: e.clientX, y: e.clientY, time: Date.now() };
-  }, true);
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      mouseDownState = { x: e.clientX, y: e.clientY, time: Date.now() };
+    },
+    true,
+  );
 
-  document.addEventListener('mouseup', () => {
-    setTimeout(() => { mouseDownState = null; }, 50);
-  }, true);
+  document.addEventListener(
+    "mouseup",
+    () => {
+      setTimeout(() => {
+        mouseDownState = null;
+      }, 50);
+    },
+    true,
+  );
 
   let actionIdCounter = 0;
   function generateActionId(): string {
@@ -90,7 +125,14 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // Radix UI (and similar) remove elements from DOM on selection, causing click
   // to retarget to body/wrapper with useless selectors. pointerdown fires first.
   let pointerDownSelectors: BrowserActionSelector[] | null = null;
-  let pointerDownBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
+  let pointerDownBoundingBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    clickX: number;
+    clickY: number;
+  } | null = null;
   let pointerDownTarget: HTMLElement | null = null;
   let pointerCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   let pointerDownClickRecorded = false;
@@ -100,224 +142,418 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // and unmount via an exit animation, so a `click` event is never synthesized.
   function isMenuLikeTarget(el: HTMLElement | null): boolean {
     if (!el) return false;
-    const role = (el.getAttribute('role') || '').toLowerCase();
-    if (role === 'menuitem' || role === 'menuitemcheckbox' || role === 'menuitemradio' || role === 'option') return true;
-    return el.closest('[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper],[data-radix-menu-content],.dropdown-menu,.radix-menu-item') !== null;
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (
+      role === "menuitem" ||
+      role === "menuitemcheckbox" ||
+      role === "menuitemradio" ||
+      role === "option"
+    )
+      return true;
+    return (
+      el.closest(
+        '[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper],[data-radix-menu-content],.dropdown-menu,.radix-menu-item',
+      ) !== null
+    );
   }
 
   // Walk up DOM to find nearest interactive ancestor for better selectors.
   function findBestTarget(el: HTMLElement): HTMLElement {
     const INTERACTIVE = new Set([
-      'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
-      'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
-      'combobox', 'listitem'
+      "button",
+      "option",
+      "menuitem",
+      "menuitemcheckbox",
+      "menuitemradio",
+      "tab",
+      "treeitem",
+      "link",
+      "switch",
+      "radio",
+      "checkbox",
+      "combobox",
+      "listitem",
     ]);
-    const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'LI']);
+    const INTERACTIVE_TAGS = new Set([
+      "A",
+      "BUTTON",
+      "INPUT",
+      "SELECT",
+      "TEXTAREA",
+      "LI",
+    ]);
     let current: HTMLElement | null = el;
-    while (current && current !== document.body && current !== document.documentElement) {
-      const role = current.getAttribute('role');
+    while (
+      current &&
+      current !== document.body &&
+      current !== document.documentElement
+    ) {
+      const role = current.getAttribute("role");
       if (role && INTERACTIVE.has(role)) return current;
       if (INTERACTIVE_TAGS.has(current.tagName)) return current;
-      if (current.tagName === 'LABEL') {
-        const labelFor = current.getAttribute('for');
+      if (current.tagName === "LABEL") {
+        const labelFor = current.getAttribute("for");
         let labeledControl: HTMLElement | null = null;
         if (labelFor) labeledControl = document.getElementById(labelFor);
-        if (!labeledControl) labeledControl = current.querySelector('input, select, textarea, button');
+        if (!labeledControl)
+          labeledControl = current.querySelector(
+            "input, select, textarea, button",
+          );
         if (labeledControl) return labeledControl as HTMLElement;
       }
       if (current.dataset.testid) return current;
-      if (current.hasAttribute('tabindex') || (current.getAttribute('aria-label') && current !== el)) return current;
+      if (
+        current.hasAttribute("tabindex") ||
+        (current.getAttribute("aria-label") && current !== el)
+      )
+        return current;
       current = current.parentElement;
     }
     return el;
   }
 
-  document.addEventListener('pointerdown', (e: PointerEvent) => {
-    if (pointerCleanupTimer) { clearTimeout(pointerCleanupTimer); pointerCleanupTimer = null; }
-    if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
-    const rawTarget = e.target as HTMLElement;
-    const target = findBestTarget(rawTarget);
-    pointerDownSelectors = generateAllSelectors(target);
-    const rect = target.getBoundingClientRect();
-    pointerDownBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
-    pointerDownTarget = target;
-    pointerDownClickRecorded = false;
-
-    // Safety net: if element is removed from DOM and no click fires,
-    // record the action directly from pointerdown data.
-    const savedSelectors = pointerDownSelectors;
-    const savedBoundingBox = pointerDownBoundingBox;
-    if (savedSelectors && savedSelectors.length > 0) {
-      pointerDownDeferTimer = setTimeout(() => {
-        if (!pointerDownClickRecorded && !document.contains(target) && savedSelectors.length > 0) {
-          const modifiers = getActiveModifiers();
-          // @ts-expect-error - exposed function
-          window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
-        }
+  document.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      if (pointerCleanupTimer) {
+        clearTimeout(pointerCleanupTimer);
+        pointerCleanupTimer = null;
+      }
+      if (pointerDownDeferTimer) {
+        clearTimeout(pointerDownDeferTimer);
         pointerDownDeferTimer = null;
-      }, 300);
-    }
-  }, true);
+      }
+      const rawTarget = e.target as HTMLElement;
+      const target = findBestTarget(rawTarget);
+      pointerDownSelectors = generateAllSelectors(target);
+      const rect = target.getBoundingClientRect();
+      pointerDownBoundingBox = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        clickX: e.clientX,
+        clickY: e.clientY,
+      };
+      pointerDownTarget = target;
+      pointerDownClickRecorded = false;
 
-  document.addEventListener('pointerup', () => {
-    const savedSelectors = pointerDownSelectors;
-    const savedBoundingBox = pointerDownBoundingBox;
-    const savedTarget = pointerDownTarget;
-    if (savedSelectors && savedSelectors.length > 0 && isMenuLikeTarget(savedTarget)) {
-      setTimeout(() => {
-        if (!pointerDownClickRecorded) {
-          pointerDownClickRecorded = true;
-          if (pointerDownDeferTimer) { clearTimeout(pointerDownDeferTimer); pointerDownDeferTimer = null; }
-          const modifiers = getActiveModifiers();
-          // @ts-expect-error - exposed function
-          window.__recordAction?.('click', savedSelectors, undefined, savedBoundingBox, generateActionId(), modifiers);
-        }
-      }, 50);
-    }
-    pointerCleanupTimer = setTimeout(() => { pointerDownSelectors = null; pointerDownBoundingBox = null; pointerDownTarget = null; pointerCleanupTimer = null; }, 500);
-  }, true);
+      // Safety net: if element is removed from DOM and no click fires,
+      // record the action directly from pointerdown data.
+      const savedSelectors = pointerDownSelectors;
+      const savedBoundingBox = pointerDownBoundingBox;
+      if (savedSelectors && savedSelectors.length > 0) {
+        pointerDownDeferTimer = setTimeout(() => {
+          if (
+            !pointerDownClickRecorded &&
+            !document.contains(target) &&
+            savedSelectors.length > 0
+          ) {
+            const modifiers = getActiveModifiers();
+            // @ts-expect-error - exposed function
+            window.__recordAction?.(
+              "click",
+              savedSelectors,
+              undefined,
+              savedBoundingBox,
+              generateActionId(),
+              modifiers,
+            );
+          }
+          pointerDownDeferTimer = null;
+        }, 300);
+      }
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "pointerup",
+    () => {
+      const savedSelectors = pointerDownSelectors;
+      const savedBoundingBox = pointerDownBoundingBox;
+      const savedTarget = pointerDownTarget;
+      if (
+        savedSelectors &&
+        savedSelectors.length > 0 &&
+        isMenuLikeTarget(savedTarget)
+      ) {
+        setTimeout(() => {
+          if (!pointerDownClickRecorded) {
+            pointerDownClickRecorded = true;
+            if (pointerDownDeferTimer) {
+              clearTimeout(pointerDownDeferTimer);
+              pointerDownDeferTimer = null;
+            }
+            const modifiers = getActiveModifiers();
+            // @ts-expect-error - exposed function
+            window.__recordAction?.(
+              "click",
+              savedSelectors,
+              undefined,
+              savedBoundingBox,
+              generateActionId(),
+              modifiers,
+            );
+          }
+        }, 50);
+      }
+      pointerCleanupTimer = setTimeout(() => {
+        pointerDownSelectors = null;
+        pointerDownBoundingBox = null;
+        pointerDownTarget = null;
+        pointerCleanupTimer = null;
+      }, 500);
+    },
+    true,
+  );
 
   // Capture mouseover selectors as second fallback (fires well before click)
   let hoverSelectors: BrowserActionSelector[] | null = null;
-  let hoverBoundingBox: { x: number; y: number; width: number; height: number; clickX: number; clickY: number } | null = null;
-  document.addEventListener('mouseover', (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (!target || target === document.body || target === document.documentElement) return;
-    const sels = generateAllSelectors(target);
-    if (sels.length > 0) {
-      hoverSelectors = sels;
+  let hoverBoundingBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    clickX: number;
+    clickY: number;
+  } | null = null;
+  document.addEventListener(
+    "mouseover",
+    (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        !target ||
+        target === document.body ||
+        target === document.documentElement
+      )
+        return;
+      const sels = generateAllSelectors(target);
+      if (sels.length > 0) {
+        hoverSelectors = sels;
+        const rect = target.getBoundingClientRect();
+        hoverBoundingBox = {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          clickX: e.clientX,
+          clickY: e.clientY,
+        };
+      }
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
+      const rawTarget = e.target as HTMLElement;
+
+      // Drop the synthesized click that browsers fire on a labeled <input
+      // type="radio|checkbox"> after the user clicks the bound <label>.
+      // The label-activation click has detail===0; real user clicks have detail>=1.
+      if (e.detail === 0 && rawTarget && rawTarget.tagName === "INPUT") {
+        const inputType = (
+          (rawTarget as HTMLInputElement).type || ""
+        ).toLowerCase();
+        if (inputType === "radio" || inputType === "checkbox") return;
+      }
+
+      if (mouseDownState) {
+        const dx = Math.abs(e.clientX - mouseDownState.x);
+        const dy = Math.abs(e.clientY - mouseDownState.y);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const duration = Date.now() - mouseDownState.time;
+        if (
+          distance > DRAG_THRESHOLD_PX ||
+          (duration > DRAG_THRESHOLD_MS && distance > 3)
+        ) {
+          return;
+        }
+      }
+      const target = findBestTarget(rawTarget);
+      let selectors = generateAllSelectors(target);
       const rect = target.getBoundingClientRect();
-      hoverBoundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
-    }
-  }, true);
+      let boundingBox: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        clickX?: number;
+        clickY?: number;
+      } = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        clickX: e.clientX,
+        clickY: e.clientY,
+      };
 
-  document.addEventListener('click', (e) => {
-    pointerDownClickRecorded = true; // Prevent deferred pointerdown from double-recording
-    const rawTarget = e.target as HTMLElement;
+      // Check if click-generated selectors are useful (not just body/html css-path)
+      const hasUsefulSelectors =
+        selectors.length > 0 &&
+        !(
+          selectors.length === 1 &&
+          selectors[0].type === "css-path" &&
+          (selectors[0].value === "body" || selectors[0].value === "html")
+        );
 
-    // Drop the synthesized click that browsers fire on a labeled <input
-    // type="radio|checkbox"> after the user clicks the bound <label>.
-    // The label-activation click has detail===0; real user clicks have detail>=1.
-    if (e.detail === 0 && rawTarget && rawTarget.tagName === 'INPUT') {
-      const inputType = ((rawTarget as HTMLInputElement).type || '').toLowerCase();
-      if (inputType === 'radio' || inputType === 'checkbox') return;
-    }
+      // If click target only resolves to a css-path (e.g. inner span of a menu item),
+      // prefer pointerDownSelectors which ran findBestTarget and resolved the
+      // semantic ancestor (button/menuitem/etc.).
+      const onlyCssPath =
+        selectors.length > 0 && selectors.every((s) => s.type === "css-path");
+      const pointerDownHasSemantic =
+        pointerDownSelectors &&
+        pointerDownSelectors.some((s) => s.type !== "css-path");
 
-    if (mouseDownState) {
-      const dx = Math.abs(e.clientX - mouseDownState.x);
-      const dy = Math.abs(e.clientY - mouseDownState.y);
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const duration = Date.now() - mouseDownState.time;
-      if (distance > DRAG_THRESHOLD_PX || (duration > DRAG_THRESHOLD_MS && distance > 3)) {
+      // Fallback 1: use pointerdown selectors (captured before DOM removal, or
+      // when the raw click target lacks any semantic selector while pointerdown's
+      // findBestTarget resolved an interactive ancestor with one).
+      if (
+        (!hasUsefulSelectors || (onlyCssPath && pointerDownHasSemantic)) &&
+        pointerDownSelectors &&
+        pointerDownSelectors.length > 0
+      ) {
+        selectors = pointerDownSelectors;
+        if (pointerDownBoundingBox) {
+          boundingBox = pointerDownBoundingBox;
+        }
+      }
+
+      // Fallback 2: use mouseover/hover selectors (last element hovered before click)
+      const stillNoSelectors =
+        selectors.length === 0 ||
+        (selectors.length === 1 &&
+          selectors[0].type === "css-path" &&
+          (selectors[0].value === "body" || selectors[0].value === "html"));
+      if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
+        selectors = hoverSelectors;
+        if (hoverBoundingBox) {
+          boundingBox = hoverBoundingBox;
+        }
+      }
+
+      const modifiers = getActiveModifiers();
+      // @ts-expect-error - exposed function
+      window.__recordAction?.(
+        "click",
+        selectors,
+        undefined,
+        boundingBox,
+        generateActionId(),
+        modifiers,
+      );
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "input",
+    (e) => {
+      const target = e.target as HTMLInputElement;
+      const inputType = target.type?.toLowerCase();
+      if (
+        inputType === "radio" ||
+        inputType === "checkbox" ||
+        inputType === "submit" ||
+        inputType === "button" ||
+        inputType === "reset" ||
+        inputType === "file"
+      ) {
         return;
       }
-    }
-    const target = findBestTarget(rawTarget);
-    let selectors = generateAllSelectors(target);
-    const rect = target.getBoundingClientRect();
-    let boundingBox: { x: number; y: number; width: number; height: number; clickX?: number; clickY?: number } = { x: rect.x, y: rect.y, width: rect.width, height: rect.height, clickX: e.clientX, clickY: e.clientY };
-
-    // Check if click-generated selectors are useful (not just body/html css-path)
-    const hasUsefulSelectors = selectors.length > 0 &&
-      !(selectors.length === 1 && selectors[0].type === 'css-path' &&
-        (selectors[0].value === 'body' || selectors[0].value === 'html'));
-
-    // If click target only resolves to a css-path (e.g. inner span of a menu item),
-    // prefer pointerDownSelectors which ran findBestTarget and resolved the
-    // semantic ancestor (button/menuitem/etc.).
-    const onlyCssPath = selectors.length > 0 && selectors.every(s => s.type === 'css-path');
-    const pointerDownHasSemantic = pointerDownSelectors && pointerDownSelectors.some(s => s.type !== 'css-path');
-
-    // Fallback 1: use pointerdown selectors (captured before DOM removal, or
-    // when the raw click target lacks any semantic selector while pointerdown's
-    // findBestTarget resolved an interactive ancestor with one).
-    if ((!hasUsefulSelectors || (onlyCssPath && pointerDownHasSemantic)) && pointerDownSelectors && pointerDownSelectors.length > 0) {
-      selectors = pointerDownSelectors;
-      if (pointerDownBoundingBox) {
-        boundingBox = pointerDownBoundingBox;
-      }
-    }
-
-    // Fallback 2: use mouseover/hover selectors (last element hovered before click)
-    const stillNoSelectors = selectors.length === 0 ||
-      (selectors.length === 1 && selectors[0].type === 'css-path' &&
-        (selectors[0].value === 'body' || selectors[0].value === 'html'));
-    if (stillNoSelectors && hoverSelectors && hoverSelectors.length > 0) {
-      selectors = hoverSelectors;
-      if (hoverBoundingBox) {
-        boundingBox = hoverBoundingBox;
-      }
-    }
-
-    const modifiers = getActiveModifiers();
-    // @ts-expect-error - exposed function
-    window.__recordAction?.('click', selectors, undefined, boundingBox, generateActionId(), modifiers);
-  }, true);
-
-  document.addEventListener('input', (e) => {
-    const target = e.target as HTMLInputElement;
-    const inputType = target.type?.toLowerCase();
-    if (inputType === 'radio' || inputType === 'checkbox' || inputType === 'submit' || inputType === 'button' || inputType === 'reset' || inputType === 'file') {
-      return;
-    }
-    const selectors = generateAllSelectors(target);
-    const rect = target.getBoundingClientRect();
-    const boundingBox = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    // @ts-expect-error - exposed function
-    window.__recordAction?.('fill', selectors, target.value, boundingBox, generateActionId());
-  }, true);
-
-  document.addEventListener('change', (e) => {
-    const target = e.target as HTMLSelectElement;
-    if (target.tagName === 'SELECT') {
       const selectors = generateAllSelectors(target);
+      const rect = target.getBoundingClientRect();
+      const boundingBox = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      };
       // @ts-expect-error - exposed function
-      window.__recordAction?.('selectOption', selectors, target.value, undefined, generateActionId());
-    }
-  }, true);
+      window.__recordAction?.(
+        "fill",
+        selectors,
+        target.value,
+        boundingBox,
+        generateActionId(),
+      );
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "change",
+    (e) => {
+      const target = e.target as HTMLSelectElement;
+      if (target.tagName === "SELECT") {
+        const selectors = generateAllSelectors(target);
+        // @ts-expect-error - exposed function
+        window.__recordAction?.(
+          "selectOption",
+          selectors,
+          target.value,
+          undefined,
+          generateActionId(),
+        );
+      }
+    },
+    true,
+  );
 
   function generateAllSelectors(element: HTMLElement): BrowserActionSelector[] {
     const allSelectors: Map<string, string> = new Map();
 
     if (element.dataset.testid) {
-      allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
+      allSelectors.set(
+        "data-testid",
+        `[data-testid="${element.dataset.testid}"]`,
+      );
     }
-    if (element.id && !element.id.includes('undefined')) {
-      allSelectors.set('id', `#${element.id}`);
+    if (element.id && !element.id.includes("undefined")) {
+      allSelectors.set("id", `#${element.id}`);
     }
-    const role = element.getAttribute('role') || getImplicitRole(element);
-    const accessibleName = element.getAttribute('aria-label') ||
-      element.getAttribute('title') ||
+    const role = element.getAttribute("role") || getImplicitRole(element);
+    const accessibleName =
+      element.getAttribute("aria-label") ||
+      element.getAttribute("title") ||
       element.textContent?.trim().slice(0, 30);
     if (role && accessibleName) {
-      allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
+      allSelectors.set("role-name", `role=${role}[name="${accessibleName}"]`);
     }
-    const ariaLabel = element.getAttribute('aria-label');
+    const ariaLabel = element.getAttribute("aria-label");
     if (ariaLabel) {
-      allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
+      allSelectors.set("aria-label", `[aria-label="${ariaLabel}"]`);
     }
-    if (element.tagName === 'BUTTON' || element.tagName === 'A' ||
-        element.getAttribute('role') === 'button') {
+    if (
+      element.tagName === "BUTTON" ||
+      element.tagName === "A" ||
+      element.getAttribute("role") === "button"
+    ) {
       const text = element.textContent?.trim().slice(0, 30);
       if (text) {
-        allSelectors.set('text', `text="${text}"`);
+        allSelectors.set("text", `text="${text}"`);
       }
     }
-    const placeholder = element.getAttribute('placeholder');
+    const placeholder = element.getAttribute("placeholder");
     if (placeholder) {
-      allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
+      allSelectors.set("placeholder", `[placeholder="${placeholder}"]`);
     }
-    const name = element.getAttribute('name');
+    const name = element.getAttribute("name");
     if (name) {
-      allSelectors.set('name', `[name="${name}"]`);
+      allSelectors.set("name", `[name="${name}"]`);
     }
     const cssPath = generateCssPath(element);
     if (cssPath) {
-      allSelectors.set('css-path', cssPath);
+      allSelectors.set("css-path", cssPath);
     }
 
     const enabledConfigs = (priority as BrowserSelectorConfig[])
-      .filter(config => config.enabled && config.type !== 'ocr-text')
+      .filter((config) => config.enabled && config.type !== "ocr-text")
       .sort((a, b) => a.priority - b.priority);
 
     const selectors: BrowserActionSelector[] = [];
@@ -332,18 +568,23 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
 
   function getImplicitRole(element: HTMLElement): string | null {
     const tagRoles: Record<string, string> = {
-      'BUTTON': 'button',
-      'A': 'link',
-      'INPUT': element.getAttribute('type') === 'checkbox' ? 'checkbox' :
-               element.getAttribute('type') === 'radio' ? 'radio' :
-               element.getAttribute('type') === 'submit' ? 'button' : 'textbox',
-      'SELECT': 'combobox',
-      'TEXTAREA': 'textbox',
-      'IMG': 'img',
-      'NAV': 'navigation',
-      'MAIN': 'main',
-      'HEADER': 'banner',
-      'FOOTER': 'contentinfo',
+      BUTTON: "button",
+      A: "link",
+      INPUT:
+        element.getAttribute("type") === "checkbox"
+          ? "checkbox"
+          : element.getAttribute("type") === "radio"
+            ? "radio"
+            : element.getAttribute("type") === "submit"
+              ? "button"
+              : "textbox",
+      SELECT: "combobox",
+      TEXTAREA: "textbox",
+      IMG: "img",
+      NAV: "navigation",
+      MAIN: "main",
+      HEADER: "banner",
+      FOOTER: "contentinfo",
     };
     return tagRoles[element.tagName] || null;
   }
@@ -353,90 +594,136 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     let current: HTMLElement | null = element;
     while (current && current !== document.body) {
       let selector = current.tagName.toLowerCase();
-      const classAttr = current.getAttribute('class');
+      const classAttr = current.getAttribute("class");
       if (classAttr) {
-        const classes = classAttr.split(' ')
-          .filter(c => c && !c.includes(':') && !c.startsWith('_'))
+        const classes = classAttr
+          .split(" ")
+          .filter((c) => c && !c.includes(":") && !c.startsWith("_"))
           .slice(0, 2)
-          .map(c => c.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
+          .map((c) => c.replace(/([[\]()#.>+~=|^$*!@])/g, "\\$1"));
         if (classes.length > 0) {
-          selector += '.' + classes.join('.');
+          selector += "." + classes.join(".");
         }
       }
       path.unshift(selector);
       current = current.parentElement;
     }
-    return path.slice(-3).join(' > ');
+    return path.slice(-3).join(" > ");
   }
 
   // Cursor move tracking
   if (pg) {
     const interval = Math.round(1000 / fps);
     let lastTime = 0;
-    document.addEventListener('mousemove', (e: MouseEvent) => {
-      const now = Date.now();
-      if (now - lastTime >= interval) {
-        lastTime = now;
+    document.addEventListener(
+      "mousemove",
+      (e: MouseEvent) => {
+        const now = Date.now();
+        if (now - lastTime >= interval) {
+          lastTime = now;
+          // @ts-expect-error - exposed function
+          window.__recordCursorMove?.(e.clientX, e.clientY);
+        }
+      },
+      true,
+    );
+
+    document.addEventListener(
+      "pointerdown",
+      (e: PointerEvent) => {
+        if (e.pointerType !== "mouse") return;
+        const modifiers = getActiveModifiers();
         // @ts-expect-error - exposed function
-        window.__recordCursorMove?.(e.clientX, e.clientY);
-      }
-    }, true);
+        window.__recordMouseEvent?.(
+          "down",
+          e.clientX,
+          e.clientY,
+          e.button,
+          modifiers,
+        );
+      },
+      true,
+    );
 
-    document.addEventListener('pointerdown', (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse') return;
-      const modifiers = getActiveModifiers();
-      // @ts-expect-error - exposed function
-      window.__recordMouseEvent?.('down', e.clientX, e.clientY, e.button, modifiers);
-    }, true);
-
-    document.addEventListener('pointerup', (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse') return;
-      const modifiers = getActiveModifiers();
-      // @ts-expect-error - exposed function
-      window.__recordMouseEvent?.('up', e.clientX, e.clientY, e.button, modifiers);
-    }, true);
+    document.addEventListener(
+      "pointerup",
+      (e: PointerEvent) => {
+        if (e.pointerType !== "mouse") return;
+        const modifiers = getActiveModifiers();
+        // @ts-expect-error - exposed function
+        window.__recordMouseEvent?.(
+          "up",
+          e.clientX,
+          e.clientY,
+          e.button,
+          modifiers,
+        );
+      },
+      true,
+    );
   }
 
   // Hover preview tracking
   let lastHoverTime = 0;
-  document.addEventListener('mouseover', (e: MouseEvent) => {
-    const now = Date.now();
-    if (now - lastHoverTime < 200) return;
-    lastHoverTime = now;
-    const target = e.target as HTMLElement;
-    if (!target || target === document.body || target === document.documentElement) return;
+  document.addEventListener(
+    "mouseover",
+    (e: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastHoverTime < 200) return;
+      lastHoverTime = now;
+      const target = e.target as HTMLElement;
+      if (
+        !target ||
+        target === document.body ||
+        target === document.documentElement
+      )
+        return;
 
-    let potentialAction: 'click' | 'fill' | 'select' | undefined;
-    const tagName = target.tagName.toUpperCase();
-    if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
-      potentialAction = 'fill';
-    } else if (tagName === 'SELECT') {
-      potentialAction = 'select';
-    } else if (tagName === 'BUTTON' || tagName === 'A' || target.getAttribute('role') === 'button' || target.onclick) {
-      potentialAction = 'click';
-    } else {
-      potentialAction = 'click';
-    }
+      let potentialAction: "click" | "fill" | "select" | undefined;
+      const tagName = target.tagName.toUpperCase();
+      if (tagName === "INPUT" || tagName === "TEXTAREA") {
+        potentialAction = "fill";
+      } else if (tagName === "SELECT") {
+        potentialAction = "select";
+      } else if (
+        tagName === "BUTTON" ||
+        tagName === "A" ||
+        target.getAttribute("role") === "button" ||
+        target.onclick
+      ) {
+        potentialAction = "click";
+      } else {
+        potentialAction = "click";
+      }
 
-    const selectors = generateAllSelectors(target);
-    const primarySelector = selectors[0]?.value || '';
+      const selectors = generateAllSelectors(target);
+      const primarySelector = selectors[0]?.value || "";
 
-    // @ts-expect-error - exposed function
-    window.__recordHoverPreview?.({
-      tagName: target.tagName.toLowerCase(),
-      id: target.id || undefined,
-      textContent: target.textContent?.trim().slice(0, 30) || undefined,
-      potentialAction,
-      potentialSelector: primarySelector,
-      selectors,
-    });
-  }, true);
+      // @ts-expect-error - exposed function
+      window.__recordHoverPreview?.({
+        tagName: target.tagName.toLowerCase(),
+        id: target.id || undefined,
+        textContent: target.textContent?.trim().slice(0, 30) || undefined,
+        potentialAction,
+        potentialSelector: primarySelector,
+        selectors,
+      });
+    },
+    true,
+  );
 
   // ========== Element Assertion Menu (Shift+Right-Click) ==========
   type ElementAssertionTypeInBrowser =
-    | 'toBeVisible' | 'toBeHidden' | 'toBeAttached' | 'toHaveAttribute'
-    | 'toHaveText' | 'toContainText' | 'toHaveValue'
-    | 'toBeEnabled' | 'toBeDisabled' | 'toBeChecked';
+    | "toBeVisible"
+    | "toBeHidden"
+    | "toBeAttached"
+    | "toHaveAttribute"
+    | "toHaveText"
+    | "toContainText"
+    | "toHaveValue"
+    | "toBeEnabled"
+    | "toBeDisabled"
+    | "toBeChecked";
 
   interface AssertionOption {
     type: ElementAssertionTypeInBrowser;
@@ -451,24 +738,40 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
 
   function getAssertionOptions(element: HTMLElement): AssertionOption[] {
     const options: AssertionOption[] = [
-      { type: 'toBeVisible', label: 'Assert visible' },
-      { type: 'toBeHidden', label: 'Assert hidden' },
-      { type: 'toBeAttached', label: 'Assert attached' },
-      { type: 'toHaveAttribute', label: 'Assert has attribute...', needsAttribute: true },
+      { type: "toBeVisible", label: "Assert visible" },
+      { type: "toBeHidden", label: "Assert hidden" },
+      { type: "toBeAttached", label: "Assert attached" },
+      {
+        type: "toHaveAttribute",
+        label: "Assert has attribute...",
+        needsAttribute: true,
+      },
     ];
     const tagName = element.tagName.toUpperCase();
     const inputType = (element as HTMLInputElement).type?.toLowerCase();
     if (element.textContent?.trim()) {
-      options.push({ type: 'toHaveText', label: 'Assert text equals', needsValue: true });
-      options.push({ type: 'toContainText', label: 'Assert text contains', needsValue: true });
+      options.push({
+        type: "toHaveText",
+        label: "Assert text equals",
+        needsValue: true,
+      });
+      options.push({
+        type: "toContainText",
+        label: "Assert text contains",
+        needsValue: true,
+      });
     }
-    if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
-      options.push({ type: 'toHaveValue', label: 'Assert value equals', needsValue: true });
-      options.push({ type: 'toBeEnabled', label: 'Assert enabled' });
-      options.push({ type: 'toBeDisabled', label: 'Assert disabled' });
+    if (tagName === "INPUT" || tagName === "TEXTAREA") {
+      options.push({
+        type: "toHaveValue",
+        label: "Assert value equals",
+        needsValue: true,
+      });
+      options.push({ type: "toBeEnabled", label: "Assert enabled" });
+      options.push({ type: "toBeDisabled", label: "Assert disabled" });
     }
-    if (inputType === 'checkbox' || inputType === 'radio') {
-      options.push({ type: 'toBeChecked', label: 'Assert checked' });
+    if (inputType === "checkbox" || inputType === "radio") {
+      options.push({ type: "toBeChecked", label: "Assert checked" });
     }
     return options;
   }
@@ -477,36 +780,45 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
     hideAssertionMenu();
     assertionMenuTarget = element;
     const options = getAssertionOptions(element);
-    const menu = document.createElement('div');
-    menu.id = '__lastest_assertion_menu';
+    const menu = document.createElement("div");
+    menu.id = "__lastest_assertion_menu";
     menu.style.cssText = `position:fixed;z-index:2147483647;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:4px 0;min-width:180px;box-shadow:0 10px 25px rgba(0,0,0,0.3);font-family:system-ui,-apple-system,sans-serif;font-size:13px;color:#e5e7eb;`;
-    const header = document.createElement('div');
+    const header = document.createElement("div");
     header.style.cssText = `padding:6px 12px;border-bottom:1px solid #374151;font-size:11px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     const tagDisplay = element.tagName.toLowerCase();
-    const idDisplay = element.id ? `#${element.id}` : '';
+    const idDisplay = element.id ? `#${element.id}` : "";
     header.textContent = `<${tagDisplay}>${idDisplay}`;
     menu.appendChild(header);
     for (const opt of options) {
-      const item = document.createElement('div');
+      const item = document.createElement("div");
       item.style.cssText = `padding:6px 12px;cursor:pointer;transition:background 0.1s;`;
       item.textContent = opt.label;
-      item.addEventListener('mouseenter', () => { item.style.background = '#374151'; });
-      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-      item.addEventListener('click', (e) => { e.stopPropagation(); handleAssertionSelection(opt, element); });
+      item.addEventListener("mouseenter", () => {
+        item.style.background = "#374151";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.background = "transparent";
+      });
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        handleAssertionSelection(opt, element);
+      });
       menu.appendChild(item);
     }
     let finalX = x;
     let finalY = y;
     document.body.appendChild(menu);
     const rect = menu.getBoundingClientRect();
-    if (finalX + rect.width > window.innerWidth) finalX = window.innerWidth - rect.width - 10;
-    if (finalY + rect.height > window.innerHeight) finalY = window.innerHeight - rect.height - 10;
+    if (finalX + rect.width > window.innerWidth)
+      finalX = window.innerWidth - rect.width - 10;
+    if (finalY + rect.height > window.innerHeight)
+      finalY = window.innerHeight - rect.height - 10;
     menu.style.left = `${finalX}px`;
     menu.style.top = `${finalY}px`;
     assertionMenuElement = menu;
     setTimeout(() => {
-      document.addEventListener('click', hideAssertionMenu, { once: true });
-      document.addEventListener('keydown', handleEscapeKey);
+      document.addEventListener("click", hideAssertionMenu, { once: true });
+      document.addEventListener("keydown", handleEscapeKey);
     }, 0);
   }
 
@@ -515,45 +827,68 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
       assertionMenuElement.remove();
       assertionMenuElement = null;
       assertionMenuTarget = null;
-      document.removeEventListener('keydown', handleEscapeKey);
+      document.removeEventListener("keydown", handleEscapeKey);
     }
   }
 
   function handleEscapeKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') hideAssertionMenu();
+    if (e.key === "Escape") hideAssertionMenu();
   }
 
-  function handleAssertionSelection(opt: AssertionOption, element: HTMLElement): void {
+  function handleAssertionSelection(
+    opt: AssertionOption,
+    element: HTMLElement,
+  ): void {
     const selectors = generateAllSelectors(element);
     let expectedValue: string | undefined;
     let attributeName: string | undefined;
     let attributeValue: string | undefined;
     if (opt.needsAttribute) {
-      const promptResult = prompt('Enter attribute name (e.g., "href", "class"):');
-      if (!promptResult) { hideAssertionMenu(); return; }
+      const promptResult = prompt(
+        'Enter attribute name (e.g., "href", "class"):',
+      );
+      if (!promptResult) {
+        hideAssertionMenu();
+        return;
+      }
       attributeName = promptResult;
-      attributeValue = element.getAttribute(attributeName) || '';
+      attributeValue = element.getAttribute(attributeName) || "";
     }
     if (opt.needsValue) {
-      if (opt.type === 'toHaveText' || opt.type === 'toContainText') {
-        expectedValue = element.textContent?.trim() || '';
-      } else if (opt.type === 'toHaveValue') {
-        expectedValue = (element as HTMLInputElement).value || '';
+      if (opt.type === "toHaveText" || opt.type === "toContainText") {
+        expectedValue = element.textContent?.trim() || "";
+      } else if (opt.type === "toHaveValue") {
+        expectedValue = (element as HTMLInputElement).value || "";
       }
     }
     // @ts-expect-error - exposed function
-    window.__recordElementAssertion?.({ type: opt.type, selectors, expectedValue, attributeName, attributeValue });
+    window.__recordElementAssertion?.({
+      type: opt.type,
+      selectors,
+      expectedValue,
+      attributeName,
+      attributeValue,
+    });
     hideAssertionMenu();
   }
 
-  document.addEventListener('contextmenu', (e) => {
-    if (!e.shiftKey) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const target = e.target as HTMLElement;
-    if (!target || target === document.body || target === document.documentElement) return;
-    showAssertionMenu(e.clientX, e.clientY, target);
-  }, true);
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const target = e.target as HTMLElement;
+      if (
+        !target ||
+        target === document.body ||
+        target === document.documentElement
+      )
+        return;
+      showAssertionMenu(e.clientX, e.clientY, target);
+    },
+    true,
+  );
 
   // DOM verification system
   interface BrowserSelectorMatch {
@@ -574,7 +909,12 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // runtime, not the browser DOM API), 0 when the selector throws, otherwise
   // the live querySelectorAll length.
   function countMatches(sel: BrowserActionSelector): number {
-    if (sel.type === 'role-name' || sel.type === 'text' || sel.type === 'ocr-text') return -1;
+    if (
+      sel.type === "role-name" ||
+      sel.type === "text" ||
+      sel.type === "ocr-text"
+    )
+      return -1;
     try {
       return document.querySelectorAll(sel.value).length;
     } catch {
@@ -586,17 +926,23 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
   // any positive count, then the first selector verbatim. The original
   // primary is what the recorder chose first; if a different candidate is
   // unique while the primary isn't, we surface that as autorepair.
-  function evaluatePending(pending: PendingVerification): { matches: BrowserSelectorMatch[]; chosen: string; autoRepaired: boolean; anyVerified: boolean } {
-    const matches: BrowserSelectorMatch[] = pending.selectors.map(sel => ({
+  function evaluatePending(pending: PendingVerification): {
+    matches: BrowserSelectorMatch[];
+    chosen: string;
+    autoRepaired: boolean;
+    anyVerified: boolean;
+  } {
+    const matches: BrowserSelectorMatch[] = pending.selectors.map((sel) => ({
       type: sel.type,
       value: sel.value,
       count: countMatches(sel),
     }));
     // Treat -1 (uncountable but recognized) as "exists" for chosen selection.
-    const unique = matches.find(m => m.count === 1);
-    const positive = unique ?? matches.find(m => m.count > 0 || m.count === -1);
+    const unique = matches.find((m) => m.count === 1);
+    const positive =
+      unique ?? matches.find((m) => m.count > 0 || m.count === -1);
     const chosen = (positive ?? matches[0]).value;
-    const anyVerified = matches.some(m => m.count !== 0);
+    const anyVerified = matches.some((m) => m.count !== 0);
     const autoRepaired = anyVerified && chosen !== pending.primary;
     return { matches, chosen, autoRepaired, anyVerified };
   }
@@ -615,15 +961,24 @@ export const browserRecordingScript = ({ pointerGestures: pg, cursorFPS: fps, se
 
   const originalRecordAction = (window as any).__recordAction;
   if (originalRecordAction) {
-    (window as any).__recordAction = (action: string, selectors: BrowserActionSelector[], value?: string, boundingBox?: { x: number; y: number; width: number; height: number }, actionId?: string) => {
+    (window as any).__recordAction = (
+      action: string,
+      selectors: BrowserActionSelector[],
+      value?: string,
+      boundingBox?: { x: number; y: number; width: number; height: number },
+      actionId?: string,
+    ) => {
       originalRecordAction(action, selectors, value, boundingBox, actionId);
       if (!actionId) return;
-      const validSelectors = selectors.filter(sel => sel.value && sel.value.trim() && !sel.value.includes('undefined'));
+      const validSelectors = selectors.filter(
+        (sel) =>
+          sel.value && sel.value.trim() && !sel.value.includes("undefined"),
+      );
       if (validSelectors.length === 0) return;
       const pending: PendingVerification = {
         actionId,
         selectors: validSelectors,
-        primary: validSelectors[0]?.value ?? '',
+        primary: validSelectors[0]?.value ?? "",
         verified: false,
       };
       pendingVerifications.push(pending);

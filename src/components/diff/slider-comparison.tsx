@@ -1,15 +1,27 @@
-'use client';
+"use client";
 
 /* eslint-disable @next/next/no-img-element -- screenshots are auth-protected dynamic
    media; next/image's optimizer can't forward the session cookie (Next >=16.2) and
    would lossily recompress pixel-accurate diff images. */
 
-import { useState, useRef, useCallback } from 'react';
-import type { AlignmentSegment } from '@/lib/db/schema';
+import { useState, useRef, useCallback } from "react";
+import type { AlignmentSegment } from "@/lib/db/schema";
 
-type ViewMode = 'slider' | 'side-by-side' | 'overlay' | 'three-way' | 'planned-vs-actual' | 'shift-compare';
+type ViewMode =
+  | "slider"
+  | "side-by-side"
+  | "overlay"
+  | "three-way"
+  | "planned-vs-actual"
+  | "shift-compare";
 
-export function RegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: ChangedRegion[] }) {
+export function RegionOverlay({
+  dims,
+  regions,
+}: {
+  dims: { width: number; height: number } | null;
+  regions: ChangedRegion[];
+}) {
   if (!dims || regions.length === 0) return null;
   return (
     <svg
@@ -82,24 +94,25 @@ export function FocusRegionOverlay({
           />
         ))}
       </svg>
-      {onDelete && regions.map((r) => {
-        const leftPct = ((r.x + r.width) / dims.width) * 100;
-        const topPct = (r.y / dims.height) * 100;
-        return (
-          <button
-            key={`del-${r.id}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(r.id);
-            }}
-            title="Remove focus region"
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-green-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-green-700"
-            style={{ left: `${leftPct}%`, top: `${topPct}%` }}
-          >
-            ×
-          </button>
-        );
-      })}
+      {onDelete &&
+        regions.map((r) => {
+          const leftPct = ((r.x + r.width) / dims.width) * 100;
+          const topPct = (r.y / dims.height) * 100;
+          return (
+            <button
+              key={`del-${r.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(r.id);
+              }}
+              title="Remove focus region"
+              className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-green-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-green-700"
+              style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+            >
+              ×
+            </button>
+          );
+        })}
     </>
   );
 }
@@ -138,46 +151,62 @@ export function IgnoreRegionOverlay({
           />
         ))}
       </svg>
-      {onDelete && regions.map((r) => {
-        const leftPct = ((r.x + r.width) / dims.width) * 100;
-        const topPct = (r.y / dims.height) * 100;
-        return (
-          <button
-            key={`del-${r.id}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(r.id);
-            }}
-            title="Remove ignore region"
-            className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-rose-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-rose-700"
-            style={{ left: `${leftPct}%`, top: `${topPct}%` }}
-          >
-            ×
-          </button>
-        );
-      })}
+      {onDelete &&
+        regions.map((r) => {
+          const leftPct = ((r.x + r.width) / dims.width) * 100;
+          const topPct = (r.y / dims.height) * 100;
+          return (
+            <button
+              key={`del-${r.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(r.id);
+              }}
+              title="Remove ignore region"
+              className="absolute -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-rose-600 text-white text-xs leading-none shadow flex items-center justify-center hover:bg-rose-700"
+              style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+            >
+              ×
+            </button>
+          );
+        })}
     </>
   );
 }
 
 interface DrawLayerProps {
   dims: { width: number; height: number } | null;
-  onDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
-  variant?: 'focus' | 'ignore';
+  onDrawn: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
+  variant?: "focus" | "ignore";
 }
 
-export function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) {
+export function DrawLayer({
+  dims,
+  onDrawn,
+  variant = "focus",
+}: DrawLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const [start, setStart] = useState<{ x: number; y: number } | null>(null);
   const [current, setCurrent] = useState<{ x: number; y: number } | null>(null);
 
-  const toNatural = useCallback((clientX: number, clientY: number) => {
-    if (!layerRef.current || !dims) return null;
-    const rect = layerRef.current.getBoundingClientRect();
-    const px = ((clientX - rect.left) / rect.width) * dims.width;
-    const py = ((clientY - rect.top) / rect.height) * dims.height;
-    return { x: Math.max(0, Math.min(dims.width, px)), y: Math.max(0, Math.min(dims.height, py)) };
-  }, [dims]);
+  const toNatural = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!layerRef.current || !dims) return null;
+      const rect = layerRef.current.getBoundingClientRect();
+      const px = ((clientX - rect.left) / rect.width) * dims.width;
+      const py = ((clientY - rect.top) / rect.height) * dims.height;
+      return {
+        x: Math.max(0, Math.min(dims.width, px)),
+        y: Math.max(0, Math.min(dims.height, py)),
+      };
+    },
+    [dims],
+  );
 
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -206,15 +235,20 @@ export function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) 
     if (width >= 4 && height >= 4) onDrawn({ x, y, width, height });
   };
 
-  const preview = start && current && dims ? {
-    x: Math.min(start.x, current.x),
-    y: Math.min(start.y, current.y),
-    width: Math.abs(current.x - start.x),
-    height: Math.abs(current.y - start.y),
-  } : null;
+  const preview =
+    start && current && dims
+      ? {
+          x: Math.min(start.x, current.x),
+          y: Math.min(start.y, current.y),
+          width: Math.abs(current.x - start.x),
+          height: Math.abs(current.y - start.y),
+        }
+      : null;
 
-  const previewFill = variant === 'ignore' ? 'rgba(15,23,42,0.30)' : 'rgba(34,197,94,0.15)';
-  const previewStroke = variant === 'ignore' ? 'rgba(244,63,94,0.95)' : 'rgba(34,197,94,0.9)';
+  const previewFill =
+    variant === "ignore" ? "rgba(15,23,42,0.30)" : "rgba(34,197,94,0.15)";
+  const previewStroke =
+    variant === "ignore" ? "rgba(244,63,94,0.95)" : "rgba(34,197,94,0.9)";
 
   return (
     <div
@@ -248,7 +282,20 @@ export function DrawLayer({ dims, onDrawn, variant = 'focus' }: DrawLayerProps) 
   );
 }
 
-function DomRegionOverlay({ dims, regions }: { dims: { width: number; height: number } | null; regions: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }> }) {
+function DomRegionOverlay({
+  dims,
+  regions,
+}: {
+  dims: { width: number; height: number } | null;
+  regions: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color: string;
+    border: string;
+  }>;
+}) {
   if (!dims || regions.length === 0) return null;
   return (
     <svg
@@ -291,15 +338,32 @@ interface SliderComparisonProps {
   alignedDiffImage?: string;
   alignmentSegments?: AlignmentSegment[];
   changedRegions?: ChangedRegion[];
-  domOverlayRegions?: Array<{ x: number; y: number; width: number; height: number; color: string; border: string }>;
+  domOverlayRegions?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color: string;
+    border: string;
+  }>;
   showRegions?: boolean;
   focusRegions?: FocusRegionRect[];
   drawFocusMode?: boolean;
-  onFocusRegionDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onFocusRegionDrawn?: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
   onFocusRegionDelete?: (id: string) => void;
   ignoreRegions?: IgnoreRegionRect[];
   drawIgnoreMode?: boolean;
-  onIgnoreRegionDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onIgnoreRegionDrawn?: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
   onIgnoreRegionDelete?: (id: string) => void;
   leftLabel?: string;
   rightLabel?: string;
@@ -329,41 +393,53 @@ export function SliderComparison({
   drawIgnoreMode = false,
   onIgnoreRegionDrawn,
   onIgnoreRegionDelete,
-  leftLabel = 'Baseline',
-  rightLabel = 'Current',
-  className = '',
+  leftLabel = "Baseline",
+  rightLabel = "Current",
+  className = "",
   initialViewMode,
   onViewModeChange,
 }: SliderComparisonProps) {
   const hasAlignedImages = !!(alignedBaselineImage && alignedCurrentImage);
 
   const defaultMode: ViewMode = hasAlignedImages
-    ? 'shift-compare'
+    ? "shift-compare"
     : baselineImage && plannedImage
-      ? 'three-way'
+      ? "three-way"
       : baselineImage
-        ? 'slider'
+        ? "slider"
         : plannedImage
-          ? 'planned-vs-actual'
-          : 'slider';
+          ? "planned-vs-actual"
+          : "slider";
 
   const [sliderPosition, setSliderPosition] = useState(50);
-  const [viewMode, setViewModeInternal] = useState<ViewMode>(initialViewMode ?? defaultMode);
+  const [viewMode, setViewModeInternal] = useState<ViewMode>(
+    initialViewMode ?? defaultMode,
+  );
 
-  const setViewMode = useCallback((mode: ViewMode) => {
-    setViewModeInternal(mode);
-    onViewModeChange?.(mode);
-  }, [onViewModeChange]);
-  const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+  const setViewMode = useCallback(
+    (mode: ViewMode) => {
+      setViewModeInternal(mode);
+      onViewModeChange?.(mode);
+    },
+    [onViewModeChange],
+  );
+  const [imageDims, setImageDims] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
-  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget;
-    setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
-  }, []);
+  const handleImageLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const img = e.currentTarget;
+      setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+    },
+    [],
+  );
 
-  const visibleRegions = showRegionsProp && changedRegions?.length ? changedRegions : [];
+  const visibleRegions =
+    showRegionsProp && changedRegions?.length ? changedRegions : [];
 
   const handleMouseDown = useCallback(() => {
     isDragging.current = true;
@@ -397,21 +473,21 @@ export function SliderComparison({
       {baselineImage && (
         <>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'slider' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
-            onClick={() => setViewMode('slider')}
+            className={`px-3 py-1 rounded text-sm ${viewMode === "slider" ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+            onClick={() => setViewMode("slider")}
           >
             Slider
           </button>
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'side-by-side' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
-            onClick={() => setViewMode('side-by-side')}
+            className={`px-3 py-1 rounded text-sm ${viewMode === "side-by-side" ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+            onClick={() => setViewMode("side-by-side")}
           >
             Side by Side
           </button>
           {diffImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'overlay' ? 'bg-accent text-accent-foreground' : 'bg-muted'}`}
-              onClick={() => setViewMode('overlay')}
+              className={`px-3 py-1 rounded text-sm ${viewMode === "overlay" ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+              onClick={() => setViewMode("overlay")}
             >
               Diff Overlay
             </button>
@@ -420,8 +496,8 @@ export function SliderComparison({
       )}
       {hasAlignedImages && (
         <button
-          className={`px-3 py-1 rounded text-sm ${viewMode === 'shift-compare' ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700'}`}
-          onClick={() => setViewMode('shift-compare')}
+          className={`px-3 py-1 rounded text-sm ${viewMode === "shift-compare" ? "bg-blue-600 text-white" : "bg-blue-100 text-blue-700"}`}
+          onClick={() => setViewMode("shift-compare")}
         >
           Shift Compare
         </button>
@@ -430,15 +506,15 @@ export function SliderComparison({
         <>
           {baselineImage && (
             <button
-              className={`px-3 py-1 rounded text-sm ${viewMode === 'three-way' ? 'bg-accent text-accent-foreground' : 'bg-accent/40 text-accent-foreground'}`}
-              onClick={() => setViewMode('three-way')}
+              className={`px-3 py-1 rounded text-sm ${viewMode === "three-way" ? "bg-accent text-accent-foreground" : "bg-accent/40 text-accent-foreground"}`}
+              onClick={() => setViewMode("three-way")}
             >
               Three-Way
             </button>
           )}
           <button
-            className={`px-3 py-1 rounded text-sm ${viewMode === 'planned-vs-actual' ? 'bg-accent text-accent-foreground' : 'bg-accent/40 text-accent-foreground'}`}
-            onClick={() => setViewMode('planned-vs-actual')}
+            className={`px-3 py-1 rounded text-sm ${viewMode === "planned-vs-actual" ? "bg-accent text-accent-foreground" : "bg-accent/40 text-accent-foreground"}`}
+            onClick={() => setViewMode("planned-vs-actual")}
           >
             Planned vs Actual
           </button>
@@ -447,12 +523,17 @@ export function SliderComparison({
     </div>
   );
 
-  if (viewMode === 'shift-compare' && hasAlignedImages) {
-    const totalRows = alignmentSegments?.reduce((sum, s) => sum + s.count, 0) ?? 1;
-    const markers: { op: 'insert' | 'delete'; topPct: number; heightPct: number }[] = [];
+  if (viewMode === "shift-compare" && hasAlignedImages) {
+    const totalRows =
+      alignmentSegments?.reduce((sum, s) => sum + s.count, 0) ?? 1;
+    const markers: {
+      op: "insert" | "delete";
+      topPct: number;
+      heightPct: number;
+    }[] = [];
     let rowOffset = 0;
     for (const seg of alignmentSegments ?? []) {
-      if (seg.op === 'insert' || seg.op === 'delete') {
+      if (seg.op === "insert" || seg.op === "delete") {
         markers.push({
           op: seg.op,
           topPct: (rowOffset / totalRows) * 100,
@@ -479,17 +560,26 @@ export function SliderComparison({
         <div className="grid grid-cols-[16px_1fr_1fr_16px] gap-0 border rounded-b-lg overflow-hidden">
           {/* Left gutter: delete markers */}
           <div className="relative bg-muted/30">
-            {markers.filter(m => m.op === 'delete').map((m, i) => (
-              <div
-                key={i}
-                className="absolute left-0 right-0 bg-red-500/70"
-                style={{ top: `${m.topPct}%`, height: `${Math.max(m.heightPct, 0.3)}%` }}
-              />
-            ))}
+            {markers
+              .filter((m) => m.op === "delete")
+              .map((m, i) => (
+                <div
+                  key={i}
+                  className="absolute left-0 right-0 bg-red-500/70"
+                  style={{
+                    top: `${m.topPct}%`,
+                    height: `${Math.max(m.heightPct, 0.3)}%`,
+                  }}
+                />
+              ))}
           </div>
           {/* Aligned baseline with diff overlay */}
           <div className="relative">
-            <img src={alignedBaselineImage} alt="Aligned baseline" className="w-full" />
+            <img
+              src={alignedBaselineImage}
+              alt="Aligned baseline"
+              className="w-full"
+            />
             {alignedDiffImage && (
               <img
                 src={alignedDiffImage}
@@ -500,7 +590,11 @@ export function SliderComparison({
           </div>
           {/* Aligned current with diff overlay */}
           <div className="relative">
-            <img src={alignedCurrentImage} alt="Aligned current" className="w-full" />
+            <img
+              src={alignedCurrentImage}
+              alt="Aligned current"
+              className="w-full"
+            />
             {alignedDiffImage && (
               <img
                 src={alignedDiffImage}
@@ -511,46 +605,81 @@ export function SliderComparison({
           </div>
           {/* Right gutter: insert markers */}
           <div className="relative bg-muted/30">
-            {markers.filter(m => m.op === 'insert').map((m, i) => (
-              <div
-                key={i}
-                className="absolute left-0 right-0 bg-green-500/70"
-                style={{ top: `${m.topPct}%`, height: `${Math.max(m.heightPct, 0.3)}%` }}
-              />
-            ))}
+            {markers
+              .filter((m) => m.op === "insert")
+              .map((m, i) => (
+                <div
+                  key={i}
+                  className="absolute left-0 right-0 bg-green-500/70"
+                  style={{
+                    top: `${m.topPct}%`,
+                    height: `${Math.max(m.heightPct, 0.3)}%`,
+                  }}
+                />
+              ))}
           </div>
         </div>
         <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-500/70 rounded-sm" /> Deleted rows</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500/70 rounded-sm" /> Inserted rows</span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 bg-red-500/70 rounded-sm" /> Deleted rows
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 bg-green-500/70 rounded-sm" /> Inserted
+            rows
+          </span>
           {alignedDiffImage && (
-            <span className="flex items-center gap-1"><span className="w-3 h-3 bg-fuchsia-500/70 rounded-sm" /> Pixel differences</span>
+            <span className="flex items-center gap-1">
+              <span className="w-3 h-3 bg-fuchsia-500/70 rounded-sm" /> Pixel
+              differences
+            </span>
           )}
         </div>
       </div>
     );
   }
 
-  if (viewMode === 'side-by-side' && baselineImage) {
+  if (viewMode === "side-by-side" && baselineImage) {
     return (
       <div className={className}>
         {viewModeButtons}
         <div className="grid grid-cols-2 gap-4">
           <div className="relative">
-            <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">
+              {leftLabel}
+            </div>
             <div className="relative">
-              <img src={baselineImage} alt={leftLabel} className="w-full border rounded" onLoad={handleImageLoad} />
+              <img
+                src={baselineImage}
+                alt={leftLabel}
+                className="w-full border rounded"
+                onLoad={handleImageLoad}
+              />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
             </div>
           </div>
           <div className="relative">
-            <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
+            <div className="text-sm text-muted-foreground mb-2">
+              {rightLabel}
+            </div>
             <div className="relative">
-              <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+              <img
+                src={currentImage}
+                alt={rightLabel}
+                className="w-full border rounded"
+              />
               <RegionOverlay dims={imageDims} regions={visibleRegions} />
-              <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
-              <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
-              <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} />
+              <DomRegionOverlay
+                dims={imageDims}
+                regions={domOverlayRegions ?? []}
+              />
+              <FocusRegionOverlay
+                dims={imageDims}
+                regions={focusRegions ?? []}
+              />
+              <IgnoreRegionOverlay
+                dims={imageDims}
+                regions={ignoreRegions ?? []}
+              />
             </div>
           </div>
         </div>
@@ -558,35 +687,59 @@ export function SliderComparison({
     );
   }
 
-  if (viewMode === 'three-way' && plannedImage && baselineImage) {
+  if (viewMode === "three-way" && plannedImage && baselineImage) {
     return (
       <div className={className}>
         {viewModeButtons}
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <div className="text-sm text-muted-foreground mb-2">{leftLabel}</div>
-            <img src={baselineImage} alt={leftLabel} className="w-full border rounded" />
+            <div className="text-sm text-muted-foreground mb-2">
+              {leftLabel}
+            </div>
+            <img
+              src={baselineImage}
+              alt={leftLabel}
+              className="w-full border rounded"
+            />
           </div>
           <div>
-            <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
-            <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+            <div className="text-sm text-muted-foreground mb-2">
+              {rightLabel}
+            </div>
+            <img
+              src={currentImage}
+              alt={rightLabel}
+              className="w-full border rounded"
+            />
           </div>
           <div>
-            <div className="text-sm text-primary mb-2 font-medium">Planned (Design)</div>
-            <img src={plannedImage} alt="Planned" className="w-full border-2 border-primary/30 rounded" />
+            <div className="text-sm text-primary mb-2 font-medium">
+              Planned (Design)
+            </div>
+            <img
+              src={plannedImage}
+              alt="Planned"
+              className="w-full border-2 border-primary/30 rounded"
+            />
           </div>
         </div>
         {plannedDiffImage && (
           <div className="mt-4">
-            <div className="text-sm text-primary mb-2 font-medium">Planned vs Current Diff</div>
-            <img src={plannedDiffImage} alt="Planned Diff" className="w-full border border-primary/30 rounded" />
+            <div className="text-sm text-primary mb-2 font-medium">
+              Planned vs Current Diff
+            </div>
+            <img
+              src={plannedDiffImage}
+              alt="Planned Diff"
+              className="w-full border border-primary/30 rounded"
+            />
           </div>
         )}
       </div>
     );
   }
 
-  if (viewMode === 'planned-vs-actual' && plannedImage) {
+  if (viewMode === "planned-vs-actual" && plannedImage) {
     return (
       <div className={className}>
         {viewModeButtons}
@@ -601,7 +754,12 @@ export function SliderComparison({
         >
           {/* Planned (left side) */}
           <div className="relative">
-            <img src={plannedImage} alt="Planned" className="w-full" draggable={false} />
+            <img
+              src={plannedImage}
+              alt="Planned"
+              className="w-full"
+              draggable={false}
+            />
           </div>
 
           {/* Current (right side, clipped) */}
@@ -609,13 +767,21 @@ export function SliderComparison({
             className="absolute inset-0 overflow-hidden"
             style={{ clipPath: `inset(0 0 0 ${sliderPosition}%)` }}
           >
-            <img src={currentImage} alt="Current" className="w-full" draggable={false} />
+            <img
+              src={currentImage}
+              alt="Current"
+              className="w-full"
+              draggable={false}
+            />
           </div>
 
           {/* Slider handle */}
           <div
             className="absolute top-0 bottom-0 w-1 bg-primary cursor-ew-resize shadow-lg"
-            style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
+            style={{
+              left: `${sliderPosition}%`,
+              transform: "translateX(-50%)",
+            }}
             onMouseDown={handleMouseDown}
             onTouchStart={handleMouseDown}
           >
@@ -639,19 +805,27 @@ export function SliderComparison({
     );
   }
 
-  if (viewMode === 'overlay' && diffImage) {
+  if (viewMode === "overlay" && diffImage) {
     return (
       <div className={className}>
         {viewModeButtons}
         <div className="relative">
-          <img src={currentImage} alt="Current" className="w-full border rounded" onLoad={handleImageLoad} />
+          <img
+            src={currentImage}
+            alt="Current"
+            className="w-full border rounded"
+            onLoad={handleImageLoad}
+          />
           <img
             src={diffImage}
             alt="Diff"
             className="absolute inset-0 w-full h-full opacity-70 mix-blend-multiply"
           />
           <RegionOverlay dims={imageDims} regions={visibleRegions} />
-          <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
+          <DomRegionOverlay
+            dims={imageDims}
+            regions={domOverlayRegions ?? []}
+          />
           <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} />
           <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} />
         </div>
@@ -666,7 +840,11 @@ export function SliderComparison({
       <div className={className}>
         {viewModeButtons}
         <div className="text-sm text-muted-foreground mb-2">{rightLabel}</div>
-        <img src={currentImage} alt={rightLabel} className="w-full border rounded" />
+        <img
+          src={currentImage}
+          alt={rightLabel}
+          className="w-full border rounded"
+        />
       </div>
     );
   }
@@ -685,34 +863,66 @@ export function SliderComparison({
       >
         {/* Baseline (left side) */}
         <div className="relative">
-          <img src={baselineImage} alt={leftLabel} className="w-full" draggable={false} onLoad={handleImageLoad} />
+          <img
+            src={baselineImage}
+            alt={leftLabel}
+            className="w-full"
+            draggable={false}
+            onLoad={handleImageLoad}
+          />
         </div>
 
         {/* Current (right side, clipped — fully revealed while drawing regions) */}
         <div
           className="absolute inset-0 overflow-hidden"
-          style={{ clipPath: `inset(0 0 0 ${drawFocusMode || drawIgnoreMode ? 0 : sliderPosition}%)` }}
+          style={{
+            clipPath: `inset(0 0 0 ${drawFocusMode || drawIgnoreMode ? 0 : sliderPosition}%)`,
+          }}
         >
-          <img src={currentImage} alt={rightLabel} className="w-full" draggable={false} />
+          <img
+            src={currentImage}
+            alt={rightLabel}
+            className="w-full"
+            draggable={false}
+          />
         </div>
 
         {/* Region overlays */}
         <RegionOverlay dims={imageDims} regions={visibleRegions} />
         <DomRegionOverlay dims={imageDims} regions={domOverlayRegions ?? []} />
-        <FocusRegionOverlay dims={imageDims} regions={focusRegions ?? []} onDelete={onFocusRegionDelete} />
-        <IgnoreRegionOverlay dims={imageDims} regions={ignoreRegions ?? []} onDelete={onIgnoreRegionDelete} />
+        <FocusRegionOverlay
+          dims={imageDims}
+          regions={focusRegions ?? []}
+          onDelete={onFocusRegionDelete}
+        />
+        <IgnoreRegionOverlay
+          dims={imageDims}
+          regions={ignoreRegions ?? []}
+          onDelete={onIgnoreRegionDelete}
+        />
         {drawFocusMode && onFocusRegionDrawn && !drawIgnoreMode && (
-          <DrawLayer dims={imageDims} onDrawn={onFocusRegionDrawn} variant="focus" />
+          <DrawLayer
+            dims={imageDims}
+            onDrawn={onFocusRegionDrawn}
+            variant="focus"
+          />
         )}
         {drawIgnoreMode && onIgnoreRegionDrawn && !drawFocusMode && (
-          <DrawLayer dims={imageDims} onDrawn={onIgnoreRegionDrawn} variant="ignore" />
+          <DrawLayer
+            dims={imageDims}
+            onDrawn={onIgnoreRegionDrawn}
+            variant="ignore"
+          />
         )}
 
         {/* Slider handle — hidden while drawing so it doesn't intercept the mouse mid-drag */}
         {!drawFocusMode && !drawIgnoreMode && (
           <div
             className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize shadow-lg"
-            style={{ left: `${sliderPosition}%`, transform: 'translateX(-50%)' }}
+            style={{
+              left: `${sliderPosition}%`,
+              transform: "translateX(-50%)",
+            }}
             onMouseDown={handleMouseDown}
             onTouchStart={handleMouseDown}
           >

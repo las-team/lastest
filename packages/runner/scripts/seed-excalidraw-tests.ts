@@ -15,12 +15,12 @@
  * Run: npx tsx scripts/seed-excalidraw-tests.ts
  */
 
-import { db } from '../src/lib/db';
-import { tests, testVersions } from '../src/lib/db/schema';
-import { v4 as uuid } from 'uuid';
+import { db } from "../src/lib/db";
+import { tests, testVersions } from "../src/lib/db/schema";
+import { v4 as uuid } from "uuid";
 
-const LASTEST_REPO_ID = '0d881179-1fed-4a44-bcbd-30809e3de39b';
-const EXCALIDRAW_URL = 'https://excalidraw.com';
+const LASTEST_REPO_ID = "0d881179-1fed-4a44-bcbd-30809e3de39b";
+const EXCALIDRAW_URL = "https://excalidraw.com";
 
 // Common test helpers template
 const TEST_HELPERS = `import { Page } from 'playwright';
@@ -95,7 +95,7 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
 // Test definitions with code bodies (after helpers)
 const TEST_DEFINITIONS = [
   {
-    name: 'Test 1: Move Element Basic',
+    name: "Test 1: Move Element Basic",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1248,477,0],[1042,440,39],[912,409,33],[831,386,33],[791,366,34],[781,350,33],[778,343,33],[777,337,34]]);
   await replayCursorPath(page, [[774,332,33],[763,324,33],[729,310,34],[680,293,33],[634,271,33],[599,242,34],[563,207,33],[535,176,34],[519,150,32],[511,129,34],[508,112,33],[507,97,42],[508,92,33],[509,89,33],[511,84,34],[512,78,33],[514,71,34],[516,64,33]]);
@@ -124,7 +124,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 1b: Move Element Advanced',
+    name: "Test 1b: Move Element Advanced",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1262,469,0],[1147,454,40],[1060,446,33],[978,441,32],[902,438,42],[850,439,26],[813,440,33]]);
   await replayCursorPath(page, [[787,438,35],[771,436,31],[765,435,34],[765,435,42],[765,435,57],[765,435,34],[764,435,42],[764,435,33],[765,435,33],[765,435,42],[765,435,42],[765,435,50],[765,435,33],[765,435,41],[765,435,76],[765,435,600]]);
@@ -163,7 +163,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 2: Move Binding Arrow',
+    name: "Test 2: Move Binding Arrow",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await page.screenshot({ path: getScreenshotPath(), fullPage: true });
   await replayCursorPath(page, [[1260,155,0],[1084,155,39],[970,156,34],[863,149,33],[774,138,33],[710,129,33],[667,121,33],[654,112,34],[642,102,33],[634,94,34],[620,85,33],[597,76,33],[586,71,33],[576,65,34],[572,63,49],[568,60,34]]);
@@ -293,7 +293,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 3: ALT+Drag Duplicate',
+    name: "Test 3: ALT+Drag Duplicate",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1275,234,0],[1080,213,38],[953,199,34],[832,185,33],[767,178,33],[764,178,42],[764,178,41],[758,169,34],[735,149,42],[693,125,25],[648,99,33],[632,87,33],[629,84,34],[626,81,33],[626,81,33],[626,81,34],[626,81,41],[626,81,33],[626,81,43],[626,81,33],[626,82,33],[625,83,33],[626,104,34],[625,126,34],[619,149,33],[609,168,32],[587,190,34],[551,218,33],[510,238,33],[490,246,34],[489,246,34],[489,246,33]]);
   await page.mouse.move(489, 246);
@@ -323,7 +323,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 4: Rotate Arrow Binding',
+    name: "Test 4: Rotate Arrow Binding",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1263,317,0],[1148,294,38],[1064,285,34],[1002,283,33],[954,281,33],[899,279,34],[828,276,33],[750,267,33],[698,252,34],[669,231,33],[662,213,33],[652,187,33],[636,158,35],[626,145,33],[625,145,33],[625,145,92],[625,145,42],[625,145,41],[625,145,108],[614,154,34],[598,165,33],[585,175,33],[572,188,34],[566,193,33],[566,193,59],[566,194,74],[562,201,33],[555,213,33],[542,231,35],[529,252,33],[518,274,33],[509,293,33],[504,307,33],[500,315,33]]);
   await page.mouse.move(500, 316);
@@ -397,7 +397,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 5: Undo Element Creation',
+    name: "Test 5: Undo Element Creation",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1262,592,0],[1150,551,40],[1038,510,34],[947,475,33],[888,448,34],[873,441,32],[873,441,34],[873,441,33],[873,441,51],[873,441,33],[871,440,33],[858,427,33],[830,400,33],[797,365,34],[754,322,33],[711,293,33],[676,277,33],[647,263,35],[613,250,33],[573,241,34],[526,241,32],[451,259,34],[391,285,33],[363,299,33],[360,305,34],[357,310,33],[357,310,68],[357,310,82]]);
   await page.mouse.move(357, 310);
@@ -444,7 +444,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 6: Redo Element Creation',
+    name: "Test 6: Redo Element Creation",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1223,289,0],[931,299,38],[781,319,34],[682,338,34],[651,349,33],[647,354,33],[646,355,33],[646,355,34],[646,355,33],[647,355,60],[648,346,32],[650,326,33],[648,321,33],[648,321,34],[632,319,34],[604,319,33],[578,322,33],[571,322,33]]);
   await page.mouse.move(571, 322);
@@ -494,7 +494,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 7: Undo Multiple Operations',
+    name: "Test 7: Undo Multiple Operations",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1270,378,0],[1160,394,39],[1088,410,34],[1022,422,33],[947,427,34],[878,430,32],[849,430,33],[836,425,34],[810,411,33]]);
   await replayCursorPath(page, [[767,381,34],[738,350,33],[726,322,34],[717,301,33],[714,291,34]]);
@@ -576,7 +576,7 @@ const TEST_DEFINITIONS = [
 }`,
   },
   {
-    name: 'Test 8: Undo/Redo Button State',
+    name: "Test 8: Undo/Redo Button State",
     codeBody: `  await page.goto(buildUrl(baseUrl, '/'));
   await replayCursorPath(page, [[1276,418,0],[1263,419,32],[1243,417,42],[1213,414,32],[1169,410,34],[1119,407,33],[1037,409,34],[950,411,33],[896,407,34],[848,403,33],[820,399,33],[800,396,33]]);
   await replayCursorPath(page, [[778,397,34],[745,395,33],[698,387,33],[628,375,34],[552,366,33],[477,357,34],[439,352,32],[434,351,42],[434,351,34],[434,351,41],[434,351,33],[425,346,33],[403,337,35],[378,324,32],[361,304,42],[356,295,25],[356,295,92],[356,295,51],[356,295,42],[356,296,43],[356,301,39],[359,309,34],[359,311,183],[361,323,33],[365,335,33],[368,341,33],[369,343,35],[370,347,41],[371,352,33],[372,364,33],[374,402,33],[373,447,34],[368,483,33],[363,508,34],[356,541,32],[346,567,35],[342,573,33],[341,576,33],[321,593,33],[287,611,34],[261,625,33],[243,638,33],[233,647,34],[224,657,33],[222,658,33],[222,658,33],[222,658,43],[223,658,33],[245,644,33],[366,587,33]]);
@@ -637,7 +637,7 @@ const TEST_DEFINITIONS = [
 ];
 
 async function seed() {
-  console.log('Seeding Excalidraw tests for lastest repository...\n');
+  console.log("Seeding Excalidraw tests for lastest repository...\n");
 
   const now = new Date();
 
@@ -664,7 +664,7 @@ async function seed() {
       code: fullCode,
       name: def.name,
       targetUrl: EXCALIDRAW_URL,
-      changeReason: 'initial',
+      changeReason: "initial",
       createdAt: now,
     });
 
@@ -675,6 +675,6 @@ async function seed() {
 }
 
 seed().catch((err) => {
-  console.error('Seed failed:', err);
+  console.error("Seed failed:", err);
   process.exit(1);
 });

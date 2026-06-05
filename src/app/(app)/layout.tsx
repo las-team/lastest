@@ -1,17 +1,17 @@
-import { redirect } from 'next/navigation';
-import { SidebarServer } from '@/components/layout/sidebar-server';
-import { MobileTopBarServer } from '@/components/layout/mobile-shell-server';
-import { MobileBottomNav } from '@/components/layout/mobile-bottom-nav-client';
-import { JobPollingProvider } from '@/components/queue/job-polling-context';
-import { ContextCollectorProvider } from '@/components/bug-report/context-collector';
-import { BugReportWidget } from '@/components/bug-report/bug-report-widget';
-import { ActivityFeedProvider } from '@/components/activity-feed/activity-feed-provider-client';
-import { ActivityFeedPanel } from '@/components/activity-feed/activity-feed-panel-client';
-import { CelebrationListener } from '@/components/gamification/celebration-listener-client';
-import { ConsentBanner } from '@/components/layout/consent-banner-client';
-import { UmamiIdentifyClient } from '@/components/analytics/umami-identify-client';
-import { getCurrentSession } from '@/lib/auth';
-import { hasAcceptedTerms } from '@/lib/db/queries';
+import { redirect } from "next/navigation";
+import { SidebarServer } from "@/components/layout/sidebar-server";
+import { MobileTopBarServer } from "@/components/layout/mobile-shell-server";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav-client";
+import { JobPollingProvider } from "@/components/queue/job-polling-context";
+import { ContextCollectorProvider } from "@/components/bug-report/context-collector";
+import { BugReportWidget } from "@/components/bug-report/bug-report-widget";
+import { ActivityFeedProvider } from "@/components/activity-feed/activity-feed-provider-client";
+import { ActivityFeedPanel } from "@/components/activity-feed/activity-feed-panel-client";
+import { CelebrationListener } from "@/components/gamification/celebration-listener-client";
+import { ConsentBanner } from "@/components/layout/consent-banner-client";
+import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
+import { getCurrentSession } from "@/lib/auth";
+import { hasAcceptedTerms } from "@/lib/db/queries";
 
 export default async function AppLayout({
   children,
@@ -23,7 +23,7 @@ export default async function AppLayout({
   // First-run gate: send users who haven't completed onboarding to /onboarding.
   // Backfilled timestamp on existing users → no redirect for them.
   if (session?.user && !session.user.onboardingCompletedAt) {
-    redirect('/onboarding');
+    redirect("/onboarding");
   }
 
   // Resolve every async server component used in this layout up-front so
@@ -38,7 +38,9 @@ export default async function AppLayout({
   // `<div className="flex h-screen">`. Awaiting here also dedupes the
   // sidebar's DB/GitHub calls that used to run twice.
   const [showConsentBanner, sidebarEl, mobileTopBarEl] = await Promise.all([
-    session?.user ? hasAcceptedTerms(session.user.id).then((v) => !v) : Promise.resolve(false),
+    session?.user
+      ? hasAcceptedTerms(session.user.id).then((v) => !v)
+      : Promise.resolve(false),
     SidebarServer(),
     MobileTopBarServer(),
   ]);

@@ -5,14 +5,18 @@
  * CI/CD integrations). Browser/UI auth is handled by BetterAuth (see session.ts).
  * Tokens are validated against the `sessions` table in the DB.
  */
-import * as queries from '@/lib/db/queries';
-import type { SessionData } from './session';
-export async function verifyBearerToken(token: string): Promise<SessionData | null> {
+import * as queries from "@/lib/db/queries";
+import type { SessionData } from "./session";
+export async function verifyBearerToken(
+  token: string,
+): Promise<SessionData | null> {
   const result = await queries.getSessionWithUser(token);
   if (!result || result.session.expiresAt < new Date()) {
     return null;
   }
-  const team = result.user.teamId ? await queries.getTeam(result.user.teamId) : null;
+  const team = result.user.teamId
+    ? await queries.getTeam(result.user.teamId)
+    : null;
   return {
     user: result.user,
     sessionId: result.session.id,

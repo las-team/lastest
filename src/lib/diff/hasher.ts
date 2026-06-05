@@ -1,6 +1,6 @@
-import fs from 'fs';
-import crypto from 'crypto';
-import { PNG } from 'pngjs';
+import fs from "fs";
+import crypto from "crypto";
+import { PNG } from "pngjs";
 
 /**
  * Generate SHA256 hash of image pixel data (ignoring metadata)
@@ -11,19 +11,19 @@ export function hashImage(imagePath: string): string {
   const png = PNG.sync.read(imageBuffer);
 
   // Hash the raw pixel data, not the file
-  const hash = crypto.createHash('sha256');
+  const hash = crypto.createHash("sha256");
   hash.update(png.data);
 
-  return hash.digest('hex');
+  return hash.digest("hex");
 }
 
 /**
  * Generate hash from raw pixel buffer (for in-memory images)
  */
 export function hashPixelData(data: Buffer): string {
-  const hash = crypto.createHash('sha256');
+  const hash = crypto.createHash("sha256");
   hash.update(data);
-  return hash.digest('hex');
+  return hash.digest("hex");
 }
 
 /**
@@ -40,9 +40,9 @@ export function hashImageWithDimensions(imagePath: string): string {
   const imageBuffer = fs.readFileSync(imagePath);
   const png = PNG.sync.read(imageBuffer);
 
-  const hash = crypto.createHash('sha256');
+  const hash = crypto.createHash("sha256");
   hash.update(`${png.width}x${png.height}:`);
   hash.update(png.data);
 
-  return hash.digest('hex');
+  return hash.digest("hex");
 }

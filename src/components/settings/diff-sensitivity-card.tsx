@@ -1,44 +1,84 @@
-'use client';
+"use client";
 
-import { useState, useTransition, useEffect, useRef, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { saveDiffSensitivitySettings, resetDiffSensitivitySettings } from '@/server/actions/settings';
-import type { DiffSensitivitySettings, DiffEngineType, TextDetectionGranularity, RegionDetectionMode } from '@/lib/db/schema';
-import { DEFAULT_DIFF_THRESHOLDS } from '@/lib/db/schema';
-import { Loader2, RotateCcw, Eye, Zap, Brain, Sparkles, Type } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState, useTransition, useEffect, useRef, useCallback } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  saveDiffSensitivitySettings,
+  resetDiffSensitivitySettings,
+} from "@/server/actions/settings";
+import type {
+  DiffSensitivitySettings,
+  DiffEngineType,
+  TextDetectionGranularity,
+  RegionDetectionMode,
+} from "@/lib/db/schema";
+import { DEFAULT_DIFF_THRESHOLDS } from "@/lib/db/schema";
+import {
+  Loader2,
+  RotateCcw,
+  Eye,
+  Zap,
+  Brain,
+  Sparkles,
+  Type,
+} from "lucide-react";
+import { toast } from "sonner";
 
 interface DiffSensitivityCardProps {
   settings: DiffSensitivitySettings;
   repositoryId?: string | null;
 }
 
-const ENGINE_INFO: Record<DiffEngineType, { label: string; description: string; icon: typeof Zap; speed: string; accuracy: string }> = {
+const ENGINE_INFO: Record<
+  DiffEngineType,
+  {
+    label: string;
+    description: string;
+    icon: typeof Zap;
+    speed: string;
+    accuracy: string;
+  }
+> = {
   pixelmatch: {
-    label: 'Pixelmatch',
-    description: 'Pixel-perfect binary comparison. Fast and strict — best for CI gating.',
+    label: "Pixelmatch",
+    description:
+      "Pixel-perfect binary comparison. Fast and strict — best for CI gating.",
     icon: Zap,
-    speed: 'Fastest',
-    accuracy: 'Pixel-exact',
+    speed: "Fastest",
+    accuracy: "Pixel-exact",
   },
   ssim: {
-    label: 'SSIM',
-    description: 'Structural similarity index. Tolerant of rendering noise — best for perceptual comparison.',
+    label: "SSIM",
+    description:
+      "Structural similarity index. Tolerant of rendering noise — best for perceptual comparison.",
     icon: Brain,
-    speed: 'Medium',
-    accuracy: 'Perceptual',
+    speed: "Medium",
+    accuracy: "Perceptual",
   },
   butteraugli: {
-    label: 'Butteraugli',
-    description: 'Human-perception-aligned via CIELAB color space. Most advanced — best for cross-platform consistency.',
+    label: "Butteraugli",
+    description:
+      "Human-perception-aligned via CIELAB color space. Most advanced — best for cross-platform consistency.",
     icon: Sparkles,
-    speed: 'Slowest',
-    accuracy: 'Human-aligned',
+    speed: "Slowest",
+    accuracy: "Human-aligned",
   },
 };
 
@@ -48,75 +88,140 @@ export function DiffSensitivityCard({
 }: DiffSensitivityCardProps) {
   const [isPending, startTransition] = useTransition();
   const [unchangedThreshold, setUnchangedThreshold] = useState(
-    settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold
+    settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
   );
   const [flakyThreshold, setFlakyThreshold] = useState(
-    settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold
+    settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
   );
   const [includeAntiAliasing, setIncludeAntiAliasing] = useState(
-    settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing
+    settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
   );
   const [ignorePageShift, setIgnorePageShift] = useState(
-    settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift
+    settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
   );
   const [diffEngine, setDiffEngine] = useState<DiffEngineType>(
-    (settings.diffEngine as DiffEngineType) ?? DEFAULT_DIFF_THRESHOLDS.diffEngine
+    (settings.diffEngine as DiffEngineType) ??
+      DEFAULT_DIFF_THRESHOLDS.diffEngine,
   );
   const [textRegionAwareDiffing, setTextRegionAwareDiffing] = useState(
-    settings.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing
+    settings.textRegionAwareDiffing ??
+      DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
   );
   const [textRegionThreshold, setTextRegionThreshold] = useState(
-    settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold
+    settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
   );
   const [textRegionPadding, setTextRegionPadding] = useState(
-    settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding
+    settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
   );
-  const [textDetectionGranularity, setTextDetectionGranularity] = useState<TextDetectionGranularity>(
-    (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity
-  );
-  const [regionDetectionMode, setRegionDetectionMode] = useState<RegionDetectionMode>(
-    (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode
-  );
+  const [textDetectionGranularity, setTextDetectionGranularity] =
+    useState<TextDetectionGranularity>(
+      (settings.textDetectionGranularity as TextDetectionGranularity) ??
+        DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    );
+  const [regionDetectionMode, setRegionDetectionMode] =
+    useState<RegionDetectionMode>(
+      (settings.regionDetectionMode as RegionDetectionMode) ??
+        DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    );
 
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const originalValues = useRef({
-    unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
-    flakyThreshold: settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
-    includeAntiAliasing: settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
-    ignorePageShift: settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
-    diffEngine: (settings.diffEngine as DiffEngineType) ?? DEFAULT_DIFF_THRESHOLDS.diffEngine,
-    textRegionAwareDiffing: settings.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
-    textRegionThreshold: settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
-    textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
-    textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
-    regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    unchangedThreshold:
+      settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+    flakyThreshold:
+      settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    includeAntiAliasing:
+      settings.includeAntiAliasing ??
+      DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+    ignorePageShift:
+      settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    diffEngine:
+      (settings.diffEngine as DiffEngineType) ??
+      DEFAULT_DIFF_THRESHOLDS.diffEngine,
+    textRegionAwareDiffing:
+      settings.textRegionAwareDiffing ??
+      DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+    textRegionThreshold:
+      settings.textRegionThreshold ??
+      DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+    textRegionPadding:
+      settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+    textDetectionGranularity:
+      (settings.textDetectionGranularity as TextDetectionGranularity) ??
+      DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    regionDetectionMode:
+      (settings.regionDetectionMode as RegionDetectionMode) ??
+      DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
   });
 
   const settingsKey = `${settings.id}-${settings.updatedAt?.getTime?.() ?? 0}`;
   useEffect(() => {
-    setUnchangedThreshold(settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold);
-    setFlakyThreshold(settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold);
-    setIncludeAntiAliasing(settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing);
-    setIgnorePageShift(settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift);
-    setDiffEngine((settings.diffEngine as DiffEngineType) ?? DEFAULT_DIFF_THRESHOLDS.diffEngine);
-    setTextRegionAwareDiffing(settings.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing);
-    setTextRegionThreshold(settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold);
-    setTextRegionPadding(settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
-    setTextDetectionGranularity((settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
-    setRegionDetectionMode((settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
+    setUnchangedThreshold(
+      settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+    );
+    setFlakyThreshold(
+      settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+    );
+    setIncludeAntiAliasing(
+      settings.includeAntiAliasing ??
+        DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+    );
+    setIgnorePageShift(
+      settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+    );
+    setDiffEngine(
+      (settings.diffEngine as DiffEngineType) ??
+        DEFAULT_DIFF_THRESHOLDS.diffEngine,
+    );
+    setTextRegionAwareDiffing(
+      settings.textRegionAwareDiffing ??
+        DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+    );
+    setTextRegionThreshold(
+      settings.textRegionThreshold ??
+        DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+    );
+    setTextRegionPadding(
+      settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+    );
+    setTextDetectionGranularity(
+      (settings.textDetectionGranularity as TextDetectionGranularity) ??
+        DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+    );
+    setRegionDetectionMode(
+      (settings.regionDetectionMode as RegionDetectionMode) ??
+        DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+    );
 
     originalValues.current = {
-      unchangedThreshold: settings.unchangedThreshold ?? DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
-      flakyThreshold: settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
-      includeAntiAliasing: settings.includeAntiAliasing ?? DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
-      ignorePageShift: settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
-      diffEngine: (settings.diffEngine as DiffEngineType) ?? DEFAULT_DIFF_THRESHOLDS.diffEngine,
-      textRegionAwareDiffing: settings.textRegionAwareDiffing ?? DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
-      textRegionThreshold: settings.textRegionThreshold ?? DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
-      textRegionPadding: settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
-      textDetectionGranularity: (settings.textDetectionGranularity as TextDetectionGranularity) ?? DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
-      regionDetectionMode: (settings.regionDetectionMode as RegionDetectionMode) ?? DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
+      unchangedThreshold:
+        settings.unchangedThreshold ??
+        DEFAULT_DIFF_THRESHOLDS.unchangedThreshold,
+      flakyThreshold:
+        settings.flakyThreshold ?? DEFAULT_DIFF_THRESHOLDS.flakyThreshold,
+      includeAntiAliasing:
+        settings.includeAntiAliasing ??
+        DEFAULT_DIFF_THRESHOLDS.includeAntiAliasing,
+      ignorePageShift:
+        settings.ignorePageShift ?? DEFAULT_DIFF_THRESHOLDS.ignorePageShift,
+      diffEngine:
+        (settings.diffEngine as DiffEngineType) ??
+        DEFAULT_DIFF_THRESHOLDS.diffEngine,
+      textRegionAwareDiffing:
+        settings.textRegionAwareDiffing ??
+        DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing,
+      textRegionThreshold:
+        settings.textRegionThreshold ??
+        DEFAULT_DIFF_THRESHOLDS.textRegionThreshold,
+      textRegionPadding:
+        settings.textRegionPadding ?? DEFAULT_DIFF_THRESHOLDS.textRegionPadding,
+      textDetectionGranularity:
+        (settings.textDetectionGranularity as TextDetectionGranularity) ??
+        DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+      regionDetectionMode:
+        (settings.regionDetectionMode as RegionDetectionMode) ??
+        DEFAULT_DIFF_THRESHOLDS.regionDetectionMode,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey]);
@@ -136,9 +241,21 @@ export function DiffSensitivityCard({
         textDetectionGranularity,
         regionDetectionMode,
       });
-      toast.success('Diff sensitivity settings saved');
+      toast.success("Diff sensitivity settings saved");
     });
-  }, [repositoryId, unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode]);
+  }, [
+    repositoryId,
+    unchangedThreshold,
+    flakyThreshold,
+    includeAntiAliasing,
+    ignorePageShift,
+    diffEngine,
+    textRegionAwareDiffing,
+    textRegionThreshold,
+    textRegionPadding,
+    textDetectionGranularity,
+    regionDetectionMode,
+  ]);
 
   useEffect(() => {
     const orig = originalValues.current;
@@ -169,7 +286,19 @@ export function DiffSensitivityCard({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [unchangedThreshold, flakyThreshold, includeAntiAliasing, ignorePageShift, diffEngine, textRegionAwareDiffing, textRegionThreshold, textRegionPadding, textDetectionGranularity, regionDetectionMode, doSave]);
+  }, [
+    unchangedThreshold,
+    flakyThreshold,
+    includeAntiAliasing,
+    ignorePageShift,
+    diffEngine,
+    textRegionAwareDiffing,
+    textRegionThreshold,
+    textRegionPadding,
+    textDetectionGranularity,
+    regionDetectionMode,
+    doSave,
+  ]);
 
   const handleReset = () => {
     startTransition(async () => {
@@ -182,9 +311,11 @@ export function DiffSensitivityCard({
       setTextRegionAwareDiffing(DEFAULT_DIFF_THRESHOLDS.textRegionAwareDiffing);
       setTextRegionThreshold(DEFAULT_DIFF_THRESHOLDS.textRegionThreshold);
       setTextRegionPadding(DEFAULT_DIFF_THRESHOLDS.textRegionPadding);
-      setTextDetectionGranularity(DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity);
+      setTextDetectionGranularity(
+        DEFAULT_DIFF_THRESHOLDS.textDetectionGranularity,
+      );
       setRegionDetectionMode(DEFAULT_DIFF_THRESHOLDS.regionDetectionMode);
-      toast.success('Diff sensitivity reset to defaults');
+      toast.success("Diff sensitivity reset to defaults");
     });
   };
 
@@ -209,26 +340,37 @@ export function DiffSensitivityCard({
           Diff Sensitivity
         </CardTitle>
         <CardDescription>
-          Configure diff engine, thresholds, and text-region detection for visual change classification
+          Configure diff engine, thresholds, and text-region detection for
+          visual change classification
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Diff Engine Selection */}
         <div className="space-y-3">
           <Label>Diff Engine</Label>
-          <Select value={diffEngine} onValueChange={(v) => setDiffEngine(v as DiffEngineType)}>
+          <Select
+            value={diffEngine}
+            onValueChange={(v) => setDiffEngine(v as DiffEngineType)}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(Object.entries(ENGINE_INFO) as [DiffEngineType, typeof engineInfo][]).map(([key, info]) => {
+              {(
+                Object.entries(ENGINE_INFO) as [
+                  DiffEngineType,
+                  typeof engineInfo,
+                ][]
+              ).map(([key, info]) => {
                 const Icon = info.icon;
                 return (
                   <SelectItem key={key} value={key}>
                     <div className="flex items-center gap-2">
                       <Icon className="w-4 h-4" />
                       <span>{info.label}</span>
-                      <span className="text-xs text-muted-foreground ml-1">({info.speed})</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        ({info.speed})
+                      </span>
                     </div>
                   </SelectItem>
                 );
@@ -301,7 +443,8 @@ export function DiffSensitivityCard({
         {/* Unchanged Threshold */}
         <div className="space-y-2">
           <Label htmlFor="unchangedThreshold">
-            Unchanged Threshold ({'\u003C'}{unchangedThreshold}%)
+            Unchanged Threshold ({"\u003C"}
+            {unchangedThreshold}%)
           </Label>
           <div className="flex items-center gap-4">
             <input
@@ -318,7 +461,9 @@ export function DiffSensitivityCard({
               min={0}
               max={flakyThreshold - 1}
               value={unchangedThreshold}
-              onChange={(e) => handleUnchangedChange(parseInt(e.target.value) || 0)}
+              onChange={(e) =>
+                handleUnchangedChange(parseInt(e.target.value) || 0)
+              }
               className="w-20"
             />
             <span className="text-sm text-muted-foreground">%</span>
@@ -354,14 +499,19 @@ export function DiffSensitivityCard({
             <span className="text-sm text-muted-foreground">%</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Diffs between unchanged and flaky thresholds are marked as flaky (minor changes)
+            Diffs between unchanged and flaky thresholds are marked as flaky
+            (minor changes)
           </p>
         </div>
 
         {/* Changed Info */}
         <div className="p-3 bg-muted rounded-lg text-sm">
-          <span className="font-medium">Changed ({'\u2265'}{flakyThreshold}%): </span>
-          Diffs at or above the flaky threshold are marked as significant changes requiring review.
+          <span className="font-medium">
+            Changed ({"\u2265"}
+            {flakyThreshold}%):{" "}
+          </span>
+          Diffs at or above the flaky threshold are marked as significant
+          changes requiring review.
         </div>
 
         {/* Anti-aliasing Toggle */}
@@ -369,7 +519,8 @@ export function DiffSensitivityCard({
           <div className="space-y-0.5">
             <Label className="text-sm font-medium">Include Anti-aliasing</Label>
             <p className="text-xs text-muted-foreground">
-              Count anti-aliased pixels in diff calculations. Disable to reduce false positives from font rendering.
+              Count anti-aliased pixels in diff calculations. Disable to reduce
+              false positives from font rendering.
             </p>
           </div>
           <Switch
@@ -381,9 +532,16 @@ export function DiffSensitivityCard({
         {/* Page Shift Detection Toggle */}
         <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
           <div className="space-y-0.5">
-            <Label className="text-sm font-medium">Ignore Page Shifts <span className="ml-1 text-[10px] font-semibold uppercase text-muted-foreground">Beta</span></Label>
+            <Label className="text-sm font-medium">
+              Ignore Page Shifts{" "}
+              <span className="ml-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                Beta
+              </span>
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Exclude vertical content shifts from diffs. When content is inserted or removed (e.g. a banner), only genuinely changed pixels are counted — displaced content is aligned and excluded.
+              Exclude vertical content shifts from diffs. When content is
+              inserted or removed (e.g. a banner), only genuinely changed pixels
+              are counted — displaced content is aligned and excluded.
             </p>
           </div>
           <Switch
@@ -397,18 +555,23 @@ export function DiffSensitivityCard({
           <Label>Region Detection</Label>
           <Select
             value={regionDetectionMode}
-            onValueChange={(v) => setRegionDetectionMode(v as RegionDetectionMode)}
+            onValueChange={(v) =>
+              setRegionDetectionMode(v as RegionDetectionMode)
+            }
           >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="grid">Grid (32px cells)</SelectItem>
-              <SelectItem value="flood-fill">Flood Fill (pixel-precise)</SelectItem>
+              <SelectItem value="flood-fill">
+                Flood Fill (pixel-precise)
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Grid groups changes into 32px cells. Flood Fill uses connected-component analysis for tighter bounding boxes.
+            Grid groups changes into 32px cells. Flood Fill uses
+            connected-component analysis for tighter bounding boxes.
           </p>
         </div>
 
@@ -418,9 +581,12 @@ export function DiffSensitivityCard({
             <div className="flex items-center gap-2">
               <Type className="w-4 h-4 text-muted-foreground" />
               <div className="space-y-0.5">
-                <Label className="text-sm font-medium">Text-Region-Aware Diffing</Label>
+                <Label className="text-sm font-medium">
+                  Text-Region-Aware Diffing
+                </Label>
                 <p className="text-xs text-muted-foreground">
-                  Use OCR to detect text regions and apply lenient thresholds, reducing false positives from font rendering and dynamic text.
+                  Use OCR to detect text regions and apply lenient thresholds,
+                  reducing false positives from font rendering and dynamic text.
                 </p>
               </div>
             </div>
@@ -444,7 +610,9 @@ export function DiffSensitivityCard({
                     min={1}
                     max={100}
                     value={textRegionThreshold}
-                    onChange={(e) => setTextRegionThreshold(parseInt(e.target.value))}
+                    onChange={(e) =>
+                      setTextRegionThreshold(parseInt(e.target.value))
+                    }
                     className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
                   <Input
@@ -452,13 +620,16 @@ export function DiffSensitivityCard({
                     min={1}
                     max={100}
                     value={textRegionThreshold}
-                    onChange={(e) => setTextRegionThreshold(parseInt(e.target.value) || 30)}
+                    onChange={(e) =>
+                      setTextRegionThreshold(parseInt(e.target.value) || 30)
+                    }
                     className="w-20"
                   />
                   <span className="text-sm text-muted-foreground">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Higher values tolerate more text rendering differences (30% recommended)
+                  Higher values tolerate more text rendering differences (30%
+                  recommended)
                 </p>
               </div>
 
@@ -474,7 +645,9 @@ export function DiffSensitivityCard({
                     min={0}
                     max={20}
                     value={textRegionPadding}
-                    onChange={(e) => setTextRegionPadding(parseInt(e.target.value))}
+                    onChange={(e) =>
+                      setTextRegionPadding(parseInt(e.target.value))
+                    }
                     className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
                   <Input
@@ -482,7 +655,9 @@ export function DiffSensitivityCard({
                     min={0}
                     max={20}
                     value={textRegionPadding}
-                    onChange={(e) => setTextRegionPadding(parseInt(e.target.value) || 4)}
+                    onChange={(e) =>
+                      setTextRegionPadding(parseInt(e.target.value) || 4)
+                    }
                     className="w-20"
                   />
                   <span className="text-sm text-muted-foreground">px</span>
@@ -497,7 +672,9 @@ export function DiffSensitivityCard({
                 <Label>Detection Granularity</Label>
                 <Select
                   value={textDetectionGranularity}
-                  onValueChange={(v) => setTextDetectionGranularity(v as TextDetectionGranularity)}
+                  onValueChange={(v) =>
+                    setTextDetectionGranularity(v as TextDetectionGranularity)
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />

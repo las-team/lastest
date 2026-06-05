@@ -29,7 +29,10 @@ export interface ScenarioGroup {
 /**
  * Parse an agentPlan (markdown) into individual scenarios.
  */
-export function parseScenariosFromPlan(agentPlan: string, areaName: string): ParsedScenario[] {
+export function parseScenariosFromPlan(
+  agentPlan: string,
+  areaName: string,
+): ParsedScenario[] {
   const scenarios: ParsedScenario[] = [];
 
   // Split by "### Scenario N: Title" headings
@@ -38,13 +41,16 @@ export function parseScenariosFromPlan(agentPlan: string, areaName: string): Par
     const headerMatch = part.match(/^###\s+Scenario\s+\d+:\s*(.+)/);
     if (!headerMatch) continue;
     const name = headerMatch[1].trim();
-    const lines = part.split('\n').slice(1);
-    const expectedIdx = lines.findIndex(l => /^\*\*Expected\*\*/.test(l));
-    const expectedLine = expectedIdx >= 0 ? lines[expectedIdx] : '';
-    const description = expectedLine.replace(/^\*\*Expected\*\*:\s*/, '').trim() || name;
+    const lines = part.split("\n").slice(1);
+    const expectedIdx = lines.findIndex((l) => /^\*\*Expected\*\*/.test(l));
+    const expectedLine = expectedIdx >= 0 ? lines[expectedIdx] : "";
+    const description =
+      expectedLine.replace(/^\*\*Expected\*\*:\s*/, "").trim() || name;
 
     // Extract route from scenario steps (look for "Navigate to /path")
-    const routeMatch = part.match(/Navigate to\s+(\/\S+)/i) || part.match(/\/[a-z][\w\-/[\]]*(?=\s|$)/i);
+    const routeMatch =
+      part.match(/Navigate to\s+(\/\S+)/i) ||
+      part.match(/\/[a-z][\w\-/[\]]*(?=\s|$)/i);
     const route = routeMatch ? routeMatch[1] || routeMatch[0] : undefined;
 
     scenarios.push({ name, description, steps: part.trim(), route });
@@ -57,9 +63,11 @@ export function parseScenariosFromPlan(agentPlan: string, areaName: string): Par
   for (const part of fallbackParts) {
     const hMatch = part.match(/^###\s+(.+)/);
     if (!hMatch) continue;
-    const name = hMatch[1].trim().replace(/^Route:\s*/, '');
-    if (part.includes('\n-') || part.includes('\n1.')) {
-      const routeMatch = part.match(/Navigate to\s+(\/\S+)/i) || part.match(/\/[a-z][\w\-/[\]]*(?=\s|$)/i);
+    const name = hMatch[1].trim().replace(/^Route:\s*/, "");
+    if (part.includes("\n-") || part.includes("\n1.")) {
+      const routeMatch =
+        part.match(/Navigate to\s+(\/\S+)/i) ||
+        part.match(/\/[a-z][\w\-/[\]]*(?=\s|$)/i);
       scenarios.push({
         name: `${areaName} - ${name}`,
         description: name,
@@ -71,7 +79,13 @@ export function parseScenariosFromPlan(agentPlan: string, areaName: string): Par
 
   if (scenarios.length > 0) return scenarios;
 
-  return [{ name: areaName, description: `Test the ${areaName} functionality`, steps: agentPlan }];
+  return [
+    {
+      name: areaName,
+      description: `Test the ${areaName} functionality`,
+      steps: agentPlan,
+    },
+  ];
 }
 
 /**
@@ -79,33 +93,42 @@ export function parseScenariosFromPlan(agentPlan: string, areaName: string): Par
  * Scenarios sharing the same base route are grouped together.
  * Each group becomes one test that covers multiple scenarios with intermediate screenshots.
  */
-export function groupScenariosForGeneration(agentPlan: string, areaName: string, areaRoutes: string[]): ScenarioGroup[] {
+export function groupScenariosForGeneration(
+  agentPlan: string,
+  areaName: string,
+  areaRoutes: string[],
+): ScenarioGroup[] {
   const scenarios = parseScenariosFromPlan(agentPlan, areaName);
 
   // If 3 or fewer scenarios, keep as one test
   if (scenarios.length <= 3) {
-    return [{
-      name: areaName,
-      description: scenarios.map(s => s.name).join('; '),
-      combinedSteps: agentPlan,
-      scenarioCount: scenarios.length,
-    }];
+    return [
+      {
+        name: areaName,
+        description: scenarios.map((s) => s.name).join("; "),
+        combinedSteps: agentPlan,
+        scenarioCount: scenarios.length,
+      },
+    ];
   }
 
   // Group by base route (first path segment after /)
   const groups = new Map<string, ParsedScenario[]>();
 
   for (const scenario of scenarios) {
-    let routeKey = '_general';
+    let routeKey = "_general";
 
     if (scenario.route) {
       // Normalize route to base path: /builds/[buildId]/diff/[diffId] → /builds
-      const segments = scenario.route.replace(/\[.*?\]/g, '_').split('/').filter(Boolean);
-      routeKey = segments[0] || '_general';
+      const segments = scenario.route
+        .replace(/\[.*?\]/g, "_")
+        .split("/")
+        .filter(Boolean);
+      routeKey = segments[0] || "_general";
     } else {
       // Try to match against known area routes
       for (const r of areaRoutes) {
-        const base = r.split('/').filter(Boolean)[0];
+        const base = r.split("/").filter(Boolean)[0];
         if (base && scenario.steps.includes(r)) {
           routeKey = base;
           break;
@@ -127,18 +150,20 @@ export function groupScenariosForGeneration(agentPlan: string, areaName: string,
       const isMultiChunk = groupScenarios.length > MAX_SCENARIOS_PER_TEST;
       const chunkIdx = Math.floor(i / MAX_SCENARIOS_PER_TEST) + 1;
 
-      const groupName = routeKey === '_general'
-        ? areaName
-        : `${areaName} - /${routeKey}`;
+      const groupName =
+        routeKey === "_general" ? areaName : `${areaName} - /${routeKey}`;
       const name = isMultiChunk ? `${groupName} (Part ${chunkIdx})` : groupName;
 
-      const combinedSteps = chunk.map((s, idx) => (
-        `--- Scenario ${idx + 1}: ${s.name} ---\n${s.steps}\n\n**Take a screenshot after verifying this scenario.**`
-      )).join('\n\n');
+      const combinedSteps = chunk
+        .map(
+          (s, idx) =>
+            `--- Scenario ${idx + 1}: ${s.name} ---\n${s.steps}\n\n**Take a screenshot after verifying this scenario.**`,
+        )
+        .join("\n\n");
 
       result.push({
         name,
-        description: chunk.map(s => s.name).join('; '),
+        description: chunk.map((s) => s.name).join("; "),
         combinedSteps,
         scenarioCount: chunk.length,
       });

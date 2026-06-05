@@ -1,11 +1,11 @@
-import Link from 'next/link';
-import { cn } from '@/lib/utils';
+import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 const LEGAL_LINKS = [
-  { href: '/terms', label: 'Terms' },
-  { href: '/privacy', label: 'Privacy' },
-  { href: '/cookies', label: 'Cookies' },
-  { href: '/dpa', label: 'DPA' },
+  { href: "/terms", label: "Terms" },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/cookies", label: "Cookies" },
+  { href: "/dpa", label: "DPA" },
 ] as const;
 
 /**
@@ -15,7 +15,12 @@ const LEGAL_LINKS = [
  */
 export function LegalLinks({ className }: { className?: string }) {
   return (
-    <nav className={cn('flex items-center gap-4 text-xs text-muted-foreground', className)}>
+    <nav
+      className={cn(
+        "flex items-center gap-4 text-xs text-muted-foreground",
+        className,
+      )}
+    >
       {LEGAL_LINKS.map(({ href, label }) => (
         <Link
           key={href}

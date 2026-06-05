@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ActivityEvent } from '@/lib/db/schema';
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { ActivityEvent } from "@/lib/db/schema";
 
 const MAX_EVENTS = 500;
 
@@ -12,7 +12,7 @@ interface UseActivityFeedOpts {
 }
 
 function buildWsUrl(path: string): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${path}`;
 }
 
@@ -30,10 +30,10 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
     if (!enabled) return;
 
     const params = new URLSearchParams();
-    if (repoId) params.set('repo', repoId);
-    if (sourceType) params.set('source', sourceType);
+    if (repoId) params.set("repo", repoId);
+    if (sourceType) params.set("source", sourceType);
 
-    const qs = params.toString() ? `?${params}` : '';
+    const qs = params.toString() ? `?${params}` : "";
     const ws = new WebSocket(buildWsUrl(`/api/activity-feed/ws${qs}`));
     wsRef.current = ws;
 
@@ -42,7 +42,7 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'connected') return;
+        if (data.type === "connected") return;
 
         const event = data as ActivityEvent;
         setEvents((prev) => {
@@ -51,9 +51,12 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
         });
 
         // Track active sessions
-        if (event.eventType === 'session:start') {
+        if (event.eventType === "session:start") {
           setActiveSessionCount((c) => c + 1);
-        } else if (event.eventType === 'session:complete' || event.eventType === 'session:error') {
+        } else if (
+          event.eventType === "session:complete" ||
+          event.eventType === "session:error"
+        ) {
           setActiveSessionCount((c) => Math.max(0, c - 1));
         }
       } catch {
@@ -74,7 +77,9 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
 
   // Load history for a specific session (replay mode)
   const loadSessionHistory = useCallback(async (sessionId: string) => {
-    const res = await fetch(`/api/activity-feed/history?sessionId=${sessionId}&limit=500`);
+    const res = await fetch(
+      `/api/activity-feed/history?sessionId=${sessionId}&limit=500`,
+    );
     if (!res.ok) return;
     const { events: history } = await res.json();
     setEvents(history);

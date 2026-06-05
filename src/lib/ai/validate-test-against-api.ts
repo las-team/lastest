@@ -14,10 +14,10 @@
  * job of mcp-validator.validateSelectorsOnPage, called after this passes.
  */
 
-import * as ts from 'typescript';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { extractTestBody } from '@lastest/shared';
+import * as ts from "typescript";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { extractTestBody } from "@lastest/shared";
 
 export interface ValidationDiagnostic {
   message: string;
@@ -48,15 +48,15 @@ const REPORTED_TS_CODES = new Set<number>([
   18046, // Property 'X' does not exist on type 'unknown' (defensive)
 ]);
 
-const RUNNER_API_VIRTUAL_NAME = '__runner_api__.d.ts';
-const TEST_VIRTUAL_NAME = '__ai_generated_test__.ts';
+const RUNNER_API_VIRTUAL_NAME = "__runner_api__.d.ts";
+const TEST_VIRTUAL_NAME = "__ai_generated_test__.ts";
 
 let cachedRunnerApiSource: string | null = null;
 
 function getRunnerApiSource(): string {
   if (cachedRunnerApiSource !== null) return cachedRunnerApiSource;
-  const apiPath = path.join(process.cwd(), 'src/lib/ai/runner-api.d.ts');
-  cachedRunnerApiSource = fs.readFileSync(apiPath, 'utf8');
+  const apiPath = path.join(process.cwd(), "src/lib/ai/runner-api.d.ts");
+  cachedRunnerApiSource = fs.readFileSync(apiPath, "utf8");
   return cachedRunnerApiSource;
 }
 
@@ -99,19 +99,35 @@ function makeHost(
   const real = ts.createCompilerHost(compilerOptions, true);
   return {
     ...real,
-    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
-      const virtual = virtualFiles.get(fileName) ?? virtualFiles.get(path.basename(fileName));
+    getSourceFile: (
+      fileName,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    ) => {
+      const virtual =
+        virtualFiles.get(fileName) ?? virtualFiles.get(path.basename(fileName));
       if (virtual !== undefined) {
         return ts.createSourceFile(fileName, virtual, languageVersion, true);
       }
-      return real.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+      return real.getSourceFile(
+        fileName,
+        languageVersion,
+        onError,
+        shouldCreateNewSourceFile,
+      );
     },
     fileExists: (fileName) => {
-      if (virtualFiles.has(fileName) || virtualFiles.has(path.basename(fileName))) return true;
+      if (
+        virtualFiles.has(fileName) ||
+        virtualFiles.has(path.basename(fileName))
+      )
+        return true;
       return real.fileExists(fileName);
     },
     readFile: (fileName) => {
-      const virtual = virtualFiles.get(fileName) ?? virtualFiles.get(path.basename(fileName));
+      const virtual =
+        virtualFiles.get(fileName) ?? virtualFiles.get(path.basename(fileName));
       if (virtual !== undefined) return virtual;
       return real.readFile(fileName);
     },
@@ -153,7 +169,7 @@ export function validateTestAgainstRunnerAPI(code: string): ValidationResult {
     allowJs: true,
     esModuleInterop: true,
     types: [],
-    lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+    lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
   };
 
   const host = makeHost(virtualFiles, compilerOptions);
@@ -172,9 +188,11 @@ export function validateTestAgainstRunnerAPI(code: string): ValidationResult {
   for (const diag of diagnostics) {
     if (!REPORTED_TS_CODES.has(diag.code)) continue;
     if (!diag.file || diag.file.fileName !== TEST_VIRTUAL_NAME) continue;
-    const { line, character } = diag.file.getLineAndCharacterOfPosition(diag.start ?? 0);
+    const { line, character } = diag.file.getLineAndCharacterOfPosition(
+      diag.start ?? 0,
+    );
     errors.push({
-      message: ts.flattenDiagnosticMessageText(diag.messageText, '\n'),
+      message: ts.flattenDiagnosticMessageText(diag.messageText, "\n"),
       line: line + 1,
       column: character + 1,
       code: diag.code,
@@ -188,13 +206,15 @@ export function validateTestAgainstRunnerAPI(code: string): ValidationResult {
  * Format diagnostics as a message the LLM can read on its next retry turn.
  */
 export function formatTSDiagnostics(errors: ValidationDiagnostic[]): string {
-  if (errors.length === 0) return '';
-  const lines = errors.map((e) => `  - line ${e.line}, col ${e.column} [TS${e.code}]: ${e.message}`);
+  if (errors.length === 0) return "";
+  const lines = errors.map(
+    (e) => `  - line ${e.line}, col ${e.column} [TS${e.code}]: ${e.message}`,
+  );
   return [
-    'The generated test code failed static API validation against the Lastest runner surface.',
-    'Each error below means the test calls something the runner does not expose:',
+    "The generated test code failed static API validation against the Lastest runner surface.",
+    "Each error below means the test calls something the runner does not expose:",
     ...lines,
-    '',
-    'Only use methods and matchers documented for Playwright Page/Locator and the matcher list in the system prompt. Do NOT invent new ones.',
-  ].join('\n');
+    "",
+    "Only use methods and matchers documented for Playwright Page/Locator and the matcher list in the system prompt. Do NOT invent new ones.",
+  ].join("\n");
 }

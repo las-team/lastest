@@ -1,7 +1,7 @@
-import { db } from '../index';
-import { testFixtures } from '../schema';
-import type { NewTestFixture } from '../schema';
-import { eq } from 'drizzle-orm';
+import { db } from "../index";
+import { testFixtures } from "../schema";
+import type { NewTestFixture } from "../schema";
+import { eq } from "drizzle-orm";
 
 export async function createTestFixture(data: NewTestFixture) {
   const [fixture] = await db.insert(testFixtures).values(data).returning();
@@ -13,11 +13,17 @@ export async function getTestFixtures(testId: string) {
 }
 
 export async function getTestFixturesByRepo(repositoryId: string) {
-  return db.select().from(testFixtures).where(eq(testFixtures.repositoryId, repositoryId));
+  return db
+    .select()
+    .from(testFixtures)
+    .where(eq(testFixtures.repositoryId, repositoryId));
 }
 
 export async function getTestFixture(id: string) {
-  const [fixture] = await db.select().from(testFixtures).where(eq(testFixtures.id, id));
+  const [fixture] = await db
+    .select()
+    .from(testFixtures)
+    .where(eq(testFixtures.id, id));
   return fixture ?? null;
 }
 

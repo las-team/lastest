@@ -1,14 +1,17 @@
-'use client';
+"use client";
 
-import { useState, useRef, useCallback } from 'react';
-import { Upload, X, Image as ImageIcon, Link as LinkIcon } from 'lucide-react';
+import { useState, useRef, useCallback } from "react";
+import { Upload, X, Image as ImageIcon, Link as LinkIcon } from "lucide-react";
 
 interface PlannedScreenshotUploaderProps {
   repositoryId: string;
   testId?: string;
   stepLabel?: string;
   routeId?: string;
-  onUploadComplete?: (result: { success: boolean; plannedScreenshot?: { id: string; imagePath: string } }) => void;
+  onUploadComplete?: (result: {
+    success: boolean;
+    plannedScreenshot?: { id: string; imagePath: string };
+  }) => void;
   onCancel?: () => void;
   className?: string;
 }
@@ -20,15 +23,15 @@ export function PlannedScreenshotUploader({
   routeId,
   onUploadComplete,
   onCancel,
-  className = '',
+  className = "",
 }: PlannedScreenshotUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [sourceUrl, setSourceUrl] = useState('');
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,14 +46,14 @@ export function PlannedScreenshotUploader({
   }, []);
 
   const validateFile = (file: File): string | null => {
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+    const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
     const maxSize = 10 * 1024 * 1024; // 10MB
 
     if (!allowedTypes.includes(file.type)) {
-      return 'Invalid file type. Please upload PNG, JPEG, or WebP.';
+      return "Invalid file type. Please upload PNG, JPEG, or WebP.";
     }
     if (file.size > maxSize) {
-      return 'File too large. Maximum size is 10MB.';
+      return "File too large. Maximum size is 10MB.";
     }
     return null;
   };
@@ -73,22 +76,28 @@ export function PlannedScreenshotUploader({
     reader.readAsDataURL(file);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
 
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      handleFileSelect(file);
-    }
-  }, [handleFileSelect]);
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        handleFileSelect(file);
+      }
+    },
+    [handleFileSelect],
+  );
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFileSelect(file);
-    }
-  }, [handleFileSelect]);
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        handleFileSelect(file);
+      }
+    },
+    [handleFileSelect],
+  );
 
   const handleUpload = async () => {
     if (!selectedFile) return;
@@ -98,29 +107,29 @@ export function PlannedScreenshotUploader({
 
     try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('repositoryId', repositoryId);
-      if (testId) formData.append('testId', testId);
-      if (stepLabel) formData.append('stepLabel', stepLabel);
-      if (routeId) formData.append('routeId', routeId);
-      if (name) formData.append('name', name);
-      if (description) formData.append('description', description);
-      if (sourceUrl) formData.append('sourceUrl', sourceUrl);
+      formData.append("file", selectedFile);
+      formData.append("repositoryId", repositoryId);
+      if (testId) formData.append("testId", testId);
+      if (stepLabel) formData.append("stepLabel", stepLabel);
+      if (routeId) formData.append("routeId", routeId);
+      if (name) formData.append("name", name);
+      if (description) formData.append("description", description);
+      if (sourceUrl) formData.append("sourceUrl", sourceUrl);
 
-      const response = await fetch('/api/planned-screenshots/upload', {
-        method: 'POST',
+      const response = await fetch("/api/planned-screenshots/upload", {
+        method: "POST",
         body: formData,
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || 'Upload failed');
+        throw new Error(result.error || "Upload failed");
       }
 
       onUploadComplete?.(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
     }
@@ -131,7 +140,7 @@ export function PlannedScreenshotUploader({
     setPreview(null);
     setError(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
@@ -146,9 +155,10 @@ export function PlannedScreenshotUploader({
           onClick={() => fileInputRef.current?.click()}
           className={`
             border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-            ${isDragging
-              ? 'border-purple-500 bg-purple-50'
-              : 'border-gray-300 hover:border-purple-400 hover:bg-purple-50/50'
+            ${
+              isDragging
+                ? "border-purple-500 bg-purple-50"
+                : "border-gray-300 hover:border-purple-400 hover:bg-purple-50/50"
             }
           `}
         >
@@ -156,9 +166,7 @@ export function PlannedScreenshotUploader({
           <p className="text-sm text-gray-600 mb-1">
             Drag and drop a design mockup or expected screenshot
           </p>
-          <p className="text-xs text-gray-400">
-            PNG, JPEG, or WebP up to 10MB
-          </p>
+          <p className="text-xs text-gray-400">PNG, JPEG, or WebP up to 10MB</p>
           <input
             ref={fileInputRef}
             type="file"

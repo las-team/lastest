@@ -1,23 +1,29 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, Trash2, AlertTriangle } from 'lucide-react';
-import { toast } from 'sonner';
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import type {
   TestVariable,
   GoogleSheetsDataSource,
   CsvDataSource,
-} from '@/lib/db/schema';
-import { AI_VAR_PRESETS } from '@/lib/vars/ai-presets';
-import { VarEditDialog } from './var-edit-dialog';
-import { CsvSourcesSettingsCard } from '@/components/settings/csv-sources-settings-card';
-import { GoogleSheetsSettingsCard } from '@/components/settings/google-sheets-settings-card';
-import { extractTestBody, parseSteps } from '@/lib/playwright/debug-parser';
-import { collectExtractableSelectors } from '@/lib/playwright/extractable-selector';
-import { cn } from '@/lib/utils';
+} from "@/lib/db/schema";
+import { AI_VAR_PRESETS } from "@/lib/vars/ai-presets";
+import { VarEditDialog } from "./var-edit-dialog";
+import { CsvSourcesSettingsCard } from "@/components/settings/csv-sources-settings-card";
+import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
+import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import { collectExtractableSelectors } from "@/lib/playwright/extractable-selector";
+import { cn } from "@/lib/utils";
 
 export interface TestVarsTabProps {
   testId: string;
@@ -57,17 +63,24 @@ export interface TestVarsTabProps {
 }
 
 function describeSource(v: TestVariable): string {
-  if (v.mode === 'extract') return v.targetSelector ? `${v.attribute || 'value'} of ${v.targetSelector}` : '—';
-  if (v.sourceType === 'static') return `static: ${v.staticValue ?? ''}`;
-  if (v.sourceType === 'gsheet') return `gsheet:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
-  if (v.sourceType === 'csv') return `csv:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
-  if (v.sourceType === 'ai-generated') {
-    const refresh = v.sourceRowMode === 'fixed' ? 'fixed' : 'per-run';
-    if (v.aiPreset === 'custom') return `ai (custom · ${refresh})`;
-    const label = v.aiPreset ? AI_VAR_PRESETS[v.aiPreset]?.label ?? v.aiPreset : 'unset';
+  if (v.mode === "extract")
+    return v.targetSelector
+      ? `${v.attribute || "value"} of ${v.targetSelector}`
+      : "—";
+  if (v.sourceType === "static") return `static: ${v.staticValue ?? ""}`;
+  if (v.sourceType === "gsheet")
+    return `gsheet:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
+  if (v.sourceType === "csv")
+    return `csv:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
+  if (v.sourceType === "ai-generated") {
+    const refresh = v.sourceRowMode === "fixed" ? "fixed" : "per-run";
+    if (v.aiPreset === "custom") return `ai (custom · ${refresh})`;
+    const label = v.aiPreset
+      ? (AI_VAR_PRESETS[v.aiPreset]?.label ?? v.aiPreset)
+      : "unset";
     return `ai · ${label} · ${refresh}`;
   }
-  return '—';
+  return "—";
 }
 
 export function TestVarsTab({
@@ -100,7 +113,7 @@ export function TestVarsTab({
   }, [code]);
 
   const isOrphan = (v: TestVariable): boolean => {
-    if (v.mode !== 'extract') return false;
+    if (v.mode !== "extract") return false;
     if (!availableSelectors) return false;
     if (!v.targetSelector) return false;
     return !availableSelectors.has(v.targetSelector);
@@ -120,25 +133,29 @@ export function TestVarsTab({
 
   const handleSave = async (v: TestVariable) => {
     const next = editing
-      ? variables.map(x => (x.id === editing.id ? v : x))
+      ? variables.map((x) => (x.id === editing.id ? v : x))
       : [...variables, v];
     try {
       await onSaveVariables(next);
-      toast.success(editing ? 'Variable updated' : 'Variable created');
+      toast.success(editing ? "Variable updated" : "Variable created");
     } catch (err) {
-      toast.error(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(
+        `Save failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       throw err;
     }
   };
 
   const handleDelete = async (v: TestVariable) => {
     if (!confirm(`Delete variable "${v.name}"?`)) return;
-    const next = variables.filter(x => x.id !== v.id);
+    const next = variables.filter((x) => x.id !== v.id);
     try {
       await onSaveVariables(next);
-      toast.success('Variable deleted');
+      toast.success("Variable deleted");
     } catch (err) {
-      toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(
+        `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -149,7 +166,9 @@ export function TestVarsTab({
           <div>
             <CardTitle className="text-base">Test variables</CardTitle>
             <CardDescription>
-              Bind named values to page fields. Use <code>{'{{var:name}}'}</code> in test code for assign-mode vars; extract-mode vars read from the page after the test runs.
+              Bind named values to page fields. Use{" "}
+              <code>{"{{var:name}}"}</code> in test code for assign-mode vars;
+              extract-mode vars read from the page after the test runs.
             </CardDescription>
           </div>
           <Button size="sm" onClick={openNew}>
@@ -160,14 +179,18 @@ export function TestVarsTab({
           <div className="mx-6 -mt-1 mb-3 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">
-              {orphanCount === 1 ? '1 variable references' : `${orphanCount} variables reference`} a selector that&apos;s no longer in the test.
+              {orphanCount === 1
+                ? "1 variable references"
+                : `${orphanCount} variables reference`}{" "}
+              a selector that&apos;s no longer in the test.
             </span>
           </div>
         )}
         <CardContent>
           {variables.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No variables yet. Add one to bind a CSV/Sheet column to a page field, or to assert a field&apos;s value at end of test.
+              No variables yet. Add one to bind a CSV/Sheet column to a page
+              field, or to assert a field&apos;s value at end of test.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -184,26 +207,29 @@ export function TestVarsTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {variables.map(v => {
+                  {variables.map((v) => {
                     // Extract-mode vars surface what the page held at end of run.
                     // Assign-mode vars surface the value we injected (resolved
                     // CSV / Sheet / static), so the column is meaningful for
                     // both modes — especially with random/increment row strategies
                     // where the user can't tell at a glance which row was used.
-                    const lastRun = v.mode === 'extract'
-                      ? extractedValues?.[v.name]
-                      : assignedValues?.[v.name]
-                        // AI vars: fall back to the cached last-known-good
-                        // value when this run hasn't recorded an
-                        // assignedVariables entry yet.
-                        ?? (v.sourceType === 'ai-generated' ? aiVarLastValues?.[v.id] : undefined);
+                    const lastRun =
+                      v.mode === "extract"
+                        ? extractedValues?.[v.name]
+                        : (assignedValues?.[v.name] ??
+                          // AI vars: fall back to the cached last-known-good
+                          // value when this run hasn't recorded an
+                          // assignedVariables entry yet.
+                          (v.sourceType === "ai-generated"
+                            ? aiVarLastValues?.[v.id]
+                            : undefined));
                     const orphan = isOrphan(v);
                     return (
                       <tr
                         key={v.id}
                         className={cn(
-                          'border-b last:border-0 hover:bg-muted/40',
-                          orphan && 'opacity-60 bg-muted/30',
+                          "border-b last:border-0 hover:bg-muted/40",
+                          orphan && "opacity-60 bg-muted/30",
                         )}
                       >
                         <td className="py-2 pr-3 font-mono">
@@ -214,19 +240,32 @@ export function TestVarsTab({
                                 aria-label="Selector no longer in test"
                               />
                             )}
-                            <span className={cn(orphan && 'line-through decoration-muted-foreground/40')}>
+                            <span
+                              className={cn(
+                                orphan &&
+                                  "line-through decoration-muted-foreground/40",
+                              )}
+                            >
                               {v.name}
                             </span>
                           </span>
                         </td>
                         <td className="py-2 pr-3">
-                          <Badge variant={v.mode === 'extract' ? 'secondary' : 'outline'}>
+                          <Badge
+                            variant={
+                              v.mode === "extract" ? "secondary" : "outline"
+                            }
+                          >
                             {v.mode}
                           </Badge>
                         </td>
                         <td
                           className="py-2 pr-3 font-mono text-xs"
-                          title={orphan ? 'This selector no longer appears in any step of the test.' : undefined}
+                          title={
+                            orphan
+                              ? "This selector no longer appears in any step of the test."
+                              : undefined
+                          }
                         >
                           {describeSource(v)}
                           {orphan && (
@@ -235,16 +274,25 @@ export function TestVarsTab({
                             </span>
                           )}
                         </td>
-                        <td className="py-2 pr-3 font-mono text-xs">{v.expectedValue ?? ''}</td>
-                        <td className="py-2 pr-3 font-mono text-xs max-w-[220px] truncate" title={lastRun ?? ''}>
-                          {lastRun != null && lastRun !== '' ? (
-                            <span className={
-                              v.mode === 'extract' && v.assertEnabled && v.expectedValue != null
-                                ? lastRun === v.expectedValue
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-red-600 dark:text-red-400'
-                                : ''
-                            }>
+                        <td className="py-2 pr-3 font-mono text-xs">
+                          {v.expectedValue ?? ""}
+                        </td>
+                        <td
+                          className="py-2 pr-3 font-mono text-xs max-w-[220px] truncate"
+                          title={lastRun ?? ""}
+                        >
+                          {lastRun != null && lastRun !== "" ? (
+                            <span
+                              className={
+                                v.mode === "extract" &&
+                                v.assertEnabled &&
+                                v.expectedValue != null
+                                  ? lastRun === v.expectedValue
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-red-600 dark:text-red-400"
+                                  : ""
+                              }
+                            >
                               {lastRun}
                             </span>
                           ) : (
@@ -253,11 +301,19 @@ export function TestVarsTab({
                         </td>
                         <td className="py-2 pr-3">
                           {v.assertEnabled ? (
-                            <Badge variant={v.assertSeverity === 'warn' ? 'secondary' : 'destructive'}>
-                              {v.assertSeverity ?? 'fail'}
+                            <Badge
+                              variant={
+                                v.assertSeverity === "warn"
+                                  ? "secondary"
+                                  : "destructive"
+                              }
+                            >
+                              {v.assertSeverity ?? "fail"}
                             </Badge>
                           ) : (
-                            <span className="text-muted-foreground text-xs">—</span>
+                            <span className="text-muted-foreground text-xs">
+                              —
+                            </span>
                           )}
                         </td>
                         <td className="py-2 text-right">
@@ -267,16 +323,24 @@ export function TestVarsTab({
                             onClick={() => openEdit(v)}
                             aria-label="Edit"
                             disabled={orphan}
-                            title={orphan ? 'Selector no longer in test — delete or recreate from a step' : 'Edit'}
+                            title={
+                              orphan
+                                ? "Selector no longer in test — delete or recreate from a step"
+                                : "Edit"
+                            }
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             size="icon"
-                            variant={orphan ? 'destructive' : 'ghost'}
+                            variant={orphan ? "destructive" : "ghost"}
                             onClick={() => handleDelete(v)}
-                            aria-label={orphan ? 'Delete orphaned variable' : 'Delete'}
-                            title={orphan ? 'Delete orphaned variable' : 'Delete'}
+                            aria-label={
+                              orphan ? "Delete orphaned variable" : "Delete"
+                            }
+                            title={
+                              orphan ? "Delete orphaned variable" : "Delete"
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -308,7 +372,7 @@ export function TestVarsTab({
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         initial={editing ?? undefined}
-        takenNames={variables.map(v => v.name)}
+        takenNames={variables.map((v) => v.name)}
         sheetSources={sheetSources}
         csvSources={csvSources}
         onSave={handleSave}

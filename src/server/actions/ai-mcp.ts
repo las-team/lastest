@@ -1,15 +1,15 @@
-'use server';
+"use server";
 
 import {
   extractSelectors,
   validateSelectorsOnPage,
   type SelectorValidationResult,
-} from '@/lib/ai/mcp-validator';
-import { requireTeamAccess } from '@/lib/auth';
+} from "@/lib/ai/mcp-validator";
+import { requireTeamAccess } from "@/lib/auth";
 
 export async function mcpValidateTest(
   code: string,
-  pageUrl: string
+  pageUrl: string,
 ): Promise<{
   success: boolean;
   valid?: boolean;
@@ -45,7 +45,8 @@ export async function mcpValidateTest(
       results: result.results,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Validation failed';
+    const message =
+      error instanceof Error ? error.message : "Validation failed";
     return { success: false, error: message };
   }
 }

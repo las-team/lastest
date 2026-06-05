@@ -1,10 +1,18 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import type { AgentSession } from '@/lib/db/schema';
-import { startPlayAgent, resumePlayAgent, pausePlayAgent, cancelPlayAgent, approvePlayAgentPlan, rerunPlanner as rerunPlannerAction, skipSettingsStep } from '@/server/actions/play-agent';
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { AgentSession } from "@/lib/db/schema";
+import {
+  startPlayAgent,
+  resumePlayAgent,
+  pausePlayAgent,
+  cancelPlayAgent,
+  approvePlayAgentPlan,
+  rerunPlanner as rerunPlannerAction,
+  skipSettingsStep,
+} from "@/server/actions/play-agent";
 
-const SESSION_KEY = 'play-agent-session-id';
+const SESSION_KEY = "play-agent-session-id";
 const POLL_INTERVAL = 2000;
 
 export function usePlayAgent(repositoryId?: string | null) {
@@ -12,7 +20,9 @@ export function usePlayAgent(repositoryId?: string | null) {
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const sessionId = session?.id ?? (typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null);
+  const sessionId =
+    session?.id ??
+    (typeof window !== "undefined" ? localStorage.getItem(SESSION_KEY) : null);
 
   const poll = useCallback(async (sid: string) => {
     try {
@@ -25,7 +35,7 @@ export function usePlayAgent(repositoryId?: string | null) {
       const data: AgentSession = await res.json();
       setSession(data);
 
-      if (data.status !== 'active' && data.status !== 'paused') {
+      if (data.status !== "active" && data.status !== "paused") {
         if (pollRef.current) {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -60,7 +70,10 @@ export function usePlayAgent(repositoryId?: string | null) {
       await poll(result.sessionId);
 
       if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(() => poll(result.sessionId), POLL_INTERVAL);
+      pollRef.current = setInterval(
+        () => poll(result.sessionId),
+        POLL_INTERVAL,
+      );
     } finally {
       setLoading(false);
     }
@@ -91,39 +104,47 @@ export function usePlayAgent(repositoryId?: string | null) {
     }
   }, [session?.id, poll]);
 
-  const approvePlan = useCallback(async (approvedAreaIds: string[], autoApprove: boolean) => {
-    if (!session?.id || loading) return;
-    setLoading(true);
-    try {
-      // If empty array, approve all areas from plan step
-      let ids = approvedAreaIds;
-      if (ids.length === 0) {
-        const planStep = session.steps.find(s => s.id === 'plan');
-        const planRich = planStep?.richResult as { type: 'plan'; areas: Array<{ id: string }> } | undefined;
-        ids = planRich?.areas?.map(a => a.id) || [];
+  const approvePlan = useCallback(
+    async (approvedAreaIds: string[], autoApprove: boolean) => {
+      if (!session?.id || loading) return;
+      setLoading(true);
+      try {
+        // If empty array, approve all areas from plan step
+        let ids = approvedAreaIds;
+        if (ids.length === 0) {
+          const planStep = session.steps.find((s) => s.id === "plan");
+          const planRich = planStep?.richResult as
+            | { type: "plan"; areas: Array<{ id: string }> }
+            | undefined;
+          ids = planRich?.areas?.map((a) => a.id) || [];
+        }
+        await approvePlayAgentPlan(session.id, ids, autoApprove);
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+        await poll(session.id);
+      } finally {
+        setLoading(false);
       }
-      await approvePlayAgentPlan(session.id, ids, autoApprove);
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
-      await poll(session.id);
-    } finally {
-      setLoading(false);
-    }
-  }, [session?.id, session?.steps, poll, loading]);
+    },
+    [session?.id, session?.steps, poll, loading],
+  );
 
-  const rerunPlanner = useCallback(async (source: string) => {
-    if (!session?.id) return;
-    setLoading(true);
-    try {
-      await rerunPlannerAction(session.id, source);
-      // Resume polling to pick up the update
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
-      await poll(session.id);
-    } finally {
-      setLoading(false);
-    }
-  }, [session?.id, poll]);
+  const rerunPlanner = useCallback(
+    async (source: string) => {
+      if (!session?.id) return;
+      setLoading(true);
+      try {
+        await rerunPlannerAction(session.id, source);
+        // Resume polling to pick up the update
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(() => poll(session.id), POLL_INTERVAL);
+        await poll(session.id);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [session?.id, poll],
+  );
 
   const skipSettings = useCallback(async () => {
     if (!session?.id) return;
@@ -150,14 +171,19 @@ export function usePlayAgent(repositoryId?: string | null) {
     }
   }, [session?.id]);
 
-  const isActive = session?.status === 'active' || session?.status === 'paused';
-  const isTerminal = session?.status === 'completed' || session?.status === 'cancelled' || session?.status === 'failed';
+  const isActive = session?.status === "active" || session?.status === "paused";
+  const isTerminal =
+    session?.status === "completed" ||
+    session?.status === "cancelled" ||
+    session?.status === "failed";
 
-  const completedSteps = session?.steps.filter(
-    (s) => s.status === 'completed' || s.status === 'skipped',
-  ).length ?? 0;
+  const completedSteps =
+    session?.steps.filter(
+      (s) => s.status === "completed" || s.status === "skipped",
+    ).length ?? 0;
   const totalSteps = session?.steps.length ?? 11;
-  const progress = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  const progress =
+    totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
   return {
     session,

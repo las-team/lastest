@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useActivityFeedContextSafe } from './activity-feed-provider-client';
+import { useEffect } from "react";
+import { useActivityFeedContextSafe } from "./activity-feed-provider-client";
 
 /**
  * Renders nothing — opens the Activity Feed panel on mount.

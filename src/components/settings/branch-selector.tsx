@@ -1,15 +1,18 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { fetchRepoBranches, updateRepoSelectedBranch } from '@/server/actions/repos';
-import { Loader2 } from 'lucide-react';
+} from "@/components/ui/select";
+import {
+  fetchRepoBranches,
+  updateRepoSelectedBranch,
+} from "@/server/actions/repos";
+import { Loader2 } from "lucide-react";
 
 interface BranchSelectorProps {
   repositoryId: string;
@@ -38,14 +41,18 @@ export function BranchSelector({
     setUpdating(false);
   };
 
-  const selectedValue = currentBranch || defaultBranch || '';
+  const selectedValue = currentBranch || defaultBranch || "";
 
   if (loading) {
     return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
   }
 
   return (
-    <Select value={selectedValue} onValueChange={handleChange} disabled={updating}>
+    <Select
+      value={selectedValue}
+      onValueChange={handleChange}
+      disabled={updating}
+    >
       <SelectTrigger className="w-[180px]">
         <SelectValue placeholder="Select branch" />
         {updating && <Loader2 className="w-3 h-3 animate-spin ml-1" />}

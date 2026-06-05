@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Plus, Copy, Check, Bot, Tv2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { useState } from "react";
+import { Plus, Copy, Check, Bot, Tv2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -13,23 +13,23 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { createRunner } from '@/server/actions/runners';
-import { useRouter } from 'next/navigation';
-import type { RunnerType } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import { createRunner } from "@/server/actions/runners";
+import { useRouter } from "next/navigation";
+import type { RunnerType } from "@/lib/db/schema";
 
 export function CreateRunnerDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [runnerType, setRunnerType] = useState<RunnerType>('remote');
+  const [name, setName] = useState("");
+  const [runnerType, setRunnerType] = useState<RunnerType>("remote");
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -38,18 +38,22 @@ export function CreateRunnerDialog() {
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      setError('Name is required');
+      setError("Name is required");
       return;
     }
 
     setLoading(true);
     setError(null);
 
-    const result = await createRunner(name.trim(), ['run', 'record'], runnerType);
+    const result = await createRunner(
+      name.trim(),
+      ["run", "record"],
+      runnerType,
+    );
 
     setLoading(false);
 
-    if ('error' in result) {
+    if ("error" in result) {
       setError(result.error);
     } else {
       setToken(result.token);
@@ -65,10 +69,14 @@ export function CreateRunnerDialog() {
 
   const copyCommand = async () => {
     if (!token) return;
-    const serverUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-    const command = runnerType === 'embedded'
-      ? `docker run -d --name lastest-eb -e LASTEST_TOKEN=${token} -e LASTEST_URL=${serverUrl} -p 9223:9223 -p 9224:9224 ewyc/lastest-eb:latest`
-      : `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
+    const serverUrl =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost:3000";
+    const command =
+      runnerType === "embedded"
+        ? `docker run -d --name lastest-eb -e LASTEST_TOKEN=${token} -e LASTEST_URL=${serverUrl} -p 9223:9223 -p 9224:9224 ewyc/lastest-eb:latest`
+        : `npx @lastest/runner start -t ${token} -s ${serverUrl}`;
     await navigator.clipboard.writeText(command);
     setCopiedCommand(true);
     setTimeout(() => setCopiedCommand(false), 2000);
@@ -76,8 +84,8 @@ export function CreateRunnerDialog() {
 
   const handleClose = () => {
     setOpen(false);
-    setName('');
-    setRunnerType('remote');
+    setName("");
+    setRunnerType("remote");
     setToken(null);
     setError(null);
     if (token) {
@@ -85,17 +93,20 @@ export function CreateRunnerDialog() {
     }
   };
 
-  const isEmbedded = runnerType === 'embedded';
+  const isEmbedded = runnerType === "embedded";
   const Icon = isEmbedded ? Tv2 : Bot;
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      if (!isOpen) {
-        handleClose();
-      } else {
-        setOpen(true);
-      }
-    }}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          handleClose();
+        } else {
+          setOpen(true);
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button>
           <Plus className="w-4 h-4 mr-2" />
@@ -106,14 +117,16 @@ export function CreateRunnerDialog() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Icon className="w-5 h-5" />
-            {token ? (isEmbedded ? 'Embedded Browser Created' : 'Runner Created') : 'Create Runner'}
+            {token
+              ? isEmbedded
+                ? "Embedded Browser Created"
+                : "Runner Created"
+              : "Create Runner"}
           </DialogTitle>
           <DialogDescription>
-            {token ? (
-              'Copy this token now. It will not be shown again.'
-            ) : (
-              'Create a new runner to execute tests remotely.'
-            )}
+            {token
+              ? "Copy this token now. It will not be shown again."
+              : "Create a new runner to execute tests remotely."}
           </DialogDescription>
         </DialogHeader>
 
@@ -152,11 +165,19 @@ export function CreateRunnerDialog() {
               {isEmbedded ? (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Set the token as <code className="bg-muted px-1 py-0.5 rounded text-xs">LASTEST_TOKEN</code> in your environment or <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code> file, then start the container:
+                    Set the token as{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                      LASTEST_TOKEN
+                    </code>{" "}
+                    in your environment or{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                      .env
+                    </code>{" "}
+                    file, then start the container:
                   </p>
                   <div className="relative">
                     <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
-{`docker run -d --name lastest-eb \\\n  -e LASTEST_TOKEN=${token} \\\n  -e LASTEST_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'} \\\n  -p 9223:9223 -p 9224:9224 \\\n  ewyc/lastest-eb:latest`}
+                      {`docker run -d --name lastest-eb \\\n  -e LASTEST_TOKEN=${token} \\\n  -e LASTEST_URL=${typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"} \\\n  -p 9223:9223 -p 9224:9224 \\\n  ewyc/lastest-eb:latest`}
                     </pre>
                     <Button
                       variant="ghost"
@@ -175,14 +196,29 @@ export function CreateRunnerDialog() {
               ) : (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Install Playwright first: <code className="bg-muted px-1 py-0.5 rounded text-xs">npx playwright install chromium</code>
+                    Install Playwright first:{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                      npx playwright install chromium
+                    </code>
                   </p>
                   <div className="relative">
                     <pre className="bg-muted p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-all pr-10">
-{`npx @lastest/runner start \\\n  -t ${token} \\\n  -s ${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'}`}
+                      {`npx @lastest/runner start \\\n  -t ${token} \\\n  -s ${typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"}`}
                     </pre>
                     <p className="text-[11px] text-muted-foreground mt-1.5 opacity-75">
-                      Config saved after first run. Manage: <code className="bg-muted px-1 py-0.5 rounded">stop</code> · <code className="bg-muted px-1 py-0.5 rounded">status</code> · <code className="bg-muted px-1 py-0.5 rounded">log -f</code> · <code className="bg-muted px-1 py-0.5 rounded">run</code> (foreground)
+                      Config saved after first run. Manage:{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">stop</code>{" "}
+                      ·{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        status
+                      </code>{" "}
+                      ·{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">
+                        log -f
+                      </code>{" "}
+                      ·{" "}
+                      <code className="bg-muted px-1 py-0.5 rounded">run</code>{" "}
+                      (foreground)
                     </p>
                     <Button
                       variant="ghost"
@@ -205,7 +241,10 @@ export function CreateRunnerDialog() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="runner-type">Type</Label>
-              <Select value={runnerType} onValueChange={(v) => setRunnerType(v as RunnerType)}>
+              <Select
+                value={runnerType}
+                onValueChange={(v) => setRunnerType(v as RunnerType)}
+              >
                 <SelectTrigger id="runner-type">
                   <SelectValue />
                 </SelectTrigger>
@@ -226,8 +265,8 @@ export function CreateRunnerDialog() {
               </Select>
               <p className="text-sm text-muted-foreground">
                 {isEmbedded
-                  ? 'Docker container with live browser streaming'
-                  : 'CLI agent that runs on your machine'}
+                  ? "Docker container with live browser streaming"
+                  : "CLI agent that runs on your machine"}
               </p>
             </div>
 
@@ -235,11 +274,15 @@ export function CreateRunnerDialog() {
               <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
-                placeholder={isEmbedded ? 'e.g., Embedded Chrome, Docker Browser' : 'e.g., My Laptop, CI Server, Local Dev'}
+                placeholder={
+                  isEmbedded
+                    ? "e.g., Embedded Chrome, Docker Browser"
+                    : "e.g., My Laptop, CI Server, Local Dev"
+                }
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === "Enter") {
                     handleCreate();
                   }
                 }}
@@ -249,9 +292,7 @@ export function CreateRunnerDialog() {
               </p>
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}
 
@@ -264,7 +305,7 @@ export function CreateRunnerDialog() {
                 Cancel
               </Button>
               <Button onClick={handleCreate} disabled={loading}>
-                {loading ? 'Creating...' : 'Create'}
+                {loading ? "Creating..." : "Create"}
               </Button>
             </>
           )}

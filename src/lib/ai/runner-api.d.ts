@@ -15,7 +15,7 @@
 // We borrow Page/Locator from @playwright/test so the chain methods
 // (locator, filter, getByRole, click, fill, …) are typed by Playwright itself.
 // Only the *matcher* surface differs from upstream and is redeclared below.
-import type { Page as PWPage, Locator as PWLocator } from '@playwright/test';
+import type { Page as PWPage, Locator as PWLocator } from "@playwright/test";
 
 export type Page = PWPage;
 export type Locator = PWLocator;
@@ -35,20 +35,50 @@ interface LocatorMatchers {
   toBeEditable(opts?: { timeout?: number }): Promise<void>;
   toBeEmpty(opts?: { timeout?: number }): Promise<void>;
   toBeInViewport(opts?: { timeout?: number; ratio?: number }): Promise<void>;
-  toHaveText(expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
-  toContainText(expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
-  toHaveValue(expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
-  toHaveAttribute(name: string, expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
+  toHaveText(
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toContainText(
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toHaveValue(
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toHaveAttribute(
+    name: string,
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
   toHaveCount(expected: number, opts?: { timeout?: number }): Promise<void>;
-  toHaveClass(expected: string | RegExp | (string | RegExp)[], opts?: { timeout?: number }): Promise<void>;
-  toHaveCSS(name: string, expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
-  toHaveJSProperty(name: string, expected: unknown, opts?: { timeout?: number }): Promise<void>;
+  toHaveClass(
+    expected: string | RegExp | (string | RegExp)[],
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toHaveCSS(
+    name: string,
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toHaveJSProperty(
+    name: string,
+    expected: unknown,
+    opts?: { timeout?: number },
+  ): Promise<void>;
   toHaveRole(expected: string, opts?: { timeout?: number }): Promise<void>;
 }
 
 interface PageMatchers {
-  toHaveURL(expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
-  toHaveTitle(expected: string | RegExp, opts?: { timeout?: number }): Promise<void>;
+  toHaveURL(
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
+  toHaveTitle(
+    expected: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void>;
   toHaveScreenshot(name?: string, opts?: unknown): Promise<void>;
 }
 

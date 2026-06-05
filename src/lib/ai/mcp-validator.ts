@@ -1,4 +1,4 @@
-import { chromium, Browser, Page } from 'playwright';
+import { chromium, Browser, Page } from "playwright";
 
 export interface SelectorValidationResult {
   selector: string;
@@ -43,41 +43,41 @@ const HAS_TEXT_OPT_RE = /hasText:\s*(?:['"`]([^'"`]+)['"`]|\/([^/]+)\/)/;
 function segmentToSelector(method: string, args: string): string | null {
   const trimmed = args.trim();
   switch (method) {
-    case 'locator': {
+    case "locator": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? m[1] : null;
     }
-    case 'getByRole': {
+    case "getByRole": {
       const role = trimmed.match(STRING_ARG_RE);
       if (!role) return null;
       const name = trimmed.match(NAME_OPT_RE);
       return name ? `role=${role[1]}[name="${name[1]}"]` : `role=${role[1]}`;
     }
-    case 'getByTestId': {
+    case "getByTestId": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `[data-testid="${m[1]}"]` : null;
     }
-    case 'getByText': {
+    case "getByText": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `text=${m[1]}` : null;
     }
-    case 'getByLabel': {
+    case "getByLabel": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `internal:label=${JSON.stringify(m[1])}i` : null;
     }
-    case 'getByPlaceholder': {
+    case "getByPlaceholder": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `[placeholder="${m[1]}"]` : null;
     }
-    case 'getByTitle': {
+    case "getByTitle": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `[title="${m[1]}"]` : null;
     }
-    case 'getByAltText': {
+    case "getByAltText": {
       const m = trimmed.match(STRING_ARG_RE);
       return m ? `[alt="${m[1]}"]` : null;
     }
-    case 'filter': {
+    case "filter": {
       const m = trimmed.match(HAS_TEXT_OPT_RE);
       if (m) return `internal:has-text=${JSON.stringify(m[1] ?? m[2])}i`;
       return null;
@@ -98,7 +98,7 @@ function segmentToSelector(method: string, args: string): string | null {
 export function extractSelectors(code: string): string[] {
   const selectors: string[] = [];
   let match;
-  const re = new RegExp(SEGMENT_RE.source, 'g');
+  const re = new RegExp(SEGMENT_RE.source, "g");
   while ((match = re.exec(code)) !== null) {
     const sel = segmentToSelector(match[1], match[2]);
     if (sel) selectors.push(sel);
@@ -117,14 +117,26 @@ export function extractSelectors(code: string): string[] {
  * surface that catches "ancestor doesn't exist" failures like the
  * marktolmacs.com `<section>` case.
  */
-export function extractLocatorChains(code: string): { chain: string; selector: string; segments: ChainSegment[] }[] {
-  const chains: { chain: string; selector: string; segments: ChainSegment[] }[] = [];
+export function extractLocatorChains(
+  code: string,
+): { chain: string; selector: string; segments: ChainSegment[] }[] {
+  const chains: {
+    chain: string;
+    selector: string;
+    segments: ChainSegment[];
+  }[] = [];
 
   // Walk each line; collect runs of consecutive segment matches that form a
   // single chain starting from `page` (or a bare-locator variable assignment).
   // We greedily merge segments whose offsets are contiguous in the source.
-  const segs: { method: string; args: string; selector: string; start: number; end: number }[] = [];
-  const re = new RegExp(SEGMENT_RE.source, 'g');
+  const segs: {
+    method: string;
+    args: string;
+    selector: string;
+    start: number;
+    end: number;
+  }[] = [];
+  const re = new RegExp(SEGMENT_RE.source, "g");
   let m;
   while ((m = re.exec(code)) !== null) {
     const sel = segmentToSelector(m[1], m[2]);
@@ -143,7 +155,10 @@ export function extractLocatorChains(code: string): { chain: string; selector: s
   // separation), which is how `.locator(...).filter(...).getByRole(...)` looks.
   let currentGroup: typeof segs = [];
   for (const seg of segs) {
-    if (currentGroup.length === 0 || seg.start === currentGroup[currentGroup.length - 1].end) {
+    if (
+      currentGroup.length === 0 ||
+      seg.start === currentGroup[currentGroup.length - 1].end
+    ) {
       currentGroup.push(seg);
     } else {
       if (currentGroup.length > 0) flush(currentGroup, code, chains);
@@ -162,7 +177,13 @@ export function extractLocatorChains(code: string): { chain: string; selector: s
 }
 
 function flush(
-  group: { method: string; args: string; selector: string; start: number; end: number }[],
+  group: {
+    method: string;
+    args: string;
+    selector: string;
+    start: number;
+    end: number;
+  }[],
   code: string,
   out: { chain: string; selector: string; segments: ChainSegment[] }[],
 ): void {
@@ -171,7 +192,7 @@ function flush(
     args: s.args,
     selector: s.selector,
   }));
-  const composite = segments.map((s) => s.selector).join(' >> ');
+  const composite = segments.map((s) => s.selector).join(" >> ");
   const chainSource = code.slice(group[0].start, group[group.length - 1].end);
   out.push({ chain: chainSource, selector: composite, segments });
 }
@@ -185,7 +206,11 @@ function convertToQueryableSelector(selector: string): string {
   // Already a Playwright engine selector — pass through.
   if (/^(role|text|css|xpath|internal:)/i.test(selector)) return selector;
   // Bracket / class / id selectors are valid CSS — pass through.
-  if (selector.startsWith('[') || selector.startsWith('.') || selector.startsWith('#')) {
+  if (
+    selector.startsWith("[") ||
+    selector.startsWith(".") ||
+    selector.startsWith("#")
+  ) {
     return selector;
   }
   // Anything that looks like a tag name (`section`, `header`, etc.) stays as CSS.
@@ -195,7 +220,7 @@ function convertToQueryableSelector(selector: string): string {
 
 export async function validateSelectorsOnPage(
   pageUrl: string,
-  selectors: string[]
+  selectors: string[],
 ): Promise<MCPValidationResult> {
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -204,14 +229,14 @@ export async function validateSelectorsOnPage(
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage();
 
-    await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 30000 });
 
     const results: SelectorValidationResult[] = [];
 
     for (const selector of selectors) {
       try {
         // Skip URL-like patterns (from goto)
-        if (selector.startsWith('http') || selector.startsWith('/')) {
+        if (selector.startsWith("http") || selector.startsWith("/")) {
           continue;
         }
 
@@ -230,7 +255,7 @@ export async function validateSelectorsOnPage(
         results.push({
           selector,
           valid: false,
-          error: error instanceof Error ? error.message : 'Invalid selector',
+          error: error instanceof Error ? error.message : "Invalid selector",
         });
       }
     }
@@ -242,7 +267,7 @@ export async function validateSelectorsOnPage(
     return {
       valid: false,
       results: [],
-      pageError: error instanceof Error ? error.message : 'Failed to load page',
+      pageError: error instanceof Error ? error.message : "Failed to load page",
     };
   } finally {
     if (page) await page.close().catch(() => {});
@@ -259,7 +284,11 @@ export async function validateSelectorsOnPage(
  */
 export async function validateLocatorChainsOnPage(
   pageUrl: string,
-  chains: { chain: string; selector: string; segments: { method: string; args: string; selector: string }[] }[],
+  chains: {
+    chain: string;
+    selector: string;
+    segments: { method: string; args: string; selector: string }[];
+  }[],
 ): Promise<MCPValidationResult> {
   let browser: Browser | null = null;
   let page: Page | null = null;
@@ -267,14 +296,16 @@ export async function validateLocatorChainsOnPage(
   try {
     browser = await chromium.launch({ headless: true });
     page = await browser.newPage();
-    await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 30000 });
 
     const results: SelectorValidationResult[] = [];
 
     for (const c of chains) {
       // Test the full chain selector first.
       try {
-        const wholeCount = await page.locator(convertToQueryableSelector(c.selector)).count();
+        const wholeCount = await page
+          .locator(convertToQueryableSelector(c.selector))
+          .count();
         results.push({
           selector: c.chain,
           valid: wholeCount > 0,
@@ -285,14 +316,16 @@ export async function validateLocatorChainsOnPage(
         results.push({
           selector: c.chain,
           valid: false,
-          error: err instanceof Error ? err.message : 'Invalid locator chain',
+          error: err instanceof Error ? err.message : "Invalid locator chain",
         });
       }
 
       // If the whole chain didn't match, drill in: which segment is empty?
       for (const seg of c.segments) {
         try {
-          const segCount = await page.locator(convertToQueryableSelector(seg.selector)).count();
+          const segCount = await page
+            .locator(convertToQueryableSelector(seg.selector))
+            .count();
           results.push({
             selector: `  └─ ${seg.method}(${seg.args}) → ${seg.selector}`,
             valid: segCount > 0,
@@ -302,7 +335,8 @@ export async function validateLocatorChainsOnPage(
           results.push({
             selector: `  └─ ${seg.method}(${seg.args}) → ${seg.selector}`,
             valid: false,
-            error: err instanceof Error ? err.message : 'Invalid segment selector',
+            error:
+              err instanceof Error ? err.message : "Invalid segment selector",
           });
         }
       }
@@ -314,7 +348,7 @@ export async function validateLocatorChainsOnPage(
     return {
       valid: false,
       results: [],
-      pageError: error instanceof Error ? error.message : 'Failed to load page',
+      pageError: error instanceof Error ? error.message : "Failed to load page",
     };
   } finally {
     if (page) await page.close().catch(() => {});
@@ -328,13 +362,13 @@ export function formatValidationFeedback(result: MCPValidationResult): string {
   }
 
   if (result.valid) {
-    return 'All selectors are valid.';
+    return "All selectors are valid.";
   }
 
   const invalidSelectors = result.results
     .filter((r) => !r.valid)
-    .map((r) => `- "${r.selector}": ${r.error || 'No matching elements found'}`)
-    .join('\n');
+    .map((r) => `- "${r.selector}": ${r.error || "No matching elements found"}`)
+    .join("\n");
 
   return `The following selectors are invalid:\n${invalidSelectors}\n\nPlease update the test code to use valid selectors.`;
 }

@@ -1,6 +1,12 @@
-import { db } from '../index';
-import { teams, testRuns, testResults, visualDiffs, repositories } from '../schema';
-import { eq, asc, inArray, sql } from 'drizzle-orm';
+import { db } from "../index";
+import {
+  teams,
+  testRuns,
+  testResults,
+  visualDiffs,
+  repositories,
+} from "../schema";
+import { eq, asc, inArray, sql } from "drizzle-orm";
 
 export async function getTeamStorageUsage(teamId: string) {
   const [team] = await db
@@ -21,11 +27,15 @@ export async function getTeamStorageUsage(teamId: string) {
     storageQuotaBytes: quotaBytes,
     storageUsedBytes: usedBytes,
     storageLastCalculatedAt: team.storageLastCalculatedAt,
-    percentUsed: quotaBytes > 0 ? Math.round((usedBytes / quotaBytes) * 100) : 0,
+    percentUsed:
+      quotaBytes > 0 ? Math.round((usedBytes / quotaBytes) * 100) : 0,
   };
 }
 
-export async function updateTeamStorageUsage(teamId: string, usedBytes: number) {
+export async function updateTeamStorageUsage(
+  teamId: string,
+  usedBytes: number,
+) {
   await db
     .update(teams)
     .set({
@@ -35,7 +45,10 @@ export async function updateTeamStorageUsage(teamId: string, usedBytes: number) 
     .where(eq(teams.id, teamId));
 }
 
-export async function updateTeamStorageQuota(teamId: string, quotaBytes: number) {
+export async function updateTeamStorageQuota(
+  teamId: string,
+  quotaBytes: number,
+) {
   await db
     .update(teams)
     .set({ storageQuotaBytes: quotaBytes })
@@ -46,7 +59,7 @@ const DEFAULT_RUN_QUOTA = 500;
 
 function currentUsageMonth(date: Date = new Date()): string {
   const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
 
@@ -87,7 +100,7 @@ export async function getTeamRunUsage(teamId: string) {
  */
 export async function recordTeamRunCompletion(
   teamId: string,
-  durationMs: number
+  durationMs: number,
 ) {
   const month = currentUsageMonth();
   const minutes = Math.max(0, durationMs) / 60_000;
@@ -194,7 +207,9 @@ export async function deleteTestRunAndResults(testRunId: string) {
 
   // Delete visual diffs first (FK to testResults)
   if (resultIds.length > 0) {
-    await db.delete(visualDiffs).where(inArray(visualDiffs.testResultId, resultIds));
+    await db
+      .delete(visualDiffs)
+      .where(inArray(visualDiffs.testResultId, resultIds));
   }
 
   // Delete test results

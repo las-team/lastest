@@ -1,20 +1,24 @@
-'use server';
+"use server";
 
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { generateDiff } from '@/lib/diff/generator';
-import { computeDomDiff } from '@/lib/diff/dom-diff';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { generateDiff } from "@/lib/diff/generator";
+import { computeDomDiff } from "@/lib/diff/dom-diff";
 import {
   computeNetworkDiff,
   type NetworkRequestLike,
-} from '@/lib/diff/network-diff';
-import { diffVariables } from '@/lib/diff/variables-diff';
-import { diffVisibleText } from '@/lib/diff/text-content-diff';
-import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
+} from "@/lib/diff/network-diff";
+import { diffVariables } from "@/lib/diff/variables-diff";
+import { diffVisibleText } from "@/lib/diff/text-content-diff";
+import {
+  STORAGE_ROOT,
+  STORAGE_DIRS,
+  toRelativePath,
+} from "@/lib/storage/paths";
 import type {
   DiffEngineType,
   InspectionResult,
@@ -28,7 +32,7 @@ import type {
   TextInspectionPayload,
   NetworkInspectionPayload,
   VariableInspectionPayload,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 export interface InspectTargetsInput {
   testId: string;
@@ -39,7 +43,13 @@ export interface InspectTargetsInput {
   options?: InspectorOptions;
 }
 
-const ALL_DIMENSIONS: InspectorDimension[] = ['visual', 'dom', 'text', 'network', 'variables'];
+const ALL_DIMENSIONS: InspectorDimension[] = [
+  "visual",
+  "dom",
+  "text",
+  "network",
+  "variables",
+];
 
 // Per-dimension timeout. Real bottlenecks are the visual diff on huge
 // screenshots and the LCS in text-content-diff on huge DOM snapshots; without
@@ -48,7 +58,10 @@ const DIMENSION_TIMEOUT_MS = 30_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
     p.then(
       (v) => {
         clearTimeout(timer);
@@ -62,7 +75,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
-function buildCacheKey(input: InspectTargetsInput, engine: DiffEngineType): string {
+function buildCacheKey(
+  input: InspectTargetsInput,
+  engine: DiffEngineType,
+): string {
   const payload = JSON.stringify({
     t: input.testId,
     c: input.currentResultId,
@@ -71,69 +87,80 @@ function buildCacheKey(input: InspectTargetsInput, engine: DiffEngineType): stri
     d: (input.dimensions ?? ALL_DIMENSIONS).slice().sort(),
     o: input.options ?? {},
   });
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
 async function authorizeForTest(testId: string) {
   const repoId = await queries.getRepoIdForTest(testId);
-  if (!repoId) throw new Error('Test has no repository');
+  if (!repoId) throw new Error("Test has no repository");
   return requireRepoAccess(repoId);
 }
 
 function hostFromDomSnapshotUrl(url: string | undefined | null): string {
-  if (!url) return '';
+  if (!url) return "";
   try {
     return new URL(url).host;
   } catch {
-    return '';
+    return "";
   }
 }
 
-function classifyVisual(p: VisualInspectionPayload | undefined): InspectorSeverity {
-  if (!p) return 'unavailable';
-  if (p.error) return 'unavailable';
-  if (p.classification === 'unchanged') return 'unchanged';
-  if (p.classification === 'flaky') return 'minor';
-  return 'changed';
+function classifyVisual(
+  p: VisualInspectionPayload | undefined,
+): InspectorSeverity {
+  if (!p) return "unavailable";
+  if (p.error) return "unavailable";
+  if (p.classification === "unchanged") return "unchanged";
+  if (p.classification === "flaky") return "minor";
+  return "changed";
 }
 
 function classifyDom(p: DomInspectionPayload | undefined): InspectorSeverity {
-  if (!p || p.error) return 'unavailable';
-  const total = p.diff.added.length + p.diff.removed.length + p.diff.changed.length;
-  if (total === 0) return 'unchanged';
-  if (total < 5) return 'minor';
-  return 'changed';
+  if (!p || p.error) return "unavailable";
+  const total =
+    p.diff.added.length + p.diff.removed.length + p.diff.changed.length;
+  if (total === 0) return "unchanged";
+  if (total < 5) return "minor";
+  return "changed";
 }
 
 function classifyText(p: TextInspectionPayload | undefined): InspectorSeverity {
-  if (!p || p.error) return 'unavailable';
+  if (!p || p.error) return "unavailable";
   const total = p.added + p.removed;
-  if (total === 0) return 'unchanged';
-  if (total < 3) return 'minor';
-  return 'changed';
+  if (total === 0) return "unchanged";
+  if (total < 3) return "minor";
+  return "changed";
 }
 
-function classifyNetwork(p: NetworkInspectionPayload | undefined): InspectorSeverity {
-  if (!p || p.error) return 'unavailable';
+function classifyNetwork(
+  p: NetworkInspectionPayload | undefined,
+): InspectorSeverity {
+  if (!p || p.error) return "unavailable";
   const failedDelta = p.summary.failedCountB - p.summary.failedCountA;
-  if (failedDelta > 0) return 'changed';
+  if (failedDelta > 0) return "changed";
   const total =
-    p.added.length + p.removed.length + p.changedStatus.length + p.changedSize.length + p.slowdowns.length;
-  if (total === 0) return 'unchanged';
-  if (total < 4) return 'minor';
-  return 'changed';
+    p.added.length +
+    p.removed.length +
+    p.changedStatus.length +
+    p.changedSize.length +
+    p.slowdowns.length;
+  if (total === 0) return "unchanged";
+  if (total < 4) return "minor";
+  return "changed";
 }
 
-function classifyVariables(p: VariableInspectionPayload | undefined): InspectorSeverity {
-  if (!p || p.error) return 'unavailable';
-  const ext = p.extracted.filter((e) => e.kind !== 'unchanged').length;
-  const asg = p.assigned.filter((e) => e.kind !== 'unchanged').length;
+function classifyVariables(
+  p: VariableInspectionPayload | undefined,
+): InspectorSeverity {
+  if (!p || p.error) return "unavailable";
+  const ext = p.extracted.filter((e) => e.kind !== "unchanged").length;
+  const asg = p.assigned.filter((e) => e.kind !== "unchanged").length;
   const consoleNew = p.consoleErrors.added.length;
   const total = ext + asg + consoleNew;
-  if (consoleNew > 0) return 'changed';
-  if (total === 0) return 'unchanged';
-  if (total < 3) return 'minor';
-  return 'changed';
+  if (consoleNew > 0) return "changed";
+  if (total === 0) return "unchanged";
+  if (total < 3) return "minor";
+  return "changed";
 }
 
 async function runVisual(
@@ -144,35 +171,36 @@ async function runVisual(
 ): Promise<VisualInspectionPayload> {
   if (!baselinePath || !currentPath) {
     return {
-      classification: 'changed',
+      classification: "changed",
       pixelDifference: 0,
       percentageDifference: 0,
       baselineImagePath: baselinePath ?? null,
       currentImagePath: currentPath ?? null,
       diffImagePath: null,
       engine,
-      error: 'Missing screenshot on one side',
+      error: "Missing screenshot on one side",
     };
   }
   const absBaseline = path.join(STORAGE_ROOT, baselinePath);
   const absCurrent = path.join(STORAGE_ROOT, currentPath);
   if (!fs.existsSync(absBaseline) || !fs.existsSync(absCurrent)) {
     return {
-      classification: 'changed',
+      classification: "changed",
       pixelDifference: 0,
       percentageDifference: 0,
       baselineImagePath: baselinePath,
       currentImagePath: currentPath,
       diffImagePath: null,
       engine,
-      error: 'Screenshot file missing on disk',
+      error: "Screenshot file missing on disk",
     };
   }
 
   const settings = await queries.getDiffSensitivitySettings(repoId);
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
   const ignorePageShift = settings.ignorePageShift ?? false;
-  const regionDetectionMode = (settings.regionDetectionMode as RegionDetectionMode) ?? 'grid';
+  const regionDetectionMode =
+    (settings.regionDetectionMode as RegionDetectionMode) ?? "grid";
   const unchangedThreshold = settings.unchangedThreshold ?? 1;
   const flakyThreshold = settings.flakyThreshold ?? 10;
 
@@ -189,10 +217,12 @@ async function runVisual(
     undefined,
   );
 
-  let classification: 'unchanged' | 'flaky' | 'changed';
-  if (result.percentageDifference < unchangedThreshold) classification = 'unchanged';
-  else if (result.percentageDifference < flakyThreshold) classification = 'flaky';
-  else classification = 'changed';
+  let classification: "unchanged" | "flaky" | "changed";
+  if (result.percentageDifference < unchangedThreshold)
+    classification = "unchanged";
+  else if (result.percentageDifference < flakyThreshold)
+    classification = "flaky";
+  else classification = "changed";
 
   return {
     classification,
@@ -211,15 +241,19 @@ async function runVisual(
  * and variables. Pure recompute over already-persisted artifacts — no
  * Playwright re-execution and no build creation.
  */
-export async function runInspection(input: InspectTargetsInput): Promise<InspectionResult> {
+export async function runInspection(
+  input: InspectTargetsInput,
+): Promise<InspectionResult> {
   const { team, repo } = await authorizeForTest(input.testId);
   void team;
 
   const test = await queries.getTest(input.testId);
-  if (!test) throw new Error('Test not found');
+  if (!test) throw new Error("Test not found");
 
   const engine: DiffEngineType =
-    input.engine ?? (test.diffOverrides?.diffEngine as DiffEngineType | undefined) ?? 'pixelmatch';
+    input.engine ??
+    (test.diffOverrides?.diffEngine as DiffEngineType | undefined) ??
+    "pixelmatch";
   const dimensions = input.dimensions ?? ALL_DIMENSIONS;
   const cacheKey = buildCacheKey(input, engine);
 
@@ -233,26 +267,31 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
     queries.getTestResultById(input.baselineResultId),
   ]);
   if (!current || current.testId !== input.testId) {
-    throw new Error('Current run not found for this test');
+    throw new Error("Current run not found for this test");
   }
   if (!baseline || baseline.testId !== input.testId) {
-    throw new Error('Baseline run not found for this test');
+    throw new Error("Baseline run not found for this test");
   }
 
-  const wantVisual = dimensions.includes('visual');
-  const wantDom = dimensions.includes('dom');
-  const wantText = dimensions.includes('text');
-  const wantNetwork = dimensions.includes('network');
-  const wantVars = dimensions.includes('variables');
+  const wantVisual = dimensions.includes("visual");
+  const wantDom = dimensions.includes("dom");
+  const wantText = dimensions.includes("text");
+  const wantNetwork = dimensions.includes("network");
+  const wantVars = dimensions.includes("variables");
 
   const visualP: Promise<VisualInspectionPayload | undefined> = wantVisual
     ? withTimeout(
-        runVisual(baseline.screenshotPath, current.screenshotPath, engine, repo.id),
+        runVisual(
+          baseline.screenshotPath,
+          current.screenshotPath,
+          engine,
+          repo.id,
+        ),
         DIMENSION_TIMEOUT_MS,
-        'visual',
+        "visual",
       ).catch(
         (err): VisualInspectionPayload => ({
-          classification: 'changed',
+          classification: "changed",
           pixelDifference: 0,
           percentageDifference: 0,
           baselineImagePath: baseline.screenshotPath ?? null,
@@ -272,10 +311,13 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
               diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
               baselineUrl: baseline.domSnapshot?.url,
               currentUrl: current.domSnapshot?.url,
-              error: 'DOM snapshot missing on one side',
+              error: "DOM snapshot missing on one side",
             };
           }
-          const diff = computeDomDiff(baseline.domSnapshot, current.domSnapshot);
+          const diff = computeDomDiff(
+            baseline.domSnapshot,
+            current.domSnapshot,
+          );
           return {
             diff,
             baselineUrl: baseline.domSnapshot.url,
@@ -283,7 +325,7 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
           };
         })(),
         DIMENSION_TIMEOUT_MS,
-        'dom',
+        "dom",
       ).catch(
         (err): DomInspectionPayload => ({
           diff: { added: [], removed: [], changed: [], unchangedCount: 0 },
@@ -300,7 +342,7 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
           }),
         ),
         DIMENSION_TIMEOUT_MS,
-        'text',
+        "text",
       ).catch(
         (err): TextInspectionPayload => ({
           lines: [],
@@ -316,14 +358,17 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
   const networkP: Promise<NetworkInspectionPayload | undefined> = wantNetwork
     ? withTimeout(
         Promise.resolve().then(() => {
-          const reqsA = (baseline.networkRequests ?? []) as NetworkRequestLike[];
+          const reqsA = (baseline.networkRequests ??
+            []) as NetworkRequestLike[];
           const reqsB = (current.networkRequests ?? []) as NetworkRequestLike[];
-          const primaryHostA = hostFromDomSnapshotUrl(baseline.domSnapshot?.url);
+          const primaryHostA = hostFromDomSnapshotUrl(
+            baseline.domSnapshot?.url,
+          );
           const primaryHostB = hostFromDomSnapshotUrl(current.domSnapshot?.url);
           return computeNetworkDiff(reqsA, reqsB, primaryHostA, primaryHostB);
         }),
         DIMENSION_TIMEOUT_MS,
-        'network',
+        "network",
       ).catch(
         (err): NetworkInspectionPayload => ({
           added: [],
@@ -370,7 +415,7 @@ export async function runInspection(input: InspectTargetsInput): Promise<Inspect
           }),
         ),
         DIMENSION_TIMEOUT_MS,
-        'variables',
+        "variables",
       ).catch(
         (err): VariableInspectionPayload => ({
           extracted: [],
@@ -444,7 +489,8 @@ export async function listInspectableRuns(testId: string, limit = 50) {
     gitCommit: r.gitCommit ?? null,
     hasScreenshot: !!r.screenshotPath,
     hasDom: !!r.domSnapshot,
-    hasNetwork: Array.isArray(r.networkRequests) && r.networkRequests.length > 0,
+    hasNetwork:
+      Array.isArray(r.networkRequests) && r.networkRequests.length > 0,
     hasVariables:
       (r.extractedVariables && Object.keys(r.extractedVariables).length > 0) ||
       (r.assignedVariables && Object.keys(r.assignedVariables).length > 0),

@@ -1,12 +1,14 @@
-const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
-const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
-const GITHUB_REDIRECT_URI = process.env.GITHUB_REDIRECT_URI || 'http://localhost:3000/api/connect/github/callback';
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || "";
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || "";
+const GITHUB_REDIRECT_URI =
+  process.env.GITHUB_REDIRECT_URI ||
+  "http://localhost:3000/api/connect/github/callback";
 
 export function getGitHubAuthUrl(state?: string): string {
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
     redirect_uri: GITHUB_REDIRECT_URI,
-    scope: 'repo read:user workflow',
+    scope: "repo read:user workflow",
     state: state || crypto.randomUUID(),
   });
 
@@ -19,19 +21,22 @@ export async function exchangeCodeForToken(code: string): Promise<{
   scope: string;
 } | null> {
   try {
-    const response = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      "https://github.com/login/oauth/access_token",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_id: GITHUB_CLIENT_ID,
+          client_secret: GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: GITHUB_REDIRECT_URI,
+        }),
       },
-      body: JSON.stringify({
-        client_id: GITHUB_CLIENT_ID,
-        client_secret: GITHUB_CLIENT_SECRET,
-        code,
-        redirect_uri: GITHUB_REDIRECT_URI,
-      }),
-    });
+    );
 
     if (!response.ok) return null;
 
@@ -49,10 +54,10 @@ export async function getGitHubUser(accessToken: string): Promise<{
   avatar_url: string;
 } | null> {
   try {
-    const response = await fetch('https://api.github.com/user', {
+    const response = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/vnd.github.v3+json',
+        Accept: "application/vnd.github.v3+json",
       },
     });
 
@@ -63,15 +68,21 @@ export async function getGitHubUser(accessToken: string): Promise<{
     // If no public email, try to get primary email from /user/emails
     if (!user.email) {
       try {
-        const emailResponse = await fetch('https://api.github.com/user/emails', {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: 'application/vnd.github.v3+json',
+        const emailResponse = await fetch(
+          "https://api.github.com/user/emails",
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: "application/vnd.github.v3+json",
+            },
           },
-        });
+        );
         if (emailResponse.ok) {
           const emails = await emailResponse.json();
-          const primary = emails.find((e: { primary: boolean; verified: boolean }) => e.primary && e.verified);
+          const primary = emails.find(
+            (e: { primary: boolean; verified: boolean }) =>
+              e.primary && e.verified,
+          );
           if (primary) {
             user.email = primary.email;
           }
@@ -91,22 +102,24 @@ export async function getOpenPRsForBranch(
   accessToken: string,
   owner: string,
   repo: string,
-  branch: string
-): Promise<Array<{
-  number: number;
-  title: string;
-  head: { ref: string; sha: string };
-  base: { ref: string };
-}>> {
+  branch: string,
+): Promise<
+  Array<{
+    number: number;
+    title: string;
+    head: { ref: string; sha: string };
+    base: { ref: string };
+  }>
+> {
   try {
     const response = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${branch}&state=open`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return [];
@@ -129,13 +142,13 @@ export interface GitHubRepo {
 export async function getUserRepos(accessToken: string): Promise<GitHubRepo[]> {
   try {
     const response = await fetch(
-      'https://api.github.com/user/repos?type=all&sort=updated&per_page=100',
+      "https://api.github.com/user/repos?type=all&sort=updated&per_page=100",
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return [];
@@ -155,7 +168,7 @@ export interface GitHubBranch {
 export async function getRepoBranches(
   accessToken: string,
   owner: string,
-  repo: string
+  repo: string,
 ): Promise<GitHubBranch[]> {
   try {
     const response = await fetch(
@@ -163,9 +176,9 @@ export async function getRepoBranches(
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
+          Accept: "application/vnd.github.v3+json",
         },
-      }
+      },
     );
 
     if (!response.ok) return [];

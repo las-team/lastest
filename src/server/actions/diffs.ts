@@ -1,26 +1,27 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess } from '@/lib/auth';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess } from "@/lib/auth";
 import {
   requireDiffOwnership,
   requireBuildOwnership,
   requireTestOwnership,
   requireTestResultOwnership,
-} from '@/lib/auth/ownership';
-import { generateDiff, type Rectangle } from '@/lib/diff/generator';
-import type { DiffEngineType, RegionDetectionMode } from '@/lib/db/schema';
-import fs from 'fs';
-import path from 'path';
-import { STORAGE_ROOT, STORAGE_DIRS, toRelativePath } from '@/lib/storage/paths';
-import { awardScore } from '@/server/actions/gamification';
-import { createVisualDiffIssue } from '@/lib/integrations/github-issues';
-import { buildVisualDiffBody } from '@/lib/integrations/github-issue-body';
+} from "@/lib/auth/ownership";
+import { generateDiff, type Rectangle } from "@/lib/diff/generator";
+import type { DiffEngineType, RegionDetectionMode } from "@/lib/db/schema";
+import fs from "fs";
+import path from "path";
 import {
-  approveDiffCore,
-  rejectDiffCore,
-} from '@/lib/diff/core';
+  STORAGE_ROOT,
+  STORAGE_DIRS,
+  toRelativePath,
+} from "@/lib/storage/paths";
+import { awardScore } from "@/server/actions/gamification";
+import { createVisualDiffIssue } from "@/lib/integrations/github-issues";
+import { buildVisualDiffBody } from "@/lib/integrations/github-issue-body";
+import { approveDiffCore, rejectDiffCore } from "@/lib/diff/core";
 
 export async function approveDiff(diffId: string, approvedBy?: string) {
   const { session } = await requireDiffOwnership(diffId);
@@ -31,15 +32,17 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
   // Gamification: reward the approver for a real change, and credit the test's
   // creator with catching a regression. Only fires when classification='changed'
   // so auto-approved or flaky diffs don't generate awards. Idempotent on diffId.
-  if (session.team && diffBefore && diffBefore.status === 'pending') {
+  if (session.team && diffBefore && diffBefore.status === "pending") {
     awardScore({
       teamId: session.team.id,
-      kind: 'diff_approved_as_change',
-      actor: { kind: 'user', id: session.user.id },
-      sourceType: 'diff',
+      kind: "diff_approved_as_change",
+      actor: { kind: "user", id: session.user.id },
+      sourceType: "diff",
       sourceId: diffId,
       detail: { testId: diffBefore.testId },
-    }).catch((err) => console.error('[gamification] diff_approved_as_change failed', err));
+    }).catch((err) =>
+      console.error("[gamification] diff_approved_as_change failed", err),
+    );
 
     queries
       .getTestCreator(diffBefore.testId)
@@ -47,12 +50,14 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
         if (!creator) return;
         awardScore({
           teamId: session.team.id,
-          kind: 'regression_caught',
+          kind: "regression_caught",
           actor: creator,
-          sourceType: 'diff',
+          sourceType: "diff",
           sourceId: diffId,
           detail: { testId: diffBefore.testId },
-        }).catch((err) => console.error('[gamification] regression_caught failed', err));
+        }).catch((err) =>
+          console.error("[gamification] regression_caught failed", err),
+        );
       })
       .catch(() => {});
   }
@@ -73,7 +78,7 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
     await approveDiffCore(diff.id, approvedBy);
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${buildId}`);
 
   return { approvedCount: pendingDiffs.length };
@@ -84,18 +89,26 @@ export async function approveAllDiffs(buildId: string, approvedBy?: string) {
  * for one test result. Wraps the same logic as the build-page Approve All
  * button but scoped to a single run. See mwhis review #21.
  */
-export async function promoteTestResultBaselines(testResultId: string, approvedBy?: string) {
+export async function promoteTestResultBaselines(
+  testResultId: string,
+  approvedBy?: string,
+) {
   await requireTestResultOwnership(testResultId);
   const diffs = await queries.getVisualDiffsByTestResult(testResultId);
-  const pending = diffs.filter(d => d.status !== 'approved' && d.status !== 'auto_approved');
+  const pending = diffs.filter(
+    (d) => d.status !== "approved" && d.status !== "auto_approved",
+  );
   for (const d of pending) {
     await approveDiffCore(d.id, approvedBy);
   }
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { approvedCount: pending.length };
 }
 
-export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) {
+export async function batchApproveDiffs(
+  diffIds: string[],
+  approvedBy?: string,
+) {
   // Verify ownership on every diff before mutating any of them, so a single
   // foreign id aborts the whole batch instead of approving the legitimate
   // ones first.
@@ -106,7 +119,7 @@ export async function batchApproveDiffs(diffIds: string[], approvedBy?: string) 
     await approveDiffCore(diffId, approvedBy);
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
 
   return { approvedCount: diffIds.length };
 }
@@ -119,7 +132,7 @@ export async function batchRejectDiffs(diffIds: string[]) {
     await rejectDiffCore(diffId);
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
 
   return { rejectedCount: diffIds.length };
 }
@@ -143,21 +156,28 @@ export async function getSortedDiffsByBuild(buildId: string) {
   // Per-test tier: tier 0 if any diff in test is failed/rejected
   const testTiers = new Map<string, number>();
   for (const d of diffs) {
-    const tier = d.testResultStatus === 'failed' || d.status === 'rejected' ? 0
-      : d.status === 'pending' && d.testResultStatus !== 'failed' ? 1
-      : 2;
+    const tier =
+      d.testResultStatus === "failed" || d.status === "rejected"
+        ? 0
+        : d.status === "pending" && d.testResultStatus !== "failed"
+          ? 1
+          : 2;
     const prev = testTiers.get(d.testId) ?? 2;
     if (tier < prev) testTiers.set(d.testId, tier);
   }
 
-  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const collator = new Intl.Collator(undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 
   return diffs.sort((a, b) => {
-    const tierDiff = (testTiers.get(a.testId) ?? 2) - (testTiers.get(b.testId) ?? 2);
+    const tierDiff =
+      (testTiers.get(a.testId) ?? 2) - (testTiers.get(b.testId) ?? 2);
     if (tierDiff !== 0) return tierDiff;
-    const nameCmp = (a.testName || '').localeCompare(b.testName || '');
+    const nameCmp = (a.testName || "").localeCompare(b.testName || "");
     if (nameCmp !== 0) return nameCmp;
-    return collator.compare(a.stepLabel || '', b.stepLabel || '');
+    return collator.compare(a.stepLabel || "", b.stepLabel || "");
   });
 }
 
@@ -167,11 +187,11 @@ export async function getSortedDiffsByBuild(buildId: string) {
  * where runId and testId are UUIDs (5 dash-separated hex groups each = 10 parts).
  */
 function extractStepLabelFromPath(imagePath: string): string | null {
-  const filename = imagePath.split('/').pop();
+  const filename = imagePath.split("/").pop();
   if (!filename) return null;
-  const parts = filename.split('-');
+  const parts = filename.split("-");
   if (parts.length <= 10) return null;
-  return parts.slice(10).join('-').replace('.png', '') || null;
+  return parts.slice(10).join("-").replace(".png", "") || null;
 }
 
 /**
@@ -186,9 +206,9 @@ export async function getDiffCore(diffId: string) {
 
   // Get error message and a11y violations from test result
   let errorMessage: string | null = null;
-  let a11yViolations: import('@/lib/db/schema').A11yViolation[] | null = null;
+  let a11yViolations: import("@/lib/db/schema").A11yViolation[] | null = null;
   let consoleErrors: string[] | null = null;
-  let networkRequests: import('@/lib/db/schema').NetworkRequest[] | null = null;
+  let networkRequests: import("@/lib/db/schema").NetworkRequest[] | null = null;
   let networkBodiesPath: string | null = null;
   if (diff.testResultId) {
     const testResult = await queries.getTestResultById(diff.testResultId);
@@ -202,7 +222,10 @@ export async function getDiffCore(diffId: string) {
   // Hide network requests if network interception is off or error mode is 'ignore'
   if (networkRequests && test) {
     const pwSettings = await queries.getPlaywrightSettings(test.repositoryId);
-    if (!pwSettings?.enableNetworkInterception || pwSettings?.networkErrorMode === 'ignore') {
+    if (
+      !pwSettings?.enableNetworkInterception ||
+      pwSettings?.networkErrorMode === "ignore"
+    ) {
       networkRequests = null;
       networkBodiesPath = null;
     }
@@ -217,7 +240,10 @@ export async function getDiffCore(diffId: string) {
   if (!plannedImagePath && diff.currentImagePath) {
     const stepLabel = extractStepLabelFromPath(diff.currentImagePath);
     if (stepLabel) {
-      const planned = await queries.getPlannedScreenshotByTest(diff.testId, stepLabel);
+      const planned = await queries.getPlannedScreenshotByTest(
+        diff.testId,
+        stepLabel,
+      );
       if (planned) {
         plannedImagePath = planned.imagePath;
       }
@@ -271,7 +297,7 @@ export async function addIgnoreRegion(
   testId: string,
   stepLabel: string | null,
   region: { x: number; y: number; width: number; height: number },
-  reason?: string
+  reason?: string,
 ) {
   await requireTestOwnership(testId);
   return queries.createIgnoreRegion({
@@ -288,12 +314,13 @@ export async function addIgnoreRegion(
 export async function removeIgnoreRegion(regionId: string) {
   const session = await requireTeamAccess();
   const region = await queries.getIgnoreRegionById(regionId);
-  if (!region) throw new Error('Ignore region not found');
+  if (!region) throw new Error("Ignore region not found");
   const test = await queries.getTest(region.testId);
-  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  if (!test?.repositoryId)
+    throw new Error("Forbidden: Region has no repository");
   const repo = await queries.getRepository(test.repositoryId);
   if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Ignore region does not belong to your team');
+    throw new Error("Forbidden: Ignore region does not belong to your team");
   }
   await queries.deleteIgnoreRegion(regionId);
   return { success: true };
@@ -302,7 +329,10 @@ export async function removeIgnoreRegion(regionId: string) {
 /**
  * Get ignore regions for a test step
  */
-export async function getIgnoreRegions(testId: string, stepLabel: string | null) {
+export async function getIgnoreRegions(
+  testId: string,
+  stepLabel: string | null,
+) {
   await requireTestOwnership(testId);
   return queries.getIgnoreRegions(testId, stepLabel);
 }
@@ -334,15 +364,19 @@ export async function addIgnoreRegionForDiff(
  * Remove an ignore region. Triggers recalculation for the owning diff
  * if one is provided so the UI updates in-place.
  */
-export async function removeIgnoreRegionForDiff(regionId: string, diffId?: string) {
+export async function removeIgnoreRegionForDiff(
+  regionId: string,
+  diffId?: string,
+) {
   const session = await requireTeamAccess();
   const region = await queries.getIgnoreRegionById(regionId);
-  if (!region) throw new Error('Ignore region not found');
+  if (!region) throw new Error("Ignore region not found");
   const test = await queries.getTest(region.testId);
-  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  if (!test?.repositoryId)
+    throw new Error("Forbidden: Region has no repository");
   const repo = await queries.getRepository(test.repositoryId);
   if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Ignore region does not belong to your team');
+    throw new Error("Forbidden: Ignore region does not belong to your team");
   }
   await queries.deleteIgnoreRegion(regionId);
   if (diffId) {
@@ -391,12 +425,13 @@ export async function addFocusRegion(
 export async function removeFocusRegion(regionId: string, diffId?: string) {
   const session = await requireTeamAccess();
   const region = await queries.getFocusRegionById(regionId);
-  if (!region) throw new Error('Focus region not found');
+  if (!region) throw new Error("Focus region not found");
   const test = await queries.getTest(region.testId);
-  if (!test?.repositoryId) throw new Error('Forbidden: Region has no repository');
+  if (!test?.repositoryId)
+    throw new Error("Forbidden: Region has no repository");
   const repo = await queries.getRepository(test.repositoryId);
   if (!repo || repo.teamId !== session.team.id) {
-    throw new Error('Forbidden: Focus region does not belong to your team');
+    throw new Error("Forbidden: Focus region does not belong to your team");
   }
   await queries.deleteFocusRegion(regionId);
   if (diffId) {
@@ -431,15 +466,15 @@ export async function listFocusRegionsByTest(testId: string) {
 export async function undoApproval(diffId: string) {
   await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  if (!diff) throw new Error("Diff not found");
 
   // Only allow undo of recently approved diffs
-  if (diff.status !== 'approved') {
-    throw new Error('Can only undo approved diffs');
+  if (diff.status !== "approved") {
+    throw new Error("Can only undo approved diffs");
   }
 
   await queries.updateVisualDiff(diffId, {
-    status: 'pending',
+    status: "pending",
     approvedBy: null,
     approvedAt: null,
   });
@@ -450,7 +485,7 @@ export async function undoApproval(diffId: string) {
     await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${diff.buildId}`);
 
   return { success: true };
@@ -464,10 +499,10 @@ export async function acceptAIApprovals(buildId: string, approvedBy?: string) {
   const approvable = await queries.getPendingAIApprovableDiffs(buildId);
 
   for (const diff of approvable) {
-    await approveDiff(diff.id, approvedBy || 'ai-recommendation');
+    await approveDiff(diff.id, approvedBy || "ai-recommendation");
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${buildId}`);
 
   return { approvedCount: approvable.length };
@@ -476,13 +511,16 @@ export async function acceptAIApprovals(buildId: string, approvedBy?: string) {
 /**
  * Accept selected AI-recommended diffs
  */
-export async function acceptSelectedAIApprovals(diffIds: string[], approvedBy?: string) {
+export async function acceptSelectedAIApprovals(
+  diffIds: string[],
+  approvedBy?: string,
+) {
   await requireTeamAccess();
   for (const diffId of diffIds) {
-    await approveDiff(diffId, approvedBy || 'ai-recommendation');
+    await approveDiff(diffId, approvedBy || "ai-recommendation");
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
 
   return { approvedCount: diffIds.length };
 }
@@ -504,7 +542,7 @@ export async function discardAIRecommendations(buildId: string) {
     }
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${buildId}`);
 
   return { success: true };
@@ -515,13 +553,16 @@ export async function discardAIRecommendations(buildId: string) {
  * Idempotent: if an issue was already created for this diff, returns the
  * existing URL instead of opening a duplicate.
  */
-export async function submitDiffAsIssue(
-  diffId: string,
-): Promise<{ success: boolean; issueUrl?: string; alreadyExists?: boolean; error?: string }> {
+export async function submitDiffAsIssue(diffId: string): Promise<{
+  success: boolean;
+  issueUrl?: string;
+  alreadyExists?: boolean;
+  error?: string;
+}> {
   const session = await requireTeamAccess();
 
   const diff = await queries.getVisualDiff(diffId);
-  if (!diff) return { success: false, error: 'Diff not found' };
+  if (!diff) return { success: false, error: "Diff not found" };
 
   // Idempotency: don't double-submit
   if (diff.issueUrl) {
@@ -530,32 +571,48 @@ export async function submitDiffAsIssue(
 
   // Resolve repo + branch + commit via build → testRun
   const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
-  const testRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repositoryId = testRun?.repositoryId || null;
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
-  if (!repo) return { success: false, error: 'Repository not found for this diff' };
+  if (!repo)
+    return { success: false, error: "Repository not found for this diff" };
 
   // Tenant check — same pattern as requireRepoAccess but inline so we can
   // surface a friendlier error instead of throwing.
   if (repo.teamId !== session.team.id) {
-    return { success: false, error: 'Forbidden: repository does not belong to your team' };
+    return {
+      success: false,
+      error: "Forbidden: repository does not belong to your team",
+    };
   }
 
   // Resolve provider preference. Per-repo first, then global.
   const notif = await queries.getNotificationSettings(repo.id);
-  const provider = notif.issueTrackerProvider || 'github';
+  const provider = notif.issueTrackerProvider || "github";
 
-  if (provider !== 'github') {
-    return { success: false, error: `Issue tracker "${provider}" is not yet supported. Switch to GitHub in Settings.` };
+  if (provider !== "github") {
+    return {
+      success: false,
+      error: `Issue tracker "${provider}" is not yet supported. Switch to GitHub in Settings.`,
+    };
   }
 
-  if (repo.provider !== 'github' || !repo.owner || !repo.name) {
-    return { success: false, error: 'This repository is not linked to GitHub. Connect a GitHub repository in Settings.' };
+  if (repo.provider !== "github" || !repo.owner || !repo.name) {
+    return {
+      success: false,
+      error:
+        "This repository is not linked to GitHub. Connect a GitHub repository in Settings.",
+    };
   }
 
   const ghAccount = await queries.getGithubAccountByTeam(session.team.id);
   if (!ghAccount?.accessToken) {
-    return { success: false, error: 'GitHub is not connected for this team. Connect it in Settings.' };
+    return {
+      success: false,
+      error: "GitHub is not connected for this team. Connect it in Settings.",
+    };
   }
 
   // Enrich with test + test result + step-comparison context for the issue body.
@@ -567,21 +624,26 @@ export async function submitDiffAsIssue(
     ? await queries.getFunctionalArea(test.functionalAreaId)
     : null;
   const testResult = diff.testResultId
-    ? (await queries.getTestResultById(diff.testResultId)) ?? null
+    ? ((await queries.getTestResultById(diff.testResultId)) ?? null)
     : null;
-  const stepComparison = (await queries.getStepComparisonByVisualDiff(diff.id)) ?? null;
+  const stepComparison =
+    (await queries.getStepComparisonByVisualDiff(diff.id)) ?? null;
 
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.BETTER_AUTH_BASE_URL ||
-    'http://localhost:3000';
+    "http://localhost:3000";
 
   const payload = buildVisualDiffBody({
     diff,
-    test: test ? { id: test.id, name: test.name, targetUrl: test.targetUrl } : null,
+    test: test
+      ? { id: test.id, name: test.name, targetUrl: test.targetUrl }
+      : null,
     functionalAreaName: functionalArea?.name ?? null,
     build: { id: diff.buildId },
-    testRun: testRun ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit } : null,
+    testRun: testRun
+      ? { gitBranch: testRun.gitBranch, gitCommit: testRun.gitCommit }
+      : null,
     testResult,
     stepComparison,
     repoFullName: repo.fullName,
@@ -597,12 +659,15 @@ export async function submitDiffAsIssue(
   );
 
   if (!result.success || !result.issueUrl) {
-    return { success: false, error: result.error || 'Failed to create GitHub issue' };
+    return {
+      success: false,
+      error: result.error || "Failed to create GitHub issue",
+    };
   }
 
-  await queries.setDiffIssue(diffId, result.issueUrl, 'github');
+  await queries.setDiffIssue(diffId, result.issueUrl, "github");
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   if (diff.buildId) {
     revalidatePath(`/builds/${diff.buildId}`);
     revalidatePath(`/builds/${diff.buildId}/diff/${diffId}`);
@@ -617,15 +682,17 @@ export async function submitDiffAsIssue(
 export async function addDiffTodo(diffId: string, description: string) {
   const session = await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  if (!diff) throw new Error("Diff not found");
 
   // Set diff status to 'todo'
-  await queries.updateVisualDiff(diffId, { status: 'todo' });
+  await queries.updateVisualDiff(diffId, { status: "todo" });
 
   // Resolve branch + repo from build → test run
   const build = diff.buildId ? await queries.getBuild(diff.buildId) : null;
-  const buildTestRun = build?.testRunId ? await queries.getTestRun(build.testRunId) : null;
-  const branch = buildTestRun?.gitBranch || 'main';
+  const buildTestRun = build?.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
+  const branch = buildTestRun?.gitBranch || "main";
   const repositoryId = buildTestRun?.repositoryId || null;
 
   // Create the review todo
@@ -636,8 +703,8 @@ export async function addDiffTodo(diffId: string, description: string) {
     testId: diff.testId,
     branch,
     description,
-    status: 'open',
-    createdBy: session.user?.email || 'user',
+    status: "open",
+    createdBy: session.user?.email || "user",
   });
 
   // Gamification: reward the reviewer for triaging, and credit the test's
@@ -645,12 +712,14 @@ export async function addDiffTodo(diffId: string, description: string) {
   if (session.team) {
     awardScore({
       teamId: session.team.id,
-      kind: 'diff_approved_as_change',
-      actor: { kind: 'user', id: session.user.id },
-      sourceType: 'diff',
+      kind: "diff_approved_as_change",
+      actor: { kind: "user", id: session.user.id },
+      sourceType: "diff",
       sourceId: diffId,
       detail: { testId: diff.testId },
-    }).catch((err) => console.error('[gamification] diff_todo_triage failed', err));
+    }).catch((err) =>
+      console.error("[gamification] diff_todo_triage failed", err),
+    );
 
     queries
       .getTestCreator(diff.testId)
@@ -658,12 +727,14 @@ export async function addDiffTodo(diffId: string, description: string) {
         if (!creator) return;
         awardScore({
           teamId: session.team.id,
-          kind: 'regression_caught',
+          kind: "regression_caught",
           actor: creator,
-          sourceType: 'diff',
+          sourceType: "diff",
           sourceId: diffId,
           detail: { testId: diff.testId },
-        }).catch((err) => console.error('[gamification] regression_caught_todo failed', err));
+        }).catch((err) =>
+          console.error("[gamification] regression_caught_todo failed", err),
+        );
       })
       .catch(() => {});
   }
@@ -674,9 +745,9 @@ export async function addDiffTodo(diffId: string, description: string) {
     await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${diff.buildId}`);
-  revalidatePath('/review');
+  revalidatePath("/review");
 
   return { success: true };
 }
@@ -684,14 +755,17 @@ export async function addDiffTodo(diffId: string, description: string) {
 /**
  * Batch add todos to selected diffs
  */
-export async function batchAddDiffTodos(diffIds: string[], description: string) {
+export async function batchAddDiffTodos(
+  diffIds: string[],
+  description: string,
+) {
   await requireTeamAccess();
   for (const diffId of diffIds) {
     await addDiffTodo(diffId, description);
   }
 
-  revalidatePath('/builds');
-  revalidatePath('/review');
+  revalidatePath("/builds");
+  revalidatePath("/review");
 
   return { todoCount: diffIds.length };
 }
@@ -707,7 +781,7 @@ export async function rejectAllDiffs(buildId: string) {
     await rejectDiff(diff.id);
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${buildId}`);
 
   return { rejectedCount: pendingDiffs.length };
@@ -724,7 +798,9 @@ export async function getAIDiffSummary(buildId: string) {
 /**
  * Get step label suggestions for a test (distinct active baseline step labels)
  */
-export async function getStepLabelSuggestions(testId: string): Promise<string[]> {
+export async function getStepLabelSuggestions(
+  testId: string,
+): Promise<string[]> {
   await requireTeamAccess();
   return queries.getStepLabelsForTest(testId);
 }
@@ -732,10 +808,13 @@ export async function getStepLabelSuggestions(testId: string): Promise<string[]>
 /**
  * Update a diff's step label and re-diff against the matching baseline
  */
-export async function updateStepLabelAndRediff(diffId: string, newStepLabel: string | null) {
+export async function updateStepLabelAndRediff(
+  diffId: string,
+  newStepLabel: string | null,
+) {
   await requireTeamAccess();
   const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  if (!diff) throw new Error("Diff not found");
 
   // Short-circuit if label unchanged
   if ((diff.stepLabel ?? null) === (newStepLabel ?? null)) {
@@ -753,9 +832,12 @@ export async function updateStepLabelAndRediff(diffId: string, newStepLabel: str
  * Caller is responsible for auth; this function re-fetches baselines, settings, and
  * masks, then persists the new diff result and build status.
  */
-async function recalculateDiff(diffId: string, stepLabel: string | null): Promise<void> {
+async function recalculateDiff(
+  diffId: string,
+  stepLabel: string | null,
+): Promise<void> {
   const diff = await queries.getVisualDiff(diffId);
-  if (!diff) throw new Error('Diff not found');
+  if (!diff) throw new Error("Diff not found");
 
   // Resolve branch/repo context (same pattern as approveDiff)
   const testResult = diff.testResultId
@@ -764,10 +846,10 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
   const testRun = testResult?.testRunId
     ? await queries.getTestRun(testResult.testRunId)
     : null;
-  const branch = testRun?.gitBranch || 'main';
+  const branch = testRun?.gitBranch || "main";
   const repositoryId = testRun?.repositoryId || null;
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
-  const defaultBranch = repo?.defaultBranch || 'main';
+  const defaultBranch = repo?.defaultBranch || "main";
 
   // Get diff sensitivity settings
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
@@ -775,26 +857,53 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
   const flakyThreshold = settings.flakyThreshold ?? 10;
   const includeAntiAliasing = settings.includeAntiAliasing ?? false;
   const ignorePageShift = settings.ignorePageShift ?? false;
-  const diffEngine = (settings.diffEngine as DiffEngineType) ?? 'pixelmatch';
-  const regionDetectionMode = (settings.regionDetectionMode as RegionDetectionMode) ?? 'grid';
+  const diffEngine = (settings.diffEngine as DiffEngineType) ?? "pixelmatch";
+  const regionDetectionMode =
+    (settings.regionDetectionMode as RegionDetectionMode) ?? "grid";
 
   // Fetch per-step ignore + focus regions for this screenshot
-  const stepIgnoreRegions = await queries.getIgnoreRegions(diff.testId, stepLabel);
-  const ignoreRects: Rectangle[] | undefined = stepIgnoreRegions.length > 0
-    ? stepIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
-    : undefined;
-  const stepFocusRegions = await queries.getFocusRegions(diff.testId, stepLabel);
-  const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
-    ? stepFocusRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
-    : undefined;
+  const stepIgnoreRegions = await queries.getIgnoreRegions(
+    diff.testId,
+    stepLabel,
+  );
+  const ignoreRects: Rectangle[] | undefined =
+    stepIgnoreRegions.length > 0
+      ? stepIgnoreRegions.map((r) => ({
+          x: r.x,
+          y: r.y,
+          width: r.width,
+          height: r.height,
+        }))
+      : undefined;
+  const stepFocusRegions = await queries.getFocusRegions(
+    diff.testId,
+    stepLabel,
+  );
+  const focusRects: Rectangle[] | undefined =
+    stepFocusRegions.length > 0
+      ? stepFocusRegions.map((r) => ({
+          x: r.x,
+          y: r.y,
+          width: r.width,
+          height: r.height,
+        }))
+      : undefined;
 
   // Look up baseline: branch-specific first, then fallback to default branch
   const baseline =
-    await queries.getBranchBaseline(diff.testId, stepLabel, branch) ??
-    await queries.getActiveBaseline(diff.testId, stepLabel, branch, defaultBranch);
+    (await queries.getBranchBaseline(diff.testId, stepLabel, branch)) ??
+    (await queries.getActiveBaseline(
+      diff.testId,
+      stepLabel,
+      branch,
+      defaultBranch,
+    ));
 
-  const baselineExists = baseline && fs.existsSync(path.join(STORAGE_ROOT, baseline.imagePath));
-  const currentExists = diff.currentImagePath && fs.existsSync(path.join(STORAGE_ROOT, diff.currentImagePath));
+  const baselineExists =
+    baseline && fs.existsSync(path.join(STORAGE_ROOT, baseline.imagePath));
+  const currentExists =
+    diff.currentImagePath &&
+    fs.existsSync(path.join(STORAGE_ROOT, diff.currentImagePath));
 
   if (baselineExists && currentExists) {
     // Re-diff against found baseline
@@ -812,25 +921,31 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
     );
 
     const pct = diffResult.percentageDifference;
-    let classification: 'unchanged' | 'flaky' | 'changed';
+    let classification: "unchanged" | "flaky" | "changed";
     if (pct < unchangedThreshold) {
-      classification = 'unchanged';
+      classification = "unchanged";
     } else if (pct < flakyThreshold) {
-      classification = 'flaky';
+      classification = "flaky";
     } else {
-      classification = 'changed';
+      classification = "changed";
     }
 
     // Strip absolute paths from aligned shift images
     const metadata = diffResult.metadata;
     if (metadata.pageShift?.alignedBaselineImagePath) {
-      metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
+      metadata.pageShift.alignedBaselineImagePath = toRelativePath(
+        metadata.pageShift.alignedBaselineImagePath,
+      );
     }
     if (metadata.pageShift?.alignedCurrentImagePath) {
-      metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
+      metadata.pageShift.alignedCurrentImagePath = toRelativePath(
+        metadata.pageShift.alignedCurrentImagePath,
+      );
     }
     if (metadata.pageShift?.alignedDiffImagePath) {
-      metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
+      metadata.pageShift.alignedDiffImagePath = toRelativePath(
+        metadata.pageShift.alignedDiffImagePath,
+      );
     }
 
     await queries.updateVisualDiff(diffId, {
@@ -840,7 +955,7 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
       pixelDifference: diffResult.pixelDifference,
       percentageDifference: diffResult.percentageDifference.toString(),
       classification,
-      status: classification === 'unchanged' ? 'auto_approved' : 'pending',
+      status: classification === "unchanged" ? "auto_approved" : "pending",
       metadata,
     });
   } else {
@@ -850,9 +965,9 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
       baselineImagePath: null,
       diffImagePath: null,
       pixelDifference: 0,
-      percentageDifference: '0',
-      classification: 'changed',
-      status: 'pending',
+      percentageDifference: "0",
+      classification: "changed",
+      status: "pending",
       metadata: { changedRegions: [], isNewTest: true },
     });
   }
@@ -863,7 +978,7 @@ async function recalculateDiff(diffId: string, stepLabel: string | null): Promis
     await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
   }
 
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   if (diff.buildId) {
     revalidatePath(`/builds/${diff.buildId}`);
     revalidatePath(`/builds/${diff.buildId}/diff/${diffId}`);

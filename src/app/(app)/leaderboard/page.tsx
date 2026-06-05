@@ -1,25 +1,25 @@
-import { notFound } from 'next/navigation';
-import { headers } from 'next/headers';
-import { getCurrentSession } from '@/lib/auth';
-import * as queries from '@/lib/db/queries';
-import { getTeamTrophyRoom } from '@/lib/db/queries/awards';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Trophy, Zap, Bot as BotIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { TrophyRoom } from '@/components/awards/trophy-room';
+import { notFound } from "next/navigation";
+import { headers } from "next/headers";
+import { getCurrentSession } from "@/lib/auth";
+import * as queries from "@/lib/db/queries";
+import { getTeamTrophyRoom } from "@/lib/db/queries/awards";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Trophy, Zap, Bot as BotIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { TrophyRoom } from "@/components/awards/trophy-room";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 async function resolveOrigin(): Promise<string> {
   const h = await headers();
-  const forwardedHost = h.get('x-forwarded-host');
-  const forwardedProto = h.get('x-forwarded-proto');
-  if (forwardedHost) return `${forwardedProto ?? 'https'}://${forwardedHost}`;
-  const host = h.get('host');
-  if (host) return `${process.env.NEXT_PUBLIC_APP_PROTO ?? 'http'}://${host}`;
-  return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  const forwardedHost = h.get("x-forwarded-host");
+  const forwardedProto = h.get("x-forwarded-proto");
+  if (forwardedHost) return `${forwardedProto ?? "https"}://${forwardedHost}`;
+  const host = h.get("host");
+  if (host) return `${process.env.NEXT_PUBLIC_APP_PROTO ?? "http"}://${host}`;
+  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 }
 
 export default async function LeaderboardPage() {
@@ -33,7 +33,9 @@ export default async function LeaderboardPage() {
 
   // High Scores still gates on gamificationEnabled; Trophy Room is always shown.
   const gamificationEnabled = !!session.team.gamificationEnabled;
-  const season = gamificationEnabled ? await queries.getActiveSeason(session.team.id) : null;
+  const season = gamificationEnabled
+    ? await queries.getActiveSeason(session.team.id)
+    : null;
 
   if (!gamificationEnabled || !season) {
     return (
@@ -53,16 +55,24 @@ export default async function LeaderboardPage() {
 
   // Append viewer's own row if they're outside the top 10
   const viewerId = session.user.id;
-  let viewerRow = leaderboard.find((r) => r.actorKind === 'user' && r.actorId === viewerId);
+  let viewerRow = leaderboard.find(
+    (r) => r.actorKind === "user" && r.actorId === viewerId,
+  );
   if (!viewerRow) {
-    const row = await queries.getUserScoreRow(season.id, 'user', viewerId);
+    const row = await queries.getUserScoreRow(season.id, "user", viewerId);
     if (row) {
       // Rank is approximate (count of actors with strictly higher score + 1).
-      const allRows = await queries.getSeasonLeaderboard(season.id, session.team.id, 1000);
-      const betterCount = allRows.findIndex((r) => r.actorKind === 'user' && r.actorId === viewerId);
+      const allRows = await queries.getSeasonLeaderboard(
+        season.id,
+        session.team.id,
+        1000,
+      );
+      const betterCount = allRows.findIndex(
+        (r) => r.actorKind === "user" && r.actorId === viewerId,
+      );
       viewerRow = {
         rank: betterCount >= 0 ? betterCount + 1 : leaderboard.length + 1,
-        actorKind: 'user',
+        actorKind: "user",
         actorId: viewerId,
         displayName: session.user.name || session.user.email,
         avatarUrl: session.user.avatarUrl,
@@ -95,10 +105,14 @@ export default async function LeaderboardPage() {
           <CardContent className="flex items-center gap-3 py-4">
             <Zap className="h-5 w-5 text-yellow-600" />
             <div className="flex-1">
-              <div className="font-semibold">🐛 BUG BLITZ ACTIVE — {blitz.name}</div>
+              <div className="font-semibold">
+                🐛 BUG BLITZ ACTIVE — {blitz.name}
+              </div>
               <div className="text-xs text-muted-foreground">
                 All score events earn ×{(blitz.multiplier / 100).toFixed(1)}
-                {blitz.endsAt ? ` until ${new Date(blitz.endsAt).toLocaleString()}` : ''}
+                {blitz.endsAt
+                  ? ` until ${new Date(blitz.endsAt).toLocaleString()}`
+                  : ""}
               </div>
             </div>
           </CardContent>
@@ -121,7 +135,9 @@ export default async function LeaderboardPage() {
                 <LeaderboardRow
                   key={`${row.actorKind}:${row.actorId}`}
                   row={row}
-                  isViewer={row.actorKind === 'user' && row.actorId === viewerId}
+                  isViewer={
+                    row.actorKind === "user" && row.actorId === viewerId
+                  }
                 />
               ))}
               {viewerRow && viewerRow.rank > 10 && (
@@ -157,7 +173,7 @@ function LeaderboardRow({
 }: {
   row: {
     rank: number;
-    actorKind: 'user' | 'bot';
+    actorKind: "user" | "bot";
     displayName: string;
     avatarUrl: string | null;
     avatarEmoji: string | null;
@@ -171,40 +187,54 @@ function LeaderboardRow({
   const topThree = row.rank <= 3;
   const rankColor =
     row.rank === 1
-      ? 'text-yellow-500 drop-shadow-[0_0_6px_rgba(250,204,21,0.6)]'
+      ? "text-yellow-500 drop-shadow-[0_0_6px_rgba(250,204,21,0.6)]"
       : row.rank === 2
-        ? 'text-slate-300'
+        ? "text-slate-300"
         : row.rank === 3
-          ? 'text-orange-500'
-          : 'text-muted-foreground';
+          ? "text-orange-500"
+          : "text-muted-foreground";
 
   return (
     <li
       className={cn(
-        'flex items-center gap-4 px-4 py-3',
-        isViewer && 'bg-primary/5 ring-1 ring-inset ring-primary/30',
+        "flex items-center gap-4 px-4 py-3",
+        isViewer && "bg-primary/5 ring-1 ring-inset ring-primary/30",
       )}
     >
-      <div className={cn('w-8 text-right font-mono font-bold text-lg', rankColor)}>#{row.rank}</div>
+      <div
+        className={cn("w-8 text-right font-mono font-bold text-lg", rankColor)}
+      >
+        #{row.rank}
+      </div>
       <Avatar className="h-9 w-9">
-        {row.actorKind === 'user' && row.avatarUrl && (
+        {row.actorKind === "user" && row.avatarUrl && (
           <AvatarImage src={row.avatarUrl} alt={row.displayName} />
         )}
-        <AvatarFallback className={cn(row.actorKind === 'bot' && 'bg-cyan-500/10')}>
-          {row.actorKind === 'bot' ? row.avatarEmoji ?? '🤖' : initials(row.displayName)}
+        <AvatarFallback
+          className={cn(row.actorKind === "bot" && "bg-cyan-500/10")}
+        >
+          {row.actorKind === "bot"
+            ? (row.avatarEmoji ?? "🤖")
+            : initials(row.displayName)}
         </AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium truncate">{row.displayName}</span>
-          {row.actorKind === 'bot' && (
-            <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+          {row.actorKind === "bot" && (
+            <Badge
+              variant="outline"
+              className="text-[10px] uppercase tracking-wider"
+            >
               <BotIcon className="h-3 w-3 mr-1" />
               Bot
             </Badge>
           )}
           {isViewer && (
-            <Badge variant="secondary" className="text-[10px] uppercase tracking-wider">
+            <Badge
+              variant="secondary"
+              className="text-[10px] uppercase tracking-wider"
+            >
               You
             </Badge>
           )}
@@ -212,13 +242,15 @@ function LeaderboardRow({
         <div className="text-[11px] text-muted-foreground flex gap-3 mt-0.5">
           <span>{row.testsCreated} tests</span>
           <span>{row.regressionsCaught} regressions</span>
-          {row.flakesIncurred > 0 && <span className="text-orange-500">{row.flakesIncurred} flakes</span>}
+          {row.flakesIncurred > 0 && (
+            <span className="text-orange-500">{row.flakesIncurred} flakes</span>
+          )}
         </div>
       </div>
       <div
         className={cn(
-          'font-mono font-bold text-xl tabular-nums',
-          topThree && 'text-primary',
+          "font-mono font-bold text-xl tabular-nums",
+          topThree && "text-primary",
         )}
       >
         {row.total.toLocaleString()}
@@ -233,7 +265,7 @@ function initials(name: string): string {
     .map((p) => p[0])
     .filter(Boolean)
     .slice(0, 2)
-    .join('')
+    .join("")
     .toUpperCase();
 }
 
@@ -262,7 +294,8 @@ function TrophyRoomHeader() {
         TROPHY ROOM
       </h1>
       <p className="text-sm text-muted-foreground">
-        Earned awards across your repos. Click any unlocked badge for embed instructions.
+        Earned awards across your repos. Click any unlocked badge for embed
+        instructions.
       </p>
     </header>
   );
@@ -272,7 +305,8 @@ function GamificationDisabledHint() {
   return (
     <Card className="border-dashed">
       <CardContent className="py-4 text-center text-xs text-muted-foreground">
-        High Scores leaderboard is disabled for this team. Ask an admin to enable Gamification in Settings.
+        High Scores leaderboard is disabled for this team. Ask an admin to
+        enable Gamification in Settings.
       </CardContent>
     </Card>
   );

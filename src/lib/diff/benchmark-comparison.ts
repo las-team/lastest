@@ -9,8 +9,15 @@
  *   pnpm tsx src/lib/diff/benchmark-comparison.ts
  */
 
-import { runDiffEngine, type DiffEngineType, type EngineResult } from './engines';
-import { generateTextAwareDiff, type TextAwareDiffOptions } from './text-regions';
+import {
+  runDiffEngine,
+  type DiffEngineType,
+  type EngineResult,
+} from "./engines";
+import {
+  generateTextAwareDiff,
+  type TextAwareDiffOptions,
+} from "./text-regions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,28 +48,28 @@ interface ScenarioDefinition {
 interface ComparisonRow {
   Scenario: string;
   Engine: string;
-  'Diff Pixels': number;
-  '% Diff': string;
-  'Time (ms)': number;
+  "Diff Pixels": number;
+  "% Diff": string;
+  "Time (ms)": number;
 }
 
 interface DetailRow {
   Scenario: string;
   Engine: string;
-  'Text Diff Px': number | string;
-  'Non-Text Diff Px': number | string;
-  'OCR Regions': number | string;
-  'OCR Time (ms)': number | string;
+  "Text Diff Px": number | string;
+  "Non-Text Diff Px": number | string;
+  "OCR Regions": number | string;
+  "OCR Time (ms)": number | string;
 }
 
 interface SummaryRow {
   Engine: string;
-  'Avg Diff %': string;
-  'Avg Time (ms)': string;
-  'Max Diff %': string;
-  'Min Diff %': string;
-  'Scenarios Run': number;
-  'Zero-Diff Pass': string;
+  "Avg Diff %": string;
+  "Avg Time (ms)": string;
+  "Max Diff %": string;
+  "Min Diff %": string;
+  "Scenarios Run": number;
+  "Zero-Diff Pass": string;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +84,7 @@ function addSubPixelJitter(
   data: Buffer,
   width: number,
   height: number,
-  amount: number
+  amount: number,
 ): void {
   // Work on a copy of the data so we read original values
   const original = Buffer.from(data);
@@ -101,9 +108,15 @@ function addSubPixelJitter(
 
       // Blend original and shifted pixel
       const blend = Math.min(amount, 255) / 255;
-      data[idx] = Math.round(original[idx] * (1 - blend) + original[srcIdx] * blend);
-      data[idx + 1] = Math.round(original[idx + 1] * (1 - blend) + original[srcIdx + 1] * blend);
-      data[idx + 2] = Math.round(original[idx + 2] * (1 - blend) + original[srcIdx + 2] * blend);
+      data[idx] = Math.round(
+        original[idx] * (1 - blend) + original[srcIdx] * blend,
+      );
+      data[idx + 1] = Math.round(
+        original[idx + 1] * (1 - blend) + original[srcIdx + 1] * blend,
+      );
+      data[idx + 2] = Math.round(
+        original[idx + 2] * (1 - blend) + original[srcIdx + 2] * blend,
+      );
       // Alpha stays the same
     }
   }
@@ -117,7 +130,7 @@ function _isEdgePixel(
   width: number,
   height: number,
   x: number,
-  y: number
+  y: number,
 ): boolean {
   const idx = (y * width + x) * 4;
   const r = data[idx];
@@ -125,7 +138,10 @@ function _isEdgePixel(
   const b = data[idx + 2];
 
   const neighbors = [
-    [-1, 0], [1, 0], [0, -1], [0, 1],
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
   ];
 
   for (const [dx, dy] of neighbors) {
@@ -154,7 +170,7 @@ function shiftRegionColor(
   rect: Rect,
   rShift: number,
   gShift: number,
-  bShift: number
+  bShift: number,
 ): void {
   const x0 = Math.max(0, rect.x);
   const y0 = Math.max(0, rect.y);
@@ -180,7 +196,7 @@ function shiftImage(
   width: number,
   height: number,
   dx: number,
-  dy: number
+  dy: number,
 ): void {
   const original = Buffer.from(data);
 
@@ -223,7 +239,7 @@ function addAAFringe(
   data: Buffer,
   width: number,
   height: number,
-  amount: number
+  amount: number,
 ): void {
   const original = Buffer.from(data);
 
@@ -232,12 +248,20 @@ function addAAFringe(
       const idx = (y * width + x) * 4;
 
       // Check if pixel is near a luminance edge
-      const lum = _luminance(original[idx], original[idx + 1], original[idx + 2]);
+      const lum = _luminance(
+        original[idx],
+        original[idx + 1],
+        original[idx + 2],
+      );
       const lumRight = _luminance(
-        original[idx + 4], original[idx + 5], original[idx + 6]
+        original[idx + 4],
+        original[idx + 5],
+        original[idx + 6],
       );
       const lumBelow = _luminance(
-        original[(idx + width * 4)], original[(idx + width * 4) + 1], original[(idx + width * 4) + 2]
+        original[idx + width * 4],
+        original[idx + width * 4 + 1],
+        original[idx + width * 4 + 2],
       );
 
       const edgeH = Math.abs(lum - lumRight);
@@ -247,9 +271,17 @@ function addAAFringe(
         // Add a small AA fringe: blend toward gray
         const fringeStrength = (amount / 255) * 0.5;
         const grayTarget = 128;
-        data[idx] = Math.round(original[idx] * (1 - fringeStrength) + grayTarget * fringeStrength);
-        data[idx + 1] = Math.round(original[idx + 1] * (1 - fringeStrength) + grayTarget * fringeStrength);
-        data[idx + 2] = Math.round(original[idx + 2] * (1 - fringeStrength) + grayTarget * fringeStrength);
+        data[idx] = Math.round(
+          original[idx] * (1 - fringeStrength) + grayTarget * fringeStrength,
+        );
+        data[idx + 1] = Math.round(
+          original[idx + 1] * (1 - fringeStrength) +
+            grayTarget * fringeStrength,
+        );
+        data[idx + 2] = Math.round(
+          original[idx + 2] * (1 - fringeStrength) +
+            grayTarget * fringeStrength,
+        );
       }
     }
   }
@@ -280,7 +312,7 @@ function makeSolidImage(
   r: number,
   g: number,
   b: number,
-  a = 255
+  a = 255,
 ): Buffer {
   const buf = Buffer.alloc(width * height * 4);
   for (let i = 0; i < width * height; i++) {
@@ -320,8 +352,18 @@ function makeUIImage(width: number, height: number): Buffer {
 
       // Text-like lines inside cards
       for (let line = 0; line < 4; line++) {
-        const lineWidth = 100 + (line * 37) % 80;
-        fillRect(buf, width, cx + 10, cy + 20 + line * 22, lineWidth, 10, 60, 60, 60);
+        const lineWidth = 100 + ((line * 37) % 80);
+        fillRect(
+          buf,
+          width,
+          cx + 10,
+          cy + 20 + line * 22,
+          lineWidth,
+          10,
+          60,
+          60,
+          60,
+        );
       }
     }
   }
@@ -333,12 +375,28 @@ function makeUIImage(width: number, height: number): Buffer {
   for (let i = 0; i < 6; i++) {
     const active = i === 1;
     fillRect(
-      buf, width,
-      10, 80 + i * 45, 200, 35,
-      active ? 70 : 210, active ? 120 : 210, active ? 190 : 220
+      buf,
+      width,
+      10,
+      80 + i * 45,
+      200,
+      35,
+      active ? 70 : 210,
+      active ? 120 : 210,
+      active ? 190 : 220,
     );
     // Nav text
-    fillRect(buf, width, 20, 90 + i * 45, 120, 12, active ? 255 : 80, active ? 255 : 80, active ? 255 : 80);
+    fillRect(
+      buf,
+      width,
+      20,
+      90 + i * 45,
+      120,
+      12,
+      active ? 255 : 80,
+      active ? 255 : 80,
+      active ? 255 : 80,
+    );
   }
 
   return buf;
@@ -370,7 +428,8 @@ function makeTextHeavyImage(width: number, height: number): Buffer {
     for (let l = 0; l < lineCount; l++) {
       if (y + 12 > height - 40) break;
       // Vary line width to simulate real text
-      const lineWidth = width - 80 - (l === lineCount - 1 ? 120 + (p * 47) % 200 : 0);
+      const lineWidth =
+        width - 80 - (l === lineCount - 1 ? 120 + ((p * 47) % 200) : 0);
       fillRect(buf, width, 40, y, Math.max(60, lineWidth), 12, 40, 40, 40);
       y += lineHeight;
     }
@@ -382,7 +441,17 @@ function makeTextHeavyImage(width: number, height: number): Buffer {
     fillRect(buf, width, 40, y, width - 80, 90, 245, 245, 250);
     for (let l = 0; l < 4; l++) {
       const indent = l === 0 ? 0 : 20;
-      fillRect(buf, width, 52 + indent, y + 12 + l * 18, 200 + (l * 31) % 100, 10, 100, 40, 40);
+      fillRect(
+        buf,
+        width,
+        52 + indent,
+        y + 12 + l * 18,
+        200 + ((l * 31) % 100),
+        10,
+        100,
+        40,
+        40,
+      );
     }
   }
 
@@ -402,7 +471,7 @@ function fillRect(
   r: number,
   g: number,
   b: number,
-  a = 255
+  a = 255,
 ): void {
   const x0 = Math.max(0, Math.round(x));
   const y0 = Math.max(0, Math.round(y));
@@ -429,8 +498,8 @@ const IMG_HEIGHT = 600;
 const SCENARIOS: ScenarioDefinition[] = [
   // 1. Identical images (zero diff baseline)
   {
-    name: 'identical',
-    description: 'Identical images — zero diff baseline',
+    name: "identical",
+    description: "Identical images — zero diff baseline",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -440,8 +509,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 2. Edge jitter — 15px amount
   {
-    name: 'edge-jitter-15',
-    description: 'Sub-pixel edge jitter (amount=15) — font rendering sim',
+    name: "edge-jitter-15",
+    description: "Sub-pixel edge jitter (amount=15) — font rendering sim",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -454,8 +523,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 3. Edge jitter — 30px amount
   {
-    name: 'edge-jitter-30',
-    description: 'Sub-pixel edge jitter (amount=30) — moderate rendering noise',
+    name: "edge-jitter-30",
+    description: "Sub-pixel edge jitter (amount=30) — moderate rendering noise",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -468,8 +537,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 4. Edge jitter — 50px amount
   {
-    name: 'edge-jitter-50',
-    description: 'Sub-pixel edge jitter (amount=50) — heavy rendering noise',
+    name: "edge-jitter-50",
+    description: "Sub-pixel edge jitter (amount=50) — heavy rendering noise",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -482,8 +551,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 5. Anti-aliasing fringe
   {
-    name: 'aa-fringe',
-    description: 'Anti-aliasing fringe differences (amount=80)',
+    name: "aa-fringe",
+    description: "Anti-aliasing fringe differences (amount=80)",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -496,8 +565,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 6. 1px layout shift
   {
-    name: '1px-shift',
-    description: '1px layout shift — entire content translated',
+    name: "1px-shift",
+    description: "1px layout shift — entire content translated",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -510,8 +579,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 7. Text-heavy UI with jitter + AA
   {
-    name: 'text-heavy-jitter-aa',
-    description: 'Text-heavy UI with jitter (20) + AA fringe (60)',
+    name: "text-heavy-jitter-aa",
+    description: "Text-heavy UI with jitter (20) + AA fringe (60)",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeTextHeavyImage(w, h),
@@ -526,23 +595,31 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 8. Mixed content — jitter + color shift in one region
   {
-    name: 'mixed-content',
-    description: 'Mixed: edge jitter (10) + color shift in sidebar',
+    name: "mixed-content",
+    description: "Mixed: edge jitter (10) + color shift in sidebar",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
     buildCurrent: (w, h) => {
       const img = makeUIImage(w, h);
       addSubPixelJitter(img, w, h, 10);
-      shiftRegionColor(img, w, h, { x: 0, y: 60, width: 220, height: h - 110 }, 15, -5, -10);
+      shiftRegionColor(
+        img,
+        w,
+        h,
+        { x: 0, y: 60, width: 220, height: h - 110 },
+        15,
+        -5,
+        -10,
+      );
       return img;
     },
   },
 
   // 9. Large content change — replacing most of the content area
   {
-    name: 'large-change',
-    description: 'Large content change — content area replaced',
+    name: "large-change",
+    description: "Large content change — content area replaced",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -563,8 +640,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 10. Small targeted change — single button color change
   {
-    name: 'small-targeted',
-    description: 'Small targeted change — single button color shift',
+    name: "small-targeted",
+    description: "Small targeted change — single button color shift",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => {
@@ -583,8 +660,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 11. Full page scroll difference
   {
-    name: 'scroll-diff',
-    description: 'Full page scroll — content shifted down by 80px',
+    name: "scroll-diff",
+    description: "Full page scroll — content shifted down by 80px",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
@@ -597,23 +674,43 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 12. Color temperature shift + gradient overlay
   {
-    name: 'color-temp-gradient',
-    description: 'Color temperature shift with gradient overlay',
+    name: "color-temp-gradient",
+    description: "Color temperature shift with gradient overlay",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => makeUIImage(w, h),
     buildCurrent: (w, h) => {
       const img = makeUIImage(w, h);
       // Apply a warm color tint to entire image
-      shiftRegionColor(img, w, h, { x: 0, y: 0, width: w, height: h }, 8, 3, -5);
+      shiftRegionColor(
+        img,
+        w,
+        h,
+        { x: 0, y: 0, width: w, height: h },
+        8,
+        3,
+        -5,
+      );
       // Overlay a subtle gradient from top to bottom
       for (let y = 0; y < h; y++) {
         const alpha = (y / (h - 1)) * 0.08; // max 8% opacity
         for (let x = 0; x < w; x++) {
           const idx = (y * w + x) * 4;
-          img[idx] = clamp(Math.round(img[idx] * (1 - alpha) + 255 * alpha), 0, 255);
-          img[idx + 1] = clamp(Math.round(img[idx + 1] * (1 - alpha) + 245 * alpha), 0, 255);
-          img[idx + 2] = clamp(Math.round(img[idx + 2] * (1 - alpha) + 230 * alpha), 0, 255);
+          img[idx] = clamp(
+            Math.round(img[idx] * (1 - alpha) + 255 * alpha),
+            0,
+            255,
+          );
+          img[idx + 1] = clamp(
+            Math.round(img[idx + 1] * (1 - alpha) + 245 * alpha),
+            0,
+            255,
+          );
+          img[idx + 2] = clamp(
+            Math.round(img[idx + 2] * (1 - alpha) + 230 * alpha),
+            0,
+            255,
+          );
         }
       }
       return img;
@@ -622,8 +719,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
   // 13. Border/shadow + font weight change
   {
-    name: 'border-shadow-font',
-    description: 'Border/shadow change + font weight simulation',
+    name: "border-shadow-font",
+    description: "Border/shadow change + font weight simulation",
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
     buildBaseline: (w, h) => {
@@ -667,7 +764,15 @@ const SCENARIOS: ScenarioDefinition[] = [
         for (let col = 0; col < 2; col++) {
           const cx = 240 + col * ((w - 260) / 2) + 5;
           const cy = 80 + row * 130;
-          shiftRegionColor(img, w, h, { x: cx + 10, y: cy + 18, width: 200, height: 88 }, -15, -15, -15);
+          shiftRegionColor(
+            img,
+            w,
+            h,
+            { x: cx + 10, y: cy + 18, width: 200, height: 88 },
+            -15,
+            -15,
+            -15,
+          );
         }
       }
       return img;
@@ -679,15 +784,15 @@ const SCENARIOS: ScenarioDefinition[] = [
 // Engines to benchmark
 // ---------------------------------------------------------------------------
 
-const ENGINES: DiffEngineType[] = ['pixelmatch', 'ssim', 'butteraugli'];
+const ENGINES: DiffEngineType[] = ["pixelmatch", "ssim", "butteraugli"];
 
 const TEXT_AWARE_OPTIONS: TextAwareDiffOptions = {
   textRegionThreshold: 0.3,
   nonTextThreshold: 0.1,
   textRegionPadding: 4,
   includeAntiAliasing: false,
-  textDetectionGranularity: 'word',
-  diffEngine: 'pixelmatch',
+  textDetectionGranularity: "word",
+  diffEngine: "pixelmatch",
 };
 
 // ---------------------------------------------------------------------------
@@ -711,7 +816,7 @@ interface ScenarioResult {
 
 async function runScenario(
   scenario: ScenarioDefinition,
-  engine: DiffEngineType
+  engine: DiffEngineType,
 ): Promise<ScenarioResult> {
   const { width, height, name } = scenario;
   const totalPixels = width * height;
@@ -728,12 +833,13 @@ async function runScenario(
       current,
       width,
       height,
-      0.1,  // threshold (only used by pixelmatch)
-      false // includeAA
+      0.1, // threshold (only used by pixelmatch)
+      false, // includeAA
     );
 
     const timeMs = Math.round((performance.now() - start) * 100) / 100;
-    const percentDiff = Math.round((result.diffPixelCount / totalPixels) * 10000) / 100;
+    const percentDiff =
+      Math.round((result.diffPixelCount / totalPixels) * 10000) / 100;
 
     return {
       scenario: name,
@@ -758,7 +864,7 @@ async function runScenario(
 }
 
 async function runTextAwareScenario(
-  scenario: ScenarioDefinition
+  scenario: ScenarioDefinition,
 ): Promise<ScenarioResult> {
   const { width, height, name } = scenario;
   const totalPixels = width * height;
@@ -774,15 +880,16 @@ async function runTextAwareScenario(
       current,
       width,
       height,
-      TEXT_AWARE_OPTIONS
+      TEXT_AWARE_OPTIONS,
     );
 
     const timeMs = Math.round((performance.now() - start) * 100) / 100;
-    const percentDiff = Math.round((result.diffPixelCount / totalPixels) * 10000) / 100;
+    const percentDiff =
+      Math.round((result.diffPixelCount / totalPixels) * 10000) / 100;
 
     return {
       scenario: name,
-      engine: 'text-aware',
+      engine: "text-aware",
       diffPixels: result.diffPixelCount,
       totalPixels,
       percentDiff,
@@ -796,7 +903,7 @@ async function runTextAwareScenario(
     const timeMs = Math.round((performance.now() - start) * 100) / 100;
     return {
       scenario: name,
-      engine: 'text-aware',
+      engine: "text-aware",
       diffPixels: 0,
       totalPixels,
       percentDiff: 0,
@@ -812,160 +919,182 @@ async function runTextAwareScenario(
 
 function formatResults(results: ScenarioResult[]): void {
   // ─── Table 1: Comparison table ───
-  console.log('\n' + '='.repeat(120));
-  console.log('  DIFF ENGINE BENCHMARK COMPARISON');
-  console.log('='.repeat(120));
-  console.log('  Engines: pixelmatch, ssim, butteraugli (+ text-aware where applicable)');
-  console.log('  Image size: ' + IMG_WIDTH + 'x' + IMG_HEIGHT + ' (' + (IMG_WIDTH * IMG_HEIGHT).toLocaleString() + ' pixels)');
-  console.log('  Scenarios: ' + SCENARIOS.length);
-  console.log('='.repeat(120));
+  console.log("\n" + "=".repeat(120));
+  console.log("  DIFF ENGINE BENCHMARK COMPARISON");
+  console.log("=".repeat(120));
+  console.log(
+    "  Engines: pixelmatch, ssim, butteraugli (+ text-aware where applicable)",
+  );
+  console.log(
+    "  Image size: " +
+      IMG_WIDTH +
+      "x" +
+      IMG_HEIGHT +
+      " (" +
+      (IMG_WIDTH * IMG_HEIGHT).toLocaleString() +
+      " pixels)",
+  );
+  console.log("  Scenarios: " + SCENARIOS.length);
+  console.log("=".repeat(120));
 
   const comparisonRows: ComparisonRow[] = [];
 
   for (const scenario of SCENARIOS) {
-    const scenarioResults = results.filter(r => r.scenario === scenario.name);
+    const scenarioResults = results.filter((r) => r.scenario === scenario.name);
     for (const r of scenarioResults) {
       comparisonRows.push({
         Scenario: r.scenario,
         Engine: r.engine,
-        'Diff Pixels': r.error ? -1 : r.diffPixels,
-        '% Diff': r.error ? `ERR: ${r.error}` : `${r.percentDiff}%`,
-        'Time (ms)': r.timeMs,
+        "Diff Pixels": r.error ? -1 : r.diffPixels,
+        "% Diff": r.error ? `ERR: ${r.error}` : `${r.percentDiff}%`,
+        "Time (ms)": r.timeMs,
       });
     }
   }
 
-  console.log('\n--- Comparison: Engine x Scenario ---\n');
+  console.log("\n--- Comparison: Engine x Scenario ---\n");
   console.table(comparisonRows);
 
   // ─── Table 2: Details (text-aware) ───
-  console.log('\n' + '-'.repeat(120));
-  console.log('  TEXT-AWARE DIFFING DETAILS');
-  console.log('-'.repeat(120));
+  console.log("\n" + "-".repeat(120));
+  console.log("  TEXT-AWARE DIFFING DETAILS");
+  console.log("-".repeat(120));
 
   const detailRows: DetailRow[] = [];
-  const textAwareResults = results.filter(r => r.engine === 'text-aware');
+  const textAwareResults = results.filter((r) => r.engine === "text-aware");
 
   if (textAwareResults.length === 0) {
-    console.log('  No text-aware scenarios were run.\n');
+    console.log("  No text-aware scenarios were run.\n");
   } else {
     for (const r of textAwareResults) {
       // Find the pixelmatch baseline for comparison
       const pmResult = results.find(
-        pr => pr.scenario === r.scenario && pr.engine === 'pixelmatch'
+        (pr) => pr.scenario === r.scenario && pr.engine === "pixelmatch",
       );
 
       detailRows.push({
         Scenario: r.scenario,
-        Engine: 'text-aware',
-        'Text Diff Px': r.textDiffPixels ?? 'N/A',
-        'Non-Text Diff Px': r.nonTextDiffPixels ?? 'N/A',
-        'OCR Regions': r.ocrRegions ?? 'N/A',
-        'OCR Time (ms)': r.ocrTimeMs ?? 'N/A',
+        Engine: "text-aware",
+        "Text Diff Px": r.textDiffPixels ?? "N/A",
+        "Non-Text Diff Px": r.nonTextDiffPixels ?? "N/A",
+        "OCR Regions": r.ocrRegions ?? "N/A",
+        "OCR Time (ms)": r.ocrTimeMs ?? "N/A",
       });
 
       // Also show the standard pixelmatch result for comparison
       if (pmResult) {
         detailRows.push({
           Scenario: r.scenario,
-          Engine: 'pixelmatch (baseline)',
-          'Text Diff Px': '-',
-          'Non-Text Diff Px': '-',
-          'OCR Regions': '-',
-          'OCR Time (ms)': '-',
+          Engine: "pixelmatch (baseline)",
+          "Text Diff Px": "-",
+          "Non-Text Diff Px": "-",
+          "OCR Regions": "-",
+          "OCR Time (ms)": "-",
         });
       }
     }
 
-    console.log('\n');
+    console.log("\n");
     console.table(detailRows);
   }
 
   // ─── Table 3: Summary ───
-  console.log('\n' + '-'.repeat(120));
-  console.log('  AGGREGATE SUMMARY');
-  console.log('-'.repeat(120));
+  console.log("\n" + "-".repeat(120));
+  console.log("  AGGREGATE SUMMARY");
+  console.log("-".repeat(120));
 
   const summaryRows: SummaryRow[] = [];
-  const allEngines = [...ENGINES, 'text-aware'] as const;
+  const allEngines = [...ENGINES, "text-aware"] as const;
 
   for (const engine of allEngines) {
-    const engineResults = results.filter(r => r.engine === engine && !r.error);
+    const engineResults = results.filter(
+      (r) => r.engine === engine && !r.error,
+    );
     if (engineResults.length === 0) continue;
 
-    const percentages = engineResults.map(r => r.percentDiff);
-    const times = engineResults.map(r => r.timeMs);
-    const avgPercent = percentages.reduce((a, b) => a + b, 0) / percentages.length;
+    const percentages = engineResults.map((r) => r.percentDiff);
+    const times = engineResults.map((r) => r.timeMs);
+    const avgPercent =
+      percentages.reduce((a, b) => a + b, 0) / percentages.length;
     const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
     const maxPercent = Math.max(...percentages);
     const minPercent = Math.min(...percentages);
 
     // Validate zero-diff scenarios
-    const zeroDiffScenarios = SCENARIOS.filter(s => s.expectZeroDiff);
-    const zeroDiffResults = engineResults.filter(r =>
-      zeroDiffScenarios.some(s => s.name === r.scenario)
+    const zeroDiffScenarios = SCENARIOS.filter((s) => s.expectZeroDiff);
+    const zeroDiffResults = engineResults.filter((r) =>
+      zeroDiffScenarios.some((s) => s.name === r.scenario),
     );
-    const zeroDiffPass = zeroDiffResults.every(r => r.diffPixels === 0);
+    const zeroDiffPass = zeroDiffResults.every((r) => r.diffPixels === 0);
 
     summaryRows.push({
       Engine: engine,
-      'Avg Diff %': `${(Math.round(avgPercent * 100) / 100).toFixed(2)}%`,
-      'Avg Time (ms)': `${(Math.round(avgTime * 100) / 100).toFixed(2)}`,
-      'Max Diff %': `${maxPercent}%`,
-      'Min Diff %': `${minPercent}%`,
-      'Scenarios Run': engineResults.length,
-      'Zero-Diff Pass': zeroDiffPass ? 'PASS' : 'FAIL',
+      "Avg Diff %": `${(Math.round(avgPercent * 100) / 100).toFixed(2)}%`,
+      "Avg Time (ms)": `${(Math.round(avgTime * 100) / 100).toFixed(2)}`,
+      "Max Diff %": `${maxPercent}%`,
+      "Min Diff %": `${minPercent}%`,
+      "Scenarios Run": engineResults.length,
+      "Zero-Diff Pass": zeroDiffPass ? "PASS" : "FAIL",
     });
   }
 
   // Calculate average diff reduction from text-aware vs pixelmatch
-  const textAwareWithPm = results.filter(r => r.engine === 'text-aware' && !r.error);
+  const textAwareWithPm = results.filter(
+    (r) => r.engine === "text-aware" && !r.error,
+  );
   if (textAwareWithPm.length > 0) {
     let totalReduction = 0;
     let comparisonCount = 0;
 
     for (const ta of textAwareWithPm) {
       const pm = results.find(
-        r => r.scenario === ta.scenario && r.engine === 'pixelmatch' && !r.error
+        (r) =>
+          r.scenario === ta.scenario && r.engine === "pixelmatch" && !r.error,
       );
       if (pm && pm.diffPixels > 0) {
-        const reduction = ((pm.diffPixels - ta.diffPixels) / pm.diffPixels) * 100;
+        const reduction =
+          ((pm.diffPixels - ta.diffPixels) / pm.diffPixels) * 100;
         totalReduction += reduction;
         comparisonCount++;
       }
     }
 
     if (comparisonCount > 0) {
-      const avgReduction = Math.round((totalReduction / comparisonCount) * 100) / 100;
-      console.log(`\n  Text-aware avg diff reduction vs pixelmatch: ${avgReduction}%`);
+      const avgReduction =
+        Math.round((totalReduction / comparisonCount) * 100) / 100;
+      console.log(
+        `\n  Text-aware avg diff reduction vs pixelmatch: ${avgReduction}%`,
+      );
     }
   }
 
-  console.log('\n');
+  console.log("\n");
   console.table(summaryRows);
 
   // Validate zero-diff scenarios across all engines
-  console.log('\n' + '-'.repeat(120));
-  console.log('  VALIDATION');
-  console.log('-'.repeat(120));
+  console.log("\n" + "-".repeat(120));
+  console.log("  VALIDATION");
+  console.log("-".repeat(120));
 
   let allValid = true;
   for (const scenario of SCENARIOS) {
     if (!scenario.expectZeroDiff) continue;
-    const scenarioResults = results.filter(r => r.scenario === scenario.name);
+    const scenarioResults = results.filter((r) => r.scenario === scenario.name);
     for (const r of scenarioResults) {
       if (r.diffPixels !== 0) {
-        console.log(`  FAIL: ${scenario.name} / ${r.engine} — expected 0 diff, got ${r.diffPixels}`);
+        console.log(
+          `  FAIL: ${scenario.name} / ${r.engine} — expected 0 diff, got ${r.diffPixels}`,
+        );
         allValid = false;
       }
     }
   }
 
   if (allValid) {
-    console.log('  All zero-diff validations passed.');
+    console.log("  All zero-diff validations passed.");
   }
 
-  console.log('\n' + '='.repeat(120) + '\n');
+  console.log("\n" + "=".repeat(120) + "\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -973,13 +1102,14 @@ function formatResults(results: ScenarioResult[]): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log('Diff Engine Benchmark Comparison');
-  console.log('Generating synthetic images and running comparisons...\n');
+  console.log("Diff Engine Benchmark Comparison");
+  console.log("Generating synthetic images and running comparisons...\n");
 
   const allResults: ScenarioResult[] = [];
   let completed = 0;
-  const total = SCENARIOS.length * ENGINES.length
-    + SCENARIOS.filter(s => s.textAware).length;
+  const total =
+    SCENARIOS.length * ENGINES.length +
+    SCENARIOS.filter((s) => s.textAware).length;
 
   for (const scenario of SCENARIOS) {
     // Run through all 3 engines
@@ -989,7 +1119,7 @@ async function main(): Promise<void> {
       completed++;
       process.stdout.write(
         `\r  Progress: ${completed}/${total} — ${scenario.name} / ${engine}` +
-        ' '.repeat(20)
+          " ".repeat(20),
       );
     }
 
@@ -1000,18 +1130,18 @@ async function main(): Promise<void> {
       completed++;
       process.stdout.write(
         `\r  Progress: ${completed}/${total} — ${scenario.name} / text-aware` +
-        ' '.repeat(20)
+          " ".repeat(20),
       );
     }
   }
 
   // Clear progress line
-  process.stdout.write('\r' + ' '.repeat(80) + '\r');
+  process.stdout.write("\r" + " ".repeat(80) + "\r");
 
   formatResults(allResults);
 }
 
 main().catch((err) => {
-  console.error('Benchmark failed:', err);
+  console.error("Benchmark failed:", err);
   process.exit(1);
 });

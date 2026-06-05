@@ -1,7 +1,14 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertOctagon,
   AlertTriangle,
@@ -22,9 +29,13 @@ import {
   XCircle,
   CheckCircle as CheckCircleIcon,
   Plus,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { closeIssueForCase, createIssueForCase, fetchLinkedIssueForCase } from '@/server/actions/verify-issues';
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  closeIssueForCase,
+  createIssueForCase,
+  fetchLinkedIssueForCase,
+} from "@/server/actions/verify-issues";
 import {
   addFocusRegion,
   removeFocusRegion,
@@ -32,7 +43,7 @@ import {
   removeIgnoreRegionForDiff,
   getFocusRegionsForDiff,
   getIgnoreRegionsForDiff,
-} from '@/server/actions/diffs';
+} from "@/server/actions/diffs";
 import {
   DrawLayer,
   FocusRegionOverlay,
@@ -40,8 +51,8 @@ import {
   RegionOverlay,
   type FocusRegionRect,
   type IgnoreRegionRect,
-} from '@/components/diff/slider-comparison';
-import { CheckModesDialog } from '@/components/verify/check-modes-dialog';
+} from "@/components/diff/slider-comparison";
+import { CheckModesDialog } from "@/components/verify/check-modes-dialog";
 import {
   classifyEvidenceWithMode,
   effectiveVerdict,
@@ -49,24 +60,34 @@ import {
   type CheckMode,
   type CheckModeMap,
   type CheckLayer,
-} from '@/lib/verify/check-modes';
-import { A11yComplianceCard } from '@/components/builds/a11y-compliance-card';
-import { A11yViolationsCard } from '@/components/builds/a11y-violations-card';
-import { DesignSystemComplianceCard } from '@/components/builds/design-system-compliance-card';
-import { DesignSystemViolationsCard } from '@/components/builds/design-system-violations-card';
-import { DesignSystemReviewPanel } from '@/components/builds/design-system-review-panel';
-import type { BuildA11yViolationRow, BuildDesignSystemViolationRow } from '@/lib/db/queries/builds';
+} from "@/lib/verify/check-modes";
+import { A11yComplianceCard } from "@/components/builds/a11y-compliance-card";
+import { A11yViolationsCard } from "@/components/builds/a11y-violations-card";
+import { DesignSystemComplianceCard } from "@/components/builds/design-system-compliance-card";
+import { DesignSystemViolationsCard } from "@/components/builds/design-system-violations-card";
+import { DesignSystemReviewPanel } from "@/components/builds/design-system-review-panel";
+import type {
+  BuildA11yViolationRow,
+  BuildDesignSystemViolationRow,
+} from "@/lib/db/queries/builds";
 import type {
   StepComparison,
   StepLayerFeedback,
   EvidenceLayer,
   StepIssueState,
-} from '@/lib/db/schema';
-import { deriveCaseStatus, type CaseStatus } from '@/lib/verify/case-status';
-import type { VisualDiffLite, TestResultLite } from './board-focus-client';
+} from "@/lib/db/schema";
+import { deriveCaseStatus, type CaseStatus } from "@/lib/verify/case-status";
+import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 
-interface AreaLite { id: string; name: string }
-interface TestLite { id: string; name: string; functionalAreaId: string | null }
+interface AreaLite {
+  id: string;
+  name: string;
+}
+interface TestLite {
+  id: string;
+  name: string;
+  functionalAreaId: string | null;
+}
 
 interface FocusViewProps {
   buildId: string;
@@ -90,11 +111,18 @@ interface FocusViewProps {
   statusFilter: Set<CaseStatus>;
   selectedStepId: string | null;
   onSelect: (id: string) => void;
-  onMarkDecision: (stepId: string, status: 'approved' | 'rejected' | 'snoozed') => void;
+  onMarkDecision: (
+    stepId: string,
+    status: "approved" | "rejected" | "snoozed",
+  ) => void;
   /** Per-evidence decision (Expected / Needs fix). Owns optimistic update +
    *  persistence at the BoardFocusClient level so the panel state never
    *  drifts from the board. */
-  onDecideLayer: (stepId: string, layer: EvidenceLayer, status: 'approved' | 'rejected' | 'snoozed') => void;
+  onDecideLayer: (
+    stepId: string,
+    layer: EvidenceLayer,
+    status: "approved" | "rejected" | "snoozed",
+  ) => void;
   /** Open the issue picker dialog for a specific case. The dialog itself is
    *  rendered once at the BoardFocusClient level. */
   onOpenIssuePicker: (stepId: string) => void;
@@ -111,12 +139,16 @@ interface FocusViewProps {
     totalRulesChecked: number | null;
     /** Per-token-value usage map summed across every test_result in the
      *  build. Drives the "Tokens in use" graphical review panel. */
-    tokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage | null;
+    tokenUsage?: import("@/lib/db/schema").DesignSystemTokenUsage | null;
     /** The repo's uploaded design-system bundle. Lets the review panel
      *  render the FULL palette (including unused tokens) — without this,
      *  the panel can only show what was rendered, not what's missing. */
-    config?: import('@/lib/db/schema').DesignSystemConfig | null;
-    trend: Array<{ id: string; designSystemScore: number | null; createdAt: Date | null }>;
+    config?: import("@/lib/db/schema").DesignSystemConfig | null;
+    trend: Array<{
+      id: string;
+      designSystemScore: number | null;
+      createdAt: Date | null;
+    }>;
     violations?: BuildDesignSystemViolationRow[];
   };
   buildA11y?: {
@@ -124,28 +156,32 @@ interface FocusViewProps {
     violationCount: number | null;
     criticalCount: number | null;
     totalRulesChecked: number | null;
-    trend: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+    trend: Array<{
+      id: string;
+      a11yScore: number | null;
+      createdAt: Date | null;
+    }>;
     violations?: BuildA11yViolationRow[];
   };
 }
 
-type CompareTab = EvidenceLayer | 'text' | 'run';
+type CompareTab = EvidenceLayer | "text" | "run";
 
 const COMPARE_TABS: { id: CompareTab; name: string }[] = [
-  { id: 'run',      name: 'Run' },
-  { id: 'visual',   name: 'Visual' },
-  { id: 'text',     name: 'Text' },
-  { id: 'dom',      name: 'DOM' },
-  { id: 'network',  name: 'Network' },
-  { id: 'console',  name: 'Console' },
-  { id: 'a11y',     name: 'A11y' },
-  { id: 'design',   name: 'Design' },
-  { id: 'perf',     name: 'Perf' },
-  { id: 'url',      name: 'URL' },
-  { id: 'variable', name: 'Variables' },
+  { id: "run", name: "Run" },
+  { id: "visual", name: "Visual" },
+  { id: "text", name: "Text" },
+  { id: "dom", name: "DOM" },
+  { id: "network", name: "Network" },
+  { id: "console", name: "Console" },
+  { id: "a11y", name: "A11y" },
+  { id: "design", name: "Design" },
+  { id: "perf", name: "Perf" },
+  { id: "url", name: "URL" },
+  { id: "variable", name: "Variables" },
 ];
 
-type LayerState = 'diff' | 'clean' | 'absent';
+type LayerState = "diff" | "clean" | "absent";
 
 /**
  * Classify each layer for the active step:
@@ -160,50 +196,62 @@ function classifyLayer(
   result: TestResultLite | null,
   visual: VisualDiffLite | null,
 ): LayerState {
-  if (layer !== 'text' && layer !== 'run' && step.evidence.some((e) => e.layer === layer)) return 'diff';
+  if (
+    layer !== "text" &&
+    layer !== "run" &&
+    step.evidence.some((e) => e.layer === layer)
+  )
+    return "diff";
   switch (layer) {
-    case 'run':
-      if (!result?.status) return 'absent';
-      if (result.status === 'failed') return 'diff';
-      return 'clean';
-    case 'visual':
+    case "run":
+      if (!result?.status) return "absent";
+      if (result.status === "failed") return "diff";
+      return "clean";
+    case "visual":
       // Visual is captured whenever a visual diff record exists for the step
       // (even with 0 px difference) or a screenshot was taken.
-      if (visual?.currentImagePath || visual?.baselineImagePath) return 'clean';
-      return 'absent';
-    case 'text': {
+      if (visual?.currentImagePath || visual?.baselineImagePath) return "clean";
+      return "absent";
+    case "text": {
       const s = visual?.textDiffStatus;
-      if (!s || s === 'skipped') return 'absent';
-      if (s === 'changed' || s === 'baseline_only' || s === 'current_only') return 'diff';
-      return 'clean';
+      if (!s || s === "skipped") return "absent";
+      if (s === "changed" || s === "baseline_only" || s === "current_only")
+        return "diff";
+      return "clean";
     }
-    case 'dom':
-      return result?.domSnapshot ? 'clean' : 'absent';
-    case 'network':
+    case "dom":
+      return result?.domSnapshot ? "clean" : "absent";
+    case "network":
       // Capture is automatic — once the test ran, "no requests" is a clean
       // signal, not an absent layer. Same for console/perf/url below.
-      if (!result?.status) return 'absent';
-      return 'clean';
-    case 'console':
-      if (!result?.status) return 'absent';
-      return 'clean';
-    case 'a11y':
+      if (!result?.status) return "absent";
+      return "clean";
+    case "console":
+      if (!result?.status) return "absent";
+      return "clean";
+    case "a11y":
       // A11y requires the enableA11y toggle, so null/null means *not* run.
-      return result?.a11yViolations != null || result?.a11yPassesCount != null ? 'clean' : 'absent';
-    case 'design':
+      return result?.a11yViolations != null || result?.a11yPassesCount != null
+        ? "clean"
+        : "absent";
+    case "design":
       // Same opt-in shape as a11y: only marked captured when the EB
       // harvester ran (violations array or rulesChecked is non-null).
-      return result?.designSystemViolations != null || result?.designSystemRulesChecked != null
-        ? 'clean'
-        : 'absent';
-    case 'perf':
-      if (!result?.status) return 'absent';
-      return 'clean';
-    case 'url':
-      if (!result?.status) return 'absent';
-      return 'clean';
-    case 'variable':
-      return (result?.extractedVariables != null || result?.assignedVariables != null) ? 'clean' : 'absent';
+      return result?.designSystemViolations != null ||
+        result?.designSystemRulesChecked != null
+        ? "clean"
+        : "absent";
+    case "perf":
+      if (!result?.status) return "absent";
+      return "clean";
+    case "url":
+      if (!result?.status) return "absent";
+      return "clean";
+    case "variable":
+      return result?.extractedVariables != null ||
+        result?.assignedVariables != null
+        ? "clean"
+        : "absent";
   }
 }
 
@@ -217,7 +265,7 @@ interface CaseRow {
   result: TestResultLite | null;
 }
 
-type RunStepStatus = 'passed' | 'changed' | 'flaky' | 'failed' | 'notrun';
+type RunStepStatus = "passed" | "changed" | "flaky" | "failed" | "notrun";
 
 interface RunStepCell {
   stepId: string;
@@ -229,15 +277,15 @@ interface RunStepCell {
 // Visual treatment per step status. `notrun` is intentionally muted: it means
 // the runner died before reaching the step, not "passed".
 const RUN_STEP_STYLE: Record<RunStepStatus, { dot: string; label: string }> = {
-  passed:  { dot: 'var(--c-teal)',  label: 'passed' },
-  changed: { dot: 'var(--c-amber)', label: 'changed' },
-  flaky:   { dot: 'var(--c-amber)', label: 'flaky' },
-  failed:  { dot: 'var(--c-red)',   label: 'failed' },
-  notrun:  { dot: 'var(--fg-3)',    label: 'not run' },
+  passed: { dot: "var(--c-teal)", label: "passed" },
+  changed: { dot: "var(--c-amber)", label: "changed" },
+  flaky: { dot: "var(--c-amber)", label: "flaky" },
+  failed: { dot: "var(--c-red)", label: "failed" },
+  notrun: { dot: "var(--fg-3)", label: "not run" },
 };
 
 export function FocusView(props: FocusViewProps) {
-  const [tab, setTab] = useState<CompareTab>('visual');
+  const [tab, setTab] = useState<CompareTab>("visual");
   // Issue panel is hidden by default — only opens when the reviewer takes a
   // negative action (Needs Improvement / Reject) or explicitly toggles it.
   const [intentOpen, setIntentOpen] = useState(false);
@@ -250,14 +298,20 @@ export function FocusView(props: FocusViewProps) {
   const cases = useMemo<CaseRow[]>(() => {
     const fbByStep = new Map<string, StepLayerFeedback[]>();
     for (const f of props.feedback) {
-      if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, []);
+      if (!fbByStep.has(f.stepComparisonId))
+        fbByStep.set(f.stepComparisonId, []);
       fbByStep.get(f.stepComparisonId)!.push(f);
     }
     const rows = props.steps.map((step) => {
       const stepFb = fbByStep.get(step.id) ?? [];
       const test = props.testById.get(step.testId) ?? null;
-      const isInChangedArea = !!(test?.functionalAreaId && props.changedAreaIds.has(test.functionalAreaId));
-      const result = step.testResultId ? props.testResultById.get(step.testResultId) ?? null : null;
+      const isInChangedArea = !!(
+        test?.functionalAreaId &&
+        props.changedAreaIds.has(test.functionalAreaId)
+      );
+      const result = step.testResultId
+        ? (props.testResultById.get(step.testResultId) ?? null)
+        : null;
       const modes = mergeWithTestOverrides(
         props.checkModes,
         test?.id ? props.checkModesByTestId[test.id] : null,
@@ -266,21 +320,26 @@ export function FocusView(props: FocusViewProps) {
         step,
         feedback: stepFb,
         isInChangedArea,
-        testFailed: result?.status === 'failed' || result?.status === 'setup_failed',
+        testFailed:
+          result?.status === "failed" || result?.status === "setup_failed",
         verdictOverride: effectiveVerdict(step.evidence, modes),
       });
-      const area = test?.functionalAreaId ? props.areaById.get(test.functionalAreaId) ?? null : null;
-      const visual = props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ''}`) ?? null;
+      const area = test?.functionalAreaId
+        ? (props.areaById.get(test.functionalAreaId) ?? null)
+        : null;
+      const visual =
+        props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ??
+        null;
       return { step, test, area, status, feedback: stepFb, visual, result };
     });
     // Keep all steps of a single test contiguous: sort by (testName ASC,
     // stepIndex ASC, stepLabel natural ASC). `stepIndex` is the source of
     // truth when present; stepLabel falls back to natural-collation (so
     // "step 2" sorts before "step 10").
-    const collator = new Intl.Collator('en', { numeric: true });
+    const collator = new Intl.Collator("en", { numeric: true });
     rows.sort((a, b) => {
-      const an = a.test?.name ?? '';
-      const bn = b.test?.name ?? '';
+      const an = a.test?.name ?? "";
+      const bn = b.test?.name ?? "";
       const byName = collator.compare(an, bn);
       if (byName !== 0) return byName;
       const ai = a.step.stepIndex;
@@ -288,10 +347,20 @@ export function FocusView(props: FocusViewProps) {
       if (ai != null && bi != null && ai !== bi) return ai - bi;
       if (ai != null && bi == null) return -1;
       if (ai == null && bi != null) return 1;
-      return collator.compare(a.step.stepLabel ?? '', b.step.stepLabel ?? '');
+      return collator.compare(a.step.stepLabel ?? "", b.step.stepLabel ?? "");
     });
     return rows;
-  }, [props.steps, props.feedback, props.testById, props.areaById, props.changedAreaIds, props.visualByStepKey, props.testResultById, props.checkModes, props.checkModesByTestId]);
+  }, [
+    props.steps,
+    props.feedback,
+    props.testById,
+    props.areaById,
+    props.changedAreaIds,
+    props.visualByStepKey,
+    props.testResultById,
+    props.checkModes,
+    props.checkModesByTestId,
+  ]);
 
   const visibleCases = useMemo(() => {
     if (props.statusFilter.size === 0) return cases;
@@ -301,15 +370,20 @@ export function FocusView(props: FocusViewProps) {
   const groupedByArea = useMemo(() => {
     const map = new Map<string, { area: AreaLite | null; rows: CaseRow[] }>();
     for (const c of visibleCases) {
-      const key = c.area?.id ?? '__unscoped__';
+      const key = c.area?.id ?? "__unscoped__";
       if (!map.has(key)) map.set(key, { area: c.area, rows: [] });
       map.get(key)!.rows.push(c);
     }
     return Array.from(map.values());
   }, [visibleCases]);
 
-  const activeCase = visibleCases.find((c) => c.step.id === props.selectedStepId) ?? visibleCases[0] ?? null;
-  const activeIdx = activeCase ? visibleCases.findIndex((c) => c.step.id === activeCase.step.id) : -1;
+  const activeCase =
+    visibleCases.find((c) => c.step.id === props.selectedStepId) ??
+    visibleCases[0] ??
+    null;
+  const activeIdx = activeCase
+    ? visibleCases.findIndex((c) => c.step.id === activeCase.step.id)
+    : -1;
 
   // Per-test step strip for the Run tab. Derives one cell per step of the
   // active test from `cases` (the full, unfiltered list — filter state on
@@ -326,24 +400,32 @@ export function FocusView(props: FocusViewProps) {
     const cells: RunStepCell[] = rows.map((c, i) => {
       const stepIdx = c.step.stepIndex ?? i;
       const cls = c.visual?.classification;
-      let status: RunStepStatus = 'passed';
-      if (c.step.verdict === 'red') status = 'failed';
-      else if (cls === 'changed') status = 'changed';
-      else if (cls === 'flaky') status = 'flaky';
-      else if (c.step.verdict === 'yellow') status = 'changed';
-      return { stepId: c.step.id, stepIndex: stepIdx, stepLabel: c.step.stepLabel, status };
+      let status: RunStepStatus = "passed";
+      if (c.step.verdict === "red") status = "failed";
+      else if (cls === "changed") status = "changed";
+      else if (cls === "flaky") status = "flaky";
+      else if (c.step.verdict === "yellow") status = "changed";
+      return {
+        stepId: c.step.id,
+        stepIndex: stepIdx,
+        stepLabel: c.step.stepLabel,
+        status,
+      };
     });
 
     const result = rows[0]?.result ?? null;
     const lastReached = result?.lastReachedStep ?? null;
-    const isFailed = result?.status === 'failed';
+    const isFailed = result?.status === "failed";
     if (lastReached != null && isFailed) {
       for (const cell of cells) {
         if (cell.stepIndex > lastReached + 1) {
-          cell.status = 'notrun';
-        } else if (cell.stepIndex === lastReached + 1 && cell.status === 'passed') {
+          cell.status = "notrun";
+        } else if (
+          cell.stepIndex === lastReached + 1 &&
+          cell.status === "passed"
+        ) {
           // Dying step: runner died before any verdict could be computed for it.
-          cell.status = 'failed';
+          cell.status = "failed";
         }
       }
     }
@@ -354,7 +436,8 @@ export function FocusView(props: FocusViewProps) {
     if (activeIdx > 0) props.onSelect(visibleCases[activeIdx - 1].step.id);
   }, [activeIdx, visibleCases, props]);
   const goNext = useCallback(() => {
-    if (activeIdx >= 0 && activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
+    if (activeIdx >= 0 && activeIdx < visibleCases.length - 1)
+      props.onSelect(visibleCases[activeIdx + 1].step.id);
   }, [activeIdx, visibleCases, props]);
   // After approving via hotkey we want the cursor to land on the next case
   // that still needs a decision — skipping anything already in `done` so the
@@ -362,15 +445,19 @@ export function FocusView(props: FocusViewProps) {
   const goNextUndecided = useCallback(() => {
     if (activeIdx < 0) return;
     for (let i = activeIdx + 1; i < visibleCases.length; i++) {
-      if (visibleCases[i].status !== 'done') {
+      if (visibleCases[i].status !== "done") {
         props.onSelect(visibleCases[i].step.id);
         return;
       }
     }
-    if (activeIdx < visibleCases.length - 1) props.onSelect(visibleCases[activeIdx + 1].step.id);
+    if (activeIdx < visibleCases.length - 1)
+      props.onSelect(visibleCases[activeIdx + 1].step.id);
   }, [activeIdx, visibleCases, props]);
 
-  const decideOneLayer = (layer: EvidenceLayer, status: 'approved' | 'rejected' | 'snoozed') => {
+  const decideOneLayer = (
+    layer: EvidenceLayer,
+    status: "approved" | "rejected" | "snoozed",
+  ) => {
     if (!activeCase) return;
     props.onDecideLayer(activeCase.step.id, layer, status);
   };
@@ -382,7 +469,10 @@ export function FocusView(props: FocusViewProps) {
   }, [activeCase, props]);
   const handleCloseIssue = async () => {
     if (!activeCase?.step.githubIssueUrl) return;
-    if (!confirm(`Close issue #${activeCase.step.githubIssueNumber} on GitHub?`)) return;
+    if (
+      !confirm(`Close issue #${activeCase.step.githubIssueNumber} on GitHub?`)
+    )
+      return;
     startTransition(async () => {
       const result = await closeIssueForCase(activeCase.step.id);
       if (!result.ok) alert(`Failed to close: ${result.error}`);
@@ -397,7 +487,7 @@ export function FocusView(props: FocusViewProps) {
   // keys inside the issue title/body or the filter search box.
   const handleOK = useCallback(() => {
     if (!activeCase) return;
-    props.onMarkDecision(activeCase.step.id, 'approved');
+    props.onMarkDecision(activeCase.step.id, "approved");
     goNextUndecided();
   }, [activeCase, props, goNextUndecided]);
 
@@ -409,7 +499,15 @@ export function FocusView(props: FocusViewProps) {
       // would swallow every hotkey once the slider grabs focus.
       const target = e.target;
       if (target instanceof HTMLInputElement) {
-        const textTypes = ['text', 'search', 'email', 'password', 'url', 'tel', 'number'];
+        const textTypes = [
+          "text",
+          "search",
+          "email",
+          "password",
+          "url",
+          "tel",
+          "number",
+        ];
         if (textTypes.includes(target.type)) return;
       } else if (target instanceof HTMLTextAreaElement) {
         return;
@@ -418,36 +516,36 @@ export function FocusView(props: FocusViewProps) {
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
-        case 'e':
-        case 'E':
+        case "e":
+        case "E":
           e.preventDefault();
           handleOK();
           break;
-        case 't':
-        case 'T':
+        case "t":
+        case "T":
           e.preventDefault();
           handleOpenPicker();
           break;
-        case 's':
-        case 'S':
+        case "s":
+        case "S":
           e.preventDefault();
           goNext();
           break;
-        case 'ArrowLeft':
+        case "ArrowLeft":
           e.preventDefault();
           goPrev();
           break;
-        case 'ArrowRight':
+        case "ArrowRight":
           e.preventDefault();
           goNext();
           break;
-        case 'Escape':
+        case "Escape":
           if (intentOpen) setIntentOpen(false);
           break;
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [handleOK, handleOpenPicker, goNext, goPrev, intentOpen]);
 
   // ---- Visual focus/ignore regions (same UX as the build diff page).
@@ -485,8 +583,24 @@ export function FocusView(props: FocusViewProps) {
           getIgnoreRegionsForDiff(activeVisualId),
         ]);
         if (cancelled) return;
-        setFocusRegions(fr.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
-        setIgnoreRegions(ir.map((r) => ({ id: r.id, x: r.x, y: r.y, width: r.width, height: r.height })));
+        setFocusRegions(
+          fr.map((r) => ({
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+          })),
+        );
+        setIgnoreRegions(
+          ir.map((r) => ({
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+          })),
+        );
       } catch {
         if (!cancelled) {
           setFocusRegions([]);
@@ -494,68 +608,110 @@ export function FocusView(props: FocusViewProps) {
         }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [activeVisualId]);
 
-  const handleFocusDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
-    if (!activeVisualId || regionPending) return;
-    setRegionPending(true);
-    try {
-      const created = await addFocusRegion(activeVisualId, rect);
-      setFocusRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
-      setDrawFocusMode(false);
-      toast.success('Focus region added');
-      props.onRefresh?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add focus region');
-    } finally {
-      setRegionPending(false);
-    }
-  }, [activeVisualId, regionPending, props]);
+  const handleFocusDrawn = useCallback(
+    async (rect: { x: number; y: number; width: number; height: number }) => {
+      if (!activeVisualId || regionPending) return;
+      setRegionPending(true);
+      try {
+        const created = await addFocusRegion(activeVisualId, rect);
+        setFocusRegions((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        ]);
+        setDrawFocusMode(false);
+        toast.success("Focus region added");
+        props.onRefresh?.();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to add focus region",
+        );
+      } finally {
+        setRegionPending(false);
+      }
+    },
+    [activeVisualId, regionPending, props],
+  );
 
-  const handleFocusDelete = useCallback(async (regionId: string) => {
-    if (regionPending) return;
-    setRegionPending(true);
-    setFocusRegions((prev) => prev.filter((r) => r.id !== regionId));
-    try {
-      await removeFocusRegion(regionId, activeVisualId ?? undefined);
-      props.onRefresh?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove focus region');
-    } finally {
-      setRegionPending(false);
-    }
-  }, [activeVisualId, regionPending, props]);
+  const handleFocusDelete = useCallback(
+    async (regionId: string) => {
+      if (regionPending) return;
+      setRegionPending(true);
+      setFocusRegions((prev) => prev.filter((r) => r.id !== regionId));
+      try {
+        await removeFocusRegion(regionId, activeVisualId ?? undefined);
+        props.onRefresh?.();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to remove focus region",
+        );
+      } finally {
+        setRegionPending(false);
+      }
+    },
+    [activeVisualId, regionPending, props],
+  );
 
-  const handleIgnoreDrawn = useCallback(async (rect: { x: number; y: number; width: number; height: number }) => {
-    if (!activeVisualId || regionPending) return;
-    setRegionPending(true);
-    try {
-      const created = await addIgnoreRegionForDiff(activeVisualId, rect);
-      setIgnoreRegions((prev) => [...prev, { id: created.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]);
-      setDrawIgnoreMode(false);
-      toast.success('Ignore region added — applies to every screenshot of this test');
-      props.onRefresh?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add ignore region');
-    } finally {
-      setRegionPending(false);
-    }
-  }, [activeVisualId, regionPending, props]);
+  const handleIgnoreDrawn = useCallback(
+    async (rect: { x: number; y: number; width: number; height: number }) => {
+      if (!activeVisualId || regionPending) return;
+      setRegionPending(true);
+      try {
+        const created = await addIgnoreRegionForDiff(activeVisualId, rect);
+        setIgnoreRegions((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        ]);
+        setDrawIgnoreMode(false);
+        toast.success(
+          "Ignore region added — applies to every screenshot of this test",
+        );
+        props.onRefresh?.();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to add ignore region",
+        );
+      } finally {
+        setRegionPending(false);
+      }
+    },
+    [activeVisualId, regionPending, props],
+  );
 
-  const handleIgnoreDelete = useCallback(async (regionId: string) => {
-    if (regionPending) return;
-    setRegionPending(true);
-    setIgnoreRegions((prev) => prev.filter((r) => r.id !== regionId));
-    try {
-      await removeIgnoreRegionForDiff(regionId, activeVisualId ?? undefined);
-      props.onRefresh?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove ignore region');
-    } finally {
-      setRegionPending(false);
-    }
-  }, [activeVisualId, regionPending, props]);
+  const handleIgnoreDelete = useCallback(
+    async (regionId: string) => {
+      if (regionPending) return;
+      setRegionPending(true);
+      setIgnoreRegions((prev) => prev.filter((r) => r.id !== regionId));
+      try {
+        await removeIgnoreRegionForDiff(regionId, activeVisualId ?? undefined);
+        props.onRefresh?.();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to remove ignore region",
+        );
+      } finally {
+        setRegionPending(false);
+      }
+    },
+    [activeVisualId, regionPending, props],
+  );
 
   const toggleDrawFocus = useCallback(() => {
     setDrawFocusMode((v) => !v);
@@ -567,16 +723,34 @@ export function FocusView(props: FocusViewProps) {
   }, []);
 
   return (
-    <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
       <CaseSidebar
         groupedByArea={groupedByArea}
         activeId={activeCase?.step.id ?? null}
         onPick={props.onSelect}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+        }}
+      >
         {/* Compare top bar */}
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="label" style={{ flexShrink: 0 }}>Verify · {activeCase?.area?.name ?? 'unscoped'}</span>
+        <div
+          style={{
+            padding: "10px 16px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--c-white)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span className="label" style={{ flexShrink: 0 }}>
+            Verify · {activeCase?.area?.name ?? "unscoped"}
+          </span>
           {activeCase?.test ? (
             // Link to the test definition so reviewers can jump to the code
             // / spec / vars tabs without losing the case context.
@@ -585,40 +759,73 @@ export function FocusView(props: FocusViewProps) {
               target="_blank"
               rel="noopener noreferrer"
               style={{
-                fontSize: 14, fontWeight: 600, color: 'var(--fg-1)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--fg-1)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
               }}
               title={`Open test ${activeCase.test.name}`}
             >
               {activeCase.test.name}
-              <ExternalLink size={11} style={{ color: 'var(--fg-3)', flexShrink: 0 }} />
+              <ExternalLink
+                size={11}
+                style={{ color: "var(--fg-3)", flexShrink: 0 }}
+              />
             </a>
           ) : (
-            <span style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               Pick a case from the sidebar
             </span>
           )}
           {activeCase && <StatusChipFor status={activeCase.status} />}
           {activeCase && <ErrorChip result={activeCase.result} />}
-          {activeCase?.step.githubIssueUrl && <IssueChipReal step={activeCase.step} />}
+          {activeCase?.step.githubIssueUrl && (
+            <IssueChipReal step={activeCase.step} />
+          )}
           <span style={{ flex: 1 }} />
-          <button className="v-btn sm" onClick={goPrev} disabled={activeIdx <= 0}>
-            <ChevronLeft size={12} />Prev<HotkeyHint keys="←" />
+          <button
+            className="v-btn sm"
+            onClick={goPrev}
+            disabled={activeIdx <= 0}
+          >
+            <ChevronLeft size={12} />
+            Prev
+            <HotkeyHint keys="←" />
           </button>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+          <span className="mono" style={{ fontSize: 11, color: "var(--fg-2)" }}>
             {activeIdx >= 0 ? activeIdx + 1 : 0} / {visibleCases.length}
           </span>
-          <button className="v-btn sm" onClick={goNext} disabled={activeIdx < 0 || activeIdx >= visibleCases.length - 1}>
-            Next<ChevronRight size={12} /><HotkeyHint keys="→ · s" />
+          <button
+            className="v-btn sm"
+            onClick={goNext}
+            disabled={activeIdx < 0 || activeIdx >= visibleCases.length - 1}
+          >
+            Next
+            <ChevronRight size={12} />
+            <HotkeyHint keys="→ · s" />
           </button>
           <button
-            className={'v-btn ' + (intentOpen ? 'tinted' : '')}
+            className={"v-btn " + (intentOpen ? "tinted" : "")}
             onClick={() => setIntentOpen((v) => !v)}
             aria-pressed={intentOpen}
           >
-            <Github size={13} />{intentOpen ? 'Hide issue' : 'Show issue'}
-            <HotkeyHint keys={intentOpen ? 'esc' : 't'} />
+            <Github size={13} />
+            {intentOpen ? "Hide issue" : "Show issue"}
+            <HotkeyHint keys={intentOpen ? "esc" : "t"} />
           </button>
         </div>
 
@@ -629,35 +836,56 @@ export function FocusView(props: FocusViewProps) {
             The leading "Run" tab covers runner-level outcome (status,
             error, duration), so a runner exception is one click away from
             every other layer. */}
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', gap: 6, alignItems: 'center', overflowX: 'auto' }}>
+        <div
+          style={{
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--c-white)",
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            overflowX: "auto",
+          }}
+        >
           {COMPARE_TABS.map((k) => {
             const isActive = tab === k.id;
             const layerState: LayerState = activeCase
-              ? classifyLayer(k.id, activeCase.step, activeCase.result, activeCase.visual)
-              : 'absent';
+              ? classifyLayer(
+                  k.id,
+                  activeCase.step,
+                  activeCase.result,
+                  activeCase.visual,
+                )
+              : "absent";
             // Matching evidence item (if any) carries the human-readable
             // reason + signal that drives the red-X "broken" treatment. Run
             // and Text aren't EvidenceLayer ids so they skip this lookup;
             // Run derives "broken" from result.status, Text from the visual
             // diff summary.
-            const evidenceItem = (k.id !== 'run' && k.id !== 'text' && activeCase?.step)
-              ? activeCase.step.evidence.find((e) => e.layer === k.id) ?? null
-              : null;
+            const evidenceItem =
+              k.id !== "run" && k.id !== "text" && activeCase?.step
+                ? (activeCase.step.evidence.find((e) => e.layer === k.id) ??
+                  null)
+                : null;
             // Run tab surfaces the failure message as its delta directly
             // from the test_result; other tabs use the step's layer deltas.
-            const delta = k.id === 'run'
-              ? (activeCase?.result?.status === 'failed'
-                  ? firstLine((activeCase.result?.errorMessage ?? '').trim() || 'failed')
-                  : null)
-              : k.id === 'text'
-                ? (() => {
-                    const s = activeCase?.visual?.textDiffSummary;
-                    if (!s || (s.added === 0 && s.removed === 0)) return null;
-                    return `+${s.added} −${s.removed}`;
-                  })()
-                : activeCase?.step
-                  ? layerDelta(activeCase.step, k.id)
-                  : null;
+            const delta =
+              k.id === "run"
+                ? activeCase?.result?.status === "failed"
+                  ? firstLine(
+                      (activeCase.result?.errorMessage ?? "").trim() ||
+                        "failed",
+                    )
+                  : null
+                : k.id === "text"
+                  ? (() => {
+                      const s = activeCase?.visual?.textDiffSummary;
+                      if (!s || (s.added === 0 && s.removed === 0)) return null;
+                      return `+${s.added} −${s.removed}`;
+                    })()
+                  : activeCase?.step
+                    ? layerDelta(activeCase.step, k.id)
+                    : null;
             // "Broken" vs "warned" depends on (1) the evidence signal, and
             // (2) the per-layer 3-way mode. Per-test overrides win for any
             // layer the test opted out of; layers the test didn't touch
@@ -672,147 +900,199 @@ export function FocusView(props: FocusViewProps) {
             const perTestMode = tid ? props.checkModesByTestId[tid] : undefined;
             const layerKey = k.id as CheckLayer;
             const layerMode: CheckMode | null =
-              k.id === 'run' || k.id === 'text'
+              k.id === "run" || k.id === "text"
                 ? null
                 : (perTestMode?.[layerKey] ?? props.checkModes[layerKey]);
             let broken = false;
             let warned = false;
-            if (k.id === 'run') {
-              broken = activeCase?.result?.status === 'failed';
-            } else if (k.id === 'text') {
+            if (k.id === "run") {
+              broken = activeCase?.result?.status === "failed";
+            } else if (k.id === "text") {
               // Text uses the visual diff summary as its signal (existing
               // behavior). Mode === 'log' downgrades to amber.
               const summary = activeCase?.visual?.textDiffSummary;
-              const hasDiff = summary && (summary.added > 0 || summary.removed > 0);
+              const hasDiff =
+                summary && (summary.added > 0 || summary.removed > 0);
               if (hasDiff) {
                 const tMode = perTestMode?.text ?? props.checkModes.text;
-                if (tMode === 'enforce') broken = true;
-                else if (tMode === 'log') warned = true;
+                if (tMode === "enforce") broken = true;
+                else if (tMode === "log") warned = true;
               }
-            } else if (evidenceItem?.signal === 'high' && layerMode) {
-              const verdict = classifyEvidenceWithMode(layerMode, 'high');
-              broken = verdict === 'broken';
-              warned = verdict === 'warned';
+            } else if (evidenceItem?.signal === "high" && layerMode) {
+              const verdict = classifyEvidenceWithMode(layerMode, "high");
+              broken = verdict === "broken";
+              warned = verdict === "warned";
             }
             const modeSource = perTestMode?.[layerKey]
-              ? 'per-test override'
-              : 'configured in Run Variables';
-            const modeNote = layerMode && (broken || warned)
-              ? (broken
+              ? "per-test override"
+              : "configured in Run Variables";
+            const modeNote =
+              layerMode && (broken || warned)
+                ? broken
                   ? ` · ${k.name} is set to Enforce (${modeSource})`
-                  : ` · ${k.name} is set to Log only so the runner surfaced this without failing the test (${modeSource})`)
-              : '';
-            const reason = k.id === 'run'
-              ? ((activeCase?.result?.errorMessage ?? '').trim() || 'Test failed')
-              : evidenceItem?.summary
-                ? `${evidenceItem.summary}${modeNote}`
-                : (delta ? `${k.name}: ${delta}${modeNote}` : null);
+                  : ` · ${k.name} is set to Log only so the runner surfaced this without failing the test (${modeSource})`
+                : "";
+            const reason =
+              k.id === "run"
+                ? (activeCase?.result?.errorMessage ?? "").trim() ||
+                  "Test failed"
+                : evidenceItem?.summary
+                  ? `${evidenceItem.summary}${modeNote}`
+                  : delta
+                    ? `${k.name}: ${delta}${modeNote}`
+                    : null;
             // All tabs clickable — `absent` panes explain *why* the layer
             // isn't captured + how to enable it, which is more useful than
             // a disabled button.
             const tabBorder = isActive
-              ? 'color-mix(in oklab, var(--c-teal) 22%, transparent)'
+              ? "color-mix(in oklab, var(--c-teal) 22%, transparent)"
               : broken
-                ? 'color-mix(in oklab, var(--c-red) 30%, transparent)'
+                ? "color-mix(in oklab, var(--c-red) 30%, transparent)"
                 : warned
-                  ? 'color-mix(in oklab, var(--c-amber) 30%, transparent)'
-                  : 'var(--border)';
+                  ? "color-mix(in oklab, var(--c-amber) 30%, transparent)"
+                  : "var(--border)";
             const tabColor = isActive
-              ? '#1F7B66'
-              : layerState === 'absent' ? 'var(--fg-4)' : 'var(--fg-2)';
+              ? "#1F7B66"
+              : layerState === "absent"
+                ? "var(--fg-4)"
+                : "var(--fg-2)";
             return (
-              <span key={k.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-              <button
-                onClick={() => setTab(k.id)}
-                title={reason ?? `${k.name} — ${layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
-                style={{
-                  padding: '6px 10px', borderRadius: 6, fontSize: 12,
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  minHeight: 32,
-                  background: isActive
-                    ? 'color-mix(in oklab, var(--c-teal) 12%, white)'
-                    : broken
-                      ? 'color-mix(in oklab, var(--c-red) 6%, white)'
-                      : warned
-                        ? 'color-mix(in oklab, var(--c-amber) 6%, white)'
-                        : 'transparent',
-                  border: `1px solid ${tabBorder}`,
-                  color: tabColor,
-                  fontWeight: isActive ? 600 : 400,
-                  opacity: layerState === 'absent' ? 0.55 : 1,
-                }}
-                aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ''}` : warned ? `warning: ${reason ?? ''}` : layerState === 'diff' ? 'diff' : layerState === 'clean' ? 'no diff (captured)' : 'not captured'}`}
+              <span
+                key={k.id}
+                style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
               >
-                <span>{k.name}</span>
-                {/* Broken pill: red X with the evidence summary as the
+                <button
+                  onClick={() => setTab(k.id)}
+                  title={
+                    reason ??
+                    `${k.name} — ${layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : "not captured"}`
+                  }
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    minHeight: 32,
+                    background: isActive
+                      ? "color-mix(in oklab, var(--c-teal) 12%, white)"
+                      : broken
+                        ? "color-mix(in oklab, var(--c-red) 6%, white)"
+                        : warned
+                          ? "color-mix(in oklab, var(--c-amber) 6%, white)"
+                          : "transparent",
+                    border: `1px solid ${tabBorder}`,
+                    color: tabColor,
+                    fontWeight: isActive ? 600 : 400,
+                    opacity: layerState === "absent" ? 0.55 : 1,
+                  }}
+                  aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ""}` : warned ? `warning: ${reason ?? ""}` : layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : "not captured"}`}
+                >
+                  <span>{k.name}</span>
+                  {/* Broken pill: red X with the evidence summary as the
                     mouseover reason. Used when the layer evidence is high
                     signal AND the error mode is "fail" (or non-configurable
                     layers default to broken). */}
-                {broken && (
-                  <span
-                    title={reason ?? 'Test failed'}
-                    aria-label={reason ?? 'Test failed'}
-                    style={{
-                      width: 14, height: 14, borderRadius: '50%',
-                      background: 'color-mix(in oklab, var(--c-red) 16%, white)',
-                      color: 'var(--c-red)',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, lineHeight: 1, fontWeight: 700,
-                      flexShrink: 0,
-                    }}
-                  >
-                    ✕
-                  </span>
-                )}
-                {/* Warned pill: amber ⚠ when the layer evidence is high
+                  {broken && (
+                    <span
+                      title={reason ?? "Test failed"}
+                      aria-label={reason ?? "Test failed"}
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        background:
+                          "color-mix(in oklab, var(--c-red) 16%, white)",
+                        color: "var(--c-red)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 10,
+                        lineHeight: 1,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      ✕
+                    </span>
+                  )}
+                  {/* Warned pill: amber ⚠ when the layer evidence is high
                     signal but the error mode is "warn only" — the runner
                     logged it without failing the test, so the reviewer sees
                     it as a soft signal, not a regression. */}
-                {warned && (
-                  <span
-                    title={reason ?? 'Warning'}
-                    aria-label={reason ?? 'Warning'}
-                    style={{
-                      width: 14, height: 14, borderRadius: '50%',
-                      background: 'color-mix(in oklab, var(--c-amber) 18%, white)',
-                      color: '#8C5C19',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, lineHeight: 1, fontWeight: 700,
-                      flexShrink: 0,
-                    }}
-                  >
-                    ⚠
-                  </span>
-                )}
-                {/* Numeric/structured delta — kept alongside the broken/warn
+                  {warned && (
+                    <span
+                      title={reason ?? "Warning"}
+                      aria-label={reason ?? "Warning"}
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        background:
+                          "color-mix(in oklab, var(--c-amber) 18%, white)",
+                        color: "#8C5C19",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 10,
+                        lineHeight: 1,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      ⚠
+                    </span>
+                  )}
+                  {/* Numeric/structured delta — kept alongside the broken/warn
                     pill so reviewers see both the signal and the magnitude
                     (e.g. "Network ✕ +2 −1"). Skipped on Run since the X
                     already encodes the failure. */}
-                {k.id !== 'run' && layerState === 'diff' && delta !== null && (
-                  <span
-                    className="mono"
-                    style={{ fontSize: 10, color: broken ? 'var(--c-red)' : warned ? '#8C5C19' : 'var(--fg-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    title={reason ?? delta}
-                  >
-                    {delta}
-                  </span>
-                )}
-                {layerState === 'clean' && !broken && !warned && (
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 14, height: 14, borderRadius: '50%',
-                      background: 'color-mix(in oklab, var(--c-teal) 16%, white)',
-                      color: '#1F7B66',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, lineHeight: 1, fontWeight: 700,
-                    }}
-                  >
-                    ✓
-                  </span>
-                )}
-              </button>
+                  {k.id !== "run" &&
+                    layerState === "diff" &&
+                    delta !== null && (
+                      <span
+                        className="mono"
+                        style={{
+                          fontSize: 10,
+                          color: broken
+                            ? "var(--c-red)"
+                            : warned
+                              ? "#8C5C19"
+                              : "var(--fg-3)",
+                          maxWidth: 220,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={reason ?? delta}
+                      >
+                        {delta}
+                      </span>
+                    )}
+                  {layerState === "clean" && !broken && !warned && (
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        background:
+                          "color-mix(in oklab, var(--c-teal) 16%, white)",
+                        color: "#1F7B66",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 10,
+                        lineHeight: 1,
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✓
+                    </span>
+                  )}
+                </button>
               </span>
             );
           })}
@@ -828,12 +1108,16 @@ export function FocusView(props: FocusViewProps) {
             title="Configure how each check signals failures (Enforce / Log / Disable)"
             aria-label="Configure check modes"
             style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 32, height: 32, borderRadius: 6,
-              color: 'var(--fg-2)',
-              border: '1px solid var(--border)',
-              background: 'var(--c-white)',
-              cursor: 'pointer',
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+              color: "var(--fg-2)",
+              border: "1px solid var(--border)",
+              background: "var(--c-white)",
+              cursor: "pointer",
               flexShrink: 0,
             }}
           >
@@ -842,7 +1126,14 @@ export function FocusView(props: FocusViewProps) {
         </div>
 
         {/* Compare pane */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}
+        >
           <ComparePane
             tab={tab}
             step={activeCase?.step ?? null}
@@ -850,8 +1141,13 @@ export function FocusView(props: FocusViewProps) {
             result={activeCase?.result ?? null}
             layerState={
               activeCase
-                ? classifyLayer(tab, activeCase.step, activeCase.result, activeCase.visual)
-                : 'absent'
+                ? classifyLayer(
+                    tab,
+                    activeCase.step,
+                    activeCase.result,
+                    activeCase.visual,
+                  )
+                : "absent"
             }
             runStepCells={runStepCells}
             activeStepId={activeCase?.step.id ?? null}
@@ -883,10 +1179,23 @@ export function FocusView(props: FocusViewProps) {
             an active highlight, even when the user revisits a case already
             sorted into one of the columns. The latter two auto-open the
             Issue panel so the reviewer can compose context. */}
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--c-white)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div
+          style={{
+            padding: "12px 16px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--c-white)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
           {(() => {
             const cur = activeCase?.status ?? null;
-            const decide = (status: 'approved' | 'snoozed' | 'rejected', revealIssue: boolean) => {
+            const decide = (
+              status: "approved" | "snoozed" | "rejected",
+              revealIssue: boolean,
+            ) => {
               if (!activeCase) return;
               props.onMarkDecision(activeCase.step.id, status);
               if (revealIssue) setIntentOpen(true);
@@ -897,49 +1206,56 @@ export function FocusView(props: FocusViewProps) {
                   label="OK"
                   icon={<Check size={13} />}
                   tone="success"
-                  active={cur === 'done'}
+                  active={cur === "done"}
                   disabled={pending || !activeCase}
-                  onClick={() => decide('approved', false)}
+                  onClick={() => decide("approved", false)}
                   hotkey="e"
                 />
                 <TriageButton
                   label="Needs Improvement"
                   icon={<AlertTriangle size={13} />}
                   tone="warning"
-                  active={cur === 'missed'}
+                  active={cur === "missed"}
                   disabled={pending || !activeCase}
-                  onClick={() => decide('snoozed', true)}
+                  onClick={() => decide("snoozed", true)}
                 />
                 <TriageButton
                   label="Reject"
                   icon={<AlertOctagon size={13} />}
                   tone="danger"
-                  active={cur === 'regression'}
+                  active={cur === "regression"}
                   disabled={pending || !activeCase}
-                  onClick={() => decide('rejected', true)}
+                  onClick={() => decide("rejected", true)}
                 />
               </>
             );
           })()}
           <span style={{ flex: 1 }} />
-          {activeCase?.step.githubIssueUrl && activeCase.step.githubIssueState !== 'closed' && (
-            <button className="v-btn ghost" disabled={pending} onClick={handleCloseIssue} style={{ minWidth: 0 }}>
-              <CheckCircleIcon size={13} />Close issue
-            </button>
-          )}
+          {activeCase?.step.githubIssueUrl &&
+            activeCase.step.githubIssueState !== "closed" && (
+              <button
+                className="v-btn ghost"
+                disabled={pending}
+                onClick={handleCloseIssue}
+                style={{ minWidth: 0 }}
+              >
+                <CheckCircleIcon size={13} />
+                Close issue
+              </button>
+            )}
           <span className="label">
-            {activeCase?.feedback.length ?? 0} layer decision{activeCase?.feedback.length === 1 ? '' : 's'} on this case
+            {activeCase?.feedback.length ?? 0} layer decision
+            {activeCase?.feedback.length === 1 ? "" : "s"} on this case
           </span>
         </div>
-
       </div>
 
       <IntentPanel
         open={intentOpen}
         onClose={() => setIntentOpen(false)}
         activeCase={activeCase}
-        onApproveLayer={(layer) => decideOneLayer(layer, 'approved')}
-        onRejectLayer={(layer) => decideOneLayer(layer, 'rejected')}
+        onApproveLayer={(layer) => decideOneLayer(layer, "approved")}
+        onRejectLayer={(layer) => decideOneLayer(layer, "rejected")}
         onOpenPicker={handleOpenPicker}
         onCloseIssue={handleCloseIssue}
         onAfterCreate={props.onRefresh}
@@ -956,42 +1272,47 @@ export function FocusView(props: FocusViewProps) {
 }
 
 function layerDelta(step: StepComparison, layer: CompareTab): string | null {
-  if (layer === 'text') return null;
+  if (layer === "text") return null;
   const layers = step.layers;
   switch (layer) {
-    case 'visual': {
+    case "visual": {
       const v = layers?.visual;
       if (!v) return null;
-      return v.percentageDifference != null ? `${v.percentageDifference}%` : `${v.pixelDifference} px`;
+      return v.percentageDifference != null
+        ? `${v.percentageDifference}%`
+        : `${v.pixelDifference} px`;
     }
-    case 'dom': return layers?.dom ? 'Δ' : null;
-    case 'network': {
+    case "dom":
+      return layers?.dom ? "Δ" : null;
+    case "network": {
       const n = layers?.network;
       if (!n) return null;
       // Prefer endpoint counts; fall back to raw counts for pre-migration rows.
       return `+${n.addedEndpoints ?? n.added} −${n.removedEndpoints ?? n.removed}`;
     }
-    case 'console': {
+    case "console": {
       const c = layers?.consoleDiff;
       if (!c) return null;
-      return c.newFingerprints.length > 0 ? `${c.newFingerprints.length} new` : '0';
+      return c.newFingerprints.length > 0
+        ? `${c.newFingerprints.length} new`
+        : "0";
     }
-    case 'a11y': {
+    case "a11y": {
       const a = layers?.a11y;
       if (!a) return null;
       return `${a.newViolations.length}`;
     }
-    case 'perf': {
+    case "perf": {
       const p = layers?.perf;
       if (!p) return null;
       return `${p.deltas.length} Δ`;
     }
-    case 'url': {
+    case "url": {
       const u = layers?.url;
       if (!u) return null;
       return `${u.divergedSteps.length} div`;
     }
-    case 'variable': {
+    case "variable": {
       const v = layers?.variable;
       if (!v) return null;
       return `Δ ${v.changes.length}`;
@@ -1015,16 +1336,16 @@ function HotkeyHint({ keys, className }: { keys: string; className?: string }) {
       className={className}
       style={{
         marginLeft: 4,
-        padding: '0 4px',
-        fontFamily: 'var(--font-mono)',
+        padding: "0 4px",
+        fontFamily: "var(--font-mono)",
         fontSize: 9,
-        lineHeight: '14px',
+        lineHeight: "14px",
         // Solid ink ≥ AA on the soft-2 / chip backgrounds where the hint
         // appears. The earlier var(--fg-3) + opacity 0.85 combo blended to
         // ~3.6:1 and tripped axe's color-contrast rule even though the
         // element is aria-hidden.
-        color: 'var(--c-ink)',
-        background: 'color-mix(in oklab, var(--c-ink) 8%, transparent)',
+        color: "var(--c-ink)",
+        background: "color-mix(in oklab, var(--c-ink) 8%, transparent)",
         borderRadius: 3,
       }}
     >
@@ -1034,11 +1355,17 @@ function HotkeyHint({ keys, className }: { keys: string; className?: string }) {
 }
 
 function TriageButton({
-  label, icon, tone, active, disabled, onClick, hotkey,
+  label,
+  icon,
+  tone,
+  active,
+  disabled,
+  onClick,
+  hotkey,
 }: {
   label: string;
   icon: React.ReactNode;
-  tone: 'success' | 'warning' | 'danger';
+  tone: "success" | "warning" | "danger";
   active: boolean;
   disabled: boolean;
   onClick: () => void;
@@ -1046,16 +1373,20 @@ function TriageButton({
   hotkey?: string;
 }) {
   const baseColor =
-    tone === 'success' ? 'var(--c-teal)' :
-    tone === 'warning' ? 'var(--c-amber)' :
-    'var(--c-red)';
+    tone === "success"
+      ? "var(--c-teal)"
+      : tone === "warning"
+        ? "var(--c-amber)"
+        : "var(--c-red)";
   // Text-only deep-shade tokens guarantee AA 4.5:1 on the tinted button
   // surface. Using the brand base (var(--c-red), etc.) as foreground was
   // ~3.2:1 on the active-state mid-tint — axe-core flagged it.
   const fg =
-    tone === 'success' ? 'var(--c-teal-text)' :
-    tone === 'warning' ? 'var(--c-amber-text)' :
-    'var(--c-red-text)';
+    tone === "success"
+      ? "var(--c-teal-text)"
+      : tone === "warning"
+        ? "var(--c-amber-text)"
+        : "var(--c-red-text)";
   return (
     <button
       type="button"
@@ -1064,26 +1395,28 @@ function TriageButton({
       aria-pressed={active}
       title={active ? `Currently marked ${label}` : `Mark ${label}`}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         gap: 8,
-        padding: '8px 14px',
+        padding: "8px 14px",
         borderRadius: 8,
         minWidth: 132,
         fontSize: 13,
         fontWeight: active ? 600 : 500,
         lineHeight: 1,
-        fontFamily: 'var(--font-sans)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontFamily: "var(--font-sans)",
+        cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.55 : 1,
         background: active
           ? `color-mix(in oklab, ${baseColor} 22%, white)`
           : `color-mix(in oklab, ${baseColor} 8%, white)`,
         border: `1px solid color-mix(in oklab, ${baseColor} ${active ? 55 : 25}%, transparent)`,
         color: fg,
-        boxShadow: active ? `inset 0 0 0 1px color-mix(in oklab, ${baseColor} 35%, transparent)` : undefined,
-        transition: 'background 120ms ease, border-color 120ms ease',
+        boxShadow: active
+          ? `inset 0 0 0 1px color-mix(in oklab, ${baseColor} 35%, transparent)`
+          : undefined,
+        transition: "background 120ms ease, border-color 120ms ease",
       }}
     >
       {icon}
@@ -1093,14 +1426,14 @@ function TriageButton({
         <span
           aria-hidden
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
             width: 14,
             height: 14,
-            borderRadius: '50%',
+            borderRadius: "50%",
             background: baseColor,
-            color: 'white',
+            color: "white",
             fontSize: 9,
             fontWeight: 700,
             lineHeight: 1,
@@ -1115,9 +1448,17 @@ function TriageButton({
 
 function StatusChipFor({ status }: { status: CaseStatus }) {
   const labels: Record<CaseStatus, string> = {
-    regression: 'Broken', done: 'Verified', missed: 'Missed', unknown: 'Unsorted',
+    regression: "Broken",
+    done: "Verified",
+    missed: "Missed",
+    unknown: "Unsorted",
   };
-  return <span className={`v-chip ${status}`}><span className="dot" />{labels[status]}</span>;
+  return (
+    <span className={`v-chip ${status}`}>
+      <span className="dot" />
+      {labels[status]}
+    </span>
+  );
 }
 
 /** Hard-failure chip — shown whenever the underlying test_result.status is
@@ -1125,14 +1466,21 @@ function StatusChipFor({ status }: { status: CaseStatus }) {
  *  full error sits in the native title tooltip so reviewers don't have to
  *  drill anywhere to see it. */
 function ErrorChip({ result }: { result: TestResultLite | null }) {
-  if (!result || result.status !== 'failed') return null;
-  const msg = (result.errorMessage ?? '').trim();
-  const summary = msg.length > 0 ? firstLine(msg) : 'test failed';
-  const tooltip = msg.length > 0 ? msg : 'Test failed (no error message captured)';
+  if (!result || result.status !== "failed") return null;
+  const msg = (result.errorMessage ?? "").trim();
+  const summary = msg.length > 0 ? firstLine(msg) : "test failed";
+  const tooltip =
+    msg.length > 0 ? msg : "Test failed (no error message captured)";
   return (
     <span
       className="v-chip regression"
-      style={{ flexShrink: 0, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      style={{
+        flexShrink: 0,
+        maxWidth: 220,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}
       title={tooltip}
     >
       <AlertOctagon size={11} />
@@ -1143,27 +1491,30 @@ function ErrorChip({ result }: { result: TestResultLite | null }) {
 
 function firstLine(s: string): string {
   const line = s.split(/\r?\n/, 1)[0] ?? s;
-  return line.length > 64 ? line.slice(0, 61) + '…' : line;
+  return line.length > 64 ? line.slice(0, 61) + "…" : line;
 }
 
 function IssueChipReal({ step }: { step: StepComparison }) {
   if (!step.githubIssueUrl) return null;
   const state = step.githubIssueState as StepIssueState | null;
   const cls =
-    state === 'auto' ? 'regression' :
-    state === 'open' ? 'missed' :
-    state === 'closed' ? 'done' :
-    'info';
+    state === "auto"
+      ? "regression"
+      : state === "open"
+        ? "missed"
+        : state === "closed"
+          ? "done"
+          : "info";
   return (
     <a
       href={step.githubIssueUrl}
       target="_blank"
       rel="noopener noreferrer"
       className={`v-chip ${cls}`}
-      style={{ textDecoration: 'none', cursor: 'pointer', flexShrink: 0 }}
+      style={{ textDecoration: "none", cursor: "pointer", flexShrink: 0 }}
       title="Open issue on GitHub"
     >
-      <CircleDot size={11} />#{step.githubIssueNumber} · {state ?? 'linked'}
+      <CircleDot size={11} />#{step.githubIssueNumber} · {state ?? "linked"}
     </a>
   );
 }
@@ -1177,80 +1528,166 @@ interface CaseSidebarProps {
 function CaseSidebar({ groupedByArea, activeId, onPick }: CaseSidebarProps) {
   const total = groupedByArea.reduce((n, g) => n + g.rows.length, 0);
   return (
-    <div style={{ width: 260, background: 'var(--c-white)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div
+      style={{
+        width: 260,
+        background: "var(--c-white)",
+        borderRight: "1px solid var(--border)",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
         <Search size={13} aria-hidden />
         <span className="label" style={{ fontSize: 10 }}>
           {total} cases · grouped by area
         </span>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: "auto" }}>
         {groupedByArea.length === 0 && (
-          <div className="label" style={{ padding: 16, textAlign: 'center' }}>no cases</div>
+          <div className="label" style={{ padding: 16, textAlign: "center" }}>
+            no cases
+          </div>
         )}
         {groupedByArea.map((g, i) => (
           <details key={g.area?.id ?? `g${i}`} open>
             <summary
               style={{
-                padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6,
-                background: 'var(--c-soft)', borderBottom: '1px solid var(--border)',
-                listStyle: 'none', cursor: 'pointer',
+                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "var(--c-soft)",
+                borderBottom: "1px solid var(--border)",
+                listStyle: "none",
+                cursor: "pointer",
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600 }}>{g.area?.name ?? 'Unscoped'}</span>
-              <span className="label" style={{ fontSize: 9, marginLeft: 'auto' }}>{g.rows.length}</span>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>
+                {g.area?.name ?? "Unscoped"}
+              </span>
+              <span
+                className="label"
+                style={{ fontSize: 9, marginLeft: "auto" }}
+              >
+                {g.rows.length}
+              </span>
             </summary>
             {g.rows.map((row) => {
               const active = row.step.id === activeId;
               // Hard test failures get a red dot even if the derived case
               // status hasn't classified them yet — the runner threw, so the
               // case is broken regardless of any layer evidence.
-              const failed = row.result?.status === 'failed';
-              const dotColor =
-                failed ? 'var(--c-red)' :
-                row.status === 'regression' ? 'var(--c-red)' :
-                row.status === 'done' ? 'var(--c-teal)' :
-                row.status === 'missed' ? 'var(--c-amber)' : 'var(--fg-3)';
-              const errMsg = (row.result?.errorMessage ?? '').trim();
+              const failed = row.result?.status === "failed";
+              const dotColor = failed
+                ? "var(--c-red)"
+                : row.status === "regression"
+                  ? "var(--c-red)"
+                  : row.status === "done"
+                    ? "var(--c-teal)"
+                    : row.status === "missed"
+                      ? "var(--c-amber)"
+                      : "var(--fg-3)";
+              const errMsg = (row.result?.errorMessage ?? "").trim();
               const dotTitle = failed
-                ? (errMsg.length > 0 ? errMsg : 'Test failed')
+                ? errMsg.length > 0
+                  ? errMsg
+                  : "Test failed"
                 : undefined;
               return (
                 <div
                   key={row.step.id}
                   onClick={() => onPick(row.step.id)}
                   style={{
-                    padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8,
-                    borderBottom: '1px solid var(--border)',
-                    background: active ? 'color-mix(in oklab, var(--c-teal) 8%, white)' : 'transparent',
-                    borderLeft: active ? '2px solid var(--c-teal)' : '2px solid transparent',
-                    cursor: 'pointer',
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    borderBottom: "1px solid var(--border)",
+                    background: active
+                      ? "color-mix(in oklab, var(--c-teal) 8%, white)"
+                      : "transparent",
+                    borderLeft: active
+                      ? "2px solid var(--c-teal)"
+                      : "2px solid transparent",
+                    cursor: "pointer",
                   }}
                 >
                   <span
-                    style={{ width: 6, height: 6, borderRadius: '50%', marginTop: 6, background: dotColor, flexShrink: 0 }}
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      marginTop: 6,
+                      background: dotColor,
+                      flexShrink: 0,
+                    }}
                     title={dotTitle}
-                    aria-label={failed ? 'test failed' : undefined}
+                    aria-label={failed ? "test failed" : undefined}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--fg-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {row.test?.name ?? 'Unknown test'}
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: "var(--fg-1)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {row.test?.name ?? "Unknown test"}
                     </div>
                     {row.step.stepLabel && (
-                      <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div
+                        className="mono"
+                        style={{
+                          fontSize: 10,
+                          color: "var(--fg-3)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
                         {row.step.stepLabel}
                       </div>
                     )}
                     {row.step.evidence.length > 0 && (
-                      <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
-                        {Array.from(new Set(row.step.evidence.slice(0, 3).map((e) => e.layer))).map((layer) => (
-                          <span key={layer} className="mono" style={{ fontSize: 9, color: 'var(--fg-3)' }}>{layer}</span>
+                      <div style={{ display: "flex", gap: 4, marginTop: 3 }}>
+                        {Array.from(
+                          new Set(
+                            row.step.evidence.slice(0, 3).map((e) => e.layer),
+                          ),
+                        ).map((layer) => (
+                          <span
+                            key={layer}
+                            className="mono"
+                            style={{ fontSize: 9, color: "var(--fg-3)" }}
+                          >
+                            {layer}
+                          </span>
                         ))}
                       </div>
                     )}
                   </div>
                   {row.step.githubIssueNumber != null && (
-                    <span className="mono" style={{ fontSize: 9, color: 'var(--fg-3)', flexShrink: 0 }}>
+                    <span
+                      className="mono"
+                      style={{
+                        fontSize: 9,
+                        color: "var(--fg-3)",
+                        flexShrink: 0,
+                      }}
+                    >
                       #{row.step.githubIssueNumber}
                     </span>
                   )}
@@ -1273,9 +1710,19 @@ interface VisualRegionsCtx {
   drawIgnoreMode: boolean;
   toggleDrawFocus: () => void;
   toggleDrawIgnore: () => void;
-  onFocusDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onFocusDrawn: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
   onFocusDelete: (regionId: string) => void;
-  onIgnoreDrawn: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onIgnoreDrawn: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => void;
   onIgnoreDelete: (regionId: string) => void;
   regionPending: boolean;
   hasVisual: boolean;
@@ -1294,38 +1741,90 @@ interface ComparePaneProps {
   activeStepId: string | null;
   onSelectStep: (stepId: string) => void;
   /** Build-level a11y roll-up + repo trend forwarded to <A11yPane>. */
-  buildA11y?: FocusViewProps['buildA11y'];
-  buildDesignSystem?: FocusViewProps['buildDesignSystem'];
+  buildA11y?: FocusViewProps["buildA11y"];
+  buildDesignSystem?: FocusViewProps["buildDesignSystem"];
   /** Build ID forwarded so A11yPane can render <A11yViolationsCard>, which
    *  hits /api/builds/[buildId]/a11y-violations?format=csv for downloads. */
   buildId: string;
 }
 
-function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runStepCells, activeStepId, onSelectStep, buildA11y, buildDesignSystem, buildId }: ComparePaneProps) {
+function ComparePane({
+  tab,
+  step,
+  visual,
+  result,
+  layerState,
+  regionsCtx,
+  runStepCells,
+  activeStepId,
+  onSelectStep,
+  buildA11y,
+  buildDesignSystem,
+  buildId,
+}: ComparePaneProps) {
   if (!step) {
     return (
-      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
+      <div
+        style={{
+          flex: 1,
+          padding: 16,
+          background: "var(--c-soft-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--fg-3)",
+        }}
+      >
         Pick a case to compare.
       </div>
     );
   }
 
-  if (layerState === 'absent') {
+  if (layerState === "absent") {
     const hint = absentHint(tab, step?.testId ?? null, result);
     return (
-      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="v-card" style={{ padding: 24, textAlign: 'center', maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+      <div
+        style={{
+          flex: 1,
+          padding: 16,
+          background: "var(--c-soft-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          className="v-card"
+          style={{
+            padding: 24,
+            textAlign: "center",
+            maxWidth: 460,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
           <span className="label">{tab} not captured</span>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 12,
+              color: "var(--fg-2)",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+            }}
+          >
             {hint.message}
           </p>
           {hint.settingsHref && (
             <a
               href={hint.settingsHref}
               className="v-btn"
-              style={{ textDecoration: 'none', minWidth: 0 }}
+              style={{ textDecoration: "none", minWidth: 0 }}
             >
-              <Settings size={13} />{hint.settingsLabel ?? 'Open settings'}
+              <Settings size={13} />
+              {hint.settingsLabel ?? "Open settings"}
             </a>
           )}
         </div>
@@ -1334,17 +1833,80 @@ function ComparePane({ tab, step, visual, result, layerState, regionsCtx, runSte
   }
 
   // diff or clean — render the layer-specific pane and let it differentiate.
-  if (tab === 'run') return <RunPane result={result} failed={layerState === 'diff'} stepCells={runStepCells} activeStepId={activeStepId} onSelectStep={onSelectStep} />;
-  if (tab === 'visual') return <VisualPane step={step} visual={visual} clean={layerState === 'clean'} regions={regionsCtx} />;
-  if (tab === 'text') return <TextPane visual={visual} clean={layerState === 'clean'} />;
-  if (tab === 'dom') return <DomPane step={step} visual={visual} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'network') return <NetworkPane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'console') return <ConsolePane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'a11y') return <A11yPane step={step} result={result} clean={layerState === 'clean'} buildA11y={buildA11y} buildId={buildId} />;
-  if (tab === 'design') return <DesignSystemPane step={step} result={result} clean={layerState === 'clean'} buildDesignSystem={buildDesignSystem} buildId={buildId} />;
-  if (tab === 'perf') return <PerfPane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'url') return <UrlPane step={step} result={result} clean={layerState === 'clean'} />;
-  if (tab === 'variable') return <VariablePane step={step} result={result} clean={layerState === 'clean'} />;
+  if (tab === "run")
+    return (
+      <RunPane
+        result={result}
+        failed={layerState === "diff"}
+        stepCells={runStepCells}
+        activeStepId={activeStepId}
+        onSelectStep={onSelectStep}
+      />
+    );
+  if (tab === "visual")
+    return (
+      <VisualPane
+        step={step}
+        visual={visual}
+        clean={layerState === "clean"}
+        regions={regionsCtx}
+      />
+    );
+  if (tab === "text")
+    return <TextPane visual={visual} clean={layerState === "clean"} />;
+  if (tab === "dom")
+    return (
+      <DomPane
+        step={step}
+        visual={visual}
+        result={result}
+        clean={layerState === "clean"}
+      />
+    );
+  if (tab === "network")
+    return (
+      <NetworkPane step={step} result={result} clean={layerState === "clean"} />
+    );
+  if (tab === "console")
+    return (
+      <ConsolePane step={step} result={result} clean={layerState === "clean"} />
+    );
+  if (tab === "a11y")
+    return (
+      <A11yPane
+        step={step}
+        result={result}
+        clean={layerState === "clean"}
+        buildA11y={buildA11y}
+        buildId={buildId}
+      />
+    );
+  if (tab === "design")
+    return (
+      <DesignSystemPane
+        step={step}
+        result={result}
+        clean={layerState === "clean"}
+        buildDesignSystem={buildDesignSystem}
+        buildId={buildId}
+      />
+    );
+  if (tab === "perf")
+    return (
+      <PerfPane step={step} result={result} clean={layerState === "clean"} />
+    );
+  if (tab === "url")
+    return (
+      <UrlPane step={step} result={result} clean={layerState === "clean"} />
+    );
+  if (tab === "variable")
+    return (
+      <VariablePane
+        step={step}
+        result={result}
+        clean={layerState === "clean"}
+      />
+    );
   return null;
 }
 
@@ -1367,68 +1929,116 @@ interface AbsentHint {
  */
 function visualAbsentMessage(result?: TestResultLite | null): string {
   if (!result) {
-    return 'No screenshot captured for this step. No test result was reported — re-run the build to populate this tab.';
+    return "No screenshot captured for this step. No test result was reported — re-run the build to populate this tab.";
   }
-  const stepInfo = result.lastReachedStep != null && result.totalSteps != null
-    ? `Reached step ${result.lastReachedStep} of ${result.totalSteps}.`
-    : '';
+  const stepInfo =
+    result.lastReachedStep != null && result.totalSteps != null
+      ? `Reached step ${result.lastReachedStep} of ${result.totalSteps}.`
+      : "";
   const durMs = result.durationMs ?? 0;
-  const durStr = durMs > 0 ? `Ran for ${(durMs / 1000).toFixed(1)}s.` : '';
-  if (result.status === 'failed' || result.status === 'setup_failed') {
-    const errSummary = (result.errorMessage ?? '').split('\n')[0]?.slice(0, 240) || 'no error message';
-    return `Test ${result.status === 'setup_failed' ? 'setup failed' : 'failed'} before this step captured. ${stepInfo} ${durStr}\n\n${errSummary}`.trim();
+  const durStr = durMs > 0 ? `Ran for ${(durMs / 1000).toFixed(1)}s.` : "";
+  if (result.status === "failed" || result.status === "setup_failed") {
+    const errSummary =
+      (result.errorMessage ?? "").split("\n")[0]?.slice(0, 240) ||
+      "no error message";
+    return `Test ${result.status === "setup_failed" ? "setup failed" : "failed"} before this step captured. ${stepInfo} ${durStr}\n\n${errSummary}`.trim();
   }
   // Passed but no screenshot — most common path. Differentiate "explicit no-shot
   // step" (test code never called screenshot) from "capture failed" (test
   // walked all steps but the artifact never made it back).
-  const reachedAll = result.lastReachedStep != null && result.totalSteps != null && result.lastReachedStep >= result.totalSteps - 1;
+  const reachedAll =
+    result.lastReachedStep != null &&
+    result.totalSteps != null &&
+    result.lastReachedStep >= result.totalSteps - 1;
   if (reachedAll) {
     return `Test passed but produced no screenshot for this step. ${stepInfo} ${durStr}\n\nLikely the test code didn't call screenshot here, or the capture failed silently on the EB. Check the Run tab logs.`.trim();
   }
   return `Test passed but stopped capturing before this step. ${stepInfo} ${durStr}\n\nThe step ran without producing a snapshot — re-run the test, or open the test definition to confirm a screenshot is requested at this step.`.trim();
 }
 
-function absentHint(layer: CompareTab, testId: string | null, result?: TestResultLite | null): AbsentHint {
+function absentHint(
+  layer: CompareTab,
+  testId: string | null,
+  result?: TestResultLite | null,
+): AbsentHint {
   switch (layer) {
-    case 'run':    return { message: 'No test result recorded for this case yet — the runner may not have started, or the test result row was deleted. Re-run the build to populate this tab.' };
-    case 'visual': return { message: visualAbsentMessage(result), settingsHref: testId ? `/tests/${testId}` : undefined, settingsLabel: testId ? 'Open test' : undefined };
-    case 'text':   return {
-      message: 'Page text capture is off. Enable "Text diff" in Diff Sensitivity settings to capture innerText and surface line-level page-text diffs here.',
-      settingsHref: '/settings?highlight=diff-sensitivity',
-      settingsLabel: 'Open Diff Sensitivity settings',
-    };
-    case 'dom':    return {
-      message: 'DOM snapshots are off. Enable "Capture DOM diff" in Playwright settings; it requires a baseline run before diffs appear.',
-      settingsHref: '/settings?highlight=playwright',
-      settingsLabel: 'Open Playwright settings',
-    };
-    case 'a11y':   return {
-      message: 'A11y checks are off. Enable "Accessibility checks (axe-core)" in Playwright settings to see WCAG violations and pass counts.',
-      settingsHref: '/settings?highlight=playwright',
-      settingsLabel: 'Open Playwright settings',
-    };
-    case 'design': return {
-      message: 'Design System checks are off. Enable "Design System checks" in Playwright settings and paste your token CSS to see off-token colors, radii, and fonts here.',
-      settingsHref: '/settings?highlight=playwright',
-      settingsLabel: 'Open Playwright settings',
-    };
-    case 'network': return { message: 'No network requests recorded for this step. Network capture is automatic, so this usually means the step didn\'t fire any requests.' };
-    case 'console': return { message: 'No console output captured. Console capture is automatic — this step ran without any logs/warnings/errors.' };
-    case 'perf':   return { message: 'No Web Vitals samples for this step. Perf capture is automatic — short-lived steps may not produce LCP/CLS/INP measurements.' };
-    case 'url':    return { message: 'No URL trajectory recorded. URL capture is automatic — this usually means the step didn\'t navigate.' };
-    case 'variable': return {
-      message: 'No test variables were extracted or assigned for this step. Add extract / assign variables on the test definition to surface them here.',
-      // Vars are configured per-test, not in global settings — link to the
-      // test detail page's Vars tab via the URL-hash deep-link.
-      settingsHref: testId ? `/tests/${testId}#vars` : undefined,
-      settingsLabel: 'Open test Vars',
-    };
+    case "run":
+      return {
+        message:
+          "No test result recorded for this case yet — the runner may not have started, or the test result row was deleted. Re-run the build to populate this tab.",
+      };
+    case "visual":
+      return {
+        message: visualAbsentMessage(result),
+        settingsHref: testId ? `/tests/${testId}` : undefined,
+        settingsLabel: testId ? "Open test" : undefined,
+      };
+    case "text":
+      return {
+        message:
+          'Page text capture is off. Enable "Text diff" in Diff Sensitivity settings to capture innerText and surface line-level page-text diffs here.',
+        settingsHref: "/settings?highlight=diff-sensitivity",
+        settingsLabel: "Open Diff Sensitivity settings",
+      };
+    case "dom":
+      return {
+        message:
+          'DOM snapshots are off. Enable "Capture DOM diff" in Playwright settings; it requires a baseline run before diffs appear.',
+        settingsHref: "/settings?highlight=playwright",
+        settingsLabel: "Open Playwright settings",
+      };
+    case "a11y":
+      return {
+        message:
+          'A11y checks are off. Enable "Accessibility checks (axe-core)" in Playwright settings to see WCAG violations and pass counts.',
+        settingsHref: "/settings?highlight=playwright",
+        settingsLabel: "Open Playwright settings",
+      };
+    case "design":
+      return {
+        message:
+          'Design System checks are off. Enable "Design System checks" in Playwright settings and paste your token CSS to see off-token colors, radii, and fonts here.',
+        settingsHref: "/settings?highlight=playwright",
+        settingsLabel: "Open Playwright settings",
+      };
+    case "network":
+      return {
+        message:
+          "No network requests recorded for this step. Network capture is automatic, so this usually means the step didn't fire any requests.",
+      };
+    case "console":
+      return {
+        message:
+          "No console output captured. Console capture is automatic — this step ran without any logs/warnings/errors.",
+      };
+    case "perf":
+      return {
+        message:
+          "No Web Vitals samples for this step. Perf capture is automatic — short-lived steps may not produce LCP/CLS/INP measurements.",
+      };
+    case "url":
+      return {
+        message:
+          "No URL trajectory recorded. URL capture is automatic — this usually means the step didn't navigate.",
+      };
+    case "variable":
+      return {
+        message:
+          "No test variables were extracted or assigned for this step. Add extract / assign variables on the test definition to surface them here.",
+        // Vars are configured per-test, not in global settings — link to the
+        // test detail page's Vars tab via the URL-hash deep-link.
+        settingsHref: testId ? `/tests/${testId}#vars` : undefined,
+        settingsLabel: "Open test Vars",
+      };
   }
 }
 
 function CleanBanner({ message }: { message: string }) {
   return (
-    <div className="v-chip done" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>
+    <div
+      className="v-chip done"
+      style={{ fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}
+    >
       <span className="dot" />
       {message}
     </div>
@@ -1450,51 +2060,110 @@ function RunPane({
 }) {
   if (!result) {
     return (
-      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="v-card" style={{ padding: 24, textAlign: 'center', maxWidth: 360, color: 'var(--fg-3)' }}>
+      <div
+        style={{
+          flex: 1,
+          padding: 16,
+          background: "var(--c-soft-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          className="v-card"
+          style={{
+            padding: 24,
+            textAlign: "center",
+            maxWidth: 360,
+            color: "var(--fg-3)",
+          }}
+        >
           <span className="label">No test result on this case</span>
         </div>
       </div>
     );
   }
 
-  const status = result.status ?? 'unknown';
-  const errMsg = (result.errorMessage ?? '').trim();
-  const watermark = result.totalSteps && result.lastReachedStep != null
-    ? `${result.lastReachedStep + 1}/${result.totalSteps}`
-    : null;
+  const status = result.status ?? "unknown";
+  const errMsg = (result.errorMessage ?? "").trim();
+  const watermark =
+    result.totalSteps && result.lastReachedStep != null
+      ? `${result.lastReachedStep + 1}/${result.totalSteps}`
+      : null;
 
   // Extract a "trace" tail from the error message — Playwright errors have
   // their callsite a few lines down. Show the full message in a code block.
   const errLines = errMsg.split(/\r?\n/);
-  const headline = errLines[0] || (failed ? 'Test failed' : '');
-  const body = errLines.slice(1).join('\n').trim();
+  const headline = errLines[0] || (failed ? "Test failed" : "");
+  const body = errLines.slice(1).join("\n").trim();
 
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {/* Status row — always visible */}
-      <div className="v-card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div
+        className="v-card"
+        style={{
+          padding: 12,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
           <span
             className={`v-chip ${
-              status === 'passed' ? 'done' :
-              status === 'failed' ? 'regression' :
-              status === 'skipped' ? 'unknown' :
-              'info'
+              status === "passed"
+                ? "done"
+                : status === "failed"
+                  ? "regression"
+                  : status === "skipped"
+                    ? "unknown"
+                    : "info"
             }`}
             style={{ fontSize: 10 }}
           >
             <span className="dot" />
             {status}
           </span>
-          {result.isFlaky && <span className="v-chip missed" style={{ fontSize: 9 }}>flaky</span>}
-          {result.retryOf && <span className="v-chip" style={{ fontSize: 9 }}>retry</span>}
+          {result.isFlaky && (
+            <span className="v-chip missed" style={{ fontSize: 9 }}>
+              flaky
+            </span>
+          )}
+          {result.retryOf && (
+            <span className="v-chip" style={{ fontSize: 9 }}>
+              retry
+            </span>
+          )}
           <span style={{ flex: 1 }} />
           {result.durationMs != null && (
-            <span className="label" style={{ fontSize: 9 }}>{Math.round(result.durationMs)} ms</span>
+            <span className="label" style={{ fontSize: 9 }}>
+              {Math.round(result.durationMs)} ms
+            </span>
           )}
           {result.browser && (
-            <span className="label" style={{ fontSize: 9 }}>{result.browser}</span>
+            <span className="label" style={{ fontSize: 9 }}>
+              {result.browser}
+            </span>
           )}
         </div>
         {watermark && (
@@ -1509,15 +2178,29 @@ function RunPane({
           without leaving the focus view. The active step gets a teal ring;
           status colors mirror the build's at-a-glance palette. */}
       {stepCells.length > 0 && (
-        <div className="v-card" style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="label" style={{ fontSize: 10 }}>Test steps</span>
+        <div
+          className="v-card"
+          style={{
+            padding: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="label" style={{ fontSize: 10 }}>
+              Test steps
+            </span>
             <span style={{ flex: 1 }} />
-            <span className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
-              {stepCells.length} step{stepCells.length === 1 ? '' : 's'}
+            <span
+              className="label"
+              style={{ fontSize: 9, color: "var(--fg-3)" }}
+            >
+              {stepCells.length} step{stepCells.length === 1 ? "" : "s"}
             </span>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {stepCells.map((cell) => {
               const style = RUN_STEP_STYLE[cell.status];
               const isActive = cell.stepId === activeStepId;
@@ -1526,32 +2209,50 @@ function RunPane({
                   type="button"
                   key={cell.stepId}
                   onClick={() => onSelectStep(cell.stepId)}
-                  title={`Step ${cell.stepIndex + 1}${cell.stepLabel ? ` (${cell.stepLabel})` : ''}: ${style.label}`}
-                  aria-current={isActive ? 'step' : undefined}
+                  title={`Step ${cell.stepIndex + 1}${cell.stepLabel ? ` (${cell.stepLabel})` : ""}: ${style.label}`}
+                  aria-current={isActive ? "step" : undefined}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '4px 8px', fontSize: 11, lineHeight: 1.2,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 8px",
+                    fontSize: 11,
+                    lineHeight: 1.2,
                     background: isActive
-                      ? 'color-mix(in oklab, var(--c-teal) 10%, white)'
-                      : 'var(--c-white)',
-                    border: `1px solid ${isActive ? 'var(--c-teal)' : 'var(--border)'}`,
+                      ? "color-mix(in oklab, var(--c-teal) 10%, white)"
+                      : "var(--c-white)",
+                    border: `1px solid ${isActive ? "var(--c-teal)" : "var(--border)"}`,
                     borderRadius: 6,
-                    cursor: 'pointer',
-                    color: 'var(--fg-1)',
-                    fontFamily: 'var(--font-sans)',
+                    cursor: "pointer",
+                    color: "var(--fg-1)",
+                    fontFamily: "var(--font-sans)",
                   }}
                 >
                   <span
                     aria-hidden
                     style={{
-                      width: 8, height: 8, borderRadius: '50%',
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
                       background: style.dot,
                       flexShrink: 0,
                     }}
                   />
-                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-2)' }}>{cell.stepIndex + 1}</span>
+                  <span
+                    className="mono"
+                    style={{ fontSize: 10, color: "var(--fg-2)" }}
+                  >
+                    {cell.stepIndex + 1}
+                  </span>
                   {cell.stepLabel && (
-                    <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span
+                      style={{
+                        maxWidth: 180,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {cell.stepLabel}
                     </span>
                   )}
@@ -1564,29 +2265,57 @@ function RunPane({
 
       {/* Failed: show the error inline. Passed: show a green confirmation. */}
       {failed ? (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertOctagon size={13} style={{ color: 'var(--c-red)' }} />
-            <span className="label" style={{ fontSize: 10 }}>Runner exception</span>
+        <div
+          className="v-card"
+          style={{ padding: 0, overflow: "hidden", flexShrink: 0 }}
+        >
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <AlertOctagon size={13} style={{ color: "var(--c-red)" }} />
+            <span className="label" style={{ fontSize: 10 }}>
+              Runner exception
+            </span>
           </div>
           {headline && (
-            <div style={{ padding: '10px 12px', borderBottom: body ? '1px solid var(--border)' : undefined, fontSize: 13, fontWeight: 500, color: 'var(--c-red)', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+            <div
+              style={{
+                padding: "10px 12px",
+                borderBottom: body ? "1px solid var(--border)" : undefined,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--c-red)",
+                wordBreak: "break-word",
+                whiteSpace: "pre-wrap",
+              }}
+            >
               {headline}
             </div>
           )}
           {body && (
-            <pre className="mono" style={{
-              margin: 0,
-              padding: '10px 12px',
-              background: 'var(--c-white)',
-              fontSize: 11,
-              lineHeight: 1.55,
-              maxHeight: 360,
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              color: 'var(--fg-2)',
-            }}>{body}</pre>
+            <pre
+              className="mono"
+              style={{
+                margin: 0,
+                padding: "10px 12px",
+                background: "var(--c-white)",
+                fontSize: 11,
+                lineHeight: 1.55,
+                maxHeight: 360,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: "var(--fg-2)",
+              }}
+            >
+              {body}
+            </pre>
           )}
           {!errMsg && (
             <div className="label" style={{ padding: 12, fontSize: 10 }}>
@@ -1597,10 +2326,10 @@ function RunPane({
       ) : (
         <CleanBanner
           message={
-            status === 'passed'
-              ? `Test passed${result.durationMs != null ? ` in ${Math.round(result.durationMs)}ms` : ''}`
-              : status === 'skipped'
-                ? 'Test was skipped'
+            status === "passed"
+              ? `Test passed${result.durationMs != null ? ` in ${Math.round(result.durationMs)}ms` : ""}`
+              : status === "skipped"
+                ? "Test was skipped"
                 : `Test status: ${status}`
           }
         />
@@ -1609,7 +2338,13 @@ function RunPane({
   );
 }
 
-function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boolean }) {
+function TextPane({
+  visual,
+  clean,
+}: {
+  visual: VisualDiffLite | null;
+  clean: boolean;
+}) {
   // The text-diff content lives on disk at baseline/currentTextPath. Fetch
   // both via the same /screenshots-style URL the paths point at, then run a
   // simple line-by-line diff in the browser.
@@ -1625,7 +2360,7 @@ function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boo
     const load = async (url: string | null): Promise<string | null> => {
       if (!url) return null;
       try {
-        const res = await fetch(url, { cache: 'no-store' });
+        const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) return null;
         return await res.text();
       } catch {
@@ -1637,36 +2372,70 @@ function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boo
       setBaselineText(b);
       setCurrentText(c);
       setLoading(false);
-      if (!b && !c) setError('Could not load captured page text');
+      if (!b && !c) setError("Could not load captured page text");
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [baseSrc, curSrc]);
 
   const status = visual?.textDiffStatus ?? null;
-  const lines = useMemo(() => simpleLineDiff(baselineText ?? '', currentText ?? ''), [baselineText, currentText]);
+  const lines = useMemo(
+    () => simpleLineDiff(baselineText ?? "", currentText ?? ""),
+    [baselineText, currentText],
+  );
 
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {clean && <CleanBanner message={`Page text matches baseline (${(currentText ?? '').length} chars captured)`} />}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && (
+        <CleanBanner
+          message={`Page text matches baseline (${(currentText ?? "").length} chars captured)`}
+        />
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {status && (
-          <span className={`v-chip ${
-            status === 'unchanged' ? 'done' :
-            status === 'changed' ? 'regression' :
-            status === 'baseline_only' || status === 'current_only' ? 'missed' :
-            status === 'baseline_establishing' ? 'done' :
-            'unknown'
-          }`} style={{ fontSize: 9 }}>{status.replace(/_/g, ' ')}</span>
+          <span
+            className={`v-chip ${
+              status === "unchanged"
+                ? "done"
+                : status === "changed"
+                  ? "regression"
+                  : status === "baseline_only" || status === "current_only"
+                    ? "missed"
+                    : status === "baseline_establishing"
+                      ? "done"
+                      : "unknown"
+            }`}
+            style={{ fontSize: 9 }}
+          >
+            {status.replace(/_/g, " ")}
+          </span>
         )}
         {!loading && baselineText !== null && (
-          <span className="label" style={{ fontSize: 9 }}>baseline · {baselineText.length} chars</span>
+          <span className="label" style={{ fontSize: 9 }}>
+            baseline · {baselineText.length} chars
+          </span>
         )}
         {!loading && currentText !== null && (
-          <span className="label" style={{ fontSize: 9 }}>current · {currentText.length} chars</span>
+          <span className="label" style={{ fontSize: 9 }}>
+            current · {currentText.length} chars
+          </span>
         )}
       </div>
       {loading && (
-        <div className="v-card" style={{ padding: 16, color: 'var(--fg-3)' }}>Loading captured text…</div>
+        <div className="v-card" style={{ padding: 16, color: "var(--fg-3)" }}>
+          Loading captured text…
+        </div>
       )}
       {error && (
         <div className="v-card" style={{ padding: 16 }}>
@@ -1674,36 +2443,69 @@ function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boo
         </div>
       )}
       {!loading && (baselineText || currentText) && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="label" style={{ fontSize: 10 }}>Line diff</span>
+        <div
+          className="v-card"
+          style={{ padding: 0, overflow: "hidden", flexShrink: 0 }}
+        >
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Line diff
+            </span>
             <span style={{ flex: 1 }} />
-            <span className="v-chip done" style={{ fontSize: 9 }}>+{lines.filter((l) => l.op === 'add').length} added</span>
-            <span className="v-chip regression" style={{ fontSize: 9 }}>−{lines.filter((l) => l.op === 'del').length} removed</span>
+            <span className="v-chip done" style={{ fontSize: 9 }}>
+              +{lines.filter((l) => l.op === "add").length} added
+            </span>
+            <span className="v-chip regression" style={{ fontSize: 9 }}>
+              −{lines.filter((l) => l.op === "del").length} removed
+            </span>
           </div>
-          <div style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.55, maxHeight: 480, overflow: 'auto', background: 'var(--c-white)' }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              lineHeight: 1.55,
+              maxHeight: 480,
+              overflow: "auto",
+              background: "var(--c-white)",
+            }}
+          >
             {lines.map((l, i) => (
               <div
                 key={i}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '14px 1fr',
+                  display: "grid",
+                  gridTemplateColumns: "14px 1fr",
                   gap: 6,
-                  padding: '0 4px',
+                  padding: "0 4px",
                   background:
-                    l.op === 'add' ? 'color-mix(in oklab, var(--c-teal) 8%, white)' :
-                    l.op === 'del' ? 'color-mix(in oklab, var(--c-red) 8%, white)' :
-                    'transparent',
+                    l.op === "add"
+                      ? "color-mix(in oklab, var(--c-teal) 8%, white)"
+                      : l.op === "del"
+                        ? "color-mix(in oklab, var(--c-red) 8%, white)"
+                        : "transparent",
                   color:
-                    l.op === 'add' ? '#1F7B66' :
-                    l.op === 'del' ? 'var(--c-red)' :
-                    'var(--fg-2)',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
+                    l.op === "add"
+                      ? "#1F7B66"
+                      : l.op === "del"
+                        ? "var(--c-red)"
+                        : "var(--fg-2)",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
                 }}
               >
-                <span style={{ color: 'var(--fg-3)', userSelect: 'none' }}>{l.op === 'add' ? '+' : l.op === 'del' ? '−' : ' '}</span>
-                <span>{l.line || ' '}</span>
+                <span style={{ color: "var(--fg-3)", userSelect: "none" }}>
+                  {l.op === "add" ? "+" : l.op === "del" ? "−" : " "}
+                </span>
+                <span>{l.line || " "}</span>
               </div>
             ))}
           </div>
@@ -1715,36 +2517,51 @@ function TextPane({ visual, clean }: { visual: VisualDiffLite | null; clean: boo
 
 /** Minimal line-by-line diff — pairs equal lines, marks insertions/removals.
  *  Not LCS-optimal but fine for short page-text snapshots. */
-function simpleLineDiff(baseline: string, current: string): { op: 'add' | 'del' | 'eq'; line: string }[] {
+function simpleLineDiff(
+  baseline: string,
+  current: string,
+): { op: "add" | "del" | "eq"; line: string }[] {
   const a = baseline.split(/\r?\n/);
   const b = current.split(/\r?\n/);
   const setA = new Set(a);
   const setB = new Set(b);
-  const out: { op: 'add' | 'del' | 'eq'; line: string }[] = [];
-  let i = 0, j = 0;
+  const out: { op: "add" | "del" | "eq"; line: string }[] = [];
+  let i = 0,
+    j = 0;
   while (i < a.length || j < b.length) {
     if (i < a.length && j < b.length && a[i] === b[j]) {
-      out.push({ op: 'eq', line: a[i] });
-      i++; j++;
+      out.push({ op: "eq", line: a[i] });
+      i++;
+      j++;
     } else if (j < b.length && !setA.has(b[j])) {
-      out.push({ op: 'add', line: b[j] });
+      out.push({ op: "add", line: b[j] });
       j++;
     } else if (i < a.length && !setB.has(a[i])) {
-      out.push({ op: 'del', line: a[i] });
+      out.push({ op: "del", line: a[i] });
       i++;
     } else if (i < a.length) {
-      out.push({ op: 'del', line: a[i] });
+      out.push({ op: "del", line: a[i] });
       i++;
     } else {
-      out.push({ op: 'add', line: b[j] });
+      out.push({ op: "add", line: b[j] });
       j++;
     }
   }
   return out;
 }
 
-function VisualPane({ step, visual, clean, regions }: { step: StepComparison; visual: VisualDiffLite | null; clean: boolean; regions: VisualRegionsCtx }) {
-  const [mode, setMode] = useState<'slider' | 'side' | 'overlay'>('slider');
+function VisualPane({
+  step,
+  visual,
+  clean,
+  regions,
+}: {
+  step: StepComparison;
+  visual: VisualDiffLite | null;
+  clean: boolean;
+  regions: VisualRegionsCtx;
+}) {
+  const [mode, setMode] = useState<"slider" | "side" | "overlay">("slider");
   const [sliderPct, setSliderPct] = useState(50);
 
   const baselineSrc = visual?.baselineImagePath;
@@ -1761,13 +2578,18 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
   // Even with 0% diff we surface "100% match" rather than nothing.
   const metricChip = (() => {
     if (visualEvidence) {
-      const pct = visualEvidence.percentageDifference ?? '?';
+      const pct = visualEvidence.percentageDifference ?? "?";
       const px = visualEvidence.pixelDifference;
-      const tone = parseFloat(String(pct)) > 1 ? 'regression' : 'missed';
+      const tone = parseFloat(String(pct)) > 1 ? "regression" : "missed";
       return { tone, label: `${pct}% diff · ${px} px` };
     }
-    if (visual && (visual.pixelDifference === 0 || (visual.percentageDifference != null && parseFloat(visual.percentageDifference) === 0))) {
-      return { tone: 'done' as const, label: '100% match' };
+    if (
+      visual &&
+      (visual.pixelDifference === 0 ||
+        (visual.percentageDifference != null &&
+          parseFloat(visual.percentageDifference) === 0))
+    ) {
+      return { tone: "done" as const, label: "100% match" };
     }
     return null;
   })();
@@ -1776,35 +2598,86 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
   // baseline (step rendered an unrelated screen, or rendered nothing at all).
   // Surface that explicitly so reviewers don't read the % as just "very high".
   const isFullDiff = (() => {
-    const raw = visual?.percentageDifference ?? visualEvidence?.percentageDifference;
+    const raw =
+      visual?.percentageDifference ?? visualEvidence?.percentageDifference;
     if (raw == null) return false;
     const n = parseFloat(String(raw));
     return Number.isFinite(n) && n >= 100;
   })();
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--c-white)', flexWrap: 'wrap' }}>
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 16px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          background: "var(--c-white)",
+          flexWrap: "wrap",
+        }}
+      >
         <div className="v-tabs">
-          <button className={`v-tab ${mode === 'slider' ? 'active' : ''}`} onClick={() => setMode('slider')}>Slider</button>
-          <button className={`v-tab ${mode === 'side' ? 'active' : ''}`} onClick={() => setMode('side')}>Side by side</button>
-          <button className={`v-tab ${mode === 'overlay' ? 'active' : ''}`} onClick={() => setMode('overlay')}>Overlay</button>
+          <button
+            className={`v-tab ${mode === "slider" ? "active" : ""}`}
+            onClick={() => setMode("slider")}
+          >
+            Slider
+          </button>
+          <button
+            className={`v-tab ${mode === "side" ? "active" : ""}`}
+            onClick={() => setMode("side")}
+          >
+            Side by side
+          </button>
+          <button
+            className={`v-tab ${mode === "overlay" ? "active" : ""}`}
+            onClick={() => setMode("overlay")}
+          >
+            Overlay
+          </button>
         </div>
         <span style={{ flex: 1 }} />
         {/* Right-side cluster: status chips + Regions buttons. Inline so the
             chips stay on one line each (whiteSpace nowrap), and so the group
             wraps as a unit instead of items breaking into a vertical stack. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {clean && <CleanBanner message="No visual diff — screenshots match baseline" />}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+          }}
+        >
+          {clean && (
+            <CleanBanner message="No visual diff — screenshots match baseline" />
+          )}
           {metricChip && (
-            <span className={`v-chip ${metricChip.tone}`} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <span
+              className={`v-chip ${metricChip.tone}`}
+              style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+            >
               <span className="dot" />
               {metricChip.label}
             </span>
           )}
           {isFullDiff && (
             <span
-              style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--c-red)' }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                flexShrink: 0,
+                color: "var(--c-red)",
+              }}
               title="100% diff: step rendered nothing or rendered an unrelated screen"
               aria-label="100% diff: step rendered nothing or rendered an unrelated screen"
             >
@@ -1814,66 +2687,98 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
           {visual?.baselineSourceBranch && (
             <span
               className="v-chip"
-              style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}
+              style={{ fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}
               title={`No baseline on this build's branch yet; comparing against ${visual.baselineSourceBranch} (the repo's default branch). Approve here to establish a same-branch baseline.`}
             >
               baseline from {visual.baselineSourceBranch}
             </span>
           )}
           {visual?.classification && (
-            <span className="v-chip" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>{visual.classification}</span>
+            <span
+              className="v-chip"
+              style={{ fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}
+            >
+              {visual.classification}
+            </span>
           )}
           {hasChangedRegions && (
             <button
-              className={`v-btn sm ${regions.showRegions ? 'tinted' : ''}`}
+              className={`v-btn sm ${regions.showRegions ? "tinted" : ""}`}
               style={{ flexShrink: 0 }}
               onClick={() => regions.setShowRegions(!regions.showRegions)}
               title={`${changedRegions.length} changed region(s) detected`}
             >
-              <Layers size={11} />{regions.showRegions ? 'Hide regions' : 'Show regions'}
+              <Layers size={11} />
+              {regions.showRegions ? "Hide regions" : "Show regions"}
             </button>
           )}
           <button
-            className={`v-btn sm ${regions.drawFocusMode ? 'tinted' : ''}`}
+            className={`v-btn sm ${regions.drawFocusMode ? "tinted" : ""}`}
             style={{ flexShrink: 0 }}
             onClick={regions.toggleDrawFocus}
             disabled={drawDisabled}
-            title={regions.hasVisual
-              ? 'Click + drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions.'
-              : 'Focus regions require a visual diff for this step.'}
+            title={
+              regions.hasVisual
+                ? "Click + drag on the screenshot to define a focus region. Diff ignores everything outside the union of focus regions."
+                : "Focus regions require a visual diff for this step."
+            }
           >
             <Crosshair size={11} />
             {regions.drawFocusMode
-              ? 'Drawing — click + drag'
+              ? "Drawing — click + drag"
               : regions.focusRegions.length > 0
                 ? `Focus (${regions.focusRegions.length})`
-                : 'Draw Focus'}
+                : "Draw Focus"}
           </button>
           <button
-            className={`v-btn sm ${regions.drawIgnoreMode ? 'tinted' : ''}`}
+            className={`v-btn sm ${regions.drawIgnoreMode ? "tinted" : ""}`}
             style={{ flexShrink: 0 }}
             onClick={regions.toggleDrawIgnore}
             disabled={drawDisabled}
-            title={regions.hasVisual
-              ? 'Click + drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test.'
-              : 'Ignore regions require a visual diff for this step.'}
+            title={
+              regions.hasVisual
+                ? "Click + drag on the screenshot to define an ignore region. Pixels inside ignored areas are excluded from every diff for this test."
+                : "Ignore regions require a visual diff for this step."
+            }
           >
             <EyeOff size={11} />
             {regions.drawIgnoreMode
-              ? 'Drawing — click + drag'
+              ? "Drawing — click + drag"
               : regions.ignoreRegions.length > 0
                 ? `Ignore (${regions.ignoreRegions.length})`
-                : 'Draw Ignore'}
+                : "Draw Ignore"}
           </button>
         </div>
       </div>
-      <div style={{ flex: 1, padding: 16, background: 'var(--c-soft-2)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', minHeight: 0, overflowY: 'auto', position: 'relative' }}>
+      <div
+        style={{
+          flex: 1,
+          padding: 16,
+          background: "var(--c-soft-2)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          minHeight: 0,
+          overflowY: "auto",
+          position: "relative",
+        }}
+      >
         {!hasBaseline && !hasCurrent && (
-          <div className="v-card" style={{ width: '100%', padding: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }}>
+          <div
+            className="v-card"
+            style={{
+              width: "100%",
+              padding: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--fg-3)",
+            }}
+          >
             No screenshots captured for this step.
           </div>
         )}
-        {mode === 'slider' && hasBaseline && hasCurrent && (
+        {mode === "slider" && hasBaseline && hasCurrent && (
           <SliderViewer
             baseline={baselineSrc}
             current={currentSrc}
@@ -1888,26 +2793,35 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
             other is missing (first-run cases have no baseline; aborted runs
             may have no current) so the user still sees a screenshot instead
             of an empty pane. */}
-        {mode === 'slider' && !(hasBaseline && hasCurrent) && (hasBaseline || hasCurrent) && (
-          <div style={{ width: '100%' }}>
-            <ImagePanel
-              label={
-                hasCurrent
-                  ? (visual?.baselineExistsOn
-                    ? `current — no baseline on this branch yet (approved baseline exists on ${visual.baselineExistsOn.branch})`
-                    : 'current (no baseline yet)')
-                  : 'baseline (no current capture)'
-              }
-              src={hasCurrent ? currentSrc : baselineSrc}
-              regions={regions}
-              changedRegions={changedRegions}
-              showChangedRegions={regions.showRegions}
-              drawEnabled={hasCurrent}
-            />
-          </div>
-        )}
-        {mode === 'side' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' }}>
+        {mode === "slider" &&
+          !(hasBaseline && hasCurrent) &&
+          (hasBaseline || hasCurrent) && (
+            <div style={{ width: "100%" }}>
+              <ImagePanel
+                label={
+                  hasCurrent
+                    ? visual?.baselineExistsOn
+                      ? `current — no baseline on this branch yet (approved baseline exists on ${visual.baselineExistsOn.branch})`
+                      : "current (no baseline yet)"
+                    : "baseline (no current capture)"
+                }
+                src={hasCurrent ? currentSrc : baselineSrc}
+                regions={regions}
+                changedRegions={changedRegions}
+                showChangedRegions={regions.showRegions}
+                drawEnabled={hasCurrent}
+              />
+            </div>
+          )}
+        {mode === "side" && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              width: "100%",
+            }}
+          >
             <ImagePanel
               label="baseline"
               src={baselineSrc}
@@ -1926,14 +2840,22 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
             />
           </div>
         )}
-        {mode === 'overlay' && (
+        {mode === "overlay" && (
           // alignSelf: flex-start prevents the parent's `alignItems: stretch`
           // from squeezing this column to a fixed cross-axis height, which was
           // making the diff ImagePanel collapse to its `minHeight: 240` (~200px
           // after header padding) instead of the image's natural height. The
           // slider mode renders directly into the parent (no extra wrapper)
           // and grows naturally, so this matches that behavior.
-          <div style={{ width: '100%', alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div
+            style={{
+              width: "100%",
+              alignSelf: "flex-start",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
             {diffSrc ? (
               <ImagePanel
                 label="diff"
@@ -1953,7 +2875,13 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
                 drawEnabled
               />
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
               <ImagePanel label="baseline" src={baselineSrc} small />
               <ImagePanel
                 label="current"
@@ -1974,11 +2902,11 @@ function VisualPane({ step, visual, clean, regions }: { step: StepComparison; vi
           <span
             className={`v-chip ${metricChip.tone}`}
             style={{
-              position: 'absolute',
+              position: "absolute",
               top: 24,
               right: 28,
               fontSize: 11,
-              boxShadow: '0 2px 6px rgba(31,42,51,0.18)',
+              boxShadow: "0 2px 6px rgba(31,42,51,0.18)",
               zIndex: 5,
             }}
           >
@@ -2011,27 +2939,62 @@ function ImagePanel({
   showChangedRegions = false,
   showOverlaysOnly = false,
   drawEnabled = false,
-}: { label: string; src: string | null | undefined; small?: boolean } & ImagePanelExtra) {
-  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+}: {
+  label: string;
+  src: string | null | undefined;
+  small?: boolean;
+} & ImagePanelExtra) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(
+    null,
+  );
   const canEdit = !!regions && !showOverlaysOnly && drawEnabled;
   const drawMode = regions?.drawFocusMode
-    ? 'focus'
+    ? "focus"
     : regions?.drawIgnoreMode
-      ? 'ignore'
+      ? "ignore"
       : null;
   return (
-    <div className="v-card" style={{ position: 'relative', overflow: 'hidden', minHeight: small ? 120 : 240 }}>
-      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 6, fontSize: 9 }}>
+    <div
+      className="v-card"
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        minHeight: small ? 120 : 240,
+      }}
+    >
+      <span
+        className="label"
+        style={{
+          position: "absolute",
+          top: 6,
+          left: 8,
+          padding: "2px 6px",
+          borderRadius: 4,
+          background: "rgba(255,255,255,0.85)",
+          zIndex: 6,
+          fontSize: 9,
+        }}
+      >
         {label}
       </span>
       {src ? (
-        <div style={{ position: 'relative', width: '100%' }}>
+        <div style={{ position: "relative", width: "100%" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
             alt={label}
-            style={{ display: 'block', width: '100%', height: 'auto', background: 'white' }}
-            onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+            style={{
+              display: "block",
+              width: "100%",
+              height: "auto",
+              background: "white",
+            }}
+            onLoad={(e) =>
+              setDims({
+                width: e.currentTarget.naturalWidth,
+                height: e.currentTarget.naturalHeight,
+              })
+            }
           />
           {regions && showChangedRegions && (
             <RegionOverlay dims={dims} regions={changedRegions} />
@@ -2050,15 +3013,33 @@ function ImagePanel({
               onDelete={canEdit ? regions.onIgnoreDelete : undefined}
             />
           )}
-          {canEdit && drawMode === 'focus' && (
-            <DrawLayer dims={dims} onDrawn={regions!.onFocusDrawn} variant="focus" />
+          {canEdit && drawMode === "focus" && (
+            <DrawLayer
+              dims={dims}
+              onDrawn={regions!.onFocusDrawn}
+              variant="focus"
+            />
           )}
-          {canEdit && drawMode === 'ignore' && (
-            <DrawLayer dims={dims} onDrawn={regions!.onIgnoreDrawn} variant="ignore" />
+          {canEdit && drawMode === "ignore" && (
+            <DrawLayer
+              dims={dims}
+              onDrawn={regions!.onIgnoreDrawn}
+              variant="ignore"
+            />
           )}
         </div>
       ) : (
-        <div style={{ width: '100%', height: small ? 120 : 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-3)' }} className="label">
+        <div
+          style={{
+            width: "100%",
+            height: small ? 120 : 240,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--fg-3)",
+          }}
+          className="label"
+        >
           missing
         </div>
       )}
@@ -2083,11 +3064,13 @@ function SliderViewer({
   changedRegions?: { x: number; y: number; width: number; height: number }[];
   showChangedRegions?: boolean;
 }) {
-  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(
+    null,
+  );
   const drawMode = regions?.drawFocusMode
-    ? 'focus'
+    ? "focus"
     : regions?.drawIgnoreMode
-      ? 'ignore'
+      ? "ignore"
       : null;
   const drawing = !!drawMode;
   // Both images render at width:100% with natural-aspect height. The current
@@ -2096,19 +3079,46 @@ function SliderViewer({
   // (Earlier rev applied `maxHeight + objectFit: contain` to the images,
   // which letterboxed each independently and broke the overlay alignment.)
   return (
-    <div className="v-card" style={{ width: '100%', padding: 0, position: 'relative', overflow: 'hidden', minHeight: 320, background: 'white' }}>
+    <div
+      className="v-card"
+      style={{
+        width: "100%",
+        padding: 0,
+        position: "relative",
+        overflow: "hidden",
+        minHeight: 320,
+        background: "white",
+      }}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={baseline}
         alt="baseline"
         draggable={false}
-        style={{ display: 'block', width: '100%', height: 'auto' }}
-        onLoad={(e) => setDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+        style={{ display: "block", width: "100%", height: "auto" }}
+        onLoad={(e) =>
+          setDims({
+            width: e.currentTarget.naturalWidth,
+            height: e.currentTarget.naturalHeight,
+          })
+        }
       />
       {/* current clipped — revealed on the right of the slider line */}
-      <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${pct}%)`, overflow: 'hidden' }}>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          clipPath: `inset(0 0 0 ${pct}%)`,
+          overflow: "hidden",
+        }}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={current} alt="current" draggable={false} style={{ display: 'block', width: '100%', height: 'auto' }} />
+        <img
+          src={current}
+          alt="current"
+          draggable={false}
+          style={{ display: "block", width: "100%", height: "auto" }}
+        />
       </div>
       {/* Region overlays sit ABOVE the clipped current image so they're
           visible on either side of the slider line. */}
@@ -2131,11 +3141,15 @@ function SliderViewer({
       )}
       {/* Drag-to-draw layer takes over pointer events while drawing so the
           slider input below it doesn't intercept the mouse. */}
-      {drawMode === 'focus' && regions && (
+      {drawMode === "focus" && regions && (
         <DrawLayer dims={dims} onDrawn={regions.onFocusDrawn} variant="focus" />
       )}
-      {drawMode === 'ignore' && regions && (
-        <DrawLayer dims={dims} onDrawn={regions.onIgnoreDrawn} variant="ignore" />
+      {drawMode === "ignore" && regions && (
+        <DrawLayer
+          dims={dims}
+          onDrawn={regions.onIgnoreDrawn}
+          variant="ignore"
+        />
       )}
       {/* slider input — invisible but pointer-events:auto so dragging the
           handle works. Layered above images via z-index, but cannot block
@@ -2148,15 +3162,78 @@ function SliderViewer({
         value={pct}
         onChange={(e) => onPctChange(parseInt(e.target.value, 10))}
         aria-label="Compare slider"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'ew-resize', zIndex: drawing ? 0 : 3, pointerEvents: drawing ? 'none' : 'auto' }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          opacity: 0,
+          cursor: "ew-resize",
+          zIndex: drawing ? 0 : 3,
+          pointerEvents: drawing ? "none" : "auto",
+        }}
       />
-      <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct}%`, width: 2, background: 'var(--c-teal)', pointerEvents: 'none', zIndex: 4 }}>
-        <div style={{ position: 'absolute', top: '50%', left: -12, width: 26, height: 26, borderRadius: '50%', background: 'var(--c-white)', border: '2px solid var(--c-teal)', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: `${pct}%`,
+          width: 2,
+          background: "var(--c-teal)",
+          pointerEvents: "none",
+          zIndex: 4,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: -12,
+            width: 26,
+            height: 26,
+            borderRadius: "50%",
+            background: "var(--c-white)",
+            border: "2px solid var(--c-teal)",
+            transform: "translateY(-50%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <MoveHorizontal size={12} />
         </div>
       </div>
-      <span className="label" style={{ position: 'absolute', top: 6, left: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 5, fontSize: 9 }}>baseline</span>
-      <span className="label" style={{ position: 'absolute', top: 6, right: 8, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.85)', zIndex: 5, fontSize: 9 }}>current</span>
+      <span
+        className="label"
+        style={{
+          position: "absolute",
+          top: 6,
+          left: 8,
+          padding: "2px 6px",
+          borderRadius: 4,
+          background: "rgba(255,255,255,0.85)",
+          zIndex: 5,
+          fontSize: 9,
+        }}
+      >
+        baseline
+      </span>
+      <span
+        className="label"
+        style={{
+          position: "absolute",
+          top: 6,
+          right: 8,
+          padding: "2px 6px",
+          borderRadius: 4,
+          background: "rgba(255,255,255,0.85)",
+          zIndex: 5,
+          fontSize: 9,
+        }}
+      >
+        current
+      </span>
     </div>
   );
 }
@@ -2176,145 +3253,264 @@ function DomPane({
   // the DOM diff that builds.ts writes into visual_diff.metadata.domDiff.
   const dom = step.layers?.dom ?? visual?.domDiff ?? null;
   const snapshot = result?.domSnapshot;
-  const elementCount = Array.isArray(snapshot?.elements) ? snapshot.elements.length : 0;
+  const elementCount = Array.isArray(snapshot?.elements)
+    ? snapshot.elements.length
+    : 0;
   // Prefer the CURRENT screenshot for the overlay — bounding boxes were
   // captured against current's coordinate system. The diff PNG often hides
   // pixel content under highlight masks, so it's a worse base for overlays.
-  const screenshotSrc = visual?.currentImagePath ?? visual?.baselineImagePath ?? visual?.diffImagePath ?? null;
+  const screenshotSrc =
+    visual?.currentImagePath ??
+    visual?.baselineImagePath ??
+    visual?.diffImagePath ??
+    null;
 
   // Image natural dimensions are the same coordinate space as the bboxes
   // (both come from the same Playwright page). We measure on load and use
   // that as the denominator for `%` overlay positioning.
   const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
 
-  type OverlayRect = { x: number; y: number; w: number; h: number; tone: 'added' | 'removed' | 'changed'; selector: string; tag: string; text: string };
+  type OverlayRect = {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    tone: "added" | "removed" | "changed";
+    selector: string;
+    tag: string;
+    text: string;
+  };
   const overlays: OverlayRect[] = [];
   if (dom && imgSize) {
-    for (const el of dom.removed) overlays.push(rectFor(el, 'removed', imgSize.w, imgSize.h));
-    for (const el of dom.added) overlays.push(rectFor(el, 'added', imgSize.w, imgSize.h));
-    for (const c of dom.changed) overlays.push(rectFor(c.current, 'changed', imgSize.w, imgSize.h));
+    for (const el of dom.removed)
+      overlays.push(rectFor(el, "removed", imgSize.w, imgSize.h));
+    for (const el of dom.added)
+      overlays.push(rectFor(el, "added", imgSize.w, imgSize.h));
+    for (const c of dom.changed)
+      overlays.push(rectFor(c.current, "changed", imgSize.w, imgSize.h));
   }
 
   const [hovered, setHovered] = useState<number | null>(null);
 
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {clean && <CleanBanner message={`No DOM diff — ${elementCount} elements captured, identical structure`} />}
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && (
+        <CleanBanner
+          message={`No DOM diff — ${elementCount} elements captured, identical structure`}
+        />
+      )}
 
       {/* Visual overlay — boxes drawn on the current screenshot at each
           changed element's bounding box. Mirrors the visual-diff Regions UI. */}
-      {dom && screenshotSrc && (dom.added.length + dom.removed.length + dom.changed.length) > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="label" style={{ fontSize: 10 }}>DOM overlay</span>
-            <span className="v-chip done" style={{ fontSize: 9 }}>+{dom.added.length} added</span>
-            <span className="v-chip regression" style={{ fontSize: 9 }}>−{dom.removed.length} removed</span>
-            <span className="v-chip missed" style={{ fontSize: 9 }}>~{dom.changed.length} changed</span>
-            <span style={{ flex: 1 }} />
-            {imgSize && <span className="label" style={{ fontSize: 9 }}>{imgSize.w}×{imgSize.h}</span>}
-          </div>
-          <div style={{ position: 'relative', background: 'white' }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={screenshotSrc}
-              alt="current"
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+      {dom &&
+        screenshotSrc &&
+        dom.added.length + dom.removed.length + dom.changed.length > 0 && (
+          <div
+            className="v-card"
+            style={{
+              padding: 0,
+              overflow: "hidden",
+              position: "relative",
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}
-              style={{ display: 'block', width: '100%', height: 'auto' }}
-            />
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {overlays.map((r, i) => {
-                const color = r.tone === 'added' ? 'var(--c-teal)' : r.tone === 'removed' ? 'var(--c-red)' : 'var(--c-amber)';
-                const isHovered = hovered === i;
-                // Pin the popover to whichever side has more room — flips
-                // to the right of the rect when the rect sits on the left
-                // half, otherwise to the left, so it never gets clipped.
-                const pinRight = r.x < 50;
-                return (
-                  <div
-                    key={i}
-                    onMouseEnter={() => setHovered(i)}
-                    onMouseLeave={() => setHovered(null)}
-                    style={{
-                      position: 'absolute',
-                      left: `${r.x}%`,
-                      top: `${r.y}%`,
-                      width: `${r.w}%`,
-                      height: `${r.h}%`,
-                      border: `2px solid ${color}`,
-                      background: `color-mix(in oklab, ${color} 14%, transparent)`,
-                      borderRadius: 2,
-                      pointerEvents: 'auto',
-                      boxShadow: isHovered ? `0 0 0 2px color-mix(in oklab, ${color} 35%, transparent)` : 'none',
-                      zIndex: isHovered ? 2 : 1,
-                    }}
-                  >
-                    {isHovered && (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          [pinRight ? 'left' : 'right']: '100%',
-                          [pinRight ? 'marginLeft' : 'marginRight']: 6,
-                          minWidth: 220,
-                          maxWidth: 320,
-                          padding: '8px 10px',
-                          background: 'var(--c-white)',
-                          border: `1px solid ${color}`,
-                          borderRadius: 6,
-                          boxShadow: '0 6px 18px rgba(31,42,51,0.18)',
-                          fontSize: 11,
-                          lineHeight: 1.5,
-                          color: 'var(--fg-1)',
-                          pointerEvents: 'none',
-                          zIndex: 10,
-                        }}
-                      >
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                          <span className={`v-chip ${r.tone === 'added' ? 'done' : r.tone === 'removed' ? 'regression' : 'missed'}`} style={{ fontSize: 9, padding: '0 5px' }}>
-                            {r.tone}
-                          </span>
-                          <span className="mono" style={{ color: 'var(--fg-3)' }}>{`<${r.tag}>`}</span>
+            >
+              <span className="label" style={{ fontSize: 10 }}>
+                DOM overlay
+              </span>
+              <span className="v-chip done" style={{ fontSize: 9 }}>
+                +{dom.added.length} added
+              </span>
+              <span className="v-chip regression" style={{ fontSize: 9 }}>
+                −{dom.removed.length} removed
+              </span>
+              <span className="v-chip missed" style={{ fontSize: 9 }}>
+                ~{dom.changed.length} changed
+              </span>
+              <span style={{ flex: 1 }} />
+              {imgSize && (
+                <span className="label" style={{ fontSize: 9 }}>
+                  {imgSize.w}×{imgSize.h}
+                </span>
+              )}
+            </div>
+            <div style={{ position: "relative", background: "white" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={screenshotSrc}
+                alt="current"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                }}
+                style={{ display: "block", width: "100%", height: "auto" }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  pointerEvents: "none",
+                }}
+              >
+                {overlays.map((r, i) => {
+                  const color =
+                    r.tone === "added"
+                      ? "var(--c-teal)"
+                      : r.tone === "removed"
+                        ? "var(--c-red)"
+                        : "var(--c-amber)";
+                  const isHovered = hovered === i;
+                  // Pin the popover to whichever side has more room — flips
+                  // to the right of the rect when the rect sits on the left
+                  // half, otherwise to the left, so it never gets clipped.
+                  const pinRight = r.x < 50;
+                  return (
+                    <div
+                      key={i}
+                      onMouseEnter={() => setHovered(i)}
+                      onMouseLeave={() => setHovered(null)}
+                      style={{
+                        position: "absolute",
+                        left: `${r.x}%`,
+                        top: `${r.y}%`,
+                        width: `${r.w}%`,
+                        height: `${r.h}%`,
+                        border: `2px solid ${color}`,
+                        background: `color-mix(in oklab, ${color} 14%, transparent)`,
+                        borderRadius: 2,
+                        pointerEvents: "auto",
+                        boxShadow: isHovered
+                          ? `0 0 0 2px color-mix(in oklab, ${color} 35%, transparent)`
+                          : "none",
+                        zIndex: isHovered ? 2 : 1,
+                      }}
+                    >
+                      {isHovered && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            [pinRight ? "left" : "right"]: "100%",
+                            [pinRight ? "marginLeft" : "marginRight"]: 6,
+                            minWidth: 220,
+                            maxWidth: 320,
+                            padding: "8px 10px",
+                            background: "var(--c-white)",
+                            border: `1px solid ${color}`,
+                            borderRadius: 6,
+                            boxShadow: "0 6px 18px rgba(31,42,51,0.18)",
+                            fontSize: 11,
+                            lineHeight: 1.5,
+                            color: "var(--fg-1)",
+                            pointerEvents: "none",
+                            zIndex: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              marginBottom: 4,
+                            }}
+                          >
+                            <span
+                              className={`v-chip ${r.tone === "added" ? "done" : r.tone === "removed" ? "regression" : "missed"}`}
+                              style={{ fontSize: 9, padding: "0 5px" }}
+                            >
+                              {r.tone}
+                            </span>
+                            <span
+                              className="mono"
+                              style={{ color: "var(--fg-3)" }}
+                            >{`<${r.tag}>`}</span>
+                          </div>
+                          {r.selector && (
+                            <div
+                              className="mono"
+                              style={{
+                                wordBreak: "break-all",
+                                color: "var(--fg-1)",
+                                fontSize: 10.5,
+                              }}
+                            >
+                              {r.selector}
+                            </div>
+                          )}
+                          {r.text && (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                color: "var(--fg-2)",
+                                fontStyle: "italic",
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {r.text.length > 240
+                                ? r.text.slice(0, 237) + "…"
+                                : r.text}
+                            </div>
+                          )}
                         </div>
-                        {r.selector && (
-                          <div className="mono" style={{ wordBreak: 'break-all', color: 'var(--fg-1)', fontSize: 10.5 }}>
-                            {r.selector}
-                          </div>
-                        )}
-                        {r.text && (
-                          <div style={{ marginTop: 4, color: 'var(--fg-2)', fontStyle: 'italic', wordBreak: 'break-word' }}>
-                            {r.text.length > 240 ? r.text.slice(0, 237) + '…' : r.text}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Element list — grouped by Added / Removed / Changed so reviewers
           can scan each set, with full text content for each element. */}
       {dom && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {dom.added.length > 0 && (
-            <div className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="v-chip done" style={{ fontSize: 9 }}>added</span>
-                <span className="label" style={{ fontSize: 10 }}>{dom.added.length}</span>
+            <div
+              className="v-card"
+              style={{ padding: 0, overflow: "hidden", flexShrink: 0 }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span className="v-chip done" style={{ fontSize: 9 }}>
+                  added
+                </span>
+                <span className="label" style={{ fontSize: 10 }}>
+                  {dom.added.length}
+                </span>
               </div>
-              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
                 {dom.added.map((el, i) => (
                   <DomRow
                     key={`a${i}`}
                     variant="added"
                     tag={el.tag}
-                    selector={el.selectors[0]?.value ?? ''}
+                    selector={el.selectors[0]?.value ?? ""}
                     text={el.textContent}
                   />
                 ))}
@@ -2322,18 +3518,33 @@ function DomPane({
             </div>
           )}
           {dom.removed.length > 0 && (
-            <div className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="v-chip regression" style={{ fontSize: 9 }}>removed</span>
-                <span className="label" style={{ fontSize: 10 }}>{dom.removed.length}</span>
+            <div
+              className="v-card"
+              style={{ padding: 0, overflow: "hidden", flexShrink: 0 }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span className="v-chip regression" style={{ fontSize: 9 }}>
+                  removed
+                </span>
+                <span className="label" style={{ fontSize: 10 }}>
+                  {dom.removed.length}
+                </span>
               </div>
-              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
                 {dom.removed.map((el, i) => (
                   <DomRow
                     key={`r${i}`}
                     variant="removed"
                     tag={el.tag}
-                    selector={el.selectors[0]?.value ?? ''}
+                    selector={el.selectors[0]?.value ?? ""}
                     text={el.textContent}
                   />
                 ))}
@@ -2341,18 +3552,33 @@ function DomPane({
             </div>
           )}
           {dom.changed.length > 0 && (
-            <div className="v-card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className="v-chip missed" style={{ fontSize: 9 }}>changed</span>
-                <span className="label" style={{ fontSize: 10 }}>{dom.changed.length}</span>
+            <div
+              className="v-card"
+              style={{ padding: 0, overflow: "hidden", flexShrink: 0 }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span className="v-chip missed" style={{ fontSize: 9 }}>
+                  changed
+                </span>
+                <span className="label" style={{ fontSize: 10 }}>
+                  {dom.changed.length}
+                </span>
               </div>
-              <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
                 {dom.changed.map((c, i) => (
                   <DomRow
                     key={`c${i}`}
                     variant="changed"
                     tag={c.current.tag}
-                    selector={c.current.selectors[0]?.value ?? ''}
+                    selector={c.current.selectors[0]?.value ?? ""}
                     text={c.current.textContent}
                     changeKinds={c.changes}
                   />
@@ -2365,9 +3591,22 @@ function DomPane({
 
       {!dom && snapshot && (
         <div className="v-card" style={{ padding: 12 }}>
-          <div className="label" style={{ fontSize: 10, marginBottom: 6 }}>Captured snapshot · {elementCount} elements</div>
-          <pre className="mono" style={{ margin: 0, fontSize: 11, lineHeight: 1.6, maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', color: 'var(--fg-2)' }}>
-{JSON.stringify(snapshot, null, 2).slice(0, 6000)}
+          <div className="label" style={{ fontSize: 10, marginBottom: 6 }}>
+            Captured snapshot · {elementCount} elements
+          </div>
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              fontSize: 11,
+              lineHeight: 1.6,
+              maxHeight: 400,
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+              color: "var(--fg-2)",
+            }}
+          >
+            {JSON.stringify(snapshot, null, 2).slice(0, 6000)}
           </pre>
         </div>
       )}
@@ -2376,11 +3615,25 @@ function DomPane({
 }
 
 function rectFor(
-  el: { boundingBox?: { x: number; y: number; width: number; height: number }; tag: string; textContent?: string; selectors: Array<{ value: string }> },
-  tone: 'added' | 'removed' | 'changed',
+  el: {
+    boundingBox?: { x: number; y: number; width: number; height: number };
+    tag: string;
+    textContent?: string;
+    selectors: Array<{ value: string }>;
+  },
+  tone: "added" | "removed" | "changed",
   vw: number,
   vh: number,
-): { x: number; y: number; w: number; h: number; tone: 'added' | 'removed' | 'changed'; selector: string; tag: string; text: string } {
+): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tone: "added" | "removed" | "changed";
+  selector: string;
+  tag: string;
+  text: string;
+} {
   const b = el.boundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
   return {
     x: vw > 0 ? (b.x / vw) * 100 : 0,
@@ -2388,9 +3641,9 @@ function rectFor(
     w: vw > 0 ? (b.width / vw) * 100 : 0,
     h: vh > 0 ? (b.height / vh) * 100 : 0,
     tone,
-    selector: el.selectors[0]?.value ?? '',
+    selector: el.selectors[0]?.value ?? "",
     tag: el.tag,
-    text: (el.textContent ?? '').trim(),
+    text: (el.textContent ?? "").trim(),
   };
 }
 
@@ -2401,86 +3654,158 @@ function DomRow({
   text,
   changeKinds,
 }: {
-  variant: 'added' | 'removed' | 'changed';
+  variant: "added" | "removed" | "changed";
   tag: string;
   selector: string;
   text?: string;
   changeKinds?: string[];
 }) {
-  const cls = variant === 'added' ? 'done' : variant === 'removed' ? 'regression' : 'missed';
-  const sign = variant === 'added' ? '+' : variant === 'removed' ? '−' : '~';
-  const trimmedText = (text ?? '').trim();
+  const cls =
+    variant === "added"
+      ? "done"
+      : variant === "removed"
+        ? "regression"
+        : "missed";
+  const sign = variant === "added" ? "+" : variant === "removed" ? "−" : "~";
+  const trimmedText = (text ?? "").trim();
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: '20px 1fr auto',
-        alignItems: 'start',
+        display: "grid",
+        gridTemplateColumns: "20px 1fr auto",
+        alignItems: "start",
         gap: 8,
-        padding: '6px 12px',
-        borderBottom: '1px solid var(--border)',
+        padding: "6px 12px",
+        borderBottom: "1px solid var(--border)",
         fontSize: 11,
       }}
     >
-      <span className={`v-chip ${cls}`} style={{ fontSize: 9, padding: '0 5px', justifySelf: 'start', marginTop: 1 }}>{sign}</span>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-3)' }}>
+      <span
+        className={`v-chip ${cls}`}
+        style={{
+          fontSize: 9,
+          padding: "0 5px",
+          justifySelf: "start",
+          marginTop: 1,
+        }}
+      >
+        {sign}
+      </span>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          minWidth: 0,
+        }}
+      >
+        <span
+          className="mono"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--fg-3)",
+          }}
+        >
           {`<${tag}>`}
         </span>
-        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-1)' }} title={selector}>
-          {selector || <span style={{ color: 'var(--fg-3)' }}>(no selector)</span>}
+        <span
+          className="mono"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--fg-1)",
+          }}
+          title={selector}
+        >
+          {selector || (
+            <span style={{ color: "var(--fg-3)" }}>(no selector)</span>
+          )}
         </span>
         {trimmedText.length > 0 && (
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-2)', fontStyle: 'italic' }} title={trimmedText}>
-            {trimmedText.length > 120 ? trimmedText.slice(0, 117) + '…' : trimmedText}
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--fg-2)",
+              fontStyle: "italic",
+            }}
+            title={trimmedText}
+          >
+            {trimmedText.length > 120
+              ? trimmedText.slice(0, 117) + "…"
+              : trimmedText}
           </span>
         )}
       </div>
-      <span style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+      <span style={{ display: "flex", gap: 3, flexShrink: 0 }}>
         {changeKinds?.map((k) => (
-          <span key={k} className="v-chip" style={{ fontSize: 9, padding: '0 5px' }}>{k}</span>
+          <span
+            key={k}
+            className="v-chip"
+            style={{ fontSize: 9, padding: "0 5px" }}
+          >
+            {k}
+          </span>
         ))}
       </span>
     </div>
   );
 }
 
-type StatusGroup = '2xx' | '3xx' | '4xx' | '5xx' | 'err' | 'other';
+type StatusGroup = "2xx" | "3xx" | "4xx" | "5xx" | "err" | "other";
 
-function statusGroupOf(req: import('@/lib/db/schema').NetworkRequest): StatusGroup {
-  if (req.failed) return 'err';
+function statusGroupOf(
+  req: import("@/lib/db/schema").NetworkRequest,
+): StatusGroup {
+  if (req.failed) return "err";
   const s = req.status;
-  if (s == null || s === 0) return 'other';
-  if (s >= 200 && s < 300) return '2xx';
-  if (s >= 300 && s < 400) return '3xx';
-  if (s >= 400 && s < 500) return '4xx';
-  if (s >= 500 && s < 600) return '5xx';
-  return 'other';
+  if (s == null || s === 0) return "other";
+  if (s >= 200 && s < 300) return "2xx";
+  if (s >= 300 && s < 400) return "3xx";
+  if (s >= 400 && s < 500) return "4xx";
+  if (s >= 500 && s < 600) return "5xx";
+  return "other";
 }
 
 const STATUS_GROUP_TONE: Record<StatusGroup, string> = {
-  '2xx': 'done',
-  '3xx': 'info',
-  '4xx': 'missed',
-  '5xx': 'regression',
-  'err': 'regression',
-  'other': 'unknown',
+  "2xx": "done",
+  "3xx": "info",
+  "4xx": "missed",
+  "5xx": "regression",
+  err: "regression",
+  other: "unknown",
 };
 
-function NetworkPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function NetworkPane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const net = step.layers?.network;
   const requests = useMemo(() => result?.networkRequests ?? [], [result]);
 
   // When the test failed because of the network layer, auto-focus the table on
   // error rows so reviewers don't have to filter manually. Derived once via
   // the useState initializer (no per-render side effects).
-  const failedByNetwork = step.evidence.some((e) => e.layer === 'network' && e.signal === 'high');
+  const failedByNetwork = step.evidence.some(
+    (e) => e.layer === "network" && e.signal === "high",
+  );
 
   // Filters
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState<Set<string>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(
-    () => (failedByNetwork ? new Set<StatusGroup>(['4xx', '5xx', 'err']) : new Set<StatusGroup>()),
+  const [statusFilter, setStatusFilter] = useState<Set<StatusGroup>>(() =>
+    failedByNetwork
+      ? new Set<StatusGroup>(["4xx", "5xx", "err"])
+      : new Set<StatusGroup>(),
   );
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -2489,12 +3814,19 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
   // so the user can see what's available to filter on.
   const counts = useMemo(() => {
     const byMethod = new Map<string, number>();
-    const byStatus: Record<StatusGroup, number> = { '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, 'err': 0, 'other': 0 };
+    const byStatus: Record<StatusGroup, number> = {
+      "2xx": 0,
+      "3xx": 0,
+      "4xx": 0,
+      "5xx": 0,
+      err: 0,
+      other: 0,
+    };
     const byType = new Map<string, number>();
     for (const r of requests) {
       byMethod.set(r.method, (byMethod.get(r.method) ?? 0) + 1);
       byStatus[statusGroupOf(r)] += 1;
-      const t = r.resourceType || 'other';
+      const t = r.resourceType || "other";
       byType.set(t, (byType.get(t) ?? 0) + 1);
     }
     return {
@@ -2510,32 +3842,59 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => {
         if (methodFilter.size > 0 && !methodFilter.has(r.method)) return false;
-        if (statusFilter.size > 0 && !statusFilter.has(statusGroupOf(r))) return false;
-        if (typeFilter.size > 0 && !typeFilter.has(r.resourceType || 'other')) return false;
-        if (q && !r.url.toLowerCase().includes(q) && !r.method.toLowerCase().includes(q)) return false;
+        if (statusFilter.size > 0 && !statusFilter.has(statusGroupOf(r)))
+          return false;
+        if (typeFilter.size > 0 && !typeFilter.has(r.resourceType || "other"))
+          return false;
+        if (
+          q &&
+          !r.url.toLowerCase().includes(q) &&
+          !r.method.toLowerCase().includes(q)
+        )
+          return false;
         return true;
       });
   }, [requests, search, methodFilter, statusFilter, typeFilter]);
 
   const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
     const next = new Set(set);
-    if (next.has(val)) next.delete(val); else next.add(val);
+    if (next.has(val)) next.delete(val);
+    else next.add(val);
     return next;
   };
 
   const toggleExpanded = (i: number) => setExpanded((s) => toggle(s, i));
 
-  const filtersActive = search.length > 0 || methodFilter.size > 0 || statusFilter.size > 0 || typeFilter.size > 0;
+  const filtersActive =
+    search.length > 0 ||
+    methodFilter.size > 0 ||
+    statusFilter.size > 0 ||
+    typeFilter.size > 0;
 
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {failedByNetwork && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              background: 'var(--c-red)', color: 'var(--c-white)',
-              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              background: "var(--c-red)",
+              color: "var(--c-white)",
+              fontSize: 9,
+              padding: "0 6px",
+              borderRadius: 3,
               lineHeight: 1.6,
             }}
             title="Test failed because of a high-signal network regression"
@@ -2545,60 +3904,170 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
           </span>
         </div>
       )}
-      {clean && <CleanBanner message={`No network diff — ${requests.length} request${requests.length === 1 ? '' : 's'} captured, all match baseline`} />}
+      {clean && (
+        <CleanBanner
+          message={`No network diff — ${requests.length} request${requests.length === 1 ? "" : "s"} captured, all match baseline`}
+        />
+      )}
       {net && (
         <>
-          <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-              <span className="label" style={{ fontSize: 9 }} title="Δ vs baseline">Δ</span>
-              <span className="label" style={{ fontSize: 9 }}>Request</span>
-              <span className="label" style={{ fontSize: 9 }}>Status</span>
+          <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "32px 1fr 100px",
+                columnGap: 10,
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <span
+                className="label"
+                style={{ fontSize: 9 }}
+                title="Δ vs baseline"
+              >
+                Δ
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Request
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Status
+              </span>
             </div>
             {net.newClientErrors.map((e, i) => (
-              <NetworkRow key={`c${i}`} kind="new" url={`${e.method} ${e.url}`} status={String(e.status)} cls="regression" />
+              <NetworkRow
+                key={`c${i}`}
+                kind="new"
+                url={`${e.method} ${e.url}`}
+                status={String(e.status)}
+                cls="regression"
+              />
             ))}
             {net.newServerErrors.map((e, i) => (
-              <NetworkRow key={`s${i}`} kind="new" url={`${e.method} ${e.url}`} status={String(e.status)} cls="regression" />
+              <NetworkRow
+                key={`s${i}`}
+                kind="new"
+                url={`${e.method} ${e.url}`}
+                status={String(e.status)}
+                cls="regression"
+              />
             ))}
             {net.statusFlips.map((e, i) => (
-              <NetworkRow key={`f${i}`} kind="Δ" url={`${e.method} ${e.url}`} status={`${e.from}→${e.to}`} cls="missed" />
+              <NetworkRow
+                key={`f${i}`}
+                kind="Δ"
+                url={`${e.method} ${e.url}`}
+                status={`${e.from}→${e.to}`}
+                cls="missed"
+              />
             ))}
           </div>
           {/* Slim Δ-vs-baseline pills. Compact symbols (+, −, ~, err) keep the
               row scannable next to the Captured-requests filter strip below. */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '0 4px', alignItems: 'center' }}>
-            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Added vs baseline">+ {net.added}</span>
-            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Removed vs baseline">− {net.removed}</span>
-            <span className="v-chip" style={{ fontSize: 9, padding: '2px 6px' }} title="Changed vs baseline">~ {net.changed}</span>
-            <span className="v-chip regression" style={{ fontSize: 9, padding: '2px 6px' }} title="New errors vs baseline">err {net.newErrorCount}</span>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+              padding: "0 4px",
+              alignItems: "center",
+            }}
+          >
+            <span
+              className="v-chip"
+              style={{ fontSize: 9, padding: "2px 6px" }}
+              title="Added vs baseline"
+            >
+              + {net.added}
+            </span>
+            <span
+              className="v-chip"
+              style={{ fontSize: 9, padding: "2px 6px" }}
+              title="Removed vs baseline"
+            >
+              − {net.removed}
+            </span>
+            <span
+              className="v-chip"
+              style={{ fontSize: 9, padding: "2px 6px" }}
+              title="Changed vs baseline"
+            >
+              ~ {net.changed}
+            </span>
+            <span
+              className="v-chip regression"
+              style={{ fontSize: 9, padding: "2px 6px" }}
+              title="New errors vs baseline"
+            >
+              err {net.newErrorCount}
+            </span>
           </div>
         </>
       )}
       {requests.length === 0 ? (
-        <div className="v-card" style={{ padding: 24, textAlign: 'center', color: 'var(--fg-3)' }}>
+        <div
+          className="v-card"
+          style={{ padding: 24, textAlign: "center", color: "var(--fg-3)" }}
+        >
           <span className="label">No requests captured</span>
-          <p style={{ fontSize: 11, marginTop: 6 }}>Enable network capture in Playwright settings to see request data here.</p>
+          <p style={{ fontSize: 11, marginTop: 6 }}>
+            Enable network capture in Playwright settings to see request data
+            here.
+          </p>
         </div>
       ) : (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div
+          className="v-card"
+          style={{
+            padding: 0,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {/* Filter / search header */}
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="label" style={{ fontSize: 10 }}>
-                Captured requests · {filtered.length}{filtered.length !== requests.length ? ` / ${requests.length}` : ''}
+                Captured requests · {filtered.length}
+                {filtered.length !== requests.length
+                  ? ` / ${requests.length}`
+                  : ""}
               </span>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <Search size={11} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-3)' }} />
+              <div style={{ flex: 1, position: "relative" }}>
+                <Search
+                  size={11}
+                  style={{
+                    position: "absolute",
+                    left: 8,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--fg-3)",
+                  }}
+                />
                 <input
                   type="text"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="filter URL / method"
                   style={{
-                    width: '100%', padding: '5px 8px 5px 24px', fontSize: 11,
-                    border: '1px solid var(--border)', borderRadius: 6,
-                    background: 'var(--c-white)', color: 'var(--fg-1)',
-                    fontFamily: 'var(--font-mono)',
+                    width: "100%",
+                    padding: "5px 8px 5px 24px",
+                    fontSize: 11,
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    background: "var(--c-white)",
+                    color: "var(--fg-1)",
+                    fontFamily: "var(--font-mono)",
                   }}
                 />
               </div>
@@ -2606,19 +4075,31 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
                 <button
                   className="v-btn sm ghost"
                   onClick={() => {
-                    setSearch('');
+                    setSearch("");
                     setMethodFilter(new Set());
                     setStatusFilter(new Set());
                     setTypeFilter(new Set());
                   }}
                 >
-                  <X size={11} />Reset
+                  <X size={11} />
+                  Reset
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-              <span className="label" style={{ fontSize: 9 }}>Status:</span>
-              {(['2xx', '3xx', '4xx', '5xx', 'err', 'other'] as StatusGroup[]).map((g) => {
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 4,
+                alignItems: "center",
+              }}
+            >
+              <span className="label" style={{ fontSize: 9 }}>
+                Status:
+              </span>
+              {(
+                ["2xx", "3xx", "4xx", "5xx", "err", "other"] as StatusGroup[]
+              ).map((g) => {
                 const n = counts.byStatus[g];
                 if (n === 0) return null;
                 const active = statusFilter.has(g);
@@ -2627,14 +4108,21 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
                     key={g}
                     onClick={() => setStatusFilter(toggle(statusFilter, g))}
                     className={`v-chip ${STATUS_GROUP_TONE[g]}`}
-                    style={{ cursor: 'pointer', fontSize: 9, padding: '1px 6px', opacity: active ? 1 : 0.55 }}
+                    style={{
+                      cursor: "pointer",
+                      fontSize: 9,
+                      padding: "1px 6px",
+                      opacity: active ? 1 : 0.55,
+                    }}
                   >
                     {g} · {n}
                   </button>
                 );
               })}
               <span style={{ width: 8 }} />
-              <span className="label" style={{ fontSize: 9 }}>Method:</span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Method:
+              </span>
               {counts.byMethod.map(([m, n]) => {
                 const active = methodFilter.has(m);
                 return (
@@ -2642,7 +4130,12 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
                     key={m}
                     onClick={() => setMethodFilter(toggle(methodFilter, m))}
                     className="v-chip"
-                    style={{ cursor: 'pointer', fontSize: 9, padding: '1px 6px', opacity: active ? 1 : 0.55 }}
+                    style={{
+                      cursor: "pointer",
+                      fontSize: 9,
+                      padding: "1px 6px",
+                      opacity: active ? 1 : 0.55,
+                    }}
                   >
                     {m} · {n}
                   </button>
@@ -2651,7 +4144,9 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
               {counts.byType.length > 1 && (
                 <>
                   <span style={{ width: 8 }} />
-                  <span className="label" style={{ fontSize: 9 }}>Type:</span>
+                  <span className="label" style={{ fontSize: 9 }}>
+                    Type:
+                  </span>
                   {counts.byType.map(([t, n]) => {
                     const active = typeFilter.has(t);
                     return (
@@ -2659,7 +4154,12 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
                         key={t}
                         onClick={() => setTypeFilter(toggle(typeFilter, t))}
                         className="v-chip"
-                        style={{ cursor: 'pointer', fontSize: 9, padding: '1px 6px', opacity: active ? 1 : 0.55 }}
+                        style={{
+                          cursor: "pointer",
+                          fontSize: 9,
+                          padding: "1px 6px",
+                          opacity: active ? 1 : 0.55,
+                        }}
                       >
                         {t} · {n}
                       </button>
@@ -2670,23 +4170,44 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
             </div>
           </div>
           {/* Column header */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
-            columnGap: 10,
-            padding: '6px 12px', borderBottom: '1px solid var(--border)',
-            background: 'var(--c-soft)',
-          }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "20px 60px 1fr 70px 70px 70px 70px",
+              columnGap: 10,
+              padding: "6px 12px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--c-soft)",
+            }}
+          >
             <span />
-            <span className="label" style={{ fontSize: 9 }}>Method</span>
-            <span className="label" style={{ fontSize: 9 }}>URL</span>
-            <span className="label" style={{ fontSize: 9 }}>Status</span>
-            <span className="label" style={{ fontSize: 9 }}>Type</span>
-            <span className="label" style={{ fontSize: 9 }}>Dur</span>
-            <span className="label" style={{ fontSize: 9 }}>Size</span>
+            <span className="label" style={{ fontSize: 9 }}>
+              Method
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              URL
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              Status
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              Type
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              Dur
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              Size
+            </span>
           </div>
-          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+          <div style={{ maxHeight: 480, overflowY: "auto" }}>
             {filtered.length === 0 && (
-              <div className="label" style={{ padding: 16, textAlign: 'center', fontSize: 10 }}>No requests match the current filters</div>
+              <div
+                className="label"
+                style={{ padding: 16, textAlign: "center", fontSize: 10 }}
+              >
+                No requests match the current filters
+              </div>
             )}
             {filtered.slice(0, 500).map(({ r, i }) => (
               <NetworkRequestRow
@@ -2697,7 +4218,12 @@ function NetworkPane({ step, result, clean }: { step: StepComparison; result: Te
               />
             ))}
             {filtered.length > 500 && (
-              <div className="label" style={{ padding: 8, textAlign: 'center', fontSize: 10 }}>+{filtered.length - 500} more not shown</div>
+              <div
+                className="label"
+                style={{ padding: 8, textAlign: "center", fontSize: 10 }}
+              >
+                +{filtered.length - 500} more not shown
+              </div>
             )}
           </div>
         </div>
@@ -2711,65 +4237,123 @@ function NetworkRequestRow({
   expanded,
   onToggle,
 }: {
-  req: import('@/lib/db/schema').NetworkRequest;
+  req: import("@/lib/db/schema").NetworkRequest;
   expanded: boolean;
   onToggle: () => void;
 }) {
   const group = statusGroupOf(req);
   const tone = STATUS_GROUP_TONE[group];
   const statusLabel = req.failed
-    ? (req.errorText ? `err · ${req.errorText.slice(0, 24)}` : 'failed')
-    : (req.status > 0 ? String(req.status) : '—');
+    ? req.errorText
+      ? `err · ${req.errorText.slice(0, 24)}`
+      : "failed"
+    : req.status > 0
+      ? String(req.status)
+      : "—";
   return (
     <>
       <button
         type="button"
         onClick={onToggle}
         style={{
-          display: 'grid',
-          gridTemplateColumns: '20px 60px 1fr 70px 70px 70px 70px',
+          display: "grid",
+          gridTemplateColumns: "20px 60px 1fr 70px 70px 70px 70px",
           columnGap: 10,
-          padding: '6px 12px', borderBottom: '1px solid var(--border)',
-          alignItems: 'center', fontSize: 11,
-          width: '100%', textAlign: 'left',
-          background: expanded ? 'color-mix(in oklab, var(--c-teal) 4%, white)' : 'transparent',
+          padding: "6px 12px",
+          borderBottom: "1px solid var(--border)",
+          alignItems: "center",
+          fontSize: 11,
+          width: "100%",
+          textAlign: "left",
+          background: expanded
+            ? "color-mix(in oklab, var(--c-teal) 4%, white)"
+            : "transparent",
           border: 0,
-          cursor: 'pointer',
+          cursor: "pointer",
         }}
         title={req.url}
       >
         <ChevronRight
           size={11}
-          style={{ transition: 'transform 100ms ease', transform: expanded ? 'rotate(90deg)' : 'none', color: 'var(--fg-3)' }}
+          style={{
+            transition: "transform 100ms ease",
+            transform: expanded ? "rotate(90deg)" : "none",
+            color: "var(--fg-3)",
+          }}
         />
-        <span className="mono" style={{ color: 'var(--fg-2)' }}>{req.method}</span>
-        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--fg-1)' }}>{req.url}</span>
-        <span className={`v-chip ${tone}`} style={{ fontSize: 9, padding: '1px 6px', justifySelf: 'start', maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={statusLabel}>
+        <span className="mono" style={{ color: "var(--fg-2)" }}>
+          {req.method}
+        </span>
+        <span
+          className="mono"
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--fg-1)",
+          }}
+        >
+          {req.url}
+        </span>
+        <span
+          className={`v-chip ${tone}`}
+          style={{
+            fontSize: 9,
+            padding: "1px 6px",
+            justifySelf: "start",
+            maxWidth: 70,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={statusLabel}
+        >
           {statusLabel}
         </span>
-        <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10 }}>{req.resourceType || '—'}</span>
-        <span className="mono" style={{ color: 'var(--fg-2)' }}>{req.duration != null ? `${Math.round(req.duration)}ms` : '—'}</span>
-        <span className="mono" style={{ color: 'var(--fg-2)' }}>{req.responseSize != null ? formatBytes(req.responseSize) : '—'}</span>
+        <span className="mono" style={{ color: "var(--fg-3)", fontSize: 10 }}>
+          {req.resourceType || "—"}
+        </span>
+        <span className="mono" style={{ color: "var(--fg-2)" }}>
+          {req.duration != null ? `${Math.round(req.duration)}ms` : "—"}
+        </span>
+        <span className="mono" style={{ color: "var(--fg-2)" }}>
+          {req.responseSize != null ? formatBytes(req.responseSize) : "—"}
+        </span>
       </button>
       {expanded && <NetworkRequestDetails req={req} />}
     </>
   );
 }
 
-function NetworkRequestDetails({ req }: { req: import('@/lib/db/schema').NetworkRequest }) {
+function NetworkRequestDetails({
+  req,
+}: {
+  req: import("@/lib/db/schema").NetworkRequest;
+}) {
   const reqHeaders = req.requestHeaders ?? {};
   const respHeaders = req.responseHeaders ?? {};
   const hasReqHeaders = Object.keys(reqHeaders).length > 0;
   const hasRespHeaders = Object.keys(respHeaders).length > 0;
   return (
-    <div style={{
-      padding: '10px 14px 14px 38px',
-      borderBottom: '1px solid var(--border)',
-      background: 'var(--c-soft)',
-      display: 'flex', flexDirection: 'column', gap: 10,
-    }}>
+    <div
+      style={{
+        padding: "10px 14px 14px 38px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--c-soft)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {/* Top metadata strip */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          alignItems: "center",
+        }}
+      >
         {req.startTime != null && (
           <span className="label" style={{ fontSize: 9 }}>
             Started {new Date(req.startTime).toLocaleTimeString()}
@@ -2777,34 +4361,90 @@ function NetworkRequestDetails({ req }: { req: import('@/lib/db/schema').Network
         )}
         {req.failed && req.errorText && (
           <span className="v-chip regression" style={{ fontSize: 9 }}>
-            <AlertOctagon size={10} />{req.errorText}
+            <AlertOctagon size={10} />
+            {req.errorText}
           </span>
         )}
       </div>
 
-      {hasReqHeaders && <HeadersBlock title="Request headers" headers={reqHeaders} />}
-      {req.postData && <BodyBlock title="Request body" body={req.postData} />}
-      {hasRespHeaders && <HeadersBlock title="Response headers" headers={respHeaders} />}
-      {req.responseBody && <BodyBlock title="Response body" body={req.responseBody} />}
-      {!hasReqHeaders && !hasRespHeaders && !req.postData && !req.responseBody && (
-        <div className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
-          No headers / body captured for this request.
-        </div>
+      {hasReqHeaders && (
+        <HeadersBlock title="Request headers" headers={reqHeaders} />
       )}
+      {req.postData && <BodyBlock title="Request body" body={req.postData} />}
+      {hasRespHeaders && (
+        <HeadersBlock title="Response headers" headers={respHeaders} />
+      )}
+      {req.responseBody && (
+        <BodyBlock title="Response body" body={req.responseBody} />
+      )}
+      {!hasReqHeaders &&
+        !hasRespHeaders &&
+        !req.postData &&
+        !req.responseBody && (
+          <div className="label" style={{ fontSize: 9, color: "var(--fg-3)" }}>
+            No headers / body captured for this request.
+          </div>
+        )}
     </div>
   );
 }
 
-function HeadersBlock({ title, headers }: { title: string; headers: Record<string, string> }) {
+function HeadersBlock({
+  title,
+  headers,
+}: {
+  title: string;
+  headers: Record<string, string>;
+}) {
   const entries = Object.entries(headers);
   return (
     <div>
-      <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>{title} · {entries.length}</div>
-      <div className="v-card" style={{ padding: '6px 10px', fontFamily: 'var(--font-mono)', fontSize: 10.5, lineHeight: 1.6, maxHeight: 180, overflowY: 'auto' }}>
+      <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
+        {title} · {entries.length}
+      </div>
+      <div
+        className="v-card"
+        style={{
+          padding: "6px 10px",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10.5,
+          lineHeight: 1.6,
+          maxHeight: 180,
+          overflowY: "auto",
+        }}
+      >
         {entries.map(([k, v]) => (
-          <div key={k} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 8, padding: '1px 0' }}>
-            <span style={{ color: 'var(--fg-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={k}>{k}</span>
-            <span style={{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v}>{v}</span>
+          <div
+            key={k}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "180px 1fr",
+              gap: 8,
+              padding: "1px 0",
+            }}
+          >
+            <span
+              style={{
+                color: "var(--fg-3)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={k}
+            >
+              {k}
+            </span>
+            <span
+              style={{
+                color: "var(--fg-1)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={v}
+            >
+              {v}
+            </span>
           </div>
         ))}
       </div>
@@ -2817,8 +4457,12 @@ function BodyBlock({ title, body }: { title: string; body: string }) {
   const pretty = (() => {
     const trimmed = body.trim();
     if (!trimmed) return body;
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch { /* fall through */ }
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        /* fall through */
+      }
     }
     return body;
   })();
@@ -2826,17 +4470,27 @@ function BodyBlock({ title, body }: { title: string; body: string }) {
   return (
     <div>
       <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
-        {title} · {body.length} chars{truncated ? ' (truncated to 8k)' : ''}
+        {title} · {body.length} chars{truncated ? " (truncated to 8k)" : ""}
       </div>
-      <pre className="mono" style={{
-        margin: 0, padding: '8px 10px',
-        background: 'var(--c-white)',
-        border: '1px solid var(--border)', borderRadius: 6,
-        fontSize: 10.5, lineHeight: 1.55,
-        maxHeight: 240, overflow: 'auto',
-        whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-        color: 'var(--fg-1)',
-      }}>{pretty.slice(0, 8000)}</pre>
+      <pre
+        className="mono"
+        style={{
+          margin: 0,
+          padding: "8px 10px",
+          background: "var(--c-white)",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          fontSize: 10.5,
+          lineHeight: 1.55,
+          maxHeight: 240,
+          overflow: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          color: "var(--fg-1)",
+        }}
+      >
+        {pretty.slice(0, 8000)}
+      </pre>
     </div>
   );
 }
@@ -2847,56 +4501,113 @@ function formatBytes(b: number): string {
   return `${(b / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function NetworkRow({ kind, url, status, cls }: { kind: string; url: string; status: string; cls: string }) {
+function NetworkRow({
+  kind,
+  url,
+  status,
+  cls,
+}: {
+  kind: string;
+  url: string;
+  status: string;
+  cls: string;
+}) {
   // Δ column is a tight 32px slot, so the chip is a minimal badge rather
   // than a full `.v-chip` pill (the default pill's 2x8 padding + pill radius
   // + 6px gap made the marker visually overweight in the narrow column).
-  const isRegression = cls === 'regression';
+  const isRegression = cls === "regression";
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 100px', columnGap: 10, padding: '8px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center', fontSize: 12 }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "32px 1fr 100px",
+        columnGap: 10,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border)",
+        alignItems: "center",
+        fontSize: 12,
+      }}
+    >
       <span
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '0 4px',
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 4px",
           minWidth: 22,
           fontSize: 9,
-          lineHeight: '14px',
+          lineHeight: "14px",
           fontWeight: 600,
-          fontFamily: 'var(--font-sans)',
+          fontFamily: "var(--font-sans)",
           borderRadius: 3,
           background: isRegression
-            ? 'color-mix(in oklab, var(--c-red) 14%, white)'
-            : 'color-mix(in oklab, var(--c-amber) 16%, white)',
-          color: isRegression ? 'var(--c-red)' : '#8C5C19',
-          border: `1px solid color-mix(in oklab, ${isRegression ? 'var(--c-red)' : 'var(--c-amber)'} 30%, transparent)`,
-          whiteSpace: 'nowrap',
+            ? "color-mix(in oklab, var(--c-red) 14%, white)"
+            : "color-mix(in oklab, var(--c-amber) 16%, white)",
+          color: isRegression ? "var(--c-red)" : "#8C5C19",
+          border: `1px solid color-mix(in oklab, ${isRegression ? "var(--c-red)" : "var(--c-amber)"} 30%, transparent)`,
+          whiteSpace: "nowrap",
           letterSpacing: 0,
         }}
-        title={isRegression ? 'New since baseline' : 'Changed since baseline'}
+        title={isRegression ? "New since baseline" : "Changed since baseline"}
       >
         {kind}
       </span>
-      <span className="mono" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{url}</span>
-      <span className="mono" style={{ fontSize: 11 }}>{status}</span>
+      <span
+        className="mono"
+        style={{
+          fontSize: 11,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {url}
+      </span>
+      <span className="mono" style={{ fontSize: 11 }}>
+        {status}
+      </span>
     </div>
   );
 }
 
-function ConsolePane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function ConsolePane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const con = step.layers?.consoleDiff;
   const messages = result?.consoleErrors ?? [];
-  const failedByConsole = step.evidence.some((e) => e.layer === 'console' && e.signal === 'high');
+  const failedByConsole = step.evidence.some(
+    (e) => e.layer === "console" && e.signal === "high",
+  );
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {failedByConsole && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              background: 'var(--c-red)', color: 'var(--c-white)',
-              fontSize: 9, padding: '0 6px', borderRadius: 3,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              background: "var(--c-red)",
+              color: "var(--c-white)",
+              fontSize: 9,
+              padding: "0 6px",
+              borderRadius: 3,
               lineHeight: 1.6,
             }}
             title="Test failed because of a high-signal console regression"
@@ -2906,33 +4617,77 @@ function ConsolePane({ step, result, clean }: { step: StepComparison; result: Te
           </span>
         </div>
       )}
-      {clean && <CleanBanner message={messages.length === 0 ? 'No console messages captured' : `${messages.length} console message${messages.length === 1 ? '' : 's'} — all match baseline`} />}
-      {con && (con.newFingerprints.length > 0 || con.disappeared.length > 0) && (
-        <div className="v-card" style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.85 }}>
-          {con.newFingerprints.map((fp, i) => (
-            <div key={`n${i}`}>
-              <span className="v-chip regression" style={{ fontSize: 9 }}>NEW · ×{fp.count}</span>{' '}
-              <span style={{ color: 'var(--c-red)' }}>{fp.sample}</span>
-            </div>
-          ))}
-          {con.disappeared.map((fp, i) => (
-            <div key={`d${i}`} style={{ opacity: 0.55 }}>
-              <span className="v-chip done" style={{ fontSize: 9 }}>resolved · ×{fp.count}</span>{' '}
-              <span style={{ color: 'var(--c-teal)' }}>{fp.sample}</span>
-            </div>
-          ))}
-        </div>
+      {clean && (
+        <CleanBanner
+          message={
+            messages.length === 0
+              ? "No console messages captured"
+              : `${messages.length} console message${messages.length === 1 ? "" : "s"} — all match baseline`
+          }
+        />
       )}
-      {messages.length > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 10 }}>Captured console output · {messages.length}</span>
-          </div>
-          <div style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.6, maxHeight: 400, overflowY: 'auto', color: 'var(--fg-2)' }}>
-            {messages.slice(0, 200).map((m, i) => (
-              <div key={i} style={{ paddingBottom: 2 }}>{m}</div>
+      {con &&
+        (con.newFingerprints.length > 0 || con.disappeared.length > 0) && (
+          <div
+            className="v-card"
+            style={{
+              padding: 12,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11.5,
+              lineHeight: 1.85,
+            }}
+          >
+            {con.newFingerprints.map((fp, i) => (
+              <div key={`n${i}`}>
+                <span className="v-chip regression" style={{ fontSize: 9 }}>
+                  NEW · ×{fp.count}
+                </span>{" "}
+                <span style={{ color: "var(--c-red)" }}>{fp.sample}</span>
+              </div>
             ))}
-            {messages.length > 200 && <div className="label" style={{ paddingTop: 6, fontSize: 10 }}>+{messages.length - 200} more</div>}
+            {con.disappeared.map((fp, i) => (
+              <div key={`d${i}`} style={{ opacity: 0.55 }}>
+                <span className="v-chip done" style={{ fontSize: 9 }}>
+                  resolved · ×{fp.count}
+                </span>{" "}
+                <span style={{ color: "var(--c-teal)" }}>{fp.sample}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      {messages.length > 0 && (
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Captured console output · {messages.length}
+            </span>
+          </div>
+          <div
+            style={{
+              padding: 12,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              lineHeight: 1.6,
+              maxHeight: 400,
+              overflowY: "auto",
+              color: "var(--fg-2)",
+            }}
+          >
+            {messages.slice(0, 200).map((m, i) => (
+              <div key={i} style={{ paddingBottom: 2 }}>
+                {m}
+              </div>
+            ))}
+            {messages.length > 200 && (
+              <div className="label" style={{ paddingTop: 6, fontSize: 10 }}>
+                +{messages.length - 200} more
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2940,12 +4695,34 @@ function ConsolePane({ step, result, clean }: { step: StepComparison; result: Te
   );
 }
 
-function A11yPane({ step, result, clean, buildA11y, buildId }: { step: StepComparison; result: TestResultLite | null; clean: boolean; buildA11y?: FocusViewProps['buildA11y']; buildId: string }) {
+function A11yPane({
+  step,
+  result,
+  clean,
+  buildA11y,
+  buildId,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+  buildA11y?: FocusViewProps["buildA11y"];
+  buildId: string;
+}) {
   const a = step.layers?.a11y;
   const violations = result?.a11yViolations ?? [];
   const passes = result?.a11yPassesCount ?? null;
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {buildA11y && buildA11y.score != null && (
         <A11yComplianceCard
           score={buildA11y.score}
@@ -2958,38 +4735,119 @@ function A11yPane({ step, result, clean, buildA11y, buildId }: { step: StepCompa
       {buildA11y?.violations && buildA11y.violations.length > 0 && (
         <A11yViolationsCard buildId={buildId} rows={buildA11y.violations} />
       )}
-      {clean && <CleanBanner message={`No new a11y issues — ${violations.length} violation${violations.length === 1 ? '' : 's'} captured${passes != null ? `, ${passes} rules passed` : ''}`} />}
+      {clean && (
+        <CleanBanner
+          message={`No new a11y issues — ${violations.length} violation${violations.length === 1 ? "" : "s"} captured${passes != null ? `, ${passes} rules passed` : ""}`}
+        />
+      )}
       {a && (
         <>
-          <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-              <span className="label" style={{ fontSize: 10 }}>New violations vs baseline</span>
+          <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div
+              style={{
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <span className="label" style={{ fontSize: 10 }}>
+                New violations vs baseline
+              </span>
             </div>
-            {a.newViolations.length === 0 && <div style={{ padding: 12 }} className="label">no new violations</div>}
+            {a.newViolations.length === 0 && (
+              <div style={{ padding: 12 }} className="label">
+                no new violations
+              </div>
+            )}
             {a.newViolations.map((v, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 80px 80px', padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}>
-                <span className="v-chip regression" style={{ fontSize: 9 }}>new</span>
-                <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.id}</span>
-                <span className="v-chip" style={{ fontSize: 9 }}>{v.impact}</span>
-                {v.wcagLevel && <span className="v-chip info" style={{ fontSize: 9 }}>WCAG {v.wcagLevel}</span>}
+              <div
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "60px 1fr 80px 80px",
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: 12,
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span className="v-chip regression" style={{ fontSize: 9 }}>
+                  new
+                </span>
+                <span
+                  style={{
+                    fontWeight: 500,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {v.id}
+                </span>
+                <span className="v-chip" style={{ fontSize: 9 }}>
+                  {v.impact}
+                </span>
+                {v.wcagLevel && (
+                  <span className="v-chip info" style={{ fontSize: 9 }}>
+                    WCAG {v.wcagLevel}
+                  </span>
+                )}
               </div>
             ))}
           </div>
-          <div className="label" style={{ padding: '0 4px' }}>
-            crit {a.newBySeverity.critical} · ser {a.newBySeverity.serious} · mod {a.newBySeverity.moderate} · min {a.newBySeverity.minor}
+          <div className="label" style={{ padding: "0 4px" }}>
+            crit {a.newBySeverity.critical} · ser {a.newBySeverity.serious} ·
+            mod {a.newBySeverity.moderate} · min {a.newBySeverity.minor}
           </div>
         </>
       )}
       {violations.length > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 10 }}>Captured violations · {violations.length}{passes != null ? ` · ${passes} passes` : ''}</span>
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Captured violations · {violations.length}
+              {passes != null ? ` · ${passes} passes` : ""}
+            </span>
           </div>
           {violations.slice(0, 50).map((v, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 70px', padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}>
-              <span className="v-chip" style={{ fontSize: 9 }}>{v.impact}</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.description}>{v.id}</span>
-              {v.wcagLevel && <span className="v-chip info" style={{ fontSize: 9, justifySelf: 'start' }}>WCAG {v.wcagLevel}</span>}
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "70px 1fr 70px",
+                padding: "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: 12,
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span className="v-chip" style={{ fontSize: 9 }}>
+                {v.impact}
+              </span>
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={v.description}
+              >
+                {v.id}
+              </span>
+              {v.wcagLevel && (
+                <span
+                  className="v-chip info"
+                  style={{ fontSize: 9, justifySelf: "start" }}
+                >
+                  WCAG {v.wcagLevel}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -3008,7 +4866,7 @@ function DesignSystemPane({
   step: StepComparison;
   result: TestResultLite | null;
   clean: boolean;
-  buildDesignSystem?: FocusViewProps['buildDesignSystem'];
+  buildDesignSystem?: FocusViewProps["buildDesignSystem"];
   buildId: string;
 }) {
   const violations = result?.designSystemViolations ?? [];
@@ -3017,7 +4875,17 @@ function DesignSystemPane({
   // — populated by the verify diff stage when present.
   const ds = step.layers?.designSystem;
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
       {buildDesignSystem && buildDesignSystem.score != null && (
         <DesignSystemComplianceCard
           score={buildDesignSystem.score}
@@ -3037,56 +4905,127 @@ function DesignSystemPane({
           violations={buildDesignSystem.violations ?? []}
         />
       )}
-      {buildDesignSystem?.violations && buildDesignSystem.violations.length > 0 && (
-        <DesignSystemViolationsCard buildId={buildId} rows={buildDesignSystem.violations} />
-      )}
+      {buildDesignSystem?.violations &&
+        buildDesignSystem.violations.length > 0 && (
+          <DesignSystemViolationsCard
+            buildId={buildId}
+            rows={buildDesignSystem.violations}
+          />
+        )}
       {clean && (
         <CleanBanner
-          message={`No design-system drift — ${violations.length} off-token value${violations.length === 1 ? '' : 's'} captured${rules != null ? `, ${rules} rule checks` : ''}`}
+          message={`No design-system drift — ${violations.length} off-token value${violations.length === 1 ? "" : "s"} captured${rules != null ? `, ${rules} rule checks` : ""}`}
         />
       )}
       {ds && (
         <>
-          <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-              <span className="label" style={{ fontSize: 10 }}>New off-token values vs baseline</span>
+          <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+            <div
+              style={{
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <span className="label" style={{ fontSize: 10 }}>
+                New off-token values vs baseline
+              </span>
             </div>
             {ds.newViolations.length === 0 && (
-              <div style={{ padding: 12 }} className="label">no new off-token values</div>
+              <div style={{ padding: 12 }} className="label">
+                no new off-token values
+              </div>
             )}
             {ds.newViolations.map((v, i) => (
               <div
                 key={i}
-                style={{ display: 'grid', gridTemplateColumns: '60px 70px 1fr 110px', padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "60px 70px 1fr 110px",
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: 12,
+                  alignItems: "center",
+                  gap: 8,
+                }}
               >
-                <span className="v-chip regression" style={{ fontSize: 9 }}>new</span>
-                <span className="v-chip" style={{ fontSize: 9 }}>{v.category}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.property} → {v.actual}</span>
-                <span className="v-chip" style={{ fontSize: 9, justifySelf: 'start' }}>{v.impact}</span>
+                <span className="v-chip regression" style={{ fontSize: 9 }}>
+                  new
+                </span>
+                <span className="v-chip" style={{ fontSize: 9 }}>
+                  {v.category}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {v.property} → {v.actual}
+                </span>
+                <span
+                  className="v-chip"
+                  style={{ fontSize: 9, justifySelf: "start" }}
+                >
+                  {v.impact}
+                </span>
               </div>
             ))}
           </div>
-          <div className="label" style={{ padding: '0 4px' }}>
-            crit {ds.newBySeverity.critical} · ser {ds.newBySeverity.serious} · mod {ds.newBySeverity.moderate} · min {ds.newBySeverity.minor}
+          <div className="label" style={{ padding: "0 4px" }}>
+            crit {ds.newBySeverity.critical} · ser {ds.newBySeverity.serious} ·
+            mod {ds.newBySeverity.moderate} · min {ds.newBySeverity.minor}
           </div>
         </>
       )}
       {violations.length > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 10 }}>Captured violations · {violations.length}{rules != null ? ` · ${rules} rules` : ''}</span>
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Captured violations · {violations.length}
+              {rules != null ? ` · ${rules} rules` : ""}
+            </span>
           </div>
           {violations.slice(0, 50).map((v, i) => (
             <div
               key={i}
-              style={{ display: 'grid', gridTemplateColumns: '70px 70px 1fr 70px', padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "70px 70px 1fr 70px",
+                padding: "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: 12,
+                alignItems: "center",
+                gap: 8,
+              }}
             >
-              <span className="v-chip" style={{ fontSize: 9 }}>{v.impact}</span>
-              <span className="v-chip" style={{ fontSize: 9 }}>{v.category}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${v.property}: ${v.actual}${v.expected ? ' (expected ' + v.expected + ')' : ''}`}>
-                {v.property}: {v.actual}{v.expected ? ` → ${v.expected}` : ''}
+              <span className="v-chip" style={{ fontSize: 9 }}>
+                {v.impact}
               </span>
-              <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>{v.nodes} node{v.nodes === 1 ? '' : 's'}</span>
+              <span className="v-chip" style={{ fontSize: 9 }}>
+                {v.category}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={`${v.property}: ${v.actual}${v.expected ? " (expected " + v.expected + ")" : ""}`}
+              >
+                {v.property}: {v.actual}
+                {v.expected ? ` → ${v.expected}` : ""}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--fg-3)" }}>
+                {v.nodes} node{v.nodes === 1 ? "" : "s"}
+              </span>
             </div>
           ))}
         </div>
@@ -3095,42 +5034,101 @@ function DesignSystemPane({
   );
 }
 
-function PerfPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function PerfPane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const p = step.layers?.perf;
   const samples = useMemo(() => result?.webVitals ?? [], [result]);
   // Aggregate samples to one value per metric (mean) for the captured-no-diff view.
   const aggregated = useMemo(() => {
-    if (samples.length === 0) return [] as Array<{ metric: string; value: number }>;
+    if (samples.length === 0)
+      return [] as Array<{ metric: string; value: number }>;
     const acc: Record<string, { sum: number; n: number }> = {};
     for (const s of samples) {
       for (const [k, v] of Object.entries(s)) {
-        if (typeof v === 'number') {
+        if (typeof v === "number") {
           if (!acc[k]) acc[k] = { sum: 0, n: 0 };
           acc[k].sum += v;
           acc[k].n += 1;
         }
       }
     }
-    return Object.entries(acc).map(([metric, { sum, n }]) => ({ metric, value: sum / n }));
+    return Object.entries(acc).map(([metric, { sum, n }]) => ({
+      metric,
+      value: sum / n,
+    }));
   }, [samples]);
 
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {clean && <CleanBanner message={`No perf drift — ${samples.length} sample${samples.length === 1 ? '' : 's'} captured, all within budget`} />}
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && (
+        <CleanBanner
+          message={`No perf drift — ${samples.length} sample${samples.length === 1 ? "" : "s"} captured, all within budget`}
+        />
+      )}
       {p && p.deltas.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+            gap: 10,
+          }}
+        >
           {p.deltas.map((d, i) => (
             <div key={i} className="v-card" style={{ padding: 14 }}>
-              <div className="label">{d.metric.toUpperCase()}{d.stepLabel ? ` · ${d.stepLabel}` : ''}</div>
-              <div style={{ fontSize: 24, fontWeight: 600, marginTop: 6 }}>
-                {d.metric === 'cls' ? d.current.toFixed(2) : Math.round(d.current)}
+              <div className="label">
+                {d.metric.toUpperCase()}
+                {d.stepLabel ? ` · ${d.stepLabel}` : ""}
               </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className={`v-chip ${d.budgetBreached || d.drifted ? 'missed' : 'done'}`} style={{ fontSize: 9 }}>
-                  {d.delta >= 0 ? '+' : ''}{d.metric === 'cls' ? d.delta.toFixed(2) : Math.round(d.delta)}
+              <div style={{ fontSize: 24, fontWeight: 600, marginTop: 6 }}>
+                {d.metric === "cls"
+                  ? d.current.toFixed(2)
+                  : Math.round(d.current)}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  className={`v-chip ${d.budgetBreached || d.drifted ? "missed" : "done"}`}
+                  style={{ fontSize: 9 }}
+                >
+                  {d.delta >= 0 ? "+" : ""}
+                  {d.metric === "cls"
+                    ? d.delta.toFixed(2)
+                    : Math.round(d.delta)}
                 </span>
-                {d.budgetBreached && <span className="label" style={{ fontSize: 9 }}>over budget</span>}
-                {d.drifted && !d.budgetBreached && <span className="label" style={{ fontSize: 9 }}>drift</span>}
+                {d.budgetBreached && (
+                  <span className="label" style={{ fontSize: 9 }}>
+                    over budget
+                  </span>
+                )}
+                {d.drifted && !d.budgetBreached && (
+                  <span className="label" style={{ fontSize: 9 }}>
+                    drift
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -3138,13 +5136,31 @@ function PerfPane({ step, result, clean }: { step: StepComparison; result: TestR
       )}
       {aggregated.length > 0 && (
         <div className="v-card" style={{ padding: 12 }}>
-          <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Captured Web Vitals · mean of {samples.length} sample{samples.length === 1 ? '' : 's'}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+          <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>
+            Captured Web Vitals · mean of {samples.length} sample
+            {samples.length === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              gap: 10,
+            }}
+          >
             {aggregated.map(({ metric, value }) => (
-              <div key={metric} style={{ borderRadius: 6, background: 'var(--c-soft)', padding: '8px 10px' }}>
-                <div className="label" style={{ fontSize: 9 }}>{metric.toUpperCase()}</div>
+              <div
+                key={metric}
+                style={{
+                  borderRadius: 6,
+                  background: "var(--c-soft)",
+                  padding: "8px 10px",
+                }}
+              >
+                <div className="label" style={{ fontSize: 9 }}>
+                  {metric.toUpperCase()}
+                </div>
                 <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>
-                  {metric === 'cls' ? value.toFixed(3) : Math.round(value)}
+                  {metric === "cls" ? value.toFixed(3) : Math.round(value)}
                 </div>
               </div>
             ))}
@@ -3155,21 +5171,62 @@ function PerfPane({ step, result, clean }: { step: StepComparison; result: TestR
   );
 }
 
-function UrlPane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function UrlPane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const u = step.layers?.url;
   const trajectory = result?.urlTrajectory ?? [];
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
-      {clean && <CleanBanner message={`No URL divergence — ${trajectory.length} URL${trajectory.length === 1 ? '' : 's'} captured, trajectory matches baseline`} />}
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        overflowY: "auto",
+      }}
+    >
+      {clean && (
+        <CleanBanner
+          message={`No URL divergence — ${trajectory.length} URL${trajectory.length === 1 ? "" : "s"} captured, trajectory matches baseline`}
+        />
+      )}
       {u && (
         <div className="v-card" style={{ padding: 12 }}>
-          <div className="label">Diverged steps ({u.divergedSteps.length} of {u.totalStepsCompared})</div>
-          <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 2 }}>
-            {u.divergedSteps.length === 0 && <span className="label">no divergence</span>}
+          <div className="label">
+            Diverged steps ({u.divergedSteps.length} of {u.totalStepsCompared})
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              lineHeight: 2,
+            }}
+          >
+            {u.divergedSteps.length === 0 && (
+              <span className="label">no divergence</span>
+            )}
             {u.divergedSteps.map((d, i) => (
               <div key={i}>
-                <span style={{ color: 'var(--fg-2)' }}>{d.baselineUrl}</span> → <span style={{ color: 'var(--c-red)' }}>{d.currentUrl}</span>
-                {d.redirectChainChanged && <span className="v-chip missed" style={{ fontSize: 9, marginLeft: 6 }}>+1 redirect</span>}
+                <span style={{ color: "var(--fg-2)" }}>{d.baselineUrl}</span> →{" "}
+                <span style={{ color: "var(--c-red)" }}>{d.currentUrl}</span>
+                {d.redirectChainChanged && (
+                  <span
+                    className="v-chip missed"
+                    style={{ fontSize: 9, marginLeft: 6 }}
+                  >
+                    +1 redirect
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -3177,17 +5234,54 @@ function UrlPane({ step, result, clean }: { step: StepComparison; result: TestRe
       )}
       {trajectory.length > 0 && (
         <div className="v-card" style={{ padding: 12 }}>
-          <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>Captured URL trajectory · {trajectory.length} step{trajectory.length === 1 ? '' : 's'}</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.8 }}>
+          <div className="label" style={{ marginBottom: 6, fontSize: 10 }}>
+            Captured URL trajectory · {trajectory.length} step
+            {trajectory.length === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              lineHeight: 1.8,
+            }}
+          >
             {trajectory.map((t, i) => {
-              const url = (t as { finalUrl?: string; url?: string }).finalUrl ?? (t as { url?: string }).url ?? '';
+              const url =
+                (t as { finalUrl?: string; url?: string }).finalUrl ??
+                (t as { url?: string }).url ??
+                "";
               const stepIndex = (t as { stepIndex?: number }).stepIndex ?? i;
-              const redirectChain = (t as { redirectChain?: string[] }).redirectChain ?? [];
+              const redirectChain =
+                (t as { redirectChain?: string[] }).redirectChain ?? [];
               return (
-                <div key={i} style={{ paddingBottom: 4, borderBottom: i < trajectory.length - 1 ? '1px dashed var(--border)' : 'none', marginBottom: 4 }}>
-                  <div><span className="label" style={{ fontSize: 9, marginRight: 6 }}>step {stepIndex}</span><span style={{ color: 'var(--fg-1)' }}>{url}</span></div>
+                <div
+                  key={i}
+                  style={{
+                    paddingBottom: 4,
+                    borderBottom:
+                      i < trajectory.length - 1
+                        ? "1px dashed var(--border)"
+                        : "none",
+                    marginBottom: 4,
+                  }}
+                >
+                  <div>
+                    <span
+                      className="label"
+                      style={{ fontSize: 9, marginRight: 6 }}
+                    >
+                      step {stepIndex}
+                    </span>
+                    <span style={{ color: "var(--fg-1)" }}>{url}</span>
+                  </div>
                   {redirectChain.length > 1 && (
-                    <div className="label" style={{ fontSize: 9, paddingLeft: 18 }}>+ {redirectChain.length - 1} redirect{redirectChain.length - 1 === 1 ? '' : 's'}</div>
+                    <div
+                      className="label"
+                      style={{ fontSize: 9, paddingLeft: 18 }}
+                    >
+                      + {redirectChain.length - 1} redirect
+                      {redirectChain.length - 1 === 1 ? "" : "s"}
+                    </div>
                   )}
                 </div>
               );
@@ -3199,53 +5293,195 @@ function UrlPane({ step, result, clean }: { step: StepComparison; result: TestRe
   );
 }
 
-function VariablePane({ step, result, clean }: { step: StepComparison; result: TestResultLite | null; clean: boolean }) {
+function VariablePane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
   const v = step.layers?.variable;
   const extracted = result?.extractedVariables ?? {};
   const assigned = result?.assignedVariables ?? {};
   const all = { ...assigned, ...extracted };
   const keys = Object.keys(all);
   return (
-    <div style={{ flex: 1, padding: 14, background: 'var(--c-soft-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {clean && <CleanBanner message={keys.length === 0 ? 'No variables captured' : `${keys.length} variable${keys.length === 1 ? '' : 's'} captured — all match baseline`} />}
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && (
+        <CleanBanner
+          message={
+            keys.length === 0
+              ? "No variables captured"
+              : `${keys.length} variable${keys.length === 1 ? "" : "s"} captured — all match baseline`
+          }
+        />
+      )}
       {v && v.changes.length > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 10 }}>Variable diff</span>
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Variable diff
+            </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr 80px', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 9 }}>path</span>
-            <span className="label" style={{ fontSize: 9 }}>baseline</span>
-            <span className="label" style={{ fontSize: 9 }}>current</span>
-            <span className="label" style={{ fontSize: 9 }}>tier</span>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "180px 1fr 1fr 80px",
+              padding: "8px 14px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 9 }}>
+              path
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              baseline
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              current
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              tier
+            </span>
           </div>
           {v.changes.map((c, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr 80px', padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}>
-              <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.path}</span>
-              <span className="mono" style={{ color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(c.baseline ?? '—')}</span>
-              <span className="mono" style={{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(c.current ?? '—')}</span>
-              <span className="v-chip" style={{ fontSize: 9 }}>{c.tier.replace('-', ' ')}</span>
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "180px 1fr 1fr 80px",
+                padding: "8px 14px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: 12,
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                className="mono"
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {c.path}
+              </span>
+              <span
+                className="mono"
+                style={{
+                  color: "var(--fg-2)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {String(c.baseline ?? "—")}
+              </span>
+              <span
+                className="mono"
+                style={{
+                  color: "var(--fg-1)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {String(c.current ?? "—")}
+              </span>
+              <span className="v-chip" style={{ fontSize: 9 }}>
+                {c.tier.replace("-", " ")}
+              </span>
             </div>
           ))}
         </div>
       )}
       {keys.length > 0 && (
-        <div className="v-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 10 }}>Captured variables · {keys.length}</span>
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 10 }}>
+              Captured variables · {keys.length}
+            </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 80px', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
-            <span className="label" style={{ fontSize: 9 }}>name</span>
-            <span className="label" style={{ fontSize: 9 }}>value</span>
-            <span className="label" style={{ fontSize: 9 }}>source</span>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "180px 1fr 80px",
+              padding: "8px 14px",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span className="label" style={{ fontSize: 9 }}>
+              name
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              value
+            </span>
+            <span className="label" style={{ fontSize: 9 }}>
+              source
+            </span>
           </div>
           {keys.slice(0, 100).map((k) => {
-            const source = k in extracted ? 'extract' : 'assign';
+            const source = k in extracted ? "extract" : "assign";
             return (
-              <div key={k} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 80px', padding: '6px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', gap: 8 }}>
-                <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
-                <span className="mono" style={{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{all[k]}</span>
-                <span className="v-chip" style={{ fontSize: 9 }}>{source}</span>
+              <div
+                key={k}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "180px 1fr 80px",
+                  padding: "6px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: 12,
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {k}
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    color: "var(--fg-1)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {all[k]}
+                </span>
+                <span className="v-chip" style={{ fontSize: 9 }}>
+                  {source}
+                </span>
               </div>
             );
           })}
@@ -3269,7 +5505,7 @@ interface IntentPanelProps {
   onAfterCreate?: () => void;
 }
 
-type EvidenceItemType = StepComparison['evidence'][number];
+type EvidenceItemType = StepComparison["evidence"][number];
 
 /** Linked GH issue summary — shows the title + body fetched via the
  *  fetchLinkedIssueForCase server action. Body is the most useful piece of
@@ -3286,7 +5522,11 @@ function LinkedIssueCard({
   issueNumber: number | null;
   issueState: StepIssueState | null;
 }) {
-  const [detail, setDetail] = useState<{ title: string; body: string; state: 'open' | 'closed' } | null>(null);
+  const [detail, setDetail] = useState<{
+    title: string;
+    body: string;
+    state: "open" | "closed";
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -3295,72 +5535,118 @@ function LinkedIssueCard({
     let cancelled = false;
     fetchLinkedIssueForCase(stepId).then((res) => {
       if (cancelled) return;
-      if (!res.ok) { setError(res.error ?? 'Failed to load issue'); setLoading(false); return; }
-      if (res.issue) setDetail({ title: res.issue.title, body: res.issue.body, state: res.issue.state });
+      if (!res.ok) {
+        setError(res.error ?? "Failed to load issue");
+        setLoading(false);
+        return;
+      }
+      if (res.issue)
+        setDetail({
+          title: res.issue.title,
+          body: res.issue.body,
+          state: res.issue.state,
+        });
       setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [stepId]);
 
-  const tone = issueState === 'closed' ? 'done' : issueState === 'auto' ? 'regression' : 'info';
-  const trimmedBody = (detail?.body ?? '').trim();
+  const tone =
+    issueState === "closed"
+      ? "done"
+      : issueState === "auto"
+        ? "regression"
+        : "info";
+  const trimmedBody = (detail?.body ?? "").trim();
   const isLong = trimmedBody.length > 480;
-  const visibleBody = expanded || !isLong ? trimmedBody : trimmedBody.slice(0, 460) + '…';
+  const visibleBody =
+    expanded || !isLong ? trimmedBody : trimmedBody.slice(0, 460) + "…";
 
   return (
-    <div className="v-card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div
+      className="v-card"
+      style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
         <span className={`v-chip ${tone}`} style={{ fontSize: 10 }}>
-          #{issueNumber} {issueState ?? 'linked'}
+          #{issueNumber} {issueState ?? "linked"}
         </span>
         <a
           href={issueUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="mono"
-          style={{ fontSize: 11, color: 'var(--c-blue)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          style={{
+            fontSize: 11,
+            color: "var(--c-blue)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
         >
-          {issueUrl.replace(/^https?:\/\//, '')}
+          {issueUrl.replace(/^https?:\/\//, "")}
         </a>
       </div>
       {loading && (
-        <div className="label" style={{ fontSize: 10 }}>loading description…</div>
+        <div className="label" style={{ fontSize: 10 }}>
+          loading description…
+        </div>
       )}
       {error && (
-        <span className="v-chip regression" style={{ fontSize: 9 }}>{error}</span>
+        <span className="v-chip regression" style={{ fontSize: 9 }}>
+          {error}
+        </span>
       )}
       {detail && (
         <>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)', lineHeight: 1.4 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--fg-1)",
+              lineHeight: 1.4,
+            }}
+          >
             {detail.title}
           </div>
           {trimmedBody.length > 0 ? (
             <div
               style={{
                 fontSize: 11.5,
-                color: 'var(--fg-2)',
+                color: "var(--fg-2)",
                 lineHeight: 1.55,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                background: 'var(--c-soft)',
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                background: "var(--c-soft)",
                 borderRadius: 6,
-                padding: '8px 10px',
-                maxHeight: expanded ? 360 : 'unset',
-                overflow: expanded ? 'auto' : 'hidden',
+                padding: "8px 10px",
+                maxHeight: expanded ? 360 : "unset",
+                overflow: expanded ? "auto" : "hidden",
               }}
             >
               {visibleBody}
             </div>
           ) : (
-            <div className="label" style={{ fontSize: 9 }}>no description</div>
+            <div className="label" style={{ fontSize: 9 }}>
+              no description
+            </div>
           )}
           {isLong && (
             <button
               className="v-btn sm ghost"
-              style={{ alignSelf: 'flex-start', fontSize: 11 }}
+              style={{ alignSelf: "flex-start", fontSize: 11 }}
               onClick={() => setExpanded((v) => !v)}
             >
-              {expanded ? 'Collapse' : `Expand (${trimmedBody.length} chars)`}
+              {expanded ? "Collapse" : `Expand (${trimmedBody.length} chars)`}
             </button>
           )}
         </>
@@ -3369,21 +5655,58 @@ function LinkedIssueCard({
   );
 }
 
-function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer, onOpenPicker, onCloseIssue, onAfterCreate }: IntentPanelProps) {
+function IntentPanel({
+  open,
+  onClose,
+  activeCase,
+  onApproveLayer,
+  onRejectLayer,
+  onOpenPicker,
+  onCloseIssue,
+  onAfterCreate,
+}: IntentPanelProps) {
   if (!open) return null;
   const evidence = activeCase?.step.evidence ?? [];
   const issueUrl = activeCase?.step.githubIssueUrl ?? null;
   const issueNumber = activeCase?.step.githubIssueNumber ?? null;
   const issueState = activeCase?.step.githubIssueState ?? null;
   return (
-    <div style={{ width: 320, background: 'var(--c-white)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div
+      style={{
+        width: 320,
+        background: "var(--c-white)",
+        borderLeft: "1px solid var(--border)",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
         <Github size={14} />
         <span className="label">Issue</span>
         <span style={{ flex: 1 }} />
-        <button className="v-btn ghost icon" onClick={onClose}><X size={13} /></button>
+        <button className="v-btn ghost icon" onClick={onClose}>
+          <X size={13} />
+        </button>
       </div>
-      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', flex: 1 }}>
+      <div
+        style={{
+          padding: 14,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          overflowY: "auto",
+          flex: 1,
+        }}
+      >
         {/* Real issue card if linked */}
         {issueUrl && activeCase && (
           <LinkedIssueCard
@@ -3409,108 +5732,181 @@ function IntentPanel({ open, onClose, activeCase, onApproveLayer, onRejectLayer,
 
         {/* Per-evidence approve/reject — kept as a secondary control for
             granular decisions. The bottom action bar covers the bulk path. */}
-        {evidence.length > 0 && (() => {
-          // Collapse evidence to unique layers — one decision per layer.
-          const uniqueLayers: typeof evidence = [];
-          const seen = new Set<EvidenceLayer>();
-          for (const e of evidence) {
-            if (seen.has(e.layer)) continue;
-            seen.add(e.layer);
-            uniqueLayers.push(e);
-          }
-          const fbByLayer = new Map<EvidenceLayer, NonNullable<typeof activeCase>['feedback'][number]>();
-          for (const f of activeCase?.feedback ?? []) {
-            fbByLayer.set(f.layer, f);
-          }
-          const decidedCount = uniqueLayers.filter((e) => {
-            const fb = fbByLayer.get(e.layer);
-            return fb?.status === 'approved' || fb?.status === 'auto_approved' || fb?.status === 'rejected';
-          }).length;
-          return (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <div className="label">Per-layer decisions</div>
-                <span className="label" style={{ fontSize: 9, color: 'var(--fg-3)' }}>
-                  {decidedCount} / {uniqueLayers.length}
-                </span>
-              </div>
-              {uniqueLayers.map((e, i) => {
-                const fb = fbByLayer.get(e.layer);
-                const decided: 'approved' | 'rejected' | null =
-                  fb?.status === 'approved' || fb?.status === 'auto_approved'
-                    ? 'approved'
-                    : fb?.status === 'rejected'
-                      ? 'rejected'
-                      : null;
-                return (
-                  <div
-                    key={i}
-                    className="v-card"
-                    style={{
-                      padding: 10, display: 'flex', flexDirection: 'column', gap: 6,
-                      borderColor: decided === 'approved'
-                        ? 'color-mix(in oklab, var(--c-teal) 35%, transparent)'
-                        : decided === 'rejected'
-                          ? 'color-mix(in oklab, var(--c-red) 35%, transparent)'
-                          : undefined,
-                      background: decided === 'approved'
-                        ? 'color-mix(in oklab, var(--c-teal) 5%, var(--c-white))'
-                        : decided === 'rejected'
-                          ? 'color-mix(in oklab, var(--c-red) 5%, var(--c-white))'
-                          : undefined,
-                    }}
+        {evidence.length > 0 &&
+          (() => {
+            // Collapse evidence to unique layers — one decision per layer.
+            const uniqueLayers: typeof evidence = [];
+            const seen = new Set<EvidenceLayer>();
+            for (const e of evidence) {
+              if (seen.has(e.layer)) continue;
+              seen.add(e.layer);
+              uniqueLayers.push(e);
+            }
+            const fbByLayer = new Map<
+              EvidenceLayer,
+              NonNullable<typeof activeCase>["feedback"][number]
+            >();
+            for (const f of activeCase?.feedback ?? []) {
+              fbByLayer.set(f.layer, f);
+            }
+            const decidedCount = uniqueLayers.filter((e) => {
+              const fb = fbByLayer.get(e.layer);
+              return (
+                fb?.status === "approved" ||
+                fb?.status === "auto_approved" ||
+                fb?.status === "rejected"
+              );
+            }).length;
+            return (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <div className="label">Per-layer decisions</div>
+                  <span
+                    className="label"
+                    style={{ fontSize: 9, color: "var(--fg-3)" }}
                   >
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <span className={`v-chip ${e.signal === 'high' ? 'regression' : e.signal === 'medium' ? 'missed' : 'done'}`} style={{ fontSize: 9 }}>
-                        {e.layer} · {e.signal}
-                      </span>
-                      {decided === 'approved' && (
-                        <span className="v-chip done" style={{ fontSize: 9 }}>
-                          <Check size={10} />marked expected
-                        </span>
-                      )}
-                      {decided === 'rejected' && (
-                        <span className="v-chip regression" style={{ fontSize: 9 }}>
-                          <AlertTriangle size={10} />marked needs fix
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>{e.summary}</div>
-                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                      <button
-                        className={'v-btn sm ' + (decided === 'approved' ? 'success' : '')}
-                        onClick={() => onApproveLayer(e.layer)}
-                        aria-pressed={decided === 'approved'}
+                    {decidedCount} / {uniqueLayers.length}
+                  </span>
+                </div>
+                {uniqueLayers.map((e, i) => {
+                  const fb = fbByLayer.get(e.layer);
+                  const decided: "approved" | "rejected" | null =
+                    fb?.status === "approved" || fb?.status === "auto_approved"
+                      ? "approved"
+                      : fb?.status === "rejected"
+                        ? "rejected"
+                        : null;
+                  return (
+                    <div
+                      key={i}
+                      className="v-card"
+                      style={{
+                        padding: 10,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                        borderColor:
+                          decided === "approved"
+                            ? "color-mix(in oklab, var(--c-teal) 35%, transparent)"
+                            : decided === "rejected"
+                              ? "color-mix(in oklab, var(--c-red) 35%, transparent)"
+                              : undefined,
+                        background:
+                          decided === "approved"
+                            ? "color-mix(in oklab, var(--c-teal) 5%, var(--c-white))"
+                            : decided === "rejected"
+                              ? "color-mix(in oklab, var(--c-red) 5%, var(--c-white))"
+                              : undefined,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
                       >
-                        <Check size={11} />{decided === 'approved' ? 'Expected ✓' : 'Expected'}
-                      </button>
-                      <button
-                        className={'v-btn sm ' + (decided === 'rejected' ? 'danger' : '')}
-                        onClick={() => onRejectLayer(e.layer)}
-                        aria-pressed={decided === 'rejected'}
+                        <span
+                          className={`v-chip ${e.signal === "high" ? "regression" : e.signal === "medium" ? "missed" : "done"}`}
+                          style={{ fontSize: 9 }}
+                        >
+                          {e.layer} · {e.signal}
+                        </span>
+                        {decided === "approved" && (
+                          <span className="v-chip done" style={{ fontSize: 9 }}>
+                            <Check size={10} />
+                            marked expected
+                          </span>
+                        )}
+                        {decided === "rejected" && (
+                          <span
+                            className="v-chip regression"
+                            style={{ fontSize: 9 }}
+                          >
+                            <AlertTriangle size={10} />
+                            marked needs fix
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11.5,
+                          color: "var(--fg-2)",
+                          lineHeight: 1.5,
+                        }}
                       >
-                        <AlertTriangle size={11} />{decided === 'rejected' ? 'Needs fix ✓' : 'Needs fix'}
-                      </button>
+                        {e.summary}
+                      </div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                        <button
+                          className={
+                            "v-btn sm " +
+                            (decided === "approved" ? "success" : "")
+                          }
+                          onClick={() => onApproveLayer(e.layer)}
+                          aria-pressed={decided === "approved"}
+                        >
+                          <Check size={11} />
+                          {decided === "approved" ? "Expected ✓" : "Expected"}
+                        </button>
+                        <button
+                          className={
+                            "v-btn sm " +
+                            (decided === "rejected" ? "danger" : "")
+                          }
+                          onClick={() => onRejectLayer(e.layer)}
+                          aria-pressed={decided === "rejected"}
+                        >
+                          <AlertTriangle size={11} />
+                          {decided === "rejected" ? "Needs fix ✓" : "Needs fix"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </>
-          );
-        })()}
+                  );
+                })}
+              </>
+            );
+          })()}
 
-        <div className="label" style={{ marginTop: 6 }}>more actions</div>
-        <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onOpenPicker}>
-          <LinkIcon size={12} />{issueUrl ? 'Re-link to a different issue' : 'Browse existing issues'}
+        <div className="label" style={{ marginTop: 6 }}>
+          more actions
+        </div>
+        <button
+          className="v-btn"
+          style={{ justifyContent: "flex-start" }}
+          onClick={onOpenPicker}
+        >
+          <LinkIcon size={12} />
+          {issueUrl ? "Re-link to a different issue" : "Browse existing issues"}
         </button>
         {issueUrl && (
           <>
-            <a className="v-btn" style={{ justifyContent: 'flex-start', textDecoration: 'none' }} href={issueUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink size={12} />Open in GitHub
+            <a
+              className="v-btn"
+              style={{ justifyContent: "flex-start", textDecoration: "none" }}
+              href={issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink size={12} />
+              Open in GitHub
             </a>
-            {issueState !== 'closed' && (
-              <button className="v-btn" style={{ justifyContent: 'flex-start' }} onClick={onCloseIssue}>
-                <CheckCircleIcon size={12} />Close issue
+            {issueState !== "closed" && (
+              <button
+                className="v-btn"
+                style={{ justifyContent: "flex-start" }}
+                onClick={onCloseIssue}
+              >
+                <CheckCircleIcon size={12} />
+                Close issue
               </button>
             )}
           </>
@@ -3548,7 +5944,7 @@ function ComposeIssueCard({
     return out;
   }, [evidence]);
 
-  const [text, setText] = useState(reviewerNote ?? '');
+  const [text, setText] = useState(reviewerNote ?? "");
   const [includeLayers, setIncludeLayers] = useState<Set<EvidenceLayer>>(
     () => new Set(uniqueEvidence.map((e) => e.layer)),
   );
@@ -3579,76 +5975,108 @@ function ComposeIssueCard({
     });
     setSubmitting(false);
     if (!res.ok) {
-      setError(res.error ?? 'Failed to create issue');
+      setError(res.error ?? "Failed to create issue");
       return;
     }
     onAfterCreate?.();
   };
 
-  const canSubmit = !submitting && (text.trim().length > 0 || includeLayers.size > 0);
+  const canSubmit =
+    !submitting && (text.trim().length > 0 || includeLayers.size > 0);
 
   return (
-    <div className="v-card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Plus size={12} style={{ color: 'var(--fg-2)' }} />
-        <span className="label">{hasLinkedIssue ? 'File a follow-up issue' : 'File a new issue'}</span>
+    <div
+      className="v-card"
+      style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <Plus size={12} style={{ color: "var(--fg-2)" }} />
+        <span className="label">
+          {hasLinkedIssue ? "File a follow-up issue" : "File a new issue"}
+        </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span className="label" style={{ fontSize: 9 }}>What&apos;s wrong?</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span className="label" style={{ fontSize: 9 }}>
+          What&apos;s wrong?
+        </span>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={4}
           placeholder="Short description, repro steps, expected vs actual…"
           style={{
-            width: '100%',
-            padding: '8px 10px',
+            width: "100%",
+            padding: "8px 10px",
             fontSize: 12,
-            fontFamily: 'var(--font-sans)',
-            border: '1px solid var(--border)',
+            fontFamily: "var(--font-sans)",
+            border: "1px solid var(--border)",
             borderRadius: 6,
-            background: 'var(--c-white)',
-            color: 'var(--fg-1)',
-            resize: 'vertical',
+            background: "var(--c-white)",
+            color: "var(--fg-1)",
+            resize: "vertical",
             minHeight: 70,
           }}
         />
       </div>
 
       {uniqueEvidence.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span className="label" style={{ fontSize: 9 }}>Include evidence ({includeLayers.size}/{uniqueEvidence.length})</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="label" style={{ fontSize: 9 }}>
+            Include evidence ({includeLayers.size}/{uniqueEvidence.length})
+          </span>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              maxHeight: 200,
+              overflowY: "auto",
+            }}
+          >
             {uniqueEvidence.map((e, i) => {
               const checked = includeLayers.has(e.layer);
               return (
                 <label
                   key={i}
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
+                    display: "flex",
+                    alignItems: "flex-start",
                     gap: 8,
-                    padding: '6px 8px',
+                    padding: "6px 8px",
                     borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: checked ? 'color-mix(in oklab, var(--c-teal) 4%, white)' : 'transparent',
-                    cursor: 'pointer',
+                    border: "1px solid var(--border)",
+                    background: checked
+                      ? "color-mix(in oklab, var(--c-teal) 4%, white)"
+                      : "transparent",
+                    cursor: "pointer",
                   }}
                 >
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleLayer(e.layer)}
-                    style={{ marginTop: 2, accentColor: 'var(--c-teal)' }}
+                    style={{ marginTop: 2, accentColor: "var(--c-teal)" }}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <span className={`v-chip ${e.signal === 'high' ? 'regression' : e.signal === 'medium' ? 'missed' : 'done'}`} style={{ fontSize: 9, padding: '0 5px' }}>
+                    <div
+                      style={{ display: "flex", gap: 4, alignItems: "center" }}
+                    >
+                      <span
+                        className={`v-chip ${e.signal === "high" ? "regression" : e.signal === "medium" ? "missed" : "done"}`}
+                        style={{ fontSize: 9, padding: "0 5px" }}
+                      >
                         {e.layer} · {e.signal}
                       </span>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: 1.45, marginTop: 2 }}>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--fg-2)",
+                        lineHeight: 1.45,
+                        marginTop: 2,
+                      }}
+                    >
                       {e.summary}
                     </div>
                   </div>
@@ -3660,7 +6088,12 @@ function ComposeIssueCard({
       )}
 
       {error && (
-        <span className="v-chip regression" style={{ fontSize: 9, alignSelf: 'flex-start' }}>{error}</span>
+        <span
+          className="v-chip regression"
+          style={{ fontSize: 9, alignSelf: "flex-start" }}
+        >
+          {error}
+        </span>
       )}
 
       <button
@@ -3668,9 +6101,10 @@ function ComposeIssueCard({
         className="v-btn primary"
         onClick={handleCreate}
         disabled={!canSubmit}
-        style={{ alignSelf: 'flex-start' }}
+        style={{ alignSelf: "flex-start" }}
       >
-        <Plus size={12} />{submitting ? 'Filing…' : 'Create issue'}
+        <Plus size={12} />
+        {submitting ? "Filing…" : "Create issue"}
       </button>
     </div>
   );

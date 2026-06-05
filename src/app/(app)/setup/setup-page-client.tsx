@@ -1,13 +1,24 @@
-'use client';
+"use client";
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ApiConfigList } from '@/components/setup/api-config-list';
-import { DesignSystemBundleUpload } from '@/components/setup/design-system-bundle-upload';
-import { SetupStepBuilder } from '@/components/setup/setup-step-builder';
-import { addDefaultTeardownStep, removeDefaultTeardownStep, reorderDefaultTeardownSteps } from '@/server/actions/teardown-steps';
-import type { Test, Repository, SetupScript, SetupConfig, StorageState, DesignSystemConfig } from '@/lib/db/schema';
-import type { SetupStep } from '@/server/actions/setup-steps';
-import type { TeardownStep } from '@/server/actions/teardown-steps';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ApiConfigList } from "@/components/setup/api-config-list";
+import { DesignSystemBundleUpload } from "@/components/setup/design-system-bundle-upload";
+import { SetupStepBuilder } from "@/components/setup/setup-step-builder";
+import {
+  addDefaultTeardownStep,
+  removeDefaultTeardownStep,
+  reorderDefaultTeardownSteps,
+} from "@/server/actions/teardown-steps";
+import type {
+  Test,
+  Repository,
+  SetupScript,
+  SetupConfig,
+  StorageState,
+  DesignSystemConfig,
+} from "@/lib/db/schema";
+import type { SetupStep } from "@/server/actions/setup-steps";
+import type { TeardownStep } from "@/server/actions/teardown-steps";
 
 interface SetupPageClientProps {
   repository: Repository;
@@ -39,10 +50,16 @@ export function SetupPageClient({
           <div className="max-w-5xl mx-auto space-y-6">
             <Tabs defaultValue="seed-setup">
               <TabsList className="h-11 w-full p-1 bg-white dark:bg-zinc-950 border">
-                <TabsTrigger value="seed-setup" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                <TabsTrigger
+                  value="seed-setup"
+                  className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
+                >
                   Seed
                 </TabsTrigger>
-                <TabsTrigger value="seed-teardown" className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm">
+                <TabsTrigger
+                  value="seed-teardown"
+                  className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
+                >
                   Teardown
                 </TabsTrigger>
               </TabsList>

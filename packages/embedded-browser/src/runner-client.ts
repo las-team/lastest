@@ -6,13 +6,13 @@
  * on startup and maintains heartbeat + streaming.
  */
 
-import os from 'os';
+import os from "os";
 
 function getContainerIP(): string | null {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name] ?? []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
+      if (iface.family === "IPv4" && !iface.internal) {
         return iface.address;
       }
     }
@@ -29,7 +29,7 @@ interface BaseMessage {
 }
 
 interface HeartbeatPayload {
-  status: 'idle' | 'busy' | 'recording';
+  status: "idle" | "busy" | "recording";
   currentTask?: string;
   systemInfo: {
     platform: string;
@@ -80,7 +80,7 @@ export class EmbeddedRunnerClient {
   private sessionId?: string;
   private runnerId?: string;
   private embeddedSessionId?: string;
-  private status: 'idle' | 'busy' = 'idle';
+  private status: "idle" | "busy" = "idle";
   private currentTask?: string;
   private wakeHeartbeat: (() => void) | null = null;
   private cdpPort?: number;
@@ -95,10 +95,10 @@ export class EmbeddedRunnerClient {
   onCommand?: (command: BaseMessage) => Promise<void>;
 
   constructor(options: EmbeddedRunnerOptions) {
-    this.serverUrl = options.serverUrl.replace(/\/$/, '');
+    this.serverUrl = options.serverUrl.replace(/\/$/, "");
     this.token = options.token;
     this.streamPort = options.streamPort;
-    this.streamHost = options.streamHost || '';
+    this.streamHost = options.streamHost || "";
     this.pollInterval = options.pollInterval ?? 1000;
     this.cdpPort = options.cdpPort;
     this.systemToken = options.systemToken;
@@ -113,13 +113,15 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
-      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
+      const cdpUrl = this.cdpPort
+        ? `http://${hostname}:${this.cdpPort}`
+        : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
       const response = await fetch(`${this.serverUrl}/api/embedded/register`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${this.token}`,
         },
         body: JSON.stringify({
@@ -132,7 +134,9 @@ export class EmbeddedRunnerClient {
 
       if (!response.ok) {
         const text = await response.text();
-        console.error(`[EmbeddedRunner] Registration failed: ${response.status} ${text}`);
+        console.error(
+          `[EmbeddedRunner] Registration failed: ${response.status} ${text}`,
+        );
         return false;
       }
 
@@ -140,10 +144,12 @@ export class EmbeddedRunnerClient {
       this.embeddedSessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
-      console.log(`[EmbeddedRunner] Registered: session=${data.sessionId}, runner=${data.runnerId}`);
+      console.log(
+        `[EmbeddedRunner] Registered: session=${data.sessionId}, runner=${data.runnerId}`,
+      );
       return true;
     } catch (error) {
-      console.error('[EmbeddedRunner] Registration error:', error);
+      console.error("[EmbeddedRunner] Registration error:", error);
       return false;
     }
   }
@@ -154,7 +160,7 @@ export class EmbeddedRunnerClient {
   async connect(): Promise<boolean> {
     try {
       const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
-        method: 'GET',
+        method: "GET",
         headers: {
           Authorization: `Bearer ${this.token}`,
         },
@@ -162,7 +168,9 @@ export class EmbeddedRunnerClient {
 
       if (!response.ok) {
         const text = await response.text();
-        console.error(`[EmbeddedRunner] Connect failed: ${response.status} ${text}`);
+        console.error(
+          `[EmbeddedRunner] Connect failed: ${response.status} ${text}`,
+        );
         return false;
       }
 
@@ -170,7 +178,9 @@ export class EmbeddedRunnerClient {
       this.sessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
-      console.log(`[EmbeddedRunner] Connected: runner=${data.runnerId}, session=${data.sessionId}`);
+      console.log(
+        `[EmbeddedRunner] Connected: runner=${data.runnerId}, session=${data.sessionId}`,
+      );
 
       // Process any pending commands
       if (data.commands && data.commands.length > 0) {
@@ -181,7 +191,7 @@ export class EmbeddedRunnerClient {
 
       return true;
     } catch (error) {
-      console.error('[EmbeddedRunner] Connect error:', error);
+      console.error("[EmbeddedRunner] Connect error:", error);
       return false;
     }
   }
@@ -194,40 +204,53 @@ export class EmbeddedRunnerClient {
     try {
       const hostname = this.streamHost || getContainerIP() || os.hostname();
       const streamUrl = `ws://${hostname}:${this.streamPort}`;
-      const cdpUrl = this.cdpPort ? `http://${hostname}:${this.cdpPort}` : undefined;
+      const cdpUrl = this.cdpPort
+        ? `http://${hostname}:${this.cdpPort}`
+        : undefined;
       const containerUrl = `http://${hostname}:${this.streamPort}`;
 
-      const response = await fetch(`${this.serverUrl}/api/embedded/auto-register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.systemToken}`,
+      const response = await fetch(
+        `${this.serverUrl}/api/embedded/auto-register`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.systemToken}`,
+          },
+          body: JSON.stringify({
+            streamUrl,
+            cdpUrl,
+            containerUrl,
+            viewport: { width: 1280, height: 720 },
+            instanceId: this.instanceId || os.hostname(),
+          }),
         },
-        body: JSON.stringify({
-          streamUrl,
-          cdpUrl,
-          containerUrl,
-          viewport: { width: 1280, height: 720 },
-          instanceId: this.instanceId || os.hostname(),
-        }),
-      });
+      );
 
       if (!response.ok) {
         const text = await response.text();
-        console.error(`[EmbeddedRunner] System registration failed: ${response.status} ${text}`);
+        console.error(
+          `[EmbeddedRunner] System registration failed: ${response.status} ${text}`,
+        );
         return false;
       }
 
-      const data = (await response.json()) as { runnerId: string; token: string; sessionId: string };
+      const data = (await response.json()) as {
+        runnerId: string;
+        token: string;
+        sessionId: string;
+      };
       this.runnerId = data.runnerId;
       this.embeddedSessionId = data.sessionId;
       // Replace token with the per-runner token for heartbeats
       this.token = data.token;
 
-      console.log(`[EmbeddedRunner] System registered: runner=${data.runnerId}, session=${data.sessionId}`);
+      console.log(
+        `[EmbeddedRunner] System registered: runner=${data.runnerId}, session=${data.sessionId}`,
+      );
       return true;
     } catch (error) {
-      console.error('[EmbeddedRunner] System registration error:', error);
+      console.error("[EmbeddedRunner] System registration error:", error);
       return false;
     }
   }
@@ -249,18 +272,24 @@ export class EmbeddedRunnerClient {
       if (registered) break;
 
       if (attempt === maxAttempts) {
-        throw new Error('Failed to register embedded browser after ' + maxAttempts + ' attempts');
+        throw new Error(
+          "Failed to register embedded browser after " +
+            maxAttempts +
+            " attempts",
+        );
       }
 
       const delay = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
-      console.log(`[EmbeddedRunner] Registration attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`);
+      console.log(
+        `[EmbeddedRunner] Registration attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`,
+      );
       await new Promise((r) => setTimeout(r, delay));
     }
 
     // Then connect as a runner
     const connected = await this.connect();
     if (!connected) {
-      throw new Error('Failed to connect to runner endpoint');
+      throw new Error("Failed to connect to runner endpoint");
     }
 
     // Start heartbeat loop
@@ -280,10 +309,10 @@ export class EmbeddedRunnerClient {
       // Ignore
     }
 
-    console.log('[EmbeddedRunner] Stopped');
+    console.log("[EmbeddedRunner] Stopped");
   }
 
-  setStatus(status: 'idle' | 'busy', task?: string): void {
+  setStatus(status: "idle" | "busy", task?: string): void {
     this.status = status;
     this.currentTask = task;
   }
@@ -293,7 +322,7 @@ export class EmbeddedRunnerClient {
       try {
         await this.sendHeartbeat(false);
       } catch (error) {
-        console.error('[EmbeddedRunner] Heartbeat error:', error);
+        console.error("[EmbeddedRunner] Heartbeat error:", error);
       }
 
       await new Promise<void>((resolve) => {
@@ -310,7 +339,7 @@ export class EmbeddedRunnerClient {
   private async sendHeartbeat(disconnect: boolean): Promise<void> {
     const heartbeat: BaseMessage = {
       id: crypto.randomUUID(),
-      type: 'status:heartbeat',
+      type: "status:heartbeat",
       timestamp: Date.now(),
       payload: {
         status: this.status,
@@ -321,19 +350,19 @@ export class EmbeddedRunnerClient {
     };
 
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       Authorization: `Bearer ${this.token}`,
     };
 
     if (this.sessionId) {
-      headers['X-Session-ID'] = this.sessionId;
+      headers["X-Session-ID"] = this.sessionId;
     }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
-        method: 'POST',
+        method: "POST",
         headers,
         body: JSON.stringify(heartbeat),
         signal: controller.signal,
@@ -352,31 +381,39 @@ export class EmbeddedRunnerClient {
     }
   }
 
-  async sendMessage(message: BaseMessage, opts: { timeoutMs?: number } = {}): Promise<boolean> {
+  async sendMessage(
+    message: BaseMessage,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<boolean> {
     const promise = this.doSend(message, opts.timeoutMs ?? 30_000);
     this.pendingSends.add(promise);
-    promise.finally(() => { this.pendingSends.delete(promise); });
+    promise.finally(() => {
+      this.pendingSends.delete(promise);
+    });
     return promise;
   }
 
-  private async doSend(message: BaseMessage, timeoutMs: number): Promise<boolean> {
+  private async doSend(
+    message: BaseMessage,
+    timeoutMs: number,
+  ): Promise<boolean> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.token}`,
       };
-      if (this.sessionId) headers['X-Session-ID'] = this.sessionId;
+      if (this.sessionId) headers["X-Session-ID"] = this.sessionId;
       const response = await fetch(`${this.serverUrl}/api/ws/runner`, {
-        method: 'POST',
+        method: "POST",
         headers,
         body: JSON.stringify(message),
         signal: controller.signal,
       });
       return response.ok;
     } catch (error) {
-      console.error('[EmbeddedRunner] Send error:', error);
+      console.error("[EmbeddedRunner] Send error:", error);
       return false;
     } finally {
       clearTimeout(timer);
@@ -392,11 +429,15 @@ export class EmbeddedRunnerClient {
     const pending = Array.from(this.pendingSends);
     if (pending.length === 0) return;
     console.log(`[EmbeddedRunner] Draining ${pending.length} pending send(s)`);
-    const drained = Promise.allSettled(pending).then(() => 'drained' as const);
-    const bail = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), timeoutMs));
+    const drained = Promise.allSettled(pending).then(() => "drained" as const);
+    const bail = new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), timeoutMs),
+    );
     const result = await Promise.race([drained, bail]);
-    if (result === 'timeout') {
-      console.warn(`[EmbeddedRunner] Drain timed out after ${timeoutMs}ms; ${this.pendingSends.size} send(s) still pending`);
+    if (result === "timeout") {
+      console.warn(
+        `[EmbeddedRunner] Drain timed out after ${timeoutMs}ms; ${this.pendingSends.size} send(s) still pending`,
+      );
     }
   }
 

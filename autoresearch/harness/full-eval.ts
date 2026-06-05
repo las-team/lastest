@@ -11,14 +11,19 @@
 // Allow nested Claude CLI sessions
 delete process.env.CLAUDECODE;
 
-import { db } from '@/lib/db';
-import { agentSessions } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
-import { getLatestBuildMetrics } from './metrics';
+import { db } from "@/lib/db";
+import { agentSessions } from "@/lib/db/schema";
+import { eq, desc } from "drizzle-orm";
+import { getLatestBuildMetrics } from "./metrics";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-type AgentSessionStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+type AgentSessionStatus =
+  | "active"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 // ─── Config ─────────────────────────────────────────────────────
 
@@ -33,7 +38,7 @@ async function triggerPlayAgent(repositoryId: string): Promise<string> {
   // by calling the HTTP endpoint or the function directly
 
   // Use the server action via dynamic import
-  const { startPlayAgent } = await import('@/server/actions/play-agent');
+  const { startPlayAgent } = await import("@/server/actions/play-agent");
   const result = await startPlayAgent(repositoryId);
   return result.sessionId;
 }
@@ -61,31 +66,37 @@ async function waitForCompletion(sessionId: string): Promise<{
 
     const status = session.status as AgentSessionStatus;
 
-    if (status !== 'active' && status !== 'paused') {
+    if (status !== "active" && status !== "paused") {
       return {
         status,
         durationMs: Date.now() - startTime,
       };
     }
 
-    console.error(`[full-eval] Session ${sessionId} status: ${status}, waiting...`);
-    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    console.error(
+      `[full-eval] Session ${sessionId} status: ${status}, waiting...`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
-  throw new Error(`Timeout waiting for session ${sessionId} after ${MAX_WAIT_MS}ms`);
+  throw new Error(
+    `Timeout waiting for session ${sessionId} after ${MAX_WAIT_MS}ms`,
+  );
 }
 
 // ─── Main ───────────────────────────────────────────────────────
 
 async function main() {
-  const repoIdArg = process.argv.find(a => a.startsWith('--repo-id='));
+  const repoIdArg = process.argv.find((a) => a.startsWith("--repo-id="));
   if (!repoIdArg) {
-    console.error('Usage: pnpm tsx autoresearch/harness/full-eval.ts --repo-id=<id>');
+    console.error(
+      "Usage: pnpm tsx autoresearch/harness/full-eval.ts --repo-id=<id>",
+    );
     process.exit(1);
   }
 
-  const repositoryId = repoIdArg.split('=')[1];
-  const skipTrigger = process.argv.includes('--skip-trigger');
+  const repositoryId = repoIdArg.split("=")[1];
+  const skipTrigger = process.argv.includes("--skip-trigger");
 
   let sessionId: string;
 
@@ -99,23 +110,27 @@ async function main() {
       .limit(1);
 
     if (!latest) {
-      console.error('No agent sessions found');
+      console.error("No agent sessions found");
       process.exit(1);
     }
     sessionId = latest.id;
     console.error(`[full-eval] Using existing session: ${sessionId}`);
   } else {
-    console.error(`[full-eval] Triggering Play Agent for repo ${repositoryId}...`);
+    console.error(
+      `[full-eval] Triggering Play Agent for repo ${repositoryId}...`,
+    );
     try {
       sessionId = await triggerPlayAgent(repositoryId);
       console.error(`[full-eval] Session started: ${sessionId}`);
     } catch (e) {
-      console.error(`[full-eval] Failed to trigger Play Agent: ${e instanceof Error ? e.message : e}`);
-      console.error('[full-eval] Falling back to latest build metrics...');
+      console.error(
+        `[full-eval] Failed to trigger Play Agent: ${e instanceof Error ? e.message : e}`,
+      );
+      console.error("[full-eval] Falling back to latest build metrics...");
 
       const metrics = await getLatestBuildMetrics(repositoryId);
       if (!metrics) {
-        console.error('No builds found');
+        console.error("No builds found");
         process.exit(1);
       }
 
@@ -127,7 +142,9 @@ async function main() {
   // Wait for completion
   console.error(`[full-eval] Waiting for session to complete...`);
   const { status, durationMs } = await waitForCompletion(sessionId);
-  console.error(`[full-eval] Session finished: ${status} (${(durationMs / 1000).toFixed(1)}s)`);
+  console.error(
+    `[full-eval] Session finished: ${status} (${(durationMs / 1000).toFixed(1)}s)`,
+  );
 
   // Get metrics from the build
   await outputMetrics(null, repositoryId, durationMs);
@@ -136,16 +153,16 @@ async function main() {
 async function outputMetrics(
   buildId: string | null,
   repositoryId: string,
-  durationMs: number
+  durationMs: number,
 ) {
   const metrics = await getLatestBuildMetrics(repositoryId);
 
   if (!metrics) {
-    console.error('No build metrics available');
+    console.error("No build metrics available");
     process.exit(1);
   }
 
-  console.log('---');
+  console.log("---");
   console.log(`mode:            full-eval`);
   console.log(`build_id:        ${metrics.buildId}`);
   console.log(`pass_rate:       ${metrics.pass_rate.toFixed(6)}`);
@@ -158,14 +175,14 @@ async function outputMetrics(
   console.log(`failed:          ${metrics.failed}`);
   console.log(`total:           ${metrics.total}`);
   console.log(`duration_ms:     ${durationMs}`);
-  console.log('---');
-  console.log('failure_breakdown:');
+  console.log("---");
+  console.log("failure_breakdown:");
   for (const [cat, count] of Object.entries(metrics.category_counts)) {
     if (count > 0) console.log(`  ${cat}: ${count}`);
   }
 }
 
-main().catch(e => {
-  console.error('Fatal error:', e);
+main().catch((e) => {
+  console.error("Fatal error:", e);
   process.exit(2);
 });

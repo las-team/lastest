@@ -1,6 +1,9 @@
-import { getSelectedRepository, getRepositoriesByTeamWithTestCounts } from '@/lib/db/queries';
-import { getCurrentSession } from '@/lib/auth';
-import { MobileTopBar } from './mobile-top-bar-client';
+import {
+  getSelectedRepository,
+  getRepositoriesByTeamWithTestCounts,
+} from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { MobileTopBar } from "./mobile-top-bar-client";
 
 export async function MobileTopBarServer() {
   const session = await getCurrentSession();
@@ -8,7 +11,9 @@ export async function MobileTopBarServer() {
   const userId = session?.user?.id;
 
   const [selectedRepo, repos] = await Promise.all([
-    teamId && userId ? getSelectedRepository(userId, teamId) : Promise.resolve(null),
+    teamId && userId
+      ? getSelectedRepository(userId, teamId)
+      : Promise.resolve(null),
     teamId ? getRepositoriesByTeamWithTestCounts(teamId) : Promise.resolve([]),
   ]);
 

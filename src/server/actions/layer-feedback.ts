@@ -1,10 +1,10 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, getCurrentSession } from '@/lib/auth';
-import { approveDiffCore } from '@/lib/diff/core';
-import { awardScore } from '@/server/actions/gamification';
-import { revalidatePath } from 'next/cache';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess, getCurrentSession } from "@/lib/auth";
+import { approveDiffCore } from "@/lib/diff/core";
+import { awardScore } from "@/server/actions/gamification";
+import { revalidatePath } from "next/cache";
 import type {
   EvidenceLayer,
   LayerFeedbackStatus,
@@ -12,7 +12,7 @@ import type {
   LayerBaselineKind,
   StepComparisonEvidence,
   StepComparison,
-} from '@/lib/db/schema';
+} from "@/lib/db/schema";
 
 /**
  * Recompute the build's overallStatus and re-render the build pages. Shared by
@@ -23,7 +23,7 @@ import type {
 async function recomputeBuildStatus(buildId: string): Promise<void> {
   const newStatus = await queries.computeBuildStatus(buildId);
   await queries.updateBuild(buildId, { overallStatus: newStatus });
-  revalidatePath('/builds');
+  revalidatePath("/builds");
   revalidatePath(`/builds/${buildId}`);
 }
 
@@ -31,14 +31,16 @@ async function recomputeBuildStatus(buildId: string): Promise<void> {
  * Maps each non-visual layer to its baseline kind. Visual stays in the
  * existing visualDiffs/baselines table; here we cover the seven other layers.
  */
-const LAYER_TO_BASELINE_KIND: Partial<Record<EvidenceLayer, LayerBaselineKind>> = {
-  network: 'network',
-  console: 'console',
-  a11y: 'a11y',
-  perf: 'perf',
-  variable: 'variable',
-  url: 'url_trajectory',
-  dom: 'dom',
+const LAYER_TO_BASELINE_KIND: Partial<
+  Record<EvidenceLayer, LayerBaselineKind>
+> = {
+  network: "network",
+  console: "console",
+  a11y: "a11y",
+  perf: "perf",
+  variable: "variable",
+  url: "url_trajectory",
+  dom: "dom",
 };
 
 interface DecideInput {
@@ -58,29 +60,33 @@ interface DecideInput {
  *  - rejected → create reviewTodo + block build
  *  - snoozed  → suppress for THIS build only (no baseline write)
  */
-export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback> {
+export async function decideLayer(
+  input: DecideInput,
+): Promise<StepLayerFeedback> {
   const session = await getCurrentSession();
   const userId = session?.user?.id ?? null;
 
   // Authorize via the build's repo.
   const build = await queries.getBuild(input.buildId);
-  if (!build) throw new Error('Build not found');
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build) throw new Error("Build not found");
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
   if (repoId) await requireRepoAccess(repoId);
 
   // Fetch the step + (when needed) repo branch context.
   const stepRows = await queries.getStepComparisonsByBuild(input.buildId);
   const step = stepRows.find((s) => s.id === input.stepComparisonId);
-  if (!step) throw new Error('Step comparison not found');
+  if (!step) throw new Error("Step comparison not found");
 
-  const branch = testRun?.gitBranch || 'main';
+  const branch = testRun?.gitBranch || "main";
 
   let baselineKind: LayerBaselineKind | null = null;
   let reviewTodoId: string | null = null;
 
-  if (input.status === 'approved') {
-    if (input.layer === 'visual') {
+  if (input.status === "approved") {
+    if (input.layer === "visual") {
       // Visual lives in visualDiffs/baselines — not in the per-layer baseline
       // tables this file handles. Without this branch the step_layer_feedback
       // row gets written (so the verify card moves to Verified) but the diff
@@ -91,16 +97,23 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
         // gamification awards (the action wrapper, not approveDiffCore,
         // owns awardScore on the build-detail path).
         const diffBefore = await queries.getVisualDiff(step.visualDiffId);
-        await approveDiffCore(step.visualDiffId, userId ?? 'verify-user');
-        if (session?.team && userId && diffBefore && diffBefore.status === 'pending') {
+        await approveDiffCore(step.visualDiffId, userId ?? "verify-user");
+        if (
+          session?.team &&
+          userId &&
+          diffBefore &&
+          diffBefore.status === "pending"
+        ) {
           awardScore({
             teamId: session.team.id,
-            kind: 'diff_approved_as_change',
-            actor: { kind: 'user', id: userId },
-            sourceType: 'diff',
+            kind: "diff_approved_as_change",
+            actor: { kind: "user", id: userId },
+            sourceType: "diff",
             sourceId: step.visualDiffId,
             detail: { testId: diffBefore.testId },
-          }).catch((err) => console.error('[gamification] diff_approved_as_change failed', err));
+          }).catch((err) =>
+            console.error("[gamification] diff_approved_as_change failed", err),
+          );
           const teamId = session.team.id;
           queries
             .getTestCreator(diffBefore.testId)
@@ -108,12 +121,14 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
               if (!creator) return;
               awardScore({
                 teamId,
-                kind: 'regression_caught',
+                kind: "regression_caught",
                 actor: creator,
-                sourceType: 'diff',
+                sourceType: "diff",
                 sourceId: step.visualDiffId!,
                 detail: { testId: diffBefore.testId },
-              }).catch((err) => console.error('[gamification] regression_caught failed', err));
+              }).catch((err) =>
+                console.error("[gamification] regression_caught failed", err),
+              );
             })
             .catch(() => {});
         }
@@ -133,16 +148,16 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
         });
       }
     }
-  } else if (input.status === 'rejected') {
+  } else if (input.status === "rejected") {
     if (repoId) {
-      const desc = `[${input.layer}] ${step.stepLabel ?? 'step'} — Needs fix${input.note ? `: ${input.note}` : ''}`;
+      const desc = `[${input.layer}] ${step.stepLabel ?? "step"} — Needs fix${input.note ? `: ${input.note}` : ""}`;
       const todo = await queries.createReviewTodo({
         repositoryId: repoId,
         buildId: input.buildId,
         testId: step.testId,
         branch,
         description: desc,
-        status: 'open',
+        status: "open",
         createdBy: userId,
         diffId: null,
         resolvedAt: null,
@@ -186,10 +201,14 @@ export async function decideLayer(input: DecideInput): Promise<StepLayerFeedback
  * Returns the number of step_comparisons that received at least one new
  * approval — useful for the caller's toast.
  */
-export async function approveAllVerifyCases(buildId: string): Promise<{ approved: number }> {
+export async function approveAllVerifyCases(
+  buildId: string,
+): Promise<{ approved: number }> {
   const build = await queries.getBuild(buildId);
-  if (!build) throw new Error('Build not found');
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build) throw new Error("Build not found");
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
   if (repoId) await requireRepoAccess(repoId);
 
@@ -209,32 +228,40 @@ export async function approveAllVerifyCases(buildId: string): Promise<{ approved
 
     // Skip rejected cases — the reviewer marked them as Broken; the bulk
     // approve shouldn't silently flip those.
-    if (stepFb.some((f) => f.status === 'rejected')) continue;
+    if (stepFb.some((f) => f.status === "rejected")) continue;
 
     // Skip already-fully-approved cases to keep the operation idempotent and
     // avoid double-writing per-layer baselines.
-    const evidenceLayers = Array.from(new Set(step.evidence.map((e) => e.layer)));
-    const approvedSet = new Set(
-      stepFb.filter((f) => f.status === 'approved' || f.status === 'auto_approved').map((f) => f.layer),
+    const evidenceLayers = Array.from(
+      new Set(step.evidence.map((e) => e.layer)),
     );
-    const fullyApproved = evidenceLayers.length > 0
-      ? evidenceLayers.every((l) => approvedSet.has(l))
-      : approvedSet.size > 0;
+    const approvedSet = new Set(
+      stepFb
+        .filter((f) => f.status === "approved" || f.status === "auto_approved")
+        .map((f) => f.layer),
+    );
+    const fullyApproved =
+      evidenceLayers.length > 0
+        ? evidenceLayers.every((l) => approvedSet.has(l))
+        : approvedSet.size > 0;
     if (fullyApproved) continue;
 
     // Same layer set decideAllForStep computes client-side: every evidence
     // layer + any layer that already has stored feedback (so we override it),
     // with `visual` as the fallback when neither is present.
     const existingLayers = stepFb.map((f) => f.layer);
-    const layerSet = new Set<EvidenceLayer>([...evidenceLayers, ...existingLayers]);
-    if (layerSet.size === 0) layerSet.add('visual');
+    const layerSet = new Set<EvidenceLayer>([
+      ...evidenceLayers,
+      ...existingLayers,
+    ]);
+    if (layerSet.size === 0) layerSet.add("visual");
 
     for (const layer of layerSet) {
       await decideLayer({
         stepComparisonId: step.id,
         buildId,
         layer,
-        status: 'approved',
+        status: "approved",
         skipBuildRecompute: true,
       });
     }
@@ -251,29 +278,33 @@ export async function approveAllVerifyCases(buildId: string): Promise<{ approved
  * verdict was not red. Mirrors the existing "Accept AI Approvals" flow on
  * visual diffs but covers all layers at once.
  */
-export async function approveAIRecommendedLayers(buildId: string): Promise<{ approved: number }> {
+export async function approveAIRecommendedLayers(
+  buildId: string,
+): Promise<{ approved: number }> {
   const build = await queries.getBuild(buildId);
-  if (!build) throw new Error('Build not found');
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  if (!build) throw new Error("Build not found");
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const repoId = testRun?.repositoryId ?? null;
   if (repoId) await requireRepoAccess(repoId);
 
   const stepRows = await queries.getStepComparisonsByBuild(buildId);
   let approved = 0;
   for (const step of stepRows) {
-    if (step.verdict === 'red') continue;
+    if (step.verdict === "red") continue;
     for (const ev of step.evidence) {
       // Only approve when the evidence's signal is at most medium and the
       // layer is one we know how to baseline. Visual goes through
       // approveDiffCore (visualDiffs + baselines table); the other seven
       // layers go through writeLayerBaseline.
-      if (ev.signal === 'high') continue;
-      if (ev.layer !== 'visual' && !LAYER_TO_BASELINE_KIND[ev.layer]) continue;
+      if (ev.signal === "high") continue;
+      if (ev.layer !== "visual" && !LAYER_TO_BASELINE_KIND[ev.layer]) continue;
       await decideLayer({
         stepComparisonId: step.id,
         buildId,
         layer: ev.layer,
-        status: 'approved',
+        status: "approved",
         skipBuildRecompute: true,
       });
       approved++;
@@ -298,16 +329,18 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
   const layerData = input.layers ?? ({} as StepComparisonEvidence);
 
   switch (input.kind) {
-    case 'network': {
+    case "network": {
       // Roll up new errors/flips into one baseline payload per (test, step).
       // First-pass behavior: snapshot the current run's error endpoints as
       // expected. Future runs with the same fingerprint suppress.
       const net = layerData.network;
       if (!net) return;
       // Combine first new error + first status flip as the canonical entry.
-      const first = net.newClientErrors[0] ?? net.newServerErrors[0] ?? net.statusFlips[0];
+      const first =
+        net.newClientErrors[0] ?? net.newServerErrors[0] ?? net.statusFlips[0];
       if (!first) return;
-      const status = 'status' in first ? first.status : (first as { to: number }).to;
+      const status =
+        "status" in first ? first.status : (first as { to: number }).to;
       await queries.createNetworkBaseline({
         testId: input.testId,
         stepLabel: input.stepLabel,
@@ -323,7 +356,7 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
       });
       return;
     }
-    case 'console': {
+    case "console": {
       const con = layerData.consoleDiff;
       if (!con) return;
       for (const fp of con.newFingerprints.slice(0, 5)) {
@@ -335,7 +368,7 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
           approvedBy: input.approvedBy,
           payload: {
             fingerprint: fp.fingerprint,
-            level: 'error',
+            level: "error",
             expectedCount: fp.count,
             lastSeenBuildId: input.approvedFromComparisonId,
             sample: fp.sample,
@@ -344,7 +377,7 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
       }
       return;
     }
-    case 'a11y': {
+    case "a11y": {
       const a = layerData.a11y;
       if (!a) return;
       for (const v of a.newViolations.slice(0, 10)) {
@@ -355,16 +388,16 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
           approvedFromComparisonId: input.approvedFromComparisonId,
           approvedBy: input.approvedBy,
           payload: {
-            ruleId: v.id ?? '',
-            selector: v.description ?? '',
-            impact: v.impact ?? '',
+            ruleId: v.id ?? "",
+            selector: v.description ?? "",
+            impact: v.impact ?? "",
             acknowledgedAt: new Date().toISOString(),
           },
         });
       }
       return;
     }
-    case 'perf': {
+    case "perf": {
       const p = layerData.perf;
       if (!p) return;
       const metrics: Record<string, { p50: number; p95: number }> = {};
@@ -381,7 +414,7 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
       });
       return;
     }
-    case 'variable': {
+    case "variable": {
       const v = layerData.variable;
       if (!v) return;
       for (const c of v.changes.slice(0, 10)) {
@@ -391,12 +424,15 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
           branch: input.branch,
           approvedFromComparisonId: input.approvedFromComparisonId,
           approvedBy: input.approvedBy,
-          payload: { key: c.path, value: c.current == null ? null : String(c.current) },
+          payload: {
+            key: c.path,
+            value: c.current == null ? null : String(c.current),
+          },
         });
       }
       return;
     }
-    case 'url_trajectory': {
+    case "url_trajectory": {
       const u = layerData.url;
       if (!u) return;
       const sequence = u.divergedSteps.map((d) => d.currentUrl);
@@ -409,12 +445,12 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
       });
       return;
     }
-    case 'dom': {
+    case "dom": {
       const d = layerData.dom;
       if (!d) return;
       // First-pass: blanket-accept attribute-only diffs surfaced by domDiff.
       // Future runs consult domBaselines.acceptedAttributes to suppress.
-      const selector = '/* root */';
+      const selector = "/* root */";
       await queries.createDomBaseline({
         testId: input.testId,
         stepLabel: input.stepLabel,
@@ -432,7 +468,9 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
  * Read the current step's reviewTodo links + per-layer feedback for display.
  * Convenience for the verify screen that spares one round-trip.
  */
-export async function getStepFeedbackContext(stepComparisonId: string): Promise<{
+export async function getStepFeedbackContext(
+  stepComparisonId: string,
+): Promise<{
   feedback: StepLayerFeedback[];
   step: StepComparison | null;
 }> {

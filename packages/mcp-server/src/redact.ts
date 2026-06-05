@@ -9,20 +9,20 @@
  */
 
 const SECRET_KEY_PATTERNS = [
-  'authorization',
-  'auth_header',
-  'authheader',
-  'bearer',
-  'token',
-  'api_key',
-  'apikey',
-  'password',
-  'passwd',
-  'secret',
-  'private_key',
-  'privatekey',
-  'cookie',
-  'set-cookie',
+  "authorization",
+  "auth_header",
+  "authheader",
+  "bearer",
+  "token",
+  "api_key",
+  "apikey",
+  "password",
+  "passwd",
+  "secret",
+  "private_key",
+  "privatekey",
+  "cookie",
+  "set-cookie",
 ];
 
 function isSecretKey(key: string): boolean {
@@ -30,7 +30,7 @@ function isSecretKey(key: string): boolean {
   return SECRET_KEY_PATTERNS.some((pat) => lower.includes(pat));
 }
 
-const REDACTED = '[REDACTED]';
+const REDACTED = "[REDACTED]";
 
 export function redactSecrets<T>(value: T, depth = 0): T {
   if (depth > 8) return value;
@@ -38,7 +38,7 @@ export function redactSecrets<T>(value: T, depth = 0): T {
   if (Array.isArray(value)) {
     return value.map((v) => redactSecrets(v, depth + 1)) as unknown as T;
   }
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (isSecretKey(k)) {

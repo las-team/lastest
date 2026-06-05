@@ -1,7 +1,7 @@
-import { db } from '@/lib/db';
-import { githubIssues, pullRequests, repositories } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+import { db } from "@/lib/db";
+import { githubIssues, pullRequests, repositories } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 const SYNC_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -36,18 +36,23 @@ async function fetchGitHubPaginated<T>(
   let page = 1;
 
   while (true) {
-    const sep = url.includes('?') ? '&' : '?';
-    const response = await fetch(`${url}${sep}per_page=${perPage}&page=${page}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
+    const sep = url.includes("?") ? "&" : "?";
+    const response = await fetch(
+      `${url}${sep}per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
       },
-    });
+    );
 
     if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      console.error(`[github-sync] API error: ${response.status} ${response.statusText} - ${body.slice(0, 200)}`);
+      const body = await response.text().catch(() => "");
+      console.error(
+        `[github-sync] API error: ${response.status} ${response.statusText} - ${body.slice(0, 200)}`,
+      );
       break;
     }
 
@@ -74,7 +79,10 @@ export async function syncGithubIssues(
       .orderBy(githubIssues.syncedAt)
       .limit(1);
 
-    if (latest?.syncedAt && Date.now() - latest.syncedAt.getTime() < SYNC_TTL_MS) {
+    if (
+      latest?.syncedAt &&
+      Date.now() - latest.syncedAt.getTime() < SYNC_TTL_MS
+    ) {
       return { syncedIssues: 0, syncedPRs: 0 };
     }
   }
@@ -84,20 +92,30 @@ export async function syncGithubIssues(
     .from(repositories)
     .where(eq(repositories.id, repositoryId));
 
-  if (!repo) throw new Error('Repository not found');
+  if (!repo) throw new Error("Repository not found");
 
   const baseUrl = `https://api.github.com/repos/${repo.owner}/${repo.name}`;
-  console.log(`[github-sync] Syncing issues + PRs for ${repo.owner}/${repo.name}...`);
+  console.log(
+    `[github-sync] Syncing issues + PRs for ${repo.owner}/${repo.name}...`,
+  );
 
   // Fetch issues and PRs in parallel
   const [allIssues, allPRs] = await Promise.all([
-    fetchGitHubPaginated<GitHubIssueResponse>(`${baseUrl}/issues?state=all`, accessToken),
-    fetchGitHubPaginated<GitHubPRResponse>(`${baseUrl}/pulls?state=all`, accessToken),
+    fetchGitHubPaginated<GitHubIssueResponse>(
+      `${baseUrl}/issues?state=all`,
+      accessToken,
+    ),
+    fetchGitHubPaginated<GitHubPRResponse>(
+      `${baseUrl}/pulls?state=all`,
+      accessToken,
+    ),
   ]);
 
   // Filter out PRs from issues endpoint
   const realIssues = allIssues.filter((i) => !i.pull_request);
-  console.log(`[github-sync] Fetched ${realIssues.length} issues, ${allPRs.length} PRs`);
+  console.log(
+    `[github-sync] Fetched ${realIssues.length} issues, ${allPRs.length} PRs`,
+  );
 
   // Upsert issues
   const now = new Date();
@@ -125,7 +143,10 @@ export async function syncGithubIssues(
     };
 
     if (existing) {
-      await db.update(githubIssues).set(values).where(eq(githubIssues.id, existing.id));
+      await db
+        .update(githubIssues)
+        .set(values)
+        .where(eq(githubIssues.id, existing.id));
     } else {
       await db.insert(githubIssues).values(values);
     }
@@ -145,25 +166,28 @@ export async function syncGithubIssues(
         ),
       );
 
-    const status = pr.merged_at ? 'merged' : pr.state;
+    const status = pr.merged_at ? "merged" : pr.state;
 
     if (existing) {
       // Update with author + mergedAt if missing
-      await db.update(pullRequests).set({
-        title: pr.title,
-        status,
-        author: pr.user?.login ?? null,
-        mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
-        headBranch: pr.head.ref,
-        baseBranch: pr.base.ref,
-        headCommit: pr.head.sha,
-        updatedAt: now,
-      }).where(eq(pullRequests.id, existing.id));
+      await db
+        .update(pullRequests)
+        .set({
+          title: pr.title,
+          status,
+          author: pr.user?.login ?? null,
+          mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
+          headBranch: pr.head.ref,
+          baseBranch: pr.base.ref,
+          headCommit: pr.head.sha,
+          updatedAt: now,
+        })
+        .where(eq(pullRequests.id, existing.id));
     } else {
       // Create new PR record from API data
       await db.insert(pullRequests).values({
         id: uuid(),
-        provider: 'github',
+        provider: "github",
         githubPrNumber: pr.number,
         repoOwner: repo.owner,
         repoName: repo.name,
@@ -181,6 +205,8 @@ export async function syncGithubIssues(
     syncedPRs++;
   }
 
-  console.log(`[github-sync] Done. Synced ${realIssues.length} issues, ${syncedPRs} PRs for ${repo.owner}/${repo.name}`);
+  console.log(
+    `[github-sync] Done. Synced ${realIssues.length} issues, ${syncedPRs} PRs for ${repo.owner}/${repo.name}`,
+  );
   return { syncedIssues: realIssues.length, syncedPRs };
 }

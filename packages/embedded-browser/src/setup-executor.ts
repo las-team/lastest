@@ -5,8 +5,8 @@
  * self-contained so the embedded-browser package has no cross-package imports.
  */
 
-import type { Page, Locator } from 'playwright';
-import { stripTypeAnnotations } from '@lastest/shared';
+import type { Page, Locator } from "playwright";
+import { stripTypeAnnotations } from "@lastest/shared";
 
 // ---------------------------------------------------------------------------
 // Page proxy – intercepts screenshots + handles relative URLs
@@ -15,22 +15,29 @@ import { stripTypeAnnotations } from '@lastest/shared';
 function createSetupPageProxy(page: Page, baseUrl: string): Page {
   return new Proxy(page, {
     get: (target, prop) => {
-      if (prop === 'screenshot') {
+      if (prop === "screenshot") {
         return async () => Buffer.alloc(0);
       }
-      if (prop === 'goto') {
-        return async (url: string | URL, options?: Parameters<Page['goto']>[1]) => {
-          const urlStr = typeof url === 'string' ? url : url.toString();
+      if (prop === "goto") {
+        return async (
+          url: string | URL,
+          options?: Parameters<Page["goto"]>[1],
+        ) => {
+          const urlStr = typeof url === "string" ? url : url.toString();
           let resolvedUrl = urlStr;
-          if (urlStr.startsWith('/')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}${urlStr}`;
-          } else if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
-            resolvedUrl = `${baseUrl.replace(/\/$/, '')}/${urlStr}`;
+          if (urlStr.startsWith("/")) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, "")}${urlStr}`;
+          } else if (
+            !urlStr.startsWith("http://") &&
+            !urlStr.startsWith("https://")
+          ) {
+            resolvedUrl = `${baseUrl.replace(/\/$/, "")}/${urlStr}`;
           }
           // Retry ladder for transient CNI/DNS bursts during build startup
           // (30 EBs hitting the target concurrently can trip ERR_NETWORK_CHANGED).
           // Total wait budget: 1s + 2s + 4s ≈ 7s before giving up.
-          const TRANSIENT_NET_RX = /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
+          const TRANSIENT_NET_RX =
+            /ERR_NETWORK_CHANGED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_IO_SUSPENDED/i;
           const delays = [1000, 2000, 4000];
           let lastErr: unknown;
           for (let attempt = 0; attempt <= delays.length; attempt++) {
@@ -41,22 +48,33 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
               const msg = err instanceof Error ? err.message : String(err);
               if (!TRANSIENT_NET_RX.test(msg)) throw err;
               if (attempt === delays.length) break;
-              console.warn(`[Setup] page.goto transient error (attempt ${attempt + 1}/${delays.length + 1}), backing off ${delays[attempt]}ms: ${msg}`);
+              console.warn(
+                `[Setup] page.goto transient error (attempt ${attempt + 1}/${delays.length + 1}), backing off ${delays[attempt]}ms: ${msg}`,
+              );
               await new Promise((r) => setTimeout(r, delays[attempt]!));
             }
           }
-          const finalMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-          const tagged = new Error(`EB network unhealthy after retries: ${finalMsg}`);
-          (tagged as unknown as Record<string, unknown>).__ebNetworkUnhealthy = true;
+          const finalMsg =
+            lastErr instanceof Error ? lastErr.message : String(lastErr);
+          const tagged = new Error(
+            `EB network unhealthy after retries: ${finalMsg}`,
+          );
+          (tagged as unknown as Record<string, unknown>).__ebNetworkUnhealthy =
+            true;
           throw tagged;
         };
       }
-      if (prop === 'waitForURL') {
-        return (predicate: string | RegExp | ((url: URL) => boolean), options?: { timeout?: number }) => {
-          if (typeof predicate === 'function') {
+      if (prop === "waitForURL") {
+        return (
+          predicate: string | RegExp | ((url: URL) => boolean),
+          options?: { timeout?: number },
+        ) => {
+          if (typeof predicate === "function") {
             const origFn = predicate;
             const wrappedFn = (url: URL) => {
-              const patched = url as URL & { includes?: (s: string) => boolean };
+              const patched = url as URL & {
+                includes?: (s: string) => boolean;
+              };
               if (!patched.includes) {
                 patched.includes = (s: string) => url.href.includes(s);
               }
@@ -68,7 +86,7 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
         };
       }
       const value = target[prop as keyof Page];
-      if (typeof value === 'function') {
+      if (typeof value === "function") {
         return (value as (...args: unknown[]) => unknown).bind(target);
       }
       return value;
@@ -82,31 +100,52 @@ function createSetupPageProxy(page: Page, baseUrl: string): Page {
 
 function createExpect(timeout = 5000) {
   return function expect(target: Page | Locator) {
-    const isPage = typeof (target as unknown as { goto?: unknown }).goto === 'function';
+    const isPage =
+      typeof (target as unknown as { goto?: unknown }).goto === "function";
 
     if (isPage) {
       const pg = target as Page;
       return {
-        async toHaveURL(expected: string | RegExp, options?: { timeout?: number }) {
+        async toHaveURL(
+          expected: string | RegExp,
+          options?: { timeout?: number },
+        ) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
           while (Date.now() - start < t) {
             const url = pg.url();
-            if (typeof expected === 'string' ? url === expected : expected.test(url)) return;
-            await new Promise(r => setTimeout(r, 100));
+            if (
+              typeof expected === "string"
+                ? url === expected
+                : expected.test(url)
+            )
+              return;
+            await new Promise((r) => setTimeout(r, 100));
           }
-          throw new Error(`Expected URL to match ${expected}, but got ${pg.url()}`);
+          throw new Error(
+            `Expected URL to match ${expected}, but got ${pg.url()}`,
+          );
         },
-        async toHaveTitle(expected: string | RegExp, options?: { timeout?: number }) {
+        async toHaveTitle(
+          expected: string | RegExp,
+          options?: { timeout?: number },
+        ) {
           const t = options?.timeout ?? timeout;
           const start = Date.now();
           while (Date.now() - start < t) {
             const title = await pg.title();
-            if (typeof expected === 'string' ? title === expected : expected.test(title)) return;
-            await new Promise(r => setTimeout(r, 100));
+            if (
+              typeof expected === "string"
+                ? title === expected
+                : expected.test(title)
+            )
+              return;
+            await new Promise((r) => setTimeout(r, 100));
           }
           const title = await pg.title();
-          throw new Error(`Expected title to match ${expected}, but got ${title}`);
+          throw new Error(
+            `Expected title to match ${expected}, but got ${title}`,
+          );
         },
       };
     }
@@ -114,18 +153,32 @@ function createExpect(timeout = 5000) {
     const locator = target as Locator;
     return {
       async toBeVisible(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'visible', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "visible",
+          timeout: options?.timeout ?? timeout,
+        });
       },
       async toBeHidden(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'hidden', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "hidden",
+          timeout: options?.timeout ?? timeout,
+        });
       },
-      async toHaveText(expected: string | RegExp, options?: { timeout?: number }) {
+      async toHaveText(
+        expected: string | RegExp,
+        options?: { timeout?: number },
+      ) {
         const t = options?.timeout ?? timeout;
         const start = Date.now();
         while (Date.now() - start < t) {
           const text = await locator.textContent();
-          if (typeof expected === 'string' ? text === expected : expected.test(text || '')) return;
-          await new Promise(r => setTimeout(r, 100));
+          if (
+            typeof expected === "string"
+              ? text === expected
+              : expected.test(text || "")
+          )
+            return;
+          await new Promise((r) => setTimeout(r, 100));
         }
         const text = await locator.textContent();
         throw new Error(`Expected text to match ${expected}, but got ${text}`);
@@ -136,10 +189,12 @@ function createExpect(timeout = 5000) {
         while (Date.now() - start < t) {
           const text = await locator.textContent();
           if (text?.includes(expected)) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         const text = await locator.textContent();
-        throw new Error(`Expected text to contain "${expected}", but got "${text}"`);
+        throw new Error(
+          `Expected text to contain "${expected}", but got "${text}"`,
+        );
       },
       async toHaveValue(expected: string, options?: { timeout?: number }) {
         const t = options?.timeout ?? timeout;
@@ -147,7 +202,7 @@ function createExpect(timeout = 5000) {
         while (Date.now() - start < t) {
           const value = await locator.inputValue();
           if (value === expected) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         const value = await locator.inputValue();
         throw new Error(`Expected value "${expected}", but got "${value}"`);
@@ -157,7 +212,7 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isEnabled()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be enabled`);
       },
@@ -166,7 +221,7 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isDisabled()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be disabled`);
       },
@@ -175,12 +230,15 @@ function createExpect(timeout = 5000) {
         const start = Date.now();
         while (Date.now() - start < t) {
           if (await locator.isChecked()) return;
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise((r) => setTimeout(r, 100));
         }
         throw new Error(`Expected element to be checked`);
       },
       async toBeAttached(options?: { timeout?: number }) {
-        await locator.waitFor({ state: 'attached', timeout: options?.timeout ?? timeout });
+        await locator.waitFor({
+          state: "attached",
+          timeout: options?.timeout ?? timeout,
+        });
       },
     };
   };
@@ -195,20 +253,27 @@ function createAppState(page: Page) {
     get: async (path: string): Promise<unknown> => {
       return page.evaluate((p) => {
         /* eslint-disable @typescript-eslint/no-explicit-any */
-        const state = (window as any).__APP_STATE__ ||
-                      (window as any).store?.getState?.() ||
-                      (window as any).__EXCALIDRAW_STATE__ ||
-                      (window as any).app?.state;
+        const state =
+          (window as any).__APP_STATE__ ||
+          (window as any).store?.getState?.() ||
+          (window as any).__EXCALIDRAW_STATE__ ||
+          (window as any).app?.state;
         /* eslint-enable @typescript-eslint/no-explicit-any */
         if (!state) return undefined;
-        return p.split('.').reduce((obj: Record<string, unknown>, key: string) => obj?.[key] as Record<string, unknown>, state);
+        return p
+          .split(".")
+          .reduce(
+            (obj: Record<string, unknown>, key: string) =>
+              obj?.[key] as Record<string, unknown>,
+            state,
+          );
       }, path);
     },
     getHistoryLength: async (): Promise<number> => -1,
     getAll: async (): Promise<unknown> => null,
     evaluate: async <T>(accessor: string): Promise<T> => {
       return page.evaluate((fn) => {
-        const func = new Function('window', `return ${fn}`);
+        const func = new Function("window", `return ${fn}`);
         return func(window);
       }, accessor);
     },
@@ -227,36 +292,42 @@ function createLocateWithFallback() {
     value?: string | null,
     coords?: { x: number; y: number } | null,
   ) => {
-    const valid = selectors.filter(s => s.value && s.value.trim() && !s.value.includes('undefined'));
+    const valid = selectors.filter(
+      (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
+    );
 
     for (const sel of valid) {
       try {
         let locator: Locator;
-        if (sel.type === 'ocr-text') {
-          const text = sel.value.replace(/^ocr-text="/, '').replace(/"$/, '');
+        if (sel.type === "ocr-text") {
+          const text = sel.value.replace(/^ocr-text="/, "").replace(/"$/, "");
           locator = pg.getByText(text, { exact: false });
-        } else if (sel.type === 'role-name') {
+        } else if (sel.type === "role-name") {
           const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
-          if (match) locator = pg.getByRole(match[1] as 'button' | 'link' | 'heading', { name: match[2] });
+          if (match)
+            locator = pg.getByRole(match[1] as "button" | "link" | "heading", {
+              name: match[2],
+            });
           else locator = pg.locator(sel.value);
         } else {
           locator = pg.locator(sel.value);
         }
         const target = locator.first();
         await target.waitFor({ timeout: 3000 });
-        if (action === 'click') await target.click();
-        else if (action === 'fill') await target.fill(value || '');
-        else if (action === 'selectOption') await target.selectOption(value || '');
+        if (action === "click") await target.click();
+        else if (action === "fill") await target.fill(value || "");
+        else if (action === "selectOption")
+          await target.selectOption(value || "");
         return;
       } catch {
         continue;
       }
     }
-    if (action === 'click' && coords) {
+    if (action === "click" && coords) {
       await pg.mouse.click(coords.x, coords.y);
       return;
     }
-    throw new Error('No selector matched: ' + JSON.stringify(valid));
+    throw new Error("No selector matched: " + JSON.stringify(valid));
   };
 }
 
@@ -264,36 +335,42 @@ function createLocateWithFallback() {
 // Legacy line executor
 // ---------------------------------------------------------------------------
 
-async function executeLine(page: Page, line: string, baseUrl: string): Promise<void> {
-  if (line.startsWith('await page.goto(')) {
+async function executeLine(
+  page: Page,
+  line: string,
+  baseUrl: string,
+): Promise<void> {
+  if (line.startsWith("await page.goto(")) {
     const urlMatch = line.match(/goto\(['"]([^'"]+)['"]\)/);
     if (urlMatch) {
       let url = urlMatch[1];
-      if (url.startsWith('/')) url = `${baseUrl}${url}`;
+      if (url.startsWith("/")) url = `${baseUrl}${url}`;
       await page.goto(url, { timeout: 30000 });
     }
-  } else if (line.startsWith('await page.locator(')) {
+  } else if (line.startsWith("await page.locator(")) {
     const locatorMatch = line.match(/locator\(['"]([^'"]+)['"]\)/);
-    const actionMatch = line.match(/\.(click|fill|selectOption)\(['"]?([^'")]*)?['"]?\)/);
+    const actionMatch = line.match(
+      /\.(click|fill|selectOption)\(['"]?([^'")]*)?['"]?\)/,
+    );
     if (locatorMatch && actionMatch) {
       const selector = locatorMatch[1];
       const action = actionMatch[1];
       const value = actionMatch[2];
       const loc = page.locator(selector);
-      if (action === 'click') await loc.click();
-      else if (action === 'fill') await loc.fill(value || '');
-      else if (action === 'selectOption') await loc.selectOption(value || '');
+      if (action === "click") await loc.click();
+      else if (action === "fill") await loc.fill(value || "");
+      else if (action === "selectOption") await loc.selectOption(value || "");
     }
-  } else if (line.startsWith('await page.fill(')) {
+  } else if (line.startsWith("await page.fill(")) {
     const match = line.match(/fill\(['"]([^'"]+)['"],\s*['"]([^'"]*)['"]\)/);
     if (match) await page.fill(match[1], match[2]);
-  } else if (line.startsWith('await page.click(')) {
+  } else if (line.startsWith("await page.click(")) {
     const match = line.match(/click\(['"]([^'"]+)['"]\)/);
     if (match) await page.click(match[1]);
-  } else if (line.startsWith('await page.waitForSelector(')) {
+  } else if (line.startsWith("await page.waitForSelector(")) {
     const match = line.match(/waitForSelector\(['"]([^'"]+)['"]\)/);
     if (match) await page.waitForSelector(match[1]);
-  } else if (line.startsWith('await page.waitForTimeout(')) {
+  } else if (line.startsWith("await page.waitForTimeout(")) {
     const match = line.match(/waitForTimeout\((\d+)\)/);
     if (match) await page.waitForTimeout(parseInt(match[1], 10));
   }
@@ -331,32 +408,45 @@ export async function executeSetupCode(
       log: (msg: string) => console.log(`[Setup] ${msg}`),
       error: (msg: string) => console.error(`[Setup] ${msg}`),
     };
-    const screenshotPath = '/tmp/setup-screenshot.png';
+    const screenshotPath = "/tmp/setup-screenshot.png";
 
     // Remove local locateWithFallback declarations so the parameter is used
-    if (body.includes('async function locateWithFallback(')) {
-      const startMatch = body.match(/async function locateWithFallback\s*\([^)]*\)\s*\{/);
+    if (body.includes("async function locateWithFallback(")) {
+      const startMatch = body.match(
+        /async function locateWithFallback\s*\([^)]*\)\s*\{/,
+      );
       if (startMatch && startMatch.index !== undefined) {
         const startIdx = startMatch.index;
-        const braceStart = body.indexOf('{', startIdx);
+        const braceStart = body.indexOf("{", startIdx);
         let depth = 1;
         let endIdx = braceStart + 1;
         while (depth > 0 && endIdx < body.length) {
-          if (body[endIdx] === '{') depth++;
-          else if (body[endIdx] === '}') depth--;
+          if (body[endIdx] === "{") depth++;
+          else if (body[endIdx] === "}") depth--;
           endIdx++;
         }
-        body = body.slice(0, startIdx) + '/* locateWithFallback provided by runner */' + body.slice(endIdx);
+        body =
+          body.slice(0, startIdx) +
+          "/* locateWithFallback provided by runner */" +
+          body.slice(endIdx);
       }
     }
 
     // Fix legacy page.keyboard.selectAll()
-    body = body.replace(/page\.keyboard\.selectAll\(\)/g, "page.keyboard.press('Control+a')");
+    body = body.replace(
+      /page\.keyboard\.selectAll\(\)/g,
+      "page.keyboard.press('Control+a')",
+    );
 
     // File upload helper
-    const fileUploadHelper = async (selector: string, filePaths: string | string[]) => {
+    const fileUploadHelper = async (
+      selector: string,
+      filePaths: string | string[],
+    ) => {
       const locator = page.locator(selector);
-      await locator.setInputFiles(Array.isArray(filePaths) ? filePaths : [filePaths]);
+      await locator.setInputFiles(
+        Array.isArray(filePaths) ? filePaths : [filePaths],
+      );
     };
 
     // Stubs
@@ -365,19 +455,21 @@ export async function executeSetupCode(
     const networkHelper = null;
 
     // Build async function with 11-parameter signature matching the runner
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    const AsyncFunction = Object.getPrototypeOf(
+      async function () {},
+    ).constructor;
     const setupFn = new AsyncFunction(
-      'page',
-      'baseUrl',
-      'screenshotPath',
-      'stepLogger',
-      'expect',
-      'appState',
-      'locateWithFallback',
-      'fileUpload',
-      'clipboard',
-      'downloads',
-      'network',
+      "page",
+      "baseUrl",
+      "screenshotPath",
+      "stepLogger",
+      "expect",
+      "appState",
+      "locateWithFallback",
+      "fileUpload",
+      "clipboard",
+      "downloads",
+      "network",
       body,
     );
 
@@ -395,14 +487,16 @@ export async function executeSetupCode(
       networkHelper,
     );
 
-    if (result && typeof result === 'object') {
+    if (result && typeof result === "object") {
       return result;
     }
     return {};
   }
 
   // Legacy format: raw `await page.*` lines
-  const lines = processedCode.split('\n').filter(line => line.trim().startsWith('await page.'));
+  const lines = processedCode
+    .split("\n")
+    .filter((line) => line.trim().startsWith("await page."));
   const pageProxy = createSetupPageProxy(page, baseUrl);
   for (const line of lines) {
     await executeLine(pageProxy, line.trim(), baseUrl);

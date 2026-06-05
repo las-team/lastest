@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import { useState, useEffect, ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
-import { BuildDetailClient } from './build-detail-client';
-import { BuildSummaryHero } from '@/components/dashboard/build-summary-hero';
-import { BrowserViewer } from '@/components/embedded-browser/browser-viewer-client';
-import { ChevronDown, ChevronUp, Tv2 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import type { VisualDiffWithTestStatus, BuildStatus } from '@/lib/db/schema';
-import type { BuildA11yViolationRow } from '@/lib/db/queries/builds';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+import { useState, useEffect, ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { BuildDetailClient } from "./build-detail-client";
+import { BuildSummaryHero } from "@/components/dashboard/build-summary-hero";
+import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
+import { ChevronDown, ChevronUp, Tv2 } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import type { VisualDiffWithTestStatus, BuildStatus } from "@/lib/db/schema";
+import type { BuildA11yViolationRow } from "@/lib/db/queries/builds";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 interface BuildData {
   id: string;
@@ -39,20 +39,34 @@ interface BuildPollingWrapperProps {
     violationCount: number | null;
     criticalCount: number | null;
     totalRulesChecked: number | null;
-    trend?: Array<{ id: string; a11yScore: number | null; createdAt: Date | null }>;
+    trend?: Array<{
+      id: string;
+      a11yScore: number | null;
+      createdAt: Date | null;
+    }>;
     violations?: BuildA11yViolationRow[];
   };
   children?: ReactNode;
 }
 
-export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = false, embeddedStreamUrl, banAiMode = false, a11y, children }: BuildPollingWrapperProps) {
+export function BuildPollingWrapper({
+  initialBuild,
+  buildId,
+  isMainBranch = false,
+  embeddedStreamUrl,
+  banAiMode = false,
+  a11y,
+  children,
+}: BuildPollingWrapperProps) {
   const [build, setBuild] = useState<BuildData>(initialBuild);
   const [isPolling, setIsPolling] = useState(!initialBuild.completedAt);
   const [showViewer, setShowViewer] = useState(true);
 
   // Mark "Check Results" setup guide step as complete on page visit
   useEffect(() => {
-    try { localStorage.setItem('lastest-results-viewed', 'true'); } catch {}
+    try {
+      localStorage.setItem("lastest-results-viewed", "true");
+    } catch {}
   }, []);
   const router = useRouter();
 
@@ -64,7 +78,9 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
         // Force a fresh response — browser HTTP cache + service-worker
         // intermediaries were returning the first 0/N snapshot for the whole
         // build, freezing the progress UI.
-        const res = await fetch(`/api/builds/${buildId}/status`, { cache: 'no-store' });
+        const res = await fetch(`/api/builds/${buildId}/status`, {
+          cache: "no-store",
+        });
         if (!res.ok) return;
 
         const data = await res.json();
@@ -84,7 +100,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
           router.refresh();
         }
       } catch (error) {
-        console.error('Polling error:', error);
+        console.error("Polling error:", error);
       }
     }, 2000);
 
@@ -93,7 +109,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
 
   const isRunning = !build.completedAt;
   const completedTests = build.passedCount + build.failedCount;
-  const pendingDiffs = build.diffs.filter((d) => d.status === 'pending');
+  const pendingDiffs = build.diffs.filter((d) => d.status === "pending");
   const showBrowserViewer = embeddedStreamUrl && isRunning;
 
   return (
@@ -121,7 +137,11 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
           >
             <Tv2 className="h-4 w-4 text-purple-500" />
             <span>Live Browser View</span>
-            {showViewer ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            {showViewer ? (
+              <ChevronUp className="h-4 w-4 ml-auto" />
+            ) : (
+              <ChevronDown className="h-4 w-4 ml-auto" />
+            )}
           </button>
           {showViewer && (
             <BrowserViewer
@@ -142,7 +162,7 @@ export function BuildPollingWrapper({ initialBuild, buildId, isMainBranch = fals
           flakyCount: build.flakyCount ?? 0,
           failedCount: build.failedCount,
           passedCount: build.passedCount,
-          errorsCount: build.diffs.filter(d => d.errorMessage).length,
+          errorsCount: build.diffs.filter((d) => d.errorMessage).length,
           elapsedMs: build.elapsedMs,
         }}
         a11y={a11y}

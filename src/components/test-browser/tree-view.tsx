@@ -1,11 +1,22 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { ChevronRight, ChevronDown, Folder, FileCode, Check, X, Pause, Plus, Lightbulb, CircleDot } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import Link from 'next/link';
-import type { FunctionalArea, Test } from '@/lib/db/schema';
+import { useState } from "react";
+import {
+  ChevronRight,
+  ChevronDown,
+  Folder,
+  FileCode,
+  Check,
+  X,
+  Pause,
+  Plus,
+  Lightbulb,
+  CircleDot,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import Link from "next/link";
+import type { FunctionalArea, Test } from "@/lib/db/schema";
 
 interface TestWithStatus extends Test {
   latestStatus: string | null;
@@ -28,18 +39,23 @@ interface TreeViewProps {
 
 function StatusIcon({ status }: { status: string | null }) {
   switch (status) {
-    case 'passed':
+    case "passed":
       return <Check className="h-3 w-3 text-green-500" />;
-    case 'failed':
+    case "failed":
       return <X className="h-3 w-3 text-destructive" />;
-    case 'running':
+    case "running":
       return <Pause className="h-3 w-3 text-yellow-500" />;
     default:
       return <div className="h-3 w-3 rounded-full bg-muted" />;
   }
 }
 
-export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeViewProps) {
+export function TreeView({
+  areas,
+  tests,
+  suggestions = [],
+  onNewArea,
+}: TreeViewProps) {
   const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
 
@@ -53,17 +69,20 @@ export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeView
     setExpandedAreas(newExpanded);
   };
 
-  const testsByArea = tests.reduce((acc, test) => {
-    const areaId = test.functionalAreaId || 'uncategorized';
-    if (!acc[areaId]) acc[areaId] = [];
-    acc[areaId].push(test);
-    return acc;
-  }, {} as Record<string, TestWithStatus[]>);
+  const testsByArea = tests.reduce(
+    (acc, test) => {
+      const areaId = test.functionalAreaId || "uncategorized";
+      if (!acc[areaId]) acc[areaId] = [];
+      acc[areaId].push(test);
+      return acc;
+    },
+    {} as Record<string, TestWithStatus[]>,
+  );
 
-  const uncategorizedTests = testsByArea['uncategorized'] || [];
+  const uncategorizedTests = testsByArea["uncategorized"] || [];
 
-  const unmatchedSuggestions = suggestions.filter(s => !s.matchedTestId);
-  const matchedSuggestions = suggestions.filter(s => s.matchedTestId);
+  const unmatchedSuggestions = suggestions.filter((s) => !s.matchedTestId);
+  const matchedSuggestions = suggestions.filter((s) => s.matchedTestId);
 
   return (
     <div className="h-full flex flex-col">
@@ -84,7 +103,9 @@ export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeView
                   <ChevronRight className="h-4 w-4" />
                 )}
                 <Lightbulb className="h-4 w-4 text-amber-500" />
-                <span className="flex-1 text-left font-medium">Suggested Tests</span>
+                <span className="flex-1 text-left font-medium">
+                  Suggested Tests
+                </span>
                 <span className="text-xs text-muted-foreground">
                   {unmatchedSuggestions.length} remaining
                 </span>
@@ -107,7 +128,9 @@ export function TreeView({ areas, tests, suggestions = [], onNewArea }: TreeView
                       className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground/60"
                     >
                       <Check className="h-3 w-3 text-green-500" />
-                      <span className="truncate line-through">{suggestion.suggestion}</span>
+                      <span className="truncate line-through">
+                        {suggestion.suggestion}
+                      </span>
                       {suggestion.matchedTestName && (
                         <span className="text-xs text-green-600">
                           → {suggestion.matchedTestName}

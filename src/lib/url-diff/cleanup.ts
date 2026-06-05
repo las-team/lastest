@@ -6,15 +6,17 @@
  * `MIN_AGE_MS` (5 min) so concurrent in-flight captures aren't deleted.
  */
 
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import path from "node:path";
+import { promises as fs } from "node:fs";
 
-import { STORAGE_DIRS } from '@/lib/storage/paths';
+import { STORAGE_DIRS } from "@/lib/storage/paths";
 
 const MIN_AGE_MS = 5 * 60 * 1000;
 
-export async function cleanupExpiredUrlDiffs(maxAgeMs = 60 * 60 * 1000): Promise<{ deleted: number }> {
-  const root = STORAGE_DIRS['url-diffs'];
+export async function cleanupExpiredUrlDiffs(
+  maxAgeMs = 60 * 60 * 1000,
+): Promise<{ deleted: number }> {
+  const root = STORAGE_DIRS["url-diffs"];
   let entries: string[] = [];
   try {
     entries = await fs.readdir(root);

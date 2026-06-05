@@ -1,4 +1,15 @@
-import type { NetworkRequest, DownloadRecord, A11yViolation, DesignSystemViolation, DesignSystemTokenUsage, AssertionResult, DomSnapshotData, UrlTrajectoryStep, WebVitalsSample, StorageStateSnapshot } from '@/lib/db/schema';
+import type {
+  NetworkRequest,
+  DownloadRecord,
+  A11yViolation,
+  DesignSystemViolation,
+  DesignSystemTokenUsage,
+  AssertionResult,
+  DomSnapshotData,
+  UrlTrajectoryStep,
+  WebVitalsSample,
+  StorageStateSnapshot,
+} from "@/lib/db/schema";
 
 export interface CapturedScreenshot {
   path: string;
@@ -7,7 +18,7 @@ export interface CapturedScreenshot {
 
 export interface TestRunResult {
   testId: string;
-  status: 'passed' | 'failed' | 'skipped' | 'setup_failed';
+  status: "passed" | "failed" | "skipped" | "setup_failed";
   durationMs: number;
   screenshotPath?: string;
   screenshots: CapturedScreenshot[];
@@ -23,7 +34,12 @@ export interface TestRunResult {
   setupDurationMs?: number;
   teardownDurationMs?: number;
   teardownError?: string;
-  stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean };
+  stabilityMetadata?: {
+    frameCount: number;
+    stableFrames: number;
+    maxFrameDiff: number;
+    isStable: boolean;
+  };
   videoPath?: string;
   softErrors?: string[];
   networkBodiesPath?: string;
@@ -40,10 +56,14 @@ export interface TestRunResult {
   storageStateSnapshot?: StorageStateSnapshot;
 }
 
-export type AssertionType = 'pageLoad' | 'networkIdle' | 'urlMatch' | 'domContentLoaded';
+export type AssertionType =
+  | "pageLoad"
+  | "networkIdle"
+  | "urlMatch"
+  | "domContentLoaded";
 
-export type WaitType = 'duration' | 'selector';
-export type WaitSelectorCondition = 'visible' | 'hidden';
+export type WaitType = "duration" | "selector";
+export type WaitSelectorCondition = "visible" | "hidden";
 
 export interface WaitParams {
   waitType: WaitType;
@@ -55,20 +75,20 @@ export interface WaitParams {
 }
 
 export type ElementAssertionType =
-  | 'toBeVisible'
-  | 'toBeHidden'
-  | 'toContainText'
-  | 'toHaveText'
-  | 'toHaveValue'
-  | 'toBeEnabled'
-  | 'toBeDisabled'
-  | 'toBeChecked'
-  | 'toHaveAttribute'
-  | 'toHaveCount';
+  | "toBeVisible"
+  | "toBeHidden"
+  | "toContainText"
+  | "toHaveText"
+  | "toHaveValue"
+  | "toBeEnabled"
+  | "toBeDisabled"
+  | "toBeChecked"
+  | "toHaveAttribute"
+  | "toHaveCount";
 
 export interface StepResult {
   stepId: number;
-  status: 'passed' | 'failed' | 'pending';
+  status: "passed" | "failed" | "pending";
   durationMs: number;
   error?: string;
 }
@@ -97,9 +117,15 @@ export interface DebugConsoleEntry {
 export interface DebugState {
   sessionId: string;
   testId: string;
-  status: 'initializing' | 'paused' | 'stepping' | 'running' | 'completed' | 'error';
+  status:
+    | "initializing"
+    | "paused"
+    | "stepping"
+    | "running"
+    | "completed"
+    | "error";
   currentStepIndex: number;
-  steps: import('@/lib/playwright/debug-parser').DebugStep[];
+  steps: import("@/lib/playwright/debug-parser").DebugStep[];
   stepResults: StepResult[];
   code: string;
   error?: string;
@@ -112,14 +138,14 @@ export interface DebugState {
 }
 
 export type DebugCommand =
-  | { type: 'step_forward' }
-  | { type: 'step_back' }
-  | { type: 'run_to_end' }
-  | { type: 'run_to_step'; stepIndex: number }
-  | { type: 'update_code'; code: string }
-  | { type: 'start_recording' }
-  | { type: 'stop_recording' }
-  | { type: 'stop' }
-  | { type: '_execution_complete' };
+  | { type: "step_forward" }
+  | { type: "step_back" }
+  | { type: "run_to_end" }
+  | { type: "run_to_step"; stepIndex: number }
+  | { type: "update_code"; code: string }
+  | { type: "start_recording" }
+  | { type: "stop_recording" }
+  | { type: "stop" }
+  | { type: "_execution_complete" };
 
-export { stripTypeAnnotations } from '@lastest/shared';
+export { stripTypeAnnotations } from "@lastest/shared";

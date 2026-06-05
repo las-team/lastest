@@ -6,13 +6,13 @@
  * `playwright-test` MCP server (npx playwright run-test-mcp-server).
  */
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { generateWithAI } from '@/lib/ai';
-import { extractCodeFromResponse } from '@/lib/ai/prompts';
-import type { TestGenerationContext } from '@/lib/ai/types';
-import { runValidationWithRetry } from '@/lib/ai/validation-retry';
-import { getAIConfig, buildSeedFixture } from './agent-context';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { generateWithAI } from "@/lib/ai";
+import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import type { TestGenerationContext } from "@/lib/ai/types";
+import { runValidationWithRetry } from "@/lib/ai/validation-retry";
+import { getAIConfig, buildSeedFixture } from "./agent-context";
 
 // ---------------------------------------------------------------------------
 // Generator system prompt (derived from Playwright's generator agent definition)
@@ -74,8 +74,11 @@ CRITICAL RULES:
 // ---------------------------------------------------------------------------
 
 // Re-export pure parsing/grouping functions from shared module (usable in client components)
-import { parseScenariosFromPlan, groupScenariosForGeneration } from './scenario-grouping';
-import type { ParsedScenario, ScenarioGroup } from './scenario-grouping';
+import {
+  parseScenariosFromPlan,
+  groupScenariosForGeneration,
+} from "./scenario-grouping";
+import type { ParsedScenario, ScenarioGroup } from "./scenario-grouping";
 export { parseScenariosFromPlan, groupScenariosForGeneration };
 export type { ParsedScenario, ScenarioGroup };
 
@@ -102,13 +105,13 @@ export async function agentCreateTest(
     const config = getAIConfig(settings);
     const seed = await buildSeedFixture(repositoryId);
 
-    let prompt = '';
+    let prompt = "";
 
     if (context.scenarioGroup) {
       const g = context.scenarioGroup;
       prompt = `Generate a Playwright test that covers ${g.scenarioCount} scenarios in one multi-step test.\n`;
       prompt += `After verifying each scenario, take a screenshot checkpoint.\n\n`;
-      prompt += g.combinedSteps + '\n\n';
+      prompt += g.combinedSteps + "\n\n";
       prompt += `Create ONE test function that walks through all ${g.scenarioCount} scenarios in sequence.\n`;
       prompt += `Group interactions on the same page together for efficiency.\n`;
     } else if (context.functionalAreaId) {
@@ -128,9 +131,12 @@ export async function agentCreateTest(
         parts.push(`Spec Description: ${context.scanContext.specDescription}`);
       }
       if (context.scanContext?.testSuggestions?.length) {
-        parts.push(`Test Suggestions:\n${context.scanContext.testSuggestions.map(s => `- ${s}`).join('\n')}`);
+        parts.push(
+          `Test Suggestions:\n${context.scanContext.testSuggestions.map((s) => `- ${s}`).join("\n")}`,
+        );
       }
-      prompt = parts.join('\n') || 'Generate a comprehensive test for this page.';
+      prompt =
+        parts.join("\n") || "Generate a comprehensive test for this page.";
     }
 
     prompt += `\n\nTarget base URL: ${seed.baseUrl}`;
@@ -144,56 +150,85 @@ export async function agentCreateTest(
     // For claude-agent-sdk: configure MCP servers directly on config (native MCP support).
     // For other providers: pass useMCP + mcpConfig to let generateWithAI use the MCP bridge.
     const mcpArgs = options?.cdpEndpoint
-      ? ['@playwright/mcp@latest', '--cdp-endpoint', options.cdpEndpoint, '--headless']
-      : ['@playwright/mcp@latest', '--headless'];
+      ? [
+          "@playwright/mcp@latest",
+          "--cdp-endpoint",
+          options.cdpEndpoint,
+          "--headless",
+        ]
+      : ["@playwright/mcp@latest", "--headless"];
 
     if (options?.cdpEndpoint) {
-      console.log(`[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
+      console.log(
+        `[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
+      );
     }
 
-    if (config.provider === 'claude-agent-sdk') {
+    if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;
-      config.agentSdkMcpServers = { 'playwright': { command: 'npx', args: mcpArgs } };
-      config.agentSdkAllowedTools = ['mcp__playwright__*'];
-      config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
+      config.agentSdkMcpServers = {
+        playwright: { command: "npx", args: mcpArgs },
+      };
+      config.agentSdkAllowedTools = ["mcp__playwright__*"];
+      config.agentSdkDisallowedTools = [
+        "Bash",
+        "Write",
+        "Edit",
+        "NotebookEdit",
+      ];
     }
 
-    const useMCP = config.provider !== 'claude-agent-sdk';
+    const useMCP = config.provider !== "claude-agent-sdk";
 
     const callLLM = async (userPrompt: string): Promise<string> => {
-      const response = await generateWithAI(config, userPrompt, GENERATOR_SYSTEM_PROMPT, {
-        repositoryId,
-        actionType: 'agent_generate',
-        signal: options?.signal,
-        useMCP,
-        ...(useMCP && {
-          mcpConfig: {
-            servers: { 'playwright': { command: 'npx', args: mcpArgs } },
-            cdpEndpoint: options?.cdpEndpoint,
-          },
-        }),
-      });
-      return extractCodeFromResponse(response) ?? '';
+      const response = await generateWithAI(
+        config,
+        userPrompt,
+        GENERATOR_SYSTEM_PROMPT,
+        {
+          repositoryId,
+          actionType: "agent_generate",
+          signal: options?.signal,
+          useMCP,
+          ...(useMCP && {
+            mcpConfig: {
+              servers: { playwright: { command: "npx", args: mcpArgs } },
+              cdpEndpoint: options?.cdpEndpoint,
+            },
+          }),
+        },
+      );
+      return extractCodeFromResponse(response) ?? "";
     };
 
     const initial = await callLLM(prompt);
     if (!initial) {
-      return { success: false, error: 'Generator agent produced no test code' };
+      return { success: false, error: "Generator agent produced no test code" };
     }
 
-    const validated = await runValidationWithRetry(initial, seed.baseUrl, async (feedback, attempt) => {
-      console.log(`[GeneratorAgent] Validation failed, retry ${attempt}/2 with feedback`);
-      const retryPrompt = `${prompt}\n\n---\n\nPrevious attempt failed validation. ${feedback}\n\nRegenerate the test code addressing the validation errors. Output ONLY the corrected code block.`;
-      return callLLM(retryPrompt);
-    });
+    const validated = await runValidationWithRetry(
+      initial,
+      seed.baseUrl,
+      async (feedback, attempt) => {
+        console.log(
+          `[GeneratorAgent] Validation failed, retry ${attempt}/2 with feedback`,
+        );
+        const retryPrompt = `${prompt}\n\n---\n\nPrevious attempt failed validation. ${feedback}\n\nRegenerate the test code addressing the validation errors. Output ONLY the corrected code block.`;
+        return callLLM(retryPrompt);
+      },
+    );
 
     if (!validated.valid) {
-      return { success: false, error: `Validation failed after retries: ${validated.feedback}` };
+      return {
+        success: false,
+        error: `Validation failed after retries: ${validated.feedback}`,
+      };
     }
 
     return { success: true, code: validated.code };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Generator agent failed';
+    const message =
+      error instanceof Error ? error.message : "Generator agent failed";
     return { success: false, error: message };
   }
 }

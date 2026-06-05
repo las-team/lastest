@@ -1,9 +1,14 @@
-import type { Page } from 'playwright';
-import type { SetupContext, SetupResult, ResolvedSetup, SetupScript } from './types';
-import type { Test, Build } from '@/lib/db/schema';
-import { runPlaywrightSetup, runTestAsSetup } from './script-runner';
-import { runApiSetup } from './api-seeder';
-import * as queries from '@/lib/db/queries';
+import type { Page } from "playwright";
+import type {
+  SetupContext,
+  SetupResult,
+  ResolvedSetup,
+  SetupScript,
+} from "./types";
+import type { Test, Build } from "@/lib/db/schema";
+import { runPlaywrightSetup, runTestAsSetup } from "./script-runner";
+import { runApiSetup } from "./api-seeder";
+import * as queries from "@/lib/db/queries";
 
 /**
  * SetupOrchestrator coordinates setup execution at all levels:
@@ -22,7 +27,7 @@ export class SetupOrchestrator {
     setupTestId: string | null | undefined,
     setupScriptId: string | null | undefined,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const startTime = Date.now();
 
@@ -57,12 +62,14 @@ export class SetupOrchestrator {
   async runTestAsSetup(
     testId: string,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const test = await queries.getTest(testId);
     if (!test) {
       // Log warning and skip instead of failing - allows graceful handling of orphaned references
-      console.warn(`Setup test not found: ${testId} - skipping setup (orphaned reference)`);
+      console.warn(
+        `Setup test not found: ${testId} - skipping setup (orphaned reference)`,
+      );
       return {
         success: true,
         duration: 0,
@@ -79,12 +86,14 @@ export class SetupOrchestrator {
   async runScript(
     scriptId: string,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const script = await queries.getSetupScript(scriptId);
     if (!script) {
       // Log warning and skip instead of failing - allows graceful handling of orphaned references
-      console.warn(`Setup script not found: ${scriptId} - skipping setup (orphaned reference)`);
+      console.warn(
+        `Setup script not found: ${scriptId} - skipping setup (orphaned reference)`,
+      );
       return {
         success: true,
         duration: 0,
@@ -92,23 +101,23 @@ export class SetupOrchestrator {
       };
     }
 
-    if (script.type === 'playwright') {
+    if (script.type === "playwright") {
       return runPlaywrightSetup(page, script as SetupScript, context);
-    } else if (script.type === 'api') {
+    } else if (script.type === "api") {
       // For API scripts, we need a config
-      const configs = await queries.getSetupConfigs(script.repositoryId || '');
+      const configs = await queries.getSetupConfigs(script.repositoryId || "");
       const config = configs[0]; // Use first available config
       if (!config) {
         return {
           success: false,
-          error: 'No API config found for API setup script',
+          error: "No API config found for API setup script",
           duration: 0,
         };
       }
       // Cast config to SetupConfig type (authType is stored as string in DB)
       const setupConfig = {
         ...config,
-        authType: config.authType as 'none' | 'bearer' | 'basic' | 'custom',
+        authType: config.authType as "none" | "bearer" | "basic" | "custom",
       };
       return runApiSetup(setupConfig, script as SetupScript, context);
     }
@@ -127,13 +136,13 @@ export class SetupOrchestrator {
   async runBuildSetup(
     build: Build,
     page: Page,
-    baseContext: SetupContext
+    baseContext: SetupContext,
   ): Promise<SetupResult> {
     const result = await this.resolveAndRunSetup(
       build.buildSetupTestId,
       build.buildSetupScriptId,
       page,
-      baseContext
+      baseContext,
     );
 
     return result;
@@ -154,13 +163,15 @@ export class SetupOrchestrator {
   async runTestSetup(
     test: Test,
     page: Page,
-    buildContext: SetupContext
+    buildContext: SetupContext,
   ): Promise<SetupResult> {
     const startTime = Date.now();
 
     // Check for multi-step default setup
     if (test.repositoryId) {
-      const defaultSteps = await queries.getDefaultSetupSteps(test.repositoryId);
+      const defaultSteps = await queries.getDefaultSetupSteps(
+        test.repositoryId,
+      );
       const overrides = test.setupOverrides;
       const hasExtraSteps = (overrides?.extraSteps?.length ?? 0) > 0;
 
@@ -168,11 +179,23 @@ export class SetupOrchestrator {
         const skippedIds = new Set(overrides?.skippedDefaultStepIds ?? []);
 
         // Filter out skipped defaults
-        const activeDefaults = defaultSteps.filter((s) => !skippedIds.has(s.id));
+        const activeDefaults = defaultSteps.filter(
+          (s) => !skippedIds.has(s.id),
+        );
 
         // Build step list: active defaults + extras
-        const stepsToRun: Array<{ stepType: string; testId: string | null; scriptId: string | null; storageStateId: string | null }> = [
-          ...activeDefaults.map((s) => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId, storageStateId: s.storageStateId })),
+        const stepsToRun: Array<{
+          stepType: string;
+          testId: string | null;
+          scriptId: string | null;
+          storageStateId: string | null;
+        }> = [
+          ...activeDefaults.map((s) => ({
+            stepType: s.stepType,
+            testId: s.testId,
+            scriptId: s.scriptId,
+            storageStateId: s.storageStateId,
+          })),
         ];
 
         if (overrides?.extraSteps) {
@@ -190,14 +213,21 @@ export class SetupOrchestrator {
         let currentContext = buildContext;
         for (const step of stepsToRun) {
           // Handle storage_state steps: load saved auth state directly
-          if (step.stepType === 'storage_state' && step.storageStateId) {
+          if (step.stepType === "storage_state" && step.storageStateId) {
             try {
-              const storageState = await queries.getStorageState(step.storageStateId);
+              const storageState = await queries.getStorageState(
+                step.storageStateId,
+              );
               if (storageState) {
-                currentContext = { ...currentContext, storageState: storageState.storageStateJson };
+                currentContext = {
+                  ...currentContext,
+                  storageState: storageState.storageStateJson,
+                };
                 // Inject cookies into current browser context
                 const parsed = JSON.parse(storageState.storageStateJson) as {
-                  cookies?: Parameters<ReturnType<typeof page.context>['addCookies']>[0];
+                  cookies?: Parameters<
+                    ReturnType<typeof page.context>["addCookies"]
+                  >[0];
                   origins?: Array<{
                     origin: string;
                     localStorage?: Array<{ name: string; value: string }>;
@@ -219,12 +249,16 @@ export class SetupOrchestrator {
                     const ss = origin.sessionStorage ?? [];
                     if (!ls.length && !ss.length) continue;
                     try {
-                      await page.goto(origin.origin, { waitUntil: 'domcontentloaded' });
+                      await page.goto(origin.origin, {
+                        waitUntil: "domcontentloaded",
+                      });
                     } catch (gotoErr) {
                       console.warn(
                         `[setup] Failed to navigate to ${origin.origin} for storage injection: ${
-                          gotoErr instanceof Error ? gotoErr.message : String(gotoErr)
-                        }`
+                          gotoErr instanceof Error
+                            ? gotoErr.message
+                            : String(gotoErr)
+                        }`,
                       );
                       continue;
                     }
@@ -247,10 +281,12 @@ export class SetupOrchestrator {
                   }
                 }
                 console.log(
-                  `[setup] Loaded storage state "${storageState.name}": ${parsed.cookies?.length ?? 0} cookies, ${lsCount} localStorage, ${ssCount} sessionStorage across ${parsed.origins?.length ?? 0} origin(s)`
+                  `[setup] Loaded storage state "${storageState.name}": ${parsed.cookies?.length ?? 0} cookies, ${lsCount} localStorage, ${ssCount} sessionStorage across ${parsed.origins?.length ?? 0} origin(s)`,
                 );
               } else {
-                console.warn(`[setup] Storage state not found: ${step.storageStateId} - skipping`);
+                console.warn(
+                  `[setup] Storage state not found: ${step.storageStateId} - skipping`,
+                );
               }
             } catch (error) {
               return {
@@ -262,22 +298,35 @@ export class SetupOrchestrator {
             continue;
           }
 
-          const stepTestId = step.stepType === 'test' ? step.testId : null;
-          const stepScriptId = step.stepType === 'script' ? step.scriptId : null;
+          const stepTestId = step.stepType === "test" ? step.testId : null;
+          const stepScriptId =
+            step.stepType === "script" ? step.scriptId : null;
 
           // Prevent self-referential setup
           if (stepTestId === test.id) continue;
 
-          const result = await this.resolveAndRunSetup(stepTestId, stepScriptId, page, currentContext);
+          const result = await this.resolveAndRunSetup(
+            stepTestId,
+            stepScriptId,
+            page,
+            currentContext,
+          );
           if (!result.success) {
             return { ...result, duration: Date.now() - startTime };
           }
           if (result.variables) {
-            currentContext = this.extendContext(currentContext, result.variables);
+            currentContext = this.extendContext(
+              currentContext,
+              result.variables,
+            );
           }
         }
 
-        return { success: true, duration: Date.now() - startTime, variables: currentContext.variables };
+        return {
+          success: true,
+          duration: Date.now() - startTime,
+          variables: currentContext.variables,
+        };
       }
     }
 
@@ -299,7 +348,12 @@ export class SetupOrchestrator {
       return { success: true, duration: 0, variables: {} };
     }
 
-    return this.resolveAndRunSetup(setupTestId, setupScriptId, page, buildContext);
+    return this.resolveAndRunSetup(
+      setupTestId,
+      setupScriptId,
+      page,
+      buildContext,
+    );
   }
 
   /**
@@ -321,7 +375,7 @@ export class SetupOrchestrator {
    */
   extendContext(
     baseContext: SetupContext,
-    newVariables: Record<string, unknown>
+    newVariables: Record<string, unknown>,
   ): SetupContext {
     return {
       ...baseContext,
@@ -356,7 +410,9 @@ export async function testNeedsSetup(test: Test): Promise<boolean> {
   if (test.repositoryId) {
     const defaultSteps = await queries.getDefaultSetupSteps(test.repositoryId);
     if (defaultSteps.length > 0) {
-      const skippedIds = new Set(test.setupOverrides?.skippedDefaultStepIds ?? []);
+      const skippedIds = new Set(
+        test.setupOverrides?.skippedDefaultStepIds ?? [],
+      );
       // If not all defaults are skipped, setup is needed
       const hasActiveDefaults = defaultSteps.some((s) => !skippedIds.has(s.id));
       if (hasActiveDefaults) return true;
@@ -390,13 +446,13 @@ export async function testNeedsSetup(test: Test): Promise<boolean> {
  */
 export async function getResolvedSetup(
   setupTestId: string | null | undefined,
-  setupScriptId: string | null | undefined
+  setupScriptId: string | null | undefined,
 ): Promise<ResolvedSetup> {
   if (setupTestId) {
     const test = await queries.getTest(setupTestId);
     if (test) {
       return {
-        type: 'test',
+        type: "test",
         test: {
           id: test.id,
           name: test.name,
@@ -411,11 +467,11 @@ export async function getResolvedSetup(
     const script = await queries.getSetupScript(setupScriptId);
     if (script) {
       return {
-        type: 'script',
+        type: "script",
         script: script as SetupScript,
       };
     }
   }
 
-  return { type: 'none' };
+  return { type: "none" };
 }

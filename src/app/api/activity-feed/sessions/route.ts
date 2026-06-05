@@ -4,25 +4,28 @@
  * GET /api/activity-feed/sessions — returns recent agent sessions (active first)
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
-import { db } from '@/lib/db';
-import { agentSessions, embeddedSessions } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
-import { sweepStuckAgentSessions } from '@/lib/db/queries/integrations';
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentSession } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { agentSessions, embeddedSessions } from "@/lib/db/schema";
+import { eq, desc } from "drizzle-orm";
+import { sweepStuckAgentSessions } from "@/lib/db/queries/integrations";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(_request: NextRequest) {
   const session = await getCurrentSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!session)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const teamId = session.team?.id;
-  if (!teamId) return NextResponse.json({ error: 'No team' }, { status: 403 });
+  if (!teamId) return NextResponse.json({ error: "No team" }, { status: 403 });
 
   // Sweep stuck sessions before listing — keeps the activity feed honest when
   // an agent process died without writing a terminal status.
-  await sweepStuckAgentSessions().catch(() => { /* sweep is best-effort */ });
+  await sweepStuckAgentSessions().catch(() => {
+    /* sweep is best-effort */
+  });
 
   // Get active/paused sessions first, then recent completed ones
   const sessions = await db
@@ -34,7 +37,7 @@ export async function GET(_request: NextRequest) {
 
   // Sort: active/paused first, then by recency
   const sorted = sessions.sort((a, b) => {
-    const activeStatuses = ['active', 'paused'];
+    const activeStatuses = ["active", "paused"];
     const aActive = activeStatuses.includes(a.status);
     const bActive = activeStatuses.includes(b.status);
     if (aActive && !bActive) return -1;
@@ -46,7 +49,7 @@ export async function GET(_request: NextRequest) {
   const [eb] = await db
     .select({ streamUrl: embeddedSessions.streamUrl })
     .from(embeddedSessions)
-    .where(eq(embeddedSessions.status, 'ready'))
+    .where(eq(embeddedSessions.status, "ready"))
     .limit(1);
 
   return NextResponse.json({

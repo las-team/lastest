@@ -13,11 +13,17 @@ Both functions share the same five regex passes (verified by
 ```ts
 function stripTypeAnnotations(code: string): string {
   let result = code;
-  result = result.replace(/\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g, '$1 $2$3');
-  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ')');
-  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, '$1');
-  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, '');
+  result = result.replace(
+    /\b(const|let|var)\s+(\w+)\s*:\s*[^=\n;]+(\s*=)/g,
+    "$1 $2$3",
+  );
+  result = result.replace(
+    /\b(const|let|var)\s+(\{[^}]+\}|\[[^\]]+\])\s*:\s*[^=\n;]+(\s*=)/g,
+    "$1 $2$3",
+  );
+  result = result.replace(/\)\s+as\s+\w[\w<>\[\],\s|]*/g, ")");
+  result = result.replace(/(\w)\s+as\s+\w[\w<>\[\],\s|]*/g, "$1");
+  result = result.replace(/<\w[\w<>\[\],\s|]*>\s*(?=\(|[\w])/g, "");
   return result;
 }
 ```
@@ -31,26 +37,26 @@ which is the symptom of a body that didn't compile cleanly into an
 
 **Semantic note on `as HTMLElement`.** TS cast expressions (`x as T`, `<T>x`)
 and non-null assertions (`x!`) are **purely compile-time** — the TS compiler
-(and all popular TS-strippers) emit *nothing* at runtime for them. Allowing
+(and all popular TS-strippers) emit _nothing_ at runtime for them. Allowing
 them in test code has zero safety or correctness impact — the only question
 is whether the transpilation step produces valid JS.
 
 ## Observed / potential failure modes of the current regex
 
-| Pattern | Current behavior | Risk |
-| --- | --- | --- |
-| `(x as HTMLElement).foo` | regex on line 4 matches `x as HTMLElement`, → `(x).foo` | ✅ handled in isolation |
-| `x as unknown as HTMLElement` | `\s` is inside the `[\w<>\[\],\s\|]` char class, so the greedy type body can eat `unknown as HTMLElement` as one "type" → `x` | ⚠️ works, but by accident (multi-step casts) |
-| `x!` (non-null assertion) | not handled | ❌ survives → runtime `SyntaxError` |
-| `satisfies Foo` | not handled | ❌ survives → `SyntaxError` |
-| Type-only `import type { X }` | not handled | ❌ survives → `ReferenceError`/`SyntaxError` when body has stray `type` keyword |
-| Generic call `fn<T>(x)` | line 5 removes `<T>` only when followed by `(` or `\w`; comma-separated generics work, but multi-arg generics with `extends` clauses don't: `<T extends Foo, U>` contains ` extends ` which is in the class (letters) but only if surrounded by allowed chars | ⚠️ brittle |
-| Type-annotated parameter in a nested arrow: `(i: HTMLElement) => i.click()` | not handled (parameter annotations) | ❌ survives → `SyntaxError` |
-| Type-annotated return: `(): Promise<void> => {}` | partial via line 5 if `<void>` happens to match, otherwise fails | ❌ brittle |
-| `as const` | matches `x as const` → `x` | ✅ handled |
-| `as typeof foo` | `typeof` starts with `t`, a word char → treated as type name → replaced | ✅ handled |
-| Comment containing `as HTMLElement` (e.g., `// cast as HTMLElement for foo`) | regex runs inside comments too | ⚠️ may mangle preceding word in comments |
-| String literal `'x as HTMLElement'` | regex runs inside strings too | ⚠️ may mangle string contents |
+| Pattern                                                                      | Current behavior                                                                                                                                                                                                                                            | Risk                                                                            |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `(x as HTMLElement).foo`                                                     | regex on line 4 matches `x as HTMLElement`, → `(x).foo`                                                                                                                                                                                                     | ✅ handled in isolation                                                         |
+| `x as unknown as HTMLElement`                                                | `\s` is inside the `[\w<>\[\],\s\|]` char class, so the greedy type body can eat `unknown as HTMLElement` as one "type" → `x`                                                                                                                               | ⚠️ works, but by accident (multi-step casts)                                    |
+| `x!` (non-null assertion)                                                    | not handled                                                                                                                                                                                                                                                 | ❌ survives → runtime `SyntaxError`                                             |
+| `satisfies Foo`                                                              | not handled                                                                                                                                                                                                                                                 | ❌ survives → `SyntaxError`                                                     |
+| Type-only `import type { X }`                                                | not handled                                                                                                                                                                                                                                                 | ❌ survives → `ReferenceError`/`SyntaxError` when body has stray `type` keyword |
+| Generic call `fn<T>(x)`                                                      | line 5 removes `<T>` only when followed by `(` or `\w`; comma-separated generics work, but multi-arg generics with `extends` clauses don't: `<T extends Foo, U>` contains `extends` which is in the class (letters) but only if surrounded by allowed chars | ⚠️ brittle                                                                      |
+| Type-annotated parameter in a nested arrow: `(i: HTMLElement) => i.click()`  | not handled (parameter annotations)                                                                                                                                                                                                                         | ❌ survives → `SyntaxError`                                                     |
+| Type-annotated return: `(): Promise<void> => {}`                             | partial via line 5 if `<void>` happens to match, otherwise fails                                                                                                                                                                                            | ❌ brittle                                                                      |
+| `as const`                                                                   | matches `x as const` → `x`                                                                                                                                                                                                                                  | ✅ handled                                                                      |
+| `as typeof foo`                                                              | `typeof` starts with `t`, a word char → treated as type name → replaced                                                                                                                                                                                     | ✅ handled                                                                      |
+| Comment containing `as HTMLElement` (e.g., `// cast as HTMLElement for foo`) | regex runs inside comments too                                                                                                                                                                                                                              | ⚠️ may mangle preceding word in comments                                        |
+| String literal `'x as HTMLElement'`                                          | regex runs inside strings too                                                                                                                                                                                                                               | ⚠️ may mangle string contents                                                   |
 
 The root cause is that regex-based stripping cannot distinguish code from
 strings/comments and cannot represent TS grammar. It was fine when the only
@@ -76,8 +82,11 @@ transform that:
 Use `sucrase` or `esbuild`-transform in-process:
 
 ```ts
-import { transform } from 'sucrase';
-const { code } = transform(body, { transforms: ['typescript'], disableESTransforms: true });
+import { transform } from "sucrase";
+const { code } = transform(body, {
+  transforms: ["typescript"],
+  disableESTransforms: true,
+});
 ```
 
 `sucrase` is a tiny (~500KB) TypeScript-to-JavaScript transpiler already used
@@ -124,7 +133,7 @@ Keep the hand-rolled stripper but expand coverage and add safeguards:
 
 ## Recommendation
 
-Ship Option A. Rationale: it is *strictly* more correct, smaller code
+Ship Option A. Rationale: it is _strictly_ more correct, smaller code
 surface, and removes an ongoing maintenance tax. The bundle-size increase is
 lost in the noise of bundling Playwright itself.
 
@@ -136,7 +145,7 @@ lost in the noise of bundling Playwright itself.
    function stripTypeAnnotations(code: string): string {
      try {
        const { code: js } = transform(code, {
-         transforms: ['typescript'],
+         transforms: ["typescript"],
          disableESTransforms: true,
          preserveDynamicImport: true,
          production: true,

@@ -89,8 +89,8 @@ Settings → Test Migration card:
 
 ## Key Files
 
-| Path | Role |
-|------|------|
-| `src/app/api/v1/[...slug]/route.ts` | Export (GET) and import (POST) handlers |
-| `src/server/actions/test-migration.ts` | `fetchRemoteRepositories()`, `migrateTests()` server actions |
-| `src/components/settings/test-migration-card.tsx` | Migration UI card |
+| Path                                              | Role                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| `src/app/api/v1/[...slug]/route.ts`               | Export (GET) and import (POST) handlers                      |
+| `src/server/actions/test-migration.ts`            | `fetchRemoteRepositories()`, `migrateTests()` server actions |
+| `src/components/settings/test-migration-card.tsx` | Migration UI card                                            |

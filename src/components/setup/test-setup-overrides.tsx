@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   closestCenter,
@@ -10,27 +10,34 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { FlaskConical, FileCode, GripVertical, X, RotateCcw, Info } from 'lucide-react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+} from "@dnd-kit/sortable";
+import {
+  FlaskConical,
+  FileCode,
+  GripVertical,
+  X,
+  RotateCcw,
+  Info,
+} from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   skipDefaultStepForTest,
   unskipDefaultStepForTest,
@@ -38,13 +45,17 @@ import {
   removeExtraSetupStep,
   reorderExtraSetupSteps,
   saveTestSetupOverrides,
-} from '@/server/actions/setup-steps';
-import { toast } from 'sonner';
-import type { Test, SetupScript, TestSetupOverrides as TestSetupOverridesType } from '@/lib/db/schema';
+} from "@/server/actions/setup-steps";
+import { toast } from "sonner";
+import type {
+  Test,
+  SetupScript,
+  TestSetupOverrides as TestSetupOverridesType,
+} from "@/lib/db/schema";
 
 interface DefaultStep {
   id: string;
-  stepType: 'test' | 'script';
+  stepType: "test" | "script";
   testId: string | null;
   scriptId: string | null;
   orderIndex: number;
@@ -55,7 +66,7 @@ interface DefaultStep {
 interface ExtraStepDisplay {
   id: string;
   index: number;
-  stepType: 'test' | 'script' | 'storage_state';
+  stepType: "test" | "script" | "storage_state";
   name: string;
 }
 
@@ -82,17 +93,19 @@ function SortableExtraStep({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const Icon = item.stepType === 'test' ? FlaskConical : FileCode;
-  const iconColor = item.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
-  const bgColor = item.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
+  const Icon = item.stepType === "test" ? FlaskConical : FileCode;
+  const iconColor =
+    item.stepType === "test" ? "text-blue-500" : "text-green-500";
+  const bgColor =
+    item.stepType === "test" ? "bg-blue-500/10" : "bg-green-500/10";
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-3 p-3 bg-background border rounded-lg group',
-        isDragging && 'shadow-lg ring-2 ring-primary'
+        "flex items-center gap-3 p-3 bg-background border rounded-lg group",
+        isDragging && "shadow-lg ring-2 ring-primary",
       )}
     >
       <button
@@ -103,15 +116,18 @@ function SortableExtraStep({
         <GripVertical className="w-4 h-4" />
       </button>
 
-      <div className={cn('flex items-center justify-center w-7 h-7 rounded', bgColor)}>
-        <Icon className={cn('w-4 h-4', iconColor)} />
+      <div
+        className={cn(
+          "flex items-center justify-center w-7 h-7 rounded",
+          bgColor,
+        )}
+      >
+        <Icon className={cn("w-4 h-4", iconColor)} />
       </div>
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{item.name}</p>
-        <p className="text-xs text-muted-foreground">
-          Extra {item.stepType}
-        </p>
+        <p className="text-xs text-muted-foreground">Extra {item.stepType}</p>
       </div>
 
       <Button
@@ -153,7 +169,8 @@ export function TestSetupOverrides({
   };
   const [mounted, setMounted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [localOverrides, setLocalOverrides] = useState<TestSetupOverridesType | null>(setupOverrides);
+  const [localOverrides, setLocalOverrides] =
+    useState<TestSetupOverridesType | null>(setupOverrides);
 
   useEffect(() => {
     setLocalOverrides(setupOverrides);
@@ -161,26 +178,28 @@ export function TestSetupOverrides({
 
   // Local state for skipped defaults
   const skippedIds = new Set(localOverrides?.skippedDefaultStepIds ?? []);
-  const hasOverrides = localOverrides !== null && (
-    (localOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
-    (localOverrides.extraSteps?.length ?? 0) > 0
-  );
+  const hasOverrides =
+    localOverrides !== null &&
+    ((localOverrides.skippedDefaultStepIds?.length ?? 0) > 0 ||
+      (localOverrides.extraSteps?.length ?? 0) > 0);
 
   // Build extra steps display list
-  const extraSteps: ExtraStepDisplay[] = (localOverrides?.extraSteps ?? []).map((step, i) => {
-    let name = 'Unknown';
-    if (step.stepType === 'test' && step.testId) {
-      const t = availableTests.find((t) => t.id === step.testId);
-      name = t?.name || 'Deleted test';
-    } else if (step.stepType === 'script' && step.scriptId) {
-      const s = availableScripts.find((s) => s.id === step.scriptId);
-      name = s?.name || 'Deleted script';
-    }
-    return { id: `extra-${i}`, index: i, stepType: step.stepType, name };
-  });
+  const extraSteps: ExtraStepDisplay[] = (localOverrides?.extraSteps ?? []).map(
+    (step, i) => {
+      let name = "Unknown";
+      if (step.stepType === "test" && step.testId) {
+        const t = availableTests.find((t) => t.id === step.testId);
+        name = t?.name || "Deleted test";
+      } else if (step.stepType === "script" && step.scriptId) {
+        const s = availableScripts.find((s) => s.id === step.scriptId);
+        name = s?.name || "Deleted script";
+      }
+      return { id: `extra-${i}`, index: i, stepType: step.stepType, name };
+    },
+  );
 
   // Add step state
-  const [addStepType, setAddStepType] = useState<'test' | 'script'>('test');
+  const [addStepType, setAddStepType] = useState<"test" | "script">("test");
 
   useEffect(() => {
     setMounted(true);
@@ -190,23 +209,32 @@ export function TestSetupOverrides({
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
-  const handleToggleSkip = async (stepId: string, isCurrentlySkipped: boolean) => {
+  const handleToggleSkip = async (
+    stepId: string,
+    isCurrentlySkipped: boolean,
+  ) => {
     const base: TestSetupOverridesType = localOverrides
       ? {
-          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          skippedDefaultStepIds: [
+            ...(localOverrides.skippedDefaultStepIds ?? []),
+          ],
           extraSteps: [...(localOverrides.extraSteps ?? [])],
         }
       : { skippedDefaultStepIds: [], extraSteps: [] };
     if (isCurrentlySkipped) {
-      base.skippedDefaultStepIds = base.skippedDefaultStepIds.filter((id) => id !== stepId);
+      base.skippedDefaultStepIds = base.skippedDefaultStepIds.filter(
+        (id) => id !== stepId,
+      );
     } else if (!base.skippedDefaultStepIds.includes(stepId)) {
       base.skippedDefaultStepIds.push(stepId);
     }
     const next: TestSetupOverridesType | null =
-      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0 ? null : base;
+      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0
+        ? null
+        : base;
     setLocalOverrides(next);
 
     setIsSaving(true);
@@ -219,23 +247,28 @@ export function TestSetupOverrides({
       await refresh();
     } catch {
       setLocalOverrides(localOverrides);
-      toast.error('Failed to update setup override');
+      toast.error("Failed to update setup override");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddExtra = async (stepType: 'test' | 'script', itemId: string) => {
+  const handleAddExtra = async (
+    stepType: "test" | "script",
+    itemId: string,
+  ) => {
     const base: TestSetupOverridesType = localOverrides
       ? {
-          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          skippedDefaultStepIds: [
+            ...(localOverrides.skippedDefaultStepIds ?? []),
+          ],
           extraSteps: [...(localOverrides.extraSteps ?? [])],
         }
       : { skippedDefaultStepIds: [], extraSteps: [] };
     base.extraSteps.push({
       stepType,
-      testId: stepType === 'test' ? itemId : null,
-      scriptId: stepType === 'script' ? itemId : null,
+      testId: stepType === "test" ? itemId : null,
+      scriptId: stepType === "script" ? itemId : null,
       storageStateId: null,
     });
     setLocalOverrides(base);
@@ -244,10 +277,10 @@ export function TestSetupOverrides({
     try {
       await addExtraSetupStep(testId, stepType, itemId);
       await refresh();
-      toast.success('Extra step added');
+      toast.success("Extra step added");
     } catch {
       setLocalOverrides(localOverrides);
-      toast.error('Failed to add extra step');
+      toast.error("Failed to add extra step");
     } finally {
       setIsSaving(false);
     }
@@ -256,7 +289,9 @@ export function TestSetupOverrides({
   const handleRemoveExtra = async (index: number) => {
     const base: TestSetupOverridesType = localOverrides
       ? {
-          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          skippedDefaultStepIds: [
+            ...(localOverrides.skippedDefaultStepIds ?? []),
+          ],
           extraSteps: [...(localOverrides.extraSteps ?? [])],
         }
       : { skippedDefaultStepIds: [], extraSteps: [] };
@@ -264,7 +299,9 @@ export function TestSetupOverrides({
       base.extraSteps.splice(index, 1);
     }
     const next: TestSetupOverridesType | null =
-      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0 ? null : base;
+      base.skippedDefaultStepIds.length === 0 && base.extraSteps.length === 0
+        ? null
+        : base;
     setLocalOverrides(next);
 
     setIsSaving(true);
@@ -273,7 +310,7 @@ export function TestSetupOverrides({
       await refresh();
     } catch {
       setLocalOverrides(localOverrides);
-      toast.error('Failed to remove extra step');
+      toast.error("Failed to remove extra step");
     } finally {
       setIsSaving(false);
     }
@@ -288,12 +325,14 @@ export function TestSetupOverrides({
     const reordered = arrayMove(
       extraSteps.map((_, i) => i),
       oldIndex,
-      newIndex
+      newIndex,
     );
 
     const base: TestSetupOverridesType = localOverrides
       ? {
-          skippedDefaultStepIds: [...(localOverrides.skippedDefaultStepIds ?? [])],
+          skippedDefaultStepIds: [
+            ...(localOverrides.skippedDefaultStepIds ?? []),
+          ],
           extraSteps: reordered
             .map((i) => localOverrides.extraSteps?.[i])
             .filter((s): s is NonNullable<typeof s> => Boolean(s)),
@@ -307,7 +346,7 @@ export function TestSetupOverrides({
       await refresh();
     } catch {
       setLocalOverrides(localOverrides);
-      toast.error('Failed to reorder steps');
+      toast.error("Failed to reorder steps");
     } finally {
       setIsSaving(false);
     }
@@ -319,10 +358,10 @@ export function TestSetupOverrides({
     try {
       await saveTestSetupOverrides(testId, null);
       await refresh();
-      toast.success('Reset to defaults');
+      toast.success("Reset to defaults");
     } catch {
       setLocalOverrides(localOverrides);
-      toast.error('Failed to reset');
+      toast.error("Failed to reset");
     } finally {
       setIsSaving(false);
     }
@@ -331,17 +370,21 @@ export function TestSetupOverrides({
   // Items already in extra steps (to exclude from picker)
   const extraTestIds = new Set(
     (setupOverrides?.extraSteps ?? [])
-      .filter((s) => s.stepType === 'test' && s.testId)
-      .map((s) => s.testId!)
+      .filter((s) => s.stepType === "test" && s.testId)
+      .map((s) => s.testId!),
   );
   const extraScriptIds = new Set(
     (setupOverrides?.extraSteps ?? [])
-      .filter((s) => s.stepType === 'script' && s.scriptId)
-      .map((s) => s.scriptId!)
+      .filter((s) => s.stepType === "script" && s.scriptId)
+      .map((s) => s.scriptId!),
   );
 
-  const pickableTests = availableTests.filter((t) => t.id !== testId && !extraTestIds.has(t.id));
-  const pickableScripts = availableScripts.filter((s) => !extraScriptIds.has(s.id));
+  const pickableTests = availableTests.filter(
+    (t) => t.id !== testId && !extraTestIds.has(t.id),
+  );
+  const pickableScripts = availableScripts.filter(
+    (s) => !extraScriptIds.has(s.id),
+  );
 
   if (!mounted) {
     return <div className="p-4 text-muted-foreground">Loading...</div>;
@@ -356,11 +399,19 @@ export function TestSetupOverrides({
           {hasOverrides ? (
             <span>This test has custom setup overrides</span>
           ) : (
-            <span>Using defaults{defaultSetupSteps.length === 0 ? ' (none configured)' : ''}</span>
+            <span>
+              Using defaults
+              {defaultSetupSteps.length === 0 ? " (none configured)" : ""}
+            </span>
           )}
         </div>
         {hasOverrides && (
-          <Button variant="outline" size="sm" onClick={handleResetToDefaults} disabled={isSaving}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResetToDefaults}
+            disabled={isSaving}
+          >
             <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
             Reset to defaults
           </Button>
@@ -375,46 +426,62 @@ export function TestSetupOverrides({
         <CardContent>
           {defaultSetupSteps.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No default setup steps configured for this repository.
-              Configure them in the Environment settings.
+              No default setup steps configured for this repository. Configure
+              them in the Environment settings.
             </p>
           ) : (
             <div className="space-y-2">
               {defaultSetupSteps.map((step) => {
                 const isSkipped = skippedIds.has(step.id);
-                const Icon = step.stepType === 'test' ? FlaskConical : FileCode;
-                const iconColor = step.stepType === 'test' ? 'text-blue-500' : 'text-green-500';
-                const bgColor = step.stepType === 'test' ? 'bg-blue-500/10' : 'bg-green-500/10';
-                const name = step.testName || step.scriptName || 'Unknown';
+                const Icon = step.stepType === "test" ? FlaskConical : FileCode;
+                const iconColor =
+                  step.stepType === "test" ? "text-blue-500" : "text-green-500";
+                const bgColor =
+                  step.stepType === "test"
+                    ? "bg-blue-500/10"
+                    : "bg-green-500/10";
+                const name = step.testName || step.scriptName || "Unknown";
 
                 return (
                   <div
                     key={step.id}
                     className={cn(
-                      'flex items-center gap-3 p-3 border rounded-lg transition-opacity',
-                      isSkipped && 'opacity-50'
+                      "flex items-center gap-3 p-3 border rounded-lg transition-opacity",
+                      isSkipped && "opacity-50",
                     )}
                   >
-                    <div className={cn('flex items-center justify-center w-7 h-7 rounded', bgColor)}>
-                      <Icon className={cn('w-4 h-4', iconColor)} />
+                    <div
+                      className={cn(
+                        "flex items-center justify-center w-7 h-7 rounded",
+                        bgColor,
+                      )}
+                    >
+                      <Icon className={cn("w-4 h-4", iconColor)} />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className={cn('text-sm font-medium truncate', isSkipped && 'line-through')}>
+                      <p
+                        className={cn(
+                          "text-sm font-medium truncate",
+                          isSkipped && "line-through",
+                        )}
+                      >
                         {name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {step.stepType === 'test' ? 'Test' : 'Script'}
+                        {step.stepType === "test" ? "Test" : "Script"}
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {isSkipped ? 'Skipped' : 'Active'}
+                        {isSkipped ? "Skipped" : "Active"}
                       </span>
                       <Switch
                         checked={!isSkipped}
-                        onCheckedChange={() => handleToggleSkip(step.id, isSkipped)}
+                        onCheckedChange={() =>
+                          handleToggleSkip(step.id, isSkipped)
+                        }
                         disabled={isSaving}
                       />
                     </div>
@@ -461,7 +528,10 @@ export function TestSetupOverrides({
 
           {/* Add step picker */}
           <div className="flex gap-2 items-center pt-2 border-t">
-            <Select value={addStepType} onValueChange={(v) => setAddStepType(v as 'test' | 'script')}>
+            <Select
+              value={addStepType}
+              onValueChange={(v) => setAddStepType(v as "test" | "script")}
+            >
               <SelectTrigger className="w-[110px]">
                 <SelectValue />
               </SelectTrigger>
@@ -479,7 +549,7 @@ export function TestSetupOverrides({
                 <SelectValue placeholder="Select to add..." />
               </SelectTrigger>
               <SelectContent>
-                {addStepType === 'test' ? (
+                {addStepType === "test" ? (
                   pickableTests.length > 0 ? (
                     pickableTests.map((t) => (
                       <SelectItem key={t.id} value={t.id}>
@@ -490,28 +560,29 @@ export function TestSetupOverrides({
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem value="_none" disabled>No tests available</SelectItem>
+                    <SelectItem value="_none" disabled>
+                      No tests available
+                    </SelectItem>
                   )
+                ) : pickableScripts.length > 0 ? (
+                  pickableScripts.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      <div className="flex items-center gap-2">
+                        <FileCode className="w-3.5 h-3.5 text-green-500" />
+                        {s.name}
+                      </div>
+                    </SelectItem>
+                  ))
                 ) : (
-                  pickableScripts.length > 0 ? (
-                    pickableScripts.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        <div className="flex items-center gap-2">
-                          <FileCode className="w-3.5 h-3.5 text-green-500" />
-                          {s.name}
-                        </div>
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="_none" disabled>No scripts available</SelectItem>
-                  )
+                  <SelectItem value="_none" disabled>
+                    No scripts available
+                  </SelectItem>
                 )}
               </SelectContent>
             </Select>
           </div>
         </CardContent>
       </Card>
-
     </div>
   );
 }

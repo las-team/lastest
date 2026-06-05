@@ -9,7 +9,7 @@ export interface PlannerArea {
   testPlan: string;
 }
 
-export type PlannerSource = 'browser' | 'code' | 'spec' | 'routes';
+export type PlannerSource = "browser" | "code" | "spec" | "routes";
 
 export interface PlannerResult {
   source: PlannerSource;
@@ -29,7 +29,7 @@ export interface PlannerResult {
 // Scout + Deep-Dive types
 // ---------------------------------------------------------------------------
 
-export type AreaClassification = 'skip' | 'explore';
+export type AreaClassification = "skip" | "explore";
 
 export interface ScoutArea {
   name: string;

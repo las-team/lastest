@@ -1,4 +1,4 @@
-import { db } from '../index';
+import { db } from "../index";
 import {
   builds,
   testRuns,
@@ -9,7 +9,7 @@ import {
   functionalAreas,
   stepComparisons,
   stepLayerFeedback,
-} from '../schema';
+} from "../schema";
 import type {
   NewBuild,
   BuildStatus,
@@ -17,19 +17,19 @@ import type {
   DesignSystemViolation,
   DesignTokenCategory,
   LayerFeedbackStatus,
-} from '../schema';
-import { getWcagLevel } from '@/lib/a11y/wcag-score';
-import { getPlaywrightSettings, getDiffSensitivitySettings } from './settings';
-import { getPlaywrightOverridesByTestIds } from './tests';
+} from "../schema";
+import { getWcagLevel } from "@/lib/a11y/wcag-score";
+import { getPlaywrightSettings, getDiffSensitivitySettings } from "./settings";
+import { getPlaywrightOverridesByTestIds } from "./tests";
 import {
   deriveCheckModes,
   pickTestModeOverrides,
   mergeWithTestOverrides,
   effectiveVerdict,
   type CheckModeMap,
-} from '@/lib/verify/check-modes';
-import { eq, desc, and, inArray, sql } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+} from "@/lib/verify/check-modes";
+import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 // Builds
 export async function getBuilds(limit = 10) {
@@ -42,15 +42,22 @@ export async function getBuild(id: string) {
 }
 
 export async function getBuildByTestRun(testRunId: string) {
-  const [row] = await db.select().from(builds).where(eq(builds.testRunId, testRunId));
+  const [row] = await db
+    .select()
+    .from(builds)
+    .where(eq(builds.testRunId, testRunId));
   return row;
 }
 
 export async function getBuildsByComparisonPairId(pairId: string) {
-  return db.select().from(builds).where(eq(builds.comparisonPairId, pairId)).orderBy(builds.createdAt);
+  return db
+    .select()
+    .from(builds)
+    .where(eq(builds.comparisonPairId, pairId))
+    .orderBy(builds.createdAt);
 }
 
-export async function createBuild(data: Omit<NewBuild, 'id'>) {
+export async function createBuild(data: Omit<NewBuild, "id">) {
   const id = uuid();
   const [row] = await db
     .insert(builds)
@@ -118,11 +125,13 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
     .where(eq(testRuns.repositoryId, repositoryId))
     .orderBy(desc(builds.createdAt))
-    .limit(limit)
-    ;
+    .limit(limit);
 }
 
-export async function getLastBuildByBranch(repositoryId: string, branch: string) {
+export async function getLastBuildByBranch(
+  repositoryId: string,
+  branch: string,
+) {
   const [row] = await db
     .select({
       id: builds.id,
@@ -144,10 +153,12 @@ export async function getLastBuildByBranch(repositoryId: string, branch: string)
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(
-      eq(testRuns.repositoryId, repositoryId),
-      eq(testRuns.gitBranch, branch)
-    ))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        eq(testRuns.gitBranch, branch),
+      ),
+    )
     .orderBy(desc(builds.createdAt))
     .limit(1);
   return row;
@@ -171,9 +182,7 @@ export async function getBuildTestSummaries(buildId: string) {
     .leftJoin(tests, eq(testResults.testId, tests.id))
     .leftJoin(testVersions, eq(testResults.testVersionId, testVersions.id))
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
-    .where(eq(builds.id, buildId))
-    ;
-
+    .where(eq(builds.id, buildId));
   // Dedupe by testId: a build can have multiple test_results rows per test
   // (retries, re-runs). Drop superseded originals (rows whose id appears in
   // another row's retryOf), then keep one row per testId. Without this the
@@ -200,23 +209,22 @@ export async function getBuildTestSummaries(buildId: string) {
       percentageDifference: visualDiffs.percentageDifference,
     })
     .from(visualDiffs)
-    .where(eq(visualDiffs.buildId, buildId))
-    ;
-
+    .where(eq(visualDiffs.buildId, buildId));
   const diffMap = new Map<string, number[]>();
   for (const d of diffs) {
     if (!d.testId) continue;
-    const pct = typeof d.percentageDifference === 'string'
-      ? parseFloat(d.percentageDifference)
-      : (d.percentageDifference ?? 0);
+    const pct =
+      typeof d.percentageDifference === "string"
+        ? parseFloat(d.percentageDifference)
+        : (d.percentageDifference ?? 0);
     if (!diffMap.has(d.testId)) diffMap.set(d.testId, []);
     diffMap.get(d.testId)!.push(isNaN(pct) ? 0 : pct);
   }
 
   // For tests without a testVersionId (ran with current code), resolve the latest version number
   const testIdsNeedingLatest = rows
-    .filter(r => !r.testVersionId && r.testId)
-    .map(r => r.testId!);
+    .filter((r) => !r.testVersionId && r.testId)
+    .map((r) => r.testId!);
 
   const latestVersionMap = new Map<string, number>();
   if (testIdsNeedingLatest.length > 0) {
@@ -227,15 +235,14 @@ export async function getBuildTestSummaries(buildId: string) {
       })
       .from(testVersions)
       .where(inArray(testVersions.testId, testIdsNeedingLatest))
-      .groupBy(testVersions.testId)
-      ;
+      .groupBy(testVersions.testId);
     for (const v of latestVersions) {
       latestVersionMap.set(v.testId, v.maxVersion);
     }
   }
 
   // Also build a set of all max versions to tag "isLatest"
-  const allTestIds = rows.filter(r => r.testId).map(r => r.testId!);
+  const allTestIds = rows.filter((r) => r.testId).map((r) => r.testId!);
   const allMaxVersions = new Map<string, number>();
   if (allTestIds.length > 0) {
     const maxRows = await db
@@ -245,21 +252,25 @@ export async function getBuildTestSummaries(buildId: string) {
       })
       .from(testVersions)
       .where(inArray(testVersions.testId, allTestIds))
-      .groupBy(testVersions.testId)
-      ;
+      .groupBy(testVersions.testId);
     for (const v of maxRows) {
       allMaxVersions.set(v.testId, v.maxVersion);
     }
   }
 
-  return rows.map(r => {
-    const resolvedVersion = r.versionNumber ?? (r.testId ? latestVersionMap.get(r.testId) ?? null : null);
-    const maxVersion = r.testId ? allMaxVersions.get(r.testId) ?? null : null;
+  return rows.map((r) => {
+    const resolvedVersion =
+      r.versionNumber ??
+      (r.testId ? (latestVersionMap.get(r.testId) ?? null) : null);
+    const maxVersion = r.testId ? (allMaxVersions.get(r.testId) ?? null) : null;
 
     return {
       ...r,
       versionNumber: resolvedVersion,
-      isLatest: resolvedVersion !== null && maxVersion !== null && resolvedVersion === maxVersion,
+      isLatest:
+        resolvedVersion !== null &&
+        maxVersion !== null &&
+        resolvedVersion === maxVersion,
       avgDiffPct: (() => {
         const vals = r.testId ? diffMap.get(r.testId) : undefined;
         if (!vals || vals.length === 0) return null;
@@ -269,9 +280,10 @@ export async function getBuildTestSummaries(buildId: string) {
   });
 }
 
-
 // Build Summary helpers
-export async function computeBuildStatus(buildId: string): Promise<BuildStatus> {
+export async function computeBuildStatus(
+  buildId: string,
+): Promise<BuildStatus> {
   // Preserve sticky `executor_failed` — that status is set explicitly by
   // runBuildAsync's catch block when no per-test results landed and must not
   // be overwritten by diff-driven recompute.
@@ -279,14 +291,22 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     .select({ overallStatus: builds.overallStatus })
     .from(builds)
     .where(eq(builds.id, buildId));
-  if (buildRow?.overallStatus === 'executor_failed') return 'executor_failed';
+  if (buildRow?.overallStatus === "executor_failed") return "executor_failed";
 
-  const allDiffs = await db.select().from(visualDiffs).where(eq(visualDiffs.buildId, buildId));
+  const allDiffs = await db
+    .select()
+    .from(visualDiffs)
+    .where(eq(visualDiffs.buildId, buildId));
 
   // Quarantined tests don't block builds — pre-load the set so it can filter
   // both diffs and step comparisons.
   const quarantinedTestIds = new Set(
-    (await db.select({ id: tests.id }).from(tests).where(eq(tests.quarantined, true))).map(t => t.id)
+    (
+      await db
+        .select({ id: tests.id })
+        .from(tests)
+        .where(eq(tests.quarantined, true))
+    ).map((t) => t.id),
   );
 
   // Per-layer feedback is checked alongside diffs because a verify-board
@@ -298,25 +318,27 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     .select()
     .from(stepLayerFeedback)
     .where(eq(stepLayerFeedback.buildId, buildId));
-  const hasRejectedLayer = feedbackRows.some(f => f.status === 'rejected');
+  const hasRejectedLayer = feedbackRows.some((f) => f.status === "rejected");
 
   if (allDiffs.length === 0) {
-    if (hasRejectedLayer) return 'blocked';
-    return 'safe_to_merge';
+    if (hasRejectedLayer) return "blocked";
+    return "safe_to_merge";
   }
 
-  const diffs = allDiffs.filter(d => !d.testId || !quarantinedTestIds.has(d.testId));
+  const diffs = allDiffs.filter(
+    (d) => !d.testId || !quarantinedTestIds.has(d.testId),
+  );
 
   if (diffs.length === 0) {
-    if (hasRejectedLayer) return 'blocked';
-    return 'safe_to_merge';
+    if (hasRejectedLayer) return "blocked";
+    return "safe_to_merge";
   }
 
-  const hasFailed = diffs.some(d => d.status === 'rejected');
-  const hasPending = diffs.some(d => d.status === 'pending');
-  const hasTodo = diffs.some(d => d.status === 'todo');
+  const hasFailed = diffs.some((d) => d.status === "rejected");
+  const hasPending = diffs.some((d) => d.status === "pending");
+  const hasTodo = diffs.some((d) => d.status === "todo");
 
-  if (hasFailed || hasRejectedLayer) return 'blocked';
+  if (hasFailed || hasRejectedLayer) return "blocked";
 
   // Multi-layer step verdicts can also escalate the build status. A `red`
   // verdict from non-visual layers (new console errors, new 4xx/5xx, URL
@@ -335,7 +357,9 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     })
     .from(stepComparisons)
     .where(eq(stepComparisons.buildId, buildId));
-  const nonQuarantinedSteps = stepRows.filter(s => !quarantinedTestIds.has(s.testId));
+  const nonQuarantinedSteps = stepRows.filter(
+    (s) => !quarantinedTestIds.has(s.testId),
+  );
 
   // Mode-aware verdict: the stored step.verdict is computed mode-blind by the
   // scorer (any high-signal layer → red). Re-derive it through the repo + per
@@ -356,40 +380,61 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
     ...(pwSettings ?? {}),
     textDiffEnabled: diffSettings?.textDiffEnabled ?? null,
   });
-  const stepTestIds = Array.from(new Set(nonQuarantinedSteps.map(s => s.testId).filter((id): id is string => !!id)));
-  const overrideRows = stepTestIds.length > 0
-    ? await getPlaywrightOverridesByTestIds(stepTestIds).catch(() => [])
-    : [];
+  const stepTestIds = Array.from(
+    new Set(
+      nonQuarantinedSteps
+        .map((s) => s.testId)
+        .filter((id): id is string => !!id),
+    ),
+  );
+  const overrideRows =
+    stepTestIds.length > 0
+      ? await getPlaywrightOverridesByTestIds(stepTestIds).catch(() => [])
+      : [];
   const modesByTestId = new Map<string, Partial<CheckModeMap>>();
   for (const t of overrideRows) {
     const partial = pickTestModeOverrides(t.playwrightOverrides ?? null);
     if (partial) modesByTestId.set(t.id, partial);
   }
-  const stepEffectiveVerdict = (step: typeof nonQuarantinedSteps[number]) =>
-    effectiveVerdict(step.evidence, mergeWithTestOverrides(repoModes, modesByTestId.get(step.testId) ?? null));
+  const stepEffectiveVerdict = (step: (typeof nonQuarantinedSteps)[number]) =>
+    effectiveVerdict(
+      step.evidence,
+      mergeWithTestOverrides(repoModes, modesByTestId.get(step.testId) ?? null),
+    );
 
-  const SETTLED: LayerFeedbackStatus[] = ['approved', 'auto_approved', 'snoozed'];
+  const SETTLED: LayerFeedbackStatus[] = [
+    "approved",
+    "auto_approved",
+    "snoozed",
+  ];
   const fbByStep = new Map<string, Set<string>>();
   for (const f of feedbackRows) {
     if (!SETTLED.includes(f.status)) continue;
-    if (!fbByStep.has(f.stepComparisonId)) fbByStep.set(f.stepComparisonId, new Set());
+    if (!fbByStep.has(f.stepComparisonId))
+      fbByStep.set(f.stepComparisonId, new Set());
     fbByStep.get(f.stepComparisonId)!.add(f.layer);
   }
 
-  const stepIsVerified = (step: typeof nonQuarantinedSteps[number]): boolean => {
-    const evLayers = Array.from(new Set((step.evidence ?? []).map(e => e.layer)));
+  const stepIsVerified = (
+    step: (typeof nonQuarantinedSteps)[number],
+  ): boolean => {
+    const evLayers = Array.from(
+      new Set((step.evidence ?? []).map((e) => e.layer)),
+    );
     if (evLayers.length === 0) return false;
     const settled = fbByStep.get(step.id);
     if (!settled) return false;
-    return evLayers.every(l => settled.has(l));
+    return evLayers.every((l) => settled.has(l));
   };
 
-  const hasRedStep = nonQuarantinedSteps.some(s => stepEffectiveVerdict(s) === 'red' && !stepIsVerified(s));
-  if (hasRedStep) return 'review_required';
+  const hasRedStep = nonQuarantinedSteps.some(
+    (s) => stepEffectiveVerdict(s) === "red" && !stepIsVerified(s),
+  );
+  if (hasRedStep) return "review_required";
 
-  if (hasPending) return 'review_required';
-  if (hasTodo) return 'has_todos';
-  return 'safe_to_merge';
+  if (hasPending) return "review_required";
+  if (hasTodo) return "has_todos";
+  return "safe_to_merge";
 }
 
 /**
@@ -397,10 +442,18 @@ export async function computeBuildStatus(buildId: string): Promise<BuildStatus> 
  * Used by the executor-failure path to distinguish "executor crashed before
  * any test ran" (→ executor_failed) from "executor ran but had errors" (→ blocked).
  */
-export async function countTestResultsByBuild(buildId: string): Promise<number> {
-  const [build] = await db.select({ testRunId: builds.testRunId }).from(builds).where(eq(builds.id, buildId));
+export async function countTestResultsByBuild(
+  buildId: string,
+): Promise<number> {
+  const [build] = await db
+    .select({ testRunId: builds.testRunId })
+    .from(builds)
+    .where(eq(builds.id, buildId));
   if (!build?.testRunId) return 0;
-  const rows = await db.select({ id: testResults.id }).from(testResults).where(eq(testResults.testRunId, build.testRunId));
+  const rows = await db
+    .select({ id: testResults.id })
+    .from(testResults)
+    .where(eq(testResults.testRunId, build.testRunId));
   return rows.length;
 }
 
@@ -411,14 +464,19 @@ export async function hasApprovedDiffs(repositoryId?: string | null) {
       .from(visualDiffs)
       .innerJoin(builds, eq(visualDiffs.buildId, builds.id))
       .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-      .where(and(eq(testRuns.repositoryId, repositoryId), eq(visualDiffs.status, 'approved')))
+      .where(
+        and(
+          eq(testRuns.repositoryId, repositoryId),
+          eq(visualDiffs.status, "approved"),
+        ),
+      )
       .limit(1);
     return !!row;
   }
   const [row] = await db
     .select({ id: visualDiffs.id })
     .from(visualDiffs)
-    .where(eq(visualDiffs.status, 'approved'))
+    .where(eq(visualDiffs.status, "approved"))
     .limit(1);
   return !!row;
 }
@@ -429,8 +487,7 @@ export async function getBuildCount(repositoryId?: string | null) {
       .select({ id: builds.id })
       .from(builds)
       .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-      .where(eq(testRuns.repositoryId, repositoryId))
-      ;
+      .where(eq(testRuns.repositoryId, repositoryId));
     return rows.length;
   }
   const rows = await db.select({ id: builds.id }).from(builds);
@@ -438,15 +495,20 @@ export async function getBuildCount(repositoryId?: string | null) {
 }
 
 // Get build trends for dashboard sparklines (daily aggregates over last N days)
-export async function getBuildTrends(repositoryId: string, days = 30): Promise<{
-  date: string;
-  passRate: number;
-  flakyRate: number;
-  totalTests: number;
-  failedCount: number;
-  passedCount: number;
-  flakyCount: number;
-}[]> {
+export async function getBuildTrends(
+  repositoryId: string,
+  days = 30,
+): Promise<
+  {
+    date: string;
+    passRate: number;
+    flakyRate: number;
+    totalTests: number;
+    failedCount: number;
+    passedCount: number;
+    flakyCount: number;
+  }[]
+> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
@@ -460,22 +522,37 @@ export async function getBuildTrends(repositoryId: string, days = 30): Promise<{
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(
-      eq(testRuns.repositoryId, repositoryId),
-      sql`${builds.completedAt} IS NOT NULL`,
-    ))
-    .orderBy(desc(builds.completedAt))
-    ;
-
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        sql`${builds.completedAt} IS NOT NULL`,
+      ),
+    )
+    .orderBy(desc(builds.completedAt));
   // Group by date
-  const byDate = new Map<string, { passed: number; failed: number; total: number; flaky: number; count: number }>();
+  const byDate = new Map<
+    string,
+    {
+      passed: number;
+      failed: number;
+      total: number;
+      flaky: number;
+      count: number;
+    }
+  >();
 
   for (const b of recentBuilds) {
     if (!b.completedAt) continue;
     const d = new Date(b.completedAt);
     if (d < cutoff) continue;
     const dateKey = d.toISOString().slice(0, 10);
-    const entry = byDate.get(dateKey) ?? { passed: 0, failed: 0, total: 0, flaky: 0, count: 0 };
+    const entry = byDate.get(dateKey) ?? {
+      passed: 0,
+      failed: 0,
+      total: 0,
+      flaky: 0,
+      count: 0,
+    };
     entry.passed += b.passedCount ?? 0;
     entry.failed += b.failedCount ?? 0;
     entry.total += b.totalTests ?? 0;
@@ -509,14 +586,14 @@ export async function getA11yScoreTrend(repositoryId: string, limit = 10) {
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(
-      eq(testRuns.repositoryId, repositoryId),
-      sql`${builds.a11yScore} IS NOT NULL`,
-    ))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        sql`${builds.a11yScore} IS NOT NULL`,
+      ),
+    )
     .orderBy(desc(builds.createdAt))
-    .limit(limit)
-    ;
-
+    .limit(limit);
   return repoBuilds.reverse(); // oldest first for charting
 }
 
@@ -529,14 +606,14 @@ export async function getA11yScoreTrend(repositoryId: string, limit = 10) {
 // node each when the harvester captured selectors).
 export interface BuildA11yViolationRow {
   id: string;
-  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  impact: "critical" | "serious" | "moderate" | "minor";
   description: string;
   help: string;
   helpUrl: string;
-  wcagLevel?: 'A' | 'AA' | 'AAA';
+  wcagLevel?: "A" | "AA" | "AAA";
   tags: string[];
   occurrenceCount: number; // # of test_results that hit this rule
-  totalNodes: number;      // sum of `nodes` counts across all occurrences
+  totalNodes: number; // sum of `nodes` counts across all occurrences
   samples: Array<{
     testResultId: string;
     testId: string | null;
@@ -558,7 +635,9 @@ const SEVERITY_RANK: Record<string, number> = {
   minor: 3,
 };
 
-export async function getBuildA11yViolations(buildId: string): Promise<BuildA11yViolationRow[]> {
+export async function getBuildA11yViolations(
+  buildId: string,
+): Promise<BuildA11yViolationRow[]> {
   const [build] = await db
     .select({ testRunId: builds.testRunId })
     .from(builds)
@@ -588,10 +667,10 @@ export async function getBuildA11yViolations(buildId: string): Promise<BuildA11y
       if (!row) {
         row = {
           id: v.id,
-          impact: v.impact ?? 'moderate',
-          description: v.description ?? '',
-          help: v.help ?? '',
-          helpUrl: v.helpUrl ?? '',
+          impact: v.impact ?? "moderate",
+          description: v.description ?? "",
+          help: v.help ?? "",
+          helpUrl: v.helpUrl ?? "",
           wcagLevel: v.wcagLevel ?? getWcagLevel(v.tags) ?? undefined,
           tags: Array.isArray(v.tags) ? v.tags : [],
           occurrenceCount: 0,
@@ -601,17 +680,18 @@ export async function getBuildA11yViolations(buildId: string): Promise<BuildA11y
         byRule.set(v.id, row);
       }
       row.occurrenceCount += 1;
-      row.totalNodes += typeof v.nodes === 'number' ? v.nodes : 0;
+      row.totalNodes += typeof v.nodes === "number" ? v.nodes : 0;
       if (row.samples.length < 5) {
-        const sampleNode = Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
-          ? v.sampleNodes[0]
-          : undefined;
+        const sampleNode =
+          Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
+            ? v.sampleNodes[0]
+            : undefined;
         row.samples.push({
           testResultId: r.testResultId,
           testId: r.testId ?? null,
           testName: r.testName ?? null,
           areaName: r.areaName ?? null,
-          nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+          nodes: typeof v.nodes === "number" ? v.nodes : 0,
           sampleNode,
         });
       }
@@ -622,7 +702,8 @@ export async function getBuildA11yViolations(buildId: string): Promise<BuildA11y
     const sa = SEVERITY_RANK[a.impact] ?? 9;
     const sb = SEVERITY_RANK[b.impact] ?? 9;
     if (sa !== sb) return sa - sb;
-    if (b.occurrenceCount !== a.occurrenceCount) return b.occurrenceCount - a.occurrenceCount;
+    if (b.occurrenceCount !== a.occurrenceCount)
+      return b.occurrenceCount - a.occurrenceCount;
     return a.id.localeCompare(b.id);
   });
 }
@@ -633,11 +714,11 @@ export async function getBuildA11yViolations(buildId: string): Promise<BuildA11y
 // (different from "0 rules violated", which returns an empty array).
 export interface TestResultA11yViolationRow {
   id: string;
-  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  impact: "critical" | "serious" | "moderate" | "minor";
   description: string;
   help: string;
   helpUrl: string;
-  wcagLevel?: 'A' | 'AA' | 'AAA';
+  wcagLevel?: "A" | "AA" | "AAA";
   tags: string[];
   nodes: number;
   sampleNodes: Array<{
@@ -661,13 +742,13 @@ export async function getTestResultA11yViolations(
     .filter((v) => v?.id)
     .map((v) => ({
       id: v.id,
-      impact: v.impact ?? 'moderate',
-      description: v.description ?? '',
-      help: v.help ?? '',
-      helpUrl: v.helpUrl ?? '',
+      impact: v.impact ?? "moderate",
+      description: v.description ?? "",
+      help: v.help ?? "",
+      helpUrl: v.helpUrl ?? "",
       wcagLevel: v.wcagLevel ?? getWcagLevel(v.tags) ?? undefined,
       tags: Array.isArray(v.tags) ? v.tags : [],
-      nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+      nodes: typeof v.nodes === "number" ? v.nodes : 0,
       sampleNodes: Array.isArray(v.sampleNodes) ? v.sampleNodes : [],
     }))
     .sort((a, b) => {
@@ -680,7 +761,10 @@ export async function getTestResultA11yViolations(
 
 // ── Design System rollups (mirror of getA11yScoreTrend / getBuildA11yViolations) ──
 
-export async function getDesignSystemScoreTrend(repositoryId: string, limit = 10) {
+export async function getDesignSystemScoreTrend(
+  repositoryId: string,
+  limit = 10,
+) {
   const rows = await db
     .select({
       id: builds.id,
@@ -692,10 +776,12 @@ export async function getDesignSystemScoreTrend(repositoryId: string, limit = 10
     })
     .from(builds)
     .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-    .where(and(
-      eq(testRuns.repositoryId, repositoryId),
-      sql`${builds.designSystemScore} IS NOT NULL`,
-    ))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        sql`${builds.designSystemScore} IS NOT NULL`,
+      ),
+    )
     .orderBy(desc(builds.createdAt))
     .limit(limit);
   return rows.reverse(); // oldest first
@@ -711,7 +797,7 @@ export interface BuildDesignSystemViolationRow {
   actual: string;
   expected?: string;
   expectedName?: string;
-  impact: 'critical' | 'serious' | 'moderate' | 'minor';
+  impact: "critical" | "serious" | "moderate" | "minor";
   occurrenceCount: number;
   totalNodes: number;
   samples: Array<{
@@ -752,7 +838,8 @@ export async function getBuildDesignSystemViolations(
 
   const byRule = new Map<string, BuildDesignSystemViolationRow>();
   for (const r of rows) {
-    const violations = (r.designSystemViolations ?? []) as DesignSystemViolation[];
+    const violations = (r.designSystemViolations ??
+      []) as DesignSystemViolation[];
     if (!Array.isArray(violations) || violations.length === 0) continue;
     for (const v of violations) {
       if (!v?.id) continue;
@@ -765,7 +852,7 @@ export async function getBuildDesignSystemViolations(
           actual: v.actual,
           expected: v.expected,
           expectedName: v.expectedName,
-          impact: v.impact ?? 'moderate',
+          impact: v.impact ?? "moderate",
           occurrenceCount: 0,
           totalNodes: 0,
           samples: [],
@@ -773,17 +860,18 @@ export async function getBuildDesignSystemViolations(
         byRule.set(v.id, row);
       }
       row.occurrenceCount += 1;
-      row.totalNodes += typeof v.nodes === 'number' ? v.nodes : 0;
+      row.totalNodes += typeof v.nodes === "number" ? v.nodes : 0;
       if (row.samples.length < 5) {
-        const sampleNode = Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
-          ? v.sampleNodes[0]
-          : undefined;
+        const sampleNode =
+          Array.isArray(v.sampleNodes) && v.sampleNodes.length > 0
+            ? v.sampleNodes[0]
+            : undefined;
         row.samples.push({
           testResultId: r.testResultId,
           testId: r.testId ?? null,
           testName: r.testName ?? null,
           areaName: r.areaName ?? null,
-          nodes: typeof v.nodes === 'number' ? v.nodes : 0,
+          nodes: typeof v.nodes === "number" ? v.nodes : 0,
           sampleNode,
         });
       }

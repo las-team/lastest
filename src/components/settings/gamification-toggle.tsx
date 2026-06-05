@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useOptimistic, useTransition } from 'react';
-import { Switch } from '@/components/ui/switch';
-import { toast } from 'sonner';
-import { toggleGamification } from '@/server/actions/gamification';
+import { useOptimistic, useTransition } from "react";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import { toggleGamification } from "@/server/actions/gamification";
 
 interface GamificationToggleProps {
   enabled: boolean;
@@ -19,10 +19,12 @@ export function GamificationToggle({ enabled }: GamificationToggleProps) {
       try {
         await toggleGamification(checked);
         toast.success(
-          checked ? '🕹️ Gamification enabled — the bots are watching.' : 'Gamification disabled',
+          checked
+            ? "🕹️ Gamification enabled — the bots are watching."
+            : "Gamification disabled",
         );
       } catch {
-        toast.error('Failed to update setting');
+        toast.error("Failed to update setting");
       }
     });
   }
@@ -32,7 +34,8 @@ export function GamificationToggle({ enabled }: GamificationToggleProps) {
       <div className="space-y-0.5">
         <span className="text-sm font-medium">Gamification</span>
         <p className="text-xs text-muted-foreground/70">
-          Beat-the-bot scoring, seasons, and a team leaderboard. Opt-in per team.
+          Beat-the-bot scoring, seasons, and a team leaderboard. Opt-in per
+          team.
         </p>
       </div>
       <Switch

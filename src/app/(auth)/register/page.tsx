@@ -1,21 +1,21 @@
-'use client';
+"use client";
 
-import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { authClient } from '@/lib/auth/auth-client';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Github } from 'lucide-react';
-import { AuthBrandHeader } from '@/components/auth/auth-brand-header';
-import { recordRegistrationConsent } from '@/server/actions/consent';
-import { isValidShareSlug } from '@/lib/share/slug';
-import { track } from '@/lib/analytics/umami';
-import { Events } from '@/lib/analytics/events';
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { authClient } from "@/lib/auth/auth-client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Github } from "lucide-react";
+import { AuthBrandHeader } from "@/components/auth/auth-brand-header";
+import { recordRegistrationConsent } from "@/server/actions/consent";
+import { isValidShareSlug } from "@/lib/share/slug";
+import { track } from "@/lib/analytics/umami";
+import { Events } from "@/lib/analytics/events";
 
 export default function RegisterPage() {
   return (
@@ -27,27 +27,29 @@ export default function RegisterPage() {
 
 function RegisterForm() {
   const searchParams = useSearchParams();
-  const rawClaim = searchParams.get('claim');
+  const rawClaim = searchParams.get("claim");
   const claim = rawClaim && isValidShareSlug(rawClaim) ? rawClaim : null;
   // Skip `/` — that path forces (app)/layout.tsx (WS bootstrap + 8 providers)
   // to compile just to redirect to /onboarding. Send new users straight there.
-  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : '/onboarding';
-  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : '/consent';
+  const emailPostAuthUrl = claim ? `/r/${claim}/claim` : "/onboarding";
+  const oauthPostAuthUrl = claim ? `/r/${claim}/claim` : "/consent";
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setError("");
 
     if (!termsAccepted) {
-      setError('Please accept the Terms of Service and Privacy Policy to continue.');
+      setError(
+        "Please accept the Terms of Service and Privacy Policy to continue.",
+      );
       return;
     }
 
@@ -61,7 +63,7 @@ function RegisterForm() {
       });
 
       if (result.error) {
-        setError(result.error.message ?? 'Sign up failed');
+        setError(result.error.message ?? "Sign up failed");
         setLoading(false);
         return;
       }
@@ -70,13 +72,13 @@ function RegisterForm() {
         await recordRegistrationConsent({ marketingEmails: marketingConsent });
       } catch (err) {
         // Consent recording is secondary — user is already signed up.
-        console.error('recordRegistrationConsent failed', err);
+        console.error("recordRegistrationConsent failed", err);
       }
 
       track(Events.signup_completed, {
-        method: 'email',
+        method: "email",
         marketingOptIn: marketingConsent,
-        claim: claim ? 'true' : 'false',
+        claim: claim ? "true" : "false",
       });
 
       // Hard navigation — RSC swap was racing with router.refresh and the
@@ -85,23 +87,23 @@ function RegisterForm() {
       // Keep `loading` true so the button stays disabled until the new page paints.
       window.location.href = emailPostAuthUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign up failed');
+      setError(err instanceof Error ? err.message : "Sign up failed");
       setLoading(false);
     }
   }
 
-  async function handleOAuth(provider: 'github' | 'google' | 'discord') {
+  async function handleOAuth(provider: "github" | "google" | "discord") {
     await authClient.signIn.social({ provider, callbackURL: oauthPostAuthUrl });
   }
 
   return (
     <>
       <AuthBrandHeader
-        title={claim ? 'Claim this test' : 'Create an account'}
+        title={claim ? "Claim this test" : "Create an account"}
         description={
           claim
             ? "Sign up and we'll copy the test into your own workspace — free."
-            : 'Get started with visual regression testing'
+            : "Get started with visual regression testing"
         }
       />
 
@@ -111,7 +113,7 @@ function RegisterForm() {
             <Button
               variant="outline"
               type="button"
-              onClick={() => handleOAuth('github')}
+              onClick={() => handleOAuth("github")}
             >
               <Github className="mr-2 h-4 w-4" />
               GitHub
@@ -119,9 +121,13 @@ function RegisterForm() {
             <Button
               variant="outline"
               type="button"
-              onClick={() => handleOAuth('google')}
+              onClick={() => handleOAuth("google")}
             >
-              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+              <svg
+                className="mr-2 h-4 w-4"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
                   fill="#4285F4"
@@ -144,9 +150,13 @@ function RegisterForm() {
             <Button
               variant="outline"
               type="button"
-              onClick={() => handleOAuth('discord')}
+              onClick={() => handleOAuth("discord")}
             >
-              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+              <svg
+                className="mr-2 h-4 w-4"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
                 <path
                   d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"
                   fill="#5865F2"
@@ -161,7 +171,9 @@ function RegisterForm() {
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">or sign up with email</span>
+              <span className="bg-card px-2 text-muted-foreground">
+                or sign up with email
+              </span>
             </div>
           </div>
 
@@ -208,17 +220,30 @@ function RegisterForm() {
               <Checkbox
                 id="terms"
                 checked={termsAccepted}
-                onCheckedChange={(checked) => setTermsAccepted(checked === true)}
+                onCheckedChange={(checked) =>
+                  setTermsAccepted(checked === true)
+                }
                 className="mt-0.5"
                 required
               />
-              <Label htmlFor="terms" className="text-sm font-normal text-muted-foreground leading-snug">
-                I have read and agree to the{' '}
-                <Link href="/terms" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+              <Label
+                htmlFor="terms"
+                className="text-sm font-normal text-muted-foreground leading-snug"
+              >
+                I have read and agree to the{" "}
+                <Link
+                  href="/terms"
+                  className="underline underline-offset-4 hover:text-foreground"
+                  target="_blank"
+                >
                   Terms of Service
-                </Link>{' '}
-                and{' '}
-                <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground" target="_blank">
+                </Link>{" "}
+                and{" "}
+                <Link
+                  href="/privacy"
+                  className="underline underline-offset-4 hover:text-foreground"
+                  target="_blank"
+                >
                   Privacy Policy
                 </Link>
                 .
@@ -226,7 +251,10 @@ function RegisterForm() {
             </div>
 
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="marketing" className="text-sm font-normal text-muted-foreground leading-snug">
+              <Label
+                htmlFor="marketing"
+                className="text-sm font-normal text-muted-foreground leading-snug"
+              >
                 Send me product updates, tips, and feature announcements
               </Label>
               <Switch
@@ -236,21 +264,23 @@ function RegisterForm() {
               />
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <Button type="submit" className="w-full" disabled={loading || !termsAccepted}>
-              {loading ? 'Creating account...' : 'Create account'}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading || !termsAccepted}
+            >
+              {loading ? "Creating account..." : "Create account"}
             </Button>
           </form>
         </CardContent>
       </Card>
 
       <p className="text-center text-sm text-muted-foreground">
-        Already have an account?{' '}
+        Already have an account?{" "}
         <Link
-          href={claim ? `/login?claim=${claim}` : '/login'}
+          href={claim ? `/login?claim=${claim}` : "/login"}
           className="text-primary font-medium underline-offset-4 hover:underline"
         >
           Sign in

@@ -1,6 +1,6 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
+import * as queries from "@/lib/db/queries";
 import {
   generateWithAI,
   createUserStoryExtractionPrompt,
@@ -8,19 +8,29 @@ import {
   extractCodeFromResponse,
   SYSTEM_PROMPT,
   MCP_SYSTEM_PROMPT,
-} from '@/lib/ai';
-import type { AIProviderConfig, CodebaseIntelligenceContext } from '@/lib/ai/types';
-import type { ExtractedUserStory, ExtractedAcceptanceCriterion } from '@/lib/db/schema';
-import { revalidatePath } from 'next/cache';
-import { getRepoTree, getFileContent, compareBranches } from '@/lib/github/content';
-import { runParallel } from '@/lib/ai/parallel';
-import { createJob, updateJobProgress, completeJob, failJob } from './jobs';
-import { getCurrentBranchForRepo } from '@/lib/git-utils';
-import { requireRepoAccess } from '@/lib/auth';
-import { extractText } from 'unpdf';
-import mammoth from 'mammoth';
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
-import { emitAndPersistActivityEvent } from '@/lib/db/queries/activity-events';
+} from "@/lib/ai";
+import type {
+  AIProviderConfig,
+  CodebaseIntelligenceContext,
+} from "@/lib/ai/types";
+import type {
+  ExtractedUserStory,
+  ExtractedAcceptanceCriterion,
+} from "@/lib/db/schema";
+import { revalidatePath } from "next/cache";
+import {
+  getRepoTree,
+  getFileContent,
+  compareBranches,
+} from "@/lib/github/content";
+import { runParallel } from "@/lib/ai/parallel";
+import { createJob, updateJobProgress, completeJob, failJob } from "./jobs";
+import { getCurrentBranchForRepo } from "@/lib/git-utils";
+import { requireRepoAccess } from "@/lib/auth";
+import { extractText } from "unpdf";
+import mammoth from "mammoth";
+import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
+import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 
 // ============================================
 // Types
@@ -53,14 +63,23 @@ export interface ValidateTestResponse {
 // Helpers
 // ============================================
 
-async function getAIConfig(repositoryId?: string | null): Promise<AIProviderConfig> {
+async function getAIConfig(
+  repositoryId?: string | null,
+): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
-    provider: settings.provider as 'claude-cli' | 'openrouter' | 'claude-agent-sdk',
+    provider: settings.provider as
+      | "claude-cli"
+      | "openrouter"
+      | "claude-agent-sdk",
     openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
+    openrouterModel: settings.openrouterModel || "anthropic/claude-sonnet-4",
     customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkPermissionMode: settings.agentSdkPermissionMode as
+      | "plan"
+      | "default"
+      | "acceptEdits"
+      | undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
 }
@@ -72,11 +91,13 @@ function extractJsonArray(text: string): string | null {
   let match;
   while ((match = codeBlockRegex.exec(text)) !== null) {
     const block = match[1].trim();
-    if (block.startsWith('[')) {
+    if (block.startsWith("[")) {
       try {
         JSON.parse(block);
         return block;
-      } catch { /* not valid JSON, try next block */ }
+      } catch {
+        /* not valid JSON, try next block */
+      }
     }
   }
 
@@ -84,9 +105,12 @@ function extractJsonArray(text: string): string | null {
   //    Skip markdown checkbox patterns like "[ ]" or "[x]"
   let start = -1;
   for (let s = 0; s < text.length; s++) {
-    if (text[s] === '[') {
+    if (text[s] === "[") {
       // Skip markdown checkboxes: [ ], [x], [X]
-      if (/^\[[ xX]\]/.test(text.slice(s))) { s += 2; continue; }
+      if (/^\[[ xX]\]/.test(text.slice(s))) {
+        s += 2;
+        continue;
+      }
       start = s;
       break;
     }
@@ -99,13 +123,22 @@ function extractJsonArray(text: string): string | null {
 
   for (let i = start; i < text.length; i++) {
     const char = text[i];
-    if (escape) { escape = false; continue; }
-    if (char === '\\' && inString) { escape = true; continue; }
-    if (char === '"') { inString = !inString; continue; }
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
     if (inString) continue;
 
-    if (char === '[') depth++;
-    else if (char === ']') {
+    if (char === "[") depth++;
+    else if (char === "]") {
       depth--;
       if (depth === 0) {
         const candidate = text.slice(start, i + 1);
@@ -131,17 +164,21 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
   const stories: ExtractedUserStory[] = [];
 
   // Split on user story headers: ### **User Story N: Title**, ## User Story: Title, ### Title, etc.
-  const storyBlocks = text.split(/(?=^#{1,4}\s+\*{0,2}(?:User Story[^*\n]*?[:]\s*)?)/mi);
+  const storyBlocks = text.split(
+    /(?=^#{1,4}\s+\*{0,2}(?:User Story[^*\n]*?[:]\s*)?)/im,
+  );
 
   let storyIndex = 0;
   for (const block of storyBlocks) {
     if (!block.trim()) continue;
 
     // Extract title from header
-    const headerMatch = block.match(/^#{1,4}\s+\*{0,2}(?:User Story\s*\d*\s*[:.]?\s*)?(.+?)\*{0,2}\s*$/m);
+    const headerMatch = block.match(
+      /^#{1,4}\s+\*{0,2}(?:User Story\s*\d*\s*[:.]?\s*)?(.+?)\*{0,2}\s*$/m,
+    );
     if (!headerMatch) continue;
 
-    const title = headerMatch[1].replace(/\*+/g, '').trim();
+    const title = headerMatch[1].replace(/\*+/g, "").trim();
     if (!title) continue;
 
     storyIndex++;
@@ -149,32 +186,41 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
 
     // Extract "As a / I want to / So that" description
     const asAMatch = block.match(/\*{0,2}As a\*{0,2}\s+(.+?)(?:\n|$)/i);
-    const iWantMatch = block.match(/\*{0,2}I want(?:\s+to)?\*{0,2}\s+(.+?)(?:\n|$)/i);
+    const iWantMatch = block.match(
+      /\*{0,2}I want(?:\s+to)?\*{0,2}\s+(.+?)(?:\n|$)/i,
+    );
     const soThatMatch = block.match(/\*{0,2}So that\*{0,2}\s+(.+?)(?:\n|$)/i);
 
-    let description = '';
+    let description = "";
     if (asAMatch) {
-      description = `As a ${asAMatch[1].replace(/\*+/g, '').trim()}`;
-      if (iWantMatch) description += `, I want to ${iWantMatch[1].replace(/\*+/g, '').trim()}`;
-      if (soThatMatch) description += `, so that ${soThatMatch[1].replace(/\*+/g, '').trim()}`;
+      description = `As a ${asAMatch[1].replace(/\*+/g, "").trim()}`;
+      if (iWantMatch)
+        description += `, I want to ${iWantMatch[1].replace(/\*+/g, "").trim()}`;
+      if (soThatMatch)
+        description += `, so that ${soThatMatch[1].replace(/\*+/g, "").trim()}`;
     } else {
       // Fallback: use first non-header, non-AC paragraph as description
-      const descMatch = block.match(/^#{1,4}[^\n]+\n+((?:(?![-*]\s*AC|Acceptance|#{1,4}\s)[\s\S])+)/);
-      description = descMatch ? descMatch[1].replace(/\*+/g, '').trim() : title;
+      const descMatch = block.match(
+        /^#{1,4}[^\n]+\n+((?:(?![-*]\s*AC|Acceptance|#{1,4}\s)[\s\S])+)/,
+      );
+      description = descMatch ? descMatch[1].replace(/\*+/g, "").trim() : title;
     }
 
     // Extract acceptance criteria from bullet points
     const criteria: ExtractedAcceptanceCriterion[] = [];
     // Match: - AC1: desc, - **AC1:** desc, - AC-1.1: desc, - desc (after "Acceptance Criteria" header)
-    const acSection = block.match(/(?:(?:#{1,4}\s+)?\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s+(?!AC)|(?:\n---)|(?:\n\*{0,2}(?:User Story|Priority|Notes))|$)/i);
+    const acSection = block.match(
+      /(?:(?:#{1,4}\s+)?\*{0,2}Acceptance Criteria\*{0,2}:?\s*\n)([\s\S]*?)(?=\n#{1,4}\s+(?!AC)|(?:\n---)|(?:\n\*{0,2}(?:User Story|Priority|Notes))|$)/i,
+    );
     const acText = acSection ? acSection[1] : block;
 
-    const acPattern = /(?:[-*]|\d+[.)]\s)\s*\*{0,2}(?:AC[-. ]?\d+(?:\.\d+)?)\*{0,2}[:.]\s*(.+?)(?:\n|$)/gi;
+    const acPattern =
+      /(?:[-*]|\d+[.)]\s)\s*\*{0,2}(?:AC[-. ]?\d+(?:\.\d+)?)\*{0,2}[:.]\s*(.+?)(?:\n|$)/gi;
     let acMatch;
     let acIndex = 0;
     while ((acMatch = acPattern.exec(acText)) !== null) {
       acIndex++;
-      const acDesc = acMatch[1].replace(/\*+/g, '').trim();
+      const acDesc = acMatch[1].replace(/\*+/g, "").trim();
       if (!acDesc) continue;
       criteria.push({
         id: `AC-${storyIndex}.${acIndex}`,
@@ -189,24 +235,30 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
       let bulletMatch;
       while ((bulletMatch = plainBullets.exec(acSection[1])) !== null) {
         acIndex++;
-        const desc = bulletMatch[1].replace(/\*+/g, '').replace(/^\[[ x]]\s*/i, '').trim();
+        const desc = bulletMatch[1]
+          .replace(/\*+/g, "")
+          .replace(/^\[[ x]]\s*/i, "")
+          .trim();
         if (!desc || desc.length < 5) continue;
         criteria.push({
           id: `AC-${storyIndex}.${acIndex}`,
           description: desc,
-          testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+          testName: desc.length > 60 ? desc.slice(0, 57) + "..." : desc,
         });
       }
     }
 
     // Last-resort fallback: any bullets in the block after skipping header + description
     if (criteria.length === 0) {
-      const lines = block.split('\n');
+      const lines = block.split("\n");
       let pastHeader = false;
       let pastDescription = false;
       for (const line of lines) {
         if (!pastHeader) {
-          if (/^#{1,4}\s/.test(line)) { pastHeader = true; continue; }
+          if (/^#{1,4}\s/.test(line)) {
+            pastHeader = true;
+            continue;
+          }
           continue;
         }
         if (!pastDescription) {
@@ -217,12 +269,15 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
         const bulletMatch = line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/);
         if (bulletMatch) {
           acIndex++;
-          const desc = bulletMatch[1].replace(/\*+/g, '').replace(/^\[[ x]]\s*/i, '').trim();
+          const desc = bulletMatch[1]
+            .replace(/\*+/g, "")
+            .replace(/^\[[ x]]\s*/i, "")
+            .trim();
           if (!desc || desc.length < 5) continue;
           criteria.push({
             id: `AC-${storyIndex}.${acIndex}`,
             description: desc,
-            testName: desc.length > 60 ? desc.slice(0, 57) + '...' : desc,
+            testName: desc.length > 60 ? desc.slice(0, 57) + "..." : desc,
           });
         }
       }
@@ -245,61 +300,90 @@ function parseStoriesFromMarkdown(text: string): ExtractedUserStory[] | null {
 // Quality Gate: filter non-testable ACs
 // ============================================
 
-const NON_TESTABLE_PREFIX = /^(create|implement|consider|add|build|design|ensure|set up|configure|should|could|might)\b/i;
+const NON_TESTABLE_PREFIX =
+  /^(create|implement|consider|add|build|design|ensure|set up|configure|should|could|might)\b/i;
 
-function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserStory[] {
+function validateAndFilterStories(
+  stories: ExtractedUserStory[],
+): ExtractedUserStory[] {
   const seenDescriptions = new Set<string>();
 
   // Filter catch-all / markdown-artifact story titles
-  const CATCHALL_TITLES = new Set(['summary', 'overview', 'general', 'miscellaneous', 'misc', 'other', 'notes']);
-  const META_TEST_AC = /^(follows the constraint|handles loading|includes meaningful|uses steplogger|captures screenshots|employs appropriate)/i;
+  const CATCHALL_TITLES = new Set([
+    "summary",
+    "overview",
+    "general",
+    "miscellaneous",
+    "misc",
+    "other",
+    "notes",
+  ]);
+  const META_TEST_AC =
+    /^(follows the constraint|handles loading|includes meaningful|uses steplogger|captures screenshots|employs appropriate)/i;
 
   // Pre-filter: clean titles and remove catch-all stories
-  stories = stories.filter(story => {
+  stories = stories.filter((story) => {
     // Strip emoji
-    story.title = story.title.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}]/gu, '').trim();
+    story.title = story.title
+      .replace(
+        /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}]/gu,
+        "",
+      )
+      .trim();
     // Strip status markers like "Planned", "Implemented", "Priority Order" etc.
-    story.title = story.title.replace(/\(.*?\)\s*$/, '').trim();
+    story.title = story.title.replace(/\(.*?\)\s*$/, "").trim();
     // Strip leading status words (e.g. "Planned", "Implemented")
-    story.title = story.title.replace(/^(planned|implemented|completed|pending|done|in progress)\b\s*/i, '').trim();
+    story.title = story.title
+      .replace(
+        /^(planned|implemented|completed|pending|done|in progress)\b\s*/i,
+        "",
+      )
+      .trim();
     // Filter catch-all titles
-    return story.title.length > 0 && !CATCHALL_TITLES.has(story.title.toLowerCase());
+    return (
+      story.title.length > 0 && !CATCHALL_TITLES.has(story.title.toLowerCase())
+    );
   });
 
-  const filtered = stories.map(story => {
-    const validACs = story.acceptanceCriteria.filter(ac => {
-      const desc = ac.description?.trim();
-      if (!desc) return false;
+  const filtered = stories
+    .map((story) => {
+      const validACs = story.acceptanceCriteria.filter((ac) => {
+        const desc = ac.description?.trim();
+        if (!desc) return false;
 
-      // Too short or too long
-      if (desc.length < 10 || desc.length > 300) return false;
+        // Too short or too long
+        if (desc.length < 10 || desc.length > 300) return false;
 
-      // Questions
-      if (desc.endsWith('?')) return false;
+        // Questions
+        if (desc.endsWith("?")) return false;
 
-      // Non-testable action verbs
-      if (NON_TESTABLE_PREFIX.test(desc)) return false;
+        // Non-testable action verbs
+        if (NON_TESTABLE_PREFIX.test(desc)) return false;
 
-      // Filter meta-test-quality ACs (about how to write tests, not what to test)
-      if (META_TEST_AC.test(desc)) return false;
+        // Filter meta-test-quality ACs (about how to write tests, not what to test)
+        if (META_TEST_AC.test(desc)) return false;
 
-      // Deduplicate by normalized description
-      const normalized = desc.toLowerCase().replace(/\s+/g, ' ');
-      if (seenDescriptions.has(normalized)) return false;
-      seenDescriptions.add(normalized);
+        // Deduplicate by normalized description
+        const normalized = desc.toLowerCase().replace(/\s+/g, " ");
+        if (seenDescriptions.has(normalized)) return false;
+        seenDescriptions.add(normalized);
 
-      return true;
-    });
+        return true;
+      });
 
-    return { ...story, acceptanceCriteria: validACs };
-  }).filter(story => story.acceptanceCriteria.length > 0);
+      return { ...story, acceptanceCriteria: validACs };
+    })
+    .filter((story) => story.acceptanceCriteria.length > 0);
 
   // Deduplicate stories by title (keep the one with more ACs)
   const storyMap = new Map<string, ExtractedUserStory>();
   for (const story of filtered) {
     const key = story.title.toLowerCase().trim();
     const existing = storyMap.get(key);
-    if (!existing || story.acceptanceCriteria.length > existing.acceptanceCriteria.length) {
+    if (
+      !existing ||
+      story.acceptanceCriteria.length > existing.acceptanceCriteria.length
+    ) {
       storyMap.set(key, story);
     }
   }
@@ -311,14 +395,30 @@ function validateAndFilterStories(stories: ExtractedUserStory[]): ExtractedUserS
 // Document Discovery
 // ============================================
 
-const SPEC_PATTERNS = ['docs/', 'specs/', 'specifications/', 'requirements/', 'stories/', 'features/'];
-const SPEC_FILES = ['README.md', 'SPEC.md', 'PRD.md', 'SPECIFICATION.md', 'REQUIREMENTS.md', 'USER_STORIES.md'];
+const SPEC_PATTERNS = [
+  "docs/",
+  "specs/",
+  "specifications/",
+  "requirements/",
+  "stories/",
+  "features/",
+];
+const SPEC_FILES = [
+  "README.md",
+  "SPEC.md",
+  "PRD.md",
+  "SPECIFICATION.md",
+  "REQUIREMENTS.md",
+  "USER_STORIES.md",
+];
 
 function isSpecFile(path: string): boolean {
   const lower = path.toLowerCase();
-  if (SPEC_FILES.some(f => lower === f.toLowerCase())) return true;
-  if (SPEC_PATTERNS.some(p => lower.startsWith(p))) {
-    return lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.pdf');
+  if (SPEC_FILES.some((f) => lower === f.toLowerCase())) return true;
+  if (SPEC_PATTERNS.some((p) => lower.startsWith(p))) {
+    return (
+      lower.endsWith(".md") || lower.endsWith(".txt") || lower.endsWith(".pdf")
+    );
   }
   return false;
 }
@@ -330,41 +430,52 @@ export interface DiscoveredSpecFile {
 
 export async function discoverSpecFiles(
   repositoryId: string,
-  branch: string
+  branch: string,
 ): Promise<{ success: boolean; files?: DiscoveredSpecFile[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
-      return { success: false, error: 'Repository not found' };
+      return { success: false, error: "Repository not found" };
     }
 
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
+      return { success: false, error: "GitHub account not connected" };
     }
 
-    const repoTree = await getRepoTree(account.accessToken, repo.owner, repo.name, branch);
+    const repoTree = await getRepoTree(
+      account.accessToken,
+      repo.owner,
+      repo.name,
+      branch,
+    );
     if (!repoTree || repoTree.tree.length === 0) {
-      return { success: false, error: 'Could not read repository tree' };
+      return { success: false, error: "Could not read repository tree" };
     }
 
     const specEntries = repoTree.tree.filter(
-      entry => entry.type === 'blob' && isSpecFile(entry.path)
+      (entry) => entry.type === "blob" && isSpecFile(entry.path),
     );
 
     if (specEntries.length === 0) {
-      return { success: false, error: 'No specification files found in repository' };
+      return {
+        success: false,
+        error: "No specification files found in repository",
+      };
     }
 
-    const files: DiscoveredSpecFile[] = specEntries.map(entry => ({
+    const files: DiscoveredSpecFile[] = specEntries.map((entry) => ({
       path: entry.path,
       size: entry.size,
     }));
 
     return { success: true, files };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to discover specs';
+    const message =
+      error instanceof Error ? error.message : "Failed to discover specs";
     return { success: false, error: message };
   }
 }
@@ -376,45 +487,61 @@ export async function discoverSpecFiles(
 export async function extractUserStoriesFromFiles(
   repositoryId: string,
   branch: string,
-  filePaths: string[]
+  filePaths: string[],
 ): Promise<SpecImportResponse> {
   const { team } = await requireRepoAccess(repositoryId);
   try {
     if (filePaths.length === 0) {
-      return { success: false, error: 'No files selected' };
+      return { success: false, error: "No files selected" };
     }
 
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
-      return { success: false, error: 'Repository not found' };
+      return { success: false, error: "Repository not found" };
     }
 
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
+      return { success: false, error: "GitHub account not connected" };
     }
 
     // Fetch file contents
     const contents: string[] = [];
     for (const path of filePaths) {
-      const content = await getFileContent(account.accessToken, repo.owner, repo.name, path, branch);
+      const content = await getFileContent(
+        account.accessToken,
+        repo.owner,
+        repo.name,
+        path,
+        branch,
+      );
       if (content) {
         contents.push(`--- ${path} ---\n${content}`);
       }
     }
 
     if (contents.length === 0) {
-      return { success: false, error: 'Could not read any selected files' };
+      return { success: false, error: "Could not read any selected files" };
     }
 
-    const specContent = contents.join('\n\n');
+    const specContent = contents.join("\n\n");
 
     // Fire and forget — runs in background, not blocked by proxy timeout
-    extractStoriesFromContent(specContent, repositoryId, branch, filePaths, 'github', team.id).catch(() => {});
+    extractStoriesFromContent(
+      specContent,
+      repositoryId,
+      branch,
+      filePaths,
+      "github",
+      team.id,
+    ).catch(() => {});
 
     return { success: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to extract user stories';
+    const message =
+      error instanceof Error ? error.message : "Failed to extract user stories";
     return { success: false, error: message };
   }
 }
@@ -422,28 +549,28 @@ export async function extractUserStoriesFromFiles(
 export async function extractUserStoriesFromUpload(
   files: { name: string; content: string }[],
   repositoryId: string,
-  branch: string
+  branch: string,
 ): Promise<SpecImportResponse> {
   const { team } = await requireRepoAccess(repositoryId);
   try {
     if (files.length === 0) {
-      return { success: false, error: 'No files uploaded' };
+      return { success: false, error: "No files uploaded" };
     }
 
     const contents: string[] = [];
     const fileNames: string[] = [];
     for (const file of files) {
-      const buf = Buffer.from(file.content, 'base64');
+      const buf = Buffer.from(file.content, "base64");
       let text: string;
       const lower = file.name.toLowerCase();
-      if (lower.endsWith('.pdf')) {
+      if (lower.endsWith(".pdf")) {
         const { text: pages } = await extractText(new Uint8Array(buf));
-        text = pages.join('\n');
-      } else if (lower.endsWith('.docx')) {
+        text = pages.join("\n");
+      } else if (lower.endsWith(".docx")) {
         const { value } = await mammoth.extractRawText({ buffer: buf });
         text = value;
       } else {
-        text = buf.toString('utf-8');
+        text = buf.toString("utf-8");
       }
       if (text.trim()) {
         contents.push(`--- ${file.name} ---\n${text}`);
@@ -452,17 +579,28 @@ export async function extractUserStoriesFromUpload(
     }
 
     if (contents.length === 0) {
-      return { success: false, error: 'Could not extract text from uploaded files' };
+      return {
+        success: false,
+        error: "Could not extract text from uploaded files",
+      };
     }
 
-    const specContent = contents.join('\n\n');
+    const specContent = contents.join("\n\n");
 
     // Fire and forget — runs in background, not blocked by proxy timeout
-    extractStoriesFromContent(specContent, repositoryId, branch, fileNames, 'upload', team.id).catch(() => {});
+    extractStoriesFromContent(
+      specContent,
+      repositoryId,
+      branch,
+      fileNames,
+      "upload",
+      team.id,
+    ).catch(() => {});
 
     return { success: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to extract user stories';
+    const message =
+      error instanceof Error ? error.message : "Failed to extract user stories";
     return { success: false, error: message };
   }
 }
@@ -472,41 +610,68 @@ async function extractStoriesFromContent(
   repositoryId: string,
   branch: string,
   sourceFiles: string[],
-  sourceType: 'github' | 'upload',
+  sourceType: "github" | "upload",
   teamId: string,
 ): Promise<void> {
   const startTime = Date.now();
   const steps = [
-    { id: 'plan' as const, status: 'active' as const, label: 'Extracting Stories', description: `Analyzing ${sourceFiles.length} document(s)...`, startedAt: new Date().toISOString() },
-    { id: 'review' as const, status: 'pending' as const, label: 'Review Stories', description: 'Review extracted user stories' },
+    {
+      id: "plan" as const,
+      status: "active" as const,
+      label: "Extracting Stories",
+      description: `Analyzing ${sourceFiles.length} document(s)...`,
+      startedAt: new Date().toISOString(),
+    },
+    {
+      id: "review" as const,
+      status: "pending" as const,
+      label: "Review Stories",
+      description: "Review extracted user stories",
+    },
   ];
 
   const session = await queries.createAgentSession({
     repositoryId,
     teamId,
-    status: 'active',
-    currentStepId: 'plan',
+    status: "active",
+    currentStepId: "plan",
     steps,
-    metadata: { specImport: true, sourceFiles, sourceType } as Record<string, unknown>,
+    metadata: { specImport: true, sourceFiles, sourceType } as Record<
+      string,
+      unknown
+    >,
   });
 
   emitAndPersistActivityEvent({
-    teamId, repositoryId, sessionId: session.id,
-    sourceType: 'generate_agent', eventType: 'session:start',
+    teamId,
+    repositoryId,
+    sessionId: session.id,
+    sourceType: "generate_agent",
+    eventType: "session:start",
     summary: `Importing spec from ${sourceFiles.length} file(s)`,
-    agentType: 'planner', stepId: null, detail: null,
-    artifactType: null, artifactId: null, artifactLabel: null,
-    durationMs: null, promptLogId: null,
+    agentType: "planner",
+    stepId: null,
+    detail: null,
+    artifactType: null,
+    artifactId: null,
+    artifactLabel: null,
+    durationMs: null,
+    promptLogId: null,
   }).catch(() => {});
 
   try {
     const config = await getAIConfig(repositoryId);
     const prompt = createUserStoryExtractionPrompt(specContent);
 
-    const response = await generateWithAI(config, prompt, 'You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.', {
-      actionType: 'extract_user_stories',
-      repositoryId,
-    });
+    const response = await generateWithAI(
+      config,
+      prompt,
+      "You are a document parser that extracts structured user stories and acceptance criteria. Output ONLY the requested format — no code, no tests, no conversation.",
+      {
+        actionType: "extract_user_stories",
+        repositoryId,
+      },
+    );
 
     // Parse response — try JSON first, then markdown. The shape check
     // narrows attacker-controlled JSON before downstream code trusts
@@ -517,16 +682,23 @@ async function extractStoriesFromContent(
     if (jsonStr) {
       try {
         const raw = JSON.parse(jsonStr);
-        if (!Array.isArray(raw)) throw new Error('Expected array');
-        stories = raw.filter((s): s is ExtractedUserStory =>
-          s && typeof s === 'object' && typeof (s as { title?: unknown }).title === 'string',
+        if (!Array.isArray(raw)) throw new Error("Expected array");
+        stories = raw.filter(
+          (s): s is ExtractedUserStory =>
+            s &&
+            typeof s === "object" &&
+            typeof (s as { title?: unknown }).title === "string",
         );
         for (const story of stories) {
           if (!story.acceptanceCriteria) continue;
           for (const ac of story.acceptanceCriteria) {
             if (!ac.description) continue;
             if (!ac.testName) ac.testName = ac.description;
-            if (!ac.description.match(/\b(given|when|then|verify|check|should|must)\b/i)) {
+            if (
+              !ac.description.match(
+                /\b(given|when|then|verify|check|should|must)\b/i,
+              )
+            ) {
               const rawDesc = ac.description;
               ac.description = `When ${rawDesc.charAt(0).toLowerCase() + rawDesc.slice(1)}, verify the expected behavior`;
             }
@@ -534,17 +706,20 @@ async function extractStoriesFromContent(
         }
       } catch {
         const parsed = parseStoriesFromMarkdown(response);
-        if (!parsed) throw new Error('Could not extract stories from AI response');
+        if (!parsed)
+          throw new Error("Could not extract stories from AI response");
         stories = parsed;
       }
     } else {
       const parsed = parseStoriesFromMarkdown(response);
-      if (!parsed) throw new Error('Could not extract stories from AI response');
+      if (!parsed)
+        throw new Error("Could not extract stories from AI response");
       stories = parsed;
     }
 
     stories = validateAndFilterStories(stories);
-    if (stories.length === 0) throw new Error('No testable stories found after quality filtering');
+    if (stories.length === 0)
+      throw new Error("No testable stories found after quality filtering");
 
     // Create import record
     let importId: string | null = null;
@@ -552,56 +727,95 @@ async function extractStoriesFromContent(
       const importRecord = await queries.createSpecImport({
         repositoryId,
         name: `Import from ${sourceFiles.length} file(s)`,
-        sourceType, sourceFiles, branch,
-        status: 'extracted',
+        sourceType,
+        sourceFiles,
+        branch,
+        status: "extracted",
         extractedStories: stories,
       });
       importId = importRecord.id;
     } catch (err) {
-      console.error('Failed to create spec import record:', err);
+      console.error("Failed to create spec import record:", err);
     }
 
-    const totalAC = stories.reduce((sum, s) => sum + s.acceptanceCriteria.length, 0);
+    const totalAC = stories.reduce(
+      (sum, s) => sum + s.acceptanceCriteria.length,
+      0,
+    );
 
     // Transition: plan → completed, review → waiting_user, session → paused
     await queries.updateAgentSession(session.id, {
-      status: 'paused',
-      currentStepId: 'review',
+      status: "paused",
+      currentStepId: "review",
       steps: [
-        { ...steps[0], status: 'completed', completedAt: new Date().toISOString() },
-        { ...steps[1], status: 'waiting_user', startedAt: new Date().toISOString() },
+        {
+          ...steps[0],
+          status: "completed",
+          completedAt: new Date().toISOString(),
+        },
+        {
+          ...steps[1],
+          status: "waiting_user",
+          startedAt: new Date().toISOString(),
+        },
       ],
-      metadata: { specImport: true, sourceFiles, sourceType, stories, importId } as Record<string, unknown>,
+      metadata: {
+        specImport: true,
+        sourceFiles,
+        sourceType,
+        stories,
+        importId,
+      } as Record<string, unknown>,
     });
 
     emitAndPersistActivityEvent({
-      teamId, repositoryId, sessionId: session.id,
-      sourceType: 'generate_agent', eventType: 'step:waiting_user',
+      teamId,
+      repositoryId,
+      sessionId: session.id,
+      sourceType: "generate_agent",
+      eventType: "step:waiting_user",
       summary: `${stories.length} stories, ${totalAC} acceptance criteria extracted — review pending`,
-      agentType: 'planner', stepId: 'review', detail: null,
-      artifactType: 'spec_import', artifactId: session.id,
+      agentType: "planner",
+      stepId: "review",
+      detail: null,
+      artifactType: "spec_import",
+      artifactId: session.id,
       artifactLabel: `${stories.length} stories ready for review`,
-      durationMs: Date.now() - startTime, promptLogId: null,
+      durationMs: Date.now() - startTime,
+      promptLogId: null,
     }).catch(() => {});
   } catch (error) {
-    console.error('[spec-import] extractStoriesFromContent failed:', error);
+    console.error("[spec-import] extractStoriesFromContent failed:", error);
     const message = error instanceof Error ? error.message : String(error);
 
     await queries.updateAgentSession(session.id, {
-      status: 'failed',
+      status: "failed",
       steps: [
-        { ...steps[0], status: 'failed', error: message, completedAt: new Date().toISOString() },
-        { ...steps[1], status: 'skipped' },
+        {
+          ...steps[0],
+          status: "failed",
+          error: message,
+          completedAt: new Date().toISOString(),
+        },
+        { ...steps[1], status: "skipped" },
       ],
     });
 
     emitAndPersistActivityEvent({
-      teamId, repositoryId, sessionId: session.id,
-      sourceType: 'generate_agent', eventType: 'session:error',
+      teamId,
+      repositoryId,
+      sessionId: session.id,
+      sourceType: "generate_agent",
+      eventType: "session:error",
       summary: `Spec import failed: ${message}`,
-      agentType: 'planner', stepId: null, detail: null,
-      artifactType: null, artifactId: null, artifactLabel: null,
-      durationMs: Date.now() - startTime, promptLogId: null,
+      agentType: "planner",
+      stepId: null,
+      detail: null,
+      artifactType: null,
+      artifactId: null,
+      artifactLabel: null,
+      durationMs: Date.now() - startTime,
+      promptLogId: null,
     }).catch(() => {});
   }
 }
@@ -610,39 +824,65 @@ async function extractStoriesFromContent(
 // Spec import session helpers
 // ============================================
 
-export async function getSpecImportSession(sessionId: string): Promise<SpecImportResponse> {
+export async function getSpecImportSession(
+  sessionId: string,
+): Promise<SpecImportResponse> {
   const session = await queries.getAgentSession(sessionId);
-  if (!session) return { success: false, error: 'Session not found' };
+  if (!session) return { success: false, error: "Session not found" };
   await requireRepoAccess(session.repositoryId);
 
-  const meta = session.metadata as { stories?: ExtractedUserStory[]; importId?: string } | null;
-  if (!meta?.stories) return { success: false, error: 'No stories found in session' };
+  const meta = session.metadata as {
+    stories?: ExtractedUserStory[];
+    importId?: string;
+  } | null;
+  if (!meta?.stories)
+    return { success: false, error: "No stories found in session" };
 
-  return { success: true, stories: meta.stories, importId: meta.importId ?? undefined };
+  return {
+    success: true,
+    stories: meta.stories,
+    importId: meta.importId ?? undefined,
+  };
 }
 
-export async function completeSpecImportSession(sessionId: string): Promise<void> {
+export async function completeSpecImportSession(
+  sessionId: string,
+): Promise<void> {
   const session = await queries.getAgentSession(sessionId);
   if (!session) return;
   await requireRepoAccess(session.repositoryId);
 
-  const teamId = session.teamId || '';
+  const teamId = session.teamId || "";
 
   await queries.updateAgentSession(sessionId, {
-    status: 'completed',
+    status: "completed",
     completedAt: new Date(),
-    steps: (session.steps || []).map(s =>
-      s.id === 'review' ? { ...s, status: 'completed' as const, completedAt: new Date().toISOString() } : s
+    steps: (session.steps || []).map((s) =>
+      s.id === "review"
+        ? {
+            ...s,
+            status: "completed" as const,
+            completedAt: new Date().toISOString(),
+          }
+        : s,
     ),
   });
 
   emitAndPersistActivityEvent({
-    teamId, repositoryId: session.repositoryId, sessionId,
-    sourceType: 'generate_agent', eventType: 'session:complete',
-    summary: 'Spec import review completed',
-    agentType: null, stepId: null, detail: null,
-    artifactType: null, artifactId: null, artifactLabel: null,
-    durationMs: null, promptLogId: null,
+    teamId,
+    repositoryId: session.repositoryId,
+    sessionId,
+    sourceType: "generate_agent",
+    eventType: "session:complete",
+    summary: "Spec import review completed",
+    agentType: null,
+    stepId: null,
+    detail: null,
+    artifactType: null,
+    artifactId: null,
+    artifactLabel: null,
+    durationMs: null,
+    promptLogId: null,
   }).catch(() => {});
 }
 
@@ -652,21 +892,23 @@ export async function completeSpecImportSession(sessionId: string): Promise<void
 
 export async function getBranchChanges(
   repositoryId: string,
-  branch: string
+  branch: string,
 ): Promise<{ success: boolean; changedFiles?: string[]; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
     const repo = await queries.getRepository(repositoryId);
     if (!repo) {
-      return { success: false, error: 'Repository not found' };
+      return { success: false, error: "Repository not found" };
     }
 
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) {
-      return { success: false, error: 'GitHub account not connected' };
+      return { success: false, error: "GitHub account not connected" };
     }
 
-    const baseBranch = repo.defaultBranch || 'main';
+    const baseBranch = repo.defaultBranch || "main";
     if (branch === baseBranch) {
       // No diff against itself
       return { success: true, changedFiles: [] };
@@ -677,33 +919,36 @@ export async function getBranchChanges(
       repo.owner,
       repo.name,
       baseBranch,
-      branch
+      branch,
     );
 
     if (!comparison) {
       return { success: true, changedFiles: [] };
     }
 
-    const changedFiles = comparison.files.map(f => f.filename);
+    const changedFiles = comparison.files.map((f) => f.filename);
     return { success: true, changedFiles };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to get branch changes';
+    const message =
+      error instanceof Error ? error.message : "Failed to get branch changes";
     return { success: false, error: message };
   }
 }
 
 async function fetchBranchDiffs(
   repositoryId: string,
-  branch: string
+  branch: string,
 ): Promise<{ changedFiles: string[]; fileDiffs?: string } | null> {
   try {
     const repo = await queries.getRepository(repositoryId);
     if (!repo) return null;
 
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) return null;
 
-    const baseBranch = repo.defaultBranch || 'main';
+    const baseBranch = repo.defaultBranch || "main";
     if (branch === baseBranch) return null;
 
     const comparison = await compareBranches(
@@ -711,18 +956,25 @@ async function fetchBranchDiffs(
       repo.owner,
       repo.name,
       baseBranch,
-      branch
+      branch,
     );
 
     if (!comparison || comparison.files.length === 0) return null;
 
-    const changedFiles = comparison.files.map(f => f.filename);
+    const changedFiles = comparison.files.map((f) => f.filename);
 
     // Filter to relevant source files (not test files, not configs)
-    const sourceFiles = changedFiles.filter(f =>
-      (f.endsWith('.tsx') || f.endsWith('.ts') || f.endsWith('.jsx') || f.endsWith('.js') ||
-       f.endsWith('.vue') || f.endsWith('.svelte')) &&
-      !f.includes('.test.') && !f.includes('.spec.') && !f.includes('__tests__')
+    const sourceFiles = changedFiles.filter(
+      (f) =>
+        (f.endsWith(".tsx") ||
+          f.endsWith(".ts") ||
+          f.endsWith(".jsx") ||
+          f.endsWith(".js") ||
+          f.endsWith(".vue") ||
+          f.endsWith(".svelte")) &&
+        !f.includes(".test.") &&
+        !f.includes(".spec.") &&
+        !f.includes("__tests__"),
     );
 
     // Fetch content of up to 5 relevant changed files for context
@@ -730,7 +982,13 @@ async function fetchBranchDiffs(
     const diffs: string[] = [];
 
     for (const filePath of filesToFetch) {
-      const content = await getFileContent(account.accessToken, repo.owner, repo.name, filePath, branch);
+      const content = await getFileContent(
+        account.accessToken,
+        repo.owner,
+        repo.name,
+        filePath,
+        branch,
+      );
       if (content && content.length < 5000) {
         diffs.push(`--- ${filePath} ---\n${content}`);
       }
@@ -738,7 +996,7 @@ async function fetchBranchDiffs(
 
     return {
       changedFiles: sourceFiles,
-      fileDiffs: diffs.length > 0 ? diffs.join('\n\n') : undefined,
+      fileDiffs: diffs.length > 0 ? diffs.join("\n\n") : undefined,
     };
   } catch {
     return null;
@@ -758,7 +1016,7 @@ export async function generateTestsFromStories(
     useBranchContext?: boolean;
     targetUrl?: string;
     codebaseIntelligence?: CodebaseIntelligenceContext;
-  }
+  },
 ): Promise<GenerateTestsResponse> {
   await requireRepoAccess(repositoryId);
   // Count total tests to generate
@@ -774,11 +1032,17 @@ export async function generateTestsFromStories(
     return sum + count;
   }, 0);
 
-  const jobId = await createJob('build_tests', `Generating ${totalTests} tests from spec`, totalTests, repositoryId);
+  const jobId = await createJob(
+    "build_tests",
+    `Generating ${totalTests} tests from spec`,
+    totalTests,
+    repositoryId,
+  );
 
   try {
     // Update import status
-    if (importId) await queries.updateSpecImport(importId, { status: 'generating' });
+    if (importId)
+      await queries.updateSpecImport(importId, { status: "generating" });
 
     const config = await getAIConfig(repositoryId);
     let areasCreated = 0;
@@ -786,14 +1050,15 @@ export async function generateTestsFromStories(
     const errors: string[] = [];
 
     // Fetch branch context if requested
-    let branchChanges: { changedFiles: string[]; fileDiffs?: string } | null = null;
+    let branchChanges: { changedFiles: string[]; fileDiffs?: string } | null =
+      null;
     if (options?.useBranchContext) {
       branchChanges = await fetchBranchDiffs(repositoryId, branch);
     }
 
     // Fetch available routes to constrain test navigation
     const repoRoutes = await queries.getRoutesByRepo(repositoryId);
-    const availableRoutes = repoRoutes.map(r => r.path);
+    const availableRoutes = repoRoutes.map((r) => r.path);
 
     // Pre-create areas and collect all task groups
     interface TaskInfo {
@@ -807,11 +1072,15 @@ export async function generateTestsFromStories(
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
         story.title,
-        story.description
+        story.description,
       );
 
-      const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-      const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
+      const existingAreas =
+        await queries.getFunctionalAreasByRepo(repositoryId);
+      const wasNew =
+        existingAreas.filter(
+          (a) => a.name.toLowerCase() === story.title.toLowerCase(),
+        ).length <= 1;
       if (wasNew) areasCreated++;
 
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
@@ -823,13 +1092,15 @@ export async function generateTestsFromStories(
     // Run test generation in parallel (concurrency: 3)
     const parallelTasks = allTasks.map((task) => {
       const primaryAC = task.group[0];
-      const testName = primaryAC.testName || `${task.story.title}: ${primaryAC.description.slice(0, 60)}`;
-      let acDescription = task.group.map(ac => ac.description).join('\n');
+      const testName =
+        primaryAC.testName ||
+        `${task.story.title}: ${primaryAC.description.slice(0, 60)}`;
+      let acDescription = task.group.map((ac) => ac.description).join("\n");
       // If description just duplicates the name or is too short, use story context
       if (acDescription === testName || acDescription.trim().length < 20) {
         acDescription = task.story.description;
         if (task.group.length > 0 && task.group[0].description !== testName) {
-          acDescription += `\n${task.group.map(ac => ac.description).join('\n')}`;
+          acDescription += `\n${task.group.map((ac) => ac.description).join("\n")}`;
         }
       }
 
@@ -844,11 +1115,12 @@ export async function generateTestsFromStories(
             targetUrl: options?.targetUrl,
             branchChanges: branchChanges || undefined,
             codebaseIntelligence: options?.codebaseIntelligence,
-            availableRoutes: availableRoutes.length > 0 ? availableRoutes : undefined,
+            availableRoutes:
+              availableRoutes.length > 0 ? availableRoutes : undefined,
           });
 
           const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
-            actionType: 'generate_spec_tests',
+            actionType: "generate_spec_tests",
             repositoryId,
           });
           const code = extractCodeFromResponse(response);
@@ -865,20 +1137,24 @@ export async function generateTestsFromStories(
             // Create a linked spec so the spec side is populated alongside the test.
             const specBody = [
               `**Area:** ${task.story.title}`,
-              task.story.description ? `**Story:** ${task.story.description}` : '',
-              '',
-              task.group.map(ac => `- ${ac.description}`).join('\n'),
-            ].filter(Boolean).join('\n');
-            const { createHash } = await import('crypto');
-            const codeHash = createHash('sha256').update(code).digest('hex');
+              task.story.description
+                ? `**Story:** ${task.story.description}`
+                : "",
+              "",
+              task.group.map((ac) => `- ${ac.description}`).join("\n"),
+            ]
+              .filter(Boolean)
+              .join("\n");
+            const { createHash } = await import("crypto");
+            const codeHash = createHash("sha256").update(code).digest("hex");
             const specId = await queries.createTestSpec({
               repositoryId,
               testId: test.id,
               functionalAreaId: task.areaId,
               title: testName,
               spec: specBody,
-              source: 'planner',
-              status: 'has_test',
+              source: "planner",
+              status: "has_test",
               codeHash,
             });
             await queries.linkSpecToTest(specId, test.id);
@@ -890,21 +1166,25 @@ export async function generateTestsFromStories(
       };
     });
 
-    const results = await runParallel(parallelTasks, 3, async (completed, total) => {
-      await updateJobProgress(jobId, completed, total);
-    });
+    const results = await runParallel(
+      parallelTasks,
+      3,
+      async (completed, total) => {
+        await updateJobProgress(jobId, completed, total);
+      },
+    );
 
     for (const result of results) {
       if (result.success && result.result?.created) {
         testsCreated++;
       } else if (!result.success) {
-        errors.push(`${result.error || 'Unknown error'}`);
+        errors.push(`${result.error || "Unknown error"}`);
       }
     }
 
     // Materialize `agentPlan` for each touched area so the plan side isn't empty.
-    const { syncAreaPlanAndSpecs } = await import('./specs');
-    const touchedAreaIds = Array.from(new Set(allTasks.map(t => t.areaId)));
+    const { syncAreaPlanAndSpecs } = await import("./specs");
+    const touchedAreaIds = Array.from(new Set(allTasks.map((t) => t.areaId)));
     for (const areaId of touchedAreaIds) {
       try {
         await syncAreaPlanAndSpecs(areaId, repositoryId);
@@ -916,7 +1196,7 @@ export async function generateTestsFromStories(
     // Update import record
     if (importId) {
       await queries.updateSpecImport(importId, {
-        status: 'completed',
+        status: "completed",
         areasCreated,
         testsCreated,
         completedAt: new Date(),
@@ -924,20 +1204,27 @@ export async function generateTestsFromStories(
     }
 
     await completeJob(jobId);
-    revalidatePath('/areas');
-    revalidatePath('/tests');
+    revalidatePath("/areas");
+    revalidatePath("/tests");
 
     return { success: true, areasCreated, testsCreated, errors };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate tests';
+    const message =
+      error instanceof Error ? error.message : "Failed to generate tests";
     if (importId) {
       await queries.updateSpecImport(importId, {
-        status: 'failed',
+        status: "failed",
         error: message,
       });
     }
     await failJob(jobId, message);
-    return { success: false, areasCreated: 0, testsCreated: 0, errors: [message], error: message };
+    return {
+      success: false,
+      areasCreated: 0,
+      testsCreated: 0,
+      errors: [message],
+      error: message,
+    };
   }
 }
 
@@ -952,7 +1239,7 @@ export async function createPlaceholdersFromStories(
   _branch: string,
   options?: {
     targetUrl?: string;
-  }
+  },
 ): Promise<GenerateTestsResponse> {
   await requireRepoAccess(repositoryId);
   const totalTests = stories.reduce((sum, story) => {
@@ -966,10 +1253,16 @@ export async function createPlaceholdersFromStories(
     return sum + count;
   }, 0);
 
-  const jobId = await createJob('build_tests', `Creating ${totalTests} placeholder tests`, totalTests, repositoryId);
+  const jobId = await createJob(
+    "build_tests",
+    `Creating ${totalTests} placeholder tests`,
+    totalTests,
+    repositoryId,
+  );
 
   try {
-    if (importId) await queries.updateSpecImport(importId, { status: 'generating' });
+    if (importId)
+      await queries.updateSpecImport(importId, { status: "generating" });
 
     let areasCreated = 0;
     let testsCreated = 0;
@@ -980,11 +1273,15 @@ export async function createPlaceholdersFromStories(
       const area = await queries.getOrCreateFunctionalAreaByRepo(
         repositoryId,
         story.title,
-        story.description
+        story.description,
       );
 
-      const existingAreas = await queries.getFunctionalAreasByRepo(repositoryId);
-      const wasNew = existingAreas.filter(a => a.name.toLowerCase() === story.title.toLowerCase()).length <= 1;
+      const existingAreas =
+        await queries.getFunctionalAreasByRepo(repositoryId);
+      const wasNew =
+        existingAreas.filter(
+          (a) => a.name.toLowerCase() === story.title.toLowerCase(),
+        ).length <= 1;
       if (wasNew) areasCreated++;
 
       const acGroups = groupAcceptanceCriteria(story.acceptanceCriteria);
@@ -994,13 +1291,15 @@ export async function createPlaceholdersFromStories(
         await updateJobProgress(jobId, testIndex, totalTests);
 
         const primaryAC = group[0];
-        const testName = primaryAC.testName || `${story.title}: ${primaryAC.description.slice(0, 60)}`;
-        let acDescription = group.map(ac => ac.description).join('\n');
+        const testName =
+          primaryAC.testName ||
+          `${story.title}: ${primaryAC.description.slice(0, 60)}`;
+        let acDescription = group.map((ac) => ac.description).join("\n");
         // If description just duplicates the name or is too short, use story context
         if (acDescription === testName || acDescription.trim().length < 20) {
           acDescription = story.description;
           if (group.length > 0 && group[0].description !== testName) {
-            acDescription += `\n${group.map(ac => ac.description).join('\n')}`;
+            acDescription += `\n${group.map((ac) => ac.description).join("\n")}`;
           }
         }
 
@@ -1017,35 +1316,39 @@ export async function createPlaceholdersFromStories(
           // Create linked testSpec with story + area context
           const specBody = [
             `**Area:** ${story.title}`,
-            story.description ? `**Story:** ${story.description}` : '',
-            '',
-            group.map(ac => `- ${ac.description}`).join('\n'),
-          ].filter(Boolean).join('\n');
+            story.description ? `**Story:** ${story.description}` : "",
+            "",
+            group.map((ac) => `- ${ac.description}`).join("\n"),
+          ]
+            .filter(Boolean)
+            .join("\n");
 
-          const { createHash } = await import('crypto');
-          const codeHash = createHash('sha256').update(PLACEHOLDER_CODE).digest('hex');
+          const { createHash } = await import("crypto");
+          const codeHash = createHash("sha256")
+            .update(PLACEHOLDER_CODE)
+            .digest("hex");
           const specId = await queries.createTestSpec({
             repositoryId,
             testId: test.id,
             functionalAreaId: area.id,
             title: testName,
             spec: specBody,
-            source: 'planner',
-            status: 'has_test',
+            source: "planner",
+            status: "has_test",
             codeHash,
           });
           await queries.linkSpecToTest(specId, test.id);
 
           testsCreated++;
         } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
+          const msg = err instanceof Error ? err.message : "Unknown error";
           errors.push(`${testName}: ${msg}`);
         }
       }
     }
 
     // Materialize `agentPlan` for each touched area so plan/spec stay in sync.
-    const { syncAreaPlanAndSpecs } = await import('./specs');
+    const { syncAreaPlanAndSpecs } = await import("./specs");
     const touchedAreaIds = new Set<string>();
     for (const story of stories) {
       const area = await queries.getOrCreateFunctionalAreaByRepo(
@@ -1065,7 +1368,7 @@ export async function createPlaceholdersFromStories(
 
     if (importId) {
       await queries.updateSpecImport(importId, {
-        status: 'completed',
+        status: "completed",
         areasCreated,
         testsCreated,
         completedAt: new Date(),
@@ -1073,22 +1376,34 @@ export async function createPlaceholdersFromStories(
     }
 
     await completeJob(jobId);
-    revalidatePath('/areas');
-    revalidatePath('/tests');
+    revalidatePath("/areas");
+    revalidatePath("/tests");
 
     return { success: true, areasCreated, testsCreated, errors };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create placeholder tests';
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to create placeholder tests";
     if (importId) {
-      await queries.updateSpecImport(importId, { status: 'failed', error: message });
+      await queries.updateSpecImport(importId, {
+        status: "failed",
+        error: message,
+      });
     }
     await failJob(jobId, message);
-    return { success: false, areasCreated: 0, testsCreated: 0, errors: [message], error: message };
+    return {
+      success: false,
+      areasCreated: 0,
+      testsCreated: 0,
+      errors: [message],
+      error: message,
+    };
   }
 }
 
 function groupAcceptanceCriteria(
-  criteria: ExtractedAcceptanceCriterion[]
+  criteria: ExtractedAcceptanceCriterion[],
 ): ExtractedAcceptanceCriterion[][] {
   const groups: Map<string, ExtractedAcceptanceCriterion[]> = new Map();
 
@@ -1133,19 +1448,23 @@ function groupAcceptanceCriteria(
 export async function validateTestWithMCP(
   repositoryId: string,
   testId: string,
-  baseUrl: string
+  baseUrl: string,
 ): Promise<ValidateTestResponse> {
   await requireRepoAccess(repositoryId);
   try {
     // Check if baseUrl is localhost
     const url = new URL(baseUrl);
-    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-      return { success: false, passed: false, error: 'MCP validation is only available for localhost targets' };
+    if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+      return {
+        success: false,
+        passed: false,
+        error: "MCP validation is only available for localhost targets",
+      };
     }
 
     const test = await queries.getTest(testId);
     if (!test) {
-      return { success: false, passed: false, error: 'Test not found' };
+      return { success: false, passed: false, error: "Test not found" };
     }
 
     const config = await getAIConfig(repositoryId);
@@ -1173,7 +1492,7 @@ If fixes are needed, return the FIXED code.
 Return ONLY the code (fixed or original), no explanations.`;
 
     const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
-      actionType: 'fix_test',
+      actionType: "fix_test",
       repositoryId,
       useMCP: true,
     });
@@ -1184,15 +1503,21 @@ Return ONLY the code (fixed or original), no explanations.`;
     if (codeChanged && fixedCode) {
       // Save the fixed version
       const branch = await getCurrentBranchForRepo(repositoryId);
-      await queries.updateTestWithVersion(testId, { code: fixedCode }, 'ai_fix', branch ?? undefined);
-      revalidatePath('/tests');
+      await queries.updateTestWithVersion(
+        testId,
+        { code: fixedCode },
+        "ai_fix",
+        branch ?? undefined,
+      );
+      revalidatePath("/tests");
       revalidatePath(`/tests/${testId}`);
       return { success: true, passed: false, fixedCode };
     }
 
     return { success: true, passed: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'MCP validation failed';
+    const message =
+      error instanceof Error ? error.message : "MCP validation failed";
     return { success: false, passed: false, error: message };
   }
 }
@@ -1200,8 +1525,13 @@ Return ONLY the code (fixed or original), no explanations.`;
 export async function validateAllTestsWithMCP(
   repositoryId: string,
   testIds: string[],
-  baseUrl: string
-): Promise<{ success: boolean; validated: number; fixed: number; errors: string[] }> {
+  baseUrl: string,
+): Promise<{
+  success: boolean;
+  validated: number;
+  fixed: number;
+  errors: string[];
+}> {
   let validated = 0;
   let fixed = 0;
   const errors: string[] = [];
@@ -1212,7 +1542,7 @@ export async function validateAllTestsWithMCP(
       validated++;
       if (result.fixedCode) fixed++;
     } else {
-      errors.push(result.error || 'Unknown error');
+      errors.push(result.error || "Unknown error");
     }
   }
 

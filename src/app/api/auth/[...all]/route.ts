@@ -31,17 +31,17 @@ export async function POST(request: Request): Promise<Response> {
       const retrySec = Math.ceil(result.retryAfterMs / 1000);
       return new Response(
         JSON.stringify({
-          error: 'rate_limit_exceeded',
+          error: "rate_limit_exceeded",
           retryAfterMs: result.retryAfterMs,
           limit: result.limit,
         }),
         {
           status: 429,
           headers: {
-            'Content-Type': 'application/json',
-            'Retry-After': String(retrySec),
-            'X-RateLimit-Limit': String(result.limit),
-            'X-RateLimit-Remaining': '0',
+            "Content-Type": "application/json",
+            "Retry-After": String(retrySec),
+            "X-RateLimit-Limit": String(result.limit),
+            "X-RateLimit-Remaining": "0",
           },
         },
       );

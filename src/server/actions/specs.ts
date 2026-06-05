@@ -1,31 +1,38 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess, requireTeamAccess } from '@/lib/auth';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import {
   generateWithAI,
   SYSTEM_PROMPT,
   createTestPrompt,
   extractCodeFromResponse,
-} from '@/lib/ai';
-import type { AIProviderConfig, TestGenerationContext } from '@/lib/ai/types';
-import { revalidatePath } from 'next/cache';
-import { createHash } from 'crypto';
-import { getCurrentBranchForRepo } from '@/lib/git-utils';
-import { PLACEHOLDER_CODE } from '@/lib/constants/placeholder';
+} from "@/lib/ai";
+import type { AIProviderConfig, TestGenerationContext } from "@/lib/ai/types";
+import { revalidatePath } from "next/cache";
+import { createHash } from "crypto";
+import { getCurrentBranchForRepo } from "@/lib/git-utils";
+import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
 
 function hashCode(code: string): string {
-  return createHash('sha256').update(code).digest('hex');
+  return createHash("sha256").update(code).digest("hex");
 }
 
 async function getAIConfig(repositoryId: string): Promise<AIProviderConfig> {
   const settings = await queries.getAISettings(repositoryId);
   return {
-    provider: settings.provider as 'claude-cli' | 'openrouter' | 'claude-agent-sdk',
+    provider: settings.provider as
+      | "claude-cli"
+      | "openrouter"
+      | "claude-agent-sdk",
     openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel || 'anthropic/claude-sonnet-4',
+    openrouterModel: settings.openrouterModel || "anthropic/claude-sonnet-4",
     customInstructions: settings.customInstructions,
-    agentSdkPermissionMode: settings.agentSdkPermissionMode as 'plan' | 'default' | 'acceptEdits' | undefined,
+    agentSdkPermissionMode: settings.agentSdkPermissionMode as
+      | "plan"
+      | "default"
+      | "acceptEdits"
+      | undefined,
     agentSdkModel: settings.agentSdkModel || undefined,
     agentSdkWorkingDir: settings.agentSdkWorkingDir || undefined,
   };
@@ -45,11 +52,12 @@ export async function saveTestSpec(
   const test = await queries.getTest(testId);
 
   if (existing) {
-    const isOutdated = test && existing.codeHash && hashCode(test.code) !== existing.codeHash;
+    const isOutdated =
+      test && existing.codeHash && hashCode(test.code) !== existing.codeHash;
     await queries.updateTestSpec(existing.id, {
       title,
       spec,
-      status: isOutdated ? 'outdated' : (test ? 'has_test' : 'draft'),
+      status: isOutdated ? "outdated" : test ? "has_test" : "draft",
     });
     revalidatePath(`/tests/${testId}`);
     return existing.id;
@@ -61,8 +69,8 @@ export async function saveTestSpec(
     functionalAreaId: functionalAreaId ?? test?.functionalAreaId ?? null,
     title,
     spec,
-    source: 'manual',
-    status: test ? 'has_test' : 'draft',
+    source: "manual",
+    status: test ? "has_test" : "draft",
     codeHash: test ? hashCode(test.code) : null,
   });
 
@@ -90,12 +98,12 @@ export async function createStandaloneSpec(
     functionalAreaId,
     title,
     spec,
-    source: 'manual',
-    status: 'draft',
+    source: "manual",
+    status: "draft",
     codeHash: null,
   });
 
-  revalidatePath('/areas');
+  revalidatePath("/areas");
   return specId;
 }
 
@@ -123,14 +131,14 @@ export async function createPlaceholderTestCase(
     functionalAreaId,
     title: name,
     spec: description || name,
-    source: 'manual',
-    status: 'has_test',
+    source: "manual",
+    status: "has_test",
     codeHash: hashCode(PLACEHOLDER_CODE),
   });
   await queries.linkSpecToTest(specId, test.id);
 
-  revalidatePath('/areas');
-  revalidatePath('/tests');
+  revalidatePath("/areas");
+  revalidatePath("/tests");
   return { testId: test.id };
 }
 
@@ -142,12 +150,12 @@ export async function generateTestFromSpec(
   await requireRepoAccess(repositoryId);
 
   const spec = await queries.getSpecById(specId);
-  if (!spec) return { success: false, error: 'Spec not found' };
+  if (!spec) return { success: false, error: "Spec not found" };
 
   try {
     const config = await getAIConfig(repositoryId);
     const envConfig = await queries.getEnvironmentConfig(repositoryId);
-    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+    const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
     const context: TestGenerationContext = {
       targetUrl: baseUrl,
@@ -156,28 +164,31 @@ export async function generateTestFromSpec(
 
     const prompt = createTestPrompt(context);
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
-      actionType: 'create_test',
+      actionType: "create_test",
       repositoryId,
     });
     const code = extractCodeFromResponse(response);
 
-    const testId = (await queries.createTest({
-      repositoryId,
-      functionalAreaId: spec.functionalAreaId,
-      name: spec.title,
-      code,
-      targetUrl: baseUrl,
-      specId,
-    })).id;
+    const testId = (
+      await queries.createTest({
+        repositoryId,
+        functionalAreaId: spec.functionalAreaId,
+        name: spec.title,
+        code,
+        targetUrl: baseUrl,
+        specId,
+      })
+    ).id;
 
     await queries.linkSpecToTest(specId, testId);
     await queries.updateTestSpec(specId, { codeHash: hashCode(code) });
 
-    revalidatePath('/areas');
+    revalidatePath("/areas");
     revalidatePath(`/tests/${testId}`);
     return { success: true, testId };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate test';
+    const message =
+      error instanceof Error ? error.message : "Failed to generate test";
     return { success: false, error: message };
   }
 }
@@ -190,15 +201,17 @@ export async function regenerateTestFromSpec(
   await requireRepoAccess(repositoryId);
 
   const spec = await queries.getSpecById(specId);
-  if (!spec || !spec.testId) return { success: false, error: 'Spec not linked to a test' };
+  if (!spec || !spec.testId)
+    return { success: false, error: "Spec not linked to a test" };
 
   const test = await queries.getTest(spec.testId);
-  if (!test) return { success: false, error: 'Linked test not found' };
+  if (!test) return { success: false, error: "Linked test not found" };
 
   try {
     const config = await getAIConfig(repositoryId);
     const envConfig = await queries.getEnvironmentConfig(repositoryId);
-    const baseUrl = envConfig?.baseUrl || test.targetUrl || 'http://localhost:3000';
+    const baseUrl =
+      envConfig?.baseUrl || test.targetUrl || "http://localhost:3000";
 
     const context: TestGenerationContext = {
       targetUrl: baseUrl,
@@ -208,7 +221,7 @@ export async function regenerateTestFromSpec(
 
     const prompt = createTestPrompt(context);
     const response = await generateWithAI(config, prompt, SYSTEM_PROMPT, {
-      actionType: 'create_test',
+      actionType: "create_test",
       repositoryId,
     });
     const code = extractCodeFromResponse(response);
@@ -217,19 +230,20 @@ export async function regenerateTestFromSpec(
     await queries.updateTestWithVersion(
       spec.testId,
       { code },
-      'spec_regeneration',
+      "spec_regeneration",
       branch ?? undefined,
     );
 
     await queries.updateTestSpec(specId, {
-      status: 'has_test',
+      status: "has_test",
       codeHash: hashCode(code),
     });
 
     revalidatePath(`/tests/${spec.testId}`);
     return { success: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to regenerate test';
+    const message =
+      error instanceof Error ? error.message : "Failed to regenerate test";
     return { success: false, error: message };
   }
 }
@@ -245,20 +259,25 @@ export async function convertPlanToSpecs(
   if (!area?.agentPlan) return { created: 0 };
 
   // Parse bullets/numbered items from plan markdown
-  const lines = area.agentPlan.split('\n');
+  const lines = area.agentPlan.split("\n");
   const specs: { title: string; body: string }[] = [];
-  let currentTitle = '';
+  let currentTitle = "";
   let currentBody: string[] = [];
 
   for (const line of lines) {
     // Match numbered items or bullet points that look like test scenarios
-    const match = line.match(/^(?:\d+[\.\)]\s*|\-\s+|\*\s+)\*{0,2}(.+?)\*{0,2}\s*$/);
+    const match = line.match(
+      /^(?:\d+[\.\)]\s*|\-\s+|\*\s+)\*{0,2}(.+?)\*{0,2}\s*$/,
+    );
     if (match) {
       // Save previous spec
       if (currentTitle) {
-        specs.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+        specs.push({
+          title: currentTitle,
+          body: currentBody.join("\n").trim(),
+        });
       }
-      currentTitle = match[1].replace(/\*\*/g, '').trim();
+      currentTitle = match[1].replace(/\*\*/g, "").trim();
       currentBody = [];
     } else if (currentTitle && line.trim()) {
       currentBody.push(line.trim());
@@ -266,12 +285,14 @@ export async function convertPlanToSpecs(
   }
   // Save last spec
   if (currentTitle) {
-    specs.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+    specs.push({ title: currentTitle, body: currentBody.join("\n").trim() });
   }
 
   // Check existing specs for this area to avoid duplicates
   const existingSpecs = await queries.getSpecsForArea(functionalAreaId);
-  const existingTitles = new Set(existingSpecs.map(s => s.title.toLowerCase()));
+  const existingTitles = new Set(
+    existingSpecs.map((s) => s.title.toLowerCase()),
+  );
 
   let created = 0;
   for (const { title, body } of specs) {
@@ -283,14 +304,14 @@ export async function convertPlanToSpecs(
       functionalAreaId,
       title,
       spec: body || title,
-      source: 'planner',
-      status: 'draft',
+      source: "planner",
+      status: "draft",
       codeHash: null,
     });
     created++;
   }
 
-  revalidatePath('/areas');
+  revalidatePath("/areas");
   return { created };
 }
 
@@ -305,42 +326,50 @@ export async function convertPlanToPlaceholders(
   if (!area?.agentPlan) return { created: 0 };
 
   // Parse bullets/numbered items from plan markdown
-  const lines = area.agentPlan.split('\n');
+  const lines = area.agentPlan.split("\n");
   const items: { title: string; body: string }[] = [];
-  let currentTitle = '';
+  let currentTitle = "";
   let currentBody: string[] = [];
 
   for (const line of lines) {
-    const match = line.match(/^(?:\d+[\.\)]\s*|\-\s+|\*\s+)\*{0,2}(.+?)\*{0,2}\s*$/);
+    const match = line.match(
+      /^(?:\d+[\.\)]\s*|\-\s+|\*\s+)\*{0,2}(.+?)\*{0,2}\s*$/,
+    );
     if (match) {
       if (currentTitle) {
-        items.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+        items.push({
+          title: currentTitle,
+          body: currentBody.join("\n").trim(),
+        });
       }
-      currentTitle = match[1].replace(/\*\*/g, '').trim();
+      currentTitle = match[1].replace(/\*\*/g, "").trim();
       currentBody = [];
     } else if (currentTitle && line.trim()) {
       currentBody.push(line.trim());
     }
   }
   if (currentTitle) {
-    items.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+    items.push({ title: currentTitle, body: currentBody.join("\n").trim() });
   }
 
   // Deduplicate against existing tests in this area
-  const existingTests = await queries.getTestsByFunctionalArea(functionalAreaId);
-  const existingNames = new Set(existingTests.map(t => t.name.toLowerCase()));
+  const existingTests =
+    await queries.getTestsByFunctionalArea(functionalAreaId);
+  const existingNames = new Set(existingTests.map((t) => t.name.toLowerCase()));
 
   // Build spec body with area context (area's full plan is the canonical source)
   const areaContext = [
-    area.name ? `**Area:** ${area.name}` : '',
-    area.agentPlan ? `**Plan:**\n${area.agentPlan}` : '',
-  ].filter(Boolean).join('\n\n');
+    area.name ? `**Area:** ${area.name}` : "",
+    area.agentPlan ? `**Plan:**\n${area.agentPlan}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   let created = 0;
   for (const { title, body } of items) {
     if (existingNames.has(title.toLowerCase())) continue;
 
-    const specBody = [areaContext, body || title].filter(Boolean).join('\n\n');
+    const specBody = [areaContext, body || title].filter(Boolean).join("\n\n");
 
     const test = await queries.createTest({
       repositoryId,
@@ -357,8 +386,8 @@ export async function convertPlanToPlaceholders(
       functionalAreaId,
       title,
       spec: specBody,
-      source: 'planner',
-      status: 'has_test',
+      source: "planner",
+      status: "has_test",
       codeHash: hashCode(PLACEHOLDER_CODE),
     });
     await queries.linkSpecToTest(specId, test.id);
@@ -366,8 +395,8 @@ export async function convertPlanToPlaceholders(
     created++;
   }
 
-  revalidatePath('/areas');
-  revalidatePath('/tests');
+  revalidatePath("/areas");
+  revalidatePath("/tests");
   return { created };
 }
 
@@ -379,25 +408,26 @@ export async function generatePlanFromSpecs(
   await requireRepoAccess(repositoryId);
 
   const area = await queries.getFunctionalArea(functionalAreaId);
-  if (!area) return { success: false, error: 'Area not found' };
+  if (!area) return { success: false, error: "Area not found" };
 
   const specs = await queries.getSpecsForArea(functionalAreaId);
-  if (specs.length === 0) return { success: false, error: 'No specs to compose plan from' };
+  if (specs.length === 0)
+    return { success: false, error: "No specs to compose plan from" };
 
   const header = `## ${area.name}`;
   const scenarios = specs.map((s, idx) => {
     const body = s.spec?.trim() ? s.spec.trim() : s.title;
     return `### Scenario ${idx + 1}: ${s.title}\n${body}`;
   });
-  const plan = `${header}\n\n${scenarios.join('\n\n')}`;
+  const plan = `${header}\n\n${scenarios.join("\n\n")}`;
 
   await queries.updateFunctionalArea(functionalAreaId, {
     agentPlan: plan,
     planGeneratedAt: new Date(),
   });
 
-  revalidatePath('/areas');
-  revalidatePath('/tests');
+  revalidatePath("/areas");
+  revalidatePath("/tests");
   return { success: true, planLength: plan.length };
 }
 
@@ -414,7 +444,7 @@ export async function generateSpecsFromTests(
 
   const allTests = await queries.getTestsByFunctionalArea(functionalAreaId);
   const targetTests = options?.testIds
-    ? allTests.filter(t => options.testIds!.includes(t.id))
+    ? allTests.filter((t) => options.testIds!.includes(t.id))
     : allTests;
 
   let created = 0;
@@ -422,10 +452,13 @@ export async function generateSpecsFromTests(
     const existing = await queries.getTestSpec(test.id);
     if (existing) continue;
 
-    const specBody = [
-      area.name ? `**Area:** ${area.name}` : '',
-      area.agentPlan ? `**Plan:**\n${area.agentPlan}` : '',
-    ].filter(Boolean).join('\n\n') || test.name;
+    const specBody =
+      [
+        area.name ? `**Area:** ${area.name}` : "",
+        area.agentPlan ? `**Plan:**\n${area.agentPlan}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n") || test.name;
 
     const specId = await queries.createTestSpec({
       repositoryId,
@@ -433,8 +466,8 @@ export async function generateSpecsFromTests(
       functionalAreaId,
       title: test.name,
       spec: specBody,
-      source: 'manual',
-      status: 'has_test',
+      source: "manual",
+      status: "has_test",
       codeHash: hashCode(test.code),
     });
     await queries.linkSpecToTest(specId, test.id);
@@ -442,8 +475,8 @@ export async function generateSpecsFromTests(
   }
 
   if (created > 0) {
-    revalidatePath('/areas');
-    revalidatePath('/tests');
+    revalidatePath("/areas");
+    revalidatePath("/tests");
   }
   return { created };
 }
@@ -457,14 +490,15 @@ export async function generatePlanFromTests(
   await requireRepoAccess(repositoryId);
 
   const area = await queries.getFunctionalArea(functionalAreaId);
-  if (!area) return { success: false, error: 'Area not found' };
+  if (!area) return { success: false, error: "Area not found" };
 
   const allTests = await queries.getTestsByFunctionalArea(functionalAreaId);
   const targetTests = options?.testIds
-    ? allTests.filter(t => options.testIds!.includes(t.id))
+    ? allTests.filter((t) => options.testIds!.includes(t.id))
     : allTests;
 
-  if (targetTests.length === 0) return { success: false, error: 'No tests to compose plan from' };
+  if (targetTests.length === 0)
+    return { success: false, error: "No tests to compose plan from" };
 
   // Pull spec markdown for each test (canonical "what does this test do" source)
   const specsByTestId = new Map<string, string>();
@@ -478,15 +512,15 @@ export async function generatePlanFromTests(
     const body = specsByTestId.get(t.id) ?? t.name;
     return `### Scenario ${idx + 1}: ${t.name}\n${body}`;
   });
-  const plan = `${header}\n\n${scenarios.join('\n\n')}`;
+  const plan = `${header}\n\n${scenarios.join("\n\n")}`;
 
   await queries.updateFunctionalArea(functionalAreaId, {
     agentPlan: plan,
     planGeneratedAt: new Date(),
   });
 
-  revalidatePath('/areas');
-  revalidatePath('/tests');
+  revalidatePath("/areas");
+  revalidatePath("/tests");
   return { success: true, planLength: plan.length };
 }
 
@@ -516,7 +550,10 @@ export async function syncAreaPlanAndSpecs(
       const result = await convertPlanToSpecs(functionalAreaId, repositoryId);
       specsCreated += result.created;
     } else if (tests.length > 0) {
-      const result = await generateSpecsFromTests(functionalAreaId, repositoryId);
+      const result = await generateSpecsFromTests(
+        functionalAreaId,
+        repositoryId,
+      );
       specsCreated += result.created;
     }
   } else {
@@ -527,12 +564,21 @@ export async function syncAreaPlanAndSpecs(
 
   // Fill plan side
   if (!hasPlan) {
-    const currentSpecs = specs.length > 0 ? specs : await queries.getSpecsForArea(functionalAreaId);
+    const currentSpecs =
+      specs.length > 0
+        ? specs
+        : await queries.getSpecsForArea(functionalAreaId);
     if (currentSpecs.length > 0) {
-      const result = await generatePlanFromSpecs(functionalAreaId, repositoryId);
+      const result = await generatePlanFromSpecs(
+        functionalAreaId,
+        repositoryId,
+      );
       planCreated = result.success;
     } else if (tests.length > 0) {
-      const result = await generatePlanFromTests(functionalAreaId, repositoryId);
+      const result = await generatePlanFromTests(
+        functionalAreaId,
+        repositoryId,
+      );
       planCreated = result.success;
     }
   }
@@ -550,7 +596,7 @@ export async function bulkGenerateForTests(
   if (testIds.length === 0) return { specsCreated: 0, areasUpdated: 0 };
 
   // Group tests by area
-  const testsById = await Promise.all(testIds.map(id => queries.getTest(id)));
+  const testsById = await Promise.all(testIds.map((id) => queries.getTest(id)));
   const areaGroups = new Map<string, string[]>();
   for (const t of testsById) {
     if (!t?.functionalAreaId) continue;
@@ -561,19 +607,23 @@ export async function bulkGenerateForTests(
 
   let specsCreated = 0;
   for (const [areaId, ids] of areaGroups) {
-    const { created } = await generateSpecsFromTests(areaId, repositoryId, { testIds: ids });
+    const { created } = await generateSpecsFromTests(areaId, repositoryId, {
+      testIds: ids,
+    });
     specsCreated += created;
     // Refresh the plan side so both halves stay in sync.
     await generatePlanFromTests(areaId, repositoryId);
   }
 
-  revalidatePath('/areas');
-  revalidatePath('/tests');
+  revalidatePath("/areas");
+  revalidatePath("/tests");
   return { specsCreated, areasUpdated: areaGroups.size };
 }
 
 /** Check if a test's code has drifted from its spec */
-export async function detectSpecDrift(testId: string): Promise<{ isDrifted: boolean; specId?: string }> {
+export async function detectSpecDrift(
+  testId: string,
+): Promise<{ isDrifted: boolean; specId?: string }> {
   await requireTeamAccess();
 
   const spec = await queries.getTestSpec(testId);
@@ -585,8 +635,8 @@ export async function detectSpecDrift(testId: string): Promise<{ isDrifted: bool
   const currentHash = hashCode(test.code);
   const isDrifted = spec.codeHash !== null && spec.codeHash !== currentHash;
 
-  if (isDrifted && spec.status !== 'outdated') {
-    await queries.updateTestSpec(spec.id, { status: 'outdated' });
+  if (isDrifted && spec.status !== "outdated") {
+    await queries.updateTestSpec(spec.id, { status: "outdated" });
   }
 
   return { isDrifted, specId: spec.id };

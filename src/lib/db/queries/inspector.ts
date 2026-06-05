@@ -1,7 +1,7 @@
-import { db } from '../index';
-import { inspectorCache, tests, repositories } from '../schema';
-import type { InspectionResult } from '../schema';
-import { eq, lt } from 'drizzle-orm';
+import { db } from "../index";
+import { inspectorCache, tests, repositories } from "../schema";
+import type { InspectionResult } from "../schema";
+import { eq, lt } from "drizzle-orm";
 
 export async function getInspectorCacheEntry(cacheKey: string) {
   const [row] = await db
@@ -57,7 +57,9 @@ export async function getRepoIdForTest(testId: string): Promise<string | null> {
   return row?.repositoryId ?? null;
 }
 
-export async function getRepoTeamIdForTest(testId: string): Promise<string | null> {
+export async function getRepoTeamIdForTest(
+  testId: string,
+): Promise<string | null> {
   const [row] = await db
     .select({ teamId: repositories.teamId })
     .from(tests)
@@ -65,4 +67,3 @@ export async function getRepoTeamIdForTest(testId: string): Promise<string | nul
     .where(eq(tests.id, testId));
   return row?.teamId ?? null;
 }
-

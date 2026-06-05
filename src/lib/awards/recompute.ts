@@ -1,5 +1,10 @@
-import { v4 as uuid } from 'uuid';
-import type { AwardCategories, AwardTier, NewRepoAward, RepoAward } from '@/lib/db/schema';
+import { v4 as uuid } from "uuid";
+import type {
+  AwardCategories,
+  AwardTier,
+  NewRepoAward,
+  RepoAward,
+} from "@/lib/db/schema";
 import {
   getLatestProofShareSlug,
   getRecentCompletedBuildsForRepo,
@@ -8,7 +13,7 @@ import {
   getRepoAward,
   getRepoTestCount,
   upsertRepoAward,
-} from '@/lib/db/queries/awards';
+} from "@/lib/db/queries/awards";
 import {
   applyDowngradeRule,
   computeCategories,
@@ -17,7 +22,7 @@ import {
   maxTier,
   type BuildSnapshot,
   type RecomputeInput,
-} from './criteria';
+} from "./criteria";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -79,15 +84,21 @@ function countConsecutiveNonFlakyFailures(snaps: BuildSnapshot[]): number {
  * Safe to fire-and-forget from the executor, DB errors thrown by callers
  * should be logged, not propagated.
  */
-export async function recomputeRepoAward(repositoryId: string): Promise<RepoAward | null> {
-  const [testCount, recentRows, rejectedAll, rejectedRecent, prior, proofSlug] = await Promise.all([
-    getRepoTestCount(repositoryId),
-    getRecentCompletedBuildsForRepo(repositoryId, 5),
-    getRejectedDiffCountForRepo(repositoryId),
-    getRejectedDiffCountForRepoSince(repositoryId, Date.now() - THIRTY_DAYS_MS),
-    getRepoAward(repositoryId),
-    getLatestProofShareSlug(repositoryId),
-  ]);
+export async function recomputeRepoAward(
+  repositoryId: string,
+): Promise<RepoAward | null> {
+  const [testCount, recentRows, rejectedAll, rejectedRecent, prior, proofSlug] =
+    await Promise.all([
+      getRepoTestCount(repositoryId),
+      getRecentCompletedBuildsForRepo(repositoryId, 5),
+      getRejectedDiffCountForRepo(repositoryId),
+      getRejectedDiffCountForRepoSince(
+        repositoryId,
+        Date.now() - THIRTY_DAYS_MS,
+      ),
+      getRepoAward(repositoryId),
+      getLatestProofShareSlug(repositoryId),
+    ]);
 
   if (recentRows.length === 0) {
     // No completed builds yet, nothing to award.
@@ -96,7 +107,9 @@ export async function recomputeRepoAward(repositoryId: string): Promise<RepoAwar
 
   const recentSnaps = recentRows.map(toSnapshot);
   const latest = recentSnaps[0];
-  const consecutiveNonFlakyFailures = countConsecutiveNonFlakyFailures(recentSnaps.slice(0, 2));
+  const consecutiveNonFlakyFailures = countConsecutiveNonFlakyFailures(
+    recentSnaps.slice(0, 2),
+  );
 
   const input: RecomputeInput = {
     testCount,
@@ -109,25 +122,26 @@ export async function recomputeRepoAward(repositoryId: string): Promise<RepoAwar
 
   const latestComputed = computeTier(input);
   const hasConfirmedRegression = detectConfirmedRegression(input);
-  const priorCurrent: AwardTier = prior?.currentTier ?? 'none';
+  const priorCurrent: AwardTier = prior?.currentTier ?? "none";
 
   const currentTier = applyDowngradeRule({
     priorCurrent,
     latestComputed,
     hasConfirmedRegression,
   });
-  const priorHighest: AwardTier = prior?.highestTier ?? 'none';
+  const priorHighest: AwardTier = prior?.highestTier ?? "none";
   const highestTier = maxTier(priorHighest, currentTier);
   const categories: AwardCategories = computeCategories(input);
 
-  const isDowngrade = priorCurrent !== currentTier && rank(currentTier) < rank(priorCurrent);
+  const isDowngrade =
+    priorCurrent !== currentTier && rank(currentTier) < rank(priorCurrent);
   const downgradeReason = !isDowngrade
-    ? prior?.lastDowngradeReason ?? null
+    ? (prior?.lastDowngradeReason ?? null)
     : rejectedAll > 0
       ? `confirmed regression: ${rejectedAll} rejected visual diff(s)`
       : consecutiveNonFlakyFailures >= 2
         ? `confirmed regression: ${consecutiveNonFlakyFailures} consecutive non-flaky failures`
-        : 'recomputed';
+        : "recomputed";
 
   const data: NewRepoAward = {
     id: prior?.id ?? uuid(),
@@ -139,14 +153,22 @@ export async function recomputeRepoAward(repositoryId: string): Promise<RepoAwar
     lastBuildId: latest.buildId,
     earnedAt: prior?.earnedAt ?? new Date(),
     lastRecomputedAt: new Date(),
-    lastDowngradeAt: isDowngrade ? new Date() : prior?.lastDowngradeAt ?? null,
+    lastDowngradeAt: isDowngrade
+      ? new Date()
+      : (prior?.lastDowngradeAt ?? null),
     lastDowngradeReason: downgradeReason,
   };
 
   return upsertRepoAward(data);
 }
 
-const TIER_RANK: Record<AwardTier, number> = { none: 0, starter: 1, bronze: 2, silver: 3, gold: 4 };
+const TIER_RANK: Record<AwardTier, number> = {
+  none: 0,
+  starter: 1,
+  bronze: 2,
+  silver: 3,
+  gold: 4,
+};
 function rank(t: AwardTier): number {
   return TIER_RANK[t];
 }

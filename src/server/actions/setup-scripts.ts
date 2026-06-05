@@ -1,14 +1,17 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { requireSetupScriptOwnership, requireTestOwnership } from '@/lib/auth/ownership';
-import type { SetupScriptType } from '@/lib/db/schema';
-import { validateApiScript } from '@/lib/setup/api-seeder';
-import { chromium } from 'playwright';
-import { runPlaywrightSetup } from '@/lib/setup/script-runner';
-import type { SetupScript, SetupContext } from '@/lib/setup/types';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import {
+  requireSetupScriptOwnership,
+  requireTestOwnership,
+} from "@/lib/auth/ownership";
+import type { SetupScriptType } from "@/lib/db/schema";
+import { validateApiScript } from "@/lib/setup/api-seeder";
+import { chromium } from "playwright";
+import { runPlaywrightSetup } from "@/lib/setup/script-runner";
+import type { SetupScript, SetupContext } from "@/lib/setup/types";
 
 export interface CreateSetupScriptInput {
   repositoryId: string;
@@ -47,7 +50,7 @@ export async function getSetupScript(id: string) {
 export async function createSetupScript(data: CreateSetupScriptInput) {
   await requireRepoAccess(data.repositoryId);
   // Validate API scripts
-  if (data.type === 'api') {
+  if (data.type === "api") {
     const validation = validateApiScript(data.code);
     if (!validation.valid) {
       throw new Error(`Invalid API script: ${validation.error}`);
@@ -62,17 +65,20 @@ export async function createSetupScript(data: CreateSetupScriptInput) {
     description: data.description,
   });
 
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return result;
 }
 
 /**
  * Update a setup script
  */
-export async function updateSetupScript(id: string, data: UpdateSetupScriptInput) {
+export async function updateSetupScript(
+  id: string,
+  data: UpdateSetupScriptInput,
+) {
   await requireSetupScriptOwnership(id);
   // Validate API scripts if code is being updated
-  if (data.type === 'api' && data.code) {
+  if (data.type === "api" && data.code) {
     const validation = validateApiScript(data.code);
     if (!validation.valid) {
       throw new Error(`Invalid API script: ${validation.error}`);
@@ -80,7 +86,7 @@ export async function updateSetupScript(id: string, data: UpdateSetupScriptInput
   }
 
   await queries.updateSetupScript(id, data);
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return { success: true };
 }
 
@@ -94,12 +100,12 @@ export async function deleteSetupScript(id: string) {
 
   if (testsUsing.length > 0) {
     throw new Error(
-      `Cannot delete: script is used by ${testsUsing.length} test(s)`
+      `Cannot delete: script is used by ${testsUsing.length} test(s)`,
     );
   }
 
   await queries.deleteSetupScript(id);
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return { success: true };
 }
 
@@ -110,10 +116,10 @@ export async function duplicateSetupScript(id: string) {
   await requireSetupScriptOwnership(id);
   const result = await queries.duplicateSetupScript(id);
   if (!result) {
-    throw new Error('Setup script not found');
+    throw new Error("Setup script not found");
   }
 
-  revalidatePath('/settings/setup');
+  revalidatePath("/settings/setup");
   return result;
 }
 
@@ -122,17 +128,23 @@ export async function duplicateSetupScript(id: string) {
  */
 export async function testSetupScript(
   id: string,
-  targetUrl: string
-): Promise<{ success: boolean; duration: number; error?: string; variables?: Record<string, unknown> }> {
+  targetUrl: string,
+): Promise<{
+  success: boolean;
+  duration: number;
+  error?: string;
+  variables?: Record<string, unknown>;
+}> {
   const { script } = await requireSetupScriptOwnership(id);
 
   // Only test Playwright scripts directly
   // API scripts need a config and actual API endpoint
-  if (script.type !== 'playwright') {
+  if (script.type !== "playwright") {
     return {
       success: false,
       duration: 0,
-      error: 'Only Playwright scripts can be tested directly. API scripts require a configured endpoint.',
+      error:
+        "Only Playwright scripts can be tested directly. API scripts require a configured endpoint.",
     };
   }
 
@@ -153,7 +165,11 @@ export async function testSetupScript(
       repositoryId: script.repositoryId,
     };
 
-    const result = await runPlaywrightSetup(page, script as SetupScript, setupContext);
+    const result = await runPlaywrightSetup(
+      page,
+      script as SetupScript,
+      setupContext,
+    );
 
     return {
       success: result.success,
@@ -176,32 +192,42 @@ export async function testSetupScript(
 /**
  * Assign a setup script to a test
  */
-export async function assignSetupScriptToTest(testId: string, setupScriptId: string | null) {
+export async function assignSetupScriptToTest(
+  testId: string,
+  setupScriptId: string | null,
+) {
   const { test } = await requireTestOwnership(testId);
   if (setupScriptId) {
     const { script } = await requireSetupScriptOwnership(setupScriptId);
     if (script.repositoryId !== test.repositoryId) {
-      throw new Error('Forbidden: setup script and test belong to different repositories');
+      throw new Error(
+        "Forbidden: setup script and test belong to different repositories",
+      );
     }
   }
   await queries.updateTestSetup(testId, null, setupScriptId);
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { success: true };
 }
 
 /**
  * Assign a setup test to a test
  */
-export async function assignSetupTestToTest(testId: string, setupTestId: string | null) {
+export async function assignSetupTestToTest(
+  testId: string,
+  setupTestId: string | null,
+) {
   const { test } = await requireTestOwnership(testId);
   if (setupTestId) {
     const { test: setupTest } = await requireTestOwnership(setupTestId);
     if (setupTest.repositoryId !== test.repositoryId) {
-      throw new Error('Forbidden: setup test and target test belong to different repositories');
+      throw new Error(
+        "Forbidden: setup test and target test belong to different repositories",
+      );
     }
   }
   await queries.updateTestSetup(testId, setupTestId, null);
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { success: true };
 }
 
@@ -211,7 +237,7 @@ export async function assignSetupTestToTest(testId: string, setupTestId: string 
 export async function clearTestSetup(testId: string) {
   await requireTestOwnership(testId);
   await queries.updateTestSetup(testId, null, null);
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   return { success: true };
 }
 
@@ -220,29 +246,32 @@ export async function clearTestSetup(testId: string) {
  */
 export async function updateRepositoryDefaultSetup(
   repositoryId: string,
-  setupType: 'test' | 'script' | 'none',
-  setupId: string | null
+  setupType: "test" | "script" | "none",
+  setupId: string | null,
 ) {
   await requireRepoAccess(repositoryId);
-  if (setupType === 'test') {
+  if (setupType === "test") {
     await queries.updateRepositoryDefaultSetup(repositoryId, setupId, null);
-  } else if (setupType === 'script') {
+  } else if (setupType === "script") {
     await queries.updateRepositoryDefaultSetup(repositoryId, null, setupId);
   } else {
     await queries.updateRepositoryDefaultSetup(repositoryId, null, null);
   }
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { success: true };
 }
 
 /**
  * Get tests that can be used as setup (excludes self-references)
  */
-export async function getAvailableSetupTests(repositoryId: string, excludeTestId?: string) {
+export async function getAvailableSetupTests(
+  repositoryId: string,
+  excludeTestId?: string,
+) {
   await requireRepoAccess(repositoryId);
   const tests = await queries.getTestsByRepo(repositoryId);
-  return tests.filter(t => t.id !== excludeTestId);
+  return tests.filter((t) => t.id !== excludeTestId);
 }
 
 /**
@@ -254,7 +283,7 @@ export async function getSetupScriptUsage(scriptId: string) {
 
   return {
     testCount: testsUsing.length,
-    tests: testsUsing.map(t => ({ id: t.id, name: t.name })),
+    tests: testsUsing.map((t) => ({ id: t.id, name: t.name })),
   };
 }
 
@@ -267,6 +296,6 @@ export async function getSetupTestUsage(testId: string) {
 
   return {
     testCount: testsUsing.length,
-    tests: testsUsing.map(t => ({ id: t.id, name: t.name })),
+    tests: testsUsing.map((t) => ({ id: t.id, name: t.name })),
   };
 }

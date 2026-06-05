@@ -3,12 +3,14 @@
  * a /gtm-lastest-saas-demo run. One row per build; rendered on /r/<slug>.
  */
 
-import { db } from '../index';
-import { buildDemoNotes, builds, testRuns } from '../schema';
-import type { DemoNotes } from '../schema';
-import { eq, desc } from 'drizzle-orm';
+import { db } from "../index";
+import { buildDemoNotes, builds, testRuns } from "../schema";
+import type { DemoNotes } from "../schema";
+import { eq, desc } from "drizzle-orm";
 
-export async function getBuildDemoNotes(buildId: string): Promise<DemoNotes | null> {
+export async function getBuildDemoNotes(
+  buildId: string,
+): Promise<DemoNotes | null> {
   const [row] = await db
     .select()
     .from(buildDemoNotes)
@@ -38,7 +40,10 @@ export async function getLatestDemoNotesForRepo(
   return row?.payload ?? null;
 }
 
-export async function upsertBuildDemoNotes(buildId: string, payload: DemoNotes): Promise<void> {
+export async function upsertBuildDemoNotes(
+  buildId: string,
+  payload: DemoNotes,
+): Promise<void> {
   const createdAt = new Date();
   await db
     .insert(buildDemoNotes)

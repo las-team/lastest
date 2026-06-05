@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+import { redirect } from "next/navigation";
 
 interface TestDetailPageProps {
   params: Promise<{ id: string }>;

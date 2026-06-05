@@ -1,20 +1,25 @@
-import { describe, it, expect, vi } from 'vitest';
-import { runValidationWithRetry, MAX_VALIDATION_RETRIES } from './validation-retry';
+import { describe, it, expect, vi } from "vitest";
+import {
+  runValidationWithRetry,
+  MAX_VALIDATION_RETRIES,
+} from "./validation-retry";
 
-describe('runValidationWithRetry', () => {
-  it('returns valid immediately when first code passes', async () => {
+describe("runValidationWithRetry", () => {
+  it("returns valid immediately when first code passes", async () => {
     const goodCode = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.goto(baseUrl);
       }
     `;
     const regen = vi.fn();
-    const result = await runValidationWithRetry(goodCode, null, regen, { skipPageCheck: true });
+    const result = await runValidationWithRetry(goodCode, null, regen, {
+      skipPageCheck: true,
+    });
     expect(result.valid).toBe(true);
     expect(regen).not.toHaveBeenCalled();
   });
 
-  it('retries on validation failure and accepts the fixed code', async () => {
+  it("retries on validation failure and accepts the fixed code", async () => {
     const badCode = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.fooBar('nope');
@@ -26,12 +31,14 @@ describe('runValidationWithRetry', () => {
       }
     `;
     const regen = vi.fn().mockResolvedValueOnce(goodCode);
-    const result = await runValidationWithRetry(badCode, null, regen, { skipPageCheck: true });
+    const result = await runValidationWithRetry(badCode, null, regen, {
+      skipPageCheck: true,
+    });
     expect(result.valid).toBe(true);
     expect(regen).toHaveBeenCalledTimes(1);
   });
 
-  it('gives up after MAX_VALIDATION_RETRIES and returns last feedback', async () => {
+  it("gives up after MAX_VALIDATION_RETRIES and returns last feedback", async () => {
     const badCode = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.fooBar('nope');
@@ -43,7 +50,9 @@ describe('runValidationWithRetry', () => {
       }
     `;
     const regen = vi.fn().mockResolvedValue(stillBadCode);
-    const result = await runValidationWithRetry(badCode, null, regen, { skipPageCheck: true });
+    const result = await runValidationWithRetry(badCode, null, regen, {
+      skipPageCheck: true,
+    });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.feedback).toBeTruthy();
@@ -51,7 +60,7 @@ describe('runValidationWithRetry', () => {
     expect(regen).toHaveBeenCalledTimes(MAX_VALIDATION_RETRIES);
   });
 
-  it('passes the feedback string into each regenerate call', async () => {
+  it("passes the feedback string into each regenerate call", async () => {
     const badCode = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.fooBar('nope');
@@ -61,19 +70,22 @@ describe('runValidationWithRetry', () => {
     await runValidationWithRetry(badCode, null, regen, { skipPageCheck: true });
     expect(regen).toHaveBeenCalled();
     const [feedback, attempt] = regen.mock.calls[0];
-    expect(typeof feedback).toBe('string');
+    expect(typeof feedback).toBe("string");
     expect(feedback.length).toBeGreaterThan(0);
     expect(attempt).toBe(1);
   });
 
-  it('honors a custom maxRetries override', async () => {
+  it("honors a custom maxRetries override", async () => {
     const badCode = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.fooBar('nope');
       }
     `;
     const regen = vi.fn().mockResolvedValue(badCode);
-    await runValidationWithRetry(badCode, null, regen, { skipPageCheck: true, maxRetries: 0 });
+    await runValidationWithRetry(badCode, null, regen, {
+      skipPageCheck: true,
+      maxRetries: 0,
+    });
     expect(regen).not.toHaveBeenCalled();
   });
 });

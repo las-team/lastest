@@ -1,42 +1,64 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { executeTests } from '@/lib/execution/executor';
-import { resolveBuildSetup } from '@/lib/setup/resolve-build-setup';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { requireRunOwnership, requireBackgroundJobOwnership } from '@/lib/auth/ownership';
-import { getBranchInfo } from '@/lib/github/content';
-import * as queries from '@/lib/db/queries';
-import type { Test } from '@/lib/db/schema';
-import type { SetupContext } from '@/lib/setup/types';
-import { createJob, createPendingJob, updateJobProgress, completeJob, failJob, isRunnerBusy } from './jobs';
-import { emitJobEvent } from '@/lib/ws/job-events';
+import { revalidatePath } from "next/cache";
+import { executeTests } from "@/lib/execution/executor";
+import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import {
+  requireRunOwnership,
+  requireBackgroundJobOwnership,
+} from "@/lib/auth/ownership";
+import { getBranchInfo } from "@/lib/github/content";
+import * as queries from "@/lib/db/queries";
+import type { Test } from "@/lib/db/schema";
+import type { SetupContext } from "@/lib/setup/types";
+import {
+  createJob,
+  createPendingJob,
+  updateJobProgress,
+  completeJob,
+  failJob,
+  isRunnerBusy,
+} from "./jobs";
+import { emitJobEvent } from "@/lib/ws/job-events";
 
 interface GitInfo {
   branch: string;
   commit: string;
 }
 
-async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+async function getGitInfoFromGitHub(
+  repositoryId: string | null,
+): Promise<GitInfo> {
   if (!repositoryId) {
-    return { branch: 'unknown', commit: 'unknown' };
+    return { branch: "unknown", commit: "unknown" };
   }
 
   const repo = await queries.getRepository(repositoryId);
   if (!repo) {
-    return { branch: 'unknown', commit: 'unknown' };
+    return { branch: "unknown", commit: "unknown" };
   }
 
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
   if (!account) {
-    return { branch: repo.selectedBranch || repo.defaultBranch || 'main', commit: 'unknown' };
+    return {
+      branch: repo.selectedBranch || repo.defaultBranch || "main",
+      commit: "unknown",
+    };
   }
 
-  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
-  const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+  const branch = repo.selectedBranch || repo.defaultBranch || "main";
+  const branchInfo = await getBranchInfo(
+    account.accessToken,
+    repo.owner,
+    repo.name,
+    branch,
+  );
 
   if (!branchInfo) {
-    return { branch, commit: 'unknown' };
+    return { branch, commit: "unknown" };
   }
 
   return {
@@ -45,7 +67,10 @@ async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInf
   };
 }
 
-export async function createTestRun(testIds?: string[], repositoryId?: string | null) {
+export async function createTestRun(
+  testIds?: string[],
+  repositoryId?: string | null,
+) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
   // Get repo for git info via GitHub API
@@ -57,44 +82,68 @@ export async function createTestRun(testIds?: string[], repositoryId?: string | 
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   return run;
 }
 
-export async function runTestsCore(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
+export async function runTestsCore(
+  testIds?: string[],
+  repositoryId?: string | null,
+  headless?: boolean,
+  runnerId?: string,
+  forceVideoRecording?: boolean,
+  cursorPlaybackSpeedOverride?: number,
+) {
   // Storage limit enforcement (off by default)
-  if (process.env.ENFORCE_STORAGE_LIMITS === 'true' && repositoryId) {
+  if (process.env.ENFORCE_STORAGE_LIMITS === "true" && repositoryId) {
     const repo = await queries.getRepository(repositoryId);
     if (repo?.teamId) {
       const usage = await queries.getTeamStorageUsage(repo.teamId);
       if (usage && usage.storageUsedBytes >= usage.storageQuotaBytes) {
-        throw new Error('Storage limit exceeded. Free up space by deleting old test runs or contact your admin.');
+        throw new Error(
+          "Storage limit exceeded. Free up space by deleting old test runs or contact your admin.",
+        );
       }
     }
   }
 
-  const targetRunner = runnerId || 'auto';
+  const targetRunner = runnerId || "auto";
 
   // If targeting a specific runner and it's busy, queue this run.
   // For 'auto' mode (pool-managed EBs), check if any pool EB is available.
-  if (targetRunner === 'auto' || targetRunner === 'local') {
-    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+  if (targetRunner === "auto" || targetRunner === "local") {
+    const { isPoolBusy } = await import("@/server/actions/embedded-sessions");
     if (await isPoolBusy()) {
       // Queue with null targetRunnerId so processPoolQueue can find it
-      return queueTestRun(testIds, repositoryId, headless, undefined, forceVideoRecording, cursorPlaybackSpeedOverride);
+      return queueTestRun(
+        testIds,
+        repositoryId,
+        headless,
+        undefined,
+        forceVideoRecording,
+        cursorPlaybackSpeedOverride,
+      );
     }
   } else if (await isRunnerBusy(targetRunner)) {
-    return queueTestRun(testIds, repositoryId, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
+    return queueTestRun(
+      testIds,
+      repositoryId,
+      headless,
+      runnerId,
+      forceVideoRecording,
+      cursorPlaybackSpeedOverride,
+    );
   }
 
   // Get tests to run (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
-    tests = await Promise.all(
-      testIds.map(id => queries.getTest(id))
-    ).then(results => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    tests = await Promise.all(testIds.map((id) => queries.getTest(id))).then(
+      (results) =>
+        results.filter((t): t is Test => t !== undefined && !t.deletedAt),
+    );
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
@@ -102,7 +151,7 @@ export async function runTestsCore(testIds?: string[], repositoryId?: string | n
   }
 
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // Get repo for git info via GitHub API
@@ -115,32 +164,80 @@ export async function runTestsCore(testIds?: string[], repositoryId?: string | n
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   // Create job first so we can return the jobId
-  const jobId = await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
+  const jobId = await createJob(
+    "test_run",
+    `Test Run (${tests.length} tests)`,
+    tests.length,
+    repositoryId,
+    undefined,
+    targetRunner,
+  );
 
   // Run tests (this happens async)
-  runTestsAsync(run.id, tests, repositoryId, headless, jobId, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
+  runTestsAsync(
+    run.id,
+    tests,
+    repositoryId,
+    headless,
+    jobId,
+    runnerId,
+    forceVideoRecording,
+    cursorPlaybackSpeedOverride,
+  );
 
   return { runId: run.id, testCount: tests.length, jobId };
 }
 
-export async function runTests(testIds?: string[], repositoryId?: string | null, headless?: boolean, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
+export async function runTests(
+  testIds?: string[],
+  repositoryId?: string | null,
+  headless?: boolean,
+  runnerId?: string,
+  forceVideoRecording?: boolean,
+  cursorPlaybackSpeedOverride?: number,
+) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  return runTestsCore(testIds, repositoryId, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride);
+  return runTestsCore(
+    testIds,
+    repositoryId,
+    headless,
+    runnerId,
+    forceVideoRecording,
+    cursorPlaybackSpeedOverride,
+  );
 }
 
-async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string | null, headless?: boolean, jobId?: string, runnerId?: string, forceVideoRecording?: boolean, cursorPlaybackSpeedOverride?: number) {
+async function runTestsAsync(
+  runId: string,
+  tests: Test[],
+  repositoryId?: string | null,
+  headless?: boolean,
+  jobId?: string,
+  runnerId?: string,
+  forceVideoRecording?: boolean,
+  cursorPlaybackSpeedOverride?: number,
+) {
   // Use provided jobId or create new one (for backwards compatibility)
-  const targetRunner = runnerId || 'auto';
-  const activeJobId = jobId ?? await createJob('test_run', `Test Run (${tests.length} tests)`, tests.length, repositoryId, undefined, targetRunner);
+  const targetRunner = runnerId || "auto";
+  const activeJobId =
+    jobId ??
+    (await createJob(
+      "test_run",
+      `Test Run (${tests.length} tests)`,
+      tests.length,
+      repositoryId,
+      undefined,
+      targetRunner,
+    ));
 
   // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
-  if (runnerId && runnerId !== 'auto') {
+  if (runnerId && runnerId !== "auto") {
     const runnerRecord = await queries.getRunnerById(runnerId);
     teamId = runnerRecord?.teamId;
   }
@@ -152,12 +249,12 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
   // Single-pass resolution: storage_state pre-load + per-test setup fallback.
   // Without the storage_state pre-load, tests whose setup is a pre-captured
   // `storage_state` step start unauthenticated. Mirrors runBuildAsync.
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
   const { setupInfo, setupContext: resolvedContext } = await resolveBuildSetup({
     tests,
     repositoryId: repositoryId ?? null,
     build: null,
-    logTag: '[test-run]',
+    logTag: "[test-run]",
   });
   const setupContext: SetupContext = {
     baseUrl,
@@ -170,7 +267,7 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     const results = await executeTests(tests, runId, {
       repositoryId,
       teamId,
-      runnerId: runnerId || 'auto',
+      runnerId: runnerId || "auto",
       headless,
       environmentConfig: envConfig,
       playwrightSettings,
@@ -217,36 +314,41 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     // passing single-test run to failed.
     let criteriaFailureCount = 0;
     try {
-      const { evaluateStepCriteria } = await import('@/lib/execution/evaluation');
+      const { evaluateStepCriteria } =
+        await import("@/lib/execution/evaluation");
       const resultsForEval = await queries.getTestResultsByRun(runId);
       for (const r of resultsForEval) {
         const prevStatus = r.status;
         const evalResult = await evaluateStepCriteria(r.id);
         if (
-          evalResult.overriddenStatus === 'failed' &&
-          prevStatus !== 'failed'
+          evalResult.overriddenStatus === "failed" &&
+          prevStatus !== "failed"
         ) {
           criteriaFailureCount++;
         }
       }
     } catch (err) {
-      console.error('[test-run] step-criteria evaluation failed:', err);
+      console.error("[test-run] step-criteria evaluation failed:", err);
     }
 
     // Update run status
-    const hasFailures = criteriaFailureCount > 0
-      || results.some(r => r.status === 'failed' || r.status === 'setup_failed');
+    const hasFailures =
+      criteriaFailureCount > 0 ||
+      results.some((r) => r.status === "failed" || r.status === "setup_failed");
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
-      status: hasFailures ? 'failed' : 'passed',
+      status: hasFailures ? "failed" : "passed",
     });
     await completeJob(activeJobId);
   } catch (error) {
     await queries.updateTestRun(runId, {
       completedAt: new Date(),
-      status: 'failed',
+      status: "failed",
     });
-    await failJob(activeJobId, error instanceof Error ? error.message : 'Test run failed');
+    await failJob(
+      activeJobId,
+      error instanceof Error ? error.message : "Test run failed",
+    );
   }
 
   // Recalculate team storage usage + record monthly run counters after the run completes.
@@ -254,23 +356,30 @@ async function runTestsAsync(runId: string, tests: Test[], repositoryId?: string
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
       const teamIdForUsage = repoForStorage.teamId;
-      const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
+      const { recalculateTeamStorage } =
+        await import("@/lib/storage/calculator");
       recalculateTeamStorage(teamIdForUsage).catch(() => {});
       const completedRun = await queries.getTestRun(runId).catch(() => null);
-      const startedAt = completedRun?.startedAt ? new Date(completedRun.startedAt).getTime() : null;
-      const completedAt = completedRun?.completedAt ? new Date(completedRun.completedAt).getTime() : Date.now();
+      const startedAt = completedRun?.startedAt
+        ? new Date(completedRun.startedAt).getTime()
+        : null;
+      const completedAt = completedRun?.completedAt
+        ? new Date(completedRun.completedAt).getTime()
+        : Date.now();
       const durationMs = startedAt ? Math.max(0, completedAt - startedAt) : 0;
-      queries.recordTeamRunCompletion(teamIdForUsage, durationMs).catch(() => {});
+      queries
+        .recordTeamRunCompletion(teamIdForUsage, durationMs)
+        .catch(() => {});
     }
   }
 
-  revalidatePath('/run');
-  revalidatePath('/tests', 'layout');
-  revalidatePath('/');
+  revalidatePath("/run");
+  revalidatePath("/tests", "layout");
+  revalidatePath("/");
 
   // Process next queued job for this specific runner.
   // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
-  if (targetRunner !== 'auto') {
+  if (targetRunner !== "auto") {
     processNextQueuedTestRun(repositoryId, targetRunner);
   }
 }
@@ -288,9 +397,11 @@ export async function getTestRunResults(runId: string) {
 export async function getTestRuns() {
   const session = await requireTeamAccess();
   const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
   const all = await queries.getTestRuns();
-  return all.filter(r => r.repositoryId !== null && teamRepoIds.has(r.repositoryId));
+  return all.filter(
+    (r) => r.repositoryId !== null && teamRepoIds.has(r.repositoryId),
+  );
 }
 
 export async function getRunStatus(repositoryId?: string | null) {
@@ -300,7 +411,7 @@ export async function getRunStatus(repositoryId?: string | null) {
     await requireTeamAccess();
   }
   // Check DB for running jobs
-  const runningJobs = await queries.getRunningJobsForRunner('auto');
+  const runningJobs = await queries.getRunningJobsForRunner("auto");
   return {
     isRunning: runningJobs.length > 0,
   };
@@ -310,8 +421,8 @@ export async function getJobStatus(jobId: string) {
   await requireBackgroundJobOwnership(jobId);
   const job = await queries.getBackgroundJob(jobId);
   return {
-    status: job?.status || 'unknown',
-    isComplete: job?.status === 'completed' || job?.status === 'failed',
+    status: job?.status || "unknown",
+    isComplete: job?.status === "completed" || job?.status === "failed",
     error: job?.error || undefined,
     actualRunnerId: job?.actualRunnerId || undefined,
   };
@@ -325,7 +436,7 @@ export async function getJobStatus(jobId: string) {
  */
 export async function getTestRunStepState(testRunId: string) {
   await requireRunOwnership(testRunId);
-  const { getStepState } = await import('@/lib/ws/step-state');
+  const { getStepState } = await import("@/lib/ws/step-state");
   return getStepState(testRunId);
 }
 
@@ -340,9 +451,10 @@ async function queueTestRun(
   // Get tests to determine label (filter out soft-deleted tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
-    tests = await Promise.all(
-      testIds.map(id => queries.getTest(id))
-    ).then(results => results.filter((t): t is Test => t !== undefined && !t.deletedAt));
+    tests = await Promise.all(testIds.map((id) => queries.getTest(id))).then(
+      (results) =>
+        results.filter((t): t is Test => t !== undefined && !t.deletedAt),
+    );
   } else if (repositoryId) {
     tests = await queries.getTestsByRepo(repositoryId);
   } else {
@@ -350,35 +462,47 @@ async function queueTestRun(
   }
 
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // null targetRunnerId = pool-managed (any available EB)
   // specific runnerId = queue for that specific runner
   const targetRunner = runnerId || undefined;
   const jobId = await createPendingJob(
-    'test_run',
+    "test_run",
     `Queued Test Run (${tests.length} tests)`,
     tests.length,
     repositoryId,
-    { testIds: testIds || null, headless, runnerId, forceVideoRecording, cursorPlaybackSpeedOverride },
+    {
+      testIds: testIds || null,
+      headless,
+      runnerId,
+      forceVideoRecording,
+      cursorPlaybackSpeedOverride,
+    },
     targetRunner,
   );
 
   return { runId: null, testCount: tests.length, queued: true, jobId };
 }
 
-export async function processNextQueuedTestRun(repositoryId?: string | null, targetRunnerId?: string) {
+export async function processNextQueuedTestRun(
+  repositoryId?: string | null,
+  targetRunnerId?: string,
+) {
   // When targetRunnerId is undefined, look for pool-managed jobs (null targetRunnerId in DB).
   // When it's a specific runner, look for jobs targeting that runner.
   const effectiveRunner = targetRunnerId || undefined;
 
   // Skip busy check for pool-managed jobs — the execution flow handles claiming
-  if (effectiveRunner && await isRunnerBusy(effectiveRunner)) return;
+  if (effectiveRunner && (await isRunnerBusy(effectiveRunner))) return;
 
   // getPendingTestRunJobs: when effectiveRunner is undefined, omits targetRunnerId filter
   // which finds jobs with ANY targetRunnerId. We need jobs with NULL targetRunnerId for pool mode.
-  const pendingJobs = await queries.getPendingTestRunJobs(repositoryId, effectiveRunner);
+  const pendingJobs = await queries.getPendingTestRunJobs(
+    repositoryId,
+    effectiveRunner,
+  );
   if (pendingJobs.length === 0) return;
 
   const nextJob = pendingJobs[0];
@@ -392,7 +516,11 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
 
   // Delete the queue placeholder — runTests creates its own running job.
   await queries.deleteBackgroundJob(nextJob.id);
-  emitJobEvent({ type: 'job:delete', jobId: nextJob.id, repositoryId: nextJob.repositoryId });
+  emitJobEvent({
+    type: "job:delete",
+    jobId: nextJob.id,
+    repositoryId: nextJob.repositoryId,
+  });
 
   // Run the tests — for pool-managed jobs, runnerId is undefined so
   // runTestsCore goes through auto mode → executeFallbackChain → claimPoolEB.
@@ -409,6 +537,6 @@ export async function processNextQueuedTestRun(repositoryId?: string | null, tar
       metadata?.cursorPlaybackSpeedOverride,
     );
   } catch (error) {
-    console.error('[queue] Failed to start queued test run:', error);
+    console.error("[queue] Failed to start queued test run:", error);
   }
 }

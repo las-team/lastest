@@ -1,18 +1,26 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
-import { Layers, Github, HardDrive, Plus, Check, ChevronsUpDown, Search } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Layers,
+  Github,
+  HardDrive,
+  Plus,
+  Check,
+  ChevronsUpDown,
+  Search,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
-import { selectRepo, createLocalRepo } from '@/server/actions/repos';
-import type { Repository } from '@/lib/db/schema';
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { selectRepo, createLocalRepo } from "@/server/actions/repos";
+import type { Repository } from "@/lib/db/schema";
 
 export type RepositoryWithTestCount = Repository & { testCount: number };
 
@@ -25,23 +33,29 @@ function GitLabIcon({ className }: { className?: string }) {
   );
 }
 
-function RepoIcon({ provider, className }: { provider: string; className?: string }) {
-  if (provider === 'gitlab') return <GitLabIcon className={className} />;
-  if (provider === 'local') return <HardDrive className={className} />;
+function RepoIcon({
+  provider,
+  className,
+}: {
+  provider: string;
+  className?: string;
+}) {
+  if (provider === "gitlab") return <GitLabIcon className={className} />;
+  if (provider === "local") return <HardDrive className={className} />;
   return <Github className={className} />;
 }
 
 export function CreateLocalRepoButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const handleCreate = () => {
     if (!name.trim()) return;
     startTransition(async () => {
       await createLocalRepo(name.trim());
-      setName('');
+      setName("");
       setOpen(false);
       router.refresh();
     });
@@ -61,7 +75,7 @@ export function CreateLocalRepoButton() {
             placeholder="Repository name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             autoFocus
           />
           <Button
@@ -70,7 +84,7 @@ export function CreateLocalRepoButton() {
             onClick={handleCreate}
             disabled={!name.trim() || isPending}
           >
-            {isPending ? 'Creating...' : 'Create'}
+            {isPending ? "Creating..." : "Create"}
           </Button>
         </div>
       </PopoverContent>
@@ -83,13 +97,16 @@ interface RepoSelectorProps {
   initialSelected?: Repository | null;
 }
 
-export function RepoSelector({ initialRepos = [], initialSelected = null }: RepoSelectorProps) {
+export function RepoSelector({
+  initialRepos = [],
+  initialSelected = null,
+}: RepoSelectorProps) {
   const router = useRouter();
   const [repos, setRepos] = useState<RepositoryWithTestCount[]>(initialRepos);
   const [selected, setSelected] = useState<Repository | null>(initialSelected);
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -102,14 +119,16 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
 
   useEffect(() => {
     if (open) {
-      setSearch('');
+      setSearch("");
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const list = search ? repos.filter((r) => r.fullName.toLowerCase().includes(q)) : repos;
+    const list = search
+      ? repos.filter((r) => r.fullName.toLowerCase().includes(q))
+      : repos;
     return [...list].sort((a, b) => {
       const aHas = a.testCount > 0 ? 1 : 0;
       const bHas = b.testCount > 0 ? 1 : 0;
@@ -134,13 +153,17 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          aria-label={selected ? `Repository: ${selected.fullName}` : 'Select repository'}
+          aria-label={
+            selected ? `Repository: ${selected.fullName}` : "Select repository"
+          }
           disabled={isPending || repos.length === 0}
           className="w-full justify-between font-normal"
         >
           <span className="flex items-center gap-2 truncate">
             <Layers className="h-4 w-4 shrink-0" />
-            <span className="truncate">{selected?.fullName || 'Select repository'}</span>
+            <span className="truncate">
+              {selected?.fullName || "Select repository"}
+            </span>
           </span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
         </Button>
@@ -162,14 +185,29 @@ export function RepoSelector({ initialRepos = [], initialSelected = null }: Repo
               key={repo.id}
               onClick={() => handleSelect(repo.id)}
               className={cn(
-                'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer',
-                'hover:bg-accent hover:text-accent-foreground',
-                selected?.id === repo.id && 'bg-accent'
+                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer",
+                "hover:bg-accent hover:text-accent-foreground",
+                selected?.id === repo.id && "bg-accent",
               )}
             >
-              <Check className={cn('h-3.5 w-3.5 shrink-0', selected?.id === repo.id ? 'opacity-100' : 'opacity-0')} />
-              <RepoIcon provider={repo.provider} className="h-3.5 w-3.5 shrink-0" />
-              <span className={cn('truncate', repo.testCount > 0 && 'font-semibold')}>{repo.fullName}</span>
+              <Check
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  selected?.id === repo.id ? "opacity-100" : "opacity-0",
+                )}
+              />
+              <RepoIcon
+                provider={repo.provider}
+                className="h-3.5 w-3.5 shrink-0"
+              />
+              <span
+                className={cn(
+                  "truncate",
+                  repo.testCount > 0 && "font-semibold",
+                )}
+              >
+                {repo.fullName}
+              </span>
             </button>
           ))}
           {filtered.length === 0 && repos.length > 0 && (

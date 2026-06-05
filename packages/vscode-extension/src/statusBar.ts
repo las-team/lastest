@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
@@ -11,9 +11,9 @@ export class StatusBarManager {
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
-      100
+      100,
     );
-    this.statusBarItem.command = 'lastest.showOutput';
+    this.statusBarItem.command = "lastest.showOutput";
     this.updateDisplay();
   }
 
@@ -42,31 +42,34 @@ export class StatusBarManager {
   }
 
   private updateDisplay() {
-    const config = vscode.workspace.getConfiguration('lastest');
-    if (!config.get('showStatusBar', true)) {
+    const config = vscode.workspace.getConfiguration("lastest");
+    if (!config.get("showStatusBar", true)) {
       this.statusBarItem.hide();
       return;
     }
 
     if (!this.isConnected) {
-      this.statusBarItem.text = '$(debug-disconnect) Lastest: Disconnected';
-      this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-      this.statusBarItem.tooltip = 'Click to reconnect';
+      this.statusBarItem.text = "$(debug-disconnect) Lastest: Disconnected";
+      this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+        "statusBarItem.warningBackground",
+      );
+      this.statusBarItem.tooltip = "Click to reconnect";
     } else if (this.runningCount > 0) {
       this.statusBarItem.text = `$(loading~spin) Lastest: Running ${this.runningCount} test(s)`;
       this.statusBarItem.backgroundColor = undefined;
-      this.statusBarItem.tooltip = 'Tests in progress...';
+      this.statusBarItem.tooltip = "Tests in progress...";
     } else if (this.totalCount > 0) {
-      const icon = this.failedCount > 0 ? '$(error)' : '$(pass)';
+      const icon = this.failedCount > 0 ? "$(error)" : "$(pass)";
       this.statusBarItem.text = `${icon} Lastest: ${this.passedCount}/${this.totalCount}`;
-      this.statusBarItem.backgroundColor = this.failedCount > 0
-        ? new vscode.ThemeColor('statusBarItem.errorBackground')
-        : undefined;
+      this.statusBarItem.backgroundColor =
+        this.failedCount > 0
+          ? new vscode.ThemeColor("statusBarItem.errorBackground")
+          : undefined;
       this.statusBarItem.tooltip = `${this.passedCount} passed, ${this.failedCount} failed`;
     } else {
-      this.statusBarItem.text = '$(beaker) Lastest';
+      this.statusBarItem.text = "$(beaker) Lastest";
       this.statusBarItem.backgroundColor = undefined;
-      this.statusBarItem.tooltip = 'No tests loaded';
+      this.statusBarItem.tooltip = "No tests loaded";
     }
 
     this.statusBarItem.show();

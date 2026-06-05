@@ -61,6 +61,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 **Core flow:** Record browser interactions → Run tests → Diff screenshots → Review/approve baselines
 
 **Key paths:**
+
 - `src/lib/db/schema.ts` — all tables (~3700 lines)
 - `src/lib/db/queries.ts` — barrel re-export of all query modules
 - `src/lib/db/queries/` — domain-focused query modules:

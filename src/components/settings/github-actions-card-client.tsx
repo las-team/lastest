@@ -1,15 +1,25 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Github, Plus, AlertTriangle, Info } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { DiagramThumbnail } from '@/components/ui/diagram-thumbnail';
-import type { GithubActionConfig, Runner, Repository } from '@/lib/db/schema';
-import { ConfigList } from '@/components/settings/github-actions/config-list-client';
-import { AddConfigDialog } from '@/components/settings/github-actions/add-config-dialog-client';
-import { ConnectGithubButton } from '@/components/settings/connect-github-button';
+import { useState } from "react";
+import { Github, Plus, AlertTriangle, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
+import type { GithubActionConfig, Runner, Repository } from "@/lib/db/schema";
+import { ConfigList } from "@/components/settings/github-actions/config-list-client";
+import { AddConfigDialog } from "@/components/settings/github-actions/add-config-dialog-client";
+import { ConnectGithubButton } from "@/components/settings/connect-github-button";
 
 interface GithubActionsCardProps {
   configs: GithubActionConfig[];
@@ -41,8 +51,14 @@ export function GithubActionsCard({
                   <Info className="w-4 h-4" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent side="bottom" align="start" className="w-auto p-3">
-                <p className="text-xs text-muted-foreground mb-2">Development & Review Flow</p>
+              <PopoverContent
+                side="bottom"
+                align="start"
+                className="w-auto p-3"
+              >
+                <p className="text-xs text-muted-foreground mb-2">
+                  Development & Review Flow
+                </p>
                 <DiagramThumbnail
                   src="/docs/development-flow.png"
                   alt="Development & Review Flow — from code push to production with visual validation"
@@ -68,7 +84,9 @@ export function GithubActionsCard({
           <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-3 flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-medium">GitHub account not connected</p>
+              <p className="text-sm font-medium">
+                GitHub account not connected
+              </p>
               <p className="text-xs text-muted-foreground">
                 Connect your GitHub account above to enable workflow deployment.
               </p>
@@ -83,7 +101,11 @@ export function GithubActionsCard({
             <p className="text-sm text-muted-foreground mb-3">
               No repositories configured yet.
             </p>
-            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAddOpen(true)}
+            >
               <Plus className="h-4 w-4 mr-1" />
               Add Repository
             </Button>
@@ -91,7 +113,11 @@ export function GithubActionsCard({
         )}
 
         {configs.length > 0 && (
-          <ConfigList configs={configs} runners={runners} hasGithubAccount={hasGithubAccount} />
+          <ConfigList
+            configs={configs}
+            runners={runners}
+            hasGithubAccount={hasGithubAccount}
+          />
         )}
 
         {hasGithubAccount && (

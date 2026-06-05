@@ -8,37 +8,45 @@
  *   disable → check does not run; layer is "absent" in the focus view
  */
 
-import type { PlaywrightSettings, EvidenceItem, StepVerdict } from '@/lib/db/schema';
+import type {
+  PlaywrightSettings,
+  EvidenceItem,
+  StepVerdict,
+} from "@/lib/db/schema";
 
-export type CheckMode = 'enforce' | 'log' | 'disable';
+export type CheckMode = "enforce" | "log" | "disable";
 
 export type CheckLayer =
-  | 'visual'
-  | 'text'
-  | 'dom'
-  | 'network'
-  | 'console'
-  | 'a11y'
-  | 'design'
-  | 'perf'
-  | 'url';
+  | "visual"
+  | "text"
+  | "dom"
+  | "network"
+  | "console"
+  | "a11y"
+  | "design"
+  | "perf"
+  | "url";
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
 /** Layers whose data is always captured by the runner. For these,
  *  `disable` means "don't surface or grade", not "skip the capture". */
-const ALWAYS_CAPTURED: ReadonlySet<CheckLayer> = new Set(['visual', 'url', 'perf']);
+const ALWAYS_CAPTURED: ReadonlySet<CheckLayer> = new Set([
+  "visual",
+  "url",
+  "perf",
+]);
 
 const DEFAULTS: CheckModeMap = {
-  visual:  'enforce',
-  text:    'log',
-  dom:     'log',
-  network: 'enforce',
-  console: 'enforce',
-  a11y:    'log',
-  design:  'disable',
-  perf:    'log',
-  url:     'log',
+  visual: "enforce",
+  text: "log",
+  dom: "log",
+  network: "enforce",
+  console: "enforce",
+  a11y: "log",
+  design: "disable",
+  perf: "log",
+  url: "log",
 };
 
 /** Repo / global default to use when nothing is persisted. */
@@ -54,28 +62,29 @@ export function isAlwaysCaptured(layer: CheckLayer): boolean {
 type LegacySource = Partial<
   Pick<
     PlaywrightSettings,
-    | 'enableA11y'
-    | 'enableDesignSystem'
-    | 'enableDomDiff'
-    | 'enableNetworkInterception'
-    | 'networkErrorMode'
-    | 'consoleErrorMode'
-    | 'visualMode'
-    | 'textMode'
-    | 'domMode'
-    | 'networkMode'
-    | 'consoleMode'
-    | 'a11yMode'
-    | 'designMode'
-    | 'perfMode'
-    | 'urlMode'
+    | "enableA11y"
+    | "enableDesignSystem"
+    | "enableDomDiff"
+    | "enableNetworkInterception"
+    | "networkErrorMode"
+    | "consoleErrorMode"
+    | "visualMode"
+    | "textMode"
+    | "domMode"
+    | "networkMode"
+    | "consoleMode"
+    | "a11yMode"
+    | "designMode"
+    | "perfMode"
+    | "urlMode"
   >
 > & {
   textDiffEnabled?: boolean | null;
 };
 
 function normalizeMode(value: unknown): CheckMode | null {
-  if (value === 'enforce' || value === 'log' || value === 'disable') return value;
+  if (value === "enforce" || value === "log" || value === "disable")
+    return value;
   return null;
 }
 
@@ -84,23 +93,27 @@ function normalizeMode(value: unknown): CheckMode | null {
  * when present; otherwise we derive from the legacy boolean / error-mode
  * fields so a row written before the migration still classifies correctly.
  */
-export function deriveCheckModes(source: LegacySource | null | undefined): CheckModeMap {
+export function deriveCheckModes(
+  source: LegacySource | null | undefined,
+): CheckModeMap {
   const out = defaultCheckModes();
   if (!source) return out;
 
   // --- visual ---
-  out.visual = normalizeMode(source.visualMode) ?? 'enforce';
+  out.visual = normalizeMode(source.visualMode) ?? "enforce";
 
   // --- text ---
   // textMode wins; legacy diffSensitivity.textDiffEnabled treats true→enforce,
   // unset (the DB default) → falls through to DEFAULTS.text so a default flip
   // in this file reaches existing rows.
-  out.text = normalizeMode(source.textMode)
-    ?? (source.textDiffEnabled === true ? 'enforce' : DEFAULTS.text);
+  out.text =
+    normalizeMode(source.textMode) ??
+    (source.textDiffEnabled === true ? "enforce" : DEFAULTS.text);
 
   // --- dom ---
-  out.dom = normalizeMode(source.domMode)
-    ?? (source.enableDomDiff === true ? 'enforce' : DEFAULTS.dom);
+  out.dom =
+    normalizeMode(source.domMode) ??
+    (source.enableDomDiff === true ? "enforce" : DEFAULTS.dom);
 
   // --- network ---
   // Network is a two-axis legacy: enableNetworkInterception (capture) +
@@ -110,35 +123,41 @@ export function deriveCheckModes(source: LegacySource | null | undefined): Check
   //   capture=true, errorMode=ignore → log (still surfaced in the panel)
   //   capture=false                  → mode from errorMode:
   //                                       fail→enforce, warn→log, ignore→disable
-  out.network = normalizeMode(source.networkMode) ?? (() => {
-    const capture = source.enableNetworkInterception ?? false;
-    const err = source.networkErrorMode ?? 'fail';
-    if (capture) {
-      if (err === 'fail') return 'enforce';
-      return 'log';
-    }
-    if (err === 'fail') return 'enforce';
-    if (err === 'warn') return 'log';
-    return 'disable';
-  })();
+  out.network =
+    normalizeMode(source.networkMode) ??
+    (() => {
+      const capture = source.enableNetworkInterception ?? false;
+      const err = source.networkErrorMode ?? "fail";
+      if (capture) {
+        if (err === "fail") return "enforce";
+        return "log";
+      }
+      if (err === "fail") return "enforce";
+      if (err === "warn") return "log";
+      return "disable";
+    })();
 
   // --- console ---
   // Console capture is always on at the runner level. The legacy gate is
   // consoleErrorMode alone.
-  out.console = normalizeMode(source.consoleMode) ?? (() => {
-    const err = source.consoleErrorMode ?? 'fail';
-    if (err === 'fail') return 'enforce';
-    if (err === 'warn') return 'log';
-    return 'disable';
-  })();
+  out.console =
+    normalizeMode(source.consoleMode) ??
+    (() => {
+      const err = source.consoleErrorMode ?? "fail";
+      if (err === "fail") return "enforce";
+      if (err === "warn") return "log";
+      return "disable";
+    })();
 
   // --- a11y ---
-  out.a11y = normalizeMode(source.a11yMode)
-    ?? (source.enableA11y === true ? 'enforce' : DEFAULTS.a11y);
+  out.a11y =
+    normalizeMode(source.a11yMode) ??
+    (source.enableA11y === true ? "enforce" : DEFAULTS.a11y);
 
   // --- design ---
-  out.design = normalizeMode(source.designMode)
-    ?? (source.enableDesignSystem === true ? 'enforce' : DEFAULTS.design);
+  out.design =
+    normalizeMode(source.designMode) ??
+    (source.enableDesignSystem === true ? "enforce" : DEFAULTS.design);
 
   // --- perf / url ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
@@ -169,44 +188,56 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   enableDesignSystem?: boolean;
   enableDomDiff?: boolean;
   enableNetworkInterception?: boolean;
-  networkErrorMode?: 'fail' | 'warn' | 'ignore';
-  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: "fail" | "warn" | "ignore";
+  consoleErrorMode?: "fail" | "warn" | "ignore";
   textDiffEnabled?: boolean;
 } {
   const patch: ReturnType<typeof checkModesToSettingsPatch> = {};
 
-  if (modes.visual)  { patch.visualMode = modes.visual; }
-  if (modes.text)    {
-    patch.textMode = modes.text;
-    patch.textDiffEnabled = modes.text !== 'disable';
+  if (modes.visual) {
+    patch.visualMode = modes.visual;
   }
-  if (modes.dom)     {
+  if (modes.text) {
+    patch.textMode = modes.text;
+    patch.textDiffEnabled = modes.text !== "disable";
+  }
+  if (modes.dom) {
     patch.domMode = modes.dom;
-    patch.enableDomDiff = modes.dom !== 'disable';
+    patch.enableDomDiff = modes.dom !== "disable";
   }
   if (modes.network) {
     patch.networkMode = modes.network;
-    patch.enableNetworkInterception = modes.network !== 'disable';
-    patch.networkErrorMode = modes.network === 'enforce'
-      ? 'fail'
-      : modes.network === 'log' ? 'warn' : 'ignore';
+    patch.enableNetworkInterception = modes.network !== "disable";
+    patch.networkErrorMode =
+      modes.network === "enforce"
+        ? "fail"
+        : modes.network === "log"
+          ? "warn"
+          : "ignore";
   }
   if (modes.console) {
     patch.consoleMode = modes.console;
-    patch.consoleErrorMode = modes.console === 'enforce'
-      ? 'fail'
-      : modes.console === 'log' ? 'warn' : 'ignore';
+    patch.consoleErrorMode =
+      modes.console === "enforce"
+        ? "fail"
+        : modes.console === "log"
+          ? "warn"
+          : "ignore";
   }
-  if (modes.a11y)    {
+  if (modes.a11y) {
     patch.a11yMode = modes.a11y;
-    patch.enableA11y = modes.a11y !== 'disable';
+    patch.enableA11y = modes.a11y !== "disable";
   }
-  if (modes.design)  {
+  if (modes.design) {
     patch.designMode = modes.design;
-    patch.enableDesignSystem = modes.design !== 'disable';
+    patch.enableDesignSystem = modes.design !== "disable";
   }
-  if (modes.perf)    { patch.perfMode = modes.perf; }
-  if (modes.url)     { patch.urlMode = modes.url; }
+  if (modes.perf) {
+    patch.perfMode = modes.perf;
+  }
+  if (modes.url) {
+    patch.urlMode = modes.url;
+  }
 
   return patch;
 }
@@ -217,12 +248,12 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
  *  in agreement. */
 export function classifyEvidenceWithMode(
   mode: CheckMode,
-  signal: 'high' | 'medium' | 'low' | null | undefined,
-): 'broken' | 'warned' | 'clean' {
-  if (mode === 'disable') return 'clean';
-  if (signal !== 'high') return 'clean';
-  if (mode === 'enforce') return 'broken';
-  return 'warned';
+  signal: "high" | "medium" | "low" | null | undefined,
+): "broken" | "warned" | "clean" {
+  if (mode === "disable") return "clean";
+  if (signal !== "high") return "clean";
+  if (mode === "enforce") return "broken";
+  return "warned";
 }
 
 /**
@@ -241,13 +272,13 @@ export function classifyEvidenceWithMode(
  */
 export function chipToneForLayer(
   mode: CheckMode,
-  signal: 'high' | 'medium' | 'low' | null | undefined,
-): 'regression' | 'missed' | 'done' | 'unknown' {
-  if (mode === 'disable') return 'unknown';
-  if (signal == null) return 'done';
-  if (signal === 'high') return mode === 'enforce' ? 'regression' : 'missed';
-  if (signal === 'medium') return 'missed';
-  return 'done';
+  signal: "high" | "medium" | "low" | null | undefined,
+): "regression" | "missed" | "done" | "unknown" {
+  if (mode === "disable") return "unknown";
+  if (signal == null) return "done";
+  if (signal === "high") return mode === "enforce" ? "regression" : "missed";
+  if (signal === "medium") return "missed";
+  return "done";
 }
 
 /**
@@ -271,24 +302,28 @@ export function chipToneForLayer(
  * structural-break still gates) — matching the board card's legacy mapping.
  */
 export function effectiveVerdict(
-  evidence: ReadonlyArray<Pick<EvidenceItem, 'layer' | 'signal'>> | null | undefined,
+  evidence:
+    | ReadonlyArray<Pick<EvidenceItem, "layer" | "signal">>
+    | null
+    | undefined,
   modes: CheckModeMap,
 ): StepVerdict {
   let hasRed = false;
   let hasAmber = false;
   for (const e of evidence ?? []) {
-    const mode: CheckMode = e.layer === 'variable'
-      ? 'enforce'
-      : modes[e.layer as CheckLayer] ?? 'enforce';
-    if (mode === 'disable') continue;
-    if (e.signal === 'high') {
-      if (mode === 'enforce') hasRed = true;
+    const mode: CheckMode =
+      e.layer === "variable"
+        ? "enforce"
+        : (modes[e.layer as CheckLayer] ?? "enforce");
+    if (mode === "disable") continue;
+    if (e.signal === "high") {
+      if (mode === "enforce") hasRed = true;
       else hasAmber = true; // log → surfaced amber, never reddens
-    } else if (e.signal === 'medium') {
+    } else if (e.signal === "medium") {
       hasAmber = true;
     }
   }
-  return hasRed ? 'red' : hasAmber ? 'yellow' : 'green';
+  return hasRed ? "red" : hasAmber ? "yellow" : "green";
 }
 
 /**
@@ -310,21 +345,33 @@ export function pickTestModeOverrides(
         designMode?: string | null;
         perfMode?: string | null;
         urlMode?: string | null;
-        networkErrorMode?: 'fail' | 'warn' | 'ignore' | null;
-        consoleErrorMode?: 'fail' | 'warn' | 'ignore' | null;
+        networkErrorMode?: "fail" | "warn" | "ignore" | null;
+        consoleErrorMode?: "fail" | "warn" | "ignore" | null;
       }
     | null
     | undefined,
 ): Partial<CheckModeMap> | null {
   if (!overrides) return null;
-  const errToMode = (e: 'fail' | 'warn' | 'ignore' | null | undefined): CheckMode | null => {
-    if (e === 'fail') return 'enforce';
-    if (e === 'warn') return 'log';
-    if (e === 'ignore') return 'disable';
+  const errToMode = (
+    e: "fail" | "warn" | "ignore" | null | undefined,
+  ): CheckMode | null => {
+    if (e === "fail") return "enforce";
+    if (e === "warn") return "log";
+    if (e === "ignore") return "disable";
     return null;
   };
   const out: Partial<CheckModeMap> = {};
-  const layers: CheckLayer[] = ['visual', 'text', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url'];
+  const layers: CheckLayer[] = [
+    "visual",
+    "text",
+    "dom",
+    "network",
+    "console",
+    "a11y",
+    "design",
+    "perf",
+    "url",
+  ];
   for (const layer of layers) {
     const newKey = `${layer}Mode` as const;
     const raw = (overrides as Record<string, unknown>)[newKey];
@@ -335,10 +382,10 @@ export function pickTestModeOverrides(
     }
     // Legacy fallback only for the two gating layers — older test rows
     // can have networkErrorMode/consoleErrorMode but no networkMode.
-    if (layer === 'network') {
+    if (layer === "network") {
       const m = errToMode(overrides.networkErrorMode ?? null);
       if (m) out.network = m;
-    } else if (layer === 'console') {
+    } else if (layer === "console") {
       const m = errToMode(overrides.consoleErrorMode ?? null);
       if (m) out.console = m;
     }
@@ -357,7 +404,9 @@ export function pickTestModeOverrides(
  * should perform a key delete when the reviewer picks "Inherit" rather
  * than relying on this to clear keys.
  */
-export function testModeOverridesToOverridesPatch(modes: Partial<CheckModeMap>): {
+export function testModeOverridesToOverridesPatch(
+  modes: Partial<CheckModeMap>,
+): {
   visualMode?: CheckMode;
   textMode?: CheckMode;
   domMode?: CheckMode;
@@ -367,20 +416,20 @@ export function testModeOverridesToOverridesPatch(modes: Partial<CheckModeMap>):
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
-  networkErrorMode?: 'fail' | 'warn' | 'ignore';
-  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
+  networkErrorMode?: "fail" | "warn" | "ignore";
+  consoleErrorMode?: "fail" | "warn" | "ignore";
 } {
   const patch: ReturnType<typeof testModeOverridesToOverridesPatch> = {};
-  const modeToErr = (m: CheckMode): 'fail' | 'warn' | 'ignore' =>
-    m === 'enforce' ? 'fail' : m === 'log' ? 'warn' : 'ignore';
+  const modeToErr = (m: CheckMode): "fail" | "warn" | "ignore" =>
+    m === "enforce" ? "fail" : m === "log" ? "warn" : "ignore";
 
-  if (modes.visual)  patch.visualMode = modes.visual;
-  if (modes.text)    patch.textMode = modes.text;
-  if (modes.dom)     patch.domMode = modes.dom;
-  if (modes.perf)    patch.perfMode = modes.perf;
-  if (modes.url)     patch.urlMode = modes.url;
-  if (modes.a11y)    patch.a11yMode = modes.a11y;
-  if (modes.design)  patch.designMode = modes.design;
+  if (modes.visual) patch.visualMode = modes.visual;
+  if (modes.text) patch.textMode = modes.text;
+  if (modes.dom) patch.domMode = modes.dom;
+  if (modes.perf) patch.perfMode = modes.perf;
+  if (modes.url) patch.urlMode = modes.url;
+  if (modes.a11y) patch.a11yMode = modes.a11y;
+  if (modes.design) patch.designMode = modes.design;
   if (modes.network) {
     patch.networkMode = modes.network;
     patch.networkErrorMode = modeToErr(modes.network);

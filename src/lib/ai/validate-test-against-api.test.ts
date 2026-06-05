@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 import {
   validateTestAgainstRunnerAPI,
   formatTSDiagnostics,
-} from './validate-test-against-api';
+} from "./validate-test-against-api";
 
-describe('validateTestAgainstRunnerAPI', () => {
-  it('accepts the marktolmacs.com chain — static check intentionally ignores DOM existence', () => {
+describe("validateTestAgainstRunnerAPI", () => {
+  it("accepts the marktolmacs.com chain — static check intentionally ignores DOM existence", () => {
     // This is the exact AI-generated locator chain that timed out in prod
     // (page.locator('section').filter(...).getByRole(...)). It IS valid
     // Playwright API; the failure was at runtime because <section> wasn't on
@@ -23,7 +23,7 @@ describe('validateTestAgainstRunnerAPI', () => {
     expect(validateTestAgainstRunnerAPI(code)).toEqual({ valid: true });
   });
 
-  it('accepts a basic well-formed test', () => {
+  it("accepts a basic well-formed test", () => {
     const code = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.goto(baseUrl);
@@ -35,7 +35,7 @@ describe('validateTestAgainstRunnerAPI', () => {
     expect(validateTestAgainstRunnerAPI(code)).toEqual({ valid: true });
   });
 
-  it('accepts new matchers added in af056db (toHaveAttribute on locator)', () => {
+  it("accepts new matchers added in af056db (toHaveAttribute on locator)", () => {
     const code = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         const link = page.getByRole('link', { name: 'Home' });
@@ -45,7 +45,7 @@ describe('validateTestAgainstRunnerAPI', () => {
     expect(validateTestAgainstRunnerAPI(code)).toEqual({ valid: true });
   });
 
-  it('rejects unsupported matchers like toHaveFakeMatcher', () => {
+  it("rejects unsupported matchers like toHaveFakeMatcher", () => {
     const code = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await expect(page).toHaveFakeMatcher('nope');
@@ -54,11 +54,13 @@ describe('validateTestAgainstRunnerAPI', () => {
     const result = validateTestAgainstRunnerAPI(code);
     expect(result.valid).toBe(false);
     if (!result.valid) {
-      expect(result.errors.some((e) => /toHaveFakeMatcher/.test(e.message))).toBe(true);
+      expect(
+        result.errors.some((e) => /toHaveFakeMatcher/.test(e.message)),
+      ).toBe(true);
     }
   });
 
-  it('rejects unknown page methods', () => {
+  it("rejects unknown page methods", () => {
     const code = `
       export async function test(page, baseUrl, screenshotPath, stepLogger) {
         await page.fooBar('hello');
@@ -68,7 +70,7 @@ describe('validateTestAgainstRunnerAPI', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('rejects references to names not in the runner variable bag', () => {
+  it("rejects references to names not in the runner variable bag", () => {
     // `request` is NOT in the injected variable bag — the AI sometimes
     // imagines it exists because @playwright/test's full fixture object has
     // it. Our runner does not.
@@ -85,7 +87,7 @@ describe('validateTestAgainstRunnerAPI', () => {
     }
   });
 
-  it('accepts all variables in the runner injection bag', () => {
+  it("accepts all variables in the runner injection bag", () => {
     // These are the 15 names listed in packages/embedded-browser/src/test-executor.ts:1204
     // and packages/runner/src/runner.ts:1374. Each must be a known parameter.
     const code = `
@@ -99,12 +101,18 @@ describe('validateTestAgainstRunnerAPI', () => {
     expect(validateTestAgainstRunnerAPI(code)).toEqual({ valid: true });
   });
 
-  it('formatTSDiagnostics produces LLM-readable feedback', () => {
+  it("formatTSDiagnostics produces LLM-readable feedback", () => {
     const fb = formatTSDiagnostics([
-      { line: 4, column: 12, code: 2339, message: "Property 'toHaveFakeMatcher' does not exist on type 'LocatorMatchers'." },
+      {
+        line: 4,
+        column: 12,
+        code: 2339,
+        message:
+          "Property 'toHaveFakeMatcher' does not exist on type 'LocatorMatchers'.",
+      },
     ]);
-    expect(fb).toContain('line 4');
-    expect(fb).toContain('TS2339');
-    expect(fb).toContain('toHaveFakeMatcher');
+    expect(fb).toContain("line 4");
+    expect(fb).toContain("TS2339");
+    expect(fb).toContain("toHaveFakeMatcher");
   });
 });

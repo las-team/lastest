@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { AlertTriangle, Check, Loader2, X } from 'lucide-react';
+import { useState } from "react";
+import { AlertTriangle, Check, Loader2, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,11 +9,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { deployPipelineToGitlab } from '@/server/actions/gitlab-pipelines';
-import type { GitlabPipelineConfig } from '@/lib/db/schema';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { deployPipelineToGitlab } from "@/server/actions/gitlab-pipelines";
+import type { GitlabPipelineConfig } from "@/lib/db/schema";
+import { toast } from "sonner";
 
 interface DeployDialogProps {
   open: boolean;
@@ -21,59 +21,81 @@ interface DeployDialogProps {
   config: GitlabPipelineConfig;
 }
 
-type StepStatus = 'pending' | 'loading' | 'success' | 'error';
+type StepStatus = "pending" | "loading" | "success" | "error";
 
-export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) {
+export function DeployDialog({
+  open,
+  onOpenChange,
+  config,
+}: DeployDialogProps) {
   const [deploying, setDeploying] = useState(false);
   const [steps, setSteps] = useState<{
     ciFile: StepStatus;
     tokenVar: StepStatus;
     urlVar: StepStatus;
     hook: StepStatus;
-  }>({ ciFile: 'pending', tokenVar: 'pending', urlVar: 'pending', hook: 'pending' });
+  }>({
+    ciFile: "pending",
+    tokenVar: "pending",
+    urlVar: "pending",
+    hook: "pending",
+  });
 
-  const isCi = config.deliveryMode === 'ci_file';
-  const willSetVars = config.mode === 'ephemeral' || config.mode === 'auto' || !!config.runnerId;
+  const isCi = config.deliveryMode === "ci_file";
+  const willSetVars =
+    config.mode === "ephemeral" || config.mode === "auto" || !!config.runnerId;
 
   const handleDeploy = async () => {
     setDeploying(true);
     setSteps({
-      ciFile: isCi ? 'loading' : 'pending',
-      tokenVar: willSetVars ? 'loading' : 'pending',
-      urlVar: willSetVars ? 'loading' : 'pending',
-      hook: 'loading',
+      ciFile: isCi ? "loading" : "pending",
+      tokenVar: willSetVars ? "loading" : "pending",
+      urlVar: willSetVars ? "loading" : "pending",
+      hook: "loading",
     });
 
     try {
       const results = await deployPipelineToGitlab(config.id);
       setSteps({
-        ciFile: isCi ? (results.ciFile ? 'success' : 'error') : 'pending',
-        tokenVar: willSetVars ? (results.tokenVar ? 'success' : 'error') : 'pending',
-        urlVar: willSetVars ? (results.urlVar ? 'success' : 'error') : 'pending',
-        hook: results.hook ? 'success' : 'error',
+        ciFile: isCi ? (results.ciFile ? "success" : "error") : "pending",
+        tokenVar: willSetVars
+          ? results.tokenVar
+            ? "success"
+            : "error"
+          : "pending",
+        urlVar: willSetVars
+          ? results.urlVar
+            ? "success"
+            : "error"
+          : "pending",
+        hook: results.hook ? "success" : "error",
       });
-      toast.success('Pipeline deployed');
+      toast.success("Pipeline deployed");
     } catch (err) {
       setSteps((prev) => ({
-        ciFile: prev.ciFile === 'loading' ? 'error' : prev.ciFile,
-        tokenVar: prev.tokenVar === 'loading' ? 'error' : prev.tokenVar,
-        urlVar: prev.urlVar === 'loading' ? 'error' : prev.urlVar,
-        hook: prev.hook === 'loading' ? 'error' : prev.hook,
+        ciFile: prev.ciFile === "loading" ? "error" : prev.ciFile,
+        tokenVar: prev.tokenVar === "loading" ? "error" : prev.tokenVar,
+        urlVar: prev.urlVar === "loading" ? "error" : prev.urlVar,
+        hook: prev.hook === "loading" ? "error" : prev.hook,
       }));
-      toast.error(err instanceof Error ? err.message : 'Deployment failed');
+      toast.error(err instanceof Error ? err.message : "Deployment failed");
     } finally {
       setDeploying(false);
     }
   };
 
   const StepIcon = ({ status }: { status: StepStatus }) => {
-    if (status === 'loading') return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
-    if (status === 'success') return <Check className="h-4 w-4 text-green-500" />;
-    if (status === 'error') return <X className="h-4 w-4 text-destructive" />;
-    return <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />;
+    if (status === "loading")
+      return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+    if (status === "success")
+      return <Check className="h-4 w-4 text-green-500" />;
+    if (status === "error") return <X className="h-4 w-4 text-destructive" />;
+    return (
+      <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />
+    );
   };
 
-  const allDone = steps.hook !== 'pending' && steps.hook !== 'loading';
+  const allDone = steps.hook !== "pending" && steps.hook !== "loading";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -81,7 +103,11 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
         <DialogHeader>
           <DialogTitle>Deploy to GitLab</DialogTitle>
           <DialogDescription>
-            Configure <span className="font-mono text-foreground">{config.projectPath}</span> for visual testing.
+            Configure{" "}
+            <span className="font-mono text-foreground">
+              {config.projectPath}
+            </span>{" "}
+            for visual testing.
           </DialogDescription>
         </DialogHeader>
 
@@ -91,8 +117,19 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
             <div>
               This will:
               <ul className="list-disc ml-4 mt-1 space-y-0.5">
-                {isCi && <li>Create or update <code className="font-mono">.gitlab-ci.yml</code> on the default branch.</li>}
-                {willSetVars && <li>Set masked project variables <code>LASTEST_TOKEN</code> and <code>LASTEST_URL</code>.</li>}
+                {isCi && (
+                  <li>
+                    Create or update{" "}
+                    <code className="font-mono">.gitlab-ci.yml</code> on the
+                    default branch.
+                  </li>
+                )}
+                {willSetVars && (
+                  <li>
+                    Set masked project variables <code>LASTEST_TOKEN</code> and{" "}
+                    <code>LASTEST_URL</code>.
+                  </li>
+                )}
                 <li>Add a project webhook with a per-config secret token.</li>
               </ul>
             </div>
@@ -128,10 +165,18 @@ export function DeployDialog({ open, onOpenChange, config }: DeployDialogProps) 
 
         <DialogFooter>
           {allDone ? (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
           ) : (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deploying}>Cancel</Button>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={deploying}
+              >
+                Cancel
+              </Button>
               <Button onClick={handleDeploy} disabled={deploying}>
                 {deploying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Deploy

@@ -1,12 +1,16 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Play,
   StepForward,
@@ -31,15 +35,34 @@ import {
   ChevronDown,
   ChevronRight,
   MousePointerClick,
-} from 'lucide-react';
-import { startDebugSession, getDebugState, sendDebugCommand, stopDebugSession } from '@/server/actions/debug';
-import { toast } from 'sonner';
-import type { Test } from '@/lib/db/schema';
-import type { DebugState, DebugNetworkEntry, DebugConsoleEntry } from '@/lib/playwright/types';
-import { extractTestBody, removeInlineLocateWithFallback, removeInlineReplayCursorPath, parseSteps } from '@/lib/playwright/debug-parser';
-import { BrowserViewer, type BrowserViewerHandle, type InspectElementResult, type DomSnapshotResult } from '@/components/embedded-browser/browser-viewer-client';
-import { Input } from '@/components/ui/input';
-import { getStreamUrlForRunner } from '@/server/actions/embedded-sessions';
+} from "lucide-react";
+import {
+  startDebugSession,
+  getDebugState,
+  sendDebugCommand,
+  stopDebugSession,
+} from "@/server/actions/debug";
+import { toast } from "sonner";
+import type { Test } from "@/lib/db/schema";
+import type {
+  DebugState,
+  DebugNetworkEntry,
+  DebugConsoleEntry,
+} from "@/lib/playwright/types";
+import {
+  extractTestBody,
+  removeInlineLocateWithFallback,
+  removeInlineReplayCursorPath,
+  parseSteps,
+} from "@/lib/playwright/debug-parser";
+import {
+  BrowserViewer,
+  type BrowserViewerHandle,
+  type InspectElementResult,
+  type DomSnapshotResult,
+} from "@/components/embedded-browser/browser-viewer-client";
+import { Input } from "@/components/ui/input";
+import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
 
 interface DebugClientProps {
   test: Test;
@@ -59,17 +82,20 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   // Inspect / DOM snapshot state
   const [inspectMode, setInspectMode] = useState(false);
-  const [inspectedElement, setInspectedElement] = useState<InspectElementResult | null>(null);
-  const [domSnapshot, setDomSnapshot] = useState<DomSnapshotResult | null>(null);
+  const [inspectedElement, setInspectedElement] =
+    useState<InspectElementResult | null>(null);
+  const [domSnapshot, setDomSnapshot] = useState<DomSnapshotResult | null>(
+    null,
+  );
   const [domSnapshotLoading, setDomSnapshotLoading] = useState(false);
-  const [selectorSearch, setSelectorSearch] = useState('');
+  const [selectorSearch, setSelectorSearch] = useState("");
   const browserViewerRef = useRef<BrowserViewerHandle>(null);
-  const [rightTab, setRightTab] = useState('steps');
-  const [leftTab, setLeftTab] = useState('code');
+  const [rightTab, setRightTab] = useState("steps");
+  const [leftTab, setLeftTab] = useState("code");
 
   // Editable code state
-  const [localCode, setLocalCode] = useState<string>(test.code || '');
-  const lastSentCodeRef = useRef<string>(test.code || '');
+  const [localCode, setLocalCode] = useState<string>(test.code || "");
+  const lastSentCodeRef = useRef<string>(test.code || "");
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,7 +131,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         setState(null);
       }
       hasMountedRef.current = true;
-      const result = await startDebugSession(test.id, repositoryId, 'auto');
+      const result = await startDebugSession(test.id, repositoryId, "auto");
       if (cancelled) {
         // Effect was cancelled after the EB was already claimed (e.g. Strict Mode double-mount
         // in dev, or fast unmount). Release it so subsequent claims can succeed.
@@ -186,33 +212,40 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     const release = () => {
       if (releasedRef.current) return;
       releasedRef.current = true;
-      const blob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
-      navigator.sendBeacon('/api/debug/release', blob);
+      const blob = new Blob([JSON.stringify({ sessionId })], {
+        type: "application/json",
+      });
+      navigator.sendBeacon("/api/debug/release", blob);
     };
     const onPageHide = () => release();
-    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
-      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [sessionId]);
 
   // Auto-scroll step list to current step
   useEffect(() => {
     if (state?.currentStepIndex !== undefined && stepListRef.current) {
-      const el = stepListRef.current.querySelector(`[data-step-index="${state.currentStepIndex}"]`);
+      const el = stepListRef.current.querySelector(
+        `[data-step-index="${state.currentStepIndex}"]`,
+      );
       if (el) {
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        el.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }
     }
   }, [state?.currentStepIndex]);
 
-  const sendCmd = useCallback(async (cmd: Parameters<typeof sendDebugCommand>[1]) => {
-    if (!sessionId) return;
-    const result = await sendDebugCommand(sessionId, cmd);
-    if (!result.ok && result.error) {
-      toast.error(result.error);
-    }
-  }, [sessionId]);
+  const sendCmd = useCallback(
+    async (cmd: Parameters<typeof sendDebugCommand>[1]) => {
+      if (!sessionId) return;
+      const result = await sendDebugCommand(sessionId, cmd);
+      if (!result.ok && result.error) {
+        toast.error(result.error);
+      }
+    },
+    [sessionId],
+  );
 
   const handleStop = useCallback(async () => {
     if (sessionId && !releasedRef.current) {
@@ -227,17 +260,20 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   }, [sessionId, router, test.id]);
 
   // Debounced code update handler
-  const handleCodeChange = useCallback((newCode: string) => {
-    setLocalCode(newCode);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      if (newCode !== lastSentCodeRef.current) {
-        lastSentCodeRef.current = newCode;
-        sendCmd({ type: 'update_code', code: newCode });
-      }
-    }, 500);
-  }, [sendCmd]);
+  const handleCodeChange = useCallback(
+    (newCode: string) => {
+      setLocalCode(newCode);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        if (newCode !== lastSentCodeRef.current) {
+          lastSentCodeRef.current = newCode;
+          sendCmd({ type: "update_code", code: newCode });
+        }
+      }, 500);
+    },
+    [sendCmd],
+  );
 
   // Re-parse steps client-side from the visible code when the user has unsynced edits,
   // so the gutter / step highlight always lines up with what's in the textarea.
@@ -250,7 +286,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     const body = extractTestBody(localCode);
     if (!body) return state?.steps ?? [];
     try {
-      const cleanBody = removeInlineReplayCursorPath(removeInlineLocateWithFallback(body));
+      const cleanBody = removeInlineReplayCursorPath(
+        removeInlineLocateWithFallback(body),
+      );
       return parseSteps(cleanBody);
     } catch {
       return state?.steps ?? [];
@@ -260,87 +298,106 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Insert a click step at the position right after the current step.
   // Uses locateWithFallback(...) so the parser/executor recognise it as an action step
   // (see debug-parser.ts:82 and debug-executor.ts:locateWithFallback).
-  const handleInsertClick = useCallback((sel: { type: string; value: string }) => {
-    const code = localCode;
-    const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
-    const bodyStartLine = funcMatch
-      ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
-      : 0;
+  const handleInsertClick = useCallback(
+    (sel: { type: string; value: string }) => {
+      const code = localCode;
+      const funcMatch = code.match(
+        /export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/,
+      );
+      const bodyStartLine = funcMatch
+        ? code
+            .slice(0, (funcMatch.index ?? 0) + funcMatch[0].length)
+            .split("\n").length
+        : 0;
 
-    const steps = displaySteps;
-    const curIdx = state?.currentStepIndex ?? -1;
-    const refStepIdx = curIdx >= 0 && curIdx < steps.length
-      ? curIdx
-      : (steps.length > 0 ? steps.length - 1 : -1);
+      const steps = displaySteps;
+      const curIdx = state?.currentStepIndex ?? -1;
+      const refStepIdx =
+        curIdx >= 0 && curIdx < steps.length
+          ? curIdx
+          : steps.length > 0
+            ? steps.length - 1
+            : -1;
 
-    const lines = code.split('\n');
+      const lines = code.split("\n");
 
-    // Insertion line index (0-based). After the current step's last line, or right
-    // after the function body opening brace when there are no steps.
-    let insertAt: number;
-    if (refStepIdx >= 0 && steps[refStepIdx]) {
-      insertAt = bodyStartLine + steps[refStepIdx].lineEnd;
-    } else {
-      insertAt = bodyStartLine; // first line inside the body
-    }
-    if (insertAt < 0) insertAt = 0;
-    if (insertAt > lines.length) insertAt = lines.length;
+      // Insertion line index (0-based). After the current step's last line, or right
+      // after the function body opening brace when there are no steps.
+      let insertAt: number;
+      if (refStepIdx >= 0 && steps[refStepIdx]) {
+        insertAt = bodyStartLine + steps[refStepIdx].lineEnd;
+      } else {
+        insertAt = bodyStartLine; // first line inside the body
+      }
+      if (insertAt < 0) insertAt = 0;
+      if (insertAt > lines.length) insertAt = lines.length;
 
-    // Reuse indentation from the previous non-empty line, or 2 spaces as a default.
-    let indent = '  ';
-    for (let i = insertAt - 1; i >= 0; i--) {
-      const m = lines[i].match(/^(\s+)\S/);
-      if (m) { indent = m[1]; break; }
-      if (lines[i].trim() !== '') break;
-    }
+      // Reuse indentation from the previous non-empty line, or 2 spaces as a default.
+      let indent = "  ";
+      for (let i = insertAt - 1; i >= 0; i--) {
+        const m = lines[i].match(/^(\s+)\S/);
+        if (m) {
+          indent = m[1];
+          break;
+        }
+        if (lines[i].trim() !== "") break;
+      }
 
-    const selectorJson = JSON.stringify([{ type: sel.type, value: sel.value }]);
-    const newLine = `${indent}await locateWithFallback(page, ${selectorJson}, 'click');`;
+      const selectorJson = JSON.stringify([
+        { type: sel.type, value: sel.value },
+      ]);
+      const newLine = `${indent}await locateWithFallback(page, ${selectorJson}, 'click');`;
 
-    const newLines = [...lines.slice(0, insertAt), newLine, ...lines.slice(insertAt)];
-    const newCode = newLines.join('\n');
+      const newLines = [
+        ...lines.slice(0, insertAt),
+        newLine,
+        ...lines.slice(insertAt),
+      ];
+      const newCode = newLines.join("\n");
 
-    handleCodeChange(newCode);
-    toast.success('Inserted click step');
-  }, [localCode, displaySteps, state?.currentStepIndex, handleCodeChange]);
+      handleCodeChange(newCode);
+      toast.success("Inserted click step");
+    },
+    [localCode, displaySteps, state?.currentStepIndex, handleCodeChange],
+  );
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const inTextarea = (e.target as HTMLElement)?.tagName === 'TEXTAREA';
+      const inTextarea = (e.target as HTMLElement)?.tagName === "TEXTAREA";
 
       // In textarea: only respond to Ctrl-modified shortcuts
       if (inTextarea && !e.ctrlKey && !e.metaKey) return;
 
-      if ((e.key === 'Enter') && (e.ctrlKey || e.metaKey)) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (e.shiftKey) {
-          sendCmd({ type: 'step_back' });
+          sendCmd({ type: "step_back" });
         } else {
-          sendCmd({ type: 'step_forward' });
+          sendCmd({ type: "step_forward" });
         }
-      } else if (e.key === 'F10') {
+      } else if (e.key === "F10") {
         e.preventDefault();
         if (e.shiftKey) {
-          sendCmd({ type: 'step_back' });
+          sendCmd({ type: "step_back" });
         } else {
-          sendCmd({ type: 'step_forward' });
+          sendCmd({ type: "step_forward" });
         }
-      } else if (e.key === 'F9') {
+      } else if (e.key === "F9") {
         e.preventDefault();
-        sendCmd({ type: 'step_back' });
-      } else if (e.key === 'F5' && (e.ctrlKey || e.metaKey || !inTextarea)) {
+        sendCmd({ type: "step_back" });
+      } else if (e.key === "F5" && (e.ctrlKey || e.metaKey || !inTextarea)) {
         e.preventDefault();
-        sendCmd({ type: 'run_to_end' });
-      } else if (e.key === 'Escape') {
+        sendCmd({ type: "run_to_end" });
+      } else if (e.key === "Escape") {
         e.preventDefault();
         handleStop();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [sendCmd, handleStop]);
 
@@ -348,7 +405,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   useEffect(() => {
     let cancelled = false;
     if (!resolvedRunnerId) {
-      Promise.resolve().then(() => { if (!cancelled) setStreamUrl(null); });
+      Promise.resolve().then(() => {
+        if (!cancelled) setStreamUrl(null);
+      });
     } else {
       (async () => {
         try {
@@ -359,7 +418,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             setStreamUrl(
               token
                 ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-                : streamInfo.streamUrl
+                : streamInfo.streamUrl,
             );
           } else {
             setStreamUrl(null);
@@ -369,26 +428,28 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         }
       })();
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [resolvedRunnerId]);
 
-  const isPaused = state?.status === 'paused';
-  const isError = state?.status === 'error';
-  const isCompleted = state?.status === 'completed';
-  const isInitializing = state?.status === 'initializing' || !state;
+  const isPaused = state?.status === "paused";
+  const isError = state?.status === "error";
+  const isCompleted = state?.status === "completed";
+  const isInitializing = state?.status === "initializing" || !state;
   const isRecording = state?.isRecording ?? false;
-  const isBusy = state?.status === 'stepping' || state?.status === 'running';
+  const isBusy = state?.status === "stepping" || state?.status === "running";
 
   // Past-step edit warning
-  const hasPastStepWarning = state?.error?.includes('Step back to apply');
+  const hasPastStepWarning = state?.error?.includes("Step back to apply");
 
   const statusColor = {
-    initializing: 'bg-yellow-500',
-    paused: 'bg-blue-500',
-    stepping: 'bg-yellow-500',
-    running: 'bg-green-500',
-    completed: 'bg-green-600',
-    error: 'bg-red-500',
+    initializing: "bg-yellow-500",
+    paused: "bg-blue-500",
+    stepping: "bg-yellow-500",
+    running: "bg-green-500",
+    completed: "bg-green-600",
+    error: "bg-red-500",
   };
 
   return (
@@ -396,15 +457,21 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-2 bg-background">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => router.push(`/tests?test=${encodeURIComponent(test.id)}`)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() =>
+              router.push(`/tests?test=${encodeURIComponent(test.id)}`)
+            }
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-sm font-medium">Debug: {test.name}</h1>
           <Badge
             variant="secondary"
-            className={`text-white ${statusColor[state?.status || 'initializing']}`}
+            className={`text-white ${statusColor[state?.status || "initializing"]}`}
           >
-            {state?.status || 'initializing'}
+            {state?.status || "initializing"}
           </Badge>
           {isRecording && (
             <span className="flex items-center gap-1 text-xs text-red-500">
@@ -424,8 +491,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => sendCmd({ type: 'step_back' })}
-            disabled={isRecording || ((!isPaused && !isError) || (state?.currentStepIndex ?? 0) <= 0)}
+            onClick={() => sendCmd({ type: "step_back" })}
+            disabled={
+              isRecording ||
+              (!isPaused && !isError) ||
+              (state?.currentStepIndex ?? 0) <= 0
+            }
             title="Step Back (Ctrl+Shift+Enter / F9)"
           >
             <SkipBack className="h-4 w-4" />
@@ -433,7 +504,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           <Button
             variant="default"
             size="sm"
-            onClick={() => sendCmd({ type: 'step_forward' })}
+            onClick={() => sendCmd({ type: "step_forward" })}
             disabled={isRecording || (!isPaused && !isError)}
             title="Step Forward (Ctrl+Enter / F10)"
           >
@@ -443,7 +514,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => sendCmd({ type: 'run_to_end' })}
+            onClick={() => sendCmd({ type: "run_to_end" })}
             disabled={isRecording || (!isPaused && !isError)}
             title="Run to End (Ctrl+F5)"
           >
@@ -471,7 +542,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 disabled={!streamUrl || domSnapshotLoading}
                 title="Download all selectors from current page"
               >
-                {domSnapshotLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileCode className="h-4 w-4 mr-1" />}
+                {domSnapshotLoading ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <FileCode className="h-4 w-4 mr-1" />
+                )}
                 DOM
               </Button>
             </>
@@ -484,21 +559,33 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         <div className="flex-1 flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Launching browser...</p>
+            <p className="text-sm text-muted-foreground">
+              Launching browser...
+            </p>
           </div>
         </div>
       ) : (
-        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="flex-1 min-h-0"
+        >
           {/* Left Panel — Code / Live View */}
           <ResizablePanel defaultSize={60} minSize={30}>
-            <Tabs value={leftTab} onValueChange={setLeftTab} className="flex flex-col h-full gap-0">
+            <Tabs
+              value={leftTab}
+              onValueChange={setLeftTab}
+              className="flex flex-col h-full gap-0"
+            >
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
                   <TabsTrigger value="code" className="text-xs px-2 py-0.5 h-6">
                     Code
                   </TabsTrigger>
                   {streamUrl && (
-                    <TabsTrigger value="liveview" className="text-xs px-2 py-0.5 h-6">
+                    <TabsTrigger
+                      value="liveview"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
                       <Tv2 className="h-3 w-3 mr-1" />
                       Live View
                     </TabsTrigger>
@@ -506,16 +593,22 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 </TabsList>
               </div>
 
-              <TabsContent value="code" className="flex flex-col flex-1 min-h-0 mt-0">
+              <TabsContent
+                value="code"
+                className="flex flex-col flex-1 min-h-0 mt-0"
+              >
                 {/* Past-step edit warning */}
                 {hasPastStepWarning && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
-                    <p className="text-xs text-yellow-600 flex-1">Code changed at an already-executed step. Step back to apply changes.</p>
+                    <p className="text-xs text-yellow-600 flex-1">
+                      Code changed at an already-executed step. Step back to
+                      apply changes.
+                    </p>
                     <Button
                       variant="outline"
                       size="sm"
                       className="h-6 text-xs border-yellow-500/30 text-yellow-600"
-                      onClick={() => sendCmd({ type: 'step_back' })}
+                      onClick={() => sendCmd({ type: "step_back" })}
                     >
                       <SkipBack className="h-3 w-3 mr-1" />
                       Step Back
@@ -529,8 +622,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   stepResults={state?.stepResults || []}
                   onCodeChange={handleCodeChange}
                   onClickStep={(idx) => {
-                    if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
-                      sendCmd({ type: 'run_to_step', stepIndex: idx });
+                    if (
+                      (isPaused || isError || isCompleted) &&
+                      idx !== (state?.currentStepIndex ?? -1)
+                    ) {
+                      sendCmd({ type: "run_to_step", stepIndex: idx });
                     }
                   }}
                   disabled={isBusy}
@@ -538,7 +634,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               </TabsContent>
 
               {streamUrl && (
-                <TabsContent value="liveview" className="flex flex-col flex-1 min-h-0 mt-0">
+                <TabsContent
+                  value="liveview"
+                  className="flex flex-col flex-1 min-h-0 mt-0"
+                >
                   <BrowserViewer
                     ref={browserViewerRef}
                     streamUrl={streamUrl}
@@ -546,7 +645,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     interactive={isRecording || inspectMode}
                     inspectMode={inspectMode}
                     onInspectResult={(result) => setInspectedElement(result)}
-                    onDomSnapshot={(result) => { setDomSnapshot(result); setDomSnapshotLoading(false); }}
+                    onDomSnapshot={(result) => {
+                      setDomSnapshot(result);
+                      setDomSnapshotLoading(false);
+                    }}
                     hideControls
                     hideFullscreenToggle
                     hideScreenshot
@@ -561,35 +663,59 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           <ResizableHandle withHandle />
 
           {/* Right Panel — Tabbed: Steps / Network / Console */}
-          <ResizablePanel defaultSize={40} minSize={20} className="overflow-hidden">
-            <Tabs value={rightTab} onValueChange={(tab) => {
-              setRightTab(tab);
-              if (tab === 'selectors' && streamUrl) {
-                // Auto-enable inspect mode and switch to live view
-                setInspectMode(true);
-                browserViewerRef.current?.sendInspectMode(true);
-                if (leftTab !== 'liveview') setLeftTab('liveview');
-              } else if (rightTab === 'selectors' && tab !== 'selectors') {
-                // Leaving selectors tab — disable inspect mode
-                setInspectMode(false);
-                browserViewerRef.current?.sendInspectMode(false);
-              }
-            }} className="flex flex-col h-full gap-0">
+          <ResizablePanel
+            defaultSize={40}
+            minSize={20}
+            className="overflow-hidden"
+          >
+            <Tabs
+              value={rightTab}
+              onValueChange={(tab) => {
+                setRightTab(tab);
+                if (tab === "selectors" && streamUrl) {
+                  // Auto-enable inspect mode and switch to live view
+                  setInspectMode(true);
+                  browserViewerRef.current?.sendInspectMode(true);
+                  if (leftTab !== "liveview") setLeftTab("liveview");
+                } else if (rightTab === "selectors" && tab !== "selectors") {
+                  // Leaving selectors tab — disable inspect mode
+                  setInspectMode(false);
+                  browserViewerRef.current?.sendInspectMode(false);
+                }
+              }}
+              className="flex flex-col h-full gap-0"
+            >
               <div className="px-2 py-1.5 border-b bg-muted/50">
                 <TabsList className="h-7">
-                  <TabsTrigger value="steps" className="text-xs px-2 py-0.5 h-6">
+                  <TabsTrigger
+                    value="steps"
+                    className="text-xs px-2 py-0.5 h-6"
+                  >
                     Steps
                   </TabsTrigger>
-                  <TabsTrigger value="network" className="text-xs px-2 py-0.5 h-6">
+                  <TabsTrigger
+                    value="network"
+                    className="text-xs px-2 py-0.5 h-6"
+                  >
                     <Globe className="h-3 w-3 mr-1" />
-                    Network{(state?.networkEntries?.length ?? 0) > 0 && ` (${state!.networkEntries.length})`}
+                    Network
+                    {(state?.networkEntries?.length ?? 0) > 0 &&
+                      ` (${state!.networkEntries.length})`}
                   </TabsTrigger>
-                  <TabsTrigger value="console" className="text-xs px-2 py-0.5 h-6">
+                  <TabsTrigger
+                    value="console"
+                    className="text-xs px-2 py-0.5 h-6"
+                  >
                     <Terminal className="h-3 w-3 mr-1" />
-                    Console{(state?.consoleEntries?.length ?? 0) > 0 && ` (${state!.consoleEntries.length})`}
+                    Console
+                    {(state?.consoleEntries?.length ?? 0) > 0 &&
+                      ` (${state!.consoleEntries.length})`}
                   </TabsTrigger>
                   {streamUrl && (
-                    <TabsTrigger value="selectors" className="text-xs px-2 py-0.5 h-6">
+                    <TabsTrigger
+                      value="selectors"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
                       <Crosshair className="h-3 w-3 mr-1" />
                       Selectors
                     </TabsTrigger>
@@ -598,18 +724,25 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               </div>
 
               {/* Steps Tab */}
-              <TabsContent value="steps" className="flex flex-col flex-1 min-h-0 mt-0">
+              <TabsContent
+                value="steps"
+                className="flex flex-col flex-1 min-h-0 mt-0"
+              >
                 {/* Error banner (non-past-step errors) */}
                 {isError && state?.error && !hasPastStepWarning && (
                   <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
-                    <p className="text-xs text-destructive font-mono">{state.error}</p>
+                    <p className="text-xs text-destructive font-mono">
+                      {state.error}
+                    </p>
                   </div>
                 )}
 
                 {/* Completed banner */}
                 {isCompleted && (
                   <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
-                    <p className="text-xs text-green-600">All steps completed successfully.</p>
+                    <p className="text-xs text-green-600">
+                      All steps completed successfully.
+                    </p>
                   </div>
                 )}
 
@@ -618,20 +751,25 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     {displaySteps.map((step, idx) => {
                       const result = state?.stepResults?.[idx];
                       const isCurrent = idx === (state?.currentStepIndex ?? -1);
-                      const isStepPassed = result?.status === 'passed';
-                      const isFailed = result?.status === 'failed';
-                      const isPendingStep = result?.status === 'pending';
+                      const isStepPassed = result?.status === "passed";
+                      const isFailed = result?.status === "failed";
+                      const isPendingStep = result?.status === "pending";
 
                       return (
                         <div
                           key={step.id}
                           data-step-index={idx}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
-                            isCurrent ? 'bg-blue-500/10 border border-blue-500/30' : ''
+                            isCurrent
+                              ? "bg-blue-500/10 border border-blue-500/30"
+                              : ""
                           }`}
                           onClick={() => {
-                            if ((isPaused || isError || isCompleted) && idx !== (state?.currentStepIndex ?? -1)) {
-                              sendCmd({ type: 'run_to_step', stepIndex: idx });
+                            if (
+                              (isPaused || isError || isCompleted) &&
+                              idx !== (state?.currentStepIndex ?? -1)
+                            ) {
+                              sendCmd({ type: "run_to_step", stepIndex: idx });
                             }
                           }}
                         >
@@ -641,7 +779,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                               <XCircle className="h-4 w-4 text-destructive" />
                             ) : isStepPassed ? (
                               <CheckCircle className="h-4 w-4 text-green-500" />
-                            ) : isCurrent && (state?.status === 'stepping' || state?.status === 'running') ? (
+                            ) : isCurrent &&
+                              (state?.status === "stepping" ||
+                                state?.status === "running") ? (
                               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                             ) : isCurrent ? (
                               <Play className="h-4 w-4 text-blue-500" />
@@ -655,16 +795,25 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                           {/* Step info */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-muted-foreground">{idx + 1}.</span>
-                              <span className={`truncate ${isCurrent ? 'font-medium' : ''}`}>
+                              <span className="text-muted-foreground">
+                                {idx + 1}.
+                              </span>
+                              <span
+                                className={`truncate ${isCurrent ? "font-medium" : ""}`}
+                              >
                                 {step.label}
                               </span>
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                              >
                                 {step.type}
                               </Badge>
                             </div>
                             {isFailed && result?.error && (
-                              <p className="text-destructive mt-0.5 truncate font-mono">{result.error}</p>
+                              <p className="text-destructive mt-0.5 truncate font-mono">
+                                {result.error}
+                              </p>
                             )}
                           </div>
 
@@ -683,27 +832,48 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 {/* Keyboard shortcuts hint */}
                 <div className="border-t px-3 py-1.5 bg-muted/30">
                   <p className="text-[10px] text-muted-foreground">
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+Enter</kbd> Step
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+Shift+Enter</kbd> Back
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Ctrl+F5</kbd> Run all
-                    {' '}<kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">Esc</kbd> Stop
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                      Ctrl+Enter
+                    </kbd>{" "}
+                    Step{" "}
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                      Ctrl+Shift+Enter
+                    </kbd>{" "}
+                    Back{" "}
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                      Ctrl+F5
+                    </kbd>{" "}
+                    Run all{" "}
+                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                      Esc
+                    </kbd>{" "}
+                    Stop
                   </p>
                 </div>
               </TabsContent>
 
               {/* Network Tab */}
-              <TabsContent value="network" className="flex flex-col flex-1 min-h-0 mt-0">
+              <TabsContent
+                value="network"
+                className="flex flex-col flex-1 min-h-0 mt-0"
+              >
                 <NetworkPanel entries={state?.networkEntries || []} />
               </TabsContent>
 
               {/* Console Tab */}
-              <TabsContent value="console" className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden">
+              <TabsContent
+                value="console"
+                className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden"
+              >
                 <ConsolePanel entries={state?.consoleEntries || []} />
               </TabsContent>
 
               {/* Selectors Tab */}
               {streamUrl && (
-                <TabsContent value="selectors" className="flex flex-col flex-1 min-h-0 mt-0">
+                <TabsContent
+                  value="selectors"
+                  className="flex flex-col flex-1 min-h-0 mt-0"
+                >
                   <SelectorsPanel
                     inspectedElement={inspectedElement}
                     domSnapshot={domSnapshot}
@@ -719,7 +889,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   />
                 </TabsContent>
               )}
-
             </Tabs>
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -732,15 +901,23 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
 interface EditableCodeDisplayProps {
   code: string;
-  steps: DebugState['steps'];
+  steps: DebugState["steps"];
   currentStepIndex: number;
-  stepResults: DebugState['stepResults'];
+  stepResults: DebugState["stepResults"];
   onCodeChange: (code: string) => void;
   onClickStep: (idx: number) => void;
   disabled: boolean;
 }
 
-function EditableCodeDisplay({ code, steps, currentStepIndex, stepResults, onCodeChange, onClickStep, disabled }: EditableCodeDisplayProps) {
+function EditableCodeDisplay({
+  code,
+  steps,
+  currentStepIndex,
+  stepResults,
+  onCodeChange,
+  onClickStep,
+  disabled,
+}: EditableCodeDisplayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -775,18 +952,22 @@ function EditableCodeDisplay({ code, steps, currentStepIndex, stepResults, onCod
         onScroll={handleScroll}
         readOnly={disabled}
         className="absolute inset-0 w-full h-full font-mono text-xs leading-5 bg-transparent resize-none focus:outline-none pl-12 pr-4 py-0 overflow-auto"
-        style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+        style={{ color: "transparent", caretColor: "var(--foreground)" }}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
       />
       {/* Click overlay for step navigation (only on the gutter area) */}
       <div className="absolute inset-y-0 left-0 w-12">
-        {code.split('\n').map((_, lineIdx) => {
+        {code.split("\n").map((_, lineIdx) => {
           const lineNum = lineIdx + 1;
-          const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+          const funcMatch = code.match(
+            /export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/,
+          );
           const bodyStartLine = funcMatch
-            ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+            ? code
+                .slice(0, (funcMatch.index ?? 0) + funcMatch[0].length)
+                .split("\n").length
             : 0;
           const bodyLineNum = lineNum - bodyStartLine;
           let stepIdx: number | undefined;
@@ -815,13 +996,18 @@ function EditableCodeDisplay({ code, steps, currentStepIndex, stepResults, onCod
 
 interface CodeHighlightProps {
   code: string;
-  steps: DebugState['steps'];
+  steps: DebugState["steps"];
   currentStepIndex: number;
-  stepResults: DebugState['stepResults'];
+  stepResults: DebugState["stepResults"];
 }
 
-function CodeHighlight({ code, steps, currentStepIndex, stepResults }: CodeHighlightProps) {
-  const lines = code.split('\n');
+function CodeHighlight({
+  code,
+  steps,
+  currentStepIndex,
+  stepResults,
+}: CodeHighlightProps) {
+  const lines = code.split("\n");
 
   // Build line → step mapping
   const lineStepMap = new Map<number, { stepIdx: number; isStart: boolean }>();
@@ -832,9 +1018,12 @@ function CodeHighlight({ code, steps, currentStepIndex, stepResults }: CodeHighl
   });
 
   // Find the line offset
-  const funcMatch = code.match(/export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/);
+  const funcMatch = code.match(
+    /export\s+async\s+function\s+test\s*\([^)]*\)\s*\{/,
+  );
   const bodyStartLine = funcMatch
-    ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split('\n').length
+    ? code.slice(0, (funcMatch.index ?? 0) + funcMatch[0].length).split("\n")
+        .length
     : 0;
 
   return (
@@ -846,27 +1035,29 @@ function CodeHighlight({ code, steps, currentStepIndex, stepResults }: CodeHighl
         const stepIdx = stepInfo?.stepIdx;
 
         const isCurrent = stepIdx !== undefined && stepIdx === currentStepIndex;
-        const isPassed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'passed';
-        const isFailed = stepIdx !== undefined && stepResults[stepIdx]?.status === 'failed';
+        const isPassed =
+          stepIdx !== undefined && stepResults[stepIdx]?.status === "passed";
+        const isFailed =
+          stepIdx !== undefined && stepResults[stepIdx]?.status === "failed";
 
-        let bgColor = '';
-        if (isCurrent) bgColor = 'bg-blue-500/10';
-        else if (isFailed) bgColor = 'bg-red-500/5';
-        else if (isPassed) bgColor = '';
+        let bgColor = "";
+        if (isCurrent) bgColor = "bg-blue-500/10";
+        else if (isFailed) bgColor = "bg-red-500/5";
+        else if (isPassed) bgColor = "";
 
-        let gutterColor = 'text-muted-foreground/40';
-        if (isFailed) gutterColor = 'text-red-500';
-        else if (isPassed) gutterColor = 'text-green-500';
-        else if (isCurrent) gutterColor = 'text-blue-500';
+        let gutterColor = "text-muted-foreground/40";
+        if (isFailed) gutterColor = "text-red-500";
+        else if (isPassed) gutterColor = "text-green-500";
+        else if (isCurrent) gutterColor = "text-blue-500";
 
         return (
-          <div
-            key={lineIdx}
-            className={`flex ${bgColor}`}
-          >
+          <div key={lineIdx} className={`flex ${bgColor}`}>
             {/* Gutter */}
-            <div className={`w-12 flex-shrink-0 text-right pr-3 select-none ${gutterColor}`}>
-              {isCurrent && stepInfo?.isStart ? '>' : ' '}{lineNum}
+            <div
+              className={`w-12 flex-shrink-0 text-right pr-3 select-none ${gutterColor}`}
+            >
+              {isCurrent && stepInfo?.isStart ? ">" : " "}
+              {lineNum}
             </div>
             {/* Code */}
             <pre className="flex-1 whitespace-pre-wrap break-all pr-4">
@@ -883,17 +1074,19 @@ function CodeHighlight({ code, steps, currentStepIndex, stepResults }: CodeHighl
 
 function NetworkPanel({ entries }: { entries: DebugNetworkEntry[] }) {
   const getStatusColor = (entry: DebugNetworkEntry) => {
-    if (entry.failed) return 'text-red-500';
-    if (entry.status === null) return 'text-muted-foreground';
-    if (entry.status >= 200 && entry.status < 300) return 'text-green-500';
-    if (entry.status >= 300 && entry.status < 400) return 'text-yellow-500';
-    return 'text-red-500';
+    if (entry.failed) return "text-red-500";
+    if (entry.status === null) return "text-muted-foreground";
+    if (entry.status >= 200 && entry.status < 300) return "text-green-500";
+    if (entry.status >= 300 && entry.status < 400) return "text-yellow-500";
+    return "text-red-500";
   };
 
   if (entries.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-xs text-muted-foreground">No network requests captured yet.</p>
+        <p className="text-xs text-muted-foreground">
+          No network requests captured yet.
+        </p>
       </div>
     );
   }
@@ -912,19 +1105,28 @@ function NetworkPanel({ entries }: { entries: DebugNetworkEntry[] }) {
         {entries.map((entry) => (
           <div
             key={entry.id}
-            className={`flex items-center gap-2 px-3 py-1 border-b border-border/50 hover:bg-muted/30 ${entry.failed ? 'bg-red-500/5' : ''}`}
+            className={`flex items-center gap-2 px-3 py-1 border-b border-border/50 hover:bg-muted/30 ${entry.failed ? "bg-red-500/5" : ""}`}
           >
-            <span className="w-12 font-mono font-medium flex-shrink-0">{entry.method}</span>
-            <span className="flex-1 min-w-0 truncate font-mono text-muted-foreground" title={entry.url}>
+            <span className="w-12 font-mono font-medium flex-shrink-0">
+              {entry.method}
+            </span>
+            <span
+              className="flex-1 min-w-0 truncate font-mono text-muted-foreground"
+              title={entry.url}
+            >
               {truncateUrl(entry.url)}
             </span>
-            <span className={`w-10 text-right font-mono flex-shrink-0 ${getStatusColor(entry)}`}>
-              {entry.failed ? 'ERR' : entry.status ?? '...'}
+            <span
+              className={`w-10 text-right font-mono flex-shrink-0 ${getStatusColor(entry)}`}
+            >
+              {entry.failed ? "ERR" : (entry.status ?? "...")}
             </span>
             <span className="w-14 text-right text-muted-foreground flex-shrink-0">
-              {entry.duration !== null ? `${entry.duration}ms` : '...'}
+              {entry.duration !== null ? `${entry.duration}ms` : "..."}
             </span>
-            <span className="w-16 truncate text-muted-foreground flex-shrink-0">{entry.resourceType}</span>
+            <span className="w-16 truncate text-muted-foreground flex-shrink-0">
+              {entry.resourceType}
+            </span>
           </div>
         ))}
       </div>
@@ -937,7 +1139,7 @@ function truncateUrl(url: string): string {
     const u = new URL(url);
     return u.pathname + u.search;
   } catch {
-    return url.length > 80 ? url.slice(0, 80) + '...' : url;
+    return url.length > 80 ? url.slice(0, 80) + "..." : url;
   }
 }
 
@@ -946,27 +1148,38 @@ function truncateUrl(url: string): string {
 function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'error': return 'text-red-500 bg-red-500/10';
-      case 'warning': return 'text-yellow-500 bg-yellow-500/10';
-      case 'info': return 'text-blue-500 bg-blue-500/10';
-      default: return 'text-muted-foreground bg-muted/50';
+      case "error":
+        return "text-red-500 bg-red-500/10";
+      case "warning":
+        return "text-yellow-500 bg-yellow-500/10";
+      case "info":
+        return "text-blue-500 bg-blue-500/10";
+      default:
+        return "text-muted-foreground bg-muted/50";
     }
   };
 
   const getTypeBadge = (type: string) => {
     switch (type) {
-      case 'error': return 'ERR';
-      case 'warning': return 'WARN';
-      case 'info': return 'INFO';
-      case 'log': return 'LOG';
-      default: return type.toUpperCase().slice(0, 4);
+      case "error":
+        return "ERR";
+      case "warning":
+        return "WARN";
+      case "info":
+        return "INFO";
+      case "log":
+        return "LOG";
+      default:
+        return type.toUpperCase().slice(0, 4);
     }
   };
 
   if (entries.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-xs text-muted-foreground">No console messages captured yet.</p>
+        <p className="text-xs text-muted-foreground">
+          No console messages captured yet.
+        </p>
       </div>
     );
   }
@@ -978,15 +1191,23 @@ function ConsolePanel({ entries }: { entries: DebugConsoleEntry[] }) {
           <div
             key={entry.id}
             className={`flex items-start gap-2 px-3 py-1 border-b border-border/50 ${
-              entry.type === 'error' ? 'bg-red-500/5' : entry.type === 'warning' ? 'bg-yellow-500/5' : ''
+              entry.type === "error"
+                ? "bg-red-500/5"
+                : entry.type === "warning"
+                  ? "bg-yellow-500/5"
+                  : ""
             }`}
           >
-            <span className={`px-1 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${getTypeColor(entry.type)}`}>
+            <span
+              className={`px-1 py-0.5 rounded text-[10px] font-medium flex-shrink-0 ${getTypeColor(entry.type)}`}
+            >
               {getTypeBadge(entry.type)}
             </span>
-            <span className="flex-1 min-w-0 font-mono break-all whitespace-pre-wrap">{entry.text}</span>
+            <span className="flex-1 min-w-0 font-mono break-all whitespace-pre-wrap">
+              {entry.text}
+            </span>
             <span className="text-[10px] text-muted-foreground flex-shrink-0">
-              s{entry.stepIndex >= 0 ? entry.stepIndex + 1 : '-'}
+              s{entry.stepIndex >= 0 ? entry.stepIndex + 1 : "-"}
             </span>
           </div>
         ))}
@@ -1008,18 +1229,29 @@ interface SelectorsPanelProps {
   canInsert: boolean;
 }
 
-function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, search, onSearchChange, onRequestDomSnapshot, onInsertClick, canInsert }: SelectorsPanelProps) {
+function SelectorsPanel({
+  inspectedElement,
+  domSnapshot,
+  domSnapshotLoading,
+  search,
+  onSearchChange,
+  onRequestDomSnapshot,
+  onInsertClick,
+  canInsert,
+}: SelectorsPanelProps) {
   const [expandedIdx, setExpandedIdx] = useState<Set<number>>(new Set());
 
   const copyToClipboard = useCallback((text: string) => {
-    navigator.clipboard.writeText(text).then(() => toast.success('Copied'));
+    navigator.clipboard.writeText(text).then(() => toast.success("Copied"));
   }, []);
 
   const handleDownloadJson = useCallback(() => {
     if (!domSnapshot) return;
-    const blob = new Blob([JSON.stringify(domSnapshot, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(domSnapshot, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `dom-selectors-${new Date().toISOString().slice(0, 19)}.json`;
     a.click();
@@ -1027,7 +1259,7 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
   }, [domSnapshot]);
 
   const toggleExpand = useCallback((idx: number) => {
-    setExpandedIdx(prev => {
+    setExpandedIdx((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
       else next.add(idx);
@@ -1049,7 +1281,11 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
           onClick={onRequestDomSnapshot}
           disabled={domSnapshotLoading}
         >
-          {domSnapshotLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileCode className="h-4 w-4 mr-1" />}
+          {domSnapshotLoading ? (
+            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          ) : (
+            <FileCode className="h-4 w-4 mr-1" />
+          )}
           Snapshot All Selectors
         </Button>
       </div>
@@ -1065,23 +1301,39 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">
                 &lt;{inspectedElement.tag}&gt;
-                {inspectedElement.id && <span className="text-muted-foreground ml-1">#{inspectedElement.id}</span>}
+                {inspectedElement.id && (
+                  <span className="text-muted-foreground ml-1">
+                    #{inspectedElement.id}
+                  </span>
+                )}
               </span>
               <span className="text-[10px] text-muted-foreground">
-                {Math.round(inspectedElement.boundingBox.width)}x{Math.round(inspectedElement.boundingBox.height)}
+                {Math.round(inspectedElement.boundingBox.width)}x
+                {Math.round(inspectedElement.boundingBox.height)}
               </span>
             </div>
             {inspectedElement.textContent && (
-              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{inspectedElement.textContent}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                {inspectedElement.textContent}
+              </p>
             )}
           </div>
           <div className="divide-y">
             {inspectedElement.selectors.map((sel, i) => (
-              <div key={i} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30">
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono">
+              <div
+                key={i}
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30"
+              >
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono"
+                >
                   {sel.type}
                 </Badge>
-                <code className="flex-1 min-w-0 text-[11px] font-mono truncate" title={sel.value}>
+                <code
+                  className="flex-1 min-w-0 text-[11px] font-mono truncate"
+                  title={sel.value}
+                >
                   {sel.value}
                 </code>
                 <Button
@@ -1126,7 +1378,12 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
             <span className="text-[10px] text-muted-foreground flex-shrink-0">
               {domSnapshot.elements.length} elements
             </span>
-            <Button variant="outline" size="sm" className="h-6 text-xs px-2" onClick={handleDownloadJson}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={handleDownloadJson}
+            >
               <Download className="h-3 w-3 mr-1" />
               JSON
             </Button>
@@ -1136,14 +1393,18 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
           <ScrollArea className="flex-1">
             <div className="text-xs">
               {domSnapshot.elements
-                .filter(el => {
+                .filter((el) => {
                   if (!search) return true;
                   const q = search.toLowerCase();
                   return (
                     el.tag.includes(q) ||
                     el.id?.toLowerCase().includes(q) ||
                     el.textContent?.toLowerCase().includes(q) ||
-                    el.selectors.some(s => s.value.toLowerCase().includes(q) || s.type.toLowerCase().includes(q))
+                    el.selectors.some(
+                      (s) =>
+                        s.value.toLowerCase().includes(q) ||
+                        s.type.toLowerCase().includes(q),
+                    )
                   );
                 })
                 .map((el, idx) => {
@@ -1154,27 +1415,46 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                         className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-muted/30"
                         onClick={() => toggleExpand(idx)}
                       >
-                        {isExpanded
-                          ? <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                          : <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                        }
-                        <span className="font-mono font-medium">&lt;{el.tag}&gt;</span>
-                        {el.id && <span className="text-muted-foreground font-mono">#{el.id}</span>}
+                        {isExpanded ? (
+                          <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="font-mono font-medium">
+                          &lt;{el.tag}&gt;
+                        </span>
+                        {el.id && (
+                          <span className="text-muted-foreground font-mono">
+                            #{el.id}
+                          </span>
+                        )}
                         <span className="flex-1 min-w-0 truncate text-muted-foreground">
                           {el.textContent?.slice(0, 40)}
                         </span>
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                        >
                           {el.selectors.length}
                         </Badge>
                       </div>
                       {isExpanded && (
                         <div className="divide-y pl-7 bg-muted/20">
                           {el.selectors.map((sel, si) => (
-                            <div key={si} className="flex items-center gap-2 px-3 py-1 hover:bg-muted/30">
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono">
+                            <div
+                              key={si}
+                              className="flex items-center gap-2 px-3 py-1 hover:bg-muted/30"
+                            >
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 font-mono"
+                              >
                                 {sel.type}
                               </Badge>
-                              <code className="flex-1 min-w-0 text-[11px] font-mono truncate" title={sel.value}>
+                              <code
+                                className="flex-1 min-w-0 text-[11px] font-mono truncate"
+                                title={sel.value}
+                              >
                                 {sel.value}
                               </code>
                               <Button
@@ -1183,7 +1463,10 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                                 className="h-5 w-5 flex-shrink-0"
                                 disabled={!canInsert}
                                 title="Insert click step here"
-                                onClick={(e) => { e.stopPropagation(); onInsertClick(sel); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onInsertClick(sel);
+                                }}
                               >
                                 <MousePointerClick className="h-3 w-3" />
                               </Button>
@@ -1192,7 +1475,10 @@ function SelectorsPanel({ inspectedElement, domSnapshot, domSnapshotLoading, sea
                                 size="icon"
                                 className="h-5 w-5 flex-shrink-0"
                                 title="Copy selector"
-                                onClick={(e) => { e.stopPropagation(); copyToClipboard(sel.value); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  copyToClipboard(sel.value);
+                                }}
                               >
                                 <Copy className="h-3 w-3" />
                               </Button>

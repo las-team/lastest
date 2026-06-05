@@ -11,7 +11,10 @@
  * divergence, not parameter changes).
  */
 
-import type { UrlTrajectoryStep, UrlTrajectoryDiffSummary } from '@/lib/db/schema';
+import type {
+  UrlTrajectoryStep,
+  UrlTrajectoryDiffSummary,
+} from "@/lib/db/schema";
 
 export function normalizeTrajectoryUrl(url: string): string {
   // Short-circuit non-navigable schemes — `new URL('about:blank')` parses but
@@ -19,19 +22,23 @@ export function normalizeTrajectoryUrl(url: string): string {
   if (!/^https?:/i.test(url)) return url;
   try {
     const u = new URL(url);
-    const noisy = /^(_|t|ts|cb|nonce|csrf|xsrf|token|sid|sessionid|state|code)$/i;
+    const noisy =
+      /^(_|t|ts|cb|nonce|csrf|xsrf|token|sid|sessionid|state|code)$/i;
     const keep: string[] = [];
     for (const [k, v] of u.searchParams.entries()) {
       if (noisy.test(k)) continue;
       keep.push(`${k}=${v}`);
     }
     keep.sort();
-    const path = u.pathname.split('/').map(seg => {
-      if (/^\d+$/.test(seg)) return ':id';
-      if (/^[a-f0-9]{24,}$/i.test(seg)) return ':hash';
-      return seg;
-    }).join('/');
-    return `${u.origin}${path}${keep.length ? '?' + keep.join('&') : ''}`;
+    const path = u.pathname
+      .split("/")
+      .map((seg) => {
+        if (/^\d+$/.test(seg)) return ":id";
+        if (/^[a-f0-9]{24,}$/i.test(seg)) return ":hash";
+        return seg;
+      })
+      .join("/");
+    return `${u.origin}${path}${keep.length ? "?" + keep.join("&") : ""}`;
   } catch {
     return url;
   }
@@ -41,11 +48,11 @@ export function computeUrlTrajectoryDiff(
   baseline: UrlTrajectoryStep[],
   current: UrlTrajectoryStep[],
 ): UrlTrajectoryDiffSummary {
-  const baseByIndex = new Map(baseline.map(s => [s.stepIndex, s]));
-  const currByIndex = new Map(current.map(s => [s.stepIndex, s]));
+  const baseByIndex = new Map(baseline.map((s) => [s.stepIndex, s]));
+  const currByIndex = new Map(current.map((s) => [s.stepIndex, s]));
   const allIndexes = new Set([...baseByIndex.keys(), ...currByIndex.keys()]);
 
-  const divergedSteps: UrlTrajectoryDiffSummary['divergedSteps'] = [];
+  const divergedSteps: UrlTrajectoryDiffSummary["divergedSteps"] = [];
   let totalCompared = 0;
 
   for (const idx of [...allIndexes].sort((a, b) => a - b)) {
@@ -73,10 +80,14 @@ export function computeUrlTrajectoryDiff(
   return { divergedSteps, totalStepsCompared: totalCompared };
 }
 
-export function summarizeUrlTrajectoryDiff(d: UrlTrajectoryDiffSummary): string {
-  if (d.divergedSteps.length === 0) return 'No URL trajectory changes';
-  const redirects = d.divergedSteps.filter(s => s.redirectChainChanged).length;
+export function summarizeUrlTrajectoryDiff(
+  d: UrlTrajectoryDiffSummary,
+): string {
+  if (d.divergedSteps.length === 0) return "No URL trajectory changes";
+  const redirects = d.divergedSteps.filter(
+    (s) => s.redirectChainChanged,
+  ).length;
   const parts = [`${d.divergedSteps.length} step(s) diverged`];
   if (redirects) parts.push(`${redirects} with redirect-chain change`);
-  return parts.join(', ');
+  return parts.join(", ");
 }

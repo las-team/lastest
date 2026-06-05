@@ -2,12 +2,12 @@
 // Mirrors src/lib/github/actions.ts but for GitLab — no libsodium needed
 // (GitLab variable values are sent in plaintext over HTTPS).
 
-const CI_FILE_PATH = '.gitlab-ci.yml';
+const CI_FILE_PATH = ".gitlab-ci.yml";
 
 function authHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 }
 
@@ -41,7 +41,10 @@ export async function getCiFileMeta(
     { headers: authHeaders(token) },
   );
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitLab API error fetching file: ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(
+      `GitLab API error fetching file: ${res.status} ${await res.text()}`,
+    );
   return res.json();
 }
 
@@ -61,17 +64,19 @@ export async function upsertCiFile(
     branch,
     content: yaml,
     commit_message: existing
-      ? 'Update Lastest visual testing pipeline'
-      : 'Add Lastest visual testing pipeline',
+      ? "Update Lastest visual testing pipeline"
+      : "Add Lastest visual testing pipeline",
   };
-  const method = existing ? 'PUT' : 'POST';
+  const method = existing ? "PUT" : "POST";
   const res = await fetch(url, {
     method,
     headers: authHeaders(token),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`Failed to upsert .gitlab-ci.yml: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to upsert .gitlab-ci.yml: ${res.status} ${await res.text()}`,
+    );
   }
   return { created: !existing };
 }
@@ -85,16 +90,18 @@ export async function deleteCiFile(
   const res = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/repository/files/${fileParam(CI_FILE_PATH)}`,
     {
-      method: 'DELETE',
+      method: "DELETE",
       headers: authHeaders(token),
       body: JSON.stringify({
         branch,
-        commit_message: 'Remove Lastest visual testing pipeline',
+        commit_message: "Remove Lastest visual testing pipeline",
       }),
     },
   );
   if (!res.ok && res.status !== 404) {
-    throw new Error(`Failed to delete .gitlab-ci.yml: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to delete .gitlab-ci.yml: ${res.status} ${await res.text()}`,
+    );
   }
 }
 
@@ -111,11 +118,16 @@ export async function setProjectVariable(
 ): Promise<void> {
   const masked = opts?.masked ?? true;
   const isProtected = opts?.protected ?? false;
-  const exists = await checkProjectVariableExists(token, instanceUrl, projectId, key);
+  const exists = await checkProjectVariableExists(
+    token,
+    instanceUrl,
+    projectId,
+    key,
+  );
   const url = exists
     ? `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/variables/${encodeURIComponent(key)}`
     : `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/variables`;
-  const method = exists ? 'PUT' : 'POST';
+  const method = exists ? "PUT" : "POST";
   const res = await fetch(url, {
     method,
     headers: authHeaders(token),
@@ -124,11 +136,13 @@ export async function setProjectVariable(
       value,
       masked,
       protected: isProtected,
-      variable_type: 'env_var',
+      variable_type: "env_var",
     }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to set project variable ${key}: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to set project variable ${key}: ${res.status} ${await res.text()}`,
+    );
   }
 }
 
@@ -140,10 +154,12 @@ export async function deleteProjectVariable(
 ): Promise<void> {
   const res = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/variables/${encodeURIComponent(key)}`,
-    { method: 'DELETE', headers: authHeaders(token) },
+    { method: "DELETE", headers: authHeaders(token) },
   );
   if (!res.ok && res.status !== 404) {
-    throw new Error(`Failed to delete project variable ${key}: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to delete project variable ${key}: ${res.status} ${await res.text()}`,
+    );
   }
 }
 
@@ -176,17 +192,22 @@ export async function upsertProjectHook(
   projectId: number,
   hookUrl: string,
   secretToken: string,
-  events: { push?: boolean; merge_request?: boolean } = { push: true, merge_request: true },
+  events: { push?: boolean; merge_request?: boolean } = {
+    push: true,
+    merge_request: true,
+  },
 ): Promise<ProjectHook> {
   const listRes = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/hooks`,
     { headers: authHeaders(token) },
   );
   if (!listRes.ok) {
-    throw new Error(`Failed to list project hooks: ${listRes.status} ${await listRes.text()}`);
+    throw new Error(
+      `Failed to list project hooks: ${listRes.status} ${await listRes.text()}`,
+    );
   }
   const hooks: ProjectHook[] = await listRes.json();
-  const existing = hooks.find(h => h.url === hookUrl);
+  const existing = hooks.find((h) => h.url === hookUrl);
 
   const body = {
     url: hookUrl,
@@ -199,14 +220,16 @@ export async function upsertProjectHook(
   const url = existing
     ? `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/hooks/${existing.id}`
     : `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/hooks`;
-  const method = existing ? 'PUT' : 'POST';
+  const method = existing ? "PUT" : "POST";
   const res = await fetch(url, {
     method,
     headers: authHeaders(token),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`Failed to upsert project hook: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to upsert project hook: ${res.status} ${await res.text()}`,
+    );
   }
   return res.json();
 }
@@ -223,11 +246,11 @@ export async function deleteProjectHook(
   );
   if (!listRes.ok) return;
   const hooks: ProjectHook[] = await listRes.json();
-  const existing = hooks.find(h => h.url === hookUrl);
+  const existing = hooks.find((h) => h.url === hookUrl);
   if (!existing) return;
   await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/hooks/${existing.id}`,
-    { method: 'DELETE', headers: authHeaders(token) },
+    { method: "DELETE", headers: authHeaders(token) },
   );
 }
 
@@ -249,26 +272,28 @@ export async function upsertPipelineSchedule(
   cron: string,
   ref: string,
 ): Promise<PipelineSchedule> {
-  const description = 'Lastest scheduled visual tests';
+  const description = "Lastest scheduled visual tests";
   const listRes = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipeline_schedules`,
     { headers: authHeaders(token) },
   );
   const schedules: PipelineSchedule[] = listRes.ok ? await listRes.json() : [];
-  const existing = schedules.find(s => s.description === description);
+  const existing = schedules.find((s) => s.description === description);
 
   const body = { description, ref, cron, active: true };
   const url = existing
     ? `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipeline_schedules/${existing.id}`
     : `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipeline_schedules`;
-  const method = existing ? 'PUT' : 'POST';
+  const method = existing ? "PUT" : "POST";
   const res = await fetch(url, {
     method,
     headers: authHeaders(token),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`Failed to upsert pipeline schedule: ${res.status} ${await res.text()}`);
+    throw new Error(
+      `Failed to upsert pipeline schedule: ${res.status} ${await res.text()}`,
+    );
   }
   return res.json();
 }
@@ -278,18 +303,18 @@ export async function deletePipelineSchedule(
   instanceUrl: string,
   projectId: number,
 ): Promise<void> {
-  const description = 'Lastest scheduled visual tests';
+  const description = "Lastest scheduled visual tests";
   const listRes = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipeline_schedules`,
     { headers: authHeaders(token) },
   );
   if (!listRes.ok) return;
   const schedules: PipelineSchedule[] = await listRes.json();
-  const existing = schedules.find(s => s.description === description);
+  const existing = schedules.find((s) => s.description === description);
   if (!existing) return;
   await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipeline_schedules/${existing.id}`,
-    { method: 'DELETE', headers: authHeaders(token) },
+    { method: "DELETE", headers: authHeaders(token) },
   );
 }
 
@@ -309,8 +334,8 @@ export async function getLatestPipeline(
   projectId: number,
   ref?: string,
 ): Promise<Pipeline | null> {
-  const params = new URLSearchParams({ per_page: '1' });
-  if (ref) params.set('ref', ref);
+  const params = new URLSearchParams({ per_page: "1" });
+  if (ref) params.set("ref", ref);
   const res = await fetch(
     `${instanceUrl}/api/v4/projects/${projectIdParam(projectId)}/pipelines?${params}`,
     { headers: authHeaders(token) },

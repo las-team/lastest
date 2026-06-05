@@ -1,25 +1,33 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { requireBuildOwnership } from '@/lib/auth/ownership';
-import { awardScore } from '@/server/actions/gamification';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import { requireBuildOwnership } from "@/lib/auth/ownership";
+import { awardScore } from "@/server/actions/gamification";
 
 async function assertTodoOwnership(todoId: string, teamId: string) {
   const todo = await queries.getReviewTodo(todoId);
-  if (!todo) throw new Error('Todo not found');
+  if (!todo) throw new Error("Todo not found");
   if (!todo.repositoryId) {
-    throw new Error('Forbidden: Todo has no team binding');
+    throw new Error("Forbidden: Todo has no team binding");
   }
   const repo = await queries.getRepository(todo.repositoryId);
   if (!repo || repo.teamId !== teamId) {
-    throw new Error('Forbidden: Todo does not belong to your team');
+    throw new Error("Forbidden: Todo does not belong to your team");
   }
   return todo;
 }
 
-export async function getReviewTodos({ repositoryId, branch, buildId }: { repositoryId?: string; branch?: string; buildId?: string }) {
+export async function getReviewTodos({
+  repositoryId,
+  branch,
+  buildId,
+}: {
+  repositoryId?: string;
+  branch?: string;
+  buildId?: string;
+}) {
   if (buildId) {
     await requireBuildOwnership(buildId);
     return queries.getReviewTodosByBuild(buildId);
@@ -37,8 +45,8 @@ export async function resolveReviewTodo(todoId: string) {
   const todo = await assertTodoOwnership(todoId, session.team.id);
 
   await queries.updateReviewTodo(todoId, {
-    status: 'resolved',
-    resolvedBy: session.user?.email || 'user',
+    status: "resolved",
+    resolvedBy: session.user?.email || "user",
     resolvedAt: new Date(),
   });
 
@@ -46,16 +54,18 @@ export async function resolveReviewTodo(todoId: string) {
   if (session.team) {
     awardScore({
       teamId: session.team.id,
-      kind: 'triage_resolved',
-      actor: { kind: 'user', id: session.user.id },
-      sourceType: 'review_todo',
+      kind: "triage_resolved",
+      actor: { kind: "user", id: session.user.id },
+      sourceType: "review_todo",
       sourceId: todoId,
       detail: { diffId: todo.diffId, testId: todo.testId },
-    }).catch((err) => console.error('[gamification] triage_resolved failed', err));
+    }).catch((err) =>
+      console.error("[gamification] triage_resolved failed", err),
+    );
   }
 
-  revalidatePath('/review');
-  revalidatePath('/builds');
+  revalidatePath("/review");
+  revalidatePath("/builds");
 
   return { success: true };
 }
@@ -65,13 +75,13 @@ export async function reopenReviewTodo(todoId: string) {
   await assertTodoOwnership(todoId, session.team.id);
 
   await queries.updateReviewTodo(todoId, {
-    status: 'open',
+    status: "open",
     resolvedBy: null,
     resolvedAt: null,
   });
 
-  revalidatePath('/review');
-  revalidatePath('/builds');
+  revalidatePath("/review");
+  revalidatePath("/builds");
 
   return { success: true };
 }
@@ -85,8 +95,8 @@ export async function deleteReviewTodoAction(todoId: string) {
   // If diff was in 'todo' status, revert to 'pending'
   if (todo.diffId) {
     const diff = await queries.getVisualDiff(todo.diffId);
-    if (diff && diff.status === 'todo') {
-      await queries.updateVisualDiff(todo.diffId, { status: 'pending' });
+    if (diff && diff.status === "todo") {
+      await queries.updateVisualDiff(todo.diffId, { status: "pending" });
       if (diff.buildId) {
         const newStatus = await queries.computeBuildStatus(diff.buildId);
         await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
@@ -94,8 +104,8 @@ export async function deleteReviewTodoAction(todoId: string) {
     }
   }
 
-  revalidatePath('/review');
-  revalidatePath('/builds');
+  revalidatePath("/review");
+  revalidatePath("/builds");
 
   return { success: true };
 }

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import CookieConsent from 'react-cookie-consent';
+import Link from "next/link";
+import CookieConsent from "react-cookie-consent";
 
 /**
  * Site-wide cookie notice. Lastest only sets strictly-necessary cookies
@@ -25,7 +25,7 @@ export function CookieNotice() {
       buttonClasses="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
     >
       We only use cookies that are strictly necessary to keep you signed in and
-      secure. No tracking or advertising cookies. See our{' '}
+      secure. No tracking or advertising cookies. See our{" "}
       <Link
         href="/cookies"
         className="underline underline-offset-4 hover:text-foreground"

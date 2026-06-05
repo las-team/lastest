@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Build-level WCAG violation drill-in. Renders directly under the
@@ -14,21 +14,27 @@
  * renderer with a tiny download menu so QA can pull the same data as
  * CSV or JSON without leaving the page.
  */
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { ChevronDown, ChevronRight, Download, ExternalLink, Accessibility } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  Accessibility,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import { cn } from '@/lib/utils';
-import type { BuildA11yViolationRow } from '@/lib/db/queries/builds';
+} from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
+import type { BuildA11yViolationRow } from "@/lib/db/queries/builds";
 
-type Severity = 'critical' | 'serious' | 'moderate' | 'minor';
+type Severity = "critical" | "serious" | "moderate" | "minor";
 
 interface A11yViolationsCardProps {
   buildId: string;
@@ -39,10 +45,10 @@ interface A11yViolationsCardProps {
 }
 
 const IMPACT_STYLE: Record<Severity, string> = {
-  critical: 'bg-destructive/15 text-destructive border-destructive/30',
-  serious: 'bg-destructive/10 text-destructive border-destructive/20',
-  moderate: 'bg-warning/15 text-warning-foreground border-warning/30',
-  minor: 'bg-muted text-muted-foreground border-border',
+  critical: "bg-destructive/15 text-destructive border-destructive/30",
+  serious: "bg-destructive/10 text-destructive border-destructive/20",
+  moderate: "bg-warning/15 text-warning-foreground border-warning/30",
+  minor: "bg-muted text-muted-foreground border-border",
 };
 
 function dequeUniversityUrl(rule: string, fallback: string): string {
@@ -57,7 +63,7 @@ function dequeUniversityUrl(rule: string, fallback: string): string {
 function downloadBlob(filename: string, data: string, mime: string) {
   const blob = new Blob([data], { type: mime });
   const href = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = href;
   a.download = filename;
   document.body.appendChild(a);
@@ -66,7 +72,11 @@ function downloadBlob(filename: string, data: string, mime: string) {
   URL.revokeObjectURL(href);
 }
 
-export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCardProps) {
+export function A11yViolationsCard({
+  buildId,
+  rows,
+  embedded,
+}: A11yViolationsCardProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -89,7 +99,7 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
     downloadBlob(
       `build-${buildId}-a11y-violations.json`,
       JSON.stringify({ buildId, violations: rows }, null, 2),
-      'application/json',
+      "application/json",
     );
   };
 
@@ -100,14 +110,17 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
       // browser — the server-side serialiser is the single source of
       // truth that the programmatic /a11y-violations?format=csv route
       // also uses.
-      const res = await fetch(`/api/builds/${buildId}/a11y-violations?format=csv`, {
-        credentials: 'include',
-      });
+      const res = await fetch(
+        `/api/builds/${buildId}/a11y-violations?format=csv`,
+        {
+          credentials: "include",
+        },
+      );
       if (!res.ok) throw new Error(`CSV download failed (${res.status})`);
       const text = await res.text();
-      downloadBlob(`build-${buildId}-a11y-violations.csv`, text, 'text/csv');
+      downloadBlob(`build-${buildId}-a11y-violations.csv`, text, "text/csv");
     } catch (err) {
-      console.error('[a11y-violations-card] CSV download failed', err);
+      console.error("[a11y-violations-card] CSV download failed", err);
     } finally {
       setIsDownloading(false);
     }
@@ -117,17 +130,28 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{rows.length} rule{rows.length === 1 ? '' : 's'} violated</span>
-          {(['critical', 'serious', 'moderate', 'minor'] as Severity[])
+          <span className="font-medium text-foreground">
+            {rows.length} rule{rows.length === 1 ? "" : "s"} violated
+          </span>
+          {(["critical", "serious", "moderate", "minor"] as Severity[])
             .filter((s) => counts[s] > 0)
             .map((s) => (
-              <Badge key={s} variant="outline" className={cn('text-[10px]', IMPACT_STYLE[s])}>
+              <Badge
+                key={s}
+                variant="outline"
+                className={cn("text-[10px]", IMPACT_STYLE[s])}
+              >
                 {counts[s]} {s}
               </Badge>
             ))}
         </div>
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={downloadJson} className="h-7 text-xs gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={downloadJson}
+            className="h-7 text-xs gap-1"
+          >
             <Download className="h-3 w-3" /> JSON
           </Button>
           <Button
@@ -146,7 +170,11 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
         {rows.map((r) => {
           const isOpen = expanded.has(r.id);
           return (
-            <Collapsible key={r.id} open={isOpen} onOpenChange={() => toggle(r.id)}>
+            <Collapsible
+              key={r.id}
+              open={isOpen}
+              onOpenChange={() => toggle(r.id)}
+            >
               <CollapsibleTrigger
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/50 transition"
                 aria-label={`Toggle details for rule ${r.id}`}
@@ -156,7 +184,13 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
                 ) : (
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 )}
-                <Badge variant="outline" className={cn('text-[10px] uppercase', IMPACT_STYLE[r.impact])}>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] uppercase",
+                    IMPACT_STYLE[r.impact],
+                  )}
+                >
                   {r.impact}
                 </Badge>
                 {r.wcagLevel && (
@@ -164,19 +198,28 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
                     WCAG {r.wcagLevel}
                   </Badge>
                 )}
-                <span className="font-mono text-xs font-medium truncate" title={r.id}>
+                <span
+                  className="font-mono text-xs font-medium truncate"
+                  title={r.id}
+                >
                   {r.id}
                 </span>
-                <span className="text-xs text-muted-foreground truncate flex-1" title={r.help}>
+                <span
+                  className="text-xs text-muted-foreground truncate flex-1"
+                  title={r.help}
+                >
                   · {r.help}
                 </span>
                 <span className="text-xs text-muted-foreground shrink-0">
-                  {r.occurrenceCount} test{r.occurrenceCount === 1 ? '' : 's'} · {r.totalNodes} node{r.totalNodes === 1 ? '' : 's'}
+                  {r.occurrenceCount} test{r.occurrenceCount === 1 ? "" : "s"} ·{" "}
+                  {r.totalNodes} node{r.totalNodes === 1 ? "" : "s"}
                 </span>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-3 pb-3 pt-1 bg-muted/30 space-y-2">
                 {r.description && (
-                  <p className="text-xs text-muted-foreground">{r.description}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.description}
+                  </p>
                 )}
                 <a
                   href={dequeUniversityUrl(r.id, r.helpUrl)}
@@ -199,7 +242,9 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
                       >
                         <div className="flex items-center gap-2 flex-wrap">
                           {s.areaName && (
-                            <span className="text-muted-foreground">{s.areaName} ·</span>
+                            <span className="text-muted-foreground">
+                              {s.areaName} ·
+                            </span>
                           )}
                           {s.testId ? (
                             <Link
@@ -210,16 +255,20 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
                               {s.testName ?? s.testId}
                             </Link>
                           ) : (
-                            <span className="font-medium truncate">{s.testName ?? '—'}</span>
+                            <span className="font-medium truncate">
+                              {s.testName ?? "—"}
+                            </span>
                           )}
                           <span className="text-muted-foreground ml-auto">
-                            {s.nodes} node{s.nodes === 1 ? '' : 's'}
+                            {s.nodes} node{s.nodes === 1 ? "" : "s"}
                           </span>
                         </div>
                         {s.sampleNode?.target?.length ? (
                           <div className="font-mono text-[11px] text-foreground/80 break-all">
-                            <span className="text-muted-foreground">selector:</span>{' '}
-                            {s.sampleNode.target.join(' ')}
+                            <span className="text-muted-foreground">
+                              selector:
+                            </span>{" "}
+                            {s.sampleNode.target.join(" ")}
                           </div>
                         ) : null}
                         {s.sampleNode?.failureSummary ? (
@@ -252,7 +301,7 @@ export function A11yViolationsCard({ buildId, rows, embedded }: A11yViolationsCa
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
           <Accessibility className="h-4 w-4" />
-          WCAG Violations · {rows.length} rule{rows.length === 1 ? '' : 's'}
+          WCAG Violations · {rows.length} rule{rows.length === 1 ? "" : "s"}
         </CardTitle>
       </CardHeader>
       <CardContent>{body}</CardContent>

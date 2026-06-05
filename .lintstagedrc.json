@@ -1,0 +1,7 @@
+{
+  "{*.ts,*.tsx}": ["pnpm prettier --list-different", "pnpm eslint"],
+  "{*.js,*.jsx,*.json,*.css,*.scss,*.mjs}": [
+    "pnpm prettier --list-different",
+    "pnpm eslint"
+  ]
+}

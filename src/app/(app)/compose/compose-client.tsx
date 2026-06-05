@@ -1,14 +1,30 @@
-'use client';
+"use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
-import { Slider } from '@/components/ui/slider';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
-import { Layers, ChevronRight, ChevronsUpDown, GitBranch, Info } from 'lucide-react';
-import { saveComposeConfig } from '@/server/actions/builds';
-import type { Test, TestVersion } from '@/lib/db/schema';
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
+import {
+  Layers,
+  ChevronRight,
+  ChevronsUpDown,
+  GitBranch,
+  Info,
+} from "lucide-react";
+import { saveComposeConfig } from "@/server/actions/builds";
+import type { Test, TestVersion } from "@/lib/db/schema";
 
 interface TestWithVersions extends Test {
   versions: TestVersion[];
@@ -52,9 +68,9 @@ function reverseMapVersionOverrides(
 ): Record<string, number> {
   const sliderPositions: Record<string, number> = {};
   for (const [testId, versionId] of Object.entries(overrides)) {
-    const test = tests.find(t => t.id === testId);
+    const test = tests.find((t) => t.id === testId);
     if (!test) continue;
-    const idx = test.versions.findIndex(v => v.id === versionId);
+    const idx = test.versions.findIndex((v) => v.id === versionId);
     if (idx >= 0) {
       sliderPositions[testId] = idx + 1;
     }
@@ -73,7 +89,7 @@ function resolveVersionOverrides(
   const resolved: Record<string, string> = {};
   for (const [testId, sliderValue] of Object.entries(sliderOverrides)) {
     if (sliderValue === 0) continue;
-    const test = tests.find(t => t.id === testId);
+    const test = tests.find((t) => t.id === testId);
     if (!test) continue;
     const version = test.versions[sliderValue - 1];
     if (version) {
@@ -93,26 +109,44 @@ interface ComposeClientProps {
   savedConfig: SavedConfig | null;
 }
 
-export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranch, mainBuild, mainBuildTests, savedConfig }: ComposeClientProps) {
-  const allTestIds = useMemo(() => tests.map(t => t.id), [tests]);
+export function ComposeClient({
+  tests,
+  repositoryId,
+  currentBranch,
+  defaultBranch,
+  mainBuild,
+  mainBuildTests,
+  savedConfig,
+}: ComposeClientProps) {
+  const allTestIds = useMemo(() => tests.map((t) => t.id), [tests]);
 
   // Initialize state from saved config or default to all tests selected.
   // Uses excludedTestIds so new tests are automatically included.
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(() => {
     if (savedConfig?.excludedTestIds) {
       const excluded = new Set(savedConfig.excludedTestIds);
-      return new Set(allTestIds.filter(id => !excluded.has(id)));
+      return new Set(allTestIds.filter((id) => !excluded.has(id)));
     }
     // Legacy fallback: use selectedTestIds if excludedTestIds not yet saved
-    if (savedConfig?.selectedTestIds && savedConfig.selectedTestIds.length > 0) {
+    if (
+      savedConfig?.selectedTestIds &&
+      savedConfig.selectedTestIds.length > 0
+    ) {
       const validIds = new Set(allTestIds);
-      return new Set(savedConfig.selectedTestIds.filter(id => validIds.has(id)));
+      return new Set(
+        savedConfig.selectedTestIds.filter((id) => validIds.has(id)),
+      );
     }
     return new Set(allTestIds);
   });
 
-  const [versionOverrides, setVersionOverrides] = useState<Record<string, number>>(() => {
-    if (savedConfig?.versionOverrides && Object.keys(savedConfig.versionOverrides).length > 0) {
+  const [versionOverrides, setVersionOverrides] = useState<
+    Record<string, number>
+  >(() => {
+    if (
+      savedConfig?.versionOverrides &&
+      Object.keys(savedConfig.versionOverrides).length > 0
+    ) {
       return reverseMapVersionOverrides(tests, savedConfig.versionOverrides);
     }
     return {};
@@ -132,14 +166,20 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const resolved = resolveVersionOverrides(tests, versionOverrides);
-      const excluded = allTestIds.filter(id => !selectedTestIds.has(id));
-      saveComposeConfig(repositoryId, currentBranch, Array.from(selectedTestIds), excluded, resolved);
+      const excluded = allTestIds.filter((id) => !selectedTestIds.has(id));
+      saveComposeConfig(
+        repositoryId,
+        currentBranch,
+        Array.from(selectedTestIds),
+        excluded,
+        resolved,
+      );
     }, 500);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repositoryId, currentBranch, selectedTestIds, versionOverrides, tests]);
 
   const [groupByArea, setGroupByArea] = useState(false);
@@ -147,66 +187,70 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
   const [allExpanded, setAllExpanded] = useState(true);
 
   const toggleExpandAll = useCallback(() => {
-    setAllExpanded(prev => !prev);
-    setExpandKey(prev => prev + 1);
+    setAllExpanded((prev) => !prev);
+    setExpandKey((prev) => prev + 1);
   }, []);
 
   // Canonical sort order: by area name then test name
   const testOrder = useMemo(() => {
     const map = new Map<string, number>();
     const sorted = [...tests].sort((a, b) => {
-      const aArea = a.functionalAreaName || 'Ungrouped';
-      const bArea = b.functionalAreaName || 'Ungrouped';
-      if (aArea === 'Ungrouped' && bArea !== 'Ungrouped') return 1;
-      if (bArea === 'Ungrouped' && aArea !== 'Ungrouped') return -1;
+      const aArea = a.functionalAreaName || "Ungrouped";
+      const bArea = b.functionalAreaName || "Ungrouped";
+      if (aArea === "Ungrouped" && bArea !== "Ungrouped") return 1;
+      if (bArea === "Ungrouped" && aArea !== "Ungrouped") return -1;
       const areaCmp = aArea.localeCompare(bArea);
       if (areaCmp !== 0) return areaCmp;
-      return (a.name || '').localeCompare(b.name || '');
+      return (a.name || "").localeCompare(b.name || "");
     });
     sorted.forEach((t, i) => map.set(t.id, i));
     return map;
   }, [tests]);
 
   // Sort + group right-column tests
-  const sortedTests = useMemo(() =>
-    [...tests].sort((a, b) => (testOrder.get(a.id) ?? 0) - (testOrder.get(b.id) ?? 0)),
-    [tests, testOrder]
+  const sortedTests = useMemo(
+    () =>
+      [...tests].sort(
+        (a, b) => (testOrder.get(a.id) ?? 0) - (testOrder.get(b.id) ?? 0),
+      ),
+    [tests, testOrder],
   );
 
   const groupedTests = useMemo(() => {
     const groups: Record<string, TestWithVersions[]> = {};
     for (const test of sortedTests) {
-      const area = test.functionalAreaName || 'Ungrouped';
+      const area = test.functionalAreaName || "Ungrouped";
       (groups[area] ||= []).push(test);
     }
     return Object.entries(groups).sort(([a], [b]) =>
-      a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
+      a === "Ungrouped" ? 1 : b === "Ungrouped" ? -1 : a.localeCompare(b),
     );
   }, [sortedTests]);
 
   // Sort + group left-column main build tests in the same order
-  const sortedMainTests = useMemo(() =>
-    [...mainBuildTests].sort((a, b) => {
-      const ai = a.testId ? (testOrder.get(a.testId) ?? Infinity) : Infinity;
-      const bi = b.testId ? (testOrder.get(b.testId) ?? Infinity) : Infinity;
-      return ai - bi;
-    }),
-    [mainBuildTests, testOrder]
+  const sortedMainTests = useMemo(
+    () =>
+      [...mainBuildTests].sort((a, b) => {
+        const ai = a.testId ? (testOrder.get(a.testId) ?? Infinity) : Infinity;
+        const bi = b.testId ? (testOrder.get(b.testId) ?? Infinity) : Infinity;
+        return ai - bi;
+      }),
+    [mainBuildTests, testOrder],
   );
 
   const groupedMainTests = useMemo(() => {
     const groups: Record<string, MainBuildTest[]> = {};
     for (const t of sortedMainTests) {
-      const area = t.functionalAreaName || 'Ungrouped';
+      const area = t.functionalAreaName || "Ungrouped";
       (groups[area] ||= []).push(t);
     }
     return Object.entries(groups).sort(([a], [b]) =>
-      a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b)
+      a === "Ungrouped" ? 1 : b === "Ungrouped" ? -1 : a.localeCompare(b),
     );
   }, [sortedMainTests]);
 
   const toggleTest = (testId: string) => {
-    setSelectedTestIds(prev => {
+    setSelectedTestIds((prev) => {
       const next = new Set(prev);
       if (next.has(testId)) next.delete(testId);
       else next.add(testId);
@@ -214,14 +258,15 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
     });
   };
 
-  const allSelected = tests.length > 0 && tests.every(t => selectedTestIds.has(t.id));
+  const allSelected =
+    tests.length > 0 && tests.every((t) => selectedTestIds.has(t.id));
   const toggleAll = () => {
     if (allSelected) setSelectedTestIds(new Set());
-    else setSelectedTestIds(new Set(tests.map(t => t.id)));
+    else setSelectedTestIds(new Set(tests.map((t) => t.id)));
   };
 
   const handleVersionSlider = (testId: string, value: number) => {
-    setVersionOverrides(prev => {
+    setVersionOverrides((prev) => {
       if (value === 0) {
         const next = { ...prev };
         delete next[testId];
@@ -232,11 +277,11 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
   };
 
   const getVersionLabel = (test: TestWithVersions, sliderValue: number) => {
-    if (sliderValue === 0) return 'Latest';
+    if (sliderValue === 0) return "Latest";
     const version = test.versions[sliderValue - 1];
-    if (!version) return 'Latest';
-    const reason = version.changeReason?.replace(/_/g, ' ') || '';
-    return `v${version.version}${reason ? ` - ${reason}` : ''}`;
+    if (!version) return "Latest";
+    const reason = version.changeReason?.replace(/_/g, " ") || "";
+    return `v${version.version}${reason ? ` - ${reason}` : ""}`;
   };
 
   return (
@@ -260,15 +305,15 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ChevronsUpDown className="w-3.5 h-3.5" />
-                {allExpanded ? 'Collapse' : 'Expand'}
+                {allExpanded ? "Collapse" : "Expand"}
               </button>
             )}
             <button
-              onClick={() => setGroupByArea(v => !v)}
+              onClick={() => setGroupByArea((v) => !v)}
               className={`inline-flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-lg border transition-colors ${
                 groupByArea
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'bg-muted text-muted-foreground border-transparent hover:text-foreground'
+                  ? "bg-accent text-accent-foreground border-accent"
+                  : "bg-muted text-muted-foreground border-transparent hover:text-foreground"
               }`}
             >
               <Layers className="w-4 h-4" />
@@ -307,25 +352,37 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
                     <MainTestRow key={t.testId ?? t.testVersionId} test={t} />
                   ))}
                   {sortedMainTests.length === 0 && (
-                    <p className="text-sm text-muted-foreground py-4 text-center">No tests in this build</p>
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      No tests in this build
+                    </p>
                   )}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {groupedMainTests.map(([areaName, areaTests]) => (
-                    <Collapsible key={`main-${areaName}-${expandKey}`} defaultOpen={allExpanded}>
+                    <Collapsible
+                      key={`main-${areaName}-${expandKey}`}
+                      defaultOpen={allExpanded}
+                    >
                       <div>
                         <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/30 hover:bg-muted/50 rounded transition-colors group">
                           <div className="flex items-center gap-2">
                             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                            <span className="font-medium text-xs">{areaName}</span>
-                            <Badge variant="secondary" className="text-[10px]">{areaTests.length}</Badge>
+                            <span className="font-medium text-xs">
+                              {areaName}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">
+                              {areaTests.length}
+                            </Badge>
                           </div>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <div className="space-y-1 pt-1">
                             {areaTests.map((t) => (
-                              <MainTestRow key={t.testId ?? t.testVersionId} test={t} />
+                              <MainTestRow
+                                key={t.testId ?? t.testVersionId}
+                                test={t}
+                              />
                             ))}
                           </div>
                         </CollapsibleContent>
@@ -342,11 +399,17 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base">Build Configuration</CardTitle>
+                  <CardTitle className="text-base">
+                    Build Configuration
+                  </CardTitle>
                   <CardDescription className="text-xs">
                     {selectedTestIds.size} of {tests.length} selected
                     {Object.keys(versionOverrides).length > 0 && (
-                      <span> &middot; {Object.keys(versionOverrides).length} version override(s)</span>
+                      <span>
+                        {" "}
+                        &middot; {Object.keys(versionOverrides).length} version
+                        override(s)
+                      </span>
                     )}
                   </CardDescription>
                 </div>
@@ -374,16 +437,27 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
               ) : (
                 <div className="space-y-2">
                   {groupedTests.map(([areaName, areaTests]) => (
-                    <Collapsible key={`config-${areaName}-${expandKey}`} defaultOpen={allExpanded}>
+                    <Collapsible
+                      key={`config-${areaName}-${expandKey}`}
+                      defaultOpen={allExpanded}
+                    >
                       <div>
                         <CollapsibleTrigger className="flex items-center justify-between w-full p-2 bg-muted/30 hover:bg-muted/50 rounded transition-colors group">
                           <div className="flex items-center gap-2">
                             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-                            <span className="font-medium text-xs">{areaName}</span>
-                            <Badge variant="secondary" className="text-[10px]">{areaTests.length}</Badge>
+                            <span className="font-medium text-xs">
+                              {areaName}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">
+                              {areaTests.length}
+                            </Badge>
                           </div>
                           <span className="text-[10px] text-muted-foreground">
-                            {areaTests.filter(t => selectedTestIds.has(t.id)).length}/{areaTests.length}
+                            {
+                              areaTests.filter((t) => selectedTestIds.has(t.id))
+                                .length
+                            }
+                            /{areaTests.length}
                           </span>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
@@ -395,7 +469,9 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
                                 isSelected={selectedTestIds.has(test.id)}
                                 onToggle={() => toggleTest(test.id)}
                                 sliderValue={versionOverrides[test.id] ?? 0}
-                                onSliderChange={(v) => handleVersionSlider(test.id, v)}
+                                onSliderChange={(v) =>
+                                  handleVersionSlider(test.id, v)
+                                }
                                 getVersionLabel={getVersionLabel}
                               />
                             ))}
@@ -417,27 +493,41 @@ export function ComposeClient({ tests, repositoryId, currentBranch, defaultBranc
 /** Read-only row showing a test from the main branch build */
 function MainTestRow({ test }: { test: MainBuildTest }) {
   const diffPct = test.avgDiffPct;
-  const diffLabel = diffPct === null ? '-' : diffPct === 0 ? '0%' : `${diffPct.toFixed(1)}%`;
-  const diffColor = diffPct === null || diffPct === 0 ? 'text-green-600' : diffPct < 1 ? 'text-yellow-600' : 'text-red-600';
+  const diffLabel =
+    diffPct === null ? "-" : diffPct === 0 ? "0%" : `${diffPct.toFixed(1)}%`;
+  const diffColor =
+    diffPct === null || diffPct === 0
+      ? "text-green-600"
+      : diffPct < 1
+        ? "text-yellow-600"
+        : "text-red-600";
 
   return (
     <div className="flex items-center gap-2 px-2 h-9 border rounded-md">
       <div className="w-4 shrink-0" />
-      <span className="text-sm font-medium truncate flex-1 min-w-0">{test.testName || 'Unknown test'}</span>
+      <span className="text-sm font-medium truncate flex-1 min-w-0">
+        {test.testName || "Unknown test"}
+      </span>
       <Badge variant="secondary" className="text-[10px] font-mono shrink-0">
-        v{test.versionNumber ?? '?'}
+        v{test.versionNumber ?? "?"}
       </Badge>
       {test.isLatest && (
-        <span className="text-[10px] text-primary font-medium shrink-0">latest</span>
+        <span className="text-[10px] text-primary font-medium shrink-0">
+          latest
+        </span>
       )}
-      <span className={`text-[10px] font-medium shrink-0 ${diffColor}`}>{diffLabel}</span>
+      <span className={`text-[10px] font-medium shrink-0 ${diffColor}`}>
+        {diffLabel}
+      </span>
       {test.status && (
         <Badge
           variant="secondary"
           className={`text-[10px] shrink-0 ${
-            test.status === 'passed' ? 'bg-green-100 text-green-700' :
-            test.status === 'failed' ? 'bg-red-100 text-red-700' :
-            'bg-gray-100 text-gray-600'
+            test.status === "passed"
+              ? "bg-green-100 text-green-700"
+              : test.status === "failed"
+                ? "bg-red-100 text-red-700"
+                : "bg-gray-100 text-gray-600"
           }`}
         >
           {test.status}
@@ -468,11 +558,13 @@ function ConfigTestRow({
   return (
     <div
       className={`flex items-center gap-2 px-2 h-9 border rounded-md transition-colors ${
-        isSelected ? 'border-primary/30 bg-primary/5' : 'opacity-60'
+        isSelected ? "border-primary/30 bg-primary/5" : "opacity-60"
       }`}
     >
       <Checkbox checked={isSelected} onCheckedChange={onToggle} />
-      <span className="text-sm font-medium truncate flex-1 min-w-0">{test.name}</span>
+      <span className="text-sm font-medium truncate flex-1 min-w-0">
+        {test.name}
+      </span>
       {hasVersions && (
         <>
           <span className="text-[10px] text-muted-foreground shrink-0 w-20 truncate text-right">

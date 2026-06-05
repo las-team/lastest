@@ -78,12 +78,8 @@
           "name": "baselines_test_id_tests_id_fk",
           "tableFrom": "baselines",
           "tableTo": "tests",
-          "columnsFrom": [
-            "test_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -91,12 +87,8 @@
           "name": "baselines_approved_from_diff_id_visual_diffs_id_fk",
           "tableFrom": "baselines",
           "tableTo": "visual_diffs",
-          "columnsFrom": [
-            "approved_from_diff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["approved_from_diff_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -211,12 +203,8 @@
           "name": "builds_test_run_id_test_runs_id_fk",
           "tableFrom": "builds",
           "tableTo": "test_runs",
-          "columnsFrom": [
-            "test_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_run_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -224,12 +212,8 @@
           "name": "builds_pull_request_id_pull_requests_id_fk",
           "tableFrom": "builds",
           "tableTo": "pull_requests",
-          "columnsFrom": [
-            "pull_request_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["pull_request_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -342,12 +326,8 @@
           "name": "github_accounts_selected_repository_id_repositories_id_fk",
           "tableFrom": "github_accounts",
           "tableTo": "repositories",
-          "columnsFrom": [
-            "selected_repository_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["selected_repository_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -422,12 +402,8 @@
           "name": "ignore_regions_test_id_tests_id_fk",
           "tableFrom": "ignore_regions",
           "tableTo": "tests",
-          "columnsFrom": [
-            "test_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -529,12 +505,8 @@
           "name": "playwright_settings_repository_id_repositories_id_fk",
           "tableFrom": "playwright_settings",
           "tableTo": "repositories",
-          "columnsFrom": [
-            "repository_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["repository_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -784,12 +756,8 @@
           "name": "routes_repository_id_repositories_id_fk",
           "tableFrom": "routes",
           "tableTo": "repositories",
-          "columnsFrom": [
-            "repository_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["repository_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -797,12 +765,8 @@
           "name": "routes_functional_area_id_functional_areas_id_fk",
           "tableFrom": "routes",
           "tableTo": "functional_areas",
-          "columnsFrom": [
-            "functional_area_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["functional_area_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -886,12 +850,8 @@
           "name": "scan_status_repository_id_repositories_id_fk",
           "tableFrom": "scan_status",
           "tableTo": "repositories",
-          "columnsFrom": [
-            "repository_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["repository_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -995,12 +955,8 @@
           "name": "test_results_test_run_id_test_runs_id_fk",
           "tableFrom": "test_results",
           "tableTo": "test_runs",
-          "columnsFrom": [
-            "test_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_run_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1008,12 +964,8 @@
           "name": "test_results_test_id_tests_id_fk",
           "tableFrom": "test_results",
           "tableTo": "tests",
-          "columnsFrom": [
-            "test_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1154,12 +1106,8 @@
           "name": "tests_functional_area_id_functional_areas_id_fk",
           "tableFrom": "tests",
           "tableTo": "functional_areas",
-          "columnsFrom": [
-            "functional_area_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["functional_area_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1278,12 +1226,8 @@
           "name": "visual_diffs_build_id_builds_id_fk",
           "tableFrom": "visual_diffs",
           "tableTo": "builds",
-          "columnsFrom": [
-            "build_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["build_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1291,12 +1235,8 @@
           "name": "visual_diffs_test_result_id_test_results_id_fk",
           "tableFrom": "visual_diffs",
           "tableTo": "test_results",
-          "columnsFrom": [
-            "test_result_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_result_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1304,12 +1244,8 @@
           "name": "visual_diffs_test_id_tests_id_fk",
           "tableFrom": "visual_diffs",
           "tableTo": "tests",
-          "columnsFrom": [
-            "test_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["test_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

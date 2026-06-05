@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 let channel: vscode.OutputChannel | null = null;
 
 export function getOutputChannel(): vscode.OutputChannel {
   if (!channel) {
-    channel = vscode.window.createOutputChannel('Lastest');
+    channel = vscode.window.createOutputChannel("Lastest");
   }
   return channel;
 }

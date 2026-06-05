@@ -1,10 +1,10 @@
-'use server';
+"use server";
 
-import * as queries from '@/lib/db/queries';
-import { requireRepoAccess } from '@/lib/auth';
-import { revalidatePath } from 'next/cache';
-import { agentDiscoverAreas as runAgentDiscovery } from '@/lib/playwright/planner-agent';
-import { aiScanRoutes, type DiscoveredArea } from './ai-routes';
+import * as queries from "@/lib/db/queries";
+import { requireRepoAccess } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
+import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
+import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
 
 /**
  * Unified area discovery server action.
@@ -15,24 +15,28 @@ import { aiScanRoutes, type DiscoveredArea } from './ai-routes';
 export async function discoverAreas(
   repositoryId: string,
   branch: string,
-): Promise<{ success: boolean; functionalAreas?: DiscoveredArea[]; error?: string }> {
+): Promise<{
+  success: boolean;
+  functionalAreas?: DiscoveredArea[];
+  error?: string;
+}> {
   await requireRepoAccess(repositoryId);
 
   // Get base URL for agent
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
-  const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+  const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
   const result = await runAgentDiscovery(repositoryId, baseUrl);
 
   if (result.success && result.functionalAreas) {
-    revalidatePath('/areas');
+    revalidatePath("/areas");
     return {
       success: true,
-      functionalAreas: result.functionalAreas.map(area => ({
+      functionalAreas: result.functionalAreas.map((area) => ({
         name: area.name,
-        routes: area.routes.map(r => ({
+        routes: area.routes.map((r) => ({
           path: r.path,
-          type: r.type as 'static' | 'dynamic',
+          type: r.type as "static" | "dynamic",
           description: r.description,
         })),
       })),
@@ -41,7 +45,9 @@ export async function discoverAreas(
 
   // If agent failed, fall back to AI scan
   if (result.error) {
-    console.warn(`Planner agent failed: ${result.error}, falling back to AI scan`);
+    console.warn(
+      `Planner agent failed: ${result.error}, falling back to AI scan`,
+    );
   }
 
   return aiScanRoutes(repositoryId, branch);
@@ -50,9 +56,7 @@ export async function discoverAreas(
 /**
  * Verify that Playwright agents are available and configured.
  */
-export async function verifyPwAgentSetup(
-  repositoryId: string,
-): Promise<{
+export async function verifyPwAgentSetup(repositoryId: string): Promise<{
   playwrightInstalled: boolean;
   agentsAvailable: boolean;
   version?: string;
@@ -61,30 +65,38 @@ export async function verifyPwAgentSetup(
   await requireRepoAccess(repositoryId);
 
   try {
-    const { spawn } = await import('child_process');
+    const { spawn } = await import("child_process");
 
     // Check if playwright is installed
-    const result = await new Promise<{ stdout: string; exitCode: number | null }>((resolve) => {
-      const child = spawn('npx', ['playwright', '--version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
+    const result = await new Promise<{
+      stdout: string;
+      exitCode: number | null;
+    }>((resolve) => {
+      const child = spawn("npx", ["playwright", "--version"], {
+        stdio: ["ignore", "pipe", "pipe"],
         timeout: 10_000,
       });
 
-      let stdout = '';
-      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.on('close', (code) => resolve({ stdout: stdout.trim(), exitCode: code }));
-      child.on('error', () => resolve({ stdout: '', exitCode: 1 }));
+      let stdout = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      child.on("close", (code) =>
+        resolve({ stdout: stdout.trim(), exitCode: code }),
+      );
+      child.on("error", () => resolve({ stdout: "", exitCode: 1 }));
     });
 
     if (result.exitCode !== 0) {
       return {
         playwrightInstalled: false,
         agentsAvailable: false,
-        error: 'Playwright is not installed. Run: npx playwright install',
+        error: "Playwright is not installed. Run: npx playwright install",
       };
     }
 
-    const version = result.stdout.match(/Version\s+([\d.]+)/)?.[1] || result.stdout;
+    const version =
+      result.stdout.match(/Version\s+([\d.]+)/)?.[1] || result.stdout;
 
     return {
       playwrightInstalled: true,
@@ -95,7 +107,7 @@ export async function verifyPwAgentSetup(
     return {
       playwrightInstalled: false,
       agentsAvailable: false,
-      error: error instanceof Error ? error.message : 'Failed to verify setup',
+      error: error instanceof Error ? error.message : "Failed to verify setup",
     };
   }
 }

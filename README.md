@@ -87,10 +87,10 @@ One click kicks off an 11-step pipeline: check settings, select repo, set up env
 
 Once your tests exist, you have two execution modes. **Local Playwright execution on the host is no longer supported** — every test runs inside an Embedded Browser pod, so EB setup is required even for development.
 
-| Mode | How | When |
-|------|-----|------|
+| Mode                           | How                                                                                                                                           | When                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Embedded Browser** (default) | Browser runs in a container with live streaming back to the UI. Provisioned dynamically into k3d locally, or into your cluster in production. | Default for all dev and prod runs — no local Playwright install needed |
-| **Remote Runner** | Tests dispatched to remote machines via WebSocket | Distributed execution, different OS/browsers, CI/CD |
+| **Remote Runner**              | Tests dispatched to remote machines via WebSocket                                                                                             | Distributed execution, different OS/browsers, CI/CD                    |
 
 Both modes support **running** and **recording**. Builds can be triggered **manually** (click Run), by **webhook** (PR opened/updated), on **push** to monitored branches via CI/CD (GitHub Action or CLI runner), or on a **schedule** (cron-based automation). Smart Run analyzes git diffs to run only affected tests.
 
@@ -296,6 +296,7 @@ See [`k8s/`](./k8s) and [`scripts/k3d-*.sh`](./scripts) for the manifests and bo
 6. **Review** visual changes and approve or reject
 
 ### Requirements
+
 - **Docker**: Docker 20+ with Compose v2
 - **Node.js**: 18+ and pnpm 10.x
 - **Required for running/recording tests**: `k3d` ≥ 5.6, `kubectl`, `openssl` (the EB stack — no local-Playwright fallback)
@@ -352,47 +353,47 @@ Distributed test execution via HTTP polling. The Lastest server queues commands;
 
 ### Comparison
 
-| Capability | Lastest | Percy | Applitools | Chromatic | Argos | Meticulous | Playwright |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Price** | **Free self-hosted / hosted plans** | Paid | Paid | Paid | Paid | Paid | Free |
-| **Screenshot volume (self-hosted)** | **Unlimited** | Limited | OSS only | Limited | Limited | None | Unlimited |
-| **Self-hosted** | **Yes** | No | Enterprise | No | OSS core | No | Yes |
-| **Open source** | **FSL-1.1-ALv2** | SDKs only | SDKs only | Storybook | MIT core | No | Apache-2.0 |
-| **No-code recording** | **Yes** | No | Low-code | No | No | Session | Codegen |
-| **AI test generation** | **Yes** | No | NLP | No | No | Session-based | No |
-| **AI auto-fix tests** | **Yes** | No | No | No | No | Auto-maintain | No |
-| **Autonomous agent** | **Yes (Play Agent)** | No | No | No | No | No | No |
-| **AI diff analysis** | **Yes** | AI Review Agent | Visual AI | No | No | Deterministic | No |
-| **Multi-engine diffing** | **3 engines** | No | Visual AI | No | No | No | No |
-| **Text-region-aware diffing** | **Yes** | No | No | No | No | No | No |
-| **Spec-driven test gen** | **Yes** | No | No | No | No | No | No |
-| **Approval workflow** | **Yes** | Yes | Yes | Yes | Yes | PR-based | No |
-| **Accessibility** | **axe-core** | No | No | Enterprise | ARIA snaps | No | No |
-| **Route discovery** | **Yes** | No | No | No | No | No | No |
-| **Multi-tenancy** | **Yes** | Projects | Enterprise | Projects | Teams | Projects | No |
-| **Figma integration** | **Yes** | No | Yes | No | No | No | No |
-| **Google Sheets data** | **Yes** | No | No | No | No | No | No |
-| **Debug mode** | **Yes** | No | No | No | Traces | No | Trace |
-| **Remote runners** | **Yes (npm package)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
-| **Embedded browser** | **Yes (container + live stream)** | No | No | No | No | No | No |
-| **Local AI (Ollama)** | **Yes** | No | No | No | No | No | No |
-| **Cross-OS consistency** | **12 stabilization features** | No | No | No | Stabilization engine | No | No |
-| **GitHub Action** | **Yes** | Cloud-only | Cloud-only | Cloud-only | Cloud-only | Cloud-only | No |
-| **GitLab integration** | **Yes (self-hosted)** | Yes | Yes | No | No | No | No |
-| **Test composition** | **Yes** | No | No | No | No | No | No |
-| **Testing templates** | **8 presets** | No | No | No | No | No | No |
-| **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
-| **Branch baseline management** | **Yes** | Yes | Yes | Yes | No | No | No |
-| **Scheduled test runs** | **Yes (cron)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
-| **MCP server (AI agent API)** | **Yes (52 tools)** | No | No | No | No | No | No |
-| **WCAG compliance scoring** | **Yes (0–100)** | No | No | No | No | No | No |
-| **AI failure triage** | **Yes** | No | No | No | No | No | No |
-| **Assertion tracking** | **Yes** | No | No | No | No | No | No |
-| **Agent monitoring** | **Yes (real-time SSE)** | No | No | No | No | No | No |
-| **In-app bug reports** | **Yes (auto-context)** | No | No | No | No | No | No |
-| **Gamification** | **Yes (leaderboard + achievements)** | No | No | No | No | No | No |
-| **Cross-instance migration** | **Yes (API export/import)** | No | No | No | No | No | No |
-| **API tokens** | **Yes (long-lived Bearer)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
+| Capability                          |               Lastest                |      Percy      | Applitools | Chromatic  |        Argos         |  Meticulous   | Playwright |
+| ----------------------------------- | :----------------------------------: | :-------------: | :--------: | :--------: | :------------------: | :-----------: | :--------: |
+| **Price**                           | **Free self-hosted / hosted plans**  |      Paid       |    Paid    |    Paid    |         Paid         |     Paid      |    Free    |
+| **Screenshot volume (self-hosted)** |            **Unlimited**             |     Limited     |  OSS only  |  Limited   |       Limited        |     None      | Unlimited  |
+| **Self-hosted**                     |               **Yes**                |       No        | Enterprise |     No     |       OSS core       |      No       |    Yes     |
+| **Open source**                     |           **FSL-1.1-ALv2**           |    SDKs only    | SDKs only  | Storybook  |       MIT core       |      No       | Apache-2.0 |
+| **No-code recording**               |               **Yes**                |       No        |  Low-code  |     No     |          No          |    Session    |  Codegen   |
+| **AI test generation**              |               **Yes**                |       No        |    NLP     |     No     |          No          | Session-based |     No     |
+| **AI auto-fix tests**               |               **Yes**                |       No        |     No     |     No     |          No          | Auto-maintain |     No     |
+| **Autonomous agent**                |         **Yes (Play Agent)**         |       No        |     No     |     No     |          No          |      No       |     No     |
+| **AI diff analysis**                |               **Yes**                | AI Review Agent | Visual AI  |     No     |          No          | Deterministic |     No     |
+| **Multi-engine diffing**            |            **3 engines**             |       No        | Visual AI  |     No     |          No          |      No       |     No     |
+| **Text-region-aware diffing**       |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Spec-driven test gen**            |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Approval workflow**               |               **Yes**                |       Yes       |    Yes     |    Yes     |         Yes          |   PR-based    |     No     |
+| **Accessibility**                   |             **axe-core**             |       No        |     No     | Enterprise |      ARIA snaps      |      No       |     No     |
+| **Route discovery**                 |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Multi-tenancy**                   |               **Yes**                |    Projects     | Enterprise |  Projects  |        Teams         |   Projects    |     No     |
+| **Figma integration**               |               **Yes**                |       No        |    Yes     |     No     |          No          |      No       |     No     |
+| **Google Sheets data**              |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Debug mode**                      |               **Yes**                |       No        |     No     |     No     |        Traces        |      No       |   Trace    |
+| **Remote runners**                  |        **Yes (npm package)**         |      Cloud      |   Cloud    |   Cloud    |        Cloud         |     Cloud     |     No     |
+| **Embedded browser**                |  **Yes (container + live stream)**   |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Local AI (Ollama)**               |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Cross-OS consistency**            |    **12 stabilization features**     |       No        |     No     |     No     | Stabilization engine |      No       |     No     |
+| **GitHub Action**                   |               **Yes**                |   Cloud-only    | Cloud-only | Cloud-only |      Cloud-only      |  Cloud-only   |     No     |
+| **GitLab integration**              |        **Yes (self-hosted)**         |       Yes       |    Yes     |     No     |          No          |      No       |     No     |
+| **Test composition**                |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Testing templates**               |            **8 presets**             |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Setup/teardown orchestration**    |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Branch baseline management**      |               **Yes**                |       Yes       |    Yes     |    Yes     |          No          |      No       |     No     |
+| **Scheduled test runs**             |            **Yes (cron)**            |      Cloud      |   Cloud    |   Cloud    |        Cloud         |     Cloud     |     No     |
+| **MCP server (AI agent API)**       |          **Yes (52 tools)**          |       No        |     No     |     No     |          No          |      No       |     No     |
+| **WCAG compliance scoring**         |           **Yes (0–100)**            |       No        |     No     |     No     |          No          |      No       |     No     |
+| **AI failure triage**               |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Assertion tracking**              |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Agent monitoring**                |       **Yes (real-time SSE)**        |       No        |     No     |     No     |          No          |      No       |     No     |
+| **In-app bug reports**              |        **Yes (auto-context)**        |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Gamification**                    | **Yes (leaderboard + achievements)** |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Cross-instance migration**        |     **Yes (API export/import)**      |       No        |     No     |     No     |          No          |      No       |     No     |
+| **API tokens**                      |     **Yes (long-lived Bearer)**      |      Cloud      |   Cloud    |   Cloud    |        Cloud         |     Cloud     |     No     |
 
 ### What makes Lastest different
 
@@ -450,23 +451,23 @@ pnpm stack:stop         # delete cluster
 
 In-depth docs for every integration live on the [Lastest Wiki](https://github.com/las-team/lastest/wiki). The README keeps things at a glance — click through for flags, payloads, and CI examples.
 
-| Guide | What it covers | Wiki |
-|-------|----------------|------|
-| **CLI Test Runner (CI/CD)** | `pnpm test:visual --repo-id <id>` for GitHub Actions / other pipelines; auto-captures `GITHUB_HEAD_REF` / `GITHUB_REF_NAME` / `GITHUB_SHA` | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration) |
-| **GitHub Action** | Reusable composite action `las-team/lastest/action@main` — zero local Playwright, runs on your Lastest server via a remote runner; outputs status + build URL + counts | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration) · [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration) |
-| **Smart Run** | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests) |
-| **Self-Hosted Deployment** | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment) |
-| **Remote Runners** | `@lastest/runner` on npm — register in Settings → Runners, then `lastest-runner start -t <token> -s <url>`; supports run, record, parallel, daemon mode, system-info reporting | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
-| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 52 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
-| **Scheduled Runs** | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
-| **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
-| **Custom Webhooks** | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
-| **VSCode Extension** | `lastest-vscode` — Test Explorer in the Activity Bar, run tests from the editor, live status bar, real-time WebSocket updates; powered by `/api/v1/` REST + SSE | [VSCode Extension API](https://github.com/las-team/lastest/wiki/VSCode-Extension-API) |
-| **API Tokens** | Long-lived Bearer tokens for programmatic access (CI runners, MCP server, REST clients) | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens) |
-| **Bug Reports** | In-app reporting with auto-captured browser/network/console context, optional GitHub-issue creation | [Bug Reports](https://github.com/las-team/lastest/wiki/Bug-Reports) |
-| **Agent Monitoring** | Real-time SSE activity feed tracking Play Agent sessions step-by-step | [Agent Monitoring](https://github.com/las-team/lastest/wiki/Agent-Monitoring) |
-| **Gamification** | "Beat the Bot" — scoring, seasons, leaderboards, Bug Blitz multiplier events | [Gamification](https://github.com/las-team/lastest/wiki/Gamification) |
-| **Test Migration** | Cross-instance export / import of tests, areas, and configs via REST API or in-app UI | [Test Migration](https://github.com/las-team/lastest/wiki/Test-Migration) |
+| Guide                         | What it covers                                                                                                                                                                                                                           | Wiki                                                                                                                                                                |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CLI Test Runner (CI/CD)**   | `pnpm test:visual --repo-id <id>` for GitHub Actions / other pipelines; auto-captures `GITHUB_HEAD_REF` / `GITHUB_REF_NAME` / `GITHUB_SHA`                                                                                               | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration)                                                                                     |
+| **GitHub Action**             | Reusable composite action `las-team/lastest/action@main` — zero local Playwright, runs on your Lastest server via a remote runner; outputs status + build URL + counts                                                                   | [CI/CD Integration](https://github.com/las-team/lastest/wiki/CI-CD-Integration) · [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration) |
+| **Smart Run**                 | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API                                                                                      | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests)                                                                                             |
+| **Self-Hosted Deployment**    | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment)                                                                                     |
+| **Remote Runners**            | `@lastest/runner` on npm — register in Settings → Runners, then `lastest-runner start -t <token> -s <url>`; supports run, record, parallel, daemon mode, system-info reporting                                                           | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners)                                                                                           |
+| **MCP Server**                | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 52 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses                                                                 | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server)                                                                                                   |
+| **Scheduled Runs**            | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures                                                                                       | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs)                                                                                           |
+| **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab                                                                                             | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration)                                                                                 |
+| **Custom Webhooks**           | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers                                                                                                              | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks)                                                                                         |
+| **VSCode Extension**          | `lastest-vscode` — Test Explorer in the Activity Bar, run tests from the editor, live status bar, real-time WebSocket updates; powered by `/api/v1/` REST + SSE                                                                          | [VSCode Extension API](https://github.com/las-team/lastest/wiki/VSCode-Extension-API)                                                                               |
+| **API Tokens**                | Long-lived Bearer tokens for programmatic access (CI runners, MCP server, REST clients)                                                                                                                                                  | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens)                                                                                                   |
+| **Bug Reports**               | In-app reporting with auto-captured browser/network/console context, optional GitHub-issue creation                                                                                                                                      | [Bug Reports](https://github.com/las-team/lastest/wiki/Bug-Reports)                                                                                                 |
+| **Agent Monitoring**          | Real-time SSE activity feed tracking Play Agent sessions step-by-step                                                                                                                                                                    | [Agent Monitoring](https://github.com/las-team/lastest/wiki/Agent-Monitoring)                                                                                       |
+| **Gamification**              | "Beat the Bot" — scoring, seasons, leaderboards, Bug Blitz multiplier events                                                                                                                                                             | [Gamification](https://github.com/las-team/lastest/wiki/Gamification)                                                                                               |
+| **Test Migration**            | Cross-instance export / import of tests, areas, and configs via REST API or in-app UI                                                                                                                                                    | [Test Migration](https://github.com/las-team/lastest/wiki/Test-Migration)                                                                                           |
 
 ---
 
@@ -474,28 +475,28 @@ In-depth docs for every integration live on the [Lastest Wiki](https://github.co
 
 All configuration lives under a unified Settings page. Per-section deep dives live on the [Settings Reference wiki](https://github.com/las-team/lastest/wiki/Settings-Reference) — the table below is the quick map.
 
-| Section | Description | Wiki |
-|---------|-------------|------|
-| **GitHub** | Connect account, select repositories, manage PR-comment + issue-creation hooks | [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration) |
-| **GitLab** | Connect account (supports self-hosted instances), MR comments, webhooks | [GitLab Integration](https://github.com/las-team/lastest/wiki/GitLab-Integration) |
-| **Google Sheets** | Connect Google Drive, manage data sources, surface vars on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
-| **Playwright** | Browser type, viewport, headless/shell mode, selector priority, recording engine, animation freezing, screenshot delay, max parallel tests, headed playback for debugging | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
-| **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading-indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content | [Stabilization](https://github.com/las-team/lastest/wiki/Stabilization-Features) |
-| **Environment** | Server startup (manual vs auto-start), health check URLs, EB-mode toggles | [Environment Vars](https://github.com/las-team/lastest/wiki/Environment-Variables) |
-| **Check Modes** | Per-layer verification control (visual / text / DOM / network / console / a11y / design / perf / URL — enforce, log, or disable); supersedes the old Diff Sensitivity card. Diff engine selection (pixelmatch / SSIM / Butteraugli), text-region-aware diffing, page-shift detection, per-step ignore regions | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
-| **AI** | Test-generation provider, diff-analysis provider, API keys, model, custom instructions, Ollama / OpenAI / Claude / OpenRouter support, MCP wiring for "Enhance with AI" | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration) |
-| **Notifications** | Slack, Discord, custom webhook config, auto-create GitHub issue from a visual diff | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
-| **Branches** | Baseline and scanning branch selection, branch baseline fork/merge/promote | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
-| **AI Logs** | Audit trail of all AI requests (last 50 entries) with cost + latency | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration) |
-| **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS | [Testing Templates](https://github.com/las-team/lastest/wiki/Testing-Templates) |
-| **Setup** | Default repository-wide multi-step setup scripts (Playwright and API types), with per-test overrides | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
-| **Teardown** | Default repository-wide multi-step teardown scripts with per-test overrides | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
-| **Schedules** | Cron-based automated test runs with presets and custom expressions | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
-| **Vars** | Test-data variables — static, AI-generated (with presets), and Google Sheets-backed | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
-| **API Tokens** | Long-lived Bearer tokens for programmatic + MCP access | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens) |
-| **Account** | Email preferences, unsubscribe, GDPR / self-serve account deletion | — |
-| **Users** | Team member management, invitations (admin only) | [Getting Started](https://github.com/las-team/lastest/wiki/Getting-Started) |
-| **Runners** | Remote runner registration and management (admin only) | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
+| Section               | Description                                                                                                                                                                                                                                                                                                   | Wiki                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **GitHub**            | Connect account, select repositories, manage PR-comment + issue-creation hooks                                                                                                                                                                                                                                | [GitHub Integration](https://github.com/las-team/lastest/wiki/GitHub-Integration)   |
+| **GitLab**            | Connect account (supports self-hosted instances), MR comments, webhooks                                                                                                                                                                                                                                       | [GitLab Integration](https://github.com/las-team/lastest/wiki/GitLab-Integration)   |
+| **Google Sheets**     | Connect Google Drive, manage data sources, surface vars on the test Vars tab                                                                                                                                                                                                                                  | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
+| **Playwright**        | Browser type, viewport, headless/shell mode, selector priority, recording engine, animation freezing, screenshot delay, max parallel tests, headed playback for debugging                                                                                                                                     | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
+| **Stabilization**     | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading-indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content                                                                                                                 | [Stabilization](https://github.com/las-team/lastest/wiki/Stabilization-Features)    |
+| **Environment**       | Server startup (manual vs auto-start), health check URLs, EB-mode toggles                                                                                                                                                                                                                                     | [Environment Vars](https://github.com/las-team/lastest/wiki/Environment-Variables)  |
+| **Check Modes**       | Per-layer verification control (visual / text / DOM / network / console / a11y / design / perf / URL — enforce, log, or disable); supersedes the old Diff Sensitivity card. Diff engine selection (pixelmatch / SSIM / Butteraugli), text-region-aware diffing, page-shift detection, per-step ignore regions | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing)           |
+| **AI**                | Test-generation provider, diff-analysis provider, API keys, model, custom instructions, Ollama / OpenAI / Claude / OpenRouter support, MCP wiring for "Enhance with AI"                                                                                                                                       | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration)       |
+| **Notifications**     | Slack, Discord, custom webhook config, auto-create GitHub issue from a visual diff                                                                                                                                                                                                                            | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks)         |
+| **Branches**          | Baseline and scanning branch selection, branch baseline fork/merge/promote                                                                                                                                                                                                                                    | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing)           |
+| **AI Logs**           | Audit trail of all AI requests (last 50 entries) with cost + latency                                                                                                                                                                                                                                          | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration)       |
+| **Testing Templates** | One-click preset configurations for SaaS, Marketing, Canvas, E-commerce, Documentation, Mobile-First, SPA, CMS                                                                                                                                                                                                | [Testing Templates](https://github.com/las-team/lastest/wiki/Testing-Templates)     |
+| **Setup**             | Default repository-wide multi-step setup scripts (Playwright and API types), with per-test overrides                                                                                                                                                                                                          | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
+| **Teardown**          | Default repository-wide multi-step teardown scripts with per-test overrides                                                                                                                                                                                                                                   | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
+| **Schedules**         | Cron-based automated test runs with presets and custom expressions                                                                                                                                                                                                                                            | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs)           |
+| **Vars**              | Test-data variables — static, AI-generated (with presets), and Google Sheets-backed                                                                                                                                                                                                                           | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
+| **API Tokens**        | Long-lived Bearer tokens for programmatic + MCP access                                                                                                                                                                                                                                                        | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens)                   |
+| **Account**           | Email preferences, unsubscribe, GDPR / self-serve account deletion                                                                                                                                                                                                                                            | —                                                                                   |
+| **Users**             | Team member management, invitations (admin only)                                                                                                                                                                                                                                                              | [Getting Started](https://github.com/las-team/lastest/wiki/Getting-Started)         |
+| **Runners**           | Remote runner registration and management (admin only)                                                                                                                                                                                                                                                        | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners)           |
 
 ---
 
@@ -646,7 +647,6 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] URL diff (navigation trajectory capture + comparison)
 - [x] Analyze URL (selector-priority tuning before recording)
 - [ ] Hosted (managed) deployment option — in progress
-
 
 ---
 

@@ -32,12 +32,16 @@ Two independent tracks. Track A is purely a refactor (low-risk, high-readability
 **Goal:** single shared helper that, given `(repositoryId, tests, build?)`, returns the executor-ready `{ setupInfo, setupContext }`. Delete the per-call-site re-implementations.
 
 **Files to add**
+
 - `src/lib/setup/resolve-build-setup.ts` — new module exporting:
   ```ts
   export async function resolveBuildSetup(args: {
     tests: Test[];
     repositoryId: string | null;
-    build?: { buildSetupTestId: string | null; buildSetupScriptId: string | null } | null;
+    build?: {
+      buildSetupTestId: string | null;
+      buildSetupScriptId: string | null;
+    } | null;
   }): Promise<{
     setupInfo: { code: string; setupId: string } | undefined;
     setupContext: { storageState?: string; variables: Record<string, unknown> };
@@ -46,12 +50,14 @@ Two independent tracks. Track A is purely a refactor (low-risk, high-readability
   Internally: (1) pre-load first matching `storage_state` step into `setupContext.storageState` (current `builds.ts:881-892` / `runs.ts:162-173`); (2) if `build.buildSetupTestId|ScriptId` set, resolve directly (current `builds.ts:898-916`); (3) else fall back to `resolveSetupCodeForRunner(tests)` (current `setup-capture.ts:112-169`); (4) walk `default_setup_steps` only once instead of in every helper.
 
 **Files to modify**
+
 - `src/server/actions/builds.ts:867-925` — replace inline storage_state pre-load + buildSetupTestId resolution + per-test fallback with a single `resolveBuildSetup({ tests, repositoryId, build })` call. Keep the `setupStatus` writes adjacent (lines 900, 920, 924, 951, 975).
 - `src/server/actions/runs.ts:160-177` — same swap; runs.ts has no `build` arg, just pass `build: null`.
 - `src/server/actions/debug.ts:103` — call the shared helper with `[test]`.
-- `src/lib/execution/setup-capture.ts:112-169` — keep `resolveSetupCodeForRunner` as a *thin* re-export of the inner step in the new module (or delete entirely once all call sites move). `captureSetupForRemoteRunner` (lines 24-102) is unused in the prod path — verify with grep and delete if dead.
+- `src/lib/execution/setup-capture.ts:112-169` — keep `resolveSetupCodeForRunner` as a _thin_ re-export of the inner step in the new module (or delete entirely once all call sites move). `captureSetupForRemoteRunner` (lines 24-102) is unused in the prod path — verify with grep and delete if dead.
 
 **Verification**
+
 - `pnpm lint && pnpm test` — Drizzle types + unit tests pass.
 - Targeted: write a unit test in `src/lib/setup/resolve-build-setup.test.ts` covering: (a) build-level setupTestId wins, (b) build-level setupScriptId wins, (c) per-test default_setup_steps fallback, (d) storage_state pre-load is non-clobbering when a setup test runs, (e) no setup needed → returns `{ setupInfo: undefined, setupContext: { variables: {} } }`.
 - Manually trigger one build via UI; assert `[Dispatch] Broadcast setup complete` still logs and `setup_status='completed'` lands on the build row.
@@ -93,6 +99,7 @@ When a build starts with N tests + setup, pre-provision `min(maxParallelEBs + 1,
 Currently invisible. The fix is to write a `test_results` row for the failed attempt 1 with `status='failed'` and an `errorMessage` tagged `[EB-dead]`, link attempt 2 via `retry_of`. Use the existing `is_flaky` flag if attempt 2 passes (matches `flaky_count` aggregate semantics).
 
 **Files**
+
 - `src/lib/execution/executor.ts:1132-1140` and `:1141-1146` — instead of `continue`, persist the dead-attempt via `onResult({ status: 'failed', errorMessage: `[EB-dead] ${lastError}`, … })` with a synthetic id, then on attempt-2 success persist that result with `retryOf` set to the dead row's id and `isFlaky=true`.
 - `src/lib/db/queries/tests.ts` — verify `createTestResult` accepts `retryOf` and `isFlaky` (already does per schema.ts:491-492).
 
@@ -106,6 +113,7 @@ Currently invisible. The fix is to write a `test_results` row for the failed att
 - Split the regex: `EB_INFRA_ERR_RX` (`ECONNREFUSED|EB network unhealthy|runner went offline`) → instant retry; `MAYBE_INFRA_ERR_RX` (`Target.*has been closed|page\.screenshot.*Target page.*closed`) → probe `/health` first.
 
 **Files**
+
 - `src/lib/execution/executor.ts:986, 1132-1146` — split detection.
 - Optional new helper in `src/lib/eb/health-probe.ts` to keep the http call out of the executor body.
 
@@ -120,13 +128,13 @@ Currently invisible. The fix is to write a `test_results` row for the failed att
 
 ### Expected outcome
 
-| metric | before | after |
-|---|---|---|
-| EBs launched per 16-test build | ~26 | ≤ 18 |
-| Warm-pool spawns during dispatch | ~10 | 0 |
-| Dead-EB retries surfaced in DB | 0 | all |
-| Idle EB reaper cycles per build | 3–5 | 0–1 |
-| `NETWORK_CHANGED` rate | nonzero on tight bursts | 0 (or measurable in B4 if not) |
+| metric                           | before                  | after                          |
+| -------------------------------- | ----------------------- | ------------------------------ |
+| EBs launched per 16-test build   | ~26                     | ≤ 18                           |
+| Warm-pool spawns during dispatch | ~10                     | 0                              |
+| Dead-EB retries surfaced in DB   | 0                       | all                            |
+| Idle EB reaper cycles per build  | 3–5                     | 0–1                            |
+| `NETWORK_CHANGED` rate           | nonzero on tight bursts | 0 (or measurable in B4 if not) |
 
 ### Files touched (cumulative)
 

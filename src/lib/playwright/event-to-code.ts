@@ -31,9 +31,9 @@ export interface CodeGenEvent {
     downloadWrap?: boolean;
     autoDetected?: boolean;
     downloadFilename?: string;
-    waitType?: 'duration' | 'selector';
+    waitType?: "duration" | "selector";
     durationMs?: number;
-    condition?: 'visible' | 'hidden';
+    condition?: "visible" | "hidden";
     timeoutMs?: number;
     // Set by codegen pre-pass: when a click-with-selectors follows a
     // mouse-down/mouse-up pair (cursor-tracking on), the down/up emission
@@ -51,9 +51,9 @@ export function eventsToCodeLines(
   events: CodeGenEvent[],
   baseOrigin: string,
   coordsEnabled: boolean,
-  options?: { indent?: string; includeCursorReplay?: boolean }
+  options?: { indent?: string; includeCursorReplay?: boolean },
 ): string[] {
-  const indent = options?.indent ?? '  ';
+  const indent = options?.indent ?? "  ";
   const includeCursorReplay = options?.includeCursorReplay ?? true;
   const lines: string[] = [];
 
@@ -61,14 +61,22 @@ export function eventsToCodeLines(
   const deduped: CodeGenEvent[] = [];
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
-    if (event.type === 'action' && event.data.action === 'fill') {
+    if (event.type === "action" && event.data.action === "fill") {
       let j = i + 1;
       let skip = false;
       while (j < events.length) {
         const next = events[j];
-        if (next.type === 'insert-timestamp') { skip = true; break; }
-        if (next.type === 'action') {
-          if (next.data.action === 'fill' && next.data.selector === event.data.selector) { skip = true; }
+        if (next.type === "insert-timestamp") {
+          skip = true;
+          break;
+        }
+        if (next.type === "action") {
+          if (
+            next.data.action === "fill" &&
+            next.data.selector === event.data.selector
+          ) {
+            skip = true;
+          }
           break;
         }
         j++;
@@ -87,28 +95,32 @@ export function eventsToCodeLines(
   // DOM under the cursor, mouseover fires, and a hover-preview lands between
   // mouse-up and the click. Without skipping it the chain breaks, the click is
   // not paired, and event-to-code.ts:180 silently drops it.
-  const isInterstitialEvent = (t: string) => t === 'cursor-move' || t === 'hover-preview';
+  const isInterstitialEvent = (t: string) =>
+    t === "cursor-move" || t === "hover-preview";
   const PAIR_MAX_PX = 5;
   for (let i = 0; i < events.length; i++) {
-    if (events[i].type !== 'mouse-down') continue;
+    if (events[i].type !== "mouse-down") continue;
     let j = i + 1;
     while (j < events.length && isInterstitialEvent(events[j].type)) j++;
-    if (j >= events.length || events[j].type !== 'mouse-up') continue;
+    if (j >= events.length || events[j].type !== "mouse-up") continue;
     const mouseUpIdx = j;
     // Only pair tight click sequences. A drag (down at A, up at B≠A) must
     // not be suppressed — the page.mouse.down/up calls do the actual drawing.
     const downCoords = events[i].data.coordinates;
     const upCoords = events[mouseUpIdx].data.coordinates;
     if (!downCoords || !upCoords) continue;
-    if (Math.abs(downCoords.x - upCoords.x) > PAIR_MAX_PX
-      || Math.abs(downCoords.y - upCoords.y) > PAIR_MAX_PX) continue;
+    if (
+      Math.abs(downCoords.x - upCoords.x) > PAIR_MAX_PX ||
+      Math.abs(downCoords.y - upCoords.y) > PAIR_MAX_PX
+    )
+      continue;
     let k = mouseUpIdx + 1;
     while (k < events.length && isInterstitialEvent(events[k].type)) k++;
     if (k >= events.length) continue;
     const cand = events[k];
     if (
-      cand.type === 'action' &&
-      cand.data.action === 'click' &&
+      cand.type === "action" &&
+      cand.data.action === "click" &&
       cand.data.selectors &&
       cand.data.selectors.length > 0
     ) {
@@ -119,14 +131,14 @@ export function eventsToCodeLines(
 
   function getRelativePath(url: string): string {
     if (url.startsWith(baseOrigin)) {
-      return url.slice(baseOrigin.length) || '/';
+      return url.slice(baseOrigin.length) || "/";
     }
     return url;
   }
 
-  let lastAction = '';
-  let lastEmittedEventType = '';
-  let lastNavigatedPath = '';
+  let lastAction = "";
+  let lastEmittedEventType = "";
+  let lastNavigatedPath = "";
   let cursorBatch: [number, number, number][] = [];
   let lastCursorTimestamp = 0;
   let lastCursorX = 640;
@@ -142,7 +154,9 @@ export function eventsToCodeLines(
 
   const flushCursorBatch = () => {
     if (cursorBatch.length > 0 && includeCursorReplay) {
-      const tuples = cursorBatch.map(t => `[${t[0]},${t[1]},${t[2]}]`).join(',');
+      const tuples = cursorBatch
+        .map((t) => `[${t[0]},${t[1]},${t[2]}]`)
+        .join(",");
       lines.push(`${indent}await replayCursorPath(page, [${tuples}]);`);
       cursorBatch = [];
     } else {
@@ -151,9 +165,10 @@ export function eventsToCodeLines(
   };
 
   for (const event of events) {
-    if (event.type === 'cursor-move' && event.data.coordinates) {
+    if (event.type === "cursor-move" && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
-      const delay = lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
+      const delay =
+        lastCursorTimestamp > 0 ? event.timestamp - lastCursorTimestamp : 0;
       cursorBatch.push([x, y, delay]);
       lastCursorTimestamp = event.timestamp;
       lastCursorX = x;
@@ -164,33 +179,54 @@ export function eventsToCodeLines(
     flushCursorBatch();
 
     // Download marker: flag that the next click should be wrapped
-    if (event.type === 'download') {
+    if (event.type === "download") {
       nextClickIsDownload = true;
       continue;
     }
 
-    if (event.type === 'navigation' && event.data.relativePath) {
+    if (event.type === "navigation" && event.data.relativePath) {
       const relativePath = event.data.relativePath;
-      if (relativePath === lastNavigatedPath && lastEmittedEventType === 'action') {
+      if (
+        relativePath === lastNavigatedPath &&
+        lastEmittedEventType === "action"
+      ) {
         // Skip duplicate navigation (revalidatePath refresh), just wait for mutation
-        if (lastAction === 'click') {
-          lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
+        if (lastAction === "click") {
+          lines.push(
+            `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+          );
         }
-      } else if (lastEmittedEventType === 'action' && lastAction === 'click') {
+      } else if (lastEmittedEventType === "action" && lastAction === "click") {
         // Click caused this navigation — assert the resulting URL instead of re-navigating.
         // Re-issuing page.goto on a click-triggered nav double-loads (and can 404 on
         // SPA/intermediate URLs that resolve in-app but not via a cold HTTP fetch).
-        lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
-        lines.push(`${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
+        lines.push(
+          `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+        );
+        lines.push(
+          `${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`,
+        );
         lastNavigatedPath = relativePath;
-      } else if (!lastAction.includes('goto')) {
-        lines.push(`${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`);
-        lines.push(`${indent}await page.waitForLoadState('networkidle').catch(() => {});`);
+      } else if (!lastAction.includes("goto")) {
+        lines.push(
+          `${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`,
+        );
+        lines.push(
+          `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+        );
         lastNavigatedPath = relativePath;
       }
-      lastAction = 'goto';
-    } else if (event.type === 'action') {
-      const { action, selector, selectors, value, coordinates, button, modifiers } = event.data;
+      lastAction = "goto";
+    } else if (event.type === "action") {
+      const {
+        action,
+        selector,
+        selectors,
+        value,
+        coordinates,
+        button,
+        modifiers,
+      } = event.data;
 
       // Skip LEFT click actions that follow an *unsuppressed* mouse-up — pointer
       // gestures already captured the click via mouse-down/up coordinates and the
@@ -200,21 +236,30 @@ export function eventsToCodeLines(
       // gets to run.
       // Right-click is NOT skipped: pointer gesture handlers skip button=2, so the
       // contextmenu 'rightclick' action is the sole record and must always be emitted.
-      if (action === 'click' && lastEmittedEventType === 'mouse-up') {
+      if (action === "click" && lastEmittedEventType === "mouse-up") {
         continue;
       }
 
-      const isRightClick = action === 'rightclick' || button === 2;
+      const isRightClick = action === "rightclick" || button === 2;
       const hasModifiers = modifiers && modifiers.length > 0;
       // Auto-detected downloads are handled by passive page.on('download') listener — no wrapping needed.
       // Only wrap if explicitly marked (not auto-detected) via nextClickIsDownload.
-      const isDownloadClick = (action === 'click' || action === 'rightclick') && nextClickIsDownload;
-      if (nextClickIsDownload && (action === 'click' || action === 'rightclick')) nextClickIsDownload = false;
+      const isDownloadClick =
+        (action === "click" || action === "rightclick") && nextClickIsDownload;
+      if (
+        nextClickIsDownload &&
+        (action === "click" || action === "rightclick")
+      )
+        nextClickIsDownload = false;
 
       const clickOptParts: string[] = [];
       if (isRightClick) clickOptParts.push(`button: 'right'`);
-      if (hasModifiers) clickOptParts.push(`modifiers: [${modifiers!.map(m => `'${m}'`).join(', ')}]`);
-      const clickOptions = clickOptParts.length > 0 ? `{ ${clickOptParts.join(', ')} }` : 'null';
+      if (hasModifiers)
+        clickOptParts.push(
+          `modifiers: [${modifiers!.map((m) => `'${m}'`).join(", ")}]`,
+        );
+      const clickOptions =
+        clickOptParts.length > 0 ? `{ ${clickOptParts.join(", ")} }` : "null";
 
       // For download-wrapped clicks, collect lines in a buffer then wrap
       const clickLines: string[] = [];
@@ -224,74 +269,115 @@ export function eventsToCodeLines(
         lines.push(`${indent}// Wait for download triggered by click`);
         lines.push(`${indent}await downloads.waitForDownload(async () => {`);
       }
-      const dIndent = isDownloadClick ? indent + '  ' : indent;
+      const dIndent = isDownloadClick ? indent + "  " : indent;
 
       if (selectors && selectors.length > 0) {
         const selectorsJson = JSON.stringify(selectors);
-        const coordsArg = coordinates ? JSON.stringify(coordinates) : 'null';
+        const coordsArg = coordinates ? JSON.stringify(coordinates) : "null";
         switch (action) {
-          case 'click':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== 'null' ? `, ${clickOptions}` : ''});`);
+          case "click":
+            target.push(
+              `${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}${clickOptions !== "null" ? `, ${clickOptions}` : ""});`,
+            );
             break;
-          case 'rightclick':
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`);
+          case "rightclick":
+            target.push(
+              `${dIndent}await locateWithFallback(page, ${selectorsJson}, 'click', null, ${coordsArg}, ${clickOptions});`,
+            );
             break;
-          case 'fill': {
-            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${escapedFillVal}', ${coordsArg});`);
+          case "fill": {
+            const escapedFillVal = (value || "")
+              .replace(/\\/g, "\\\\")
+              .replace(/'/g, "\\'");
+            target.push(
+              `${dIndent}await locateWithFallback(page, ${selectorsJson}, 'fill', '${escapedFillVal}', ${coordsArg});`,
+            );
             break;
           }
-          case 'selectOption': {
-            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            target.push(`${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escapedOptVal}', null);`);
+          case "selectOption": {
+            const escapedOptVal = (value || "")
+              .replace(/\\/g, "\\\\")
+              .replace(/'/g, "\\'");
+            target.push(
+              `${dIndent}await locateWithFallback(page, ${selectorsJson}, 'selectOption', '${escapedOptVal}', null);`,
+            );
             break;
           }
         }
       } else if (selector && selector.trim()) {
         switch (action) {
-          case 'click':
-            target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions !== 'null' ? clickOptions : ''});`);
+          case "click":
+            target.push(
+              `${dIndent}await page.locator('${selector}').click(${clickOptions !== "null" ? clickOptions : ""});`,
+            );
             break;
-          case 'rightclick':
-            target.push(`${dIndent}await page.locator('${selector}').click(${clickOptions});`);
+          case "rightclick":
+            target.push(
+              `${dIndent}await page.locator('${selector}').click(${clickOptions});`,
+            );
             break;
-          case 'fill': {
-            const escapedFillVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            target.push(`${dIndent}await page.locator('${selector}').fill('${escapedFillVal}');`);
+          case "fill": {
+            const escapedFillVal = (value || "")
+              .replace(/\\/g, "\\\\")
+              .replace(/'/g, "\\'");
+            target.push(
+              `${dIndent}await page.locator('${selector}').fill('${escapedFillVal}');`,
+            );
             break;
           }
-          case 'selectOption': {
-            const escapedOptVal = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            target.push(`${dIndent}await page.locator('${selector}').selectOption('${escapedOptVal}');`);
+          case "selectOption": {
+            const escapedOptVal = (value || "")
+              .replace(/\\/g, "\\\\")
+              .replace(/'/g, "\\'");
+            target.push(
+              `${dIndent}await page.locator('${selector}').selectOption('${escapedOptVal}');`,
+            );
             break;
           }
         }
-      } else if ((action === 'click' || action === 'rightclick') && coordinates) {
-        target.push(`${dIndent}// Coordinate-only ${isRightClick ? 'right-' : ''}click (no selectors found)`);
+      } else if (
+        (action === "click" || action === "rightclick") &&
+        coordinates
+      ) {
+        target.push(
+          `${dIndent}// Coordinate-only ${isRightClick ? "right-" : ""}click (no selectors found)`,
+        );
         if (hasModifiers) {
           for (const mod of modifiers!) {
             target.push(`${dIndent}await page.keyboard.down('${mod}');`);
           }
         }
-        target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ''});`);
+        target.push(
+          `${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y}${isRightClick ? `, { button: 'right' }` : ""});`,
+        );
         if (hasModifiers) {
           for (const mod of [...modifiers!].reverse()) {
             target.push(`${dIndent}await page.keyboard.up('${mod}');`);
           }
         }
-      } else if (action === 'fill' && lastEmittedEventType === 'mouse-up') {
+      } else if (action === "fill" && lastEmittedEventType === "mouse-up") {
         // Text input already focused by previous click (e.g. canvas text editor) - just type
-        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const escapedValue = (value || "")
+          .replace(/\\/g, "\\\\")
+          .replace(/'/g, "\\'");
         target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
-      } else if (action === 'fill' && coordinates) {
-        const escapedValue = (value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        target.push(`${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`);
-        target.push(`${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`);
+      } else if (action === "fill" && coordinates) {
+        const escapedValue = (value || "")
+          .replace(/\\/g, "\\\\")
+          .replace(/'/g, "\\'");
+        target.push(
+          `${dIndent}// Coordinate-only fill (no selectors found) - click to focus then type`,
+        );
+        target.push(
+          `${dIndent}await page.mouse.click(${coordinates.x}, ${coordinates.y});`,
+        );
         target.push(`${dIndent}await page.waitForTimeout(100);`);
         target.push(`${dIndent}await page.keyboard.press('Control+a');`);
         target.push(`${dIndent}await page.keyboard.type('${escapedValue}');`);
       } else {
-        target.push(`${dIndent}// Skipped ${action}: no valid selector or coordinates found`);
+        target.push(
+          `${dIndent}// Skipped ${action}: no valid selector or coordinates found`,
+        );
       }
 
       // Close download wrapper
@@ -300,11 +386,13 @@ export function eventsToCodeLines(
         lines.push(`${indent}});`);
       }
 
-      lastAction = action || '';
-      lastEmittedEventType = 'action';
-    } else if (event.type === 'screenshot') {
-      lines.push(`${indent}await page.screenshot({ path: getScreenshotPath(), fullPage: true });`);
-    } else if (event.type === 'assertion') {
+      lastAction = action || "";
+      lastEmittedEventType = "action";
+    } else if (event.type === "screenshot") {
+      lines.push(
+        `${indent}await page.screenshot({ path: getScreenshotPath(), fullPage: true });`,
+      );
+    } else if (event.type === "assertion") {
       const { assertionType, url, elementAssertion } = event.data;
 
       if (elementAssertion) {
@@ -312,63 +400,99 @@ export function eventsToCodeLines(
         const assertType = elementAssertion.type;
         lines.push(`${indent}// Element assertion: ${assertType}`);
         lines.push(`${indent}{`);
-        lines.push(`${indent}  const el = await locateWithFallback(page, ${selectorsJson}, 'locate', null, null);`);
+        lines.push(
+          `${indent}  const el = await locateWithFallback(page, ${selectorsJson}, 'locate', null, null);`,
+        );
 
         switch (assertType) {
-          case 'toBeVisible': lines.push(`${indent}  await expect(el).toBeVisible();`); break;
-          case 'toBeHidden': lines.push(`${indent}  await expect(el).toBeHidden();`); break;
-          case 'toBeAttached': lines.push(`${indent}  await expect(el).toBeAttached();`); break;
-          case 'toHaveAttribute':
-            lines.push(`${indent}  await expect(el).toHaveAttribute('${elementAssertion.attributeName || ''}', '${elementAssertion.attributeValue || ''}');`);
+          case "toBeVisible":
+            lines.push(`${indent}  await expect(el).toBeVisible();`);
             break;
-          case 'toHaveText':
-            lines.push(`${indent}  await expect(el).toHaveText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+          case "toBeHidden":
+            lines.push(`${indent}  await expect(el).toBeHidden();`);
             break;
-          case 'toContainText':
-            lines.push(`${indent}  await expect(el).toContainText('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+          case "toBeAttached":
+            lines.push(`${indent}  await expect(el).toBeAttached();`);
             break;
-          case 'toHaveValue':
-            lines.push(`${indent}  await expect(el).toHaveValue('${(elementAssertion.expectedValue || '').replace(/'/g, "\\'")}');`);
+          case "toHaveAttribute":
+            lines.push(
+              `${indent}  await expect(el).toHaveAttribute('${elementAssertion.attributeName || ""}', '${elementAssertion.attributeValue || ""}');`,
+            );
             break;
-          case 'toBeEnabled': lines.push(`${indent}  await expect(el).toBeEnabled();`); break;
-          case 'toBeDisabled': lines.push(`${indent}  await expect(el).toBeDisabled();`); break;
-          case 'toBeChecked': lines.push(`${indent}  await expect(el).toBeChecked();`); break;
+          case "toHaveText":
+            lines.push(
+              `${indent}  await expect(el).toHaveText('${(elementAssertion.expectedValue || "").replace(/'/g, "\\'")}');`,
+            );
+            break;
+          case "toContainText":
+            lines.push(
+              `${indent}  await expect(el).toContainText('${(elementAssertion.expectedValue || "").replace(/'/g, "\\'")}');`,
+            );
+            break;
+          case "toHaveValue":
+            lines.push(
+              `${indent}  await expect(el).toHaveValue('${(elementAssertion.expectedValue || "").replace(/'/g, "\\'")}');`,
+            );
+            break;
+          case "toBeEnabled":
+            lines.push(`${indent}  await expect(el).toBeEnabled();`);
+            break;
+          case "toBeDisabled":
+            lines.push(`${indent}  await expect(el).toBeDisabled();`);
+            break;
+          case "toBeChecked":
+            lines.push(`${indent}  await expect(el).toBeChecked();`);
+            break;
         }
         lines.push(`${indent}}`);
       } else {
         switch (assertionType) {
-          case 'pageLoad':
-            lines.push(`${indent}// Assertion: Verify page has finished loading`);
+          case "pageLoad":
+            lines.push(
+              `${indent}// Assertion: Verify page has finished loading`,
+            );
             lines.push(`${indent}await page.waitForLoadState('load');`);
             break;
-          case 'networkIdle':
-            lines.push(`${indent}// Assertion: Verify no pending network requests`);
+          case "networkIdle":
+            lines.push(
+              `${indent}// Assertion: Verify no pending network requests`,
+            );
             lines.push(`${indent}await page.waitForLoadState('networkidle');`);
             break;
-          case 'urlMatch': {
-            lines.push(`${indent}// Assertion: Verify current URL matches expected`);
-            const relativePath = getRelativePath(url || '');
-            lines.push(`${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`);
+          case "urlMatch": {
+            lines.push(
+              `${indent}// Assertion: Verify current URL matches expected`,
+            );
+            const relativePath = getRelativePath(url || "");
+            lines.push(
+              `${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`,
+            );
             break;
           }
-          case 'domContentLoaded':
+          case "domContentLoaded":
             lines.push(`${indent}// Assertion: Verify DOM is ready`);
-            lines.push(`${indent}await page.waitForLoadState('domcontentloaded');`);
+            lines.push(
+              `${indent}await page.waitForLoadState('domcontentloaded');`,
+            );
             break;
-          case 'downloadExists': {
+          case "downloadExists": {
             const dlName = event.data.downloadFilename;
-            lines.push(`${indent}// Download assertion: ${dlName || 'fileDownloaded'}`);
+            lines.push(
+              `${indent}// Download assertion: ${dlName || "fileDownloaded"}`,
+            );
             lines.push(`${indent}await downloads.waitForAny();`);
-            lines.push(`${indent}expect(downloads.list().length).toBeGreaterThan(0);`);
+            lines.push(
+              `${indent}expect(downloads.list().length).toBeGreaterThan(0);`,
+            );
             break;
           }
         }
       }
-    } else if (event.type === 'mouse-down' && event.data.coordinates) {
+    } else if (event.type === "mouse-down" && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
       const mouseButton = event.data.button;
-      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
+      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : "";
       const suppressed = event.data._suppressDownUp === true;
       // Auto-detected downloads handled by passive listener — only wrap explicit markers.
       // When suppressed, the paired action:click owns the download wrapper.
@@ -380,7 +504,7 @@ export function eventsToCodeLines(
         lines.push(`${indent}// Wait for download triggered by click`);
         lines.push(`${indent}await downloads.waitForDownload(async () => {`);
       }
-      const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
+      const mIndent = insideDownloadMouseWrap ? indent + "  " : indent;
 
       if (!suppressed && modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
@@ -392,14 +516,16 @@ export function eventsToCodeLines(
         lines.push(`${mIndent}await page.mouse.down(${buttonOpt});`);
         lastMouseDownCoords = { x, y };
       }
-      lastEmittedEventType = suppressed ? 'mouse-down-suppressed' : 'mouse-down';
-    } else if (event.type === 'mouse-up' && event.data.coordinates) {
+      lastEmittedEventType = suppressed
+        ? "mouse-down-suppressed"
+        : "mouse-down";
+    } else if (event.type === "mouse-up" && event.data.coordinates) {
       const { x, y } = event.data.coordinates;
       const modifiers = event.data.modifiers;
       const mouseButton = event.data.button;
-      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : '';
+      const buttonOpt = mouseButton === 2 ? `{ button: 'right' }` : "";
       const suppressed = event.data._suppressDownUp === true;
-      const mIndent = insideDownloadMouseWrap ? indent + '  ' : indent;
+      const mIndent = insideDownloadMouseWrap ? indent + "  " : indent;
       lines.push(`${mIndent}await page.mouse.move(${x}, ${y});`);
       if (!suppressed) {
         lines.push(`${mIndent}await page.mouse.up(${buttonOpt});`);
@@ -419,17 +545,19 @@ export function eventsToCodeLines(
       // suppress an unrelated subsequent click.
       let upState: string;
       if (suppressed) {
-        upState = 'mouse-up-suppressed';
-      } else if (lastMouseDownCoords
-        && Math.abs(lastMouseDownCoords.x - x) <= TIGHT_PAIR_PX
-        && Math.abs(lastMouseDownCoords.y - y) <= TIGHT_PAIR_PX) {
-        upState = 'mouse-up';
+        upState = "mouse-up-suppressed";
+      } else if (
+        lastMouseDownCoords &&
+        Math.abs(lastMouseDownCoords.x - x) <= TIGHT_PAIR_PX &&
+        Math.abs(lastMouseDownCoords.y - y) <= TIGHT_PAIR_PX
+      ) {
+        upState = "mouse-up";
       } else {
-        upState = 'mouse-up-loose';
+        upState = "mouse-up-loose";
       }
       lastEmittedEventType = upState;
       lastMouseDownCoords = null;
-    } else if (event.type === 'keypress' && event.data.key) {
+    } else if (event.type === "keypress" && event.data.key) {
       const { key, modifiers } = event.data;
       if (modifiers && modifiers.length > 0) {
         for (const mod of modifiers) {
@@ -442,44 +570,76 @@ export function eventsToCodeLines(
           lines.push(`${indent}await page.keyboard.up('${mod}');`);
         }
       }
-    } else if (event.type === 'keydown' && event.data.key) {
-      const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    } else if (event.type === "keydown" && event.data.key) {
+      const escapedKey = event.data.key
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
       lines.push(`${indent}await page.keyboard.down('${escapedKey}');`);
-    } else if (event.type === 'keyup' && event.data.key) {
-      const escapedKey = event.data.key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    } else if (event.type === "keyup" && event.data.key) {
+      const escapedKey = event.data.key
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
       lines.push(`${indent}await page.keyboard.up('${escapedKey}');`);
-    } else if (event.type === 'insert-timestamp') {
-      lines.push(`${indent}await page.keyboard.type(new Date().toISOString());`);
-    } else if (event.type === 'wait') {
-      const { waitType, durationMs, selector, selectors, condition, timeoutMs } = event.data;
-      if (waitType === 'duration' && typeof durationMs === 'number' && durationMs >= 0) {
-        lines.push(`${indent}await page.waitForTimeout(${Math.floor(durationMs)});`);
-      } else if (waitType === 'selector') {
-        const state = condition === 'hidden' ? 'hidden' : 'visible';
-        const timeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? Math.floor(timeoutMs) : 30000;
-        const validFromList = selectors?.find(s => s.value && s.value.trim() && !s.value.includes('undefined'));
-        const sel = (selector && selector.trim()) || validFromList?.value || '';
+    } else if (event.type === "insert-timestamp") {
+      lines.push(
+        `${indent}await page.keyboard.type(new Date().toISOString());`,
+      );
+    } else if (event.type === "wait") {
+      const {
+        waitType,
+        durationMs,
+        selector,
+        selectors,
+        condition,
+        timeoutMs,
+      } = event.data;
+      if (
+        waitType === "duration" &&
+        typeof durationMs === "number" &&
+        durationMs >= 0
+      ) {
+        lines.push(
+          `${indent}await page.waitForTimeout(${Math.floor(durationMs)});`,
+        );
+      } else if (waitType === "selector") {
+        const state = condition === "hidden" ? "hidden" : "visible";
+        const timeout =
+          typeof timeoutMs === "number" && timeoutMs > 0
+            ? Math.floor(timeoutMs)
+            : 30000;
+        const validFromList = selectors?.find(
+          (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
+        );
+        const sel = (selector && selector.trim()) || validFromList?.value || "";
         if (sel) {
-          const escapedSel = sel.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-          lines.push(`${indent}await page.waitForSelector('${escapedSel}', { state: '${state}', timeout: ${timeout} });`);
+          const escapedSel = sel.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+          lines.push(
+            `${indent}await page.waitForSelector('${escapedSel}', { state: '${state}', timeout: ${timeout} });`,
+          );
         } else {
           lines.push(`${indent}// Skipped wait: no valid selector provided`);
         }
       }
-    } else if (event.type === 'scroll') {
+    } else if (event.type === "scroll") {
       const deltaX = (event.data.deltaX as number) || 0;
       const deltaY = (event.data.deltaY as number) || 0;
       const scrollMods = event.data.modifiers;
       if (scrollMods && scrollMods.length > 0) {
         const modFlags: string[] = [];
-        if (scrollMods.includes('Control')) modFlags.push('ctrlKey: true');
-        if (scrollMods.includes('Shift')) modFlags.push('shiftKey: true');
-        if (scrollMods.includes('Alt')) modFlags.push('altKey: true');
-        if (scrollMods.includes('Meta')) modFlags.push('metaKey: true');
+        if (scrollMods.includes("Control")) modFlags.push("ctrlKey: true");
+        if (scrollMods.includes("Shift")) modFlags.push("shiftKey: true");
+        if (scrollMods.includes("Alt")) modFlags.push("altKey: true");
+        if (scrollMods.includes("Meta")) modFlags.push("metaKey: true");
         lines.push(`${indent}await page.evaluate(({ x, y, dx, dy }) => {`);
-        lines.push(`${indent}  const el = document.elementFromPoint(x, y) || document.documentElement;`);
-        lines.push(`${indent}  el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(', ')}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`);
-        lines.push(`${indent}}, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`);
+        lines.push(
+          `${indent}  const el = document.elementFromPoint(x, y) || document.documentElement;`,
+        );
+        lines.push(
+          `${indent}  el.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, ${modFlags.join(", ")}, bubbles: true, cancelable: true, clientX: x, clientY: y }));`,
+        );
+        lines.push(
+          `${indent}}, { x: ${lastCursorX}, y: ${lastCursorY}, dx: ${deltaX}, dy: ${deltaY} });`,
+        );
       } else {
         lines.push(`${indent}await page.mouse.wheel(${deltaX}, ${deltaY});`);
       }

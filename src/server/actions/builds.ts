@@ -1,65 +1,97 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { getBranchInfo } from '@/lib/github/content';
-import { getBranchInfo as getGitLabBranchInfo } from '@/lib/gitlab/content';
-import { getOpenPRsForBranch } from '@/lib/github/oauth';
-import { getOpenMRsForBranch } from '@/lib/gitlab/oauth';
-import type { TestRunResult } from '@/lib/playwright/types';
-import type { SetupContext } from '@/lib/setup/types';
-import { executeTests } from '@/lib/execution/executor';
-import { resolveBuildSetup } from '@/lib/setup/resolve-build-setup';
-import { requireTeamAccess, requireRepoAccess } from '@/lib/auth';
-import { requireBuildOwnership } from '@/lib/auth/ownership';
-import { generateDiff, generateTextAwareDiffFromPaths, type Rectangle } from '@/lib/diff/generator';
-import { hashImage, hashImageWithDimensions } from '@/lib/diff/hasher';
-import { computePageTextDiffSummary } from '@/lib/diff/page-text-diff';
-import { PNG } from 'pngjs';
-import fs from 'fs';
-import { sendSlackNotification } from '@/lib/integrations/slack';
-import { sendDiscordNotification } from '@/lib/integrations/discord';
-import { sendCustomWebhookNotification } from '@/lib/integrations/custom-webhook';
-import { postPRComment } from '@/lib/integrations/github-pr';
-import { postMRComment } from '@/lib/integrations/gitlab-mr';
-import type { Test, TriggerType, BuildStatus, VisualDiffWithTestStatus, DiffClassification, DiffStatus } from '@/lib/db/schema';
-import path from 'path';
-import { createJob, createPendingJob, updateJobProgress, updateJobActivity, completeJob, failJob, isRunnerBusy } from './jobs';
-import { emitJobEvent } from '@/lib/ws/job-events';
-import { triggerAIDiffAnalysis } from './ai-diffs';
-import { forkBaselinesForBranch } from './baselines';
-import { STORAGE_DIRS, STORAGE_ROOT, toRelativePath } from '@/lib/storage/paths';
-import { awardScore } from '@/server/actions/gamification';
-import { compareBranches } from '@/lib/github/content';
-import { findAffectedTests } from '@/lib/smart-selection/file-matcher';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { getBranchInfo } from "@/lib/github/content";
+import { getBranchInfo as getGitLabBranchInfo } from "@/lib/gitlab/content";
+import { getOpenPRsForBranch } from "@/lib/github/oauth";
+import { getOpenMRsForBranch } from "@/lib/gitlab/oauth";
+import type { TestRunResult } from "@/lib/playwright/types";
+import type { SetupContext } from "@/lib/setup/types";
+import { executeTests } from "@/lib/execution/executor";
+import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
+import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import { requireBuildOwnership } from "@/lib/auth/ownership";
+import {
+  generateDiff,
+  generateTextAwareDiffFromPaths,
+  type Rectangle,
+} from "@/lib/diff/generator";
+import { hashImage, hashImageWithDimensions } from "@/lib/diff/hasher";
+import { computePageTextDiffSummary } from "@/lib/diff/page-text-diff";
+import { PNG } from "pngjs";
+import fs from "fs";
+import { sendSlackNotification } from "@/lib/integrations/slack";
+import { sendDiscordNotification } from "@/lib/integrations/discord";
+import { sendCustomWebhookNotification } from "@/lib/integrations/custom-webhook";
+import { postPRComment } from "@/lib/integrations/github-pr";
+import { postMRComment } from "@/lib/integrations/gitlab-mr";
+import type {
+  Test,
+  TriggerType,
+  BuildStatus,
+  VisualDiffWithTestStatus,
+  DiffClassification,
+  DiffStatus,
+} from "@/lib/db/schema";
+import path from "path";
+import {
+  createJob,
+  createPendingJob,
+  updateJobProgress,
+  updateJobActivity,
+  completeJob,
+  failJob,
+  isRunnerBusy,
+} from "./jobs";
+import { emitJobEvent } from "@/lib/ws/job-events";
+import { triggerAIDiffAnalysis } from "./ai-diffs";
+import { forkBaselinesForBranch } from "./baselines";
+import {
+  STORAGE_DIRS,
+  STORAGE_ROOT,
+  toRelativePath,
+} from "@/lib/storage/paths";
+import { awardScore } from "@/server/actions/gamification";
+import { compareBranches } from "@/lib/github/content";
+import { findAffectedTests } from "@/lib/smart-selection/file-matcher";
 
 interface GitInfo {
   branch: string;
   commit: string;
 }
 
-async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitInfo> {
+async function getGitInfoFromProvider(
+  repositoryId: string | null,
+): Promise<GitInfo> {
   if (!repositoryId) {
-    return { branch: 'unknown', commit: 'unknown' };
+    return { branch: "unknown", commit: "unknown" };
   }
 
   const repo = await queries.getRepository(repositoryId);
   if (!repo) {
-    return { branch: 'unknown', commit: 'unknown' };
+    return { branch: "unknown", commit: "unknown" };
   }
 
-  const branch = repo.selectedBranch || repo.defaultBranch || 'main';
+  const branch = repo.selectedBranch || repo.defaultBranch || "main";
 
-  if (repo.provider === 'gitlab') {
+  if (repo.provider === "gitlab") {
     // Fetch from GitLab (team-scoped)
-    const account = repo.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGitlabAccountByTeam(repo.teamId)
+      : null;
     if (!account || !repo.gitlabProjectId) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
 
-    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    const branchInfo = await getGitLabBranchInfo(
+      account.accessToken,
+      repo.gitlabProjectId,
+      branch,
+      account.instanceUrl || undefined,
+    );
     if (!branchInfo) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
 
     return {
@@ -68,14 +100,21 @@ async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitI
     };
   } else {
     // Fetch from GitHub (team-scoped)
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
 
-    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    const branchInfo = await getBranchInfo(
+      account.accessToken,
+      repo.owner,
+      repo.name,
+      branch,
+    );
     if (!branchInfo) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
 
     return {
@@ -86,39 +125,58 @@ async function getGitInfoFromProvider(repositoryId: string | null): Promise<GitI
 }
 
 // Alias for backwards compatibility
-async function getGitInfoFromGitHub(repositoryId: string | null): Promise<GitInfo> {
+async function getGitInfoFromGitHub(
+  repositoryId: string | null,
+): Promise<GitInfo> {
   return getGitInfoFromProvider(repositoryId);
 }
 
-async function getGitInfoForBranch(repositoryId: string | null, branch: string): Promise<GitInfo> {
+async function getGitInfoForBranch(
+  repositoryId: string | null,
+  branch: string,
+): Promise<GitInfo> {
   if (!repositoryId) {
-    return { branch, commit: 'unknown' };
+    return { branch, commit: "unknown" };
   }
 
   const repo = await queries.getRepository(repositoryId);
   if (!repo) {
-    return { branch, commit: 'unknown' };
+    return { branch, commit: "unknown" };
   }
 
-  if (repo.provider === 'gitlab') {
-    const account = repo.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
+  if (repo.provider === "gitlab") {
+    const account = repo.teamId
+      ? await queries.getGitlabAccountByTeam(repo.teamId)
+      : null;
     if (!account || !repo.gitlabProjectId) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
-    const branchInfo = await getGitLabBranchInfo(account.accessToken, repo.gitlabProjectId, branch, account.instanceUrl || undefined);
+    const branchInfo = await getGitLabBranchInfo(
+      account.accessToken,
+      repo.gitlabProjectId,
+      branch,
+      account.instanceUrl || undefined,
+    );
     return {
       branch,
-      commit: branchInfo ? branchInfo.commit.id.slice(0, 7) : 'unknown',
+      commit: branchInfo ? branchInfo.commit.id.slice(0, 7) : "unknown",
     };
   } else {
-    const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+    const account = repo.teamId
+      ? await queries.getGithubAccountByTeam(repo.teamId)
+      : null;
     if (!account) {
-      return { branch, commit: 'unknown' };
+      return { branch, commit: "unknown" };
     }
-    const branchInfo = await getBranchInfo(account.accessToken, repo.owner, repo.name, branch);
+    const branchInfo = await getBranchInfo(
+      account.accessToken,
+      repo.owner,
+      repo.name,
+      branch,
+    );
     return {
       branch,
-      commit: branchInfo ? branchInfo.commit.sha.slice(0, 7) : 'unknown',
+      commit: branchInfo ? branchInfo.commit.sha.slice(0, 7) : "unknown",
     };
   }
 }
@@ -129,27 +187,44 @@ async function getGitInfoForBranch(repositoryId: string | null, branch: string):
  */
 async function computeCodeChangeTestIds(
   buildId: string,
-  repo: { provider: string; teamId: string | null; owner: string; name: string; defaultBranch: string | null } | null | undefined,
+  repo:
+    | {
+        provider: string;
+        teamId: string | null;
+        owner: string;
+        name: string;
+        defaultBranch: string | null;
+      }
+    | null
+    | undefined,
   branch: string,
   repositoryId: string | null | undefined,
 ) {
   if (!repo || !repositoryId) return;
-  if (repo.provider !== 'github') return;
-  const defaultBranch = repo.defaultBranch || 'main';
+  if (repo.provider !== "github") return;
+  const defaultBranch = repo.defaultBranch || "main";
   if (branch === defaultBranch) return;
 
-  const account = repo.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
   if (!account) return;
 
-  const comparison = await compareBranches(account.accessToken, repo.owner, repo.name, defaultBranch, branch);
+  const comparison = await compareBranches(
+    account.accessToken,
+    repo.owner,
+    repo.name,
+    defaultBranch,
+    branch,
+  );
   if (!comparison || comparison.files.length === 0) return;
 
-  const changedFiles = comparison.files.map(f => f.filename);
+  const changedFiles = comparison.files.map((f) => f.filename);
   const affected = await findAffectedTests(changedFiles, repositoryId);
   if (affected.length === 0) return;
 
   await queries.updateBuild(buildId, {
-    codeChangeTestIds: affected.map(a => a.testId),
+    codeChangeTestIds: affected.map((a) => a.testId),
   });
 }
 
@@ -183,7 +258,7 @@ export interface BuildSummary {
  * Called by both session-authenticated and token-authenticated paths.
  */
 export async function createAndRunBuildCore(
-  triggerType: TriggerType = 'manual',
+  triggerType: TriggerType = "manual",
   testIds?: string[],
   repositoryId?: string | null,
   runnerId?: string,
@@ -195,12 +270,12 @@ export async function createAndRunBuildCore(
   // verbatim into executor.runTests's `forceVideoRecording` option below.
   forceVideoRecording?: boolean,
 ) {
-  const targetRunner = runnerId || 'auto';
+  const targetRunner = runnerId || "auto";
 
   // If targeting a specific runner and it's busy, queue this build.
   // For 'auto' mode (pool-managed EBs), check if any pool EB is available.
-  if (targetRunner === 'auto' || targetRunner === 'local') {
-    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+  if (targetRunner === "auto" || targetRunner === "local") {
+    const { isPoolBusy } = await import("@/server/actions/embedded-sessions");
     if (await isPoolBusy()) {
       // Queue with undefined runnerId so targetRunnerId becomes null (pool-managed)
       return queueBuild(triggerType, testIds, repositoryId, undefined);
@@ -215,23 +290,31 @@ export async function createAndRunBuildCore(
   // Get tests to run (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
-    tests = await Promise.all(
-      testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
+    tests = await Promise.all(testIds.map((id) => queries.getTest(id))).then(
+      (results) =>
+        results.filter(
+          (t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder,
+        ),
+    );
   } else if (repositoryId) {
-    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(
+      (t) => !t.isPlaceholder,
+    );
   } else {
     tests = [];
   }
 
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // Get repo for git info via GitHub API
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
   const gitInfo = gitBranchOverride
-    ? await getGitInfoForBranch(repositoryId ?? repo?.id ?? null, gitBranchOverride)
+    ? await getGitInfoForBranch(
+        repositoryId ?? repo?.id ?? null,
+        gitBranchOverride,
+      )
     : await getGitInfoFromGitHub(repositoryId ?? repo?.id ?? null);
 
   // Create test run
@@ -240,21 +323,21 @@ export async function createAndRunBuildCore(
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   // Create build
   const build = await queries.createBuild({
     testRunId: testRun.id,
     triggerType,
-    overallStatus: 'review_required',
+    overallStatus: "review_required",
     totalTests: tests.length,
     changesDetected: 0,
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
-    baseUrl: envConfig?.baseUrl || 'http://localhost:3000',
-    comparisonMode: 'vs_both',
+    baseUrl: envConfig?.baseUrl || "http://localhost:3000",
+    comparisonMode: "vs_both",
   });
 
   // Try to link to existing PR
@@ -264,16 +347,28 @@ export async function createAndRunBuildCore(
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides, undefined, forceVideoRecording);
+  runBuildAsync(
+    build.id,
+    testRun.id,
+    tests,
+    gitInfo.branch,
+    repositoryId,
+    runnerId,
+    versionOverrides,
+    undefined,
+    forceVideoRecording,
+  );
 
   // Fire-and-forget: compute code-change affected test IDs
-  computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(() => {});
+  computeCodeChangeTestIds(build.id, repo, gitInfo.branch, repositoryId).catch(
+    () => {},
+  );
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
 
 export async function createAndRunBuild(
-  triggerType: TriggerType = 'manual',
+  triggerType: TriggerType = "manual",
   testIds?: string[],
   repositoryId?: string | null,
   runnerId?: string,
@@ -283,7 +378,15 @@ export async function createAndRunBuild(
 ) {
   if (repositoryId) await requireRepoAccess(repositoryId);
   else await requireTeamAccess();
-  return createAndRunBuildCore(triggerType, testIds, repositoryId, runnerId, versionOverrides, gitBranchOverride, forceVideoRecording);
+  return createAndRunBuildCore(
+    triggerType,
+    testIds,
+    repositoryId,
+    runnerId,
+    versionOverrides,
+    gitBranchOverride,
+    forceVideoRecording,
+  );
 }
 
 /**
@@ -298,11 +401,18 @@ export async function createAndRunBuildFromCI(opts: {
   gitCommit?: string;
   targetUrl?: string;
 }) {
-  const { triggerType, repositoryId, runnerId, gitBranch, gitCommit, targetUrl } = opts;
-  const targetRunner = runnerId || 'auto';
+  const {
+    triggerType,
+    repositoryId,
+    runnerId,
+    gitBranch,
+    gitCommit,
+    targetUrl,
+  } = opts;
+  const targetRunner = runnerId || "auto";
 
   // Auto mode: skip busy check — fallback chain handles concurrency internally
-  if (targetRunner !== 'auto' && await isRunnerBusy(targetRunner)) {
+  if (targetRunner !== "auto" && (await isRunnerBusy(targetRunner))) {
     return queueBuild(triggerType, undefined, repositoryId, runnerId);
   }
 
@@ -310,15 +420,21 @@ export async function createAndRunBuildFromCI(opts: {
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
 
   // Get tests to run (filter out soft-deleted and placeholder tests)
-  const tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
+  const tests = (await queries.getTestsByRepo(repositoryId)).filter(
+    (t) => !t.isPlaceholder,
+  );
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // Use git info from CI if provided, otherwise fetch from provider
-  const gitInfo: GitInfo = (gitBranch || gitCommit)
-    ? { branch: gitBranch || 'unknown', commit: gitCommit?.slice(0, 7) || 'unknown' }
-    : await getGitInfoFromProvider(repositoryId);
+  const gitInfo: GitInfo =
+    gitBranch || gitCommit
+      ? {
+          branch: gitBranch || "unknown",
+          commit: gitCommit?.slice(0, 7) || "unknown",
+        }
+      : await getGitInfoFromProvider(repositoryId);
 
   // Create test run
   const testRun = await queries.createTestRun({
@@ -326,21 +442,21 @@ export async function createAndRunBuildFromCI(opts: {
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   // Create build
   const build = await queries.createBuild({
     testRunId: testRun.id,
     triggerType,
-    overallStatus: 'review_required',
+    overallStatus: "review_required",
     totalTests: tests.length,
     changesDetected: 0,
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
-    baseUrl: targetUrl || envConfig?.baseUrl || 'http://localhost:3000',
-    comparisonMode: 'vs_both',
+    baseUrl: targetUrl || envConfig?.baseUrl || "http://localhost:3000",
+    comparisonMode: "vs_both",
   });
 
   // Try to link to existing PR
@@ -350,11 +466,23 @@ export async function createAndRunBuildFromCI(opts: {
   }
 
   // Run tests async
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId);
+  runBuildAsync(
+    build.id,
+    testRun.id,
+    tests,
+    gitInfo.branch,
+    repositoryId,
+    runnerId,
+  );
 
   // Fire-and-forget: compute code-change affected test IDs
   const ciRepo = await queries.getRepository(repositoryId);
-  computeCodeChangeTestIds(build.id, ciRepo, gitInfo.branch, repositoryId).catch(() => {});
+  computeCodeChangeTestIds(
+    build.id,
+    ciRepo,
+    gitInfo.branch,
+    repositoryId,
+  ).catch(() => {});
 
   return { buildId: build.id, testRunId: testRun.id, testCount: tests.length };
 }
@@ -373,16 +501,20 @@ export async function createComparisonRun(
   versionOverrides?: Record<string, string>,
 ) {
   await requireRepoAccess(repositoryId);
-  const targetRunner = runnerId || 'auto';
+  const targetRunner = runnerId || "auto";
 
   // If runner is busy, we can't start — comparison runs are not queued
-  if (targetRunner === 'auto' || targetRunner === 'local') {
-    const { isPoolBusy } = await import('@/server/actions/embedded-sessions');
+  if (targetRunner === "auto" || targetRunner === "local") {
+    const { isPoolBusy } = await import("@/server/actions/embedded-sessions");
     if (await isPoolBusy()) {
-      throw new Error('All browsers are busy. Please wait for a browser to become available before starting a comparison run.');
+      throw new Error(
+        "All browsers are busy. Please wait for a browser to become available before starting a comparison run.",
+      );
     }
   } else if (await isRunnerBusy(targetRunner)) {
-    throw new Error('Runner is busy. Please wait for the current build to finish before starting a comparison run.');
+    throw new Error(
+      "Runner is busy. Please wait for the current build to finish before starting a comparison run.",
+    );
   }
 
   const comparisonPairId = crypto.randomUUID();
@@ -393,14 +525,19 @@ export async function createComparisonRun(
   // Get tests (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
-    tests = await Promise.all(
-      testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
+    tests = await Promise.all(testIds.map((id) => queries.getTest(id))).then(
+      (results) =>
+        results.filter(
+          (t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder,
+        ),
+    );
   } else {
-    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(
+      (t) => !t.isPlaceholder,
+    );
   }
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // Git info for baseline branch
@@ -412,27 +549,27 @@ export async function createComparisonRun(
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   // Create baseline build
   const build = await queries.createBuild({
     testRunId: testRun.id,
-    triggerType: 'manual',
-    overallStatus: 'review_required',
+    triggerType: "manual",
+    overallStatus: "review_required",
     totalTests: tests.length,
     changesDetected: 0,
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
     baseUrl: baselineUrl,
-    comparisonMode: 'vs_both',
+    comparisonMode: "vs_both",
   });
 
   // Tag as comparison baseline with Phase 2 metadata
   await queries.updateBuild(build.id, {
     comparisonPairId,
-    comparisonRole: 'baseline',
+    comparisonRole: "baseline",
     comparisonMeta: {
       featureBranch,
       featureUrl,
@@ -443,9 +580,22 @@ export async function createComparisonRun(
   });
 
   // Run baseline build async with forceAutoApprove
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, runnerId, versionOverrides, true);
+  runBuildAsync(
+    build.id,
+    testRun.id,
+    tests,
+    gitInfo.branch,
+    repositoryId,
+    runnerId,
+    versionOverrides,
+    true,
+  );
 
-  return { pairId: comparisonPairId, baselineBuildId: build.id, testRunId: testRun.id };
+  return {
+    pairId: comparisonPairId,
+    baselineBuildId: build.id,
+    testRunId: testRun.id,
+  };
 }
 
 /**
@@ -454,9 +604,15 @@ export async function createComparisonRun(
 async function createComparisonFeatureBuild(
   comparisonPairId: string,
   repositoryId: string | null,
-  meta: { featureBranch: string; featureUrl: string; runnerId?: string; testIds?: string[]; versionOverrides?: Record<string, string> },
+  meta: {
+    featureBranch: string;
+    featureUrl: string;
+    runnerId?: string;
+    testIds?: string[];
+    versionOverrides?: Record<string, string>;
+  },
 ) {
-  if (!repositoryId) throw new Error('Comparison run requires a repository');
+  if (!repositoryId) throw new Error("Comparison run requires a repository");
 
   // The feature URL is stored on the build record below; runBuildAsync reads it
   // back and overrides the env config baseUrl at execution time.
@@ -464,12 +620,18 @@ async function createComparisonFeatureBuild(
   let tests: Test[];
   if (meta.testIds && meta.testIds.length > 0) {
     tests = await Promise.all(
-      meta.testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
+      meta.testIds.map((id) => queries.getTest(id)),
+    ).then((results) =>
+      results.filter(
+        (t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder,
+      ),
+    );
   } else {
-    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(
+      (t) => !t.isPlaceholder,
+    );
   }
-  if (tests.length === 0) throw new Error('No tests to run for feature build');
+  if (tests.length === 0) throw new Error("No tests to run for feature build");
 
   const gitInfo = await getGitInfoForBranch(repositoryId, meta.featureBranch);
 
@@ -478,29 +640,37 @@ async function createComparisonFeatureBuild(
     gitBranch: gitInfo.branch,
     gitCommit: gitInfo.commit,
     startedAt: new Date(),
-    status: 'running',
+    status: "running",
   });
 
   const build = await queries.createBuild({
     testRunId: testRun.id,
-    triggerType: 'manual',
-    overallStatus: 'review_required',
+    triggerType: "manual",
+    overallStatus: "review_required",
     totalTests: tests.length,
     changesDetected: 0,
     flakyCount: 0,
     failedCount: 0,
     passedCount: 0,
     baseUrl: meta.featureUrl,
-    comparisonMode: 'vs_both',
+    comparisonMode: "vs_both",
   });
 
   await queries.updateBuild(build.id, {
     comparisonPairId,
-    comparisonRole: 'feature',
+    comparisonRole: "feature",
   });
 
   // Run feature build normally (no forceAutoApprove — diffs against baselines from Phase 1)
-  runBuildAsync(build.id, testRun.id, tests, gitInfo.branch, repositoryId, meta.runnerId, meta.versionOverrides);
+  runBuildAsync(
+    build.id,
+    testRun.id,
+    tests,
+    gitInfo.branch,
+    repositoryId,
+    meta.runnerId,
+    meta.versionOverrides,
+  );
 
   return { buildId: build.id, testRunId: testRun.id };
 }
@@ -523,23 +693,38 @@ async function runBuildAsync(
   forceVideoRecording?: boolean,
 ) {
   const startTime = Date.now();
-  const targetRunner = runnerId || 'auto';
-  const jobId = await createJob('build_run', `Build (${tests.length} tests)`, tests.length, repositoryId, { buildId, testRunId }, targetRunner);
+  const targetRunner = runnerId || "auto";
+  const jobId = await createJob(
+    "build_run",
+    `Build (${tests.length} tests)`,
+    tests.length,
+    repositoryId,
+    { buildId, testRunId },
+    targetRunner,
+  );
 
   // Auto-fork baselines for branch builds
   if (repositoryId) {
     const repo = await queries.getRepository(repositoryId);
-    const defaultBranch = repo?.defaultBranch || 'main';
+    const defaultBranch = repo?.defaultBranch || "main";
     if (branch !== defaultBranch) {
       try {
-        const { forked, skipped } = await forkBaselinesForBranch(repositoryId, defaultBranch, branch);
+        const { forked, skipped } = await forkBaselinesForBranch(
+          repositoryId,
+          defaultBranch,
+          branch,
+        );
         if (forked > 0) {
-          console.log(`[build] Auto-forked ${forked} baselines from ${defaultBranch} → ${branch}`);
+          console.log(
+            `[build] Auto-forked ${forked} baselines from ${defaultBranch} → ${branch}`,
+          );
         } else if (skipped) {
-          console.log(`[build] Branch ${branch} already has baselines, skipping fork`);
+          console.log(
+            `[build] Branch ${branch} already has baselines, skipping fork`,
+          );
         }
       } catch (error) {
-        console.error('[build] Auto-fork failed:', error);
+        console.error("[build] Auto-fork failed:", error);
       }
     }
   }
@@ -583,7 +768,7 @@ async function runBuildAsync(
 
   // Get teamId from runner record (not session — session is unavailable in fire-and-forget context)
   let teamId: string | undefined;
-  if (runnerId && runnerId !== 'auto') {
+  if (runnerId && runnerId !== "auto") {
     const runnerRecord = await queries.getRunnerById(runnerId);
     teamId = runnerRecord?.teamId;
   }
@@ -596,28 +781,78 @@ async function runBuildAsync(
   const buildRecord = await queries.getBuild(buildId);
   const effectiveBaseUrl = buildRecord?.baseUrl || dbEnvConfig?.baseUrl;
   const envConfig = dbEnvConfig
-    ? (effectiveBaseUrl && effectiveBaseUrl !== dbEnvConfig.baseUrl
-        ? { ...dbEnvConfig, baseUrl: effectiveBaseUrl }
-        : dbEnvConfig)
-    : (buildRecord?.baseUrl
-        ? { id: 'build-override', repositoryId: repositoryId ?? null, mode: 'manual', baseUrl: buildRecord.baseUrl, startCommand: null, healthCheckUrl: null, healthCheckTimeout: 60000, reuseExistingServer: true, createdAt: null, updatedAt: null } satisfies import('@/lib/db/schema').EnvironmentConfig
-        : null);
+    ? effectiveBaseUrl && effectiveBaseUrl !== dbEnvConfig.baseUrl
+      ? { ...dbEnvConfig, baseUrl: effectiveBaseUrl }
+      : dbEnvConfig
+    : buildRecord?.baseUrl
+      ? ({
+          id: "build-override",
+          repositoryId: repositoryId ?? null,
+          mode: "manual",
+          baseUrl: buildRecord.baseUrl,
+          startCommand: null,
+          healthCheckUrl: null,
+          healthCheckTimeout: 60000,
+          reuseExistingServer: true,
+          createdAt: null,
+          updatedAt: null,
+        } satisfies import("@/lib/db/schema").EnvironmentConfig)
+      : null;
   const playwrightSettings = await queries.getPlaywrightSettings(repositoryId);
 
   // Determine browsers for this build
-  const browsers: string[] = playwrightSettings?.browsers && (playwrightSettings.browsers as string[]).length > 0
-    ? playwrightSettings.browsers as string[]
-    : ['chromium'];
+  const browsers: string[] =
+    playwrightSettings?.browsers &&
+    (playwrightSettings.browsers as string[]).length > 0
+      ? (playwrightSettings.browsers as string[])
+      : ["chromium"];
   const totalTestsAcrossBrowsers = tests.length * browsers.length;
 
   // Store browsers on the build record
-  await queries.updateBuild(buildId, { browsers, totalTests: totalTestsAcrossBrowsers });
+  await queries.updateBuild(buildId, {
+    browsers,
+    totalTests: totalTestsAcrossBrowsers,
+  });
 
   // Current browser being executed (updated in browser loop)
-  let currentBrowserType = 'chromium';
+  let currentBrowserType = "chromium";
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot }) => {
+  const onResult = async (result: {
+    testId: string;
+    status: string;
+    screenshotPath?: string;
+    screenshots: { path: string; label?: string }[];
+    errorMessage?: string;
+    durationMs?: number;
+    consoleErrors?: string[];
+    networkRequests?: import("@/lib/db/schema").NetworkRequest[];
+    downloads?: import("@/lib/db/schema").DownloadRecord[];
+    a11yViolations?: import("@/lib/db/schema").A11yViolation[];
+    a11yPassesCount?: number;
+    designSystemViolations?: import("@/lib/db/schema").DesignSystemViolation[];
+    designSystemRulesChecked?: number;
+    designSystemTokenUsage?: import("@/lib/db/schema").DesignSystemTokenUsage;
+    stabilityMetadata?: {
+      frameCount: number;
+      stableFrames: number;
+      maxFrameDiff: number;
+      isStable: boolean;
+    };
+    videoPath?: string;
+    softErrors?: string[];
+    assertionResults?: import("@/lib/db/schema").AssertionResult[];
+    networkBodiesPath?: string;
+    domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
+    lastReachedStep?: number;
+    totalSteps?: number;
+    extractedVariables?: Record<string, string>;
+    assignedVariables?: Record<string, string>;
+    logs?: Array<{ timestamp: number; level: string; message: string }>;
+    urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
+    webVitals?: import("@/lib/db/schema").WebVitalsSample[];
+    storageStateSnapshot?: import("@/lib/db/schema").StorageStateSnapshot;
+  }) => {
     processedCount++;
 
     // Save test result immediately
@@ -630,7 +865,7 @@ async function runBuildAsync(
       screenshots: result.screenshots,
       errorMessage: result.errorMessage,
       durationMs: result.durationMs,
-      viewport: '1280x720',
+      viewport: "1280x720",
       browser: currentBrowserType,
       consoleErrors: result.consoleErrors,
       networkRequests: result.networkRequests,
@@ -661,23 +896,25 @@ async function runBuildAsync(
       await queries.stampFirstBuild(versionId, buildId, branch, gitCommit);
     }
 
-    if (result.status === 'passed') passedCount++;
-    else if (result.status === 'failed' || result.status === 'setup_failed') failedCount++;
+    if (result.status === "passed") passedCount++;
+    else if (result.status === "failed" || result.status === "setup_failed")
+      failedCount++;
 
     // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
-    const screenshots = result.screenshots.length > 0
-      ? result.screenshots
-      : result.screenshotPath
-        ? [{ path: result.screenshotPath, label: 'final' }]
-        : [];
+    const screenshots =
+      result.screenshots.length > 0
+        ? result.screenshots
+        : result.screenshotPath
+          ? [{ path: result.screenshotPath, label: "final" }]
+          : [];
 
     // Look up per-test diff overrides
-    const testRecord = tests.find(t => t.id === result.testId);
+    const testRecord = tests.find((t) => t.id === result.testId);
     const testDiffOverrides = testRecord?.diffOverrides ?? null;
 
     // Generate visual diffs for all screenshots concurrently
     const diffResults = await Promise.all(
-      screenshots.map(screenshot =>
+      screenshots.map((screenshot) =>
         processVisualDiff(
           buildId,
           testResult.id,
@@ -690,21 +927,23 @@ async function runBuildAsync(
           currentBrowserType,
           testDiffOverrides,
           forceAutoApprove,
-        )
-      )
+        ),
+      ),
     );
     for (const diffResult of diffResults) {
-      if (diffResult.classification === 'changed') changesDetected++;
-      if (diffResult.classification === 'flaky') flakyCount++;
+      if (diffResult.classification === "changed") changesDetected++;
+      if (diffResult.classification === "flaky") flakyCount++;
 
       // Fire-and-forget AI diff analysis for non-unchanged diffs
-      if (diffResult.classification !== 'unchanged') {
-        triggerAIDiffAnalysis(diffResult.diffId, repositoryId, jobId).catch(console.error);
+      if (diffResult.classification !== "unchanged") {
+        triggerAIDiffAnalysis(diffResult.diffId, repositoryId, jobId).catch(
+          console.error,
+        );
       }
 
       // Gamification: flake penalty charged to the test's author.
       // Feature-flag-gated and daily-capped inside awardScore.
-      if (diffResult.classification === 'flaky' && repositoryId) {
+      if (diffResult.classification === "flaky" && repositoryId) {
         const repoId = repositoryId; // narrow for the async closure
         (async () => {
           try {
@@ -714,14 +953,14 @@ async function runBuildAsync(
             if (!creator) return;
             await awardScore({
               teamId: repo.teamId,
-              kind: 'flake_penalty',
+              kind: "flake_penalty",
               actor: creator,
-              sourceType: 'diff',
+              sourceType: "diff",
               sourceId: diffResult.diffId,
               detail: { testId: result.testId, buildId },
             });
           } catch (err) {
-            console.error('[gamification] flake_penalty failed', err);
+            console.error("[gamification] flake_penalty failed", err);
           }
         })();
       }
@@ -732,32 +971,54 @@ async function runBuildAsync(
     // Gated by playwrightSettings.enableDomDiff — when off, snapshots may
     // still be captured for healing/triage but no diffs are persisted to UI.
     const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
-    const testRecord2 = tests.find(t => t.id === result.testId);
+    const testRecord2 = tests.find((t) => t.id === result.testId);
     if (domDiffEnabled && !testRecord2?.domSnapshot && result.domSnapshot) {
       // First run for this test (or legacy test created before DOM capture
       // was wired). Promote the current snapshot to the baseline; nothing to
       // diff against on this run.
-      await queries.updateTest(result.testId, { domSnapshot: result.domSnapshot });
-      console.info('[dom-diff] bootstrapped baseline DOM snapshot', { testId: result.testId });
-    } else if (domDiffEnabled && testRecord2?.domSnapshot && result.domSnapshot && diffResults.length > 0) {
+      await queries.updateTest(result.testId, {
+        domSnapshot: result.domSnapshot,
+      });
+      console.info("[dom-diff] bootstrapped baseline DOM snapshot", {
+        testId: result.testId,
+      });
+    } else if (
+      domDiffEnabled &&
+      testRecord2?.domSnapshot &&
+      result.domSnapshot &&
+      diffResults.length > 0
+    ) {
       try {
-        const { computeDomDiff } = await import('@/lib/diff/dom-diff');
-        const domDiff = computeDomDiff(testRecord2.domSnapshot, result.domSnapshot);
-        if (domDiff.added.length > 0 || domDiff.removed.length > 0 || domDiff.changed.length > 0) {
+        const { computeDomDiff } = await import("@/lib/diff/dom-diff");
+        const domDiff = computeDomDiff(
+          testRecord2.domSnapshot,
+          result.domSnapshot,
+        );
+        if (
+          domDiff.added.length > 0 ||
+          domDiff.removed.length > 0 ||
+          domDiff.changed.length > 0
+        ) {
           // DOM diff is per-test-result, so attach it to every diff that
           // points at this test result — not just diffResults[0].
-          await Promise.all(diffResults.map(async ({ diffId }) => {
-            const existingDiff = await queries.getVisualDiff(diffId);
-            if (!existingDiff) return;
-            const updatedMetadata = {
-              ...(existingDiff.metadata as import('@/lib/db/schema').DiffMetadata ?? { changedRegions: [] }),
-              domDiff,
-            };
-            await queries.updateVisualDiff(diffId, { metadata: updatedMetadata });
-          }));
+          await Promise.all(
+            diffResults.map(async ({ diffId }) => {
+              const existingDiff = await queries.getVisualDiff(diffId);
+              if (!existingDiff) return;
+              const updatedMetadata = {
+                ...((existingDiff.metadata as import("@/lib/db/schema").DiffMetadata) ?? {
+                  changedRegions: [],
+                }),
+                domDiff,
+              };
+              await queries.updateVisualDiff(diffId, {
+                metadata: updatedMetadata,
+              });
+            }),
+          );
         }
       } catch (err) {
-        console.warn('[dom-diff] computation failed', {
+        console.warn("[dom-diff] computation failed", {
           testId: result.testId,
           err: err instanceof Error ? err.message : String(err),
         });
@@ -765,17 +1026,20 @@ async function runBuildAsync(
     }
 
     // Create placeholder diff for failed tests with no screenshots
-    if (screenshots.length === 0 && (result.status === 'failed' || result.status === 'setup_failed')) {
+    if (
+      screenshots.length === 0 &&
+      (result.status === "failed" || result.status === "setup_failed")
+    ) {
       await queries.createVisualDiff({
         buildId,
         testResultId: testResult.id,
         testId: result.testId,
         stepLabel: null,
         currentImagePath: null,
-        status: 'auto_approved',
-        classification: 'unchanged',
+        status: "auto_approved",
+        classification: "unchanged",
         pixelDifference: 0,
-        percentageDifference: '0',
+        percentageDifference: "0",
         metadata: { changedRegions: [] },
       });
     }
@@ -787,9 +1051,14 @@ async function runBuildAsync(
     // duplicated across each step row so each card remains a self-contained
     // triage unit. Best-effort — failure here never blocks the build.
     try {
-      const { scoreMultiLayer } = await import('@/lib/comparison/scorer');
-      const prevResult = await queries.getPreviousTestResultForTest(result.testId, testRunId);
-      const visualDiffs = await queries.getVisualDiffsByTestResult(testResult.id);
+      const { scoreMultiLayer } = await import("@/lib/comparison/scorer");
+      const prevResult = await queries.getPreviousTestResultForTest(
+        result.testId,
+        testRunId,
+      );
+      const visualDiffs = await queries.getVisualDiffsByTestResult(
+        testResult.id,
+      );
 
       // Group visuals by stepLabel. When a test produced no visual_diffs
       // (e.g. setup-failed before any screenshot), still emit ONE row with
@@ -802,14 +1071,16 @@ async function runBuildAsync(
       }
       if (byStep.size === 0) byStep.set(null, []);
 
-      const baselinePayload = prevResult ? {
-        consoleErrors: prevResult.consoleErrors ?? null,
-        networkRequests: prevResult.networkRequests ?? null,
-        a11yViolations: prevResult.a11yViolations ?? null,
-        urlTrajectory: prevResult.urlTrajectory ?? null,
-        webVitals: prevResult.webVitals ?? null,
-        extractedVariables: prevResult.extractedVariables ?? null,
-      } : null;
+      const baselinePayload = prevResult
+        ? {
+            consoleErrors: prevResult.consoleErrors ?? null,
+            networkRequests: prevResult.networkRequests ?? null,
+            a11yViolations: prevResult.a11yViolations ?? null,
+            urlTrajectory: prevResult.urlTrajectory ?? null,
+            webVitals: prevResult.webVitals ?? null,
+            extractedVariables: prevResult.extractedVariables ?? null,
+          }
+        : null;
       const currentPayload = {
         consoleErrors: result.consoleErrors ?? null,
         networkRequests: result.networkRequests ?? null,
@@ -824,15 +1095,19 @@ async function runBuildAsync(
         // retries). Largest pixel delta wins as the canonical visual.
         const primary = groupDiffs
           .slice()
-          .sort((a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0))[0];
+          .sort(
+            (a, b) => (b.pixelDifference ?? 0) - (a.pixelDifference ?? 0),
+          )[0];
         const verdict = scoreMultiLayer({
           baseline: baselinePayload,
           current: currentPayload,
-          visualDiff: primary ? {
-            pixelDifference: primary.pixelDifference ?? 0,
-            percentageDifference: primary.percentageDifference,
-            id: primary.id,
-          } : null,
+          visualDiff: primary
+            ? {
+                pixelDifference: primary.pixelDifference ?? 0,
+                percentageDifference: primary.percentageDifference,
+                id: primary.id,
+              }
+            : null,
         });
         await queries.createStepComparison({
           buildId,
@@ -847,7 +1122,7 @@ async function runBuildAsync(
         });
       }
     } catch (err) {
-      console.error('[multi-layer] failed to score step comparison:', err);
+      console.error("[multi-layer] failed to score step comparison:", err);
     }
 
     // Update build progress incrementally
@@ -863,14 +1138,19 @@ async function runBuildAsync(
   // Progress callback for parallel execution tracking. Only updates the
   // activeCount/activeTests metadata — completedSteps is owned by onResult so
   // the two callbacks can't race-overwrite each other on the same row.
-  const onProgress = async (progress: { completed: number; total: number; activeCount?: number; activeTests?: string[] }) => {
+  const onProgress = async (progress: {
+    completed: number;
+    total: number;
+    activeCount?: number;
+    activeTests?: string[];
+  }) => {
     await updateJobActivity(jobId, progress.activeCount, progress.activeTests);
   };
 
   try {
     // Reuse the build record fetched above for the baseUrl override.
     const build = buildRecord;
-    const baseUrl = envConfig?.baseUrl || 'http://localhost:3000';
+    const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
     // Initialize setup context
     const setupContext: SetupContext = {
@@ -891,7 +1171,7 @@ async function runBuildAsync(
             buildSetupScriptId: build.buildSetupScriptId ?? null,
           }
         : null,
-      logTag: '[build]',
+      logTag: "[build]",
     });
     const remoteSetupInfo = resolved.setupInfo;
     setupContext.storageState = resolved.setupContext.storageState;
@@ -901,7 +1181,7 @@ async function runBuildAsync(
     // 'skipped' otherwise (no setup configured, or build-level config didn't
     // resolve — in which case resolveBuildSetup already logged a warning).
     await queries.updateBuild(buildId, {
-      setupStatus: remoteSetupInfo ? 'running' : 'skipped',
+      setupStatus: remoteSetupInfo ? "running" : "skipped",
     });
 
     // Run tests for each browser in the browsers list
@@ -918,37 +1198,47 @@ async function runBuildAsync(
       // For 'auto' (pool), leave undefined — the executor resolves it from
       // the actually-claimed pool EB's DB record.
       let maxParallelTests: number | undefined;
-      if (runnerId && runnerId !== 'auto') {
+      if (runnerId && runnerId !== "auto") {
         const remoteRunner = await queries.getRunnerById(runnerId);
         maxParallelTests = remoteRunner?.maxParallelTests ?? 1;
       }
 
       try {
-        await executeTests(tests, testRunId, {
-          repositoryId,
-          teamId,
-          runnerId,
-          environmentConfig: envConfig,
-          playwrightSettings: browserSettings,
-          maxParallelTests,
-          jobId,
-          setupInfo: remoteSetupInfo,
-          forceVideoRecording,
-          setupContext: {
-            storageState: setupContext.storageState,
-            variables: setupContext.variables,
+        await executeTests(
+          tests,
+          testRunId,
+          {
+            repositoryId,
+            teamId,
+            runnerId,
+            environmentConfig: envConfig,
+            playwrightSettings: browserSettings,
+            maxParallelTests,
+            jobId,
+            setupInfo: remoteSetupInfo,
+            forceVideoRecording,
+            setupContext: {
+              storageState: setupContext.storageState,
+              variables: setupContext.variables,
+            },
           },
-        }, onProgress, onResult);
+          onProgress,
+          onResult,
+        );
 
         // If setup was used, mark it completed now
         if (remoteSetupInfo) {
-          await queries.updateBuild(buildId, { setupStatus: 'completed' });
+          await queries.updateBuild(buildId, { setupStatus: "completed" });
         }
       } catch (error) {
         // If setup failed on the runner, mark it
-        if (remoteSetupInfo && error instanceof Error && error.message.includes('setup')) {
+        if (
+          remoteSetupInfo &&
+          error instanceof Error &&
+          error.message.includes("setup")
+        ) {
           await queries.updateBuild(buildId, {
-            setupStatus: 'failed',
+            setupStatus: "failed",
             setupError: error.message,
           });
         }
@@ -958,10 +1248,10 @@ async function runBuildAsync(
 
     // Check if this build was cancelled while running
     const currentJob = await queries.getBackgroundJob(jobId);
-    if (currentJob?.error === 'Cancelled by user') {
-      revalidatePath('/builds');
-      revalidatePath('/');
-      if (targetRunner !== 'auto') {
+    if (currentJob?.error === "Cancelled by user") {
+      revalidatePath("/builds");
+      revalidatePath("/");
+      if (targetRunner !== "auto") {
         processNextQueuedBuild(repositoryId, targetRunner);
       }
       return;
@@ -971,33 +1261,51 @@ async function runBuildAsync(
     const autoRetryCount = playwrightSettings?.autoRetryCount ?? 0;
     if (autoRetryCount > 0 && failedCount > 0) {
       const allResults = await queries.getTestResultsByRun(testRunId);
-      const failedResults = allResults.filter(r => r.status === 'failed');
-      const failedTestIds = [...new Set(failedResults.map(r => r.testId!))];
-      const failedTests = tests.filter(t => failedTestIds.includes(t.id));
+      const failedResults = allResults.filter((r) => r.status === "failed");
+      const failedTestIds = [...new Set(failedResults.map((r) => r.testId!))];
+      const failedTests = tests.filter((t) => failedTestIds.includes(t.id));
 
       if (failedTests.length > 0) {
-        console.log(`[build] Auto-retrying ${failedTests.length} failed test(s), max ${autoRetryCount} attempt(s)`);
-        await updateJobProgress(jobId, processedCount, totalTestsAcrossBrowsers, { activeTests: ['Retrying failed tests...'] });
+        console.log(
+          `[build] Auto-retrying ${failedTests.length} failed test(s), max ${autoRetryCount} attempt(s)`,
+        );
+        await updateJobProgress(
+          jobId,
+          processedCount,
+          totalTestsAcrossBrowsers,
+          { activeTests: ["Retrying failed tests..."] },
+        );
 
         for (let attempt = 1; attempt <= autoRetryCount; attempt++) {
           // Re-check which tests are still failing (they may have passed on a previous retry)
-          const currentFailedResults = (await queries.getTestResultsByRun(testRunId))
-            .filter(r => r.status === 'failed' && !r.isFlaky);
-          const currentFailedTestIds = [...new Set(currentFailedResults.map(r => r.testId!))];
-          const testsToRetry = failedTests.filter(t => currentFailedTestIds.includes(t.id));
+          const currentFailedResults = (
+            await queries.getTestResultsByRun(testRunId)
+          ).filter((r) => r.status === "failed" && !r.isFlaky);
+          const currentFailedTestIds = [
+            ...new Set(currentFailedResults.map((r) => r.testId!)),
+          ];
+          const testsToRetry = failedTests.filter((t) =>
+            currentFailedTestIds.includes(t.id),
+          );
 
           if (testsToRetry.length === 0) break;
 
-          console.log(`[build] Retry attempt ${attempt}/${autoRetryCount}: ${testsToRetry.length} test(s)`);
+          console.log(
+            `[build] Retry attempt ${attempt}/${autoRetryCount}: ${testsToRetry.length} test(s)`,
+          );
 
           // Create a temporary retry result handler
           const retryOnResult = async (result: TestRunResult) => {
-            if (result.status === 'passed') {
+            if (result.status === "passed") {
               // Test passed on retry — it's flaky!
               // Find the original failed result and mark it as flaky
-              const originalResult = currentFailedResults.find(r => r.testId === result.testId);
+              const originalResult = currentFailedResults.find(
+                (r) => r.testId === result.testId,
+              );
               if (originalResult) {
-                await queries.updateTestResult(originalResult.id, { isFlaky: true });
+                await queries.updateTestResult(originalResult.id, {
+                  isFlaky: true,
+                });
               }
 
               // Save the retry result
@@ -1010,7 +1318,7 @@ async function runBuildAsync(
                 screenshots: result.screenshots,
                 errorMessage: result.errorMessage,
                 durationMs: result.durationMs,
-                viewport: '1280x720',
+                viewport: "1280x720",
                 browser: currentBrowserType,
                 consoleErrors: result.consoleErrors,
                 networkRequests: result.networkRequests,
@@ -1041,26 +1349,36 @@ async function runBuildAsync(
               failedCount--;
               flakyCount++;
 
-              console.log(`[build] Test "${testsToRetry.find(t => t.id === result.testId)?.name}" passed on retry ${attempt} — marked as flaky`);
+              console.log(
+                `[build] Test "${testsToRetry.find((t) => t.id === result.testId)?.name}" passed on retry ${attempt} — marked as flaky`,
+              );
             }
             // If retry also fails, do nothing — keep the original failed result
           };
 
           // Re-run failed tests
-          await executeTests(testsToRetry, testRunId, {
-            repositoryId,
-            teamId,
-            runnerId,
-            environmentConfig: envConfig,
-            playwrightSettings: playwrightSettings ? { ...playwrightSettings, browser: currentBrowserType } : null,
-            maxParallelTests: 1, // Retry sequentially for stability
-            jobId,
-            forceVideoRecording,
-            setupContext: {
-              storageState: setupContext.storageState,
-              variables: setupContext.variables,
+          await executeTests(
+            testsToRetry,
+            testRunId,
+            {
+              repositoryId,
+              teamId,
+              runnerId,
+              environmentConfig: envConfig,
+              playwrightSettings: playwrightSettings
+                ? { ...playwrightSettings, browser: currentBrowserType }
+                : null,
+              maxParallelTests: 1, // Retry sequentially for stability
+              jobId,
+              forceVideoRecording,
+              setupContext: {
+                storageState: setupContext.storageState,
+                variables: setupContext.variables,
+              },
             },
-          }, undefined, retryOnResult);
+            undefined,
+            retryOnResult,
+          );
 
           // Update build progress after retry
           await queries.updateBuild(buildId, {
@@ -1075,41 +1393,56 @@ async function runBuildAsync(
     // Run per-step evaluation criteria. A rule with severity 'fail' can
     // promote a passing test to failed (e.g. fail when a screenshot changed).
     try {
-      const { evaluateStepCriteria } = await import('@/lib/execution/evaluation');
+      const { evaluateStepCriteria } =
+        await import("@/lib/execution/evaluation");
       const resultsForEval = await queries.getTestResultsByRun(testRunId);
       for (const r of resultsForEval) {
         const prevStatus = r.status;
         const evalResult = await evaluateStepCriteria(r.id);
         if (
-          evalResult.overriddenStatus === 'failed' &&
-          prevStatus !== 'failed'
+          evalResult.overriddenStatus === "failed" &&
+          prevStatus !== "failed"
         ) {
-          if (prevStatus === 'passed') passedCount--;
+          if (prevStatus === "passed") passedCount--;
           failedCount++;
         }
       }
     } catch (err) {
-      console.error('[build] step-criteria evaluation failed:', err);
+      console.error("[build] step-criteria evaluation failed:", err);
     }
 
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
       completedAt: new Date(),
-      status: hasFailures ? 'failed' : 'passed',
+      status: hasFailures ? "failed" : "passed",
     });
 
     // Update build final metrics and status
     const overallStatus = await queries.computeBuildStatus(buildId);
 
     // Aggregate a11y scores across all test results for this build (only if a11y data exists)
-    let a11yUpdate: { a11yScore?: number; a11yViolationCount?: number; a11yCriticalCount?: number; a11yTotalRulesChecked?: number } = {};
-    let designSystemUpdate: { designSystemScore?: number; designSystemViolationCount?: number; designSystemCriticalCount?: number; designSystemTotalRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage } = {};
+    let a11yUpdate: {
+      a11yScore?: number;
+      a11yViolationCount?: number;
+      a11yCriticalCount?: number;
+      a11yTotalRulesChecked?: number;
+    } = {};
+    let designSystemUpdate: {
+      designSystemScore?: number;
+      designSystemViolationCount?: number;
+      designSystemCriticalCount?: number;
+      designSystemTotalRulesChecked?: number;
+      designSystemTokenUsage?: import("@/lib/db/schema").DesignSystemTokenUsage;
+    } = {};
     try {
-      const { aggregateA11yForBuild } = await import('@/lib/a11y/wcag-score');
-      const { aggregateDesignSystemForBuild } = await import('@/lib/design-system/score');
+      const { aggregateA11yForBuild } = await import("@/lib/a11y/wcag-score");
+      const { aggregateDesignSystemForBuild } =
+        await import("@/lib/design-system/score");
       const testResultsForRollup = await queries.getTestResultsByRun(testRunId);
-      const hasA11yData = testResultsForRollup.some(r => r.a11yViolations != null || r.a11yPassesCount != null);
+      const hasA11yData = testResultsForRollup.some(
+        (r) => r.a11yViolations != null || r.a11yPassesCount != null,
+      );
       if (hasA11yData) {
         const a11ySummary = aggregateA11yForBuild(testResultsForRollup);
         a11yUpdate = {
@@ -1119,7 +1452,11 @@ async function runBuildAsync(
           a11yTotalRulesChecked: a11ySummary.totalRulesChecked,
         };
       }
-      const hasDsData = testResultsForRollup.some(r => r.designSystemViolations != null || r.designSystemRulesChecked != null);
+      const hasDsData = testResultsForRollup.some(
+        (r) =>
+          r.designSystemViolations != null ||
+          r.designSystemRulesChecked != null,
+      );
       if (hasDsData) {
         const dsSummary = aggregateDesignSystemForBuild(testResultsForRollup);
         designSystemUpdate = {
@@ -1163,44 +1500,58 @@ async function runBuildAsync(
     // Fire-and-forget AI failure triage for failed tests
     if (failedCount > 0 && repositoryId) {
       const repoId = repositoryId;
-      import('@/lib/ai/failure-triage').then(({ triageBuildFailures }) => {
-        triageBuildFailures(buildId, repoId).catch(console.error);
-      }).catch(console.error);
+      import("@/lib/ai/failure-triage")
+        .then(({ triageBuildFailures }) => {
+          triageBuildFailures(buildId, repoId).catch(console.error);
+        })
+        .catch(console.error);
     }
 
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
-    import('./change-map').then(({ computeChangeMap }) => {
-      computeChangeMap(buildId).catch((e) => {
-        console.error(`[change-map] compute failed for build ${buildId}:`, e);
-      });
-    }).catch(console.error);
+    import("./change-map")
+      .then(({ computeChangeMap }) => {
+        computeChangeMap(buildId).catch((e) => {
+          console.error(`[change-map] compute failed for build ${buildId}:`, e);
+        });
+      })
+      .catch(console.error);
 
     // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
     // category badges based on the latest build. Tier only downgrades on a
     // confirmed regression — see src/lib/awards/criteria.ts.
     if (repositoryId) {
       const repoId = repositoryId;
-      import('@/lib/awards/recompute').then(({ recomputeRepoAward }) => {
-        recomputeRepoAward(repoId).catch((e) => {
-          console.error(`[awards] recompute failed for repo ${repoId}:`, e);
-        });
-      }).catch(console.error);
+      import("@/lib/awards/recompute")
+        .then(({ recomputeRepoAward }) => {
+          recomputeRepoAward(repoId).catch((e) => {
+            console.error(`[awards] recompute failed for repo ${repoId}:`, e);
+          });
+        })
+        .catch(console.error);
     }
 
     // Fire-and-forget auto-approval of 0-diff cases — a green-verdict step
     // with no evidence is treated as Done on the verify board. We persist a
     // step_layer_feedback row so the count of "verified" cases is accurate
     // without the reviewer having to click through.
-    import('./layer-feedback-auto').then(({ autoApproveZeroDiffCases }) => {
-      autoApproveZeroDiffCases(buildId).catch((e) => {
-        console.error(`[verify] auto-approve failed for build ${buildId}:`, e);
-      });
-    }).catch(console.error);
+    import("./layer-feedback-auto")
+      .then(({ autoApproveZeroDiffCases }) => {
+        autoApproveZeroDiffCases(buildId).catch((e) => {
+          console.error(
+            `[verify] auto-approve failed for build ${buildId}:`,
+            e,
+          );
+        });
+      })
+      .catch(console.error);
 
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);
-    if (completedBuild?.comparisonRole === 'baseline' && completedBuild.comparisonMeta) {
+    if (
+      completedBuild?.comparisonRole === "baseline" &&
+      completedBuild.comparisonMeta
+    ) {
       const meta = completedBuild.comparisonMeta as {
         featureBranch: string;
         featureUrl: string;
@@ -1209,49 +1560,61 @@ async function runBuildAsync(
         versionOverrides?: Record<string, string>;
       };
       try {
-        console.log(`[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`);
+        console.log(
+          `[comparison] Baseline build ${buildId} completed. Starting feature build on ${meta.featureBranch}...`,
+        );
         const featureResult = await createComparisonFeatureBuild(
           completedBuild.comparisonPairId!,
           repositoryId ?? null,
           meta,
         );
-        console.log(`[comparison] Feature build ${featureResult.buildId} started for pair ${completedBuild.comparisonPairId}`);
+        console.log(
+          `[comparison] Feature build ${featureResult.buildId} started for pair ${completedBuild.comparisonPairId}`,
+        );
       } catch (err) {
-        console.error('[comparison] Failed to start feature build:', err);
+        console.error("[comparison] Failed to start feature build:", err);
       }
     }
   } catch (error) {
     // Check if this build was cancelled while running — don't overwrite cancelJob's statuses
     const currentJob = await queries.getBackgroundJob(jobId);
-    if (currentJob?.error !== 'Cancelled by user') {
+    if (currentJob?.error !== "Cancelled by user") {
       await queries.updateTestRun(testRunId, {
         completedAt: new Date(),
-        status: 'failed',
+        status: "failed",
       });
 
       // B6: distinguish executor-level failure (no test results landed) from
       // mid-run failure (some results landed, others didn't). The former
       // points at infrastructure (EB pod scheduling, runner unreachable);
       // the latter at the failing test(s) themselves.
-      const writtenResults = await queries.countTestResultsByBuild(buildId).catch(() => 0);
-      const errorMessage = error instanceof Error ? error.message : 'Build failed';
-      const errorStack = error instanceof Error && error.stack ? error.stack : null;
-      const overallStatus: 'executor_failed' | 'blocked' =
-        writtenResults === 0 ? 'executor_failed' : 'blocked';
+      const writtenResults = await queries
+        .countTestResultsByBuild(buildId)
+        .catch(() => 0);
+      const errorMessage =
+        error instanceof Error ? error.message : "Build failed";
+      const errorStack =
+        error instanceof Error && error.stack ? error.stack : null;
+      const overallStatus: "executor_failed" | "blocked" =
+        writtenResults === 0 ? "executor_failed" : "blocked";
       const executorErrorBody = errorStack
         ? `${errorMessage}\n\n${errorStack}`
         : errorMessage;
 
       console.error(
-        `[build] runBuildAsync threw for ${buildId} after ${writtenResults} results — status=${overallStatus}: ${errorMessage}`
+        `[build] runBuildAsync threw for ${buildId} after ${writtenResults} results — status=${overallStatus}: ${errorMessage}`,
       );
 
       await queries.updateBuild(buildId, {
         overallStatus,
         completedAt: new Date(),
         elapsedMs: Date.now() - startTime,
-        executorError: overallStatus === 'executor_failed' ? executorErrorBody.slice(0, 8_000) : null,
-        executorFailedAt: overallStatus === 'executor_failed' ? new Date() : null,
+        executorError:
+          overallStatus === "executor_failed"
+            ? executorErrorBody.slice(0, 8_000)
+            : null,
+        executorFailedAt:
+          overallStatus === "executor_failed" ? new Date() : null,
       });
       await failJob(jobId, errorMessage);
     }
@@ -1262,18 +1625,24 @@ async function runBuildAsync(
     const repoForStorage = await queries.getRepository(repositoryId);
     if (repoForStorage?.teamId) {
       const teamIdForUsage = repoForStorage.teamId;
-      const { recalculateTeamStorage } = await import('@/lib/storage/calculator');
+      const { recalculateTeamStorage } =
+        await import("@/lib/storage/calculator");
       recalculateTeamStorage(teamIdForUsage).catch(() => {});
-      queries.recordTeamRunCompletion(teamIdForUsage, Math.max(0, Date.now() - startTime)).catch(() => {});
+      queries
+        .recordTeamRunCompletion(
+          teamIdForUsage,
+          Math.max(0, Date.now() - startTime),
+        )
+        .catch(() => {});
     }
   }
 
-  revalidatePath('/builds');
-  revalidatePath('/');
+  revalidatePath("/builds");
+  revalidatePath("/");
 
   // Process next queued job for this specific runner.
   // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
-  if (targetRunner !== 'auto') {
+  if (targetRunner !== "auto") {
     processNextQueuedBuild(repositoryId, targetRunner);
   }
 }
@@ -1282,7 +1651,7 @@ async function runBuildAsync(
  * Queue a build for later execution
  */
 async function queueBuild(
-  triggerType: TriggerType = 'manual',
+  triggerType: TriggerType = "manual",
   testIds?: string[],
   repositoryId?: string | null,
   runnerId?: string,
@@ -1290,17 +1659,22 @@ async function queueBuild(
   // Get tests to determine label (filter out soft-deleted and placeholder tests)
   let tests: Test[];
   if (testIds && testIds.length > 0) {
-    tests = await Promise.all(
-      testIds.map((id) => queries.getTest(id))
-    ).then((results) => results.filter((t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder));
+    tests = await Promise.all(testIds.map((id) => queries.getTest(id))).then(
+      (results) =>
+        results.filter(
+          (t): t is Test => t !== undefined && !t.deletedAt && !t.isPlaceholder,
+        ),
+    );
   } else if (repositoryId) {
-    tests = (await queries.getTestsByRepo(repositoryId)).filter(t => !t.isPlaceholder);
+    tests = (await queries.getTestsByRepo(repositoryId)).filter(
+      (t) => !t.isPlaceholder,
+    );
   } else {
-    tests = (await queries.getTests()).filter(t => !t.isPlaceholder);
+    tests = (await queries.getTests()).filter((t) => !t.isPlaceholder);
   }
 
   if (tests.length === 0) {
-    throw new Error('No tests to run');
+    throw new Error("No tests to run");
   }
 
   // null targetRunnerId = pool-managed (any available EB)
@@ -1309,7 +1683,7 @@ async function queueBuild(
 
   // Create a pending job
   const jobId = await createPendingJob(
-    'build_run',
+    "build_run",
     `Queued Build (${tests.length} tests)`,
     tests.length,
     repositoryId,
@@ -1322,7 +1696,7 @@ async function queueBuild(
     testRunId: null,
     testCount: tests.length,
     queued: true,
-    jobId
+    jobId,
   };
 }
 
@@ -1336,13 +1710,16 @@ async function queueBuild(
  * RPC callers must own the supplied `repositoryId`; pure background
  * invocations (no headers, no `repositoryId`) pass through.
  */
-export async function processNextQueuedBuild(repositoryId?: string | null, targetRunnerId?: string) {
+export async function processNextQueuedBuild(
+  repositoryId?: string | null,
+  targetRunnerId?: string,
+) {
   // Detect request context and authorize. If `headers()` succeeds we are on
   // the server-action RPC path → require team ownership of the queue scope.
   // If `headers()` throws we are in fire-and-forget context (no request) →
   // allow the internal queue worker through.
   try {
-    const { headers } = await import('next/headers');
+    const { headers } = await import("next/headers");
     await headers();
     // We have a request: enforce ownership.
     if (repositoryId) {
@@ -1354,25 +1731,36 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
     }
   } catch (err) {
     // No request context: internal call. Proceed without auth.
-    if (err instanceof Error && err.message.startsWith('Forbidden')) throw err;
-    if (err instanceof Error && err.message === 'Unauthorized') throw err;
+    if (err instanceof Error && err.message.startsWith("Forbidden")) throw err;
+    if (err instanceof Error && err.message === "Unauthorized") throw err;
   }
 
   const effectiveRunner = targetRunnerId || undefined;
 
   // Skip busy check for pool-managed jobs — the execution flow handles claiming
-  if (effectiveRunner && await isRunnerBusy(effectiveRunner)) return;
+  if (effectiveRunner && (await isRunnerBusy(effectiveRunner))) return;
 
   // getPendingBuildJobs: when effectiveRunner is undefined, finds jobs with null targetRunnerId (pool mode)
-  const pendingJobs = await queries.getPendingBuildJobs(repositoryId, effectiveRunner);
+  const pendingJobs = await queries.getPendingBuildJobs(
+    repositoryId,
+    effectiveRunner,
+  );
   if (pendingJobs.length === 0) return;
 
   const nextJob = pendingJobs[0];
-  const metadata = nextJob.metadata as { triggerType?: TriggerType; testIds?: string[] | null; runnerId?: string } | null;
+  const metadata = nextJob.metadata as {
+    triggerType?: TriggerType;
+    testIds?: string[] | null;
+    runnerId?: string;
+  } | null;
 
   // Delete the queue placeholder — createAndRunBuild creates its own running job.
   await queries.deleteBackgroundJob(nextJob.id);
-  emitJobEvent({ type: 'job:delete', jobId: nextJob.id, repositoryId: nextJob.repositoryId });
+  emitJobEvent({
+    type: "job:delete",
+    jobId: nextJob.id,
+    repositoryId: nextJob.repositoryId,
+  });
 
   // Run the build — for pool-managed jobs, runnerId is undefined so
   // createAndRunBuildCore goes through auto mode → executeFallbackChain → claimPoolEB.
@@ -1381,13 +1769,13 @@ export async function processNextQueuedBuild(repositoryId?: string | null, targe
   // from `requireRepoAccess → headers()` and the queued run would be lost.
   try {
     await createAndRunBuildCore(
-      metadata?.triggerType || 'manual',
+      metadata?.triggerType || "manual",
       metadata?.testIds || undefined,
       nextJob.repositoryId,
       metadata?.runnerId,
     );
   } catch (error) {
-    console.error('[queue] Failed to start queued build:', error);
+    console.error("[queue] Failed to start queued build:", error);
   }
 }
 
@@ -1407,21 +1795,30 @@ async function processVisualDiff(
   repositoryId?: string | null,
   stepLabel?: string,
   isUnstable?: boolean,
-  browser: string = 'chromium',
-  testDiffOverrides?: import('@/lib/db/schema').TestDiffOverrides | null,
+  browser: string = "chromium",
+  testDiffOverrides?: import("@/lib/db/schema").TestDiffOverrides | null,
   forceAutoApprove?: boolean,
-): Promise<{ hasChanges: boolean; diffId: string; classification: DiffClassification }> {
-
+): Promise<{
+  hasChanges: boolean;
+  diffId: string;
+  classification: DiffClassification;
+}> {
   // Get diff sensitivity settings, then merge per-test overrides
   const settings = await queries.getDiffSensitivitySettings(repositoryId);
-  const merged = testDiffOverrides ? { ...settings, ...testDiffOverrides } : settings;
+  const merged = testDiffOverrides
+    ? { ...settings, ...testDiffOverrides }
+    : settings;
   const unchangedThreshold = merged.unchangedThreshold ?? 1;
   const flakyThreshold = merged.flakyThreshold ?? 10;
   const includeAntiAliasing = merged.includeAntiAliasing ?? false;
   const ignorePageShift = merged.ignorePageShift ?? false;
-  const diffEngine = (merged.diffEngine as import('@/lib/db/schema').DiffEngineType) ?? 'pixelmatch';
+  const diffEngine =
+    (merged.diffEngine as import("@/lib/db/schema").DiffEngineType) ??
+    "pixelmatch";
   const textRegionAwareDiffing = merged.textRegionAwareDiffing ?? false;
-  const regionDetectionMode = (merged.regionDetectionMode as import('@/lib/db/schema').RegionDetectionMode) ?? 'grid';
+  const regionDetectionMode =
+    (merged.regionDetectionMode as import("@/lib/db/schema").RegionDetectionMode) ??
+    "grid";
   const textDiffEnabled = settings.textDiffEnabled ?? false;
 
   // Resolve text-diff fields for a single createVisualDiff call. The text
@@ -1434,13 +1831,21 @@ async function processVisualDiff(
   ): Promise<{
     baselineTextPath: string | null;
     currentTextPath: string | null;
-    textDiffStatus: import('@/lib/db/schema').TextDiffStatus;
-    textDiffSummary: NonNullable<import('@/lib/db/schema').DiffMetadata['textDiffSummary']> | null;
+    textDiffStatus: import("@/lib/db/schema").TextDiffStatus;
+    textDiffSummary: NonNullable<
+      import("@/lib/db/schema").DiffMetadata["textDiffSummary"]
+    > | null;
   }> => {
     if (!textDiffEnabled) {
-      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+      return {
+        baselineTextPath: null,
+        currentTextPath: null,
+        textDiffStatus: "skipped",
+        textDiffSummary: null,
+      };
     }
-    const swap = (p: string | null | undefined) => p ? p.replace(/\.png$/i, '.txt') : null;
+    const swap = (p: string | null | undefined) =>
+      p ? p.replace(/\.png$/i, ".txt") : null;
     const baselineCandidate = swap(baselineImagePath);
     const currentCandidate = swap(currentImagePath);
 
@@ -1458,52 +1863,95 @@ async function processVisualDiff(
       exists(currentCandidate),
     ]);
     if (!baselineTextPath && !currentTextPath) {
-      return { baselineTextPath: null, currentTextPath: null, textDiffStatus: 'skipped', textDiffSummary: null };
+      return {
+        baselineTextPath: null,
+        currentTextPath: null,
+        textDiffStatus: "skipped",
+        textDiffSummary: null,
+      };
     }
     // First-run text capture: caller passed no baseline image so there is
     // nothing to diff against. Surface as `baseline_establishing` rather than
     // `current_only` so the UI reads as intended behaviour, not as a missing-
     // baseline warning. Captured text is still browsable for review.
     if (!baselineImagePath && currentTextPath) {
-      return { baselineTextPath: null, currentTextPath, textDiffStatus: 'baseline_establishing', textDiffSummary: null };
+      return {
+        baselineTextPath: null,
+        currentTextPath,
+        textDiffStatus: "baseline_establishing",
+        textDiffSummary: null,
+      };
     }
-    const { status, summary } = await computePageTextDiffSummary(baselineTextPath, currentTextPath);
-    return { baselineTextPath, currentTextPath, textDiffStatus: status, textDiffSummary: summary };
+    const { status, summary } = await computePageTextDiffSummary(
+      baselineTextPath,
+      currentTextPath,
+    );
+    return {
+      baselineTextPath,
+      currentTextPath,
+      textDiffStatus: status,
+      textDiffSummary: summary,
+    };
   };
 
   // Get the repo's default branch
   const repo = repositoryId ? await queries.getRepository(repositoryId) : null;
-  const defaultBranch = repo?.defaultBranch || 'main';
-  const shouldAutoApprove = forceAutoApprove || (repo?.autoApproveDefaultBranch && branch === defaultBranch);
+  const defaultBranch = repo?.defaultBranch || "main";
+  const shouldAutoApprove =
+    forceAutoApprove ||
+    (repo?.autoApproveDefaultBranch && branch === defaultBranch);
 
   // Fetch per-step ignore + focus regions for this screenshot
-  const stepIgnoreRegions = await queries.getIgnoreRegions(testId, stepLabel || null);
-  const ignoreRects: Rectangle[] | undefined = stepIgnoreRegions.length > 0
-    ? stepIgnoreRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
-    : undefined;
-  const stepFocusRegions = await queries.getFocusRegions(testId, stepLabel || null);
-  const focusRects: Rectangle[] | undefined = stepFocusRegions.length > 0
-    ? stepFocusRegions.map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }))
-    : undefined;
+  const stepIgnoreRegions = await queries.getIgnoreRegions(
+    testId,
+    stepLabel || null,
+  );
+  const ignoreRects: Rectangle[] | undefined =
+    stepIgnoreRegions.length > 0
+      ? stepIgnoreRegions.map((r) => ({
+          x: r.x,
+          y: r.y,
+          width: r.width,
+          height: r.height,
+        }))
+      : undefined;
+  const stepFocusRegions = await queries.getFocusRegions(
+    testId,
+    stepLabel || null,
+  );
+  const focusRects: Rectangle[] | undefined =
+    stepFocusRegions.length > 0
+      ? stepFocusRegions.map((r) => ({
+          x: r.x,
+          y: r.y,
+          width: r.width,
+          height: r.height,
+        }))
+      : undefined;
 
   // Helper to classify based on percentage
-  const classifyDiff = (pct: number, pixelDiff?: number): { classification: DiffClassification; status: DiffStatus } => {
+  const classifyDiff = (
+    pct: number,
+    pixelDiff?: number,
+  ): { classification: DiffClassification; status: DiffStatus } => {
     // Truly identical images are always unchanged, regardless of thresholds
     if (pixelDiff === 0) {
-      return { classification: 'unchanged', status: 'auto_approved' };
+      return { classification: "unchanged", status: "auto_approved" };
     }
 
-    const effectiveFlakyThreshold = isUnstable ? Math.max(flakyThreshold, pct + 1) : flakyThreshold;
+    const effectiveFlakyThreshold = isUnstable
+      ? Math.max(flakyThreshold, pct + 1)
+      : flakyThreshold;
 
     if (pct < unchangedThreshold) {
       if (isUnstable && (pixelDiff === undefined || pixelDiff > 0)) {
-        return { classification: 'flaky', status: 'pending' };
+        return { classification: "flaky", status: "pending" };
       }
-      return { classification: 'unchanged', status: 'auto_approved' };
+      return { classification: "unchanged", status: "auto_approved" };
     } else if (pct < effectiveFlakyThreshold) {
-      return { classification: 'flaky', status: 'pending' };
+      return { classification: "flaky", status: "pending" };
     } else {
-      return { classification: 'changed', status: 'pending' };
+      return { classification: "changed", status: "pending" };
     }
   };
 
@@ -1515,24 +1963,39 @@ async function processVisualDiff(
   // comparison explicitly. If neither branch has a baseline, surface where
   // ANY approved baseline exists (`baselineExistsOn`) so the user knows the
   // baseline isn't lost — it just hasn't been promoted to this branch yet.
-  let baseline = await queries.getBranchBaseline(testId, stepLabel, branch, browser);
+  let baseline = await queries.getBranchBaseline(
+    testId,
+    stepLabel,
+    branch,
+    browser,
+  );
   let baselineSourceBranch: string | undefined;
   let baselineExistsOn: { branch: string; createdAt: string } | undefined;
   if (!baseline && defaultBranch && defaultBranch !== branch) {
-    const fallback = await queries.getBranchBaseline(testId, stepLabel, defaultBranch, browser);
+    const fallback = await queries.getBranchBaseline(
+      testId,
+      stepLabel,
+      defaultBranch,
+      browser,
+    );
     if (fallback) {
       baseline = fallback;
       baselineSourceBranch = defaultBranch;
     }
   }
   if (!baseline) {
-    const anyBaseline = await queries.getAnyActiveBaseline(testId, stepLabel, browser);
+    const anyBaseline = await queries.getAnyActiveBaseline(
+      testId,
+      stepLabel,
+      browser,
+    );
     if (anyBaseline) {
       baselineExistsOn = {
         branch: anyBaseline.branch,
-        createdAt: anyBaseline.createdAt instanceof Date
-          ? anyBaseline.createdAt.toISOString()
-          : String(anyBaseline.createdAt),
+        createdAt:
+          anyBaseline.createdAt instanceof Date
+            ? anyBaseline.createdAt.toISOString()
+            : String(anyBaseline.createdAt),
       };
     }
   }
@@ -1543,14 +2006,24 @@ async function processVisualDiff(
   const currentHashWithDims = hashImageWithDimensions(currentImageFullPath);
   const currentHash = hashImage(currentImageFullPath);
   const matchingBaseline =
-    await queries.getBaselineByHash(testId, currentHashWithDims, stepLabel, browser) ||
-    await queries.getBaselineByHash(testId, currentHash, stepLabel, browser);
+    (await queries.getBaselineByHash(
+      testId,
+      currentHashWithDims,
+      stepLabel,
+      browser,
+    )) ||
+    (await queries.getBaselineByHash(testId, currentHash, stepLabel, browser));
 
   // Get planned screenshot if exists (for design comparison)
-  const plannedScreenshot = await queries.getPlannedScreenshotByTest(testId, stepLabel || null);
+  const plannedScreenshot = await queries.getPlannedScreenshotByTest(
+    testId,
+    stepLabel || null,
+  );
 
   // Helper to generate planned diff
-  const generatePlannedDiff = async (currentPath: string): Promise<{
+  const generatePlannedDiff = async (
+    currentPath: string,
+  ): Promise<{
     plannedImagePath: string | null;
     plannedDiffImagePath: string | null;
     plannedPixelDifference: number | null;
@@ -1583,7 +2056,8 @@ async function processVisualDiff(
         plannedImagePath: plannedScreenshot.imagePath,
         plannedDiffImagePath: toRelativePath(plannedDiffResult.diffImagePath),
         plannedPixelDifference: plannedDiffResult.pixelDifference,
-        plannedPercentageDifference: plannedDiffResult.percentageDifference.toString(),
+        plannedPercentageDifference:
+          plannedDiffResult.percentageDifference.toString(),
       };
     } catch {
       return {
@@ -1596,7 +2070,9 @@ async function processVisualDiff(
   };
 
   // Helper to generate main baseline diff (always runs on feature branches)
-  const generateMainBaselineDiff = async (currentPath: string): Promise<{
+  const generateMainBaselineDiff = async (
+    currentPath: string,
+  ): Promise<{
     mainBaselineImagePath: string | null;
     mainDiffImagePath: string | null;
     mainPixelDifference: number | null;
@@ -1605,12 +2081,29 @@ async function processVisualDiff(
   }> => {
     // Skip when on main branch (branch diff IS the main diff)
     if (branch === defaultBranch) {
-      return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
+      return {
+        mainBaselineImagePath: null,
+        mainDiffImagePath: null,
+        mainPixelDifference: null,
+        mainPercentageDifference: null,
+        mainClassification: null,
+      };
     }
 
-    const mainBaseline = await queries.getBranchBaseline(testId, stepLabel, defaultBranch, browser);
+    const mainBaseline = await queries.getBranchBaseline(
+      testId,
+      stepLabel,
+      defaultBranch,
+      browser,
+    );
     if (!mainBaseline) {
-      return { mainBaselineImagePath: null, mainDiffImagePath: null, mainPixelDifference: null, mainPercentageDifference: null, mainClassification: null };
+      return {
+        mainBaselineImagePath: null,
+        mainDiffImagePath: null,
+        mainPixelDifference: null,
+        mainPercentageDifference: null,
+        mainClassification: null,
+      };
     }
 
     try {
@@ -1634,7 +2127,8 @@ async function processVisualDiff(
         mainBaselineImagePath: mainBaseline.imagePath,
         mainDiffImagePath: toRelativePath(mainDiffResult.diffImagePath),
         mainPixelDifference: mainDiffResult.pixelDifference,
-        mainPercentageDifference: mainDiffResult.percentageDifference.toString(),
+        mainPercentageDifference:
+          mainDiffResult.percentageDifference.toString(),
         mainClassification: mainCls,
       };
     } catch {
@@ -1652,11 +2146,17 @@ async function processVisualDiff(
     // Validate carry-forward: verify dimensions match before trusting hash
     let carryForwardValid = false;
     try {
-      const currentBuf = fs.readFileSync(path.join(STORAGE_ROOT, currentScreenshotPath));
-      const baselineBuf = fs.readFileSync(path.join(STORAGE_ROOT, matchingBaseline.imagePath));
+      const currentBuf = fs.readFileSync(
+        path.join(STORAGE_ROOT, currentScreenshotPath),
+      );
+      const baselineBuf = fs.readFileSync(
+        path.join(STORAGE_ROOT, matchingBaseline.imagePath),
+      );
       const currentPng = PNG.sync.read(currentBuf);
       const baselinePng = PNG.sync.read(baselineBuf);
-      carryForwardValid = currentPng.width === baselinePng.width && currentPng.height === baselinePng.height;
+      carryForwardValid =
+        currentPng.width === baselinePng.width &&
+        currentPng.height === baselinePng.height;
     } catch {
       // If we can't read either file, fall through to normal diff
       carryForwardValid = false;
@@ -1666,7 +2166,10 @@ async function processVisualDiff(
       // Auto-approve: identical to previously approved baseline
       const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
       const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
-      const textDiff = await resolveTextDiffFields(matchingBaseline.imagePath, currentScreenshotPath);
+      const textDiff = await resolveTextDiffFields(
+        matchingBaseline.imagePath,
+        currentScreenshotPath,
+      );
 
       const diff = await queries.createVisualDiff({
         buildId,
@@ -1675,11 +2178,16 @@ async function processVisualDiff(
         stepLabel: stepLabel || null,
         baselineImagePath: matchingBaseline.imagePath,
         currentImagePath: currentScreenshotPath,
-        status: 'auto_approved',
-        classification: 'unchanged',
+        status: "auto_approved",
+        classification: "unchanged",
         pixelDifference: 0,
-        percentageDifference: '0',
-        metadata: { changedRegions: [], ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}) },
+        percentageDifference: "0",
+        metadata: {
+          changedRegions: [],
+          ...(textDiff.textDiffSummary
+            ? { textDiffSummary: textDiff.textDiffSummary }
+            : {}),
+        },
         browser,
         baselineTextPath: textDiff.baselineTextPath,
         currentTextPath: textDiff.currentTextPath,
@@ -1687,7 +2195,11 @@ async function processVisualDiff(
         ...plannedDiff,
         ...mainDiff,
       });
-      return { hasChanges: false, diffId: diff.id, classification: 'unchanged' };
+      return {
+        hasChanges: false,
+        diffId: diff.id,
+        classification: "unchanged",
+      };
     }
     // Dimensions mismatch — hash is stale/wrong, fall through to normal diff
   }
@@ -1704,14 +2216,16 @@ async function processVisualDiff(
       testId,
       stepLabel: stepLabel || null,
       currentImagePath: currentScreenshotPath,
-      status: shouldAutoApprove ? 'auto_approved' : 'pending',
-      classification: 'changed',
+      status: shouldAutoApprove ? "auto_approved" : "pending",
+      classification: "changed",
       pixelDifference: 0,
-      percentageDifference: '0',
+      percentageDifference: "0",
       metadata: {
         changedRegions: [],
         isNewTest: true,
-        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(textDiff.textDiffSummary
+          ? { textDiffSummary: textDiff.textDiffSummary }
+          : {}),
         ...(baselineExistsOn ? { baselineExistsOn } : {}),
       },
       browser,
@@ -1723,8 +2237,15 @@ async function processVisualDiff(
     });
 
     if (shouldAutoApprove) {
-      const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
-      await queries.deactivateBaselines(testId, stepLabel || null, branch, browser);
+      const autoHash = hashImageWithDimensions(
+        path.join(STORAGE_ROOT, currentScreenshotPath),
+      );
+      await queries.deactivateBaselines(
+        testId,
+        stepLabel || null,
+        branch,
+        browser,
+      );
       await queries.createBaseline({
         testId,
         stepLabel: stepLabel || null,
@@ -1736,7 +2257,11 @@ async function processVisualDiff(
       });
     }
 
-    return { hasChanges: !shouldAutoApprove, diffId: diff.id, classification: 'changed' };
+    return {
+      hasChanges: !shouldAutoApprove,
+      diffId: diff.id,
+      classification: "changed",
+    };
   }
 
   // Generate diff against primary baseline
@@ -1751,7 +2276,11 @@ async function processVisualDiff(
             nonTextThreshold: 0.1,
             textRegionPadding: settings.textRegionPadding ?? 4,
             includeAntiAliasing,
-            textDetectionGranularity: (settings.textDetectionGranularity as 'word' | 'line' | 'block') ?? 'word',
+            textDetectionGranularity:
+              (settings.textDetectionGranularity as
+                | "word"
+                | "line"
+                | "block") ?? "word",
             diffEngine,
           },
           ignoreRects,
@@ -1772,9 +2301,14 @@ async function processVisualDiff(
         );
 
     const pct = diffResult.percentageDifference;
-    const { classification, status } = classifyDiff(pct, diffResult.pixelDifference);
-    const effectiveStatus = shouldAutoApprove ? 'auto_approved' : status;
-    const hasChanges = shouldAutoApprove ? false : classification !== 'unchanged';
+    const { classification, status } = classifyDiff(
+      pct,
+      diffResult.pixelDifference,
+    );
+    const effectiveStatus = shouldAutoApprove ? "auto_approved" : status;
+    const hasChanges = shouldAutoApprove
+      ? false
+      : classification !== "unchanged";
     const diffImagePath = toRelativePath(diffResult.diffImagePath);
 
     // Strip absolute paths from aligned shift images before DB storage
@@ -1785,13 +2319,19 @@ async function processVisualDiff(
       metadata.changeCategories = [];
     }
     if (metadata.pageShift?.alignedBaselineImagePath) {
-      metadata.pageShift.alignedBaselineImagePath = toRelativePath(metadata.pageShift.alignedBaselineImagePath);
+      metadata.pageShift.alignedBaselineImagePath = toRelativePath(
+        metadata.pageShift.alignedBaselineImagePath,
+      );
     }
     if (metadata.pageShift?.alignedCurrentImagePath) {
-      metadata.pageShift.alignedCurrentImagePath = toRelativePath(metadata.pageShift.alignedCurrentImagePath);
+      metadata.pageShift.alignedCurrentImagePath = toRelativePath(
+        metadata.pageShift.alignedCurrentImagePath,
+      );
     }
     if (metadata.pageShift?.alignedDiffImagePath) {
-      metadata.pageShift.alignedDiffImagePath = toRelativePath(metadata.pageShift.alignedDiffImagePath);
+      metadata.pageShift.alignedDiffImagePath = toRelativePath(
+        metadata.pageShift.alignedDiffImagePath,
+      );
     }
 
     const [plannedDiff, mainDiff, textDiff] = await Promise.all([
@@ -1828,9 +2368,16 @@ async function processVisualDiff(
       ...mainDiff,
     });
 
-    if (shouldAutoApprove && classification !== 'unchanged') {
-      const autoHash = hashImageWithDimensions(path.join(STORAGE_ROOT, currentScreenshotPath));
-      await queries.deactivateBaselines(testId, stepLabel || null, branch, browser);
+    if (shouldAutoApprove && classification !== "unchanged") {
+      const autoHash = hashImageWithDimensions(
+        path.join(STORAGE_ROOT, currentScreenshotPath),
+      );
+      await queries.deactivateBaselines(
+        testId,
+        stepLabel || null,
+        branch,
+        browser,
+      );
       await queries.createBaseline({
         testId,
         stepLabel: stepLabel || null,
@@ -1858,13 +2405,15 @@ async function processVisualDiff(
       stepLabel: stepLabel || null,
       baselineImagePath: baseline.imagePath,
       currentImagePath: currentScreenshotPath,
-      status: 'pending',
-      classification: 'changed',
+      status: "pending",
+      classification: "changed",
       pixelDifference: -1,
-      percentageDifference: '-1',
+      percentageDifference: "-1",
       metadata: {
         changedRegions: [],
-        ...(textDiff.textDiffSummary ? { textDiffSummary: textDiff.textDiffSummary } : {}),
+        ...(textDiff.textDiffSummary
+          ? { textDiffSummary: textDiff.textDiffSummary }
+          : {}),
         ...(baselineSourceBranch ? { baselineSourceBranch } : {}),
       },
       browser,
@@ -1874,7 +2423,7 @@ async function processVisualDiff(
       ...plannedDiff,
       ...mainDiff,
     });
-    return { hasChanges: true, diffId: diff.id, classification: 'changed' };
+    return { hasChanges: true, diffId: diff.id, classification: "changed" };
   }
 }
 
@@ -1882,24 +2431,31 @@ async function processVisualDiff(
  * Build summary loader without auth — callers must verify ownership themselves.
  * Used by routes that authenticate via non-session credentials (runner Bearer tokens).
  */
-export async function buildBuildSummary(buildId: string): Promise<BuildSummary | null> {
+export async function buildBuildSummary(
+  buildId: string,
+): Promise<BuildSummary | null> {
   const build = await queries.getBuild(buildId);
   if (!build) return null;
 
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
   const diffs = await queries.getVisualDiffsWithTestStatus(buildId);
-  const runningTests = build.testRunId && !build.completedAt
-    ? await queries.getRunningTestNamesForTestRun(build.testRunId)
-    : [];
+  const runningTests =
+    build.testRunId && !build.completedAt
+      ? await queries.getRunningTestNamesForTestRun(build.testRunId)
+      : [];
 
   // Determine if build is on the default branch
-  const repo = testRun?.repositoryId ? await queries.getRepository(testRun.repositoryId) : null;
-  const defaultBranch = repo?.defaultBranch || 'main';
-  const gitBranch = testRun?.gitBranch || 'unknown';
+  const repo = testRun?.repositoryId
+    ? await queries.getRepository(testRun.repositoryId)
+    : null;
+  const defaultBranch = repo?.defaultBranch || "main";
+  const gitBranch = testRun?.gitBranch || "unknown";
 
   // Fetch error message from background job if build is blocked
   let errorMessage: string | null = null;
-  if (build.overallStatus === 'blocked') {
+  if (build.overallStatus === "blocked") {
     const job = await queries.getBackgroundJobByBuildId(buildId);
     if (job?.error) {
       errorMessage = job.error;
@@ -1922,7 +2478,7 @@ export async function buildBuildSummary(buildId: string): Promise<BuildSummary |
     codeChangeTestIds: (build.codeChangeTestIds as string[] | null) ?? null,
     isMainBranch: gitBranch === defaultBranch,
     gitBranch,
-    gitCommit: testRun?.gitCommit || 'unknown',
+    gitCommit: testRun?.gitCommit || "unknown",
     diffs,
     errorMessage,
     runningTests,
@@ -1932,7 +2488,9 @@ export async function buildBuildSummary(buildId: string): Promise<BuildSummary |
 /**
  * Get build summary with all metrics (auth-checked).
  */
-export async function getBuildSummary(buildId: string): Promise<BuildSummary | null> {
+export async function getBuildSummary(
+  buildId: string,
+): Promise<BuildSummary | null> {
   await requireBuildOwnership(buildId);
   return buildBuildSummary(buildId);
 }
@@ -1943,7 +2501,7 @@ export async function getBuildSummary(buildId: string): Promise<BuildSummary | n
 export async function getRecentBuilds(limit = 5) {
   const session = await requireTeamAccess();
   const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
   // Over-fetch so post-filter still has enough rows for `limit`.
   const all = await queries.getRecentBuilds(Math.max(limit * 4, 50));
   const filtered: typeof all = [];
@@ -1951,7 +2509,8 @@ export async function getRecentBuilds(limit = 5) {
     if (filtered.length >= limit) break;
     if (!b.testRunId) continue;
     const run = await queries.getTestRun(b.testRunId);
-    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId))
+      filtered.push(b);
   }
   return filtered;
 }
@@ -1970,14 +2529,15 @@ export async function getRecentBuildsByRepo(repositoryId: string, limit = 5) {
 export async function getBuilds(limit = 10) {
   const session = await requireTeamAccess();
   const teamRepos = await queries.getRepositoriesByTeam(session.team.id);
-  const teamRepoIds = new Set(teamRepos.map(r => r.id));
+  const teamRepoIds = new Set(teamRepos.map((r) => r.id));
   const all = await queries.getBuilds(Math.max(limit * 4, 50));
   const filtered: typeof all = [];
   for (const b of all) {
     if (filtered.length >= limit) break;
     if (!b.testRunId) continue;
     const run = await queries.getTestRun(b.testRunId);
-    if (run?.repositoryId && teamRepoIds.has(run.repositoryId)) filtered.push(b);
+    if (run?.repositoryId && teamRepoIds.has(run.repositoryId))
+      filtered.push(b);
   }
   return filtered;
 }
@@ -2017,47 +2577,72 @@ export async function getBuildA11yViolations(buildId: string) {
  * can pivot in a spreadsheet. Keeps the column set narrow on purpose;
  * the JSON endpoint is the long-form source.
  */
-export async function downloadBuildA11yViolationsCsv(buildId: string): Promise<string> {
+export async function downloadBuildA11yViolationsCsv(
+  buildId: string,
+): Promise<string> {
   await requireBuildOwnership(buildId);
   const rows = await queries.getBuildA11yViolations(buildId);
   const header = [
-    'rule_id',
-    'impact',
-    'wcag_level',
-    'occurrences',
-    'total_nodes',
-    'help_url',
-    'help',
-    'test_name',
-    'area',
-    'sample_selector',
-    'failure_summary',
+    "rule_id",
+    "impact",
+    "wcag_level",
+    "occurrences",
+    "total_nodes",
+    "help_url",
+    "help",
+    "test_name",
+    "area",
+    "sample_selector",
+    "failure_summary",
   ];
   const escape = (cell: string | number | undefined | null): string => {
-    if (cell === null || cell === undefined) return '';
+    if (cell === null || cell === undefined) return "";
     const s = String(cell);
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const lines: string[] = [header.join(',')];
+  const lines: string[] = [header.join(",")];
   for (const r of rows) {
     if (r.samples.length === 0) {
-      lines.push([
-        r.id, r.impact, r.wcagLevel ?? '', r.occurrenceCount, r.totalNodes,
-        r.helpUrl, r.help, '', '', '', '',
-      ].map(escape).join(','));
+      lines.push(
+        [
+          r.id,
+          r.impact,
+          r.wcagLevel ?? "",
+          r.occurrenceCount,
+          r.totalNodes,
+          r.helpUrl,
+          r.help,
+          "",
+          "",
+          "",
+          "",
+        ]
+          .map(escape)
+          .join(","),
+      );
       continue;
     }
     for (const s of r.samples) {
-      lines.push([
-        r.id, r.impact, r.wcagLevel ?? '', r.occurrenceCount, r.totalNodes,
-        r.helpUrl, r.help,
-        s.testName ?? '', s.areaName ?? '',
-        s.sampleNode?.target?.join(' ') ?? '',
-        s.sampleNode?.failureSummary ?? '',
-      ].map(escape).join(','));
+      lines.push(
+        [
+          r.id,
+          r.impact,
+          r.wcagLevel ?? "",
+          r.occurrenceCount,
+          r.totalNodes,
+          r.helpUrl,
+          r.help,
+          s.testName ?? "",
+          s.areaName ?? "",
+          s.sampleNode?.target?.join(" ") ?? "",
+          s.sampleNode?.failureSummary ?? "",
+        ]
+          .map(escape)
+          .join(","),
+      );
     }
   }
-  return lines.join('\n') + '\n';
+  return lines.join("\n") + "\n";
 }
 
 /**
@@ -2068,7 +2653,9 @@ export interface BuildChanges {
   passingDelta: number | null; // +/- compared to previous baseline build
 }
 
-export async function getLatestBuildChanges(repositoryId: string): Promise<BuildChanges | null> {
+export async function getLatestBuildChanges(
+  repositoryId: string,
+): Promise<BuildChanges | null> {
   await requireRepoAccess(repositoryId);
   const recentBuilds = await queries.getBuildsByRepo(repositoryId, 10);
   if (recentBuilds.length === 0) return null;
@@ -2078,21 +2665,32 @@ export async function getLatestBuildChanges(repositoryId: string): Promise<Build
   // Get visual diffs for the latest build, sorted by percentage difference
   const diffs = await queries.getVisualDiffsWithTestStatus(latestBuild.id);
   const topChanges = diffs
-    .filter(d => d.percentageDifference && parseFloat(d.percentageDifference) > 0)
-    .sort((a, b) => parseFloat(b.percentageDifference!) - parseFloat(a.percentageDifference!))
+    .filter(
+      (d) => d.percentageDifference && parseFloat(d.percentageDifference) > 0,
+    )
+    .sort(
+      (a, b) =>
+        parseFloat(b.percentageDifference!) -
+        parseFloat(a.percentageDifference!),
+    )
     .slice(0, 5)
-    .map(d => ({
-      testName: d.testName || 'Unknown test',
+    .map((d) => ({
+      testName: d.testName || "Unknown test",
       percentageDifference: parseFloat(d.percentageDifference!),
     }));
 
   // Find passing delta: compare latest build's passedCount to the previous baseline build
   let passingDelta: number | null = null;
   const baselineBuild = recentBuilds.find(
-    (b, i) => i > 0 && b.overallStatus === 'safe_to_merge'
+    (b, i) => i > 0 && b.overallStatus === "safe_to_merge",
   );
-  if (baselineBuild && latestBuild.passedCount != null && baselineBuild.passedCount != null) {
-    passingDelta = (latestBuild.passedCount ?? 0) - (baselineBuild.passedCount ?? 0);
+  if (
+    baselineBuild &&
+    latestBuild.passedCount != null &&
+    baselineBuild.passedCount != null
+  ) {
+    passingDelta =
+      (latestBuild.passedCount ?? 0) - (baselineBuild.passedCount ?? 0);
   }
 
   return { topChanges, passingDelta };
@@ -2115,15 +2713,22 @@ async function sendBuildNotifications(data: {
   const build = await queries.getBuild(data.buildId);
   if (!build) return;
 
-  const testRun = build.testRunId ? await queries.getTestRun(build.testRunId) : null;
-  const notificationSettings = await queries.getNotificationSettings(data.repositoryId);
+  const testRun = build.testRunId
+    ? await queries.getTestRun(build.testRunId)
+    : null;
+  const notificationSettings = await queries.getNotificationSettings(
+    data.repositoryId,
+  );
 
   // Get base URL for links (default to localhost for now)
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
   const buildUrl = `${baseUrl}/builds/${data.buildId}`;
 
   // Send Slack notification
-  if (notificationSettings.slackEnabled && notificationSettings.slackWebhookUrl) {
+  if (
+    notificationSettings.slackEnabled &&
+    notificationSettings.slackWebhookUrl
+  ) {
     try {
       await sendSlackNotification(notificationSettings.slackWebhookUrl, {
         buildId: data.buildId,
@@ -2134,51 +2739,62 @@ async function sendBuildNotifications(data: {
         flakyCount: data.flakyCount,
         failedCount: data.failedCount,
         gitBranch: data.gitBranch,
-        gitCommit: testRun?.gitCommit || 'unknown',
+        gitCommit: testRun?.gitCommit || "unknown",
         buildUrl,
       });
     } catch (error) {
-      console.error('Failed to send Slack notification:', error);
+      console.error("Failed to send Slack notification:", error);
     }
   }
 
   // Send Discord notification
-  if (notificationSettings.discordEnabled && notificationSettings.discordWebhookUrl) {
+  if (
+    notificationSettings.discordEnabled &&
+    notificationSettings.discordWebhookUrl
+  ) {
     try {
-      const result = await sendDiscordNotification(notificationSettings.discordWebhookUrl, {
-        buildId: data.buildId,
-        status: data.status,
-        totalTests: data.totalTests,
-        passedCount: data.passedCount,
-        changesDetected: data.changesDetected,
-        flakyCount: data.flakyCount,
-        failedCount: data.failedCount,
-        gitBranch: data.gitBranch,
-        gitCommit: testRun?.gitCommit || 'unknown',
-        buildUrl,
-      });
-      console.log('[Notifications] Discord result:', result);
+      const result = await sendDiscordNotification(
+        notificationSettings.discordWebhookUrl,
+        {
+          buildId: data.buildId,
+          status: data.status,
+          totalTests: data.totalTests,
+          passedCount: data.passedCount,
+          changesDetected: data.changesDetected,
+          flakyCount: data.flakyCount,
+          failedCount: data.failedCount,
+          gitBranch: data.gitBranch,
+          gitCommit: testRun?.gitCommit || "unknown",
+          buildUrl,
+        },
+      );
+      console.log("[Notifications] Discord result:", result);
     } catch (error) {
-      console.error('Failed to send Discord notification:', error);
+      console.error("Failed to send Discord notification:", error);
     }
   }
 
   // Send custom webhook notification
-  if (notificationSettings.customWebhookEnabled && notificationSettings.customWebhookUrl) {
+  if (
+    notificationSettings.customWebhookEnabled &&
+    notificationSettings.customWebhookUrl
+  ) {
     try {
       let headers: Record<string, string> | undefined;
       if (notificationSettings.customWebhookHeaders) {
         try {
           headers = JSON.parse(notificationSettings.customWebhookHeaders);
         } catch {
-          console.error('Failed to parse custom webhook headers');
+          console.error("Failed to parse custom webhook headers");
         }
       }
 
       const result = await sendCustomWebhookNotification(
         {
           url: notificationSettings.customWebhookUrl,
-          method: (notificationSettings.customWebhookMethod as 'POST' | 'PUT') || 'POST',
+          method:
+            (notificationSettings.customWebhookMethod as "POST" | "PUT") ||
+            "POST",
           headers,
         },
         {
@@ -2190,37 +2806,47 @@ async function sendBuildNotifications(data: {
           flakyCount: data.flakyCount,
           failedCount: data.failedCount,
           gitBranch: data.gitBranch,
-          gitCommit: testRun?.gitCommit || 'unknown',
+          gitCommit: testRun?.gitCommit || "unknown",
           buildUrl,
-        }
+        },
       );
-      console.log('[Notifications] Custom webhook result:', result);
+      console.log("[Notifications] Custom webhook result:", result);
     } catch (error) {
-      console.error('Failed to send custom webhook notification:', error);
+      console.error("Failed to send custom webhook notification:", error);
     }
   }
 
   // Post GitHub PR comment
   if (notificationSettings.githubPrCommentsEnabled) {
     try {
-      const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
-      const account = repo?.teamId ? await queries.getGithubAccountByTeam(repo.teamId) : null;
+      const repo = data.repositoryId
+        ? await queries.getRepository(data.repositoryId)
+        : null;
+      const account = repo?.teamId
+        ? await queries.getGithubAccountByTeam(repo.teamId)
+        : null;
 
-      if (account && repo && repo.provider === 'github') {
+      if (account && repo && repo.provider === "github") {
         // Find open PRs for this branch
         const prs = await getOpenPRsForBranch(
           account.accessToken,
           repo.owner,
           repo.name,
-          data.gitBranch
+          data.gitBranch,
         );
 
         // Compute branch-specific counts for enhanced PR comment
-        const buildDiffs = await queries.getVisualDiffsWithTestStatus(data.buildId);
-        const mainDriftCount = buildDiffs.filter(d =>
-          d.mainPercentageDifference && parseFloat(d.mainPercentageDifference) > 0
+        const buildDiffs = await queries.getVisualDiffsWithTestStatus(
+          data.buildId,
+        );
+        const mainDriftCount = buildDiffs.filter(
+          (d) =>
+            d.mainPercentageDifference &&
+            parseFloat(d.mainPercentageDifference) > 0,
         ).length;
-        const branchAcceptedCount = buildDiffs.filter(d => d.status === 'approved').length;
+        const branchAcceptedCount = buildDiffs.filter(
+          (d) => d.status === "approved",
+        ).length;
 
         for (const pr of prs) {
           await postPRComment(
@@ -2240,23 +2866,32 @@ async function sendBuildNotifications(data: {
               comparisonMode: build.comparisonMode,
               mainDriftCount,
               branchAcceptedCount,
-            }
+            },
           );
         }
       }
     } catch (error) {
-      console.error('Failed to post GitHub PR comment:', error);
+      console.error("Failed to post GitHub PR comment:", error);
     }
   }
 
   // Post GitLab MR comment
   if (notificationSettings.gitlabMrCommentsEnabled) {
     try {
-      const repo = data.repositoryId ? await queries.getRepository(data.repositoryId) : null;
-      const account = repo?.teamId ? await queries.getGitlabAccountByTeam(repo.teamId) : null;
+      const repo = data.repositoryId
+        ? await queries.getRepository(data.repositoryId)
+        : null;
+      const account = repo?.teamId
+        ? await queries.getGitlabAccountByTeam(repo.teamId)
+        : null;
 
-      if (account && repo && repo.provider === 'gitlab' && repo.gitlabProjectId) {
-        const instanceUrl = account.instanceUrl || 'https://gitlab.com';
+      if (
+        account &&
+        repo &&
+        repo.provider === "gitlab" &&
+        repo.gitlabProjectId
+      ) {
+        const instanceUrl = account.instanceUrl || "https://gitlab.com";
         // Find open MRs for this branch
         const mrs = await getOpenMRsForBranch(
           account.accessToken,
@@ -2285,7 +2920,7 @@ async function sendBuildNotifications(data: {
         }
       }
     } catch (error) {
-      console.error('Failed to post GitLab MR comment:', error);
+      console.error("Failed to post GitLab MR comment:", error);
     }
   }
 }
@@ -2301,9 +2936,13 @@ export async function saveComposeConfig(
   versionOverrides: Record<string, string>,
 ) {
   await requireRepoAccess(repositoryId);
-  await queries.upsertComposeConfig(repositoryId, branch, { selectedTestIds, excludedTestIds, versionOverrides });
-  revalidatePath('/compose');
-  revalidatePath('/run');
+  await queries.upsertComposeConfig(repositoryId, branch, {
+    selectedTestIds,
+    excludedTestIds,
+    versionOverrides,
+  });
+  revalidatePath("/compose");
+  revalidatePath("/run");
 }
 
 /**
@@ -2320,15 +2959,17 @@ export async function getTestsWithVersions(repositoryId: string) {
         ...test,
         versions: versions.slice(0, 10), // Last 10 versions
       };
-    })
+    }),
   );
 
   // Group by functional area
   const areas = await queries.getFunctionalAreas();
-  const areaMap = new Map(areas.map(a => [a.id, a.name]));
+  const areaMap = new Map(areas.map((a) => [a.id, a.name]));
 
-  return testsWithVersions.map(t => ({
+  return testsWithVersions.map((t) => ({
     ...t,
-    functionalAreaName: t.functionalAreaId ? areaMap.get(t.functionalAreaId) ?? null : null,
+    functionalAreaName: t.functionalAreaId
+      ? (areaMap.get(t.functionalAreaId) ?? null)
+      : null,
   }));
 }

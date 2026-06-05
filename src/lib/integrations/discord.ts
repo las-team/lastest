@@ -1,4 +1,4 @@
-import type { BuildStatus, BugReportSeverity } from '@/lib/db/schema';
+import type { BuildStatus, BugReportSeverity } from "@/lib/db/schema";
 
 export interface DiscordBuildNotification {
   buildId: string;
@@ -18,7 +18,7 @@ export interface DiscordBuildNotification {
  */
 export async function sendDiscordNotification(
   webhookUrl: string,
-  notification: DiscordBuildNotification
+  notification: DiscordBuildNotification,
 ): Promise<{ success: boolean; error?: string }> {
   const color = getStatusColor(notification.status);
   const statusText = getStatusText(notification.status);
@@ -30,32 +30,32 @@ export async function sendDiscordNotification(
     color,
     fields: [
       {
-        name: 'Branch',
+        name: "Branch",
         value: `\`${notification.gitBranch}\``,
         inline: true,
       },
       {
-        name: 'Commit',
+        name: "Commit",
         value: `\`${notification.gitCommit}\``,
         inline: true,
       },
       {
-        name: 'Total Tests',
+        name: "Total Tests",
         value: `${notification.totalTests}`,
         inline: true,
       },
       {
-        name: 'Passed',
+        name: "Passed",
         value: `${notification.passedCount}`,
         inline: true,
       },
       {
-        name: 'Failed',
+        name: "Failed",
         value: `${notification.failedCount}`,
         inline: true,
       },
       {
-        name: 'Changes',
+        name: "Changes",
         value: `${notification.changesDetected}`,
         inline: true,
       },
@@ -65,8 +65,8 @@ export async function sendDiscordNotification(
 
   try {
     const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         content: `Visual Test Build ${statusText}: ${notification.passedCount}/${notification.totalTests} passed, ${notification.changesDetected} changes detected`,
         embeds: [embed],
@@ -75,14 +75,20 @@ export async function sendDiscordNotification(
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
+      return {
+        success: false,
+        error: `Discord webhook failed: ${response.status} ${text}`,
+      };
     }
 
     return { success: true };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error sending Discord notification',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error sending Discord notification",
     };
   }
 }
@@ -102,9 +108,12 @@ export interface DiscordBugReportNotification {
 
 function getBugSeverityColor(severity: BugReportSeverity): number {
   switch (severity) {
-    case 'high': return 0xef4444;
-    case 'medium': return 0xeab308;
-    case 'low': return 0x3b82f6;
+    case "high":
+      return 0xef4444;
+    case "medium":
+      return 0xeab308;
+    case "low":
+      return 0x3b82f6;
   }
 }
 
@@ -116,18 +125,26 @@ export async function sendDiscordBugReport(
     title: `🐛 Bug Report — ${notification.severity.toUpperCase()}`,
     color: getBugSeverityColor(notification.severity),
     fields: [
-      { name: 'Description', value: notification.description.slice(0, 1024) },
-      { name: 'Severity', value: notification.severity, inline: true },
-      { name: 'Reporter', value: notification.reporterEmail, inline: true },
-      { name: 'URL', value: notification.url, inline: false },
-      { name: 'Version', value: `${notification.appVersion ?? '?'} (${notification.gitHash ?? '?'})`, inline: true },
-      { name: 'Report ID', value: `\`${notification.reportId}\``, inline: true },
+      { name: "Description", value: notification.description.slice(0, 1024) },
+      { name: "Severity", value: notification.severity, inline: true },
+      { name: "Reporter", value: notification.reporterEmail, inline: true },
+      { name: "URL", value: notification.url, inline: false },
+      {
+        name: "Version",
+        value: `${notification.appVersion ?? "?"} (${notification.gitHash ?? "?"})`,
+        inline: true,
+      },
+      {
+        name: "Report ID",
+        value: `\`${notification.reportId}\``,
+        inline: true,
+      },
     ],
     timestamp: new Date().toISOString(),
   };
 
   if (notification.screenshotBuffer) {
-    embed.image = { url: 'attachment://screenshot.png' };
+    embed.image = { url: "attachment://screenshot.png" };
   }
 
   try {
@@ -141,19 +158,23 @@ export async function sendDiscordBugReport(
       const buf = Buffer.isBuffer(notification.screenshotBuffer)
         ? notification.screenshotBuffer
         : Buffer.from(notification.screenshotBuffer);
-      const file = new File([buf as unknown as BlobPart], 'screenshot.png', { type: 'image/png' });
+      const file = new File([buf as unknown as BlobPart], "screenshot.png", {
+        type: "image/png",
+      });
       const formData = new FormData();
-      formData.append('payload_json', payload);
-      formData.append('files[0]', file);
-      const url = webhookUrl.includes('?') ? `${webhookUrl}&wait=true` : `${webhookUrl}?wait=true`;
+      formData.append("payload_json", payload);
+      formData.append("files[0]", file);
+      const url = webhookUrl.includes("?")
+        ? `${webhookUrl}&wait=true`
+        : `${webhookUrl}?wait=true`;
       response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         body: formData,
       });
     } else {
       response = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           embeds: [embed],
           allowed_mentions: { parse: [] },
@@ -163,15 +184,25 @@ export async function sendDiscordBugReport(
 
     if (!response.ok) {
       const text = await response.text();
-      console.error('[BugReport] Discord webhook error:', response.status, text);
-      return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
+      console.error(
+        "[BugReport] Discord webhook error:",
+        response.status,
+        text,
+      );
+      return {
+        success: false,
+        error: `Discord webhook failed: ${response.status} ${text}`,
+      };
     }
     return { success: true };
   } catch (error) {
-    console.error('[BugReport] Discord send error:', error);
+    console.error("[BugReport] Discord send error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error sending Discord bug report',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error sending Discord bug report",
     };
   }
 }
@@ -193,19 +224,28 @@ export async function sendDiscordShareNotification(
   notification: DiscordShareNotification,
 ): Promise<{ success: boolean; error?: string }> {
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-    { name: 'Target', value: notification.targetDomain || '—', inline: true },
-    { name: 'Repo', value: notification.repoName, inline: true },
-    { name: 'Team', value: notification.teamName, inline: true },
+    { name: "Target", value: notification.targetDomain || "—", inline: true },
+    { name: "Repo", value: notification.repoName, inline: true },
+    { name: "Team", value: notification.teamName, inline: true },
   ];
   if (notification.scopedTestName) {
-    fields.push({ name: 'Scoped test', value: notification.scopedTestName, inline: true });
+    fields.push({
+      name: "Scoped test",
+      value: notification.scopedTestName,
+      inline: true,
+    });
   }
-  fields.push({ name: 'Slug', value: `\`${notification.slug}\``, inline: true });
+  fields.push({
+    name: "Slug",
+    value: `\`${notification.slug}\``,
+    inline: true,
+  });
 
   const embed = {
-    title: '🚀 Fresh share dropped in the wild',
+    title: "🚀 Fresh share dropped in the wild",
     url: notification.shareUrl,
-    description: 'Someone just pinned a baseline to the public internet. Click before they change their mind.',
+    description:
+      "Someone just pinned a baseline to the public internet. Click before they change their mind.",
     color: 0x8b5cf6,
     fields,
     timestamp: new Date().toISOString(),
@@ -213,8 +253,8 @@ export async function sendDiscordShareNotification(
 
   try {
     const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         embeds: [embed],
         allowed_mentions: { parse: [] },
@@ -223,24 +263,30 @@ export async function sendDiscordShareNotification(
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Discord webhook failed: ${response.status} ${text}` };
+      return {
+        success: false,
+        error: `Discord webhook failed: ${response.status} ${text}`,
+      };
     }
     return { success: true };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error sending Discord share notification',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error sending Discord share notification",
     };
   }
 }
 
 function getStatusColor(status: BuildStatus): number {
   switch (status) {
-    case 'safe_to_merge':
+    case "safe_to_merge":
       return 0x22c55e; // green-500
-    case 'review_required':
+    case "review_required":
       return 0xeab308; // yellow-500
-    case 'blocked':
+    case "blocked":
       return 0xef4444; // red-500
     default:
       return 0x6b7280; // gray-500
@@ -249,26 +295,26 @@ function getStatusColor(status: BuildStatus): number {
 
 function getStatusEmoji(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return '✅';
-    case 'review_required':
-      return '⚠️';
-    case 'blocked':
-      return '❌';
+    case "safe_to_merge":
+      return "✅";
+    case "review_required":
+      return "⚠️";
+    case "blocked":
+      return "❌";
     default:
-      return '📋';
+      return "📋";
   }
 }
 
 function getStatusText(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return 'Passed';
-    case 'review_required':
-      return 'Review Required';
-    case 'blocked':
-      return 'Blocked';
+    case "safe_to_merge":
+      return "Passed";
+    case "review_required":
+      return "Review Required";
+    case "blocked":
+      return "Blocked";
     default:
-      return 'Complete';
+      return "Complete";
   }
 }

@@ -14,25 +14,25 @@
  * regression suite, so demo users can run real tests and inspect
  * builds/diffs without needing GitHub/GitLab connectivity.
  */
-import * as queries from '@/lib/db/queries';
-import type { Team, Repository } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import type { Team, Repository } from "@/lib/db/schema";
 import {
   EXCALIDRAW_REPO_FULL_NAME,
   EXCALIDRAW_REPO_OWNER,
   EXCALIDRAW_REPO_NAME,
-} from '@/lib/demo/excalidraw-seed';
+} from "@/lib/demo/excalidraw-seed";
 
-export const DEMO_TEAM_SLUG = 'demo';
-export const DEMO_TEAM_NAME = 'Demo';
+export const DEMO_TEAM_SLUG = "demo";
+export const DEMO_TEAM_NAME = "Demo";
 export const DEMO_REPO_OWNER = EXCALIDRAW_REPO_OWNER;
 export const DEMO_REPO_NAME = EXCALIDRAW_REPO_NAME;
 export const DEMO_REPO_FULL_NAME = EXCALIDRAW_REPO_FULL_NAME;
-export const DEMO_EMAIL_DOMAIN = 'demo.lastest.local';
+export const DEMO_EMAIL_DOMAIN = "demo.lastest.local";
 
 // Legacy identity for demo repos created before the dexilion-team/excalidraw
 // switch. Migrated in place when the demo bootstrap runs.
-const LEGACY_DEMO_REPO_NAME = 'sample';
-const LEGACY_DEMO_REPO_OWNER = 'lastest';
+const LEGACY_DEMO_REPO_NAME = "sample";
+const LEGACY_DEMO_REPO_OWNER = "lastest";
 
 export function isDemoEmail(email: string): boolean {
   return email.toLowerCase().endsWith(`@${DEMO_EMAIL_DOMAIN}`);
@@ -41,15 +41,18 @@ export function isDemoEmail(email: string): boolean {
 export async function getOrCreateDemoTeam(): Promise<Team> {
   const existing = await queries.getTeamBySlug(DEMO_TEAM_SLUG);
   if (existing) {
-    if (existing.plan !== 'demo') {
-      await queries.updateTeam(existing.id, { plan: 'demo' });
-      return { ...existing, plan: 'demo' };
+    if (existing.plan !== "demo") {
+      await queries.updateTeam(existing.id, { plan: "demo" });
+      return { ...existing, plan: "demo" };
     }
     return existing;
   }
-  const team = await queries.createTeam({ name: DEMO_TEAM_NAME, slug: DEMO_TEAM_SLUG });
-  await queries.updateTeam(team.id, { plan: 'demo' });
-  return { ...team, plan: 'demo' };
+  const team = await queries.createTeam({
+    name: DEMO_TEAM_NAME,
+    slug: DEMO_TEAM_SLUG,
+  });
+  await queries.updateTeam(team.id, { plan: "demo" });
+  return { ...team, plan: "demo" };
 }
 
 export async function getOrCreateDemoRepo(teamId: string): Promise<Repository> {
@@ -57,7 +60,7 @@ export async function getOrCreateDemoRepo(teamId: string): Promise<Repository> {
 
   // Prefer an existing repo at the current dexilion-team/excalidraw identity.
   const current = repos.find(
-    (r) => r.provider === 'local' && r.fullName === DEMO_REPO_FULL_NAME,
+    (r) => r.provider === "local" && r.fullName === DEMO_REPO_FULL_NAME,
   );
   if (current) return current as Repository;
 
@@ -65,7 +68,7 @@ export async function getOrCreateDemoRepo(teamId: string): Promise<Repository> {
   // builds, or baselines the demo team already accumulated.
   const legacy = repos.find(
     (r) =>
-      r.provider === 'local' &&
+      r.provider === "local" &&
       r.owner === LEGACY_DEMO_REPO_OWNER &&
       r.name === LEGACY_DEMO_REPO_NAME,
   );
@@ -80,11 +83,11 @@ export async function getOrCreateDemoRepo(teamId: string): Promise<Repository> {
 
   const created = await queries.createRepository({
     teamId,
-    provider: 'local',
+    provider: "local",
     owner: DEMO_REPO_OWNER,
     name: DEMO_REPO_NAME,
     fullName: DEMO_REPO_FULL_NAME,
-    defaultBranch: 'main',
+    defaultBranch: "main",
   });
   return (await queries.getRepository(created.id)) as Repository;
 }
@@ -100,7 +103,7 @@ export async function ensureDemoEnvironment(): Promise<{
   }
   // Lazy import — the seed module is ~300KB of inline Playwright code that we
   // only want to pull in on first demo signup, not on every cold start.
-  const { seedExcalidrawTests } = await import('@/lib/demo/excalidraw-seed');
+  const { seedExcalidrawTests } = await import("@/lib/demo/excalidraw-seed");
   await seedExcalidrawTests(repo.id);
   return { team, repo };
 }

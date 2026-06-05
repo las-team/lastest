@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   closestCenter,
@@ -10,26 +10,34 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { Plus, Search, ChevronRight, FlaskConical, FileCode, Settings, Cookie } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { SetupStepItem } from './setup-step-item';
-import { SetupScriptEditor } from './setup-script-editor';
+} from "@dnd-kit/sortable";
+import {
+  Plus,
+  Search,
+  ChevronRight,
+  FlaskConical,
+  FileCode,
+  Settings,
+  Cookie,
+} from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { SetupStepItem } from "./setup-step-item";
+import { SetupScriptEditor } from "./setup-script-editor";
 import {
   addDefaultSetupStep,
   removeDefaultSetupStep,
   reorderDefaultSetupSteps,
   type SetupStep,
-} from '@/server/actions/setup-steps';
-import type { Test, SetupScript, StorageState } from '@/lib/db/schema';
+} from "@/server/actions/setup-steps";
+import type { Test, SetupScript, StorageState } from "@/lib/db/schema";
 
 interface SetupStepBuilderProps {
   repositoryId: string;
@@ -37,7 +45,11 @@ interface SetupStepBuilderProps {
   availableTests: Test[];
   availableScripts: SetupScript[];
   availableStorageStates?: StorageState[];
-  onAddStep?: (repoId: string, stepType: 'test' | 'script' | 'storage_state', itemId: string) => Promise<unknown>;
+  onAddStep?: (
+    repoId: string,
+    stepType: "test" | "script" | "storage_state",
+    itemId: string,
+  ) => Promise<unknown>;
   onRemoveStep?: (stepId: string) => Promise<unknown>;
   onReorderSteps?: (repoId: string, stepIds: string[]) => Promise<unknown>;
   title?: string;
@@ -53,15 +65,15 @@ export function SetupStepBuilder({
   onAddStep,
   onRemoveStep,
   onReorderSteps,
-  title = 'Default Setup Steps',
-  description = 'Configure the default setup sequence for all tests in this repository.',
+  title = "Default Setup Steps",
+  description = "Configure the default setup sequence for all tests in this repository.",
 }: SetupStepBuilderProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [orderedSteps, setOrderedSteps] = useState(setupSteps);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(['tests', 'scripts', 'auth-states'])
+    new Set(["tests", "scripts", "auth-states"]),
   );
 
   // Script editor state
@@ -80,40 +92,44 @@ export function SetupStepBuilder({
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
   // Filter available items - memoize selected IDs inside the useMemo
   const filteredTests = useMemo(() => {
     const selectedTestIds = new Set(
-      orderedSteps.filter((s) => s.stepType === 'test').map((s) => s.testId)
+      orderedSteps.filter((s) => s.stepType === "test").map((s) => s.testId),
     );
     return availableTests.filter(
       (t) =>
         !selectedTestIds.has(t.id) &&
-        t.name.toLowerCase().includes(searchQuery.toLowerCase())
+        t.name.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [availableTests, orderedSteps, searchQuery]);
 
   const filteredScripts = useMemo(() => {
     const selectedScriptIds = new Set(
-      orderedSteps.filter((s) => s.stepType === 'script').map((s) => s.scriptId)
+      orderedSteps
+        .filter((s) => s.stepType === "script")
+        .map((s) => s.scriptId),
     );
     return availableScripts.filter(
       (s) =>
         !selectedScriptIds.has(s.id) &&
-        s.name.toLowerCase().includes(searchQuery.toLowerCase())
+        s.name.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [availableScripts, orderedSteps, searchQuery]);
 
   const filteredStorageStates = useMemo(() => {
     const selectedStorageStateIds = new Set(
-      orderedSteps.filter((s) => s.stepType === 'storage_state').map((s) => s.storageStateId)
+      orderedSteps
+        .filter((s) => s.stepType === "storage_state")
+        .map((s) => s.storageStateId),
     );
     return availableStorageStates.filter(
       (ss) =>
         !selectedStorageStateIds.has(ss.id) &&
-        ss.name.toLowerCase().includes(searchQuery.toLowerCase())
+        ss.name.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [availableStorageStates, orderedSteps, searchQuery]);
 
@@ -137,21 +153,24 @@ export function SetupStepBuilder({
     setOrderedSteps(newOrder);
 
     // Persist reorder
-    await reorderStepsAction(repositoryId, newOrder.map((s) => s.id));
+    await reorderStepsAction(
+      repositoryId,
+      newOrder.map((s) => s.id),
+    );
   };
 
   const handleAddTest = async (testId: string) => {
-    await addStepAction(repositoryId, 'test', testId);
+    await addStepAction(repositoryId, "test", testId);
     router.refresh();
   };
 
   const handleAddScript = async (scriptId: string) => {
-    await addStepAction(repositoryId, 'script', scriptId);
+    await addStepAction(repositoryId, "script", scriptId);
     router.refresh();
   };
 
   const handleAddStorageState = async (storageStateId: string) => {
-    await addStepAction(repositoryId, 'storage_state', storageStateId);
+    await addStepAction(repositoryId, "storage_state", storageStateId);
     router.refresh();
   };
 
@@ -206,9 +225,7 @@ export function SetupStepBuilder({
             <Settings className="h-5 w-5 text-muted-foreground" />
             <div>
               <h3 className="font-medium">{title}</h3>
-              <p className="text-sm text-muted-foreground">
-                {description}
-              </p>
+              <p className="text-sm text-muted-foreground">{description}</p>
             </div>
           </div>
         </div>
@@ -233,11 +250,11 @@ export function SetupStepBuilder({
               <div className="border rounded-lg">
                 <button
                   className="w-full flex items-center gap-2 p-3 text-left hover:bg-muted/50 transition-colors"
-                  onClick={() => toggleSection('tests')}
+                  onClick={() => toggleSection("tests")}
                 >
                   <ChevronRight
                     className={`w-4 h-4 transition-transform ${
-                      expandedSections.has('tests') ? 'rotate-90' : ''
+                      expandedSections.has("tests") ? "rotate-90" : ""
                     }`}
                   />
                   <FlaskConical className="w-4 h-4 text-blue-500" />
@@ -246,7 +263,7 @@ export function SetupStepBuilder({
                     {filteredTests.length}
                   </Badge>
                 </button>
-                {expandedSections.has('tests') && filteredTests.length > 0 && (
+                {expandedSections.has("tests") && filteredTests.length > 0 && (
                   <div className="border-t divide-y max-h-56 overflow-auto">
                     {filteredTests.map((test) => (
                       <div
@@ -254,7 +271,9 @@ export function SetupStepBuilder({
                         className="flex items-center gap-3 p-3 hover:bg-muted/30"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{test.name}</p>
+                          <p className="text-sm font-medium truncate">
+                            {test.name}
+                          </p>
                           {test.targetUrl && (
                             <p className="text-xs text-muted-foreground truncate">
                               {test.targetUrl}
@@ -272,24 +291,25 @@ export function SetupStepBuilder({
                     ))}
                   </div>
                 )}
-                {expandedSections.has('tests') && filteredTests.length === 0 && (
-                  <div className="border-t p-3">
-                    <p className="text-sm text-muted-foreground text-center">
-                      {searchQuery ? 'No tests match' : 'All tests added'}
-                    </p>
-                  </div>
-                )}
+                {expandedSections.has("tests") &&
+                  filteredTests.length === 0 && (
+                    <div className="border-t p-3">
+                      <p className="text-sm text-muted-foreground text-center">
+                        {searchQuery ? "No tests match" : "All tests added"}
+                      </p>
+                    </div>
+                  )}
               </div>
 
               {/* Scripts Section */}
               <div className="border rounded-lg">
                 <button
                   className="w-full flex items-center gap-2 p-3 text-left hover:bg-muted/50 transition-colors"
-                  onClick={() => toggleSection('scripts')}
+                  onClick={() => toggleSection("scripts")}
                 >
                   <ChevronRight
                     className={`w-4 h-4 transition-transform ${
-                      expandedSections.has('scripts') ? 'rotate-90' : ''
+                      expandedSections.has("scripts") ? "rotate-90" : ""
                     }`}
                   />
                   <FileCode className="w-4 h-4 text-green-500" />
@@ -298,7 +318,7 @@ export function SetupStepBuilder({
                     {filteredScripts.length}
                   </Badge>
                 </button>
-                {expandedSections.has('scripts') && (
+                {expandedSections.has("scripts") && (
                   <div className="border-t">
                     {/* New Script Button */}
                     <button
@@ -316,7 +336,9 @@ export function SetupStepBuilder({
                             className="flex items-center gap-3 p-3 hover:bg-muted/30"
                           >
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{script.name}</p>
+                              <p className="text-sm font-medium truncate">
+                                {script.name}
+                              </p>
                               {script.description && (
                                 <p className="text-xs text-muted-foreground truncate">
                                   {script.description}
@@ -337,7 +359,9 @@ export function SetupStepBuilder({
                     {filteredScripts.length === 0 && (
                       <div className="p-3 border-t">
                         <p className="text-sm text-muted-foreground text-center">
-                          {searchQuery ? 'No scripts match' : 'All scripts added'}
+                          {searchQuery
+                            ? "No scripts match"
+                            : "All scripts added"}
                         </p>
                       </div>
                     )}
@@ -350,11 +374,11 @@ export function SetupStepBuilder({
                 <div className="border rounded-lg">
                   <button
                     className="w-full flex items-center gap-2 p-3 text-left hover:bg-muted/50 transition-colors"
-                    onClick={() => toggleSection('auth-states')}
+                    onClick={() => toggleSection("auth-states")}
                   >
                     <ChevronRight
                       className={`w-4 h-4 transition-transform ${
-                        expandedSections.has('auth-states') ? 'rotate-90' : ''
+                        expandedSections.has("auth-states") ? "rotate-90" : ""
                       }`}
                     />
                     <Cookie className="w-4 h-4 text-amber-500" />
@@ -363,37 +387,44 @@ export function SetupStepBuilder({
                       {filteredStorageStates.length}
                     </Badge>
                   </button>
-                  {expandedSections.has('auth-states') && filteredStorageStates.length > 0 && (
-                    <div className="border-t divide-y max-h-56 overflow-auto">
-                      {filteredStorageStates.map((ss) => (
-                        <div
-                          key={ss.id}
-                          className="flex items-center gap-3 p-3 hover:bg-muted/30"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{ss.name}</p>
-                            <p className="text-xs text-muted-foreground truncate">
-                              {ss.cookieCount} cookies, {ss.originCount} origins
-                            </p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleAddStorageState(ss.id)}
+                  {expandedSections.has("auth-states") &&
+                    filteredStorageStates.length > 0 && (
+                      <div className="border-t divide-y max-h-56 overflow-auto">
+                        {filteredStorageStates.map((ss) => (
+                          <div
+                            key={ss.id}
+                            className="flex items-center gap-3 p-3 hover:bg-muted/30"
                           >
-                            <Plus className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {expandedSections.has('auth-states') && filteredStorageStates.length === 0 && (
-                    <div className="border-t p-3">
-                      <p className="text-sm text-muted-foreground text-center">
-                        {searchQuery ? 'No auth states match' : 'All auth states added'}
-                      </p>
-                    </div>
-                  )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {ss.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {ss.cookieCount} cookies, {ss.originCount}{" "}
+                                origins
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleAddStorageState(ss.id)}
+                            >
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  {expandedSections.has("auth-states") &&
+                    filteredStorageStates.length === 0 && (
+                      <div className="border-t p-3">
+                        <p className="text-sm text-muted-foreground text-center">
+                          {searchQuery
+                            ? "No auth states match"
+                            : "All auth states added"}
+                        </p>
+                      </div>
+                    )}
                 </div>
               )}
             </div>
@@ -428,11 +459,16 @@ export function SetupStepBuilder({
                           key={step.id}
                           id={step.id}
                           stepType={step.stepType}
-                          name={step.testName || step.scriptName || step.storageStateName || 'Unknown'}
+                          name={
+                            step.testName ||
+                            step.scriptName ||
+                            step.storageStateName ||
+                            "Unknown"
+                          }
                           index={index}
                           onRemove={() => handleRemoveStep(step.id)}
                           onEdit={
-                            step.stepType === 'script' && step.scriptId
+                            step.stepType === "script" && step.scriptId
                               ? () => handleEditScript(step.scriptId!)
                               : undefined
                           }

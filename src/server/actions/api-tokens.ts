@@ -1,9 +1,9 @@
-'use server';
+"use server";
 
-import crypto from 'crypto';
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireAuth } from '@/lib/auth';
+import crypto from "crypto";
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireAuth } from "@/lib/auth";
 
 /**
  * API tokens are long-lived `sessions` rows with kind='api'.
@@ -14,7 +14,7 @@ import { requireAuth } from '@/lib/auth';
  */
 
 function generateApiToken(): string {
-  return `lastest_api_${crypto.randomBytes(32).toString('hex')}`;
+  return `lastest_api_${crypto.randomBytes(32).toString("hex")}`;
 }
 
 export async function listApiTokens() {
@@ -22,10 +22,12 @@ export async function listApiTokens() {
   return queries.listApiTokensByUser(session.user.id);
 }
 
-export async function createApiToken(label: string): Promise<{ id: string; token: string } | { error: string }> {
+export async function createApiToken(
+  label: string,
+): Promise<{ id: string; token: string } | { error: string }> {
   const session = await requireAuth();
   const trimmed = label.trim();
-  if (!trimmed) return { error: 'Label is required' };
+  if (!trimmed) return { error: "Label is required" };
 
   const token = generateApiToken();
   // 10-year expiry — effectively non-expiring; users revoke explicitly.
@@ -38,13 +40,15 @@ export async function createApiToken(label: string): Promise<{ id: string; token
     expiresAt,
   });
 
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { id, token };
 }
 
-export async function revokeApiToken(id: string): Promise<{ success: true } | { error: string }> {
+export async function revokeApiToken(
+  id: string,
+): Promise<{ success: true } | { error: string }> {
   const session = await requireAuth();
   await queries.deleteApiToken(id, session.user.id);
-  revalidatePath('/settings');
+  revalidatePath("/settings");
   return { success: true };
 }

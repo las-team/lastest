@@ -6,7 +6,7 @@
 import type {
   VariableInspectionPayload,
   VariableMapDiffEntry,
-} from '../db/schema';
+} from "../db/schema";
 
 export interface VariableDiffOptions {
   ignoreKeys?: string[];
@@ -26,11 +26,11 @@ export function diffStringMap(
     if (ignoreKeys.has(key)) continue;
     const b = baseline?.[key] ?? null;
     const c = current?.[key] ?? null;
-    let kind: VariableMapDiffEntry['kind'];
-    if (b === null && c !== null) kind = 'added';
-    else if (b !== null && c === null) kind = 'removed';
-    else if (b !== c) kind = 'changed';
-    else kind = 'unchanged';
+    let kind: VariableMapDiffEntry["kind"];
+    if (b === null && c !== null) kind = "added";
+    else if (b !== null && c === null) kind = "removed";
+    else if (b !== c) kind = "changed";
+    else kind = "unchanged";
     out.push({ key, baseline: b, current: c, kind });
   }
   // Stable sort: changed first, then added, removed, unchanged; alpha within.
@@ -47,7 +47,8 @@ function diffStringArrays(
   current: string[] | null | undefined,
 ): { added: string[]; removed: string[]; common: number } {
   const baseCounts = new Map<string, number>();
-  for (const s of baseline ?? []) baseCounts.set(s, (baseCounts.get(s) ?? 0) + 1);
+  for (const s of baseline ?? [])
+    baseCounts.set(s, (baseCounts.get(s) ?? 0) + 1);
   const added: string[] = [];
   let common = 0;
   for (const s of current ?? []) {
@@ -91,7 +92,8 @@ function diffLogs(
       baseKeys.set(k, c - 1);
     } else {
       addedCount++;
-      if (addedSamples.length < 20) addedSamples.push(`[${l.level}] ${l.message}`);
+      if (addedSamples.length < 20)
+        addedSamples.push(`[${l.level}] ${l.message}`);
     }
   }
   let removedCount = 0;
@@ -115,12 +117,25 @@ export interface VariableDiffInput {
   options?: VariableDiffOptions;
 }
 
-export function diffVariables(input: VariableDiffInput): VariableInspectionPayload {
+export function diffVariables(
+  input: VariableDiffInput,
+): VariableInspectionPayload {
   const ignore = new Set(input.options?.ignoreKeys ?? []);
   return {
-    extracted: diffStringMap(input.baseline.extracted, input.current.extracted, ignore),
-    assigned: diffStringMap(input.baseline.assigned, input.current.assigned, ignore),
-    consoleErrors: diffStringArrays(input.baseline.consoleErrors, input.current.consoleErrors),
+    extracted: diffStringMap(
+      input.baseline.extracted,
+      input.current.extracted,
+      ignore,
+    ),
+    assigned: diffStringMap(
+      input.baseline.assigned,
+      input.current.assigned,
+      ignore,
+    ),
+    consoleErrors: diffStringArrays(
+      input.baseline.consoleErrors,
+      input.current.consoleErrors,
+    ),
     logs: diffLogs(input.baseline.logs, input.current.logs),
   };
 }

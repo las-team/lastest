@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 
 export interface ZoomState {
   scale: number;
@@ -17,7 +17,12 @@ interface ZoomableImageProps {
   onZoomChange?: (zoomState: ZoomState) => void;
 }
 
-export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableImageProps) {
+export function ZoomableImage({
+  src,
+  alt,
+  className,
+  onZoomChange,
+}: ZoomableImageProps) {
   const [zoomState, setZoomState] = useState<ZoomState>({
     scale: 1,
     offsetX: 0,
@@ -33,7 +38,7 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
       setZoomState(newState);
       onZoomChange?.(newState);
     },
-    [onZoomChange]
+    [onZoomChange],
   );
 
   const handleZoomIn = useCallback(() => {
@@ -66,9 +71,12 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       setIsDragging(true);
-      setDragStart({ x: e.clientX - zoomState.offsetX, y: e.clientY - zoomState.offsetY });
+      setDragStart({
+        x: e.clientX - zoomState.offsetX,
+        y: e.clientY - zoomState.offsetY,
+      });
     },
-    [zoomState.offsetX, zoomState.offsetY]
+    [zoomState.offsetX, zoomState.offsetY],
   );
 
   const handleMouseMove = useCallback(
@@ -84,7 +92,7 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
         offsetY: newOffsetY,
       });
     },
-    [isDragging, dragStart, zoomState, updateZoomState]
+    [isDragging, dragStart, zoomState, updateZoomState],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -100,25 +108,25 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
 
       updateZoomState({ ...zoomState, scale: newScale });
     },
-    [zoomState, updateZoomState]
+    [zoomState, updateZoomState],
   );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '+' || e.key === '=') {
+      if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         handleZoomIn();
-      } else if (e.key === '-') {
+      } else if (e.key === "-") {
         e.preventDefault();
         handleZoomOut();
-      } else if (e.key === 'f' || e.key === 'F') {
+      } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         handleFitToScreen();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleZoomIn, handleZoomOut, handleFitToScreen]);
 
   return (
@@ -157,7 +165,7 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        style={{ cursor: isDragging ? "grabbing" : "grab" }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -167,9 +175,9 @@ export function ZoomableImage({ src, alt, className, onZoomChange }: ZoomableIma
           className="transition-transform duration-150"
           style={{
             transform: `scale(${zoomState.scale}) translate(${zoomState.offsetX}px, ${zoomState.offsetY}px)`,
-            transformOrigin: 'top left',
-            userSelect: 'none',
-            pointerEvents: 'none',
+            transformOrigin: "top left",
+            userSelect: "none",
+            pointerEvents: "none",
           }}
           draggable={false}
         />

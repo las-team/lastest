@@ -1,4 +1,4 @@
-import type { BuildStatus } from '@/lib/db/schema';
+import type { BuildStatus } from "@/lib/db/schema";
 
 export interface MRCommentData {
   buildId: string;
@@ -22,7 +22,7 @@ export async function postMRComment(
   data: MRCommentData,
   instanceUrl: string,
 ): Promise<{ success: boolean; noteId?: number; error?: string }> {
-  const baseUrl = instanceUrl.replace(/\/+$/, '');
+  const baseUrl = instanceUrl.replace(/\/+$/, "");
   const statusEmoji = getStatusEmoji(data.status);
   const statusText = getStatusText(data.status);
 
@@ -38,24 +38,32 @@ export async function postMRComment(
 *Posted by Lastest Visual Regression*`;
 
   try {
-    const existingNoteId = await findExistingNote(accessToken, projectId, mrIid, baseUrl);
+    const existingNoteId = await findExistingNote(
+      accessToken,
+      projectId,
+      mrIid,
+      baseUrl,
+    );
 
     if (existingNoteId) {
       const response = await fetch(
         `${baseUrl}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes/${existingNoteId}`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
             Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({ body }),
-        }
+        },
       );
 
       if (!response.ok) {
         const text = await response.text();
-        return { success: false, error: `Failed to update MR note: ${response.status} ${text}` };
+        return {
+          success: false,
+          error: `Failed to update MR note: ${response.status} ${text}`,
+        };
       }
 
       return { success: true, noteId: existingNoteId };
@@ -64,18 +72,21 @@ export async function postMRComment(
     const response = await fetch(
       `${baseUrl}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ body }),
-      }
+      },
     );
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, error: `Failed to post MR note: ${response.status} ${text}` };
+      return {
+        success: false,
+        error: `Failed to post MR note: ${response.status} ${text}`,
+      };
     }
 
     const result = await response.json();
@@ -83,7 +94,10 @@ export async function postMRComment(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error posting MR note',
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown error posting MR note",
     };
   }
 }
@@ -101,14 +115,14 @@ async function findExistingNote(
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
 
     const notes = await response.json();
     const ourNote = notes.find((note: { body: string; id: number }) =>
-      note.body.includes('*Posted by Lastest Visual Regression*')
+      note.body.includes("*Posted by Lastest Visual Regression*"),
     );
 
     return ourNote?.id || null;
@@ -119,26 +133,26 @@ async function findExistingNote(
 
 function getStatusEmoji(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return '✅';
-    case 'review_required':
-      return '⚠️';
-    case 'blocked':
-      return '❌';
+    case "safe_to_merge":
+      return "✅";
+    case "review_required":
+      return "⚠️";
+    case "blocked":
+      return "❌";
     default:
-      return '📋';
+      return "📋";
   }
 }
 
 function getStatusText(status: BuildStatus): string {
   switch (status) {
-    case 'safe_to_merge':
-      return 'Passed';
-    case 'review_required':
-      return 'Review Required';
-    case 'blocked':
-      return 'Blocked';
+    case "safe_to_merge":
+      return "Passed";
+    case "review_required":
+      return "Review Required";
+    case "blocked":
+      return "Blocked";
     default:
-      return 'Complete';
+      return "Complete";
   }
 }

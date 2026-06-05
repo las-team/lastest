@@ -24,7 +24,11 @@ export interface DomSnapshotResult {
   timestamp: number;
 }
 
-export type SelectorPriorityConfig = Array<{ type: string; enabled: boolean; priority: number }>;
+export type SelectorPriorityConfig = Array<{
+  type: string;
+  enabled: boolean;
+  priority: number;
+}>;
 
 /**
  * Evaluate in page context: returns all selectors for the element at (x, y).
@@ -56,29 +60,29 @@ export async function inspectElementAtPoint(
       ];
 
       function isProbablyDynamicId(id: string): boolean {
-        if (id.includes('undefined')) return true;
+        if (id.includes("undefined")) return true;
         return DYNAMIC_ID_PATTERNS.some((p) => p.test(id));
       }
 
       function getImplicitRole(element: HTMLElement): string | null {
         const tagRoles: Record<string, string> = {
-          BUTTON: 'button',
-          A: 'link',
+          BUTTON: "button",
+          A: "link",
           INPUT:
-            element.getAttribute('type') === 'checkbox'
-              ? 'checkbox'
-              : element.getAttribute('type') === 'radio'
-                ? 'radio'
-                : element.getAttribute('type') === 'submit'
-                  ? 'button'
-                  : 'textbox',
-          SELECT: 'combobox',
-          TEXTAREA: 'textbox',
-          IMG: 'img',
-          NAV: 'navigation',
-          MAIN: 'main',
-          HEADER: 'banner',
-          FOOTER: 'contentinfo',
+            element.getAttribute("type") === "checkbox"
+              ? "checkbox"
+              : element.getAttribute("type") === "radio"
+                ? "radio"
+                : element.getAttribute("type") === "submit"
+                  ? "button"
+                  : "textbox",
+          SELECT: "combobox",
+          TEXTAREA: "textbox",
+          IMG: "img",
+          NAV: "navigation",
+          MAIN: "main",
+          HEADER: "banner",
+          FOOTER: "contentinfo",
         };
         return tagRoles[element.tagName] || null;
       }
@@ -88,121 +92,161 @@ export async function inspectElementAtPoint(
         let current: HTMLElement | null = element;
         while (current && current !== document.body) {
           let selector = current.tagName.toLowerCase();
-          const classAttr = current.getAttribute('class');
+          const classAttr = current.getAttribute("class");
           if (classAttr) {
             const classes = classAttr
-              .split(' ')
-              .filter((c) => c && !c.includes(':') && !c.startsWith('_'))
+              .split(" ")
+              .filter((c) => c && !c.includes(":") && !c.startsWith("_"))
               .slice(0, 2)
-              .map((c) => c.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
+              .map((c) => c.replace(/([[\]()#.>+~=|^$*!@])/g, "\\$1"));
             if (classes.length > 0) {
-              selector += '.' + classes.join('.');
+              selector += "." + classes.join(".");
             }
           }
           path.unshift(selector);
           current = current.parentElement;
         }
-        return path.slice(-3).join(' > ');
+        return path.slice(-3).join(" > ");
       }
 
       const INTERACTIVE_ROLES = new Set([
-        'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
-        'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
-        'combobox', 'listitem',
+        "button",
+        "option",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "tab",
+        "treeitem",
+        "link",
+        "switch",
+        "radio",
+        "checkbox",
+        "combobox",
+        "listitem",
       ]);
 
-      function generateAllSelectors(element: HTMLElement): Array<{ type: string; value: string }> {
+      function generateAllSelectors(
+        element: HTMLElement,
+      ): Array<{ type: string; value: string }> {
         const allSelectors: Map<string, string> = new Map();
 
         if (element.dataset.testid) {
-          allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
+          allSelectors.set(
+            "data-testid",
+            `[data-testid="${element.dataset.testid}"]`,
+          );
         }
         if (element.id && !isProbablyDynamicId(element.id)) {
-          allSelectors.set('id', `#${element.id}`);
+          allSelectors.set("id", `#${element.id}`);
         }
 
-        const labelText = (
-          (element.id ? (document.querySelector(`label[for="${CSS.escape(element.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
-          (element.closest('label') as HTMLElement)?.textContent?.trim() ||
-          (element.getAttribute('aria-labelledby')
-            ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
-            : null)
-        )?.slice(0, 50) || null;
+        const labelText =
+          (
+            (element.id
+              ? (
+                  document.querySelector(
+                    `label[for="${CSS.escape(element.id)}"]`,
+                  ) as HTMLElement
+                )?.textContent?.trim()
+              : null) ||
+            (element.closest("label") as HTMLElement)?.textContent?.trim() ||
+            (element.getAttribute("aria-labelledby")
+              ? document
+                  .getElementById(element.getAttribute("aria-labelledby")!)
+                  ?.textContent?.trim()
+              : null)
+          )?.slice(0, 50) || null;
         if (labelText) {
-          allSelectors.set('label', `label="${labelText}"`);
+          allSelectors.set("label", `label="${labelText}"`);
         }
 
-        const role = element.getAttribute('role') || getImplicitRole(element);
+        const role = element.getAttribute("role") || getImplicitRole(element);
         const accessibleName =
-          element.getAttribute('aria-label') ||
-          element.getAttribute('title') ||
+          element.getAttribute("aria-label") ||
+          element.getAttribute("title") ||
           labelText ||
           element.textContent?.trim().slice(0, 30);
         if (role && accessibleName) {
-          allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
+          allSelectors.set(
+            "role-name",
+            `role=${role}[name="${accessibleName}"]`,
+          );
         }
 
         // Heading context
-        if (!element.textContent?.trim() || element.querySelector('svg')) {
+        if (!element.textContent?.trim() || element.querySelector("svg")) {
           const interactiveTag = element.closest('button, a, [role="button"]');
           const target = interactiveTag || element;
           const heading =
-            target.closest('h1, h2, h3, h4, h5, h6') ||
-            target.parentElement?.closest('h1, h2, h3, h4, h5, h6');
+            target.closest("h1, h2, h3, h4, h5, h6") ||
+            target.parentElement?.closest("h1, h2, h3, h4, h5, h6");
           if (heading) {
             const headingClone = heading.cloneNode(true) as HTMLElement;
-            headingClone.querySelectorAll('button, svg, [role="button"]').forEach((el) => el.remove());
+            headingClone
+              .querySelectorAll('button, svg, [role="button"]')
+              .forEach((el) => el.remove());
             const headingText = headingClone.textContent?.trim().slice(0, 50);
             if (headingText && headingText.length > 1) {
               const hTag = heading.tagName.toLowerCase();
               const targetTag = (target as HTMLElement).tagName.toLowerCase();
-              allSelectors.set('heading-context', `${hTag}:has-text("${headingText}") ${targetTag}`);
+              allSelectors.set(
+                "heading-context",
+                `${hTag}:has-text("${headingText}") ${targetTag}`,
+              );
             }
           }
         }
 
-        const ariaLabel = element.getAttribute('aria-label');
+        const ariaLabel = element.getAttribute("aria-label");
         if (ariaLabel) {
-          allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
+          allSelectors.set("aria-label", `[aria-label="${ariaLabel}"]`);
         }
 
-        const elRole = element.getAttribute('role');
+        const elRole = element.getAttribute("role");
         if (
-          element.tagName === 'BUTTON' || element.tagName === 'A' ||
-          element.tagName === 'LI' || element.tagName === 'LABEL' ||
+          element.tagName === "BUTTON" ||
+          element.tagName === "A" ||
+          element.tagName === "LI" ||
+          element.tagName === "LABEL" ||
           (elRole && INTERACTIVE_ROLES.has(elRole))
         ) {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
-            allSelectors.set('text', `text="${text}"`);
+            allSelectors.set("text", `text="${text}"`);
           }
         }
 
-        if (!allSelectors.has('text') && element.children.length === 0) {
+        if (!allSelectors.has("text") && element.children.length === 0) {
           const leafText = element.textContent?.trim().slice(0, 30);
           if (leafText && leafText.length > 0) {
-            allSelectors.set('text', `text="${leafText}"`);
+            allSelectors.set("text", `text="${leafText}"`);
           }
         }
 
-        const placeholder = element.getAttribute('placeholder');
+        const placeholder = element.getAttribute("placeholder");
         if (placeholder) {
-          allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
+          allSelectors.set("placeholder", `[placeholder="${placeholder}"]`);
         }
 
-        const name = element.getAttribute('name');
+        const name = element.getAttribute("name");
         if (name && !isProbablyDynamicId(name)) {
-          allSelectors.set('name', `[name="${name}"]`);
+          allSelectors.set("name", `[name="${name}"]`);
         }
 
         const cssPath = generateCssPath(element);
         if (cssPath) {
-          allSelectors.set('css-path', cssPath);
+          allSelectors.set("css-path", cssPath);
         }
 
         // Filter + sort by priority config
-        const enabledConfigs = (priority as Array<{ type: string; enabled: boolean; priority: number }>)
-          .filter((config) => config.enabled && config.type !== 'ocr-text')
+        const enabledConfigs = (
+          priority as Array<{
+            type: string;
+            enabled: boolean;
+            priority: number;
+          }>
+        )
+          .filter((config) => config.enabled && config.type !== "ocr-text")
           .sort((a, b) => a.priority - b.priority);
 
         const selectors: Array<{ type: string; value: string }> = [];
@@ -228,7 +272,8 @@ export async function inspectElementAtPoint(
       // CDP Overlay handles hover highlighting natively.
 
       const el = document.elementFromPoint(px, py) as HTMLElement | null;
-      if (!el || el === document.body || el === document.documentElement) return null;
+      if (!el || el === document.body || el === document.documentElement)
+        return null;
 
       const selectors = generateAllSelectors(el);
       const rect = el.getBoundingClientRect();
@@ -237,7 +282,12 @@ export async function inspectElementAtPoint(
         tag: el.tagName.toLowerCase(),
         id: el.id || undefined,
         textContent: el.textContent?.trim().slice(0, 100) || undefined,
-        boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        boundingBox: {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        },
         selectors,
       };
     },
@@ -272,29 +322,29 @@ export async function getAllDomSelectors(
       ];
 
       function isProbablyDynamicId(id: string): boolean {
-        if (id.includes('undefined')) return true;
+        if (id.includes("undefined")) return true;
         return DYNAMIC_ID_PATTERNS.some((p) => p.test(id));
       }
 
       function getImplicitRole(element: HTMLElement): string | null {
         const tagRoles: Record<string, string> = {
-          BUTTON: 'button',
-          A: 'link',
+          BUTTON: "button",
+          A: "link",
           INPUT:
-            element.getAttribute('type') === 'checkbox'
-              ? 'checkbox'
-              : element.getAttribute('type') === 'radio'
-                ? 'radio'
-                : element.getAttribute('type') === 'submit'
-                  ? 'button'
-                  : 'textbox',
-          SELECT: 'combobox',
-          TEXTAREA: 'textbox',
-          IMG: 'img',
-          NAV: 'navigation',
-          MAIN: 'main',
-          HEADER: 'banner',
-          FOOTER: 'contentinfo',
+            element.getAttribute("type") === "checkbox"
+              ? "checkbox"
+              : element.getAttribute("type") === "radio"
+                ? "radio"
+                : element.getAttribute("type") === "submit"
+                  ? "button"
+                  : "textbox",
+          SELECT: "combobox",
+          TEXTAREA: "textbox",
+          IMG: "img",
+          NAV: "navigation",
+          MAIN: "main",
+          HEADER: "banner",
+          FOOTER: "contentinfo",
         };
         return tagRoles[element.tagName] || null;
       }
@@ -304,119 +354,159 @@ export async function getAllDomSelectors(
         let current: HTMLElement | null = element;
         while (current && current !== document.body) {
           let selector = current.tagName.toLowerCase();
-          const classAttr = current.getAttribute('class');
+          const classAttr = current.getAttribute("class");
           if (classAttr) {
             const classes = classAttr
-              .split(' ')
-              .filter((c) => c && !c.includes(':') && !c.startsWith('_'))
+              .split(" ")
+              .filter((c) => c && !c.includes(":") && !c.startsWith("_"))
               .slice(0, 2)
-              .map((c) => c.replace(/([[\]()#.>+~=|^$*!@])/g, '\\$1'));
+              .map((c) => c.replace(/([[\]()#.>+~=|^$*!@])/g, "\\$1"));
             if (classes.length > 0) {
-              selector += '.' + classes.join('.');
+              selector += "." + classes.join(".");
             }
           }
           path.unshift(selector);
           current = current.parentElement;
         }
-        return path.slice(-3).join(' > ');
+        return path.slice(-3).join(" > ");
       }
 
       const INTERACTIVE_ROLES = new Set([
-        'button', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
-        'tab', 'treeitem', 'link', 'switch', 'radio', 'checkbox',
-        'combobox', 'listitem',
+        "button",
+        "option",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "tab",
+        "treeitem",
+        "link",
+        "switch",
+        "radio",
+        "checkbox",
+        "combobox",
+        "listitem",
       ]);
 
-      function generateAllSelectors(element: HTMLElement): Array<{ type: string; value: string }> {
+      function generateAllSelectors(
+        element: HTMLElement,
+      ): Array<{ type: string; value: string }> {
         const allSelectors: Map<string, string> = new Map();
 
         if (element.dataset.testid) {
-          allSelectors.set('data-testid', `[data-testid="${element.dataset.testid}"]`);
+          allSelectors.set(
+            "data-testid",
+            `[data-testid="${element.dataset.testid}"]`,
+          );
         }
         if (element.id && !isProbablyDynamicId(element.id)) {
-          allSelectors.set('id', `#${element.id}`);
+          allSelectors.set("id", `#${element.id}`);
         }
 
-        const labelText = (
-          (element.id ? (document.querySelector(`label[for="${CSS.escape(element.id)}"]`) as HTMLElement)?.textContent?.trim() : null) ||
-          (element.closest('label') as HTMLElement)?.textContent?.trim() ||
-          (element.getAttribute('aria-labelledby')
-            ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent?.trim()
-            : null)
-        )?.slice(0, 50) || null;
+        const labelText =
+          (
+            (element.id
+              ? (
+                  document.querySelector(
+                    `label[for="${CSS.escape(element.id)}"]`,
+                  ) as HTMLElement
+                )?.textContent?.trim()
+              : null) ||
+            (element.closest("label") as HTMLElement)?.textContent?.trim() ||
+            (element.getAttribute("aria-labelledby")
+              ? document
+                  .getElementById(element.getAttribute("aria-labelledby")!)
+                  ?.textContent?.trim()
+              : null)
+          )?.slice(0, 50) || null;
         if (labelText) {
-          allSelectors.set('label', `label="${labelText}"`);
+          allSelectors.set("label", `label="${labelText}"`);
         }
 
-        const role = element.getAttribute('role') || getImplicitRole(element);
+        const role = element.getAttribute("role") || getImplicitRole(element);
         const accessibleName =
-          element.getAttribute('aria-label') ||
-          element.getAttribute('title') ||
+          element.getAttribute("aria-label") ||
+          element.getAttribute("title") ||
           labelText ||
           element.textContent?.trim().slice(0, 30);
         if (role && accessibleName) {
-          allSelectors.set('role-name', `role=${role}[name="${accessibleName}"]`);
+          allSelectors.set(
+            "role-name",
+            `role=${role}[name="${accessibleName}"]`,
+          );
         }
 
-        if (!element.textContent?.trim() || element.querySelector('svg')) {
+        if (!element.textContent?.trim() || element.querySelector("svg")) {
           const interactiveTag = element.closest('button, a, [role="button"]');
           const target = interactiveTag || element;
           const heading =
-            target.closest('h1, h2, h3, h4, h5, h6') ||
-            target.parentElement?.closest('h1, h2, h3, h4, h5, h6');
+            target.closest("h1, h2, h3, h4, h5, h6") ||
+            target.parentElement?.closest("h1, h2, h3, h4, h5, h6");
           if (heading) {
             const headingClone = heading.cloneNode(true) as HTMLElement;
-            headingClone.querySelectorAll('button, svg, [role="button"]').forEach((el) => el.remove());
+            headingClone
+              .querySelectorAll('button, svg, [role="button"]')
+              .forEach((el) => el.remove());
             const headingText = headingClone.textContent?.trim().slice(0, 50);
             if (headingText && headingText.length > 1) {
               const hTag = heading.tagName.toLowerCase();
               const targetTag = (target as HTMLElement).tagName.toLowerCase();
-              allSelectors.set('heading-context', `${hTag}:has-text("${headingText}") ${targetTag}`);
+              allSelectors.set(
+                "heading-context",
+                `${hTag}:has-text("${headingText}") ${targetTag}`,
+              );
             }
           }
         }
 
-        const ariaLabel = element.getAttribute('aria-label');
+        const ariaLabel = element.getAttribute("aria-label");
         if (ariaLabel) {
-          allSelectors.set('aria-label', `[aria-label="${ariaLabel}"]`);
+          allSelectors.set("aria-label", `[aria-label="${ariaLabel}"]`);
         }
 
-        const elRole = element.getAttribute('role');
+        const elRole = element.getAttribute("role");
         if (
-          element.tagName === 'BUTTON' || element.tagName === 'A' ||
-          element.tagName === 'LI' || element.tagName === 'LABEL' ||
+          element.tagName === "BUTTON" ||
+          element.tagName === "A" ||
+          element.tagName === "LI" ||
+          element.tagName === "LABEL" ||
           (elRole && INTERACTIVE_ROLES.has(elRole))
         ) {
           const text = element.textContent?.trim().slice(0, 30);
           if (text) {
-            allSelectors.set('text', `text="${text}"`);
+            allSelectors.set("text", `text="${text}"`);
           }
         }
 
-        if (!allSelectors.has('text') && element.children.length === 0) {
+        if (!allSelectors.has("text") && element.children.length === 0) {
           const leafText = element.textContent?.trim().slice(0, 30);
           if (leafText && leafText.length > 0) {
-            allSelectors.set('text', `text="${leafText}"`);
+            allSelectors.set("text", `text="${leafText}"`);
           }
         }
 
-        const placeholder = element.getAttribute('placeholder');
+        const placeholder = element.getAttribute("placeholder");
         if (placeholder) {
-          allSelectors.set('placeholder', `[placeholder="${placeholder}"]`);
+          allSelectors.set("placeholder", `[placeholder="${placeholder}"]`);
         }
 
-        const name = element.getAttribute('name');
+        const name = element.getAttribute("name");
         if (name && !isProbablyDynamicId(name)) {
-          allSelectors.set('name', `[name="${name}"]`);
+          allSelectors.set("name", `[name="${name}"]`);
         }
 
         const cssPath = generateCssPath(element);
         if (cssPath) {
-          allSelectors.set('css-path', cssPath);
+          allSelectors.set("css-path", cssPath);
         }
 
-        const enabledConfigs = (priority as Array<{ type: string; enabled: boolean; priority: number }>)
-          .filter((config) => config.enabled && config.type !== 'ocr-text')
+        const enabledConfigs = (
+          priority as Array<{
+            type: string;
+            enabled: boolean;
+            priority: number;
+          }>
+        )
+          .filter((config) => config.enabled && config.type !== "ocr-text")
           .sort((a, b) => a.priority - b.priority);
 
         const selectors: Array<{ type: string; value: string }> = [];
@@ -438,7 +528,8 @@ export async function getAllDomSelectors(
 
       // --- walk all interactive elements ---
 
-      const SELECTOR = 'a, button, input, select, textarea, [role], [data-testid], [tabindex], [aria-label], label, li, [onclick]';
+      const SELECTOR =
+        "a, button, input, select, textarea, [role], [data-testid], [tabindex], [aria-label], label, li, [onclick]";
       const nodeList = document.querySelectorAll(SELECTOR);
       const seen = new Set<HTMLElement>();
       const results: Array<{
@@ -469,7 +560,12 @@ export async function getAllDomSelectors(
           tag: el.tagName.toLowerCase(),
           id: el.id || undefined,
           textContent: el.textContent?.trim().slice(0, 100) || undefined,
-          boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          boundingBox: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
           selectors,
         });
         count++;
@@ -482,7 +578,7 @@ export async function getAllDomSelectors(
 
   return {
     elements: elements || [],
-    url: typeof page.url === 'function' ? page.url() : '',
+    url: typeof page.url === "function" ? page.url() : "",
     timestamp: Date.now(),
   };
 }

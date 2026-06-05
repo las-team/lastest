@@ -43,9 +43,13 @@ export function parseAiJson<T>(
   }
   if (!isValid(parsed)) {
     if (opts.source) {
-      console.warn(`[ai-json] ${opts.source}: shape validation failed; got keys ${
-        parsed && typeof parsed === 'object' ? Object.keys(parsed as object).join(',') : typeof parsed
-      }`);
+      console.warn(
+        `[ai-json] ${opts.source}: shape validation failed; got keys ${
+          parsed && typeof parsed === "object"
+            ? Object.keys(parsed as object).join(",")
+            : typeof parsed
+        }`,
+      );
     }
     return null;
   }

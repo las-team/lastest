@@ -17,13 +17,13 @@ Generate an API key in the Lastest UI: **Settings → Runners & API Access → C
 
 ## Compatible clients
 
-| Client | Status | Install method |
-|--------|--------|----------------|
-| Claude Code | Verified | `claude mcp add` (see below) |
+| Client         | Status   | Install method               |
+| -------------- | -------- | ---------------------------- |
+| Claude Code    | Verified | `claude mcp add` (see below) |
 | Claude Desktop | Verified | `claude_desktop_config.json` |
-| Cursor | Verified | `~/.cursor/mcp.json` |
-| Windsurf | Verified | MCP config (generic JSON) |
-| Cline | Verified | MCP config (generic JSON) |
+| Cursor         | Verified | `~/.cursor/mcp.json`         |
+| Windsurf       | Verified | MCP config (generic JSON)    |
+| Cline          | Verified | MCP config (generic JSON)    |
 
 Any MCP-compliant client that can launch a stdio server with arguments works.
 
@@ -80,20 +80,20 @@ Restart the client.
 
 The server registers 50 MCP tools (all prefixed `lastest_`). Every tool returns a structured `{ status, summary, actionRequired?, details }` payload.
 
-| Category | Tools |
-|----------|-------|
-| Health & jobs | `lastest_health_check`, `lastest_list_active_jobs`, `lastest_get_job_status` |
-| Repositories | `lastest_list_repos`, `lastest_get_repo`, `lastest_create_repo`, `lastest_update_repo` |
-| Playwright settings (repo-level) | `lastest_get_playwright_settings`, `lastest_update_playwright_settings` |
-| Functional areas | `lastest_list_areas`, `lastest_create_area`, `lastest_update_area`, `lastest_delete_area`, `lastest_list_tests_by_area` |
-| Tests | `lastest_list_tests`, `lastest_list_failing_tests`, `lastest_get_test`, `lastest_create_test`, `lastest_update_test`, `lastest_delete_test`, `lastest_heal_test` |
-| Setup scripts | `lastest_list_setup_scripts`, `lastest_get_setup_script`, `lastest_create_setup_script`, `lastest_update_setup_script`, `lastest_delete_setup_script` |
-| Storage states | `lastest_list_storage_states`, `lastest_create_storage_state`, `lastest_delete_storage_state` |
-| Runs & builds | `lastest_run_tests`, `lastest_get_test_run`, `lastest_list_builds`, `lastest_get_build_status`, `lastest_review_build` |
-| Diffs & baselines | `lastest_get_diff`, `lastest_get_visual_diff`, `lastest_approve_diff`, `lastest_reject_diff`, `lastest_approve_all_diffs`, `lastest_approve_baseline`, `lastest_reject_baseline` |
-| Verify phase | `lastest_get_change_map`, `lastest_verify_build`, `lastest_approve_layer` |
-| Sharing | `lastest_publish_share`, `lastest_list_build_shares`, `lastest_list_test_shares`, `lastest_revoke_share` |
-| Coverage & QA | `lastest_get_coverage`, `lastest_qa_summary` |
+| Category                         | Tools                                                                                                                                                                            |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Health & jobs                    | `lastest_health_check`, `lastest_list_active_jobs`, `lastest_get_job_status`                                                                                                     |
+| Repositories                     | `lastest_list_repos`, `lastest_get_repo`, `lastest_create_repo`, `lastest_update_repo`                                                                                           |
+| Playwright settings (repo-level) | `lastest_get_playwright_settings`, `lastest_update_playwright_settings`                                                                                                          |
+| Functional areas                 | `lastest_list_areas`, `lastest_create_area`, `lastest_update_area`, `lastest_delete_area`, `lastest_list_tests_by_area`                                                          |
+| Tests                            | `lastest_list_tests`, `lastest_list_failing_tests`, `lastest_get_test`, `lastest_create_test`, `lastest_update_test`, `lastest_delete_test`, `lastest_heal_test`                 |
+| Setup scripts                    | `lastest_list_setup_scripts`, `lastest_get_setup_script`, `lastest_create_setup_script`, `lastest_update_setup_script`, `lastest_delete_setup_script`                            |
+| Storage states                   | `lastest_list_storage_states`, `lastest_create_storage_state`, `lastest_delete_storage_state`                                                                                    |
+| Runs & builds                    | `lastest_run_tests`, `lastest_get_test_run`, `lastest_list_builds`, `lastest_get_build_status`, `lastest_review_build`                                                           |
+| Diffs & baselines                | `lastest_get_diff`, `lastest_get_visual_diff`, `lastest_approve_diff`, `lastest_reject_diff`, `lastest_approve_all_diffs`, `lastest_approve_baseline`, `lastest_reject_baseline` |
+| Verify phase                     | `lastest_get_change_map`, `lastest_verify_build`, `lastest_approve_layer`                                                                                                        |
+| Sharing                          | `lastest_publish_share`, `lastest_list_build_shares`, `lastest_list_test_shares`, `lastest_revoke_share`                                                                         |
+| Coverage & QA                    | `lastest_get_coverage`, `lastest_qa_summary`                                                                                                                                     |
 
 ### Self-configuring tests
 
@@ -121,12 +121,12 @@ The server authenticates against Lastest's REST API (`/api/v1/*`) with a `Bearer
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| `Failed to connect to Lastest at …` | Check the URL is reachable from this machine and that the API key is valid. |
-| `Lastest API error 401` | Token revoked or expired — generate a new one in Settings. |
-| Tools don't appear in Claude Code | Run `claude mcp list`; if missing re-run `claude mcp add`. Restart the client. |
-| Tools don't appear in Cursor / Windsurf / Cline | Confirm the JSON config is valid and the client was fully restarted. |
+| Symptom                                         | Fix                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| `Failed to connect to Lastest at …`             | Check the URL is reachable from this machine and that the API key is valid.    |
+| `Lastest API error 401`                         | Token revoked or expired — generate a new one in Settings.                     |
+| Tools don't appear in Claude Code               | Run `claude mcp list`; if missing re-run `claude mcp add`. Restart the client. |
+| Tools don't appear in Cursor / Windsurf / Cline | Confirm the JSON config is valid and the client was fully restarted.           |
 
 ## Local development
 

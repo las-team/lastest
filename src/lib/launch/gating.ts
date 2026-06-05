@@ -5,8 +5,8 @@
  * {@link GateError} (rather than throwing) so the route maps it to a response.
  */
 
-import * as queries from '@/lib/db/queries';
-import { DEFAULT_LAUNCH } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { DEFAULT_LAUNCH } from "@/lib/db/schema";
 
 export interface GateError {
   status: number; // HTTP status
@@ -21,17 +21,17 @@ export async function assertCanVote(
   emailVerified: boolean,
   ip: string | null,
 ): Promise<GateError | null> {
-  if (!emailVerified) return { status: 403, code: 'email_unverified' };
+  if (!emailVerified) return { status: 403, code: "email_unverified" };
 
   const since = new Date(Date.now() - ONE_HOUR_MS);
   const byAccount = await queries.countVotesByUserSince(userId, since);
   if (byAccount >= DEFAULT_LAUNCH.votesPerAccountPerHour) {
-    return { status: 429, code: 'velocity_exceeded', retryAfterSec: 3600 };
+    return { status: 429, code: "velocity_exceeded", retryAfterSec: 3600 };
   }
   if (ip) {
     const byIp = await queries.countVotesByIpSince(ip, since);
     if (byIp >= DEFAULT_LAUNCH.votesPerIpPerHour) {
-      return { status: 429, code: 'velocity_exceeded', retryAfterSec: 3600 };
+      return { status: 429, code: "velocity_exceeded", retryAfterSec: 3600 };
     }
   }
   return null;
@@ -41,12 +41,12 @@ export async function assertCanSubmit(
   userId: string,
   emailVerified: boolean,
 ): Promise<GateError | null> {
-  if (!emailVerified) return { status: 403, code: 'email_unverified' };
+  if (!emailVerified) return { status: 403, code: "email_unverified" };
 
   const since = new Date(Date.now() - ONE_HOUR_MS);
   const recent = await queries.countSubmissionsByUserSince(userId, since);
   if (recent >= DEFAULT_LAUNCH.submissionsPerAccountPerHour) {
-    return { status: 429, code: 'velocity_exceeded', retryAfterSec: 3600 };
+    return { status: 429, code: "velocity_exceeded", retryAfterSec: 3600 };
   }
   return null;
 }

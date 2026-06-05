@@ -10,50 +10,50 @@
 
 export type MessageType =
   // Server → Agent (Commands)
-  | 'command:run_test'
-  | 'command:run_setup'
-  | 'command:cancel_test'
-  | 'command:start_recording'
-  | 'command:stop_recording'
-  | 'command:create_assertion'
-  | 'command:create_wait'
-  | 'command:flag_download'
-  | 'command:insert_timestamp'
-  | 'command:promote_selector'
-  | 'command:start_debug'
-  | 'command:debug_action'
-  | 'command:stop_debug'
-  | 'command:ping'
-  | 'command:shutdown'
+  | "command:run_test"
+  | "command:run_setup"
+  | "command:cancel_test"
+  | "command:start_recording"
+  | "command:stop_recording"
+  | "command:create_assertion"
+  | "command:create_wait"
+  | "command:flag_download"
+  | "command:insert_timestamp"
+  | "command:promote_selector"
+  | "command:start_debug"
+  | "command:debug_action"
+  | "command:stop_debug"
+  | "command:ping"
+  | "command:shutdown"
   // Agent → Server (Responses)
-  | 'response:test_result'
-  | 'response:test_progress'
-  | 'response:step_event'
-  | 'response:setup_result'
-  | 'response:recording_event'
-  | 'response:recording_stopped'
-  | 'response:debug_state'
-  | 'command:capture_screenshot'
-  | 'response:screenshot'
-  | 'response:screenshot_text'
-  | 'response:screenshot_ack'
-  | 'response:network_bodies'
-  | 'response:error'
-  | 'response:pong'
-  | 'response:command_ack'
+  | "response:test_result"
+  | "response:test_progress"
+  | "response:step_event"
+  | "response:setup_result"
+  | "response:recording_event"
+  | "response:recording_stopped"
+  | "response:debug_state"
+  | "command:capture_screenshot"
+  | "response:screenshot"
+  | "response:screenshot_text"
+  | "response:screenshot_ack"
+  | "response:network_bodies"
+  | "response:error"
+  | "response:pong"
+  | "response:command_ack"
   // Status
-  | 'status:heartbeat'
-  | 'connection:established'
+  | "status:heartbeat"
+  | "connection:established"
   // Embedded Browser Streaming
-  | 'stream:frame'
-  | 'stream:input'
-  | 'stream:session'
-  | 'stream:status'
-  | 'stream:inspect_element_request'
-  | 'stream:inspect_element_response'
-  | 'stream:dom_snapshot_request'
-  | 'stream:dom_snapshot_response'
-  | 'stream:inspect_mode';
+  | "stream:frame"
+  | "stream:input"
+  | "stream:session"
+  | "stream:status"
+  | "stream:inspect_element_request"
+  | "stream:inspect_element_response"
+  | "stream:dom_snapshot_request"
+  | "stream:dom_snapshot_response"
+  | "stream:inspect_mode";
 
 export interface BaseMessage {
   id: string;
@@ -72,7 +72,11 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type { CoreStabilizationSettings, SelectorOutcome, SelectorStatRow } from '@lastest/shared';
+import type {
+  CoreStabilizationSettings,
+  SelectorOutcome,
+  SelectorStatRow,
+} from "@lastest/shared";
 
 export type StabilizationPayload = CoreStabilizationSettings;
 export type { SelectorOutcome, SelectorStatRow };
@@ -95,7 +99,7 @@ export interface RunTestCommandPayload {
   setupVariables?: Record<string, unknown>; // Variables from setup scripts
   cursorPlaybackSpeed?: number; // 0 = instant (skip delays), 1 = realtime
   stabilization?: StabilizationPayload;
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: "chromium" | "firefox" | "webkit";
   fixtures?: Array<{ filename: string; data: string }>; // base64-encoded fixture files
   grantClipboardAccess?: boolean;
   acceptDownloads?: boolean;
@@ -103,8 +107,8 @@ export interface RunTestCommandPayload {
   forceVideoRecording?: boolean;
   recordingViewport?: { width: number; height: number };
   lockViewportToRecording?: boolean;
-  consoleErrorMode?: 'fail' | 'warn' | 'ignore';
-  networkErrorMode?: 'fail' | 'warn' | 'ignore';
+  consoleErrorMode?: "fail" | "warn" | "ignore";
+  networkErrorMode?: "fail" | "warn" | "ignore";
   ignoreExternalNetworkErrors?: boolean;
   enableNetworkInterception?: boolean;
   /** Hostname substrings whose console errors the EB drops BEFORE applying
@@ -126,15 +130,22 @@ export interface RunTestCommandPayload {
    *  the live DOM after the test body and returns `designSystemViolations`
    *  + `designSystemRulesChecked` on the test result. */
   designSystem?: {
-    tokens: Partial<Record<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing', Array<{ name: string; value: string }>>>;
-    ignoredCategories?: Array<'color' | 'border-radius' | 'font-family' | 'font-size' | 'spacing'>;
+    tokens: Partial<
+      Record<
+        "color" | "border-radius" | "font-family" | "font-size" | "spacing",
+        Array<{ name: string; value: string }>
+      >
+    >;
+    ignoredCategories?: Array<
+      "color" | "border-radius" | "font-family" | "font-size" | "spacing"
+    >;
     maxViolationsPerScreenshot?: number;
   };
   // Extract-mode TestVariables — runner reads these page fields after the test body runs.
   extractVariables?: Array<{
     name: string;
     targetSelector: string;
-    attribute?: 'value' | 'textContent' | 'innerText' | 'innerHTML';
+    attribute?: "value" | "textContent" | "innerText" | "innerHTML";
   }>;
   // When true, the runner re-throws TypeError / ReferenceError / SyntaxError
   // from the soft-wrap so a broken test body fails the run instead of being
@@ -150,7 +161,15 @@ export interface RunTestCommandPayload {
     label: string;
     lineStart: number;
     lineEnd: number;
-    type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+    type:
+      | "action"
+      | "navigation"
+      | "assertion"
+      | "screenshot"
+      | "wait"
+      | "variable"
+      | "log"
+      | "other";
   }>;
   /** Parsed assertions from `parseAssertions(code)`. Runner uses these to
    *  wrap each `expect(...)` line with a structured pass/fail recorder
@@ -180,7 +199,7 @@ export interface RunTestCommandPayload {
 }
 
 export interface RunTestCommand extends BaseMessage {
-  type: 'command:run_test';
+  type: "command:run_test";
   payload: RunTestCommandPayload;
 }
 
@@ -195,7 +214,7 @@ export interface RunSetupCommandPayload {
     height: number;
   };
   stabilization?: StabilizationPayload;
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: "chromium" | "firefox" | "webkit";
   // Debug-mode flag: when true, the EB keeps the CDP screencast attached to
   // the setup page so the user can watch setup execute live (login flow,
   // OAuth redirects). Default false preserves the CPU-saving behavior of
@@ -207,13 +226,13 @@ export interface RunSetupCommandPayload {
 }
 
 export interface RunSetupCommand extends BaseMessage {
-  type: 'command:run_setup';
+  type: "command:run_setup";
   payload: RunSetupCommandPayload;
 }
 
 export interface SetupResultPayload {
   correlationId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout';
+  status: "passed" | "failed" | "error" | "timeout";
   storageState?: string;
   // Serialized JSON of the captured storageState. `storageState` may be a
   // "persistent:<setupId>" marker; debug-executor and other non-test consumers
@@ -226,7 +245,7 @@ export interface SetupResultPayload {
 }
 
 export interface SetupResultResponse extends BaseMessage {
-  type: 'response:setup_result';
+  type: "response:setup_result";
   payload: SetupResultPayload;
 }
 
@@ -234,8 +253,12 @@ export interface StartRecordingCommandPayload {
   sessionId: string;
   targetUrl: string;
   viewport?: { width: number; height: number };
-  browser?: 'chromium' | 'firefox' | 'webkit';
-  selectorPriority?: Array<{ type: string; enabled: boolean; priority: number }>;
+  browser?: "chromium" | "firefox" | "webkit";
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
   ocrEnabled?: boolean;
   pointerGestures?: boolean;
   cursorFPS?: number;
@@ -243,19 +266,19 @@ export interface StartRecordingCommandPayload {
 }
 
 export interface StartRecordingCommand extends BaseMessage {
-  type: 'command:start_recording';
+  type: "command:start_recording";
   payload: StartRecordingCommandPayload;
 }
 
 export interface StopRecordingCommand extends BaseMessage {
-  type: 'command:stop_recording';
+  type: "command:stop_recording";
   payload: {
     sessionId: string;
   };
 }
 
 export interface PingCommand extends BaseMessage {
-  type: 'command:ping';
+  type: "command:ping";
   payload: Record<string, never>;
 }
 
@@ -265,7 +288,7 @@ export interface CancelTestCommandPayload {
 }
 
 export interface CancelTestCommand extends BaseMessage {
-  type: 'command:cancel_test';
+  type: "command:cancel_test";
   payload: CancelTestCommandPayload;
 }
 
@@ -274,7 +297,7 @@ export interface ShutdownCommandPayload {
 }
 
 export interface ShutdownCommand extends BaseMessage {
-  type: 'command:shutdown';
+  type: "command:shutdown";
   payload: ShutdownCommandPayload;
 }
 
@@ -284,7 +307,7 @@ export interface ShutdownCommand extends BaseMessage {
 
 export interface LogEntry {
   timestamp: number;
-  level: 'info' | 'warn' | 'error';
+  level: "info" | "warn" | "error";
   message: string;
 }
 
@@ -295,7 +318,7 @@ export interface TestProgressPayload {
 }
 
 export interface TestProgressResponse extends BaseMessage {
-  type: 'response:test_progress';
+  type: "response:test_progress";
   payload: TestProgressPayload;
 }
 
@@ -304,15 +327,23 @@ export interface StepEventPayload {
   testRunId: string;
   stepIndex: number;
   totalSteps: number;
-  status: 'started' | 'passed' | 'failed';
+  status: "started" | "passed" | "failed";
   label?: string;
-  stepType?: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  stepType?:
+    | "action"
+    | "navigation"
+    | "assertion"
+    | "screenshot"
+    | "wait"
+    | "variable"
+    | "log"
+    | "other";
   durationMs?: number;
   error?: string;
 }
 
 export interface StepEventResponse extends BaseMessage {
-  type: 'response:step_event';
+  type: "response:step_event";
   payload: StepEventPayload;
 }
 
@@ -320,7 +351,7 @@ export interface TestResultPayload {
   correlationId: string;
   testId: string;
   testRunId: string;
-  status: 'passed' | 'failed' | 'error' | 'timeout' | 'cancelled';
+  status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
   screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
   error?: {
@@ -334,15 +365,15 @@ export interface TestResultPayload {
    *  `assertionId` matches one of the `assertions[].id` sent in the run
    *  command. The criteria evaluator keys on these to fail the test when a
    *  user-pinned assertion failed. */
-  assertionResults?: import('@/lib/db/schema').AssertionResult[];
+  assertionResults?: import("@/lib/db/schema").AssertionResult[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
-  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured after test body ran
+  domSnapshot?: import("@/lib/db/schema").DomSnapshotData; // DOM state captured after test body ran
   /** axe-core violations harvested from the page (URL-Diff feature). Only
    *  populated when the run command sets `enableA11y: true`. */
-  a11yViolations?: import('@/lib/db/schema').A11yViolation[];
+  a11yViolations?: import("@/lib/db/schema").A11yViolation[];
   a11yPassesCount?: number;
   /** Playwright `page.accessibility.snapshot()` output (URL-Diff feature).
    *  May be `{ _truncated: true, byteLength }` if the EB capped the payload. */
@@ -355,12 +386,12 @@ export interface TestResultPayload {
 }
 
 export interface TestResultResponse extends BaseMessage {
-  type: 'response:test_result';
+  type: "response:test_result";
   payload: TestResultPayload;
 }
 
 export interface RecordingEventData {
-  type: 'click' | 'fill' | 'navigate' | 'screenshot' | 'scroll' | 'hover';
+  type: "click" | "fill" | "navigate" | "screenshot" | "scroll" | "hover";
   timestamp: number;
   target?: {
     selector: string;
@@ -389,7 +420,7 @@ export interface RecordingEventPayload {
     type: string;
     timestamp: number;
     sequence: number;
-    status: 'preview' | 'committed';
+    status: "preview" | "committed";
     verification?: {
       syntaxValid: boolean;
       domVerified?: boolean;
@@ -408,18 +439,18 @@ export interface RecordingEventPayload {
 }
 
 export interface RecordingEventResponse extends BaseMessage {
-  type: 'response:recording_event';
+  type: "response:recording_event";
   payload: RecordingEventPayload;
 }
 
 export interface RecordingStoppedPayload {
   sessionId: string;
   generatedCode: string;
-  domSnapshot?: import('@/lib/db/schema').DomSnapshotData; // DOM state captured on the recording page before stop
+  domSnapshot?: import("@/lib/db/schema").DomSnapshotData; // DOM state captured on the recording page before stop
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {
-  type: 'response:recording_stopped';
+  type: "response:recording_stopped";
   payload: RecordingStoppedPayload;
 }
 
@@ -429,12 +460,12 @@ export interface CreateAssertionCommandPayload {
 }
 
 export interface CreateAssertionCommand extends BaseMessage {
-  type: 'command:create_assertion';
+  type: "command:create_assertion";
   payload: CreateAssertionCommandPayload;
 }
 
-export type WaitType = 'duration' | 'selector';
-export type WaitSelectorCondition = 'visible' | 'hidden';
+export type WaitType = "duration" | "selector";
+export type WaitSelectorCondition = "visible" | "hidden";
 
 export interface CreateWaitCommandPayload {
   sessionId: string;
@@ -447,7 +478,7 @@ export interface CreateWaitCommandPayload {
 }
 
 export interface CreateWaitCommand extends BaseMessage {
-  type: 'command:create_wait';
+  type: "command:create_wait";
   payload: CreateWaitCommandPayload;
 }
 
@@ -456,12 +487,12 @@ export interface FlagDownloadCommandPayload {
 }
 
 export interface FlagDownloadCommand extends BaseMessage {
-  type: 'command:flag_download';
+  type: "command:flag_download";
   payload: FlagDownloadCommandPayload;
 }
 
 export interface InsertTimestampCommand extends BaseMessage {
-  type: 'command:insert_timestamp';
+  type: "command:insert_timestamp";
   payload: { sessionId: string };
 }
 
@@ -472,7 +503,7 @@ export interface PromoteSelectorCommandPayload {
 }
 
 export interface PromoteSelectorCommand extends BaseMessage {
-  type: 'command:promote_selector';
+  type: "command:promote_selector";
   payload: PromoteSelectorCommandPayload;
 }
 
@@ -486,12 +517,20 @@ export interface DebugStep {
   label: string;
   lineStart: number;
   lineEnd: number;
-  type: 'action' | 'navigation' | 'assertion' | 'screenshot' | 'wait' | 'variable' | 'log' | 'other';
+  type:
+    | "action"
+    | "navigation"
+    | "assertion"
+    | "screenshot"
+    | "wait"
+    | "variable"
+    | "log"
+    | "other";
 }
 
 export interface DebugStepResult {
   stepId: number;
-  status: 'passed' | 'failed' | 'pending';
+  status: "passed" | "failed" | "pending";
   durationMs: number;
   error?: string;
 }
@@ -510,13 +549,18 @@ export interface StartDebugCommandPayload {
 }
 
 export interface StartDebugCommand extends BaseMessage {
-  type: 'command:start_debug';
+  type: "command:start_debug";
   payload: StartDebugCommandPayload;
 }
 
 export interface DebugActionCommandPayload {
   sessionId: string;
-  action: 'step_forward' | 'step_back' | 'run_to_end' | 'run_to_step' | 'update_code';
+  action:
+    | "step_forward"
+    | "step_back"
+    | "run_to_end"
+    | "run_to_step"
+    | "update_code";
   stepIndex?: number;
   code?: string;
   cleanBody?: string;
@@ -524,7 +568,7 @@ export interface DebugActionCommandPayload {
 }
 
 export interface DebugActionCommand extends BaseMessage {
-  type: 'command:debug_action';
+  type: "command:debug_action";
   payload: DebugActionCommandPayload;
 }
 
@@ -533,14 +577,20 @@ export interface StopDebugCommandPayload {
 }
 
 export interface StopDebugCommand extends BaseMessage {
-  type: 'command:stop_debug';
+  type: "command:stop_debug";
   payload: StopDebugCommandPayload;
 }
 
 export interface DebugStateResponsePayload {
   sessionId: string;
   testId: string;
-  status: 'initializing' | 'paused' | 'stepping' | 'running' | 'completed' | 'error';
+  status:
+    | "initializing"
+    | "paused"
+    | "stepping"
+    | "running"
+    | "completed"
+    | "error";
   currentStepIndex: number;
   steps: DebugStep[];
   stepResults: DebugStepResult[];
@@ -550,12 +600,12 @@ export interface DebugStateResponsePayload {
 }
 
 export interface DebugStateResponse extends BaseMessage {
-  type: 'response:debug_state';
+  type: "response:debug_state";
   payload: DebugStateResponsePayload;
 }
 
 export interface CaptureScreenshotCommand extends BaseMessage {
-  type: 'command:capture_screenshot';
+  type: "command:capture_screenshot";
   payload: { sessionId: string };
 }
 
@@ -571,7 +621,7 @@ export interface ScreenshotUploadPayload {
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {
-  type: 'response:screenshot';
+  type: "response:screenshot";
   payload: ScreenshotUploadPayload;
 }
 
@@ -585,7 +635,7 @@ export interface ScreenshotTextUploadPayload {
 }
 
 export interface ScreenshotTextUploadResponse extends BaseMessage {
-  type: 'response:screenshot_text';
+  type: "response:screenshot_text";
   payload: ScreenshotTextUploadPayload;
 }
 
@@ -595,7 +645,7 @@ export interface ScreenshotAckPayload {
 }
 
 export interface ScreenshotAckResponse extends BaseMessage {
-  type: 'response:screenshot_ack';
+  type: "response:screenshot_ack";
   payload: ScreenshotAckPayload;
 }
 
@@ -608,20 +658,20 @@ export interface NetworkBodiesPayload {
 }
 
 export interface NetworkBodiesResponse extends BaseMessage {
-  type: 'response:network_bodies';
+  type: "response:network_bodies";
   payload: NetworkBodiesPayload;
 }
 
 export type ErrorCode =
-  | 'BROWSER_LAUNCH_FAILED'
-  | 'TEST_TIMEOUT'
-  | 'NAVIGATION_FAILED'
-  | 'SELECTOR_NOT_FOUND'
-  | 'SERVER_START_FAILED'
-  | 'SCREENSHOT_FAILED'
-  | 'UNKNOWN_COMMAND'
-  | 'INTERNAL_ERROR'
-  | 'AUTH_FAILED';
+  | "BROWSER_LAUNCH_FAILED"
+  | "TEST_TIMEOUT"
+  | "NAVIGATION_FAILED"
+  | "SELECTOR_NOT_FOUND"
+  | "SERVER_START_FAILED"
+  | "SCREENSHOT_FAILED"
+  | "UNKNOWN_COMMAND"
+  | "INTERNAL_ERROR"
+  | "AUTH_FAILED";
 
 export interface ErrorPayload {
   correlationId?: string;
@@ -631,7 +681,7 @@ export interface ErrorPayload {
 }
 
 export interface ErrorResponse extends BaseMessage {
-  type: 'response:error';
+  type: "response:error";
   payload: ErrorPayload;
 }
 
@@ -640,7 +690,7 @@ export interface PongPayload {
 }
 
 export interface PongResponse extends BaseMessage {
-  type: 'response:pong';
+  type: "response:pong";
   payload: PongPayload;
 }
 
@@ -654,7 +704,7 @@ export interface CommandAckPayload {
 }
 
 export interface CommandAckResponse extends BaseMessage {
-  type: 'response:command_ack';
+  type: "response:command_ack";
   payload: CommandAckPayload;
 }
 
@@ -669,14 +719,14 @@ export interface SystemInfo {
 }
 
 export interface HeartbeatPayload {
-  status: 'idle' | 'busy' | 'recording' | 'debugging';
+  status: "idle" | "busy" | "recording" | "debugging";
   currentTask?: string;
   systemInfo: SystemInfo;
   disconnect?: boolean; // Signal graceful shutdown
 }
 
 export interface HeartbeatMessage extends BaseMessage {
-  type: 'status:heartbeat';
+  type: "status:heartbeat";
   payload: HeartbeatPayload;
 }
 
@@ -689,7 +739,7 @@ export interface ConnectionEstablishedPayload {
 }
 
 export interface ConnectionEstablishedMessage extends BaseMessage {
-  type: 'connection:established';
+  type: "connection:established";
   payload: ConnectionEstablishedPayload;
 }
 
@@ -744,8 +794,8 @@ export type Message =
 // ============================================
 
 export function createMessage<T extends Message>(
-  type: T['type'],
-  payload: T['payload']
+  type: T["type"],
+  payload: T["payload"],
 ): T {
   return {
     id: crypto.randomUUID(),
@@ -756,11 +806,11 @@ export function createMessage<T extends Message>(
 }
 
 export function isServerCommand(msg: Message): msg is ServerCommand {
-  return msg.type.startsWith('command:');
+  return msg.type.startsWith("command:");
 }
 
 export function isAgentResponse(msg: Message): msg is AgentResponse {
-  return msg.type.startsWith('response:') || msg.type.startsWith('status:');
+  return msg.type.startsWith("response:") || msg.type.startsWith("status:");
 }
 
 // ============================================
@@ -769,9 +819,9 @@ export function isAgentResponse(msg: Message): msg is AgentResponse {
 
 /** Server → Client: CDP screencast frame */
 export interface ScreencastFrameMessage extends BaseMessage {
-  type: 'stream:frame';
+  type: "stream:frame";
   payload: {
-    data: string;          // base64 JPEG
+    data: string; // base64 JPEG
     width: number;
     height: number;
     timestamp: number;
@@ -780,60 +830,70 @@ export interface ScreencastFrameMessage extends BaseMessage {
 
 /** Client → Server: Mouse/keyboard input forwarding */
 export interface StreamInputMessage extends BaseMessage {
-  type: 'stream:input';
-  payload: StreamMouseEvent | StreamKeyboardEvent | StreamFileUploadEvent | StreamClipboardEvent | StreamTouchEvent;
+  type: "stream:input";
+  payload:
+    | StreamMouseEvent
+    | StreamKeyboardEvent
+    | StreamFileUploadEvent
+    | StreamClipboardEvent
+    | StreamTouchEvent;
 }
 
 export interface StreamMouseEvent {
-  type: 'mouse';
-  action: 'move' | 'down' | 'up' | 'wheel';
+  type: "mouse";
+  action: "move" | "down" | "up" | "wheel";
   x: number;
   y: number;
-  button?: 'left' | 'right' | 'middle';
+  button?: "left" | "right" | "middle";
   clickCount?: number;
   deltaX?: number;
   deltaY?: number;
 }
 
 export interface StreamKeyboardEvent {
-  type: 'keyboard';
-  action: 'keydown' | 'keyup' | 'type';
+  type: "keyboard";
+  action: "keydown" | "keyup" | "type";
   key: string;
   code?: string;
   text?: string;
-  modifiers?: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
+  modifiers?: {
+    ctrl?: boolean;
+    shift?: boolean;
+    alt?: boolean;
+    meta?: boolean;
+  };
 }
 
 export interface StreamFileUploadEvent {
-  type: 'file_upload';
+  type: "file_upload";
   files: Array<{ name: string; data: string; mimeType: string }>; // base64 data
 }
 
 export interface StreamClipboardEvent {
-  type: 'clipboard_paste';
+  type: "clipboard_paste";
   text: string;
 }
 
 export interface StreamTouchEvent {
-  type: 'touch';
-  action: 'start' | 'move' | 'end' | 'cancel';
+  type: "touch";
+  action: "start" | "move" | "end" | "cancel";
   touches: Array<{ x: number; y: number; id: number }>;
 }
 
 /** Client → Server / Server → Client: Session lifecycle control */
 export interface StreamSessionMessage extends BaseMessage {
-  type: 'stream:session';
+  type: "stream:session";
   payload:
-    | { action: 'start' | 'stop' }
-    | { action: 'resize'; viewport: { width: number; height: number } }
-    | { action: 'navigate'; url: string };
+    | { action: "start" | "stop" }
+    | { action: "resize"; viewport: { width: number; height: number } }
+    | { action: "navigate"; url: string };
 }
 
 /** Server → Client: Stream connection status */
 export interface StreamStatusMessage extends BaseMessage {
-  type: 'stream:status';
+  type: "stream:status";
   payload: {
-    status: 'connected' | 'disconnected' | 'error';
+    status: "connected" | "disconnected" | "error";
     currentUrl?: string;
     viewport?: { width: number; height: number };
     error?: string;
@@ -843,13 +903,13 @@ export interface StreamStatusMessage extends BaseMessage {
 
 /** Client → Server: Request selectors for element at coordinates */
 export interface InspectElementRequestMessage extends BaseMessage {
-  type: 'stream:inspect_element_request';
+  type: "stream:inspect_element_request";
   payload: { x: number; y: number };
 }
 
 /** Server → Client: Selectors for inspected element */
 export interface InspectElementResponseMessage extends BaseMessage {
-  type: 'stream:inspect_element_response';
+  type: "stream:inspect_element_response";
   payload: {
     element: {
       tag: string;
@@ -863,12 +923,12 @@ export interface InspectElementResponseMessage extends BaseMessage {
 
 /** Client → Server: Request full DOM selector snapshot */
 export interface DomSnapshotRequestMessage extends BaseMessage {
-  type: 'stream:dom_snapshot_request';
+  type: "stream:dom_snapshot_request";
 }
 
 /** Server → Client: Full DOM snapshot with all interactive elements */
 export interface DomSnapshotResponseMessage extends BaseMessage {
-  type: 'stream:dom_snapshot_response';
+  type: "stream:dom_snapshot_response";
   payload: {
     elements: Array<{
       tag: string;
@@ -884,7 +944,7 @@ export interface DomSnapshotResponseMessage extends BaseMessage {
 
 /** Client → Server: Toggle inspect mode (suppresses input forwarding on EB side) */
 export interface InspectModeMessage extends BaseMessage {
-  type: 'stream:inspect_mode';
+  type: "stream:inspect_mode";
   payload: { enabled: boolean };
 }
 
@@ -900,5 +960,5 @@ export type StreamMessage =
   | InspectModeMessage;
 
 export function isStreamMessage(msg: { type: string }): boolean {
-  return msg.type.startsWith('stream:');
+  return msg.type.startsWith("stream:");
 }

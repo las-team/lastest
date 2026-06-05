@@ -48,9 +48,18 @@ export interface NetworkDiffResult {
   summary: NetworkDiffSummary;
 }
 
-const NONCE_PARAMS = new Set(['_t', 'cb', '_', 'v', 'ts', 'nocache', 'rand', 'r']);
+const NONCE_PARAMS = new Set([
+  "_t",
+  "cb",
+  "_",
+  "v",
+  "ts",
+  "nocache",
+  "rand",
+  "r",
+]);
 const HEX_NONCE = /^[a-f0-9]{12,}$/i;
-const SIZE_DELTA_THRESHOLD = 0.10; // 10%
+const SIZE_DELTA_THRESHOLD = 0.1; // 10%
 const SLOWDOWN_ABSOLUTE_MS = 200;
 const SLOWDOWN_RATIO = 1.5;
 
@@ -72,9 +81,9 @@ export function normalizeUrl(rawUrl: string): string {
     keep.push([key, value]);
   });
   keep.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  parsed.search = '';
+  parsed.search = "";
   for (const [k, v] of keep) parsed.searchParams.append(k, v);
-  parsed.hash = '';
+  parsed.hash = "";
   return parsed.toString();
 }
 
@@ -87,7 +96,7 @@ export function isThirdParty(reqHost: string, primaryHost: string): boolean {
   const r = reqHost.toLowerCase();
   const p = primaryHost.toLowerCase();
   if (r === p) return false;
-  if (r.endsWith('.' + p)) return false;
+  if (r.endsWith("." + p)) return false;
   return true;
 }
 
@@ -95,7 +104,7 @@ function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -117,7 +126,10 @@ function snap(req: NetworkRequestLike) {
   };
 }
 
-function summariseSide(reqs: NetworkRequestLike[], primaryHost: string): {
+function summariseSide(
+  reqs: NetworkRequestLike[],
+  primaryHost: string,
+): {
   count: number;
   bytes: number;
   byType: Record<string, number>;
@@ -180,7 +192,10 @@ export function computeNetworkDiff(
       changedStatus.push({ ...entryFrom(b), baseline: aSnap, current: bSnap });
     }
     const max = Math.max(aSnap.bytes, bSnap.bytes);
-    if (max > 0 && Math.abs(bSnap.bytes - aSnap.bytes) / max > SIZE_DELTA_THRESHOLD) {
+    if (
+      max > 0 &&
+      Math.abs(bSnap.bytes - aSnap.bytes) / max > SIZE_DELTA_THRESHOLD
+    ) {
       changedSize.push({ ...entryFrom(b), baseline: aSnap, current: bSnap });
     }
     if (
@@ -204,8 +219,12 @@ export function computeNetworkDiff(
     changedStatus,
     changedSize,
     slowdowns,
-    failedA: reqsA.filter((r) => r.failed).map((r) => ({ ...entryFrom(r), baseline: snap(r) })),
-    failedB: reqsB.filter((r) => r.failed).map((r) => ({ ...entryFrom(r), current: snap(r) })),
+    failedA: reqsA
+      .filter((r) => r.failed)
+      .map((r) => ({ ...entryFrom(r), baseline: snap(r) })),
+    failedB: reqsB
+      .filter((r) => r.failed)
+      .map((r) => ({ ...entryFrom(r), current: snap(r) })),
     summary: {
       countA: sumA.count,
       countB: sumB.count,

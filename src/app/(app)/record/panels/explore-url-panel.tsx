@@ -1,30 +1,30 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
+} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { startGenerateTestAgent } from '@/server/actions/ai';
-import { Compass, Loader2, Sparkles } from 'lucide-react';
-import { toast } from 'sonner';
-import type { FunctionalArea } from '@/lib/db/schema';
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { startGenerateTestAgent } from "@/server/actions/ai";
+import { Compass, Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import type { FunctionalArea } from "@/lib/db/schema";
 
 interface ExploreUrlPanelProps {
   repositoryId: string | undefined;
@@ -32,29 +32,36 @@ interface ExploreUrlPanelProps {
   defaultBaseUrl: string;
 }
 
-export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: ExploreUrlPanelProps) {
+export function ExploreUrlPanel({
+  repositoryId,
+  areas,
+  defaultBaseUrl,
+}: ExploreUrlPanelProps) {
   const router = useRouter();
-  const [prompt, setPrompt] = useState('');
-  const [targetUrl, setTargetUrl] = useState(defaultBaseUrl || '');
-  const [testName, setTestName] = useState('');
-  const [functionalAreaId, setFunctionalAreaId] = useState<string>('');
+  const [prompt, setPrompt] = useState("");
+  const [targetUrl, setTargetUrl] = useState(defaultBaseUrl || "");
+  const [testName, setTestName] = useState("");
+  const [functionalAreaId, setFunctionalAreaId] = useState<string>("");
   const [headless, setHeadless] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     if (!repositoryId) {
-      toast.error('Select a repository first');
+      toast.error("Select a repository first");
       return;
     }
     if (!prompt.trim()) {
-      toast.error('Describe what you want to test');
+      toast.error("Describe what you want to test");
       return;
     }
 
     const name =
       testName.trim() ||
-      prompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').trim() ||
-      'AI Generated Test';
+      prompt
+        .slice(0, 50)
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .trim() ||
+      "AI Generated Test";
 
     setIsSubmitting(true);
     try {
@@ -64,18 +71,22 @@ export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: Explore
         targetUrl: targetUrl.trim() || undefined,
         testName: name,
         functionalAreaId:
-          functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : undefined,
+          functionalAreaId && functionalAreaId !== "__none__"
+            ? functionalAreaId
+            : undefined,
         headless,
       });
 
       if (result.success) {
-        toast.success('Test generation started — check the activity feed for progress');
-        router.push('/');
+        toast.success(
+          "Test generation started — check the activity feed for progress",
+        );
+        router.push("/");
       } else {
-        toast.error(result.error || 'Failed to start test generation');
+        toast.error(result.error || "Failed to start test generation");
       }
     } catch {
-      toast.error('Failed to start test generation');
+      toast.error("Failed to start test generation");
     } finally {
       setIsSubmitting(false);
     }
@@ -91,8 +102,9 @@ export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: Explore
               Explore from URL
             </CardTitle>
             <CardDescription>
-              Describe the flow and provide a target URL. The Generator agent opens a browser,
-              explores the page, and writes test code with real selectors.
+              Describe the flow and provide a target URL. The Generator agent
+              opens a browser, explores the page, and writes test code with real
+              selectors.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -132,7 +144,10 @@ export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: Explore
               {areas.length > 0 && (
                 <div className="flex-1 space-y-2">
                   <Label>Functional area</Label>
-                  <Select value={functionalAreaId} onValueChange={setFunctionalAreaId}>
+                  <Select
+                    value={functionalAreaId}
+                    onValueChange={setFunctionalAreaId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select area (optional)" />
                     </SelectTrigger>
@@ -148,7 +163,11 @@ export function ExploreUrlPanel({ repositoryId, areas, defaultBaseUrl }: Explore
                 </div>
               )}
               <div className="flex items-center gap-2 pb-2">
-                <Switch id="explore-headless" checked={headless} onCheckedChange={setHeadless} />
+                <Switch
+                  id="explore-headless"
+                  checked={headless}
+                  onCheckedChange={setHeadless}
+                />
                 <Label htmlFor="explore-headless" className="text-sm">
                   Headless
                 </Label>

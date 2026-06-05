@@ -1,12 +1,21 @@
-'use client';
+"use client";
 
-import { useTransition } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { HardDrive, RefreshCw, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { recalculateStorageAction, triggerStorageCleanupAction } from '@/server/actions/storage';
+import { useTransition } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { HardDrive, RefreshCw, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  recalculateStorageAction,
+  triggerStorageCleanupAction,
+} from "@/server/actions/storage";
 
 interface StorageUsageCardProps {
   usedBytes: number;
@@ -17,8 +26,8 @@ interface StorageUsageCardProps {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const value = bytes / Math.pow(1024, i);
   return `${value.toFixed(i >= 2 ? 2 : 0)} ${units[i]}`;
@@ -30,7 +39,7 @@ function formatRelativeTime(dateStr: string): string {
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
 
-  if (diffSec < 60) return 'just now';
+  if (diffSec < 60) return "just now";
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
   return `${Math.floor(diffSec / 86400)}d ago`;
@@ -46,37 +55,46 @@ export function StorageUsageCard({
   const [isRecalculating, startRecalculate] = useTransition();
   const [isCleaning, startCleanup] = useTransition();
 
-  const percentUsed = quotaBytes > 0 ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100)) : 0;
+  const percentUsed =
+    quotaBytes > 0
+      ? Math.min(100, Math.round((usedBytes / quotaBytes) * 100))
+      : 0;
 
   function handleRecalculate() {
     startRecalculate(async () => {
       try {
         await recalculateStorageAction();
-        toast.success('Storage usage recalculated');
+        toast.success("Storage usage recalculated");
       } catch {
-        toast.error('Failed to recalculate storage');
+        toast.error("Failed to recalculate storage");
       }
     });
   }
 
   function handleCleanup() {
-    if (!confirm('This will delete the oldest test runs and their data to free up space. Continue?')) {
+    if (
+      !confirm(
+        "This will delete the oldest test runs and their data to free up space. Continue?",
+      )
+    ) {
       return;
     }
     startCleanup(async () => {
       try {
         await triggerStorageCleanupAction();
-        toast.success('Storage cleanup started');
+        toast.success("Storage cleanup started");
       } catch {
-        toast.error('Failed to start cleanup');
+        toast.error("Failed to start cleanup");
       }
     });
   }
 
   const progressColor =
-    percentUsed >= 90 ? 'bg-red-500' :
-    percentUsed >= 70 ? 'bg-yellow-500' :
-    'bg-green-500';
+    percentUsed >= 90
+      ? "bg-red-500"
+      : percentUsed >= 70
+        ? "bg-yellow-500"
+        : "bg-green-500";
 
   return (
     <Card id="storage">
@@ -88,12 +106,13 @@ export function StorageUsageCard({
               Storage Usage
             </CardTitle>
           </div>
-          <Badge variant={enforcementEnabled ? 'default' : 'secondary'}>
-            {enforcementEnabled ? 'Enforced' : 'Display only'}
+          <Badge variant={enforcementEnabled ? "default" : "secondary"}>
+            {enforcementEnabled ? "Enforced" : "Display only"}
           </Badge>
         </div>
         <CardDescription>
-          Disk storage used by screenshots, videos, diffs, and other test artifacts
+          Disk storage used by screenshots, videos, diffs, and other test
+          artifacts
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -124,7 +143,9 @@ export function StorageUsageCard({
             onClick={handleRecalculate}
             disabled={isRecalculating || isCleaning}
           >
-            <RefreshCw className={`w-4 h-4 mr-1.5 ${isRecalculating ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-4 h-4 mr-1.5 ${isRecalculating ? "animate-spin" : ""}`}
+            />
             Recalculate
           </Button>
           {isAdmin && (
@@ -135,7 +156,7 @@ export function StorageUsageCard({
               disabled={isCleaning || isRecalculating}
             >
               <Trash2 className={`w-4 h-4 mr-1.5`} />
-              {isCleaning ? 'Cleaning up...' : 'Clean Up'}
+              {isCleaning ? "Cleaning up..." : "Clean Up"}
             </Button>
           )}
         </div>

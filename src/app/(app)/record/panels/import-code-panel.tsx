@@ -1,29 +1,29 @@
-'use client';
+"use client";
 
-import { useCallback, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
+} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Code2, FileCode2, Loader2, Upload, X } from 'lucide-react';
-import { toast } from 'sonner';
-import type { FunctionalArea } from '@/lib/db/schema';
-import { createTestFromCode } from '@/server/actions/test-import';
+} from "@/components/ui/select";
+import { Code2, FileCode2, Loader2, Upload, X } from "lucide-react";
+import { toast } from "sonner";
+import type { FunctionalArea } from "@/lib/db/schema";
+import { createTestFromCode } from "@/server/actions/test-import";
 
 interface ImportCodePanelProps {
   repositoryId: string | undefined;
@@ -31,7 +31,15 @@ interface ImportCodePanelProps {
   defaultBaseUrl: string;
 }
 
-const ACCEPTED_EXTS = ['.ts', '.spec.ts', '.test.ts', '.tsx', '.js', '.spec.js', '.test.js'];
+const ACCEPTED_EXTS = [
+  ".ts",
+  ".spec.ts",
+  ".test.ts",
+  ".tsx",
+  ".js",
+  ".spec.js",
+  ".test.js",
+];
 const MAX_FILE_SIZE = 500 * 1024; // 500KB
 
 interface PendingFile {
@@ -40,13 +48,17 @@ interface PendingFile {
   size: number;
 }
 
-export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportCodePanelProps) {
+export function ImportCodePanel({
+  repositoryId,
+  areas,
+  defaultBaseUrl,
+}: ImportCodePanelProps) {
   const router = useRouter();
-  const [pastedCode, setPastedCode] = useState('');
-  const [pastedName, setPastedName] = useState('');
+  const [pastedCode, setPastedCode] = useState("");
+  const [pastedName, setPastedName] = useState("");
   const [files, setFiles] = useState<PendingFile[]>([]);
-  const [functionalAreaId, setFunctionalAreaId] = useState<string>('');
-  const [targetUrl, setTargetUrl] = useState(defaultBaseUrl || '');
+  const [functionalAreaId, setFunctionalAreaId] = useState<string>("");
+  const [targetUrl, setTargetUrl] = useState(defaultBaseUrl || "");
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -99,18 +111,19 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const stripExt = (name: string): string => name.replace(/\.(spec|test)?\.?(ts|tsx|js)$/i, '');
+  const stripExt = (name: string): string =>
+    name.replace(/\.(spec|test)?\.?(ts|tsx|js)$/i, "");
 
   const handleSubmit = async () => {
     if (!repositoryId) {
-      toast.error('Select a repository first');
+      toast.error("Select a repository first");
       return;
     }
 
     const trimmedPaste = pastedCode.trim();
     const hasPaste = trimmedPaste.length > 0;
     if (!hasPaste && files.length === 0) {
-      toast.error('Paste code or drop a file');
+      toast.error("Paste code or drop a file");
       return;
     }
 
@@ -121,11 +134,13 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
 
     try {
       const areaArg =
-        functionalAreaId && functionalAreaId !== '__none__' ? functionalAreaId : null;
+        functionalAreaId && functionalAreaId !== "__none__"
+          ? functionalAreaId
+          : null;
       const urlArg = targetUrl.trim() || null;
 
       if (hasPaste) {
-        const name = pastedName.trim() || 'Imported test';
+        const name = pastedName.trim() || "Imported test";
         const result = await createTestFromCode({
           repositoryId,
           name,
@@ -158,15 +173,15 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
       }
 
       if (created > 0) {
-        toast.success(`Imported ${created} test${created === 1 ? '' : 's'}`);
-        if (errors.length > 0) toast.error(errors.join('\n'));
+        toast.success(`Imported ${created} test${created === 1 ? "" : "s"}`);
+        if (errors.length > 0) toast.error(errors.join("\n"));
         if (firstId && created === 1) {
           router.push(`/tests/${firstId}`);
         } else {
-          router.push('/tests');
+          router.push("/tests");
         }
       } else {
-        toast.error(errors[0] || 'No tests were imported');
+        toast.error(errors[0] || "No tests were imported");
       }
     } finally {
       setIsSubmitting(false);
@@ -183,8 +198,8 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
               Import code
             </CardTitle>
             <CardDescription>
-              Paste a Playwright test or drop existing <code>.spec.ts</code> files. Each file
-              becomes one test. Expected signature:{' '}
+              Paste a Playwright test or drop existing <code>.spec.ts</code>{" "}
+              files. Each file becomes one test. Expected signature:{" "}
               <code>test(page, baseUrl, screenshotPath, stepLogger)</code>.
             </CardDescription>
           </CardHeader>
@@ -193,7 +208,10 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
               {areas.length > 0 && (
                 <div className="space-y-2">
                   <Label>Functional area</Label>
-                  <Select value={functionalAreaId} onValueChange={setFunctionalAreaId}>
+                  <Select
+                    value={functionalAreaId}
+                    onValueChange={setFunctionalAreaId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select area (optional)" />
                     </SelectTrigger>
@@ -241,8 +259,9 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
               />
               {pastedCode.trim().length > 0 && !/page\./.test(pastedCode) && (
                 <p className="text-xs text-amber-600">
-                  Heads up: pasted code doesn&apos;t reference <code>page.</code> — verify it&apos;s
-                  a valid Playwright test before running.
+                  Heads up: pasted code doesn&apos;t reference{" "}
+                  <code>page.</code> — verify it&apos;s a valid Playwright test
+                  before running.
                 </p>
               )}
             </div>
@@ -256,8 +275,8 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
                 onClick={() => inputRef.current?.click()}
                 className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
                   isDragging
-                    ? 'border-primary bg-primary/5'
-                    : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30'
+                    ? "border-primary bg-primary/5"
+                    : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
                 }`}
               >
                 <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
@@ -274,7 +293,7 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
                   accept=".ts,.spec.ts,.test.ts,.tsx,.js,.spec.js,.test.js"
                   onChange={(e) => {
                     if (e.target.files) addFiles(e.target.files);
-                    e.target.value = '';
+                    e.target.value = "";
                   }}
                   className="hidden"
                 />
@@ -325,7 +344,8 @@ export function ImportCodePanel({ repositoryId, areas, defaultBaseUrl }: ImportC
                 ) : (
                   <Code2 className="h-4 w-4 mr-2" />
                 )}
-                Import test{files.length + (pastedCode.trim() ? 1 : 0) > 1 ? 's' : ''}
+                Import test
+                {files.length + (pastedCode.trim() ? 1 : 0) > 1 ? "s" : ""}
               </Button>
             </div>
           </CardContent>

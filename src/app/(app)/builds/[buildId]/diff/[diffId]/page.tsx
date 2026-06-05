@@ -1,14 +1,21 @@
-import { notFound } from 'next/navigation';
-import Link from 'next/link';
-import { getDiff, getSortedDiffsByBuild, getStepLabelSuggestions, getFocusRegionsForDiff, getIgnoreRegionsForDiff, getMultiLayerComparisonForDiff } from '@/server/actions/diffs';
-import { getBuild } from '@/server/actions/builds';
-import { getPlaywrightSettings } from '@/server/actions/settings';
-import { computePageTextDiff } from '@/lib/diff/page-text-diff';
-import { DiffViewerClient } from './diff-viewer-client';
-import { StepLabelEditor } from './step-label-editor';
-import { MultiLayerPanel } from '@/components/diff/multi-layer-panel';
-import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { BrowserIcon } from '@/components/ui/browser-icon';
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import {
+  getDiff,
+  getSortedDiffsByBuild,
+  getStepLabelSuggestions,
+  getFocusRegionsForDiff,
+  getIgnoreRegionsForDiff,
+  getMultiLayerComparisonForDiff,
+} from "@/server/actions/diffs";
+import { getBuild } from "@/server/actions/builds";
+import { getPlaywrightSettings } from "@/server/actions/settings";
+import { computePageTextDiff } from "@/lib/diff/page-text-diff";
+import { DiffViewerClient } from "./diff-viewer-client";
+import { StepLabelEditor } from "./step-label-editor";
+import { MultiLayerPanel } from "@/components/diff/multi-layer-panel";
+import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { BrowserIcon } from "@/components/ui/browser-icon";
 
 interface PageProps {
   params: Promise<{ buildId: string; diffId: string }>;
@@ -16,7 +23,7 @@ interface PageProps {
 
 export default async function DiffPage({ params }: PageProps) {
   const { buildId, diffId } = await params;
-  const { getCurrentSession } = await import('@/lib/auth');
+  const { getCurrentSession } = await import("@/lib/auth");
   const session = await getCurrentSession();
   const banAiMode = session?.team?.banAiMode ?? false;
   const diff = await getDiff(diffId);
@@ -27,7 +34,9 @@ export default async function DiffPage({ params }: PageProps) {
 
   // Get build to resolve the correct base URL for "Open Page" link
   const build = await getBuild(buildId);
-  const playwrightSettings = await getPlaywrightSettings(diff.test?.repositoryId ?? null);
+  const playwrightSettings = await getPlaywrightSettings(
+    diff.test?.repositoryId ?? null,
+  );
   const enableDomDiff = playwrightSettings?.enableDomDiff ?? false;
 
   // Replace the test's targetUrl origin with the build's baseUrl
@@ -41,8 +50,10 @@ export default async function DiffPage({ params }: PageProps) {
       openPageUrl = testUrl.toString();
     } catch {
       // targetUrl is a relative path — combine with build baseUrl
-      const base = build.baseUrl.replace(/\/+$/, '');
-      const path = openPageUrl.startsWith('/') ? openPageUrl : `/${openPageUrl}`;
+      const base = build.baseUrl.replace(/\/+$/, "");
+      const path = openPageUrl.startsWith("/")
+        ? openPageUrl
+        : `/${openPageUrl}`;
       openPageUrl = `${base}${path}`;
     }
   }
@@ -63,13 +74,18 @@ export default async function DiffPage({ params }: PageProps) {
   const allDiffs = await getSortedDiffsByBuild(buildId);
   const currentIndex = allDiffs.findIndex((d) => d.id === diffId);
   const prevDiff = currentIndex > 0 ? allDiffs[currentIndex - 1] : null;
-  const nextDiff = currentIndex < allDiffs.length - 1 ? allDiffs[currentIndex + 1] : null;
+  const nextDiff =
+    currentIndex < allDiffs.length - 1 ? allDiffs[currentIndex + 1] : null;
 
   // Page-text diff: read both stored text blobs and run the line-level diff.
   // Hidden in the UI when status is `skipped` and both paths are null.
-  const textDiff = (diff.baselineTextPath || diff.currentTextPath || diff.textDiffStatus)
-    ? await computePageTextDiff(diff.baselineTextPath ?? null, diff.currentTextPath ?? null)
-    : null;
+  const textDiff =
+    diff.baselineTextPath || diff.currentTextPath || diff.textDiffStatus
+      ? await computePageTextDiff(
+          diff.baselineTextPath ?? null,
+          diff.currentTextPath ?? null,
+        )
+      : null;
 
   return (
     <div className="flex-1 p-6 overflow-auto">
@@ -134,7 +150,10 @@ export default async function DiffPage({ params }: PageProps) {
                 Prev
               </Link>
             ) : (
-              <button disabled className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed">
+              <button
+                disabled
+                className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed"
+              >
                 <ChevronLeft className="w-4 h-4" />
                 Prev
               </button>
@@ -153,7 +172,10 @@ export default async function DiffPage({ params }: PageProps) {
                 <ChevronRight className="w-4 h-4" />
               </Link>
             ) : (
-              <button disabled className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed">
+              <button
+                disabled
+                className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed"
+              >
                 Next
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -175,26 +197,39 @@ export default async function DiffPage({ params }: PageProps) {
           nextDiffId={nextDiff?.id}
           banAiMode={banAiMode}
           enableDomDiff={enableDomDiff}
-          initialFocusRegions={focusRegions.map(r => ({
-            id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
+          initialFocusRegions={focusRegions.map((r) => ({
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
           }))}
-          initialIgnoreRegions={ignoreRegions.map(r => ({
-            id: r.id, x: r.x, y: r.y, width: r.width, height: r.height,
+          initialIgnoreRegions={ignoreRegions.map((r) => ({
+            id: r.id,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
           }))}
           allDiffs={allDiffs}
-          textDiff={textDiff ? {
-            status: textDiff.status,
-            summary: textDiff.summary,
-            lines: textDiff.lines,
-          } : null}
+          textDiff={
+            textDiff
+              ? {
+                  status: textDiff.status,
+                  summary: textDiff.summary,
+                  lines: textDiff.lines,
+                }
+              : null
+          }
         />
 
         {/* Keyboard shortcuts hint */}
         <div className="text-sm text-muted-foreground text-center">
-          Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">E</kbd> Expected Change ·{' '}
-          <kbd className="px-1 bg-muted rounded">T</kbd> Todo ·{' '}
-          <kbd className="px-1 bg-muted rounded">S</kbd> Skip ·{' '}
-          <kbd className="px-1 bg-muted rounded">←</kbd> <kbd className="px-1 bg-muted rounded">→</kbd> Navigate
+          Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">E</kbd>{" "}
+          Expected Change · <kbd className="px-1 bg-muted rounded">T</kbd> Todo
+          · <kbd className="px-1 bg-muted rounded">S</kbd> Skip ·{" "}
+          <kbd className="px-1 bg-muted rounded">←</kbd>{" "}
+          <kbd className="px-1 bg-muted rounded">→</kbd> Navigate
         </div>
       </div>
     </div>

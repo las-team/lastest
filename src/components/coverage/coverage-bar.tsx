@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 
 interface CoverageBarProps {
   covered: number;
@@ -22,7 +22,7 @@ export function CoverageBar({
 
   if (isScanning) {
     return (
-      <div className={cn('space-y-2', className)}>
+      <div className={cn("space-y-2", className)}>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Scanning routes...</span>
           <span className="font-medium">{scanProgress ?? 0}%</span>
@@ -34,14 +34,14 @@ export function CoverageBar({
 
   if (total === 0) {
     return (
-      <div className={cn('text-sm text-muted-foreground', className)}>
+      <div className={cn("text-sm text-muted-foreground", className)}>
         No routes discovered. Scan to detect routes.
       </div>
     );
   }
 
   return (
-    <div className={cn('space-y-2', className)}>
+    <div className={cn("space-y-2", className)}>
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">Route coverage</span>
         <span className="font-medium">
@@ -51,9 +51,9 @@ export function CoverageBar({
       <Progress
         value={coveragePercent}
         className={cn(
-          'h-2',
-          coveragePercent === 100 && 'bg-green-500/20',
-          coveragePercent < 50 && 'bg-red-500/20'
+          "h-2",
+          coveragePercent === 100 && "bg-green-500/20",
+          coveragePercent < 50 && "bg-red-500/20",
         )}
       />
     </div>

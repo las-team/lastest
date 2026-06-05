@@ -60,7 +60,7 @@ export function buildDiffAnalysisPrompt(metadata: {
 }): string {
   const parts = [
     `Analyze this visual diff for the test "${metadata.testName}".`,
-    '',
+    "",
     `Pixel difference: ${metadata.percentageDifference}%`,
   ];
 
@@ -69,19 +69,23 @@ export function buildDiffAnalysisPrompt(metadata: {
   }
 
   if (metadata.changeCategories && metadata.changeCategories.length > 0) {
-    parts.push(`Detected change categories: ${metadata.changeCategories.join(', ')}`);
+    parts.push(
+      `Detected change categories: ${metadata.changeCategories.join(", ")}`,
+    );
   }
 
   if (metadata.pageShift?.detected) {
     parts.push(`Page shift detected: ${metadata.pageShift.deltaY}px vertical`);
   }
 
-  parts.push('');
-  parts.push('The three images are: (1) Baseline screenshot, (2) Current screenshot, (3) Diff overlay.');
-  parts.push('');
-  parts.push('Respond with ONLY a JSON object.');
+  parts.push("");
+  parts.push(
+    "The three images are: (1) Baseline screenshot, (2) Current screenshot, (3) Diff overlay.",
+  );
+  parts.push("");
+  parts.push("Respond with ONLY a JSON object.");
 
-  return parts.join('\n');
+  return parts.join("\n");
 }
 
 export function buildDiffAnalysisPromptWithPaths(metadata: {
@@ -96,7 +100,7 @@ export function buildDiffAnalysisPromptWithPaths(metadata: {
 }): string {
   const parts = [
     `Analyze this visual diff for the test "${metadata.testName}".`,
-    '',
+    "",
     `Pixel difference: ${metadata.percentageDifference}%`,
   ];
 
@@ -105,20 +109,22 @@ export function buildDiffAnalysisPromptWithPaths(metadata: {
   }
 
   if (metadata.changeCategories && metadata.changeCategories.length > 0) {
-    parts.push(`Detected change categories: ${metadata.changeCategories.join(', ')}`);
+    parts.push(
+      `Detected change categories: ${metadata.changeCategories.join(", ")}`,
+    );
   }
 
   if (metadata.pageShift?.detected) {
     parts.push(`Page shift detected: ${metadata.pageShift.deltaY}px vertical`);
   }
 
-  parts.push('');
-  parts.push('Read these 3 screenshot files to perform your analysis:');
+  parts.push("");
+  parts.push("Read these 3 screenshot files to perform your analysis:");
   parts.push(`1. Baseline: ${metadata.baselinePath}`);
   parts.push(`2. Current:  ${metadata.currentPath}`);
   parts.push(`3. Diff overlay: ${metadata.diffPath}`);
-  parts.push('');
-  parts.push('Respond with ONLY a JSON object.');
+  parts.push("");
+  parts.push("Respond with ONLY a JSON object.");
 
-  return parts.join('\n');
+  return parts.join("\n");
 }

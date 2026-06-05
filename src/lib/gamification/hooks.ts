@@ -7,11 +7,11 @@
  * cycle. Keep this module's public functions async and side-effect-only.
  */
 
-import { db } from '@/lib/db';
-import { tests } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
-import { getCurrentSession } from '@/lib/auth';
-import { awardScore } from '@/server/actions/gamification';
+import { db } from "@/lib/db";
+import { tests } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { getCurrentSession } from "@/lib/auth";
+import { awardScore } from "@/server/actions/gamification";
 
 /**
  * Called right after a new row is inserted into `tests`.
@@ -33,9 +33,9 @@ export async function onTestCreated(
       if (!session?.team) return;
       await awardScore({
         teamId: session.team.id,
-        kind: 'test_created',
-        actor: { kind: 'bot', id: data.createdByBotId },
-        sourceType: 'test',
+        kind: "test_created",
+        actor: { kind: "bot", id: data.createdByBotId },
+        sourceType: "test",
         sourceId: testId,
       });
       return;
@@ -47,9 +47,9 @@ export async function onTestCreated(
       if (!session?.team) return;
       await awardScore({
         teamId: session.team.id,
-        kind: 'test_created',
-        actor: { kind: 'user', id: data.createdByUserId },
-        sourceType: 'test',
+        kind: "test_created",
+        actor: { kind: "user", id: data.createdByUserId },
+        sourceType: "test",
         sourceId: testId,
       });
       return;
@@ -59,16 +59,19 @@ export async function onTestCreated(
     const session = await getCurrentSession();
     if (!session?.user || !session?.team) return;
 
-    await db.update(tests).set({ createdByUserId: session.user.id }).where(eq(tests.id, testId));
+    await db
+      .update(tests)
+      .set({ createdByUserId: session.user.id })
+      .where(eq(tests.id, testId));
 
     await awardScore({
       teamId: session.team.id,
-      kind: 'test_created',
-      actor: { kind: 'user', id: session.user.id },
-      sourceType: 'test',
+      kind: "test_created",
+      actor: { kind: "user", id: session.user.id },
+      sourceType: "test",
       sourceId: testId,
     });
   } catch (err) {
-    console.error('[gamification] onTestCreated failed', err);
+    console.error("[gamification] onTestCreated failed", err);
   }
 }

@@ -1,4 +1,4 @@
-import Tesseract from 'tesseract.js';
+import Tesseract from "tesseract.js";
 
 let worker: Tesseract.Worker | null = null;
 let workerPromise: Promise<Tesseract.Worker> | null = null;
@@ -8,11 +8,11 @@ async function getWorker(): Promise<Tesseract.Worker> {
 
   // Deduplicate concurrent worker creation requests
   if (!workerPromise) {
-    console.log('[OCR] Creating Tesseract worker...');
-    workerPromise = Tesseract.createWorker('eng').then((w) => {
+    console.log("[OCR] Creating Tesseract worker...");
+    workerPromise = Tesseract.createWorker("eng").then((w) => {
       worker = w;
       workerPromise = null;
-      console.log('[OCR] Tesseract worker ready');
+      console.log("[OCR] Tesseract worker ready");
       return w;
     });
   }
@@ -42,23 +42,27 @@ export async function extractText(imageBuffer: Buffer): Promise<string | null> {
         return w.recognize(imageBuffer);
       })(),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('OCR timeout')), timeoutMs)
+        setTimeout(() => reject(new Error("OCR timeout")), timeoutMs),
       ),
     ]);
 
     const { data } = result as Tesseract.RecognizeResult;
     const text = data.text.trim();
-    console.log(`[OCR] Recognition result: confidence=${data.confidence.toFixed(1)}%, text="${text.slice(0, 50)}"`);
+    console.log(
+      `[OCR] Recognition result: confidence=${data.confidence.toFixed(1)}%, text="${text.slice(0, 50)}"`,
+    );
 
     if (data.confidence < 60) {
-      console.warn(`[OCR] Rejected: confidence ${data.confidence.toFixed(1)}% < 60% threshold`);
+      console.warn(
+        `[OCR] Rejected: confidence ${data.confidence.toFixed(1)}% < 60% threshold`,
+      );
       return null;
     }
 
     return text.length > 0 ? text : null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg === 'OCR timeout') {
+    if (msg === "OCR timeout") {
       console.warn(`[OCR] Timed out after ${timeoutMs}ms`);
     } else {
       console.warn(`[OCR] Error: ${msg}`);
@@ -77,7 +81,9 @@ export async function terminateWorker(): Promise<void> {
       try {
         const w = await workerPromise;
         await w.terminate();
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       workerPromise = null;
     }
     if (worker) {
@@ -89,12 +95,16 @@ export async function terminateWorker(): Promise<void> {
   try {
     await Promise.race([
       cleanup(),
-      new Promise<void>((resolve) => setTimeout(() => {
-        console.warn('[OCR] terminateWorker timed out after 3s, forcing cleanup');
-        worker = null;
-        workerPromise = null;
-        resolve();
-      }, 3000)),
+      new Promise<void>((resolve) =>
+        setTimeout(() => {
+          console.warn(
+            "[OCR] terminateWorker timed out after 3s, forcing cleanup",
+          );
+          worker = null;
+          workerPromise = null;
+          resolve();
+        }, 3000),
+      ),
     ]);
   } catch {
     worker = null;

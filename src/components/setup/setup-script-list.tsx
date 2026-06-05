@@ -1,34 +1,58 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Plus, Code, Globe, MoreVertical, Edit2, Trash2, Copy, Loader2 } from 'lucide-react';
-import { SetupScriptEditor } from './setup-script-editor';
-import { deleteSetupScript, duplicateSetupScript, getSetupScriptUsage } from '@/server/actions/setup-scripts';
-import { toast } from 'sonner';
-import type { SetupScript } from '@/lib/db/schema';
+} from "@/components/ui/dropdown-menu";
+import {
+  Plus,
+  Code,
+  Globe,
+  MoreVertical,
+  Edit2,
+  Trash2,
+  Copy,
+  Loader2,
+} from "lucide-react";
+import { SetupScriptEditor } from "./setup-script-editor";
+import {
+  deleteSetupScript,
+  duplicateSetupScript,
+  getSetupScriptUsage,
+} from "@/server/actions/setup-scripts";
+import { toast } from "sonner";
+import type { SetupScript } from "@/lib/db/schema";
 
 interface SetupScriptListProps {
   repositoryId: string;
   scripts: SetupScript[];
 }
 
-export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps) {
+export function SetupScriptList({
+  repositoryId,
+  scripts,
+}: SetupScriptListProps) {
   const router = useRouter();
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<SetupScript | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const [usageMap, setUsageMap] = useState<Map<string, { testCount: number }>>(new Map());
+  const [usageMap, setUsageMap] = useState<Map<string, { testCount: number }>>(
+    new Map(),
+  );
 
   const handleCreate = () => {
     setEditingScript(null);
@@ -41,15 +65,17 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this script?')) return;
+    if (!confirm("Are you sure you want to delete this script?")) return;
 
     setDeletingId(id);
     try {
       await deleteSetupScript(id);
-      toast.success('Script deleted');
+      toast.success("Script deleted");
       router.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete script');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete script",
+      );
     } finally {
       setDeletingId(null);
     }
@@ -59,10 +85,12 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
     setDuplicatingId(id);
     try {
       await duplicateSetupScript(id);
-      toast.success('Script duplicated');
+      toast.success("Script duplicated");
       router.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to duplicate script');
+      toast.error(
+        error instanceof Error ? error.message : "Failed to duplicate script",
+      );
     } finally {
       setDuplicatingId(null);
     }
@@ -72,7 +100,9 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
     if (usageMap.has(id)) return;
     try {
       const usage = await getSetupScriptUsage(id);
-      setUsageMap(prev => new Map(prev).set(id, { testCount: usage.testCount }));
+      setUsageMap((prev) =>
+        new Map(prev).set(id, { testCount: usage.testCount }),
+      );
     } catch {
       // Ignore errors
     }
@@ -104,7 +134,9 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
             <div className="text-center py-8 text-muted-foreground">
               <Code className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="mb-2">No setup scripts yet</p>
-              <p className="text-sm">Create a script to automate test preparation.</p>
+              <p className="text-sm">
+                Create a script to automate test preparation.
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -117,14 +149,16 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
                     onMouseEnter={() => loadUsage(script.id)}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      {script.type === 'playwright' ? (
+                      {script.type === "playwright" ? (
                         <Code className="h-5 w-5 text-blue-500 shrink-0" />
                       ) : (
                         <Globe className="h-5 w-5 text-green-500 shrink-0" />
                       )}
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium truncate">{script.name}</span>
+                          <span className="font-medium truncate">
+                            {script.name}
+                          </span>
                           <Badge variant="outline" className="shrink-0">
                             {script.type}
                           </Badge>
@@ -136,7 +170,8 @@ export function SetupScriptList({ repositoryId, scripts }: SetupScriptListProps)
                         )}
                         {usage && usage.testCount > 0 && (
                           <p className="text-xs text-muted-foreground mt-1">
-                            Used by {usage.testCount} test{usage.testCount !== 1 ? 's' : ''}
+                            Used by {usage.testCount} test
+                            {usage.testCount !== 1 ? "s" : ""}
                           </p>
                         )}
                       </div>

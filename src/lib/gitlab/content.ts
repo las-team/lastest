@@ -3,7 +3,8 @@
  * Uses GitLab Repository API for file access without local clones
  */
 
-const DEFAULT_GITLAB_INSTANCE = process.env.GITLAB_INSTANCE_URL || 'https://gitlab.com';
+const DEFAULT_GITLAB_INSTANCE =
+  process.env.GITLAB_INSTANCE_URL || "https://gitlab.com";
 
 // Simple in-memory cache with TTL
 const cache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -25,7 +26,7 @@ function setCache(key: string, data: unknown): void {
 export interface TreeEntry {
   id: string;
   name: string;
-  type: 'blob' | 'tree';
+  type: "blob" | "tree";
   path: string;
   mode: string;
 }
@@ -39,7 +40,7 @@ export interface FileContent {
   file_path: string;
   size: number;
   content: string; // Base64 encoded
-  encoding: 'base64';
+  encoding: "base64";
   ref: string;
   blob_id: string;
   commit_id: string;
@@ -63,7 +64,7 @@ export async function getRepoTree(
   accessToken: string,
   projectId: number,
   branch: string,
-  instanceUrl?: string
+  instanceUrl?: string,
 ): Promise<TreeEntry[] | null> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
   const cacheKey = `gitlab:tree:${projectId}:${branch}`;
@@ -77,7 +78,7 @@ export async function getRepoTree(
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -98,7 +99,7 @@ export async function getFileContent(
   projectId: number,
   path: string,
   ref: string,
-  instanceUrl?: string
+  instanceUrl?: string,
 ): Promise<string | null> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
   const cacheKey = `gitlab:file:${projectId}:${ref}:${path}`;
@@ -114,7 +115,7 @@ export async function getFileContent(
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -122,7 +123,7 @@ export async function getFileContent(
     const data: FileContent = await response.json();
 
     // Decode base64 content
-    const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
     setCache(cacheKey, content);
     return content;
   } catch {
@@ -137,7 +138,7 @@ export async function getBranchInfo(
   accessToken: string,
   projectId: number,
   branch: string,
-  instanceUrl?: string
+  instanceUrl?: string,
 ): Promise<BranchInfo | null> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
 
@@ -148,7 +149,7 @@ export async function getBranchInfo(
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
-      }
+      },
     );
 
     if (!response.ok) return null;
@@ -190,7 +191,7 @@ export async function compareBranches(
   projectId: number,
   baseBranch: string,
   headBranch: string,
-  instanceUrl?: string
+  instanceUrl?: string,
 ): Promise<CompareResult | null> {
   const baseUrl = instanceUrl || DEFAULT_GITLAB_INSTANCE;
   const cacheKey = `gitlab:compare:${projectId}:${baseBranch}...${headBranch}`;
@@ -204,7 +205,7 @@ export async function compareBranches(
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -226,14 +227,14 @@ export async function compareBranches(
  * Filter tree entries by glob-like pattern
  */
 export function filterTree(tree: TreeEntry[], patterns: string[]): TreeEntry[] {
-  return tree.filter(entry => {
-    return patterns.some(pattern => {
+  return tree.filter((entry) => {
+    return patterns.some((pattern) => {
       // Convert glob pattern to regex
       const regexPattern = pattern
-        .replace(/\*\*/g, '<<DOUBLESTAR>>')
-        .replace(/\*/g, '[^/]*')
-        .replace(/<<DOUBLESTAR>>/g, '.*')
-        .replace(/\//g, '\\/');
+        .replace(/\*\*/g, "<<DOUBLESTAR>>")
+        .replace(/\*/g, "[^/]*")
+        .replace(/<<DOUBLESTAR>>/g, ".*")
+        .replace(/\//g, "\\/");
       const regex = new RegExp(`^${regexPattern}$`);
       return regex.test(entry.path);
     });
@@ -244,17 +245,23 @@ export function filterTree(tree: TreeEntry[], patterns: string[]): TreeEntry[] {
  * Check if a path exists in the tree
  */
 export function pathExists(tree: TreeEntry[], path: string): boolean {
-  return tree.some(entry => entry.path === path || entry.path.startsWith(path + '/'));
+  return tree.some(
+    (entry) => entry.path === path || entry.path.startsWith(path + "/"),
+  );
 }
 
 /**
  * Get all files in a directory from the tree
  */
-export function getFilesInDirectory(tree: TreeEntry[], directory: string): TreeEntry[] {
-  const normalizedDir = directory.endsWith('/') ? directory : directory + '/';
-  return tree.filter(entry =>
-    entry.type === 'blob' &&
-    entry.path.startsWith(normalizedDir === '/' ? '' : normalizedDir)
+export function getFilesInDirectory(
+  tree: TreeEntry[],
+  directory: string,
+): TreeEntry[] {
+  const normalizedDir = directory.endsWith("/") ? directory : directory + "/";
+  return tree.filter(
+    (entry) =>
+      entry.type === "blob" &&
+      entry.path.startsWith(normalizedDir === "/" ? "" : normalizedDir),
   );
 }
 

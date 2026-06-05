@@ -1,10 +1,16 @@
-import fs from 'fs';
-import path from 'path';
-import crypto from 'crypto';
-import { PNG } from 'pngjs';
-import pixelmatch from 'pixelmatch';
-import type { AlignmentSegment, DiffMetadata, DiffEngineType, PageShiftInfo, RegionDetectionMode } from '../db/schema';
-import { runDiffEngine } from './engines';
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import { PNG } from "pngjs";
+import pixelmatch from "pixelmatch";
+import type {
+  AlignmentSegment,
+  DiffMetadata,
+  DiffEngineType,
+  PageShiftInfo,
+  RegionDetectionMode,
+} from "../db/schema";
+import { runDiffEngine } from "./engines";
 
 export interface Rectangle {
   x: number;
@@ -27,7 +33,7 @@ export interface DiffResult {
 }
 
 // Alignment operation types for LCS row alignment
-type AlignOp = 'match' | 'insert' | 'delete';
+type AlignOp = "match" | "insert" | "delete";
 
 /**
  * Maximum number of DP cells (m * n) for the LCS alignment.
@@ -39,8 +45,8 @@ const MAX_LCS_CELLS = 50_000_000;
 
 interface AlignmentResult {
   ops: AlignOp[];
-  baselineRows: number[];  // maps aligned row index -> baseline row (-1 for inserts)
-  currentRows: number[];   // maps aligned row index -> current row (-1 for deletes)
+  baselineRows: number[]; // maps aligned row index -> baseline row (-1 for inserts)
+  currentRows: number[]; // maps aligned row index -> current row (-1 for deletes)
   insertedRows: number;
   deletedRows: number;
   matchedRows: number;
@@ -69,7 +75,11 @@ function compressOpsToSegments(ops: AlignOp[]): AlignmentSegment[] {
  * Detect background color by sampling corners and edges of the image.
  * Returns the most common color found in these areas.
  */
-function detectBackgroundColor(data: Buffer, width: number, height: number): { r: number; g: number; b: number } {
+function detectBackgroundColor(
+  data: Buffer,
+  width: number,
+  height: number,
+): { r: number; g: number; b: number } {
   const samples: Map<string, number> = new Map();
 
   // Sample corners and edges
@@ -97,7 +107,7 @@ function detectBackgroundColor(data: Buffer, width: number, height: number): { r
   for (const [key, count] of samples) {
     if (count > maxCount) {
       maxCount = count;
-      const [r, g, b] = key.split(',').map(Number);
+      const [r, g, b] = key.split(",").map(Number);
       bgColor = { r, g, b };
     }
   }
@@ -114,9 +124,12 @@ function calculateContentArea(
   width: number,
   height: number,
   bgColor: { r: number; g: number; b: number },
-  tolerance: number = 30
+  tolerance: number = 30,
 ): { contentPixels: number; boundingBox: Rectangle | null } {
-  let minX = width, minY = height, maxX = 0, maxY = 0;
+  let minX = width,
+    minY = height,
+    maxX = 0,
+    maxY = 0;
   let contentPixels = 0;
 
   for (let y = 0; y < height; y++) {
@@ -161,11 +174,15 @@ function calculateContentArea(
  * We use MD5 because we only need collision resistance within a single image pair,
  * and it's significantly faster than SHA256 for this use case.
  */
-function _hashRow(data: Buffer | Uint8Array, width: number, row: number): string {
+function _hashRow(
+  data: Buffer | Uint8Array,
+  width: number,
+  row: number,
+): string {
   const start = row * width * 4;
   const end = start + width * 4;
   const slice = Buffer.from(data.buffer, data.byteOffset + start, end - start);
-  return crypto.createHash('md5').update(slice).digest('hex');
+  return crypto.createHash("md5").update(slice).digest("hex");
 }
 
 /**
@@ -173,17 +190,21 @@ function _hashRow(data: Buffer | Uint8Array, width: number, row: number): string
  * Shift each RGB channel right by 4 bits (16 levels) so sub-pixel rendering
  * differences hash identically. Alpha is kept as-is.
  */
-function hashRowQuantized(data: Buffer | Uint8Array, width: number, row: number): string {
+function hashRowQuantized(
+  data: Buffer | Uint8Array,
+  width: number,
+  row: number,
+): string {
   const rowBytes = width * 4;
   const start = row * rowBytes;
   const quantized = Buffer.allocUnsafe(rowBytes);
   for (let i = 0; i < rowBytes; i += 4) {
-    quantized[i]     = data[start + i] >> 4;      // R
-    quantized[i + 1] = data[start + i + 1] >> 4;  // G
-    quantized[i + 2] = data[start + i + 2] >> 4;  // B
-    quantized[i + 3] = data[start + i + 3];        // A unchanged
+    quantized[i] = data[start + i] >> 4; // R
+    quantized[i + 1] = data[start + i + 1] >> 4; // G
+    quantized[i + 2] = data[start + i + 2] >> 4; // B
+    quantized[i + 3] = data[start + i + 3]; // A unchanged
   }
-  return crypto.createHash('md5').update(quantized).digest('hex');
+  return crypto.createHash("md5").update(quantized).digest("hex");
 }
 
 /**
@@ -198,13 +219,24 @@ function rowDiffRatioPixelmatch(
   rowA: number,
   rowB: number,
   threshold: number,
-  includeAA: boolean
+  includeAA: boolean,
 ): number {
   const rowBytes = width * 4;
-  const rowDataA = Buffer.from(dataA.buffer, dataA.byteOffset + rowA * rowBytes, rowBytes);
-  const rowDataB = Buffer.from(dataB.buffer, dataB.byteOffset + rowB * rowBytes, rowBytes);
+  const rowDataA = Buffer.from(
+    dataA.buffer,
+    dataA.byteOffset + rowA * rowBytes,
+    rowBytes,
+  );
+  const rowDataB = Buffer.from(
+    dataB.buffer,
+    dataB.byteOffset + rowB * rowBytes,
+    rowBytes,
+  );
   const output = new Uint8Array(rowBytes);
-  const diff = pixelmatch(rowDataA, rowDataB, output, width, 1, { threshold, includeAA });
+  const diff = pixelmatch(rowDataA, rowDataB, output, width, 1, {
+    threshold,
+    includeAA,
+  });
   return diff / width;
 }
 
@@ -223,16 +255,20 @@ function alignRows(
   baselineHeight: number,
   currentData: Buffer | Uint8Array,
   currentWidth: number,
-  currentHeight: number
+  currentHeight: number,
 ): AlignmentResult {
   // Both images must have the same width for row alignment
   if (baselineWidth !== currentWidth) {
     // Fall back: no alignment possible with different widths
     const maxH = Math.max(baselineHeight, currentHeight);
     return {
-      ops: Array(maxH).fill('match' as AlignOp),
-      baselineRows: Array.from({ length: maxH }, (_, i) => i < baselineHeight ? i : -1),
-      currentRows: Array.from({ length: maxH }, (_, i) => i < currentHeight ? i : -1),
+      ops: Array(maxH).fill("match" as AlignOp),
+      baselineRows: Array.from({ length: maxH }, (_, i) =>
+        i < baselineHeight ? i : -1,
+      ),
+      currentRows: Array.from({ length: maxH }, (_, i) =>
+        i < currentHeight ? i : -1,
+      ),
       insertedRows: Math.max(0, currentHeight - baselineHeight),
       deletedRows: Math.max(0, baselineHeight - currentHeight),
       matchedRows: Math.min(baselineHeight, currentHeight),
@@ -250,18 +286,18 @@ function alignRows(
     const currentRows: number[] = [];
     // Match rows 1:1 up to the shorter image
     for (let y = 0; y < minH; y++) {
-      ops.push('match');
+      ops.push("match");
       baselineRows.push(y);
       currentRows.push(y);
     }
     // Remaining rows are inserts or deletes
     for (let y = minH; y < maxH; y++) {
       if (currentHeight > baselineHeight) {
-        ops.push('insert');
+        ops.push("insert");
         baselineRows.push(-1);
         currentRows.push(y);
       } else {
-        ops.push('delete');
+        ops.push("delete");
         baselineRows.push(y);
         currentRows.push(-1);
       }
@@ -292,7 +328,10 @@ function alignRows(
   const n = currentHeight;
 
   // Full DP table for traceback
-  const dp: Uint32Array[] = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+  const dp: Uint32Array[] = Array.from(
+    { length: m + 1 },
+    () => new Uint32Array(n + 1),
+  );
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -308,22 +347,23 @@ function alignRows(
   const ops: AlignOp[] = [];
   const baselineRows: number[] = [];
   const currentRows: number[] = [];
-  let i = m, j = n;
+  let i = m,
+    j = n;
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && baselineHashes[i - 1] === currentHashes[j - 1]) {
-      ops.push('match');
+      ops.push("match");
       baselineRows.push(i - 1);
       currentRows.push(j - 1);
       i--;
       j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      ops.push('insert');
+      ops.push("insert");
       baselineRows.push(-1);
       currentRows.push(j - 1);
       j--;
     } else {
-      ops.push('delete');
+      ops.push("delete");
       baselineRows.push(i - 1);
       currentRows.push(-1);
       i--;
@@ -335,11 +375,18 @@ function alignRows(
   baselineRows.reverse();
   currentRows.reverse();
 
-  const insertedRows = ops.filter(o => o === 'insert').length;
-  const deletedRows = ops.filter(o => o === 'delete').length;
-  const matchedRows = ops.filter(o => o === 'match').length;
+  const insertedRows = ops.filter((o) => o === "insert").length;
+  const deletedRows = ops.filter((o) => o === "delete").length;
+  const matchedRows = ops.filter((o) => o === "match").length;
 
-  return { ops, baselineRows, currentRows, insertedRows, deletedRows, matchedRows };
+  return {
+    ops,
+    baselineRows,
+    currentRows,
+    insertedRows,
+    deletedRows,
+    matchedRows,
+  };
 }
 
 /**
@@ -355,7 +402,7 @@ function fuzzyMatchUnalignedRows(
   width: number,
   threshold: number,
   includeAA: boolean,
-  maxDiffRatio: number = 0.5
+  maxDiffRatio: number = 0.5,
 ): AlignmentResult {
   const ops = [...alignment.ops];
   const baselineRows = [...alignment.baselineRows];
@@ -368,13 +415,13 @@ function fuzzyMatchUnalignedRows(
   while (i < ops.length) {
     // Find a block of deletes
     const delStart = i;
-    while (i < ops.length && ops[i] === 'delete') i++;
+    while (i < ops.length && ops[i] === "delete") i++;
     const delEnd = i;
     const delCount = delEnd - delStart;
 
     // Find a following block of inserts
     const insStart = i;
-    while (i < ops.length && ops[i] === 'insert') i++;
+    while (i < ops.length && ops[i] === "insert") i++;
     const insEnd = i;
     const insCount = insEnd - insStart;
 
@@ -382,7 +429,7 @@ function fuzzyMatchUnalignedRows(
     if (delCount === 0 && insCount > 0) {
       // Check if inserts are followed by deletes
       const delStart2 = i;
-      while (i < ops.length && ops[i] === 'delete') i++;
+      while (i < ops.length && ops[i] === "delete") i++;
       const delEnd2 = i;
       const delCount2 = delEnd2 - delStart2;
 
@@ -396,11 +443,19 @@ function fuzzyMatchUnalignedRows(
           const bRow = baselineRows[di];
           if (cRow === -1 || bRow === -1) continue;
 
-          const ratio = rowDiffRatioPixelmatch(baselineData, currentData, width, bRow, cRow, threshold, includeAA);
+          const ratio = rowDiffRatioPixelmatch(
+            baselineData,
+            currentData,
+            width,
+            bRow,
+            cRow,
+            threshold,
+            includeAA,
+          );
           if (ratio < maxDiffRatio) {
-            ops[ii] = 'match';
+            ops[ii] = "match";
             baselineRows[ii] = bRow;
-            ops[di] = 'match' as AlignOp;
+            ops[di] = "match" as AlignOp;
             baselineRows[di] = -2;
             currentRows[di] = -2;
           }
@@ -423,12 +478,20 @@ function fuzzyMatchUnalignedRows(
       const cRow = currentRows[ii];
       if (bRow === -1 || cRow === -1) continue;
 
-      const ratio = rowDiffRatioPixelmatch(baselineData, currentData, width, bRow, cRow, threshold, includeAA);
+      const ratio = rowDiffRatioPixelmatch(
+        baselineData,
+        currentData,
+        width,
+        bRow,
+        cRow,
+        threshold,
+        includeAA,
+      );
       if (ratio < maxDiffRatio) {
         // Keep the delete position as 'match' with both row refs, remove the insert
-        ops[di] = 'match';
+        ops[di] = "match";
         currentRows[di] = cRow;
-        ops[ii] = 'match' as AlignOp;
+        ops[ii] = "match" as AlignOp;
         baselineRows[ii] = -2;
         currentRows[ii] = -2;
       }
@@ -451,9 +514,9 @@ function fuzzyMatchUnalignedRows(
     ops: finalOps,
     baselineRows: finalBaselineRows,
     currentRows: finalCurrentRows,
-    insertedRows: finalOps.filter(o => o === 'insert').length,
-    deletedRows: finalOps.filter(o => o === 'delete').length,
-    matchedRows: finalOps.filter(o => o === 'match').length,
+    insertedRows: finalOps.filter((o) => o === "insert").length,
+    deletedRows: finalOps.filter((o) => o === "delete").length,
+    matchedRows: finalOps.filter((o) => o === "match").length,
   };
 }
 
@@ -468,7 +531,7 @@ function buildAlignedImages(
   width: number,
   alignment: AlignmentResult,
   baselineBg: { r: number; g: number; b: number },
-  currentBg: { r: number; g: number; b: number }
+  currentBg: { r: number; g: number; b: number },
 ): { alignedBaseline: Buffer; alignedCurrent: Buffer; alignedHeight: number } {
   const alignedHeight = alignment.ops.length;
   const rowBytes = width * 4;
@@ -480,14 +543,20 @@ function buildAlignedImages(
     const op = alignment.ops[i];
     const destOffset = i * rowBytes;
 
-    if (op === 'match') {
+    if (op === "match") {
       const bRow = alignment.baselineRows[i];
       const cRow = alignment.currentRows[i];
-      Buffer.from(baselineData.buffer, baselineData.byteOffset + bRow * rowBytes, rowBytes)
-        .copy(alignedBaseline, destOffset);
-      Buffer.from(currentData.buffer, currentData.byteOffset + cRow * rowBytes, rowBytes)
-        .copy(alignedCurrent, destOffset);
-    } else if (op === 'insert') {
+      Buffer.from(
+        baselineData.buffer,
+        baselineData.byteOffset + bRow * rowBytes,
+        rowBytes,
+      ).copy(alignedBaseline, destOffset);
+      Buffer.from(
+        currentData.buffer,
+        currentData.byteOffset + cRow * rowBytes,
+        rowBytes,
+      ).copy(alignedCurrent, destOffset);
+    } else if (op === "insert") {
       // No baseline row — fill with baseline background color
       for (let x = 0; x < width; x++) {
         const off = destOffset + x * 4;
@@ -497,13 +566,19 @@ function buildAlignedImages(
         alignedBaseline[off + 3] = 255;
       }
       const cRow = alignment.currentRows[i];
-      Buffer.from(currentData.buffer, currentData.byteOffset + cRow * rowBytes, rowBytes)
-        .copy(alignedCurrent, destOffset);
+      Buffer.from(
+        currentData.buffer,
+        currentData.byteOffset + cRow * rowBytes,
+        rowBytes,
+      ).copy(alignedCurrent, destOffset);
     } else {
       // delete — no current row — fill with current background color
       const bRow = alignment.baselineRows[i];
-      Buffer.from(baselineData.buffer, baselineData.byteOffset + bRow * rowBytes, rowBytes)
-        .copy(alignedBaseline, destOffset);
+      Buffer.from(
+        baselineData.buffer,
+        baselineData.byteOffset + bRow * rowBytes,
+        rowBytes,
+      ).copy(alignedBaseline, destOffset);
       for (let x = 0; x < width; x++) {
         const off = destOffset + x * 4;
         alignedCurrent[off] = currentBg.r;
@@ -528,7 +603,7 @@ function buildShiftAwareDiffImage(
   currentData: Buffer | Uint8Array,
   alignedDiffData: Buffer | Uint8Array,
   width: number,
-  alignment: AlignmentResult
+  alignment: AlignmentResult,
 ): PNG {
   const totalHeight = alignment.ops.length;
   const diffImage = new PNG({ width, height: totalHeight });
@@ -538,11 +613,14 @@ function buildShiftAwareDiffImage(
     const op = alignment.ops[i];
     const destOffset = i * rowBytes;
 
-    if (op === 'match') {
+    if (op === "match") {
       // Copy diff data for matched rows (alignedDiffData includes all rows now)
-      Buffer.from(alignedDiffData.buffer, alignedDiffData.byteOffset + i * rowBytes, rowBytes)
-        .copy(diffImage.data as Buffer, destOffset);
-    } else if (op === 'insert') {
+      Buffer.from(
+        alignedDiffData.buffer,
+        alignedDiffData.byteOffset + i * rowBytes,
+        rowBytes,
+      ).copy(diffImage.data as Buffer, destOffset);
+    } else if (op === "insert") {
       // Green tint for inserted rows (new content)
       const cRow = alignment.currentRows[i];
       const srcOffset = cRow * rowBytes;
@@ -550,8 +628,11 @@ function buildShiftAwareDiffImage(
         const si = srcOffset + x * 4;
         const di = destOffset + x * 4;
         // Blend with green overlay
-        diffImage.data[di] = Math.floor(currentData[si] * 0.4);       // R dimmed
-        diffImage.data[di + 1] = Math.min(255, Math.floor(currentData[si + 1] * 0.4 + 150)); // G boosted
+        diffImage.data[di] = Math.floor(currentData[si] * 0.4); // R dimmed
+        diffImage.data[di + 1] = Math.min(
+          255,
+          Math.floor(currentData[si + 1] * 0.4 + 150),
+        ); // G boosted
         diffImage.data[di + 2] = Math.floor(currentData[si + 2] * 0.4); // B dimmed
         diffImage.data[di + 3] = 255;
       }
@@ -563,7 +644,10 @@ function buildShiftAwareDiffImage(
         const si = srcOffset + x * 4;
         const di = destOffset + x * 4;
         // Blend with red overlay
-        diffImage.data[di] = Math.min(255, Math.floor(baselineData[si] * 0.4 + 150));     // R boosted
+        diffImage.data[di] = Math.min(
+          255,
+          Math.floor(baselineData[si] * 0.4 + 150),
+        ); // R boosted
         diffImage.data[di + 1] = Math.floor(baselineData[si + 1] * 0.4); // G dimmed
         diffImage.data[di + 2] = Math.floor(baselineData[si + 2] * 0.4); // B dimmed
         diffImage.data[di + 3] = 255;
@@ -580,7 +664,11 @@ function buildShiftAwareDiffImage(
  */
 function padToHeight(img: PNG, targetHeight: number): PNG {
   if (img.height >= targetHeight) return img;
-  const padded = new PNG({ width: img.width, height: targetHeight, fill: true });
+  const padded = new PNG({
+    width: img.width,
+    height: targetHeight,
+    fill: true,
+  });
   // Copy existing image data
   (img.data as Buffer).copy(padded.data as Buffer, 0, 0, img.data.length);
   // Fill remaining rows with background color
@@ -606,7 +694,12 @@ function cropToWidth(img: PNG, targetWidth: number): PNG {
   for (let y = 0; y < img.height; y++) {
     const srcOffset = y * img.width * 4;
     const destOffset = y * targetWidth * 4;
-    (img.data as Buffer).copy(cropped.data as Buffer, destOffset, srcOffset, srcOffset + targetWidth * 4);
+    (img.data as Buffer).copy(
+      cropped.data as Buffer,
+      destOffset,
+      srcOffset,
+      srcOffset + targetWidth * 4,
+    );
   }
   return cropped;
 }
@@ -625,8 +718,8 @@ export async function generateDiff(
   includeAntiAliasing = false,
   ignoreRegions?: Rectangle[],
   ignorePageShift = false,
-  diffEngine: DiffEngineType = 'pixelmatch',
-  regionDetectionMode: RegionDetectionMode = 'grid',
+  diffEngine: DiffEngineType = "pixelmatch",
+  regionDetectionMode: RegionDetectionMode = "grid",
   focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
   let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
@@ -643,12 +736,23 @@ export async function generateDiff(
     current = cropToWidth(current, minWidth);
   }
 
-  const hasSameSize = baseline.width === current.width && baseline.height === current.height;
+  const hasSameSize =
+    baseline.width === current.width && baseline.height === current.height;
   const hasSameWidth = baseline.width === current.width;
 
   // Use shift-aware diffing when enabled and widths match
   if (ignorePageShift && hasSameWidth) {
-    return generateShiftAwareDiff(baseline, current, outputDir, threshold, includeAntiAliasing, ignoreRegions, diffEngine, regionDetectionMode, focusRegions);
+    return generateShiftAwareDiff(
+      baseline,
+      current,
+      outputDir,
+      threshold,
+      includeAntiAliasing,
+      ignoreRegions,
+      diffEngine,
+      regionDetectionMode,
+      focusRegions,
+    );
   }
 
   // Pad shorter image to match taller one when heights differ
@@ -661,7 +765,9 @@ export async function generateDiff(
       current = padToHeight(current, maxHeight);
     }
   } else if (!hasSameSize) {
-    throw new Error(`Image dimensions mismatch: baseline ${baseline.width}x${baseline.height}, current ${current.width}x${current.height}`);
+    throw new Error(
+      `Image dimensions mismatch: baseline ${baseline.width}x${baseline.height}, current ${current.width}x${current.height}`,
+    );
   }
 
   const { width, height } = baseline;
@@ -669,10 +775,10 @@ export async function generateDiff(
   // Apply ignore mask (blank inside) then focus mask (blank outside union).
   // Ignore takes priority inside a focus area: ignore rects get magenta-filled, then
   // focus-outside pass only touches pixels outside the focus union.
-  applyMask(baseline.data, width, height, ignoreRegions, 'inside');
-  applyMask(current.data, width, height, ignoreRegions, 'inside');
-  applyMask(baseline.data, width, height, focusRegions, 'outside');
-  applyMask(current.data, width, height, focusRegions, 'outside');
+  applyMask(baseline.data, width, height, ignoreRegions, "inside");
+  applyMask(current.data, width, height, ignoreRegions, "inside");
+  applyMask(baseline.data, width, height, focusRegions, "outside");
+  applyMask(current.data, width, height, focusRegions, "outside");
 
   const diff = new PNG({ width, height });
 
@@ -683,7 +789,7 @@ export async function generateDiff(
     width,
     height,
     threshold,
-    includeAntiAliasing
+    includeAntiAliasing,
   );
   const numDiffPixels = engineResult.diffPixelCount;
   Buffer.from(engineResult.diffData).copy(diff.data as Buffer);
@@ -695,20 +801,38 @@ export async function generateDiff(
   fs.writeFileSync(diffImagePath, PNG.sync.write(diff));
 
   // Calculate metadata
-  const changedRegions = regionDetectionMode === 'flood-fill'
-    ? findChangedRegionsFloodFill(diff.data, width, height)
-    : findChangedRegions(diff.data, width, height);
+  const changedRegions =
+    regionDetectionMode === "flood-fill"
+      ? findChangedRegionsFloodFill(diff.data, width, height)
+      : findChangedRegions(diff.data, width, height);
 
   const baselineBg = detectBackgroundColor(baseline.data, width, height);
   const currentBg = detectBackgroundColor(current.data, width, height);
-  const baselineContent = calculateContentArea(baseline.data, width, height, baselineBg);
-  const currentContent = calculateContentArea(current.data, width, height, currentBg);
+  const baselineContent = calculateContentArea(
+    baseline.data,
+    width,
+    height,
+    baselineBg,
+  );
+  const currentContent = calculateContentArea(
+    current.data,
+    width,
+    height,
+    currentBg,
+  );
 
-  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
+  const contentArea = Math.max(
+    baselineContent.contentPixels,
+    currentContent.contentPixels,
+    1,
+  );
   const contentPercentage = (numDiffPixels / contentArea) * 100;
   const percentageDifference = Math.min(contentPercentage, 100);
 
-  const changeCategories = categorizeChanges(changedRegions, percentageDifference);
+  const changeCategories = categorizeChanges(
+    changedRegions,
+    percentageDifference,
+  );
   const affectedComponents = detectAffectedComponents(changedRegions);
   const pageShift = detectPageShift(changedRegions);
 
@@ -735,12 +859,12 @@ export async function generateTextAwareDiffFromPaths(
   baselinePath: string,
   currentPath: string,
   outputDir: string,
-  options: import('./text-regions').TextAwareDiffOptions,
+  options: import("./text-regions").TextAwareDiffOptions,
   ignoreRegions?: Rectangle[],
-  regionDetectionMode: RegionDetectionMode = 'grid',
+  regionDetectionMode: RegionDetectionMode = "grid",
   focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
-  const { generateTextAwareDiff } = await import('./text-regions');
+  const { generateTextAwareDiff } = await import("./text-regions");
 
   let baseline: PNG = PNG.sync.read(fs.readFileSync(baselinePath));
   let current: PNG = PNG.sync.read(fs.readFileSync(currentPath));
@@ -759,17 +883,18 @@ export async function generateTextAwareDiffFromPaths(
   // Normalise heights (pad to taller)
   if (baseline.height !== current.height) {
     const maxHeight = Math.max(baseline.height, current.height);
-    if (baseline.height < maxHeight) baseline = padToHeight(baseline, maxHeight);
+    if (baseline.height < maxHeight)
+      baseline = padToHeight(baseline, maxHeight);
     if (current.height < maxHeight) current = padToHeight(current, maxHeight);
   }
 
   const { width, height } = baseline;
 
   // Apply ignore then focus masks (see generateDiff for ordering rationale).
-  applyMask(baseline.data, width, height, ignoreRegions, 'inside');
-  applyMask(current.data, width, height, ignoreRegions, 'inside');
-  applyMask(baseline.data, width, height, focusRegions, 'outside');
-  applyMask(current.data, width, height, focusRegions, 'outside');
+  applyMask(baseline.data, width, height, ignoreRegions, "inside");
+  applyMask(current.data, width, height, ignoreRegions, "inside");
+  applyMask(baseline.data, width, height, focusRegions, "outside");
+  applyMask(current.data, width, height, focusRegions, "outside");
 
   // Two-pass OCR diff
   const result = await generateTextAwareDiff(
@@ -790,17 +915,36 @@ export async function generateTextAwareDiffFromPaths(
   // Compute content-area-based percentage (same formula as generateDiff)
   const baselineBg = detectBackgroundColor(baseline.data, width, height);
   const currentBg = detectBackgroundColor(current.data, width, height);
-  const baselineContent = calculateContentArea(baseline.data, width, height, baselineBg);
-  const currentContent = calculateContentArea(current.data, width, height, currentBg);
-  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
+  const baselineContent = calculateContentArea(
+    baseline.data,
+    width,
+    height,
+    baselineBg,
+  );
+  const currentContent = calculateContentArea(
+    current.data,
+    width,
+    height,
+    currentBg,
+  );
+  const contentArea = Math.max(
+    baselineContent.contentPixels,
+    currentContent.contentPixels,
+    1,
+  );
   const contentPercentage = (result.diffPixelCount / contentArea) * 100;
-  const percentageDifference = Math.round(Math.min(contentPercentage, 100) * 100) / 100;
+  const percentageDifference =
+    Math.round(Math.min(contentPercentage, 100) * 100) / 100;
 
   // Metadata
-  const changedRegions = regionDetectionMode === 'flood-fill'
-    ? findChangedRegionsFloodFill(result.diffData, width, height)
-    : findChangedRegions(result.diffData, width, height);
-  const changeCategories = categorizeChanges(changedRegions, percentageDifference);
+  const changedRegions =
+    regionDetectionMode === "flood-fill"
+      ? findChangedRegionsFloodFill(result.diffData, width, height)
+      : findChangedRegions(result.diffData, width, height);
+  const changeCategories = categorizeChanges(
+    changedRegions,
+    percentageDifference,
+  );
   const affectedComponents = detectAffectedComponents(changedRegions);
 
   return {
@@ -831,42 +975,91 @@ async function generateShiftAwareDiff(
   threshold: number,
   includeAntiAliasing: boolean,
   ignoreRegions?: Rectangle[],
-  diffEngine: DiffEngineType = 'pixelmatch',
-  regionDetectionMode: RegionDetectionMode = 'grid',
+  diffEngine: DiffEngineType = "pixelmatch",
+  regionDetectionMode: RegionDetectionMode = "grid",
   focusRegions?: Rectangle[],
 ): Promise<DiffResult> {
   const width = baseline.width;
 
   // Blank ignore regions then focus-outside before alignment hashing.
-  applyMask(baseline.data, baseline.width, baseline.height, ignoreRegions, 'inside');
-  applyMask(current.data, current.width, current.height, ignoreRegions, 'inside');
-  applyMask(baseline.data, baseline.width, baseline.height, focusRegions, 'outside');
-  applyMask(current.data, current.width, current.height, focusRegions, 'outside');
+  applyMask(
+    baseline.data,
+    baseline.width,
+    baseline.height,
+    ignoreRegions,
+    "inside",
+  );
+  applyMask(
+    current.data,
+    current.width,
+    current.height,
+    ignoreRegions,
+    "inside",
+  );
+  applyMask(
+    baseline.data,
+    baseline.width,
+    baseline.height,
+    focusRegions,
+    "outside",
+  );
+  applyMask(
+    current.data,
+    current.width,
+    current.height,
+    focusRegions,
+    "outside",
+  );
 
   // Detect background colors before alignment (needed for blank-row fills)
-  const baselineBg = detectBackgroundColor(baseline.data, baseline.width, baseline.height);
-  const currentBg = detectBackgroundColor(current.data, current.width, current.height);
+  const baselineBg = detectBackgroundColor(
+    baseline.data,
+    baseline.width,
+    baseline.height,
+  );
+  const currentBg = detectBackgroundColor(
+    current.data,
+    current.width,
+    current.height,
+  );
 
   // Align rows using LCS, then fuzzy-match nearby insert/delete pairs
   // whose pixels are similar (anti-aliasing, font rendering differences)
   const rawAlignment = alignRows(
-    baseline.data, baseline.width, baseline.height,
-    current.data, current.width, current.height
+    baseline.data,
+    baseline.width,
+    baseline.height,
+    current.data,
+    current.width,
+    current.height,
   );
   const alignment = fuzzyMatchUnalignedRows(
-    rawAlignment, baseline.data, current.data, width, threshold, includeAntiAliasing
+    rawAlignment,
+    baseline.data,
+    current.data,
+    width,
+    threshold,
+    includeAntiAliasing,
   );
 
   // Build aligned buffers with ALL rows (insert/delete filled with bg color)
   const { alignedBaseline, alignedCurrent, alignedHeight } = buildAlignedImages(
-    baseline.data, current.data, width, alignment, baselineBg, currentBg
+    baseline.data,
+    current.data,
+    width,
+    alignment,
+    baselineBg,
+    currentBg,
   );
 
   // Save aligned images for side-by-side shift comparison view
   const ts = Date.now();
   const alignedBaselinePng = new PNG({ width, height: alignedHeight });
   Buffer.from(alignedBaseline).copy(alignedBaselinePng.data as Buffer);
-  const alignedBaselinePath = path.join(outputDir, `aligned-baseline-${ts}.png`);
+  const alignedBaselinePath = path.join(
+    outputDir,
+    `aligned-baseline-${ts}.png`,
+  );
   fs.writeFileSync(alignedBaselinePath, PNG.sync.write(alignedBaselinePng));
 
   const alignedCurrentPng = new PNG({ width, height: alignedHeight });
@@ -887,7 +1080,7 @@ async function generateShiftAwareDiff(
       width,
       alignedHeight,
       threshold,
-      includeAntiAliasing
+      includeAntiAliasing,
     );
     alignedDiffData = Buffer.from(alignedEngineResult.diffData);
   } else {
@@ -905,7 +1098,11 @@ async function generateShiftAwareDiff(
 
   // Build the full shift-aware diff image
   const diffImage = buildShiftAwareDiffImage(
-    baseline.data, current.data, alignedDiffData, width, alignment
+    baseline.data,
+    current.data,
+    alignedDiffData,
+    width,
+    alignment,
   );
 
   const diffFileName = `diff-${Date.now()}.png`;
@@ -916,7 +1113,7 @@ async function generateShiftAwareDiff(
   // which would compare content against background fill, inflating the percentage)
   let matchedRowDiffPixels = 0;
   for (let idx = 0; idx < alignment.ops.length; idx++) {
-    if (alignment.ops[idx] !== 'match') continue;
+    if (alignment.ops[idx] !== "match") continue;
     const bRow = alignment.baselineRows[idx];
     const cRow = alignment.currentRows[idx];
     if (bRow < 0 || cRow < 0) continue;
@@ -924,20 +1121,49 @@ async function generateShiftAwareDiff(
     const cStart = cRow * width * 4;
     const bSlice = baseline.data.subarray(bStart, bStart + width * 4);
     const cSlice = current.data.subarray(cStart, cStart + width * 4);
-    const rowResult = runDiffEngine(diffEngine, Buffer.from(bSlice), Buffer.from(cSlice), width, 1, threshold, includeAntiAliasing);
+    const rowResult = runDiffEngine(
+      diffEngine,
+      Buffer.from(bSlice),
+      Buffer.from(cSlice),
+      width,
+      1,
+      threshold,
+      includeAntiAliasing,
+    );
     matchedRowDiffPixels += rowResult.diffPixelCount;
   }
 
-  const baselineContent = calculateContentArea(baseline.data, baseline.width, baseline.height, baselineBg);
-  const currentContent = calculateContentArea(current.data, current.width, current.height, currentBg);
-  const contentArea = Math.max(baselineContent.contentPixels, currentContent.contentPixels, 1);
-  const percentageDiff = Math.min((matchedRowDiffPixels / contentArea) * 100, 100);
+  const baselineContent = calculateContentArea(
+    baseline.data,
+    baseline.width,
+    baseline.height,
+    baselineBg,
+  );
+  const currentContent = calculateContentArea(
+    current.data,
+    current.width,
+    current.height,
+    currentBg,
+  );
+  const contentArea = Math.max(
+    baselineContent.contentPixels,
+    currentContent.contentPixels,
+    1,
+  );
+  const percentageDiff = Math.min(
+    (matchedRowDiffPixels / contentArea) * 100,
+    100,
+  );
 
   // Find changed regions from the full aligned diff
-  const detectRegions = regionDetectionMode === 'flood-fill' ? findChangedRegionsFloodFill : findChangedRegions;
-  const changedRegions = alignedHeight > 0
-    ? detectRegions(alignedDiffData, width, alignedHeight)
-    : [];
+  const detectRegions =
+    regionDetectionMode === "flood-fill"
+      ? findChangedRegionsFloodFill
+      : findChangedRegions;
+  const changedRegions =
+    alignedHeight > 0
+      ? detectRegions(alignedDiffData, width, alignedHeight)
+      : [];
 
   const changeCategories = categorizeChanges(changedRegions, percentageDiff);
   const affectedComponents = detectAffectedComponents(changedRegions);
@@ -985,7 +1211,11 @@ async function generateShiftAwareDiff(
 /**
  * Compare and check if images are identical (for carry-forward)
  */
-export function imagesMatch(path1: string, path2: string, threshold = 0.1): boolean {
+export function imagesMatch(
+  path1: string,
+  path2: string,
+  threshold = 0.1,
+): boolean {
   try {
     const img1 = PNG.sync.read(fs.readFileSync(path1));
     const img2 = PNG.sync.read(fs.readFileSync(path2));
@@ -1002,7 +1232,7 @@ export function imagesMatch(path1: string, path2: string, threshold = 0.1): bool
       output,
       img1.width,
       img1.height,
-      { threshold }
+      { threshold },
     );
 
     return diffPixels === 0;
@@ -1015,7 +1245,12 @@ export function imagesMatch(path1: string, path2: string, threshold = 0.1): bool
  * Fill a rectangular region in an image buffer with solid magenta.
  * Used internally by applyMask.
  */
-function blankRect(data: Buffer, imgWidth: number, imgHeight: number, region: Rectangle): void {
+function blankRect(
+  data: Buffer,
+  imgWidth: number,
+  imgHeight: number,
+  region: Rectangle,
+): void {
   const x0 = Math.max(0, region.x);
   const y0 = Math.max(0, region.y);
   const x1 = Math.min(imgWidth, region.x + region.width);
@@ -1025,8 +1260,8 @@ function blankRect(data: Buffer, imgWidth: number, imgHeight: number, region: Re
     for (let x = x0; x < x1; x++) {
       const idx = (y * imgWidth + x) * 4;
       // Fill with magenta (same color in both images = zero diff)
-      data[idx] = 255;     // R
-      data[idx + 1] = 0;   // G
+      data[idx] = 255; // R
+      data[idx + 1] = 0; // G
       data[idx + 2] = 255; // B
       data[idx + 3] = 255; // A
     }
@@ -1044,11 +1279,11 @@ function applyMask(
   imgWidth: number,
   imgHeight: number,
   rects: Rectangle[] | undefined,
-  mode: 'inside' | 'outside',
+  mode: "inside" | "outside",
 ): void {
   if (!rects || rects.length === 0) return;
 
-  if (mode === 'inside') {
+  if (mode === "inside") {
     for (const r of rects) blankRect(data, imgWidth, imgHeight, r);
     return;
   }
@@ -1086,7 +1321,11 @@ function applyMask(
  * then groups adjacent cells into regions. This prevents sparse
  * scattered changes from merging into one giant region.
  */
-function findChangedRegions(diffData: Buffer, width: number, height: number): Rectangle[] {
+function findChangedRegions(
+  diffData: Buffer,
+  width: number,
+  height: number,
+): Rectangle[] {
   const CELL_SIZE = 32; // Grid cell size in pixels
   const CELL_THRESHOLD = 0.05; // 5% of cell pixels must differ to mark cell as changed
   const GAP_TOLERANCE = 1; // Adjacent cells within this gap are grouped together
@@ -1095,7 +1334,9 @@ function findChangedRegions(diffData: Buffer, width: number, height: number): Re
   const cellsY = Math.ceil(height / CELL_SIZE);
 
   // Count diff pixels per cell
-  const cellCounts: number[][] = Array.from({ length: cellsY }, () => Array(cellsX).fill(0));
+  const cellCounts: number[][] = Array.from({ length: cellsY }, () =>
+    Array(cellsX).fill(0),
+  );
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -1116,7 +1357,7 @@ function findChangedRegions(diffData: Buffer, width: number, height: number): Re
       const cellHeight = Math.min(CELL_SIZE, height - cy * CELL_SIZE);
       const cellPixels = cellWidth * cellHeight;
       return count / cellPixels >= CELL_THRESHOLD;
-    })
+    }),
   );
 
   // Group adjacent changed cells into regions using flood fill on the grid
@@ -1129,7 +1370,10 @@ function findChangedRegions(diffData: Buffer, width: number, height: number): Re
 
       // Flood fill on grid cells with gap tolerance
       const stack = [{ cx, cy }];
-      let minCX = cx, maxCX = cx, minCY = cy, maxCY = cy;
+      let minCX = cx,
+        maxCX = cx,
+        minCY = cy,
+        maxCY = cy;
 
       while (stack.length > 0) {
         const { cx: x, cy: y } = stack.pop()!;
@@ -1180,7 +1424,11 @@ function findChangedRegions(diffData: Buffer, width: number, height: number): Re
 const MIN_FLOOD_REGION_PIXELS = 25;
 const MIN_FLOOD_REGION_DIMENSION = 3;
 
-function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: number): Rectangle[] {
+function findChangedRegionsFloodFill(
+  diffData: Buffer,
+  width: number,
+  height: number,
+): Rectangle[] {
   const totalPixels = width * height;
   const labels = new Int32Array(totalPixels); // 0 = unlabeled
   let nextLabel = 1;
@@ -1201,9 +1449,14 @@ function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: nu
     const ra = find(a);
     const rb = find(b);
     if (ra === rb) return;
-    if (rank[ra] < rank[rb]) { parent[ra] = rb; }
-    else if (rank[ra] > rank[rb]) { parent[rb] = ra; }
-    else { parent[rb] = ra; rank[ra]++; }
+    if (rank[ra] < rank[rb]) {
+      parent[ra] = rb;
+    } else if (rank[ra] > rank[rb]) {
+      parent[rb] = ra;
+    } else {
+      parent[rb] = ra;
+      rank[ra]++;
+    }
   }
 
   // Pass 1: Scan L→R, T→B. For each diff pixel (alpha > 0), check 4 already-visited neighbors.
@@ -1215,10 +1468,22 @@ function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: nu
 
       // Neighbors already visited: top-left, top, top-right, left
       const neighbors: number[] = [];
-      if (y > 0 && x > 0)          { const n = (y - 1) * width + (x - 1); if (labels[n]) neighbors.push(labels[n]); }
-      if (y > 0)                     { const n = (y - 1) * width + x;       if (labels[n]) neighbors.push(labels[n]); }
-      if (y > 0 && x < width - 1)  { const n = (y - 1) * width + (x + 1); if (labels[n]) neighbors.push(labels[n]); }
-      if (x > 0)                     { const n = y * width + (x - 1);       if (labels[n]) neighbors.push(labels[n]); }
+      if (y > 0 && x > 0) {
+        const n = (y - 1) * width + (x - 1);
+        if (labels[n]) neighbors.push(labels[n]);
+      }
+      if (y > 0) {
+        const n = (y - 1) * width + x;
+        if (labels[n]) neighbors.push(labels[n]);
+      }
+      if (y > 0 && x < width - 1) {
+        const n = (y - 1) * width + (x + 1);
+        if (labels[n]) neighbors.push(labels[n]);
+      }
+      if (x > 0) {
+        const n = y * width + (x - 1);
+        if (labels[n]) neighbors.push(labels[n]);
+      }
 
       if (neighbors.length === 0) {
         // New component
@@ -1243,7 +1508,10 @@ function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: nu
   }
 
   // Pass 2: Resolve labels to canonical roots, accumulate bounding boxes per component
-  const bboxMap = new Map<number, { minX: number; minY: number; maxX: number; maxY: number; count: number }>();
+  const bboxMap = new Map<
+    number,
+    { minX: number; minY: number; maxX: number; maxY: number; count: number }
+  >();
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -1272,7 +1540,11 @@ function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: nu
   for (const box of bboxMap.values()) {
     const w = box.maxX - box.minX + 1;
     const h = box.maxY - box.minY + 1;
-    if (box.count < MIN_FLOOD_REGION_PIXELS || w < MIN_FLOOD_REGION_DIMENSION || h < MIN_FLOOD_REGION_DIMENSION) {
+    if (
+      box.count < MIN_FLOOD_REGION_PIXELS ||
+      w < MIN_FLOOD_REGION_DIMENSION ||
+      h < MIN_FLOOD_REGION_DIMENSION
+    ) {
       continue;
     }
     regions.push({ x: box.minX, y: box.minY, width: w, height: h });
@@ -1284,14 +1556,19 @@ function findChangedRegionsFloodFill(diffData: Buffer, width: number, height: nu
 /**
  * Categorize changes based on characteristics
  */
-function categorizeChanges(regions: Rectangle[], percentageDifference: number): DiffMetadata['changeCategories'] {
-  const categories: DiffMetadata['changeCategories'] = [];
+function categorizeChanges(
+  regions: Rectangle[],
+  percentageDifference: number,
+): DiffMetadata["changeCategories"] {
+  const categories: DiffMetadata["changeCategories"] = [];
 
-  if (percentageDifference > 5) categories.push('layout');
-  if (regions.some(r => r.width > 100 || r.height > 100)) categories.push('layout');
-  if (regions.some(r => r.width < 20 && r.height < 20)) categories.push('style');
+  if (percentageDifference > 5) categories.push("layout");
+  if (regions.some((r) => r.width > 100 || r.height > 100))
+    categories.push("layout");
+  if (regions.some((r) => r.width < 20 && r.height < 20))
+    categories.push("style");
 
-  if (categories.length === 0) categories.push('style');
+  if (categories.length === 0) categories.push("style");
 
   return categories;
 }
@@ -1302,42 +1579,42 @@ function categorizeChanges(regions: Rectangle[], percentageDifference: number): 
 function detectAffectedComponents(regions: Rectangle[]): string[] {
   const components: string[] = [];
 
-  regions.forEach(region => {
+  regions.forEach((region) => {
     const regionBottom = region.y + region.height;
     const regionRight = region.x + region.width;
 
     // Full page or main content (large regions)
     if (region.width > 800 || region.height > 400) {
-      components.push('main-content');
+      components.push("main-content");
       return;
     }
 
     // Sidebar (left or right edge, tall)
     if ((region.x < 50 || regionRight > 1200) && region.height > 200) {
-      components.push('sidebar');
+      components.push("sidebar");
       return;
     }
 
     // Header (top 100px, doesn't extend far down)
     if (region.y < 100 && regionBottom < 150) {
-      components.push('header');
+      components.push("header");
       return;
     }
 
     // Footer (bottom area)
     if (region.y > 500) {
-      components.push('footer');
+      components.push("footer");
       return;
     }
 
     // Button (small regions)
     if (region.width < 100 && region.height < 50) {
-      components.push('button');
+      components.push("button");
       return;
     }
 
     // Default
-    components.push('content');
+    components.push("content");
   });
 
   return Array.from(new Set(components));
@@ -1348,13 +1625,15 @@ function detectAffectedComponents(regions: Rectangle[]): string[] {
  * If multiple regions show the same vertical shift, it's likely a page-level shift
  * (e.g., banner added/removed, content insertion).
  */
-export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined {
+export function detectPageShift(
+  regions: Rectangle[],
+): PageShiftInfo | undefined {
   if (regions.length < 2) {
     return undefined;
   }
 
   // Calculate centroids for each region
-  const centroids: RegionCentroid[] = regions.map(r => ({
+  const centroids: RegionCentroid[] = regions.map((r) => ({
     x: r.x + r.width / 2,
     y: r.y + r.height / 2,
     region: r,
@@ -1362,7 +1641,7 @@ export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined
 
   // Analyze vertical shifts between regions
   // If most regions are at similar Y positions but shifted, it's a page shift
-  const yPositions = centroids.map(c => c.y).sort((a, b) => a - b);
+  const yPositions = centroids.map((c) => c.y).sort((a, b) => a - b);
 
   // Group regions by their Y position (with tolerance)
   const yGroups = new Map<number, number>();
@@ -1396,7 +1675,7 @@ export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined
     if (deltaY > 20) {
       const confidence = Math.min(
         (significantGroups[0][1] + significantGroups[1][1]) / regions.length,
-        1
+        1,
       );
 
       return {
@@ -1410,14 +1689,17 @@ export function detectPageShift(regions: Rectangle[]): PageShiftInfo | undefined
   // Check for uniform vertical shift across most regions
   // This handles cases where content shifted down/up uniformly
   if (regions.length >= 3) {
-    const heights = regions.map(r => r.y);
+    const heights = regions.map((r) => r.y);
     const avgY = heights.reduce((a, b) => a + b, 0) / heights.length;
 
     // Check if regions cluster in bottom half (content pushed down)
-    const bottomCount = heights.filter(y => y > avgY).length;
-    const topCount = heights.filter(y => y <= avgY).length;
+    const bottomCount = heights.filter((y) => y > avgY).length;
+    const topCount = heights.filter((y) => y <= avgY).length;
 
-    if (bottomCount >= regions.length * 0.7 || topCount >= regions.length * 0.7) {
+    if (
+      bottomCount >= regions.length * 0.7 ||
+      topCount >= regions.length * 0.7
+    ) {
       // Estimate shift from region distribution
       const minY = Math.min(...heights);
       const maxY = Math.max(...heights);

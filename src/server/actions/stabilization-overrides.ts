@@ -1,11 +1,14 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import * as queries from '@/lib/db/queries';
-import { requireTestOwnership } from '@/lib/auth/ownership';
-import type { StabilizationSettings } from '@/lib/db/schema';
+import { revalidatePath } from "next/cache";
+import * as queries from "@/lib/db/queries";
+import { requireTestOwnership } from "@/lib/auth/ownership";
+import type { StabilizationSettings } from "@/lib/db/schema";
 
-export async function saveTestStabilizationOverrides(testId: string, overrides: Partial<StabilizationSettings> | null) {
+export async function saveTestStabilizationOverrides(
+  testId: string,
+  overrides: Partial<StabilizationSettings> | null,
+) {
   await requireTestOwnership(testId);
   await queries.updateTestStabilizationOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);

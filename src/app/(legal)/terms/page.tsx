@@ -1,10 +1,12 @@
-import { LegalDoc } from '@/components/legal/legal-doc';
-import { TERMS_VERSION } from '@/lib/legal/versions';
+import { LegalDoc } from "@/components/legal/legal-doc";
+import { TERMS_VERSION } from "@/lib/legal/versions";
 
 export const metadata = {
-  title: 'Terms of Service - Lastest',
+  title: "Terms of Service - Lastest",
 };
 
 export default function TermsOfServicePage() {
-  return <LegalDoc slug="terms" title="Terms of Service" version={TERMS_VERSION} />;
+  return (
+    <LegalDoc slug="terms" title="Terms of Service" version={TERMS_VERSION} />
+  );
 }

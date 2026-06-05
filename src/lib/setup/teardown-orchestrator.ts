@@ -1,9 +1,9 @@
-import type { Page } from 'playwright';
-import type { SetupContext, SetupResult, SetupScript } from './types';
-import type { Test } from '@/lib/db/schema';
-import { runPlaywrightSetup, runTestAsSetup } from './script-runner';
-import { runApiSetup } from './api-seeder';
-import * as queries from '@/lib/db/queries';
+import type { Page } from "playwright";
+import type { SetupContext, SetupResult, SetupScript } from "./types";
+import type { Test } from "@/lib/db/schema";
+import { runPlaywrightSetup, runTestAsSetup } from "./script-runner";
+import { runApiSetup } from "./api-seeder";
+import * as queries from "@/lib/db/queries";
 
 /**
  * TeardownOrchestrator coordinates teardown execution after tests.
@@ -17,7 +17,7 @@ export class TeardownOrchestrator {
     teardownTestId: string | null | undefined,
     teardownScriptId: string | null | undefined,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const startTime = Date.now();
 
@@ -50,11 +50,13 @@ export class TeardownOrchestrator {
   async runTestAsTeardown(
     testId: string,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const test = await queries.getTest(testId);
     if (!test) {
-      console.warn(`Teardown test not found: ${testId} - skipping teardown (orphaned reference)`);
+      console.warn(
+        `Teardown test not found: ${testId} - skipping teardown (orphaned reference)`,
+      );
       return { success: true, duration: 0, variables: {} };
     }
 
@@ -67,29 +69,31 @@ export class TeardownOrchestrator {
   async runScript(
     scriptId: string,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const script = await queries.getSetupScript(scriptId);
     if (!script) {
-      console.warn(`Teardown script not found: ${scriptId} - skipping teardown (orphaned reference)`);
+      console.warn(
+        `Teardown script not found: ${scriptId} - skipping teardown (orphaned reference)`,
+      );
       return { success: true, duration: 0, variables: {} };
     }
 
-    if (script.type === 'playwright') {
+    if (script.type === "playwright") {
       return runPlaywrightSetup(page, script as SetupScript, context);
-    } else if (script.type === 'api') {
-      const configs = await queries.getSetupConfigs(script.repositoryId || '');
+    } else if (script.type === "api") {
+      const configs = await queries.getSetupConfigs(script.repositoryId || "");
       const config = configs[0];
       if (!config) {
         return {
           success: false,
-          error: 'No API config found for API teardown script',
+          error: "No API config found for API teardown script",
           duration: 0,
         };
       }
       const setupConfig = {
         ...config,
-        authType: config.authType as 'none' | 'bearer' | 'basic' | 'custom',
+        authType: config.authType as "none" | "bearer" | "basic" | "custom",
       };
       return runApiSetup(setupConfig, script as SetupScript, context);
     }
@@ -113,7 +117,7 @@ export class TeardownOrchestrator {
   async runTestTeardown(
     test: Test,
     page: Page,
-    context: SetupContext
+    context: SetupContext,
   ): Promise<SetupResult> {
     const startTime = Date.now();
     const errors: string[] = [];
@@ -122,8 +126,13 @@ export class TeardownOrchestrator {
       return { success: true, duration: 0, variables: {} };
     }
 
-    const defaultSteps = await queries.getDefaultTeardownSteps(test.repositoryId);
-    if (defaultSteps.length === 0 && !test.teardownOverrides?.extraSteps?.length) {
+    const defaultSteps = await queries.getDefaultTeardownSteps(
+      test.repositoryId,
+    );
+    if (
+      defaultSteps.length === 0 &&
+      !test.teardownOverrides?.extraSteps?.length
+    ) {
       return { success: true, duration: 0, variables: {} };
     }
 
@@ -132,8 +141,16 @@ export class TeardownOrchestrator {
 
     const activeDefaults = defaultSteps.filter((s) => !skippedIds.has(s.id));
 
-    const stepsToRun: Array<{ stepType: string; testId: string | null; scriptId: string | null }> = [
-      ...activeDefaults.map((s) => ({ stepType: s.stepType, testId: s.testId, scriptId: s.scriptId })),
+    const stepsToRun: Array<{
+      stepType: string;
+      testId: string | null;
+      scriptId: string | null;
+    }> = [
+      ...activeDefaults.map((s) => ({
+        stepType: s.stepType,
+        testId: s.testId,
+        scriptId: s.scriptId,
+      })),
     ];
 
     if (overrides?.extraSteps) {
@@ -149,17 +166,22 @@ export class TeardownOrchestrator {
     // Execute sequentially, but continue on failure (non-blocking)
     let currentContext = context;
     for (const step of stepsToRun) {
-      const stepTestId = step.stepType === 'test' ? step.testId : null;
-      const stepScriptId = step.stepType === 'script' ? step.scriptId : null;
+      const stepTestId = step.stepType === "test" ? step.testId : null;
+      const stepScriptId = step.stepType === "script" ? step.scriptId : null;
 
       // Prevent self-referential teardown
       if (stepTestId === test.id) continue;
 
       try {
-        const result = await this.resolveAndRunTeardown(stepTestId, stepScriptId, page, currentContext);
+        const result = await this.resolveAndRunTeardown(
+          stepTestId,
+          stepScriptId,
+          page,
+          currentContext,
+        );
         if (!result.success) {
           console.warn(`[teardown] Step failed: ${result.error}`);
-          errors.push(result.error || 'Unknown teardown error');
+          errors.push(result.error || "Unknown teardown error");
         }
         if (result.variables) {
           currentContext = {
@@ -176,7 +198,7 @@ export class TeardownOrchestrator {
 
     return {
       success: errors.length === 0,
-      error: errors.length > 0 ? errors.join('; ') : undefined,
+      error: errors.length > 0 ? errors.join("; ") : undefined,
       duration: Date.now() - startTime,
       variables: currentContext.variables,
     };
@@ -202,9 +224,13 @@ export async function testNeedsTeardown(test: Test): Promise<boolean> {
   }
 
   if (test.repositoryId) {
-    const defaultSteps = await queries.getDefaultTeardownSteps(test.repositoryId);
+    const defaultSteps = await queries.getDefaultTeardownSteps(
+      test.repositoryId,
+    );
     if (defaultSteps.length > 0) {
-      const skippedIds = new Set(test.teardownOverrides?.skippedDefaultStepIds ?? []);
+      const skippedIds = new Set(
+        test.teardownOverrides?.skippedDefaultStepIds ?? [],
+      );
       const hasActiveDefaults = defaultSteps.some((s) => !skippedIds.has(s.id));
       if (hasActiveDefaults) return true;
     }

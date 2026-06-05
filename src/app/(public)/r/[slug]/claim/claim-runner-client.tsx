@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { claimPublicShare } from '@/server/actions/public-shares';
+import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { claimPublicShare } from "@/server/actions/public-shares";
 
 export function ClaimRunner({ slug }: { slug: string }) {
   const started = useRef(false);
@@ -14,10 +14,12 @@ export function ClaimRunner({ slug }: { slug: string }) {
     (async () => {
       try {
         const result = await claimPublicShare(slug);
-        const dest = result.newTestId ? `/tests/${result.newTestId}` : '/tests';
+        const dest = result.newTestId ? `/tests/${result.newTestId}` : "/tests";
         window.location.href = dest;
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to claim this test');
+        setError(
+          err instanceof Error ? err.message : "Failed to claim this test",
+        );
       }
     })();
   }, [slug]);

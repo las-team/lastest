@@ -5,6 +5,7 @@ You are an autonomous research agent optimizing the **Play Agent pipeline** for 
 ## Setup (run once at start)
 
 1. Read all track programs to understand the experiment space:
+
    ```bash
    cat autoresearch/tracks/route-accuracy.md
    cat autoresearch/tracks/test-generation.md
@@ -13,9 +14,11 @@ You are an autonomous research agent optimizing the **Play Agent pipeline** for 
    ```
 
 2. Run baseline metrics from DB:
+
    ```bash
    pnpm tsx autoresearch/harness/metrics.ts --repo-id=REPO_ID
    ```
+
    (The caller provides REPO_ID as a CLI arg)
 
 3. Log baseline to `autoresearch/results.tsv`:
@@ -26,10 +29,12 @@ You are an autonomous research agent optimizing the **Play Agent pipeline** for 
 ## Scope — CRITICAL
 
 ### CAN modify
+
 - `src/lib/ai/prompts.ts` — ALL prompt templates (SYSTEM_PROMPT, createTestPrompt, createBranchAwareTestPrompt, createFixPrompt, createMcpFixPrompt, createEnhancePrompt, createUserStoryExtractionPrompt)
 - `src/server/actions/spec-import.ts` — ONLY the `groupAcceptanceCriteria` function (around line 890) and nearby AC grouping logic
 
 ### CANNOT modify
+
 - `autoresearch/harness/*.ts` — immutable evaluation harness
 - `autoresearch/tracks/*.md` — immutable track programs
 - `src/server/actions/play-agent.ts` — the pipeline itself
@@ -38,20 +43,22 @@ You are an autonomous research agent optimizing the **Play Agent pipeline** for 
 - Any other source files
 
 ### CANNOT do
+
 - Delete or rename exported functions
 - Change function signatures
 - Add new dependencies
 
 ## Metrics & Weights
 
-| Metric | Weight | Target | Source |
-|--------|--------|--------|--------|
-| `route_accuracy` | 3x | ≥ 0.95 | 1 - (404_failures / total) |
-| `auth_success` | 2x | 1.0 | 1 - (auth_redirect / total) |
-| `pass_rate` | 1x | ≥ 0.85 | passed / total |
-| `syntax_quality` | 1x | 1.0 | 1 - (syntax_errors / total) |
+| Metric           | Weight | Target | Source                      |
+| ---------------- | ------ | ------ | --------------------------- |
+| `route_accuracy` | 3x     | ≥ 0.95 | 1 - (404_failures / total)  |
+| `auth_success`   | 2x     | 1.0    | 1 - (auth_redirect / total) |
+| `pass_rate`      | 1x     | ≥ 0.85 | passed / total              |
+| `syntax_quality` | 1x     | 1.0    | 1 - (syntax_errors / total) |
 
 **Weighted score** for track selection:
+
 ```
 route_score    = route_accuracy * 3
 auth_score     = auth_success * 2
@@ -64,11 +71,13 @@ Pick the track with the **lowest** weighted score each iteration.
 ## The Loop — NEVER STOP
 
 ### 1. Get current metrics
+
 ```bash
 pnpm tsx autoresearch/harness/metrics.ts --repo-id=REPO_ID
 ```
 
 ### 2. Compute track scores & pick worst track
+
 From the metrics output, calculate weighted scores. Pick the track with lowest score.
 
 - If `route_accuracy < 0.95` → likely pick **route-accuracy**
@@ -77,51 +86,63 @@ From the metrics output, calculate weighted scores. Pick the track with lowest s
 - If all above are good but `pass_rate < 0.85` → pick **fix-loop** or **test-generation**
 
 ### 3. Read the track program
+
 ```bash
 cat autoresearch/tracks/<selected-track>.md
 ```
 
 ### 4. Read current prompts
+
 ```bash
 cat src/lib/ai/prompts.ts
 ```
 
 ### 5. Make ONE focused change
+
 - Pick one experiment from the track's experiment list, or invent your own
 - Make a single, focused modification scoped to that track
 - Keep changes small and testable
 
 ### 6. Commit the change
+
 ```bash
 git add src/lib/ai/prompts.ts
 git commit -m "autoresearch: [track] <brief description>"
 ```
+
 If also modifying spec-import.ts:
+
 ```bash
 git add src/lib/ai/prompts.ts src/server/actions/spec-import.ts
 git commit -m "autoresearch: [track] <brief description>"
 ```
 
 ### 7. Run fast eval for the track
+
 ```bash
 pnpm tsx autoresearch/harness/fast-eval.ts --track=<track-name> --repo-id=REPO_ID 2>autoresearch/fast-eval.log
 ```
 
 ### 8. Parse results
+
 ```bash
 grep "^track:\|^score:\|^passed:\|^failed:" autoresearch/fast-eval.log
 ```
+
 Also check stderr for any errors:
+
 ```bash
 tail -20 autoresearch/fast-eval.log
 ```
 
 ### 9. Log to results.tsv
+
 ```
 <commit>\t<pass_rate>\t<route_accuracy>\t<syntax_quality>\t<auth_success>\t<keep|revert>\t[track] <description>
 ```
 
 ### 10. Keep or revert
+
 - If track score **improved** → KEEP
 - If score **equal** and no regression on other tracks → KEEP
 - If score **decreased** → REVERT:
@@ -130,9 +151,11 @@ tail -20 autoresearch/fast-eval.log
   ```
 
 ### 11. Every 5th iteration: Full eval
+
 ```bash
 pnpm tsx autoresearch/harness/full-eval.ts --repo-id=REPO_ID > autoresearch/full-eval.log 2>&1
 ```
+
 This triggers an actual Play Agent run (10-15 min). Parse all metrics from the output.
 
 ### 12. Loop back to step 1

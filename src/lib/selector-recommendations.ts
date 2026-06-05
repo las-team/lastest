@@ -1,7 +1,7 @@
-import type { SelectorConfig, SelectorType } from './db/schema';
-import type { SelectorTypeStats } from './db/queries';
+import type { SelectorConfig, SelectorType } from "./db/schema";
+import type { SelectorTypeStats } from "./db/queries";
 
-export type RecommendationType = 'disable' | 'enable' | 'move_up';
+export type RecommendationType = "disable" | "enable" | "move_up";
 
 export interface SelectorRecommendation {
   type: RecommendationType;
@@ -17,7 +17,7 @@ const MOVE_UP_SUCCESS_RATE_DIFF = 20; // percentage difference
 
 export function calculateRecommendations(
   selectorPriority: SelectorConfig[],
-  stats: SelectorTypeStats[]
+  stats: SelectorTypeStats[],
 ): Map<SelectorType, SelectorRecommendation> {
   const recommendations = new Map<SelectorType, SelectorRecommendation>();
 
@@ -40,7 +40,7 @@ export function calculateRecommendations(
       const failureRate = 100 - stat.successRate;
       if (failureRate >= FAILURE_RATE_THRESHOLD) {
         recommendations.set(selector.type, {
-          type: 'disable',
+          type: "disable",
           reason: `${failureRate}% failure rate (${stat.totalFailures}/${stat.totalAttempts} attempts)`,
         });
       }
@@ -51,17 +51,24 @@ export function calculateRecommendations(
   // Only suggest enabling if all enabled selectors have low success AND the disabled one has good success
   const allEnabledHaveLowSuccess = enabledSelectors.every((s) => {
     const stat = statsMap.get(s.type);
-    return !stat || stat.totalAttempts === 0 || stat.successRate < LOW_SUCCESS_RATE_THRESHOLD;
+    return (
+      !stat ||
+      stat.totalAttempts === 0 ||
+      stat.successRate < LOW_SUCCESS_RATE_THRESHOLD
+    );
   });
 
-  if (allEnabledHaveLowSuccess && enabledSelectors.some((s) => statsMap.has(s.type))) {
+  if (
+    allEnabledHaveLowSuccess &&
+    enabledSelectors.some((s) => statsMap.has(s.type))
+  ) {
     for (const selector of disabledSelectors) {
       const stat = statsMap.get(selector.type);
       if (!stat || stat.totalAttempts === 0) continue;
 
       if (stat.successRate > ENABLE_SUCCESS_RATE_THRESHOLD) {
         recommendations.set(selector.type, {
-          type: 'enable',
+          type: "enable",
           reason: `${stat.successRate}% success rate could help (all enabled selectors < ${LOW_SUCCESS_RATE_THRESHOLD}%)`,
         });
       }
@@ -85,7 +92,8 @@ export function calculateRecommendations(
       if (!higherStat || higherStat.totalAttempts === 0) continue;
 
       // Skip if higher one is already recommended for disable
-      if (recommendations.get(higherSelector.type)?.type === 'disable') continue;
+      if (recommendations.get(higherSelector.type)?.type === "disable")
+        continue;
 
       const successDiff = stat.successRate - higherStat.successRate;
 
@@ -100,9 +108,9 @@ export function calculateRecommendations(
         if (hasFasterResponse || successDiff >= MOVE_UP_SUCCESS_RATE_DIFF) {
           const responsePart = hasFasterResponse
             ? `, ${stat.avgResponseTimeMs}ms vs ${higherStat.avgResponseTimeMs}ms`
-            : '';
+            : "";
           recommendations.set(selector.type, {
-            type: 'move_up',
+            type: "move_up",
             reason: `${stat.successRate}% success vs ${higherStat.successRate}% for ${higherSelector.type}${responsePart}`,
           });
           break; // Only show one move_up recommendation per selector

@@ -1,6 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { runInspection, listInspectableRuns } from '@/server/actions/inspector';
-import type { DiffEngineType, InspectorDimension, InspectorOptions } from '@/lib/db/schema';
+import { NextRequest, NextResponse } from "next/server";
+import { runInspection, listInspectableRuns } from "@/server/actions/inspector";
+import type {
+  DiffEngineType,
+  InspectorDimension,
+  InspectorOptions,
+} from "@/lib/db/schema";
 
 export async function GET(
   _request: NextRequest,
@@ -11,8 +15,8 @@ export async function GET(
     const runs = await listInspectableRuns(id);
     return NextResponse.json({ runs });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = message.startsWith('Forbidden') ? 403 : 400;
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message.startsWith("Forbidden") ? 403 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -34,11 +38,11 @@ export async function POST(
   try {
     body = (await request.json()) as InspectRequestBody;
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   if (!body.currentResultId || !body.baselineResultId) {
     return NextResponse.json(
-      { error: 'currentResultId and baselineResultId are required' },
+      { error: "currentResultId and baselineResultId are required" },
       { status: 400 },
     );
   }
@@ -54,8 +58,8 @@ export async function POST(
     });
     return NextResponse.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = message.startsWith('Forbidden') ? 403 : 400;
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message.startsWith("Forbidden") ? 403 : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }

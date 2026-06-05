@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import type { BackgroundJob } from '@/lib/db/schema';
+import { useState, useEffect, useCallback } from "react";
+import type { BackgroundJob } from "@/lib/db/schema";
 
 interface UseJobResultOptions {
   /** Polling interval in ms (default: 2000) */
@@ -28,7 +28,7 @@ interface UseJobResultReturn {
  */
 export function useJobResult(
   jobId: string | null,
-  options: UseJobResultOptions = {}
+  options: UseJobResultOptions = {},
 ): UseJobResultReturn {
   const { pollInterval = 2000, stopOnComplete = true } = options;
 
@@ -36,8 +36,8 @@ export function useJobResult(
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isComplete = job?.status === 'completed';
-  const isFailed = job?.status === 'failed';
+  const isComplete = job?.status === "completed";
+  const isFailed = job?.status === "failed";
 
   const fetchJob = useCallback(async () => {
     if (!jobId) return;
@@ -53,7 +53,7 @@ export function useJobResult(
       setJob(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch job');
+      setError(err instanceof Error ? err.message : "Failed to fetch job");
     } finally {
       setIsLoading(false);
     }

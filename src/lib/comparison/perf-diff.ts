@@ -9,7 +9,7 @@
  * We pair samples by stepIndex. Missing values on either side are skipped.
  */
 
-import type { WebVitalsSample, PerfDiffSummary } from '@/lib/db/schema';
+import type { WebVitalsSample, PerfDiffSummary } from "@/lib/db/schema";
 
 const DEFAULT_BUDGETS: Record<keyof typeof METRIC_DIRECTIONS, number> = {
   lcp: 2500,
@@ -24,12 +24,12 @@ const DEFAULT_BUDGETS: Record<keyof typeof METRIC_DIRECTIONS, number> = {
 // being positive means a regression. Kept as a map for future-proofing if a
 // "higher is better" metric is added.
 const METRIC_DIRECTIONS = {
-  lcp: 'lower' as const,
-  cls: 'lower' as const,
-  inp: 'lower' as const,
-  fcp: 'lower' as const,
-  tbt: 'lower' as const,
-  ttfb: 'lower' as const,
+  lcp: "lower" as const,
+  cls: "lower" as const,
+  inp: "lower" as const,
+  fcp: "lower" as const,
+  tbt: "lower" as const,
+  ttfb: "lower" as const,
 };
 
 type Metric = keyof typeof METRIC_DIRECTIONS;
@@ -48,8 +48,8 @@ export function computePerfDiff(
   const budgets = { ...DEFAULT_BUDGETS, ...(options.budgets ?? {}) };
   const driftThreshold = options.driftThreshold ?? 0.2;
 
-  const baseByIdx = new Map(baseline.map(s => [s.stepIndex ?? -1, s]));
-  const deltas: PerfDiffSummary['deltas'] = [];
+  const baseByIdx = new Map(baseline.map((s) => [s.stepIndex ?? -1, s]));
+  const deltas: PerfDiffSummary["deltas"] = [];
 
   for (const c of current) {
     const idx = c.stepIndex ?? -1;
@@ -58,7 +58,7 @@ export function computePerfDiff(
     for (const metric of Object.keys(METRIC_DIRECTIONS) as Metric[]) {
       const cv = c[metric];
       const bv = b[metric];
-      if (typeof cv !== 'number' || typeof bv !== 'number') continue;
+      if (typeof cv !== "number" || typeof bv !== "number") continue;
       const delta = cv - bv;
       const budget = budgets[metric];
       const budgetBreached = cv > budget;
@@ -69,8 +69,16 @@ export function computePerfDiff(
       const newlyBreached = budgetBreached && bv <= budget;
       // Drift: regressed by > driftThreshold AND moved by an absolute amount
       // worth flagging (avoids noise on tiny CLS deltas like 0.001 → 0.002).
-      const minAbsoluteDelta = metric === 'cls' ? 0.05 : metric === 'inp' || metric === 'tbt' ? 30 : 100;
-      const drifted = bv > 0 && delta / bv > driftThreshold && Math.abs(delta) >= minAbsoluteDelta;
+      const minAbsoluteDelta =
+        metric === "cls"
+          ? 0.05
+          : metric === "inp" || metric === "tbt"
+            ? 30
+            : 100;
+      const drifted =
+        bv > 0 &&
+        delta / bv > driftThreshold &&
+        Math.abs(delta) >= minAbsoluteDelta;
       if (delta !== 0 || budgetBreached) {
         deltas.push({
           stepIndex: c.stepIndex,
@@ -91,13 +99,17 @@ export function computePerfDiff(
 }
 
 export function summarizePerfDiff(d: PerfDiffSummary): string {
-  const newBreaches = d.deltas.filter(x => x.newlyBreached).length;
-  const existingBreaches = d.deltas.filter(x => x.budgetBreached && !x.newlyBreached).length;
-  const drifts = d.deltas.filter(x => x.drifted && !x.budgetBreached).length;
-  if (newBreaches === 0 && existingBreaches === 0 && drifts === 0) return 'Within budget';
+  const newBreaches = d.deltas.filter((x) => x.newlyBreached).length;
+  const existingBreaches = d.deltas.filter(
+    (x) => x.budgetBreached && !x.newlyBreached,
+  ).length;
+  const drifts = d.deltas.filter((x) => x.drifted && !x.budgetBreached).length;
+  if (newBreaches === 0 && existingBreaches === 0 && drifts === 0)
+    return "Within budget";
   const parts: string[] = [];
   if (newBreaches) parts.push(`${newBreaches} new breach(es)`);
-  if (existingBreaches) parts.push(`${existingBreaches} pre-existing breach(es)`);
+  if (existingBreaches)
+    parts.push(`${existingBreaches} pre-existing breach(es)`);
   if (drifts) parts.push(`${drifts} drift(s)`);
-  return parts.join(', ');
+  return parts.join(", ");
 }

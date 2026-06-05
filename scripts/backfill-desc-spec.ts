@@ -10,10 +10,10 @@
  *   pnpm tsx --env-file=.env.local scripts/backfill-desc-spec.ts
  *   pnpm tsx --env-file=.env.local scripts/backfill-desc-spec.ts --dry-run
  */
-import { sql } from '../src/lib/db';
-import { createHash } from 'node:crypto';
+import { sql } from "../src/lib/db";
+import { createHash } from "node:crypto";
 
-const dryRun = process.argv.includes('--dry-run');
+const dryRun = process.argv.includes("--dry-run");
 
 interface AreaRow {
   id: string;
@@ -44,8 +44,8 @@ async function columnExists(table: string, column: string): Promise<boolean> {
 }
 
 async function backfillAreas() {
-  if (!(await columnExists('functional_areas', 'description'))) {
-    console.log('[areas] description column already gone — skipping');
+  if (!(await columnExists("functional_areas", "description"))) {
+    console.log("[areas] description column already gone — skipping");
     return { migrated: 0, appended: 0, skipped: 0 };
   }
 
@@ -61,7 +61,7 @@ async function backfillAreas() {
 
   for (const row of rows) {
     const desc = row.description!.trim();
-    if (!row.agent_plan || row.agent_plan.trim() === '') {
+    if (!row.agent_plan || row.agent_plan.trim() === "") {
       if (!dryRun) {
         await sql`
           UPDATE functional_areas
@@ -90,8 +90,8 @@ async function backfillAreas() {
 }
 
 async function backfillTests() {
-  if (!(await columnExists('tests', 'description'))) {
-    console.log('[tests] description column already gone — skipping');
+  if (!(await columnExists("tests", "description"))) {
+    console.log("[tests] description column already gone — skipping");
     return { specsCreated: 0, conflicts: 0, skipped: 0 };
   }
 
@@ -116,14 +116,16 @@ async function backfillTests() {
       const oldDesc = row.description!.trim();
       if (!existingSpec[0].spec.includes(oldDesc)) {
         conflicts++;
-        console.warn(`[tests] conflict on ${row.id} ("${row.name}"): existing spec lacks the legacy description content. Skipping; merge manually if needed.`);
+        console.warn(
+          `[tests] conflict on ${row.id} ("${row.name}"): existing spec lacks the legacy description content. Skipping; merge manually if needed.`,
+        );
       } else {
         skipped++;
       }
       continue;
     }
 
-    const codeHash = createHash('sha256').update(row.code).digest('hex');
+    const codeHash = createHash("sha256").update(row.code).digest("hex");
     if (!dryRun) {
       const inserted = (await sql`
         INSERT INTO test_specs (id, repository_id, test_id, functional_area_id, title, spec, source, status, code_hash, created_at, updated_at)
@@ -142,22 +144,34 @@ async function backfillTests() {
 }
 
 async function main() {
-  console.log(dryRun ? 'DRY RUN — no writes will be made' : 'APPLYING backfill');
-  console.log('---');
+  console.log(
+    dryRun ? "DRY RUN — no writes will be made" : "APPLYING backfill",
+  );
+  console.log("---");
 
   const areaResult = await backfillAreas();
-  console.log(`[areas] migrated=${areaResult.migrated} appended=${areaResult.appended} skipped=${areaResult.skipped}`);
+  console.log(
+    `[areas] migrated=${areaResult.migrated} appended=${areaResult.appended} skipped=${areaResult.skipped}`,
+  );
 
   const testResult = await backfillTests();
-  console.log(`[tests] specs_created=${testResult.specsCreated} conflicts=${testResult.conflicts} skipped=${testResult.skipped}`);
+  console.log(
+    `[tests] specs_created=${testResult.specsCreated} conflicts=${testResult.conflicts} skipped=${testResult.skipped}`,
+  );
 
   if (testResult.conflicts > 0) {
-    console.log('---');
-    console.log('Conflicts found. Review manually before dropping the columns.');
+    console.log("---");
+    console.log(
+      "Conflicts found. Review manually before dropping the columns.",
+    );
   }
 
-  console.log('---');
-  console.log(dryRun ? 'Done (dry-run).' : 'Done. Now run pnpm db:push to drop the legacy columns.');
+  console.log("---");
+  console.log(
+    dryRun
+      ? "Done (dry-run)."
+      : "Done. Now run pnpm db:push to drop the legacy columns.",
+  );
 }
 
 main()

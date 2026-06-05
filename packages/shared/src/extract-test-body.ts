@@ -36,15 +36,17 @@
  * the run.
  */
 
-export type ExtractShape = 'legacy-export' | 'framework-test' | 'whole-code';
+export type ExtractShape = "legacy-export" | "framework-test" | "whole-code";
 
 export interface ExtractedTestBody {
   body: string;
   shape: ExtractShape;
 }
 
-const LEGACY_RE = /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
-const LEGACY_SETUP_RE = /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
+const LEGACY_RE =
+  /export\s+async\s+function\s+test\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
+const LEGACY_SETUP_RE =
+  /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*\{([\s\S]*)\}\s*$/;
 
 /**
  * Match the `@playwright/test` framework signature. Accepts:
@@ -60,8 +62,11 @@ const LEGACY_SETUP_RE = /export\s+async\s+function\s+setup\s*\(\s*page[^)]*\)\s*
 const FRAMEWORK_HEAD_RE =
   /\btest(?:\.(?:only|skip|fixme|serial|describe\.serial))?\s*\(\s*(['"`])[^'"`]*\1\s*,(?:\s*\{[^}]*\}\s*,)?\s*async\s*\(\s*\{([^}]*)\}\s*\)\s*=>\s*\{/;
 
-function extractBalancedBody(source: string, openBraceIdx: number): { body: string; endIdx: number } | null {
-  if (source[openBraceIdx] !== '{') return null;
+function extractBalancedBody(
+  source: string,
+  openBraceIdx: number,
+): { body: string; endIdx: number } | null {
+  if (source[openBraceIdx] !== "{") return null;
   let depth = 1;
   let i = openBraceIdx + 1;
   let inSingle = false;
@@ -73,12 +78,12 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
     const ch = source[i];
     const next = source[i + 1];
     if (inLineComment) {
-      if (ch === '\n') inLineComment = false;
+      if (ch === "\n") inLineComment = false;
       i++;
       continue;
     }
     if (inBlockComment) {
-      if (ch === '*' && next === '/') {
+      if (ch === "*" && next === "/") {
         inBlockComment = false;
         i += 2;
         continue;
@@ -87,7 +92,7 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
       continue;
     }
     if (inSingle) {
-      if (ch === '\\') {
+      if (ch === "\\") {
         i += 2;
         continue;
       }
@@ -96,7 +101,7 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
       continue;
     }
     if (inDouble) {
-      if (ch === '\\') {
+      if (ch === "\\") {
         i += 2;
         continue;
       }
@@ -105,20 +110,20 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
       continue;
     }
     if (inTemplate) {
-      if (ch === '\\') {
+      if (ch === "\\") {
         i += 2;
         continue;
       }
-      if (ch === '`') inTemplate = false;
+      if (ch === "`") inTemplate = false;
       i++;
       continue;
     }
-    if (ch === '/' && next === '/') {
+    if (ch === "/" && next === "/") {
       inLineComment = true;
       i += 2;
       continue;
     }
-    if (ch === '/' && next === '*') {
+    if (ch === "/" && next === "*") {
       inBlockComment = true;
       i += 2;
       continue;
@@ -133,13 +138,13 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
       i++;
       continue;
     }
-    if (ch === '`') {
+    if (ch === "`") {
       inTemplate = true;
       i++;
       continue;
     }
-    if (ch === '{') depth++;
-    else if (ch === '}') depth--;
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
     i++;
   }
   if (depth !== 0) return null;
@@ -155,39 +160,44 @@ function extractBalancedBody(source: string, openBraceIdx: number): { body: stri
  * `export async function setup(page, ...)` so setup scripts share this
  * helper.
  */
-export function extractTestBody(code: string, opts: { allowSetup?: boolean } = {}): ExtractedTestBody {
+export function extractTestBody(
+  code: string,
+  opts: { allowSetup?: boolean } = {},
+): ExtractedTestBody {
   if (opts.allowSetup) {
     const setupMatch = code.match(LEGACY_SETUP_RE);
-    if (setupMatch) return { body: setupMatch[1], shape: 'legacy-export' };
+    if (setupMatch) return { body: setupMatch[1], shape: "legacy-export" };
   }
   const legacyMatch = code.match(LEGACY_RE);
-  if (legacyMatch) return { body: legacyMatch[1], shape: 'legacy-export' };
+  if (legacyMatch) return { body: legacyMatch[1], shape: "legacy-export" };
 
   const fwHead = code.match(FRAMEWORK_HEAD_RE);
   if (fwHead && fwHead.index !== undefined) {
-    const openIdx = code.indexOf('{', fwHead.index + fwHead[0].length - 1);
+    const openIdx = code.indexOf("{", fwHead.index + fwHead[0].length - 1);
     if (openIdx >= 0) {
       const balanced = extractBalancedBody(code, openIdx);
       if (balanced) {
         const destructured = fwHead[2]
-          .split(',')
+          .split(",")
           .map((s) => s.trim().split(/[:=]/)[0].trim())
           .filter(Boolean);
-        const knownInjected = new Set(['page', 'expect']);
+        const knownInjected = new Set(["page", "expect"]);
         const synth = destructured
           .filter((n) => !knownInjected.has(n))
           .map((n) => {
-            if (n === 'context') return 'const context = page.context();';
-            if (n === 'browser') return 'const browser = page.context().browser();';
-            if (n === 'request') return 'const request = undefined; /* APIRequestContext not provided */';
+            if (n === "context") return "const context = page.context();";
+            if (n === "browser")
+              return "const browser = page.context().browser();";
+            if (n === "request")
+              return "const request = undefined; /* APIRequestContext not provided */";
             return `const ${n} = undefined; /* not injected by Lastest runner */`;
           })
-          .join('\n');
-        const preamble = synth ? `${synth}\n` : '';
-        return { body: `${preamble}${balanced.body}`, shape: 'framework-test' };
+          .join("\n");
+        const preamble = synth ? `${synth}\n` : "";
+        return { body: `${preamble}${balanced.body}`, shape: "framework-test" };
       }
     }
   }
 
-  return { body: code, shape: 'whole-code' };
+  return { body: code, shape: "whole-code" };
 }

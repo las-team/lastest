@@ -14,8 +14,15 @@
  * MAX_VALIDATION_RETRIES times before giving up.
  */
 
-import { validateTestAgainstRunnerAPI, formatTSDiagnostics } from './validate-test-against-api';
-import { extractLocatorChains, validateLocatorChainsOnPage, formatValidationFeedback } from './mcp-validator';
+import {
+  validateTestAgainstRunnerAPI,
+  formatTSDiagnostics,
+} from "./validate-test-against-api";
+import {
+  extractLocatorChains,
+  validateLocatorChainsOnPage,
+  formatValidationFeedback,
+} from "./mcp-validator";
 
 export const MAX_VALIDATION_RETRIES = 2;
 
@@ -42,7 +49,11 @@ export async function runValidation(
   // 1. Static TypeScript check.
   const tsResult = validateTestAgainstRunnerAPI(code);
   if (!tsResult.valid) {
-    return { valid: false, code, feedback: formatTSDiagnostics(tsResult.errors) };
+    return {
+      valid: false,
+      code,
+      feedback: formatTSDiagnostics(tsResult.errors),
+    };
   }
 
   // 2. Page-snapshot check (only when we have a baseUrl + the caller wants it).
@@ -51,7 +62,11 @@ export async function runValidation(
     if (chains.length > 0) {
       const pageResult = await validateLocatorChainsOnPage(baseUrl, chains);
       if (!pageResult.valid) {
-        return { valid: false, code, feedback: formatValidationFeedback(pageResult) };
+        return {
+          valid: false,
+          code,
+          feedback: formatValidationFeedback(pageResult),
+        };
       }
     }
   }
@@ -72,7 +87,7 @@ export async function runValidationWithRetry(
 ): Promise<ValidationOutcome> {
   const maxRetries = options.maxRetries ?? MAX_VALIDATION_RETRIES;
   let code = initialCode;
-  let lastFeedback = '';
+  let lastFeedback = "";
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const result = await runValidation(code, baseUrl, options);

@@ -8,26 +8,27 @@
  * Two parallel `captureUrl` invocations make up one URL Diff.
  */
 
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import { promisify } from 'node:util';
+import path from "node:path";
+import { promises as fs } from "node:fs";
+import { promisify } from "node:util";
 
-import { STORAGE_DIRS, STORAGE_ROOT } from '@/lib/storage/paths';
+import { STORAGE_DIRS, STORAGE_ROOT } from "@/lib/storage/paths";
 import {
   claimOrProvisionPoolEB,
   releasePoolEB,
-} from '@/server/actions/embedded-sessions';
-import { queueCommandToDB } from '@/app/api/ws/runner/route';
-import {
-  getUnacknowledgedResults,
-  acknowledgeResults,
-} from '@/lib/db/queries';
-import type { A11yViolation, DomSnapshotData, WcagScoreSummary } from '@/lib/db/schema';
-import { calculateWcagScore } from '@/lib/a11y/wcag-score';
-import type { NetworkRequestLike } from '@/lib/diff/network-diff';
+} from "@/server/actions/embedded-sessions";
+import { queueCommandToDB } from "@/app/api/ws/runner/route";
+import { getUnacknowledgedResults, acknowledgeResults } from "@/lib/db/queries";
+import type {
+  A11yViolation,
+  DomSnapshotData,
+  WcagScoreSummary,
+} from "@/lib/db/schema";
+import { calculateWcagScore } from "@/lib/a11y/wcag-score";
+import type { NetworkRequestLike } from "@/lib/diff/network-diff";
 
-export type CaptureSide = 'a' | 'b';
-export type PoolTier = 'build' | 'interactive';
+export type CaptureSide = "a" | "b";
+export type PoolTier = "build" | "interactive";
 
 export interface CaptureOptions {
   url: string;
@@ -65,7 +66,7 @@ const MIN_HEALTHY_BASE64 = 7000; // ~5KB binary PNG floor
 const POLL_INTERVAL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-const URL_DIFF_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+const URL_DIFF_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 /**
  * Build the synthetic Playwright test body sent to the EB. The EB executes
@@ -122,12 +123,15 @@ function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {
-    return '';
+    return "";
   }
 }
 
-async function ensureSideDir(jobId: string, side: CaptureSide): Promise<string> {
-  const dir = path.join(STORAGE_DIRS['url-diffs'], jobId, side);
+async function ensureSideDir(
+  jobId: string,
+  side: CaptureSide,
+): Promise<string> {
+  const dir = path.join(STORAGE_DIRS["url-diffs"], jobId, side);
   await fs.mkdir(dir, { recursive: true });
   return dir;
 }
@@ -138,28 +142,37 @@ interface ResultRow {
   payload: Record<string, unknown> | null;
 }
 
-async function pollForResults(commandId: string, timeoutMs: number): Promise<ResultRow[]> {
+async function pollForResults(
+  commandId: string,
+  timeoutMs: number,
+): Promise<ResultRow[]> {
   const deadline = Date.now() + timeoutMs;
   let testResultRow: ResultRow | undefined;
   const screenshotRows: ResultRow[] = [];
   const textRows: ResultRow[] = [];
   while (Date.now() < deadline) {
-    const rows = (await getUnacknowledgedResults([commandId])) as unknown as ResultRow[];
+    const rows = (await getUnacknowledgedResults([
+      commandId,
+    ])) as unknown as ResultRow[];
     for (const row of rows) {
-      if (row.type === 'response:test_result') testResultRow = row;
-      if (row.type === 'response:screenshot') screenshotRows.push(row);
-      if (row.type === 'response:screenshot_text') textRows.push(row);
+      if (row.type === "response:test_result") testResultRow = row;
+      if (row.type === "response:screenshot") screenshotRows.push(row);
+      if (row.type === "response:screenshot_text") textRows.push(row);
     }
     if (testResultRow) {
       // The screenshot/text uploads happen BEFORE the result message in EB
       // index.ts, so by the time we see the test_result row, all artefact
       // rows are already inserted. One more fetch in case any landed late.
-      const rows2 = (await getUnacknowledgedResults([commandId])) as unknown as ResultRow[];
-      const seenIds = new Set([...screenshotRows, ...textRows].map((r) => r.id));
+      const rows2 = (await getUnacknowledgedResults([
+        commandId,
+      ])) as unknown as ResultRow[];
+      const seenIds = new Set(
+        [...screenshotRows, ...textRows].map((r) => r.id),
+      );
       for (const row of rows2) {
         if (seenIds.has(row.id)) continue;
-        if (row.type === 'response:screenshot') screenshotRows.push(row);
-        if (row.type === 'response:screenshot_text') textRows.push(row);
+        if (row.type === "response:screenshot") screenshotRows.push(row);
+        if (row.type === "response:screenshot_text") textRows.push(row);
       }
       return [testResultRow, ...screenshotRows, ...textRows];
     }
@@ -176,12 +189,12 @@ async function pollForResults(commandId: string, timeoutMs: number): Promise<Res
 export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
   const startedAt = Date.now();
   const viewport = opts.viewport ?? { width: 1280, height: 720 };
-  const poolTier = opts.poolTier ?? 'interactive';
+  const poolTier = opts.poolTier ?? "interactive";
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const eb = await claimOrProvisionPoolEB({ purpose: poolTier });
   if (!eb) {
-    throw new Error('EB unavailable: pool at capacity');
+    throw new Error("EB unavailable: pool at capacity");
   }
 
   const commandId = crypto.randomUUID();
@@ -192,22 +205,22 @@ export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
   try {
     await queueCommandToDB(eb.runnerId, {
       id: commandId,
-      type: 'command:run_test',
+      type: "command:run_test",
       timestamp: Date.now(),
       payload: {
         testId,
         testRunId,
         repositoryId: opts.jobId, // synthetic UUID-shaped namespace for screenshot dir
         code,
-        codeHash: 'urldiff',
+        codeHash: "urldiff",
         targetUrl: opts.url,
         timeout: timeoutMs,
         viewport,
         enableA11y: true,
         textCaptureEnabled: true,
         enableNetworkInterception: false,
-        consoleErrorMode: 'ignore',
-        networkErrorMode: 'ignore',
+        consoleErrorMode: "ignore",
+        networkErrorMode: "ignore",
         ignoreExternalNetworkErrors: true,
         acceptDownloads: false,
         stabilization: {
@@ -222,70 +235,94 @@ export async function captureUrl(opts: CaptureOptions): Promise<UrlCapture> {
     const rows = await pollForResults(commandId, timeoutMs);
     await acknowledgeResults(rows.map((r) => r.id));
 
-    const testResult = rows.find((r) => r.type === 'response:test_result');
+    const testResult = rows.find((r) => r.type === "response:test_result");
     if (!testResult || !testResult.payload) {
-      throw new Error('Capture produced no test result row');
+      throw new Error("Capture produced no test result row");
     }
     const tp = testResult.payload as Record<string, unknown>;
-    if (tp.status !== 'passed') {
+    if (tp.status !== "passed") {
       const errorObj = tp.error as { message?: string } | undefined;
-      const msg = errorObj?.message || (tp.status as string) || 'unknown';
+      const msg = errorObj?.message || (tp.status as string) || "unknown";
       throw new Error(`Capture failed (${tp.status}): ${msg}`);
     }
 
-    const screenshotRows = rows.filter((r) => r.type === 'response:screenshot');
+    const screenshotRows = rows.filter((r) => r.type === "response:screenshot");
     if (screenshotRows.length === 0) {
-      throw new Error('Capture produced no screenshot');
+      throw new Error("Capture produced no screenshot");
     }
     // Take the first screenshot row (synthetic body emits exactly one).
-    const shotPayload = screenshotRows[0]!.payload as { path?: string; width?: number; height?: number } | null;
+    const shotPayload = screenshotRows[0]!.payload as {
+      path?: string;
+      width?: number;
+      height?: number;
+    } | null;
     const sourceRel = shotPayload?.path;
-    if (!sourceRel) throw new Error('Screenshot result missing path');
-    const sourceAbs = path.join(STORAGE_ROOT, sourceRel.replace(/^\/+/, ''));
+    if (!sourceRel) throw new Error("Screenshot result missing path");
+    const sourceAbs = path.join(STORAGE_ROOT, sourceRel.replace(/^\/+/, ""));
     const stat = await fs.stat(sourceAbs);
     if (stat.size < MIN_HEALTHY_BASE64 * 0.75) {
-      throw new Error('Capture produced suspicious blank screenshot');
+      throw new Error("Capture produced suspicious blank screenshot");
     }
 
     const sideDir = await ensureSideDir(opts.jobId, opts.side);
-    const destAbs = path.join(sideDir, 'screenshot.png');
+    const destAbs = path.join(sideDir, "screenshot.png");
     await fs.copyFile(sourceAbs, destAbs);
 
     // Page-text companion (when textCaptureEnabled). Same upload pattern as
     // screenshots: stored under storage/screenshots/<jobId>/ with `.txt`.
     let pageTextRelPath: string | null = null;
-    const textRows = rows.filter((r) => r.type === 'response:screenshot_text');
+    const textRows = rows.filter((r) => r.type === "response:screenshot_text");
     if (textRows.length > 0) {
       const textPayload = textRows[0]!.payload as { path?: string } | null;
       const textSourceRel = textPayload?.path;
       if (textSourceRel) {
-        const textSourceAbs = path.join(STORAGE_ROOT, textSourceRel.replace(/^\/+/, ''));
-        const textDestAbs = path.join(sideDir, 'page-text.txt');
+        const textSourceAbs = path.join(
+          STORAGE_ROOT,
+          textSourceRel.replace(/^\/+/, ""),
+        );
+        const textDestAbs = path.join(sideDir, "page-text.txt");
         try {
           await fs.copyFile(textSourceAbs, textDestAbs);
           pageTextRelPath = `/url-diffs/${opts.jobId}/${opts.side}/page-text.txt`;
         } catch (err) {
-          console.warn(`[url-diff] page-text copy failed for ${opts.side}:`, err);
+          console.warn(
+            `[url-diff] page-text copy failed for ${opts.side}:`,
+            err,
+          );
         }
       }
     }
 
-    const networkRequests = (Array.isArray(tp.networkRequests) ? tp.networkRequests : []) as NetworkRequestLike[];
+    const networkRequests = (
+      Array.isArray(tp.networkRequests) ? tp.networkRequests : []
+    ) as NetworkRequestLike[];
     const domSnapshot = (tp.domSnapshot ?? null) as DomSnapshotData | null;
-    const a11yViolations = (Array.isArray(tp.a11yViolations) ? tp.a11yViolations : []) as A11yViolation[];
-    const a11yPassesCount = typeof tp.a11yPassesCount === 'number' ? tp.a11yPassesCount : 0;
+    const a11yViolations = (
+      Array.isArray(tp.a11yViolations) ? tp.a11yViolations : []
+    ) as A11yViolation[];
+    const a11yPassesCount =
+      typeof tp.a11yPassesCount === "number" ? tp.a11yPassesCount : 0;
     const accessibilityTree = tp.accessibilityTree ?? null;
 
     await Promise.all([
-      fs.writeFile(path.join(sideDir, 'dom.json'), JSON.stringify(domSnapshot)),
-      fs.writeFile(path.join(sideDir, 'network.json'), JSON.stringify(networkRequests)),
+      fs.writeFile(path.join(sideDir, "dom.json"), JSON.stringify(domSnapshot)),
       fs.writeFile(
-        path.join(sideDir, 'a11y.json'),
-        JSON.stringify({ violations: a11yViolations, passesCount: a11yPassesCount }),
+        path.join(sideDir, "network.json"),
+        JSON.stringify(networkRequests),
       ),
-      fs.writeFile(path.join(sideDir, 'a11y-tree.json'), JSON.stringify(accessibilityTree)),
       fs.writeFile(
-        path.join(sideDir, 'meta.json'),
+        path.join(sideDir, "a11y.json"),
+        JSON.stringify({
+          violations: a11yViolations,
+          passesCount: a11yPassesCount,
+        }),
+      ),
+      fs.writeFile(
+        path.join(sideDir, "a11y-tree.json"),
+        JSON.stringify(accessibilityTree),
+      ),
+      fs.writeFile(
+        path.join(sideDir, "meta.json"),
         JSON.stringify({ url: opts.url, viewport, capturedAt: Date.now() }),
       ),
     ]);
@@ -323,25 +360,35 @@ export async function loadCaptureFromDisk(
   jobOrSnapshotId: string,
   side: CaptureSide,
 ): Promise<UrlCapture | null> {
-  const sideDir = path.join(STORAGE_DIRS['url-diffs'], jobOrSnapshotId, side);
+  const sideDir = path.join(STORAGE_DIRS["url-diffs"], jobOrSnapshotId, side);
   try {
-    const meta = JSON.parse(await fs.readFile(path.join(sideDir, 'meta.json'), 'utf8')) as {
+    const meta = JSON.parse(
+      await fs.readFile(path.join(sideDir, "meta.json"), "utf8"),
+    ) as {
       url: string;
       capturedAt: number;
     };
-    const dom = JSON.parse(await fs.readFile(path.join(sideDir, 'dom.json'), 'utf8')) as DomSnapshotData | null;
-    const network = JSON.parse(await fs.readFile(path.join(sideDir, 'network.json'), 'utf8')) as NetworkRequestLike[];
-    const a11y = JSON.parse(await fs.readFile(path.join(sideDir, 'a11y.json'), 'utf8')) as {
+    const dom = JSON.parse(
+      await fs.readFile(path.join(sideDir, "dom.json"), "utf8"),
+    ) as DomSnapshotData | null;
+    const network = JSON.parse(
+      await fs.readFile(path.join(sideDir, "network.json"), "utf8"),
+    ) as NetworkRequestLike[];
+    const a11y = JSON.parse(
+      await fs.readFile(path.join(sideDir, "a11y.json"), "utf8"),
+    ) as {
       violations: A11yViolation[];
       passesCount: number;
     };
-    const screenshotAbsPath = path.join(sideDir, 'screenshot.png');
+    const screenshotAbsPath = path.join(sideDir, "screenshot.png");
     await fs.access(screenshotAbsPath);
     let pageTextRelPath: string | null = null;
     try {
-      await fs.access(path.join(sideDir, 'page-text.txt'));
+      await fs.access(path.join(sideDir, "page-text.txt"));
       pageTextRelPath = `/url-diffs/${jobOrSnapshotId}/${side}/page-text.txt`;
-    } catch { /* missing — pre-text-diff capture */ }
+    } catch {
+      /* missing — pre-text-diff capture */
+    }
     return {
       url: meta.url,
       side,

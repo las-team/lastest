@@ -1,4 +1,4 @@
-import type { SelectorConfig, SelectorType } from '@/lib/db/schema';
+import type { SelectorConfig, SelectorType } from "@/lib/db/schema";
 
 /**
  * Static selector analysis for the "Analyze before record" flow.
@@ -38,21 +38,21 @@ export interface SelectorCoverage {
 
 // Selector types that are universal fallbacks — always usable regardless of
 // what the page contains, so analysis never disables them.
-const ALWAYS_ON: SelectorType[] = ['text', 'css-path', 'coords'];
+const ALWAYS_ON: SelectorType[] = ["text", "css-path", "coords"];
 // OCR cannot be detected from HTML; leave its enabled state untouched.
-const PRESERVE: SelectorType[] = ['ocr-text'];
+const PRESERVE: SelectorType[] = ["ocr-text"];
 // Attribute/element-backed strategies whose usefulness we can actually measure.
 const SPECIFIC: SelectorType[] = [
-  'data-testid',
-  'id',
-  'role-name',
-  'label',
-  'heading-context',
-  'aria-label',
-  'placeholder',
-  'name',
-  'alt-text',
-  'title',
+  "data-testid",
+  "id",
+  "role-name",
+  "label",
+  "heading-context",
+  "aria-label",
+  "placeholder",
+  "name",
+  "alt-text",
+  "title",
 ];
 
 // A page needs at least this many interactive elements before we trust the
@@ -71,8 +71,8 @@ function countMatches(html: string, re: RegExp): number {
  * exist on the page and would still be matched by the recorder).
  */
 function extractAttrValues(html: string, attrName: string): Set<string> {
-  const safe = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`\\s${safe}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'gi');
+  const safe = attrName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\s${safe}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, "gi");
   const values = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
@@ -87,11 +87,14 @@ function extractAttrValues(html: string, attrName: string): Set<string> {
  * are dropped — an empty-labeled button is invisible to text-based selectors.
  */
 function extractTagInnerTexts(html: string, tagName: string): Set<string> {
-  const re = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, 'gi');
+  const re = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>`, "gi");
   const values = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const text = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const text = m[1]
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (text) values.add(text);
   }
   return values;
@@ -103,7 +106,10 @@ function extractHeadingInnerTexts(html: string): Set<string> {
   const values = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const text = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const text = m[2]
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (text) values.add(text);
   }
   return values;
@@ -124,7 +130,7 @@ function unionSize(...sets: Set<string>[]): number {
  */
 export function analyzeHtmlForSelectors(
   html: string,
-  opts: { customAttributeName?: string | null } = {}
+  opts: { customAttributeName?: string | null } = {},
 ): SelectorCoverage {
   const buttons = countMatches(html, /<button[\s/>]/gi);
   const links = countMatches(html, /<a[\s/>]/gi);
@@ -142,24 +148,29 @@ export function analyzeHtmlForSelectors(
   const customAttrRaw = customAttrName
     ? countMatches(
         html,
-        new RegExp(`\\s${customAttrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`, 'gi')
+        new RegExp(
+          `\\s${customAttrName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=`,
+          "gi",
+        ),
       )
     : 0;
 
   // Unique value sets per attribute / element.
-  const uniqTestid = extractAttrValues(html, 'data-testid');
-  const uniqCustom = customAttrName ? extractAttrValues(html, customAttrName) : new Set<string>();
-  const uniqId = extractAttrValues(html, 'id');
-  const uniqRole = extractAttrValues(html, 'role');
-  const uniqAria = extractAttrValues(html, 'aria-label');
-  const uniqPlaceholder = extractAttrValues(html, 'placeholder');
-  const uniqName = extractAttrValues(html, 'name');
-  const uniqAlt = extractAttrValues(html, 'alt');
-  const uniqTitle = extractAttrValues(html, 'title');
+  const uniqTestid = extractAttrValues(html, "data-testid");
+  const uniqCustom = customAttrName
+    ? extractAttrValues(html, customAttrName)
+    : new Set<string>();
+  const uniqId = extractAttrValues(html, "id");
+  const uniqRole = extractAttrValues(html, "role");
+  const uniqAria = extractAttrValues(html, "aria-label");
+  const uniqPlaceholder = extractAttrValues(html, "placeholder");
+  const uniqName = extractAttrValues(html, "name");
+  const uniqAlt = extractAttrValues(html, "alt");
+  const uniqTitle = extractAttrValues(html, "title");
 
-  const uniqButtonText = extractTagInnerTexts(html, 'button');
-  const uniqLinkText = extractTagInnerTexts(html, 'a');
-  const uniqLabelText = extractTagInnerTexts(html, 'label');
+  const uniqButtonText = extractTagInnerTexts(html, "button");
+  const uniqLinkText = extractTagInnerTexts(html, "a");
+  const uniqLabelText = extractTagInnerTexts(html, "label");
   const uniqHeadingText = extractHeadingInnerTexts(html);
 
   // role-name in Playwright = role + accessible name. We can't compute the
@@ -167,40 +178,51 @@ export function analyzeHtmlForSelectors(
   // text of buttons/links (most common roles) plus unique aria-labels (which
   // override inner text when present). Explicit `role=` values widen the set
   // for non-default roles.
-  const uniqRoleName = unionSize(uniqButtonText, uniqLinkText, uniqAria, uniqRole);
+  const uniqRoleName = unionSize(
+    uniqButtonText,
+    uniqLinkText,
+    uniqAria,
+    uniqRole,
+  );
 
   const counts: Record<SelectorType, number> = {
-    'data-testid': dataTestidRaw + customAttrRaw,
-    'id': countMatches(html, /\sid\s*=/gi),
-    'role-name': countMatches(html, /\srole\s*=/gi) + buttons + links + inputs + selects + textareas,
-    'label': labels,
-    'heading-context': headings,
-    'aria-label': countMatches(html, /\saria-label\s*=/gi),
-    'text': buttons + links,
-    'placeholder': countMatches(html, /\splaceholder\s*=/gi),
-    'name': countMatches(html, /\sname\s*=/gi),
-    'alt-text': countMatches(html, /\salt\s*=/gi),
-    'title': countMatches(html, /\stitle\s*=/gi),
-    'css-path': totalElements,
-    'ocr-text': 0,
-    'coords': totalElements,
+    "data-testid": dataTestidRaw + customAttrRaw,
+    id: countMatches(html, /\sid\s*=/gi),
+    "role-name":
+      countMatches(html, /\srole\s*=/gi) +
+      buttons +
+      links +
+      inputs +
+      selects +
+      textareas,
+    label: labels,
+    "heading-context": headings,
+    "aria-label": countMatches(html, /\saria-label\s*=/gi),
+    text: buttons + links,
+    placeholder: countMatches(html, /\splaceholder\s*=/gi),
+    name: countMatches(html, /\sname\s*=/gi),
+    "alt-text": countMatches(html, /\salt\s*=/gi),
+    title: countMatches(html, /\stitle\s*=/gi),
+    "css-path": totalElements,
+    "ocr-text": 0,
+    coords: totalElements,
   };
 
   const uniqueCounts: Record<SelectorType, number> = {
-    'data-testid': unionSize(uniqTestid, uniqCustom),
-    'id': uniqId.size,
-    'role-name': uniqRoleName,
-    'label': uniqLabelText.size,
-    'heading-context': uniqHeadingText.size,
-    'aria-label': uniqAria.size,
-    'text': unionSize(uniqButtonText, uniqLinkText),
-    'placeholder': uniqPlaceholder.size,
-    'name': uniqName.size,
-    'alt-text': uniqAlt.size,
-    'title': uniqTitle.size,
-    'css-path': totalElements,
-    'ocr-text': 0,
-    'coords': totalElements,
+    "data-testid": unionSize(uniqTestid, uniqCustom),
+    id: uniqId.size,
+    "role-name": uniqRoleName,
+    label: uniqLabelText.size,
+    "heading-context": uniqHeadingText.size,
+    "aria-label": uniqAria.size,
+    text: unionSize(uniqButtonText, uniqLinkText),
+    placeholder: uniqPlaceholder.size,
+    name: uniqName.size,
+    "alt-text": uniqAlt.size,
+    title: uniqTitle.size,
+    "css-path": totalElements,
+    "ocr-text": 0,
+    coords: totalElements,
   };
 
   return { totalElements, interactiveElements, counts, uniqueCounts };
@@ -226,7 +248,7 @@ export function isMeaningful(coverage: SelectorCoverage): boolean {
  */
 export function recommendPriorityFromAnalysis(
   current: SelectorConfig[],
-  coverage: SelectorCoverage
+  coverage: SelectorCoverage,
 ): SelectorConfig[] {
   if (!isMeaningful(coverage)) {
     return current.map((c) => ({ ...c }));
@@ -252,14 +274,14 @@ export function recommendPriorityFromAnalysis(
       (a, b) =>
         coverage.uniqueCounts[b] - coverage.uniqueCounts[a] ||
         coverage.counts[b] - coverage.counts[a] ||
-        origPriority(a) - origPriority(b)
+        origPriority(a) - origPriority(b),
     );
   const disabledSpecific = specificsPresent
     .filter((t) => !isUseful(t))
     .sort((a, b) => origPriority(a) - origPriority(b));
 
   // Fixed fallback tail, in the order they should be tried after specifics.
-  const tail: SelectorType[] = ['text', 'css-path', 'ocr-text', 'coords'];
+  const tail: SelectorType[] = ["text", "css-path", "ocr-text", "coords"];
 
   const orderedTypes: SelectorType[] = [
     ...enabledSpecific,

@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,17 +9,27 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { toast } from 'sonner';
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 
 function GitLabIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M22.749 9.769L21.756 6.71l-1.97-6.063a.339.339 0 00-.642 0L17.176 6.71H6.825L4.857.647a.339.339 0 00-.642 0L2.245 6.71l-.992 3.059a.68.68 0 00.247.762L12 19.292l10.5-8.761a.68.68 0 00.247-.762z" />
     </svg>
   );
@@ -52,30 +62,43 @@ export function ConnectGitlabButton() {
   );
 }
 
-function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (b: boolean) => void }) {
-  const [tab, setTab] = useState<'pat' | 'oauth'>('pat');
-  const [instanceUrl, setInstanceUrl] = useState('https://');
-  const [pat, setPat] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
+function SelfHostedDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (b: boolean) => void;
+}) {
+  const [tab, setTab] = useState<"pat" | "oauth">("pat");
+  const [instanceUrl, setInstanceUrl] = useState("https://");
+  const [pat, setPat] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [origin, setOrigin] = useState('');
+  const [origin, setOrigin] = useState("");
 
   useEffect(() => {
     setOrigin(window.location.origin);
   }, []);
 
-  const redirectUri = origin ? `${origin}/api/connect/gitlab/callback` : '/api/connect/gitlab/callback';
-  const trimmedInstance = instanceUrl.trim().replace(/\/+$/, '');
-  const oauthAppsUrl = trimmedInstance ? `${trimmedInstance}/-/profile/applications` : '<instance>/-/profile/applications';
+  const redirectUri = origin
+    ? `${origin}/api/connect/gitlab/callback`
+    : "/api/connect/gitlab/callback";
+  const trimmedInstance = instanceUrl.trim().replace(/\/+$/, "");
+  const oauthAppsUrl = trimmedInstance
+    ? `${trimmedInstance}/-/profile/applications`
+    : "<instance>/-/profile/applications";
 
   const submitPat = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch('/api/connect/gitlab/pat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instanceUrl: instanceUrl.trim(), pat: pat.trim() }),
+      const res = await fetch("/api/connect/gitlab/pat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instanceUrl: instanceUrl.trim(),
+          pat: pat.trim(),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -84,12 +107,14 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       if (body.warning) {
         toast.warning(body.warning);
       } else {
-        toast.success(`GitLab connected — imported ${body.importedCount ?? 0} project${body.importedCount === 1 ? '' : 's'}`);
+        toast.success(
+          `GitLab connected — imported ${body.importedCount ?? 0} project${body.importedCount === 1 ? "" : "s"}`,
+        );
       }
       onOpenChange(false);
-      window.location.href = '/settings?success=gitlab_connected';
+      window.location.href = "/settings?success=gitlab_connected";
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to connect');
+      toast.error(err instanceof Error ? err.message : "Failed to connect");
     } finally {
       setSubmitting(false);
     }
@@ -100,9 +125,9 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
     // GitLab origins are arbitrary and can't be enumerated in the policy.
     setSubmitting(true);
     try {
-      const res = await fetch('/api/connect/gitlab', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/connect/gitlab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instanceUrl: instanceUrl.trim(),
           clientId: clientId.trim(),
@@ -115,7 +140,7 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       }
       window.location.href = body.authorizeUrl;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start OAuth');
+      toast.error(err instanceof Error ? err.message : "Failed to start OAuth");
       setSubmitting(false);
     }
   };
@@ -126,7 +151,8 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         <DialogHeader>
           <DialogTitle>Connect Self-Hosted GitLab</DialogTitle>
           <DialogDescription>
-            Use a Personal Access Token, or register an OAuth app on your GitLab instance.
+            Use a Personal Access Token, or register an OAuth app on your GitLab
+            instance.
           </DialogDescription>
         </DialogHeader>
 
@@ -141,13 +167,15 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             />
           </div>
 
-          <Tabs value={tab} onValueChange={(v) => setTab(v as 'pat' | 'oauth')}>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as "pat" | "oauth")}>
             <TabsList className="grid grid-cols-2">
               <TabsTrigger value="pat">Personal Access Token</TabsTrigger>
               <TabsTrigger value="oauth">OAuth App</TabsTrigger>
             </TabsList>
             <TabsContent value="pat" className="space-y-2 pt-2">
-              <Label htmlFor="gl-pat" className="text-xs">PAT (scopes: api, read_user, read_repository)</Label>
+              <Label htmlFor="gl-pat" className="text-xs">
+                PAT (scopes: api, read_user, read_repository)
+              </Label>
               <Input
                 id="gl-pat"
                 type="password"
@@ -156,18 +184,23 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 placeholder="glpat-..."
               />
               <p className="text-xs text-muted-foreground">
-                The <code>api</code> scope is required to list and import projects. Stored encrypted at rest.
+                The <code>api</code> scope is required to list and import
+                projects. Stored encrypted at rest.
               </p>
             </TabsContent>
             <TabsContent value="oauth" className="space-y-2 pt-2">
-              <Label htmlFor="gl-client-id" className="text-xs">Client ID</Label>
+              <Label htmlFor="gl-client-id" className="text-xs">
+                Client ID
+              </Label>
               <Input
                 id="gl-client-id"
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
                 placeholder="Application ID from GitLab"
               />
-              <Label htmlFor="gl-client-secret" className="text-xs">Client Secret</Label>
+              <Label htmlFor="gl-client-secret" className="text-xs">
+                Client Secret
+              </Label>
               <Input
                 id="gl-client-secret"
                 type="password"
@@ -177,25 +210,44 @@ function SelfHostedDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               />
               <div className="space-y-1 text-xs text-muted-foreground">
                 <p>Register the OAuth app at:</p>
-                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">{oauthAppsUrl}</code>
+                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">
+                  {oauthAppsUrl}
+                </code>
                 <p>with redirect URI:</p>
-                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">{redirectUri}</code>
+                <code className="block break-all rounded bg-muted px-2 py-1 text-[11px]">
+                  {redirectUri}
+                </code>
               </div>
             </TabsContent>
           </Tabs>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+          >
             Cancel
           </Button>
-          {tab === 'pat' ? (
-            <Button onClick={submitPat} disabled={submitting || !instanceUrl.startsWith('http') || !pat}>
+          {tab === "pat" ? (
+            <Button
+              onClick={submitPat}
+              disabled={submitting || !instanceUrl.startsWith("http") || !pat}
+            >
               {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Connect via PAT
             </Button>
           ) : (
-            <Button onClick={submitOAuth} disabled={submitting || !instanceUrl.startsWith('http') || !clientId || !clientSecret}>
+            <Button
+              onClick={submitOAuth}
+              disabled={
+                submitting ||
+                !instanceUrl.startsWith("http") ||
+                !clientId ||
+                !clientSecret
+              }
+            >
               {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Continue to GitLab
             </Button>

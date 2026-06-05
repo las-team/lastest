@@ -18,7 +18,7 @@ import {
   SsrfBlockedError,
   extractSourceIp,
   isBlockedIp,
-} from '@/lib/security/outbound-url';
+} from "@/lib/security/outbound-url";
 
 export { SsrfBlockedError, extractSourceIp, isBlockedIp };
 

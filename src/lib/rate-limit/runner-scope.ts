@@ -17,20 +17,25 @@
  * reasonable signal that the request is internal infra, not an end user.
  */
 
-import { timingSafeEqual } from 'node:crypto';
-import * as queries from '@/lib/db/queries';
+import { timingSafeEqual } from "node:crypto";
+import * as queries from "@/lib/db/queries";
 
 export interface RunnerCheck {
   isRunner: boolean;
   /** Coarse reason for telemetry; never branched on. */
-  reason: 'bearer-token' | 'api-session' | 'system-eb-token' | 'cookie-browser' | 'unauth';
+  reason:
+    | "bearer-token"
+    | "api-session"
+    | "system-eb-token"
+    | "cookie-browser"
+    | "unauth";
 }
 
 function matchesSystemToken(token: string): boolean {
   const env = process.env.SYSTEM_EB_TOKEN;
   if (!env || !token) return false;
   const candidateBuf = Buffer.from(token);
-  for (const raw of env.split(',')) {
+  for (const raw of env.split(",")) {
     const expected = raw.trim();
     if (!expected) continue;
     if (expected.length !== candidateBuf.length) continue;
@@ -41,14 +46,14 @@ function matchesSystemToken(token: string): boolean {
 }
 
 export async function classifyRequest(request: Request): Promise<RunnerCheck> {
-  const auth = request.headers.get('authorization');
-  if (auth?.startsWith('Bearer ')) {
-    const token = auth.slice('Bearer '.length).trim();
+  const auth = request.headers.get("authorization");
+  if (auth?.startsWith("Bearer ")) {
+    const token = auth.slice("Bearer ".length).trim();
     if (token && matchesSystemToken(token)) {
-      return { isRunner: true, reason: 'system-eb-token' };
+      return { isRunner: true, reason: "system-eb-token" };
     }
     if (token && (await isApiSessionToken(token))) {
-      return { isRunner: true, reason: 'api-session' };
+      return { isRunner: true, reason: "api-session" };
     }
   }
 
@@ -56,7 +61,7 @@ export async function classifyRequest(request: Request): Promise<RunnerCheck> {
   // its kind. Doing that synchronously inside a hot middleware would require
   // pulling in the whole better-auth chain; we avoid it. Cookie sessions are
   // assumed to be browser users.
-  return { isRunner: false, reason: 'cookie-browser' };
+  return { isRunner: false, reason: "cookie-browser" };
 }
 
 /**
@@ -65,7 +70,7 @@ export async function classifyRequest(request: Request): Promise<RunnerCheck> {
  */
 export async function isApiSessionToken(token: string): Promise<boolean> {
   const result = await queries.getSessionWithUser(token);
-  return result?.session.kind === 'api';
+  return result?.session.kind === "api";
 }
 
 /**
@@ -74,14 +79,14 @@ export async function isApiSessionToken(token: string): Promise<boolean> {
  * lands in *some* bucket. Never returns empty.
  */
 export function clientIp(request: Request): string {
-  const xff = request.headers.get('x-forwarded-for');
+  const xff = request.headers.get("x-forwarded-for");
   if (xff) {
-    const first = xff.split(',')[0]?.trim();
+    const first = xff.split(",")[0]?.trim();
     if (first) return first;
   }
-  const cfip = request.headers.get('cf-connecting-ip');
+  const cfip = request.headers.get("cf-connecting-ip");
   if (cfip) return cfip.trim();
-  const xreal = request.headers.get('x-real-ip');
+  const xreal = request.headers.get("x-real-ip");
   if (xreal) return xreal.trim();
-  return 'unknown';
+  return "unknown";
 }

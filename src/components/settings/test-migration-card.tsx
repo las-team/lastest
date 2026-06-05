@@ -1,14 +1,29 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { fetchRemoteRepositories, migrateTests } from '@/server/actions/test-migration';
-import { toast } from 'sonner';
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Upload, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  fetchRemoteRepositories,
+  migrateTests,
+} from "@/server/actions/test-migration";
+import { toast } from "sonner";
 
 interface RemoteRepo {
   id: string;
@@ -31,24 +46,27 @@ interface Props {
   defaultRepositoryId?: string;
 }
 
-export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) {
-  const [sourceRepoId, setSourceRepoId] = useState(defaultRepositoryId ?? '');
-  const [remoteUrl, setRemoteUrl] = useState('');
-  const [apiKey, setApiKey] = useState('');
+export function TestMigrationCard({
+  repositories,
+  defaultRepositoryId,
+}: Props) {
+  const [sourceRepoId, setSourceRepoId] = useState(defaultRepositoryId ?? "");
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [remoteRepos, setRemoteRepos] = useState<RemoteRepo[]>([]);
-  const [targetRepoId, setTargetRepoId] = useState('');
+  const [targetRepoId, setTargetRepoId] = useState("");
   const [fetchingRepos, setFetchingRepos] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState<MigrationResult | null>(null);
 
   async function handleFetchRepos() {
     if (!remoteUrl || !apiKey) {
-      toast.error('Remote URL and API key are required');
+      toast.error("Remote URL and API key are required");
       return;
     }
     setFetchingRepos(true);
     setRemoteRepos([]);
-    setTargetRepoId('');
+    setTargetRepoId("");
     setResult(null);
 
     try {
@@ -59,7 +77,7 @@ export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) 
         setRemoteRepos(res.repos);
         toast.success(`Found ${res.repos.length} repositories`);
       } else {
-        toast.error('No repositories found on remote');
+        toast.error("No repositories found on remote");
       }
     } finally {
       setFetchingRepos(false);
@@ -68,26 +86,31 @@ export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) 
 
   async function handleMigrate() {
     if (!sourceRepoId) {
-      toast.error('Select a source repository');
+      toast.error("Select a source repository");
       return;
     }
     if (!targetRepoId) {
-      toast.error('Select a target repository');
+      toast.error("Select a target repository");
       return;
     }
     setMigrating(true);
     setResult(null);
 
     try {
-      const res = await migrateTests(sourceRepoId, remoteUrl, apiKey, targetRepoId);
+      const res = await migrateTests(
+        sourceRepoId,
+        remoteUrl,
+        apiKey,
+        targetRepoId,
+      );
       setResult(res);
       if (res.success) {
-        toast.success('Migration completed successfully');
+        toast.success("Migration completed successfully");
       } else {
-        toast.error('Migration completed with errors');
+        toast.error("Migration completed with errors");
       }
     } catch {
-      toast.error('Migration failed');
+      toast.error("Migration failed");
     } finally {
       setMigrating(false);
     }
@@ -184,8 +207,8 @@ export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) 
           <div
             className={`p-4 rounded-lg border text-sm space-y-1 ${
               result.success
-                ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
-                : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'
+                ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800"
+                : "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800"
             }`}
           >
             <div className="flex items-center gap-2 font-medium">
@@ -194,13 +217,15 @@ export function TestMigrationCard({ repositories, defaultRepositoryId }: Props) 
               ) : (
                 <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
               )}
-              Migration {result.success ? 'complete' : 'completed with errors'}
+              Migration {result.success ? "complete" : "completed with errors"}
             </div>
             <div className="text-muted-foreground">
-              Areas: {result.areasCreated} created, {result.areasUpdated} updated
+              Areas: {result.areasCreated} created, {result.areasUpdated}{" "}
+              updated
             </div>
             <div className="text-muted-foreground">
-              Tests: {result.testsCreated} created, {result.testsUpdated} updated
+              Tests: {result.testsCreated} created, {result.testsUpdated}{" "}
+              updated
             </div>
             {result.errors.length > 0 && (
               <div className="mt-2 space-y-1">

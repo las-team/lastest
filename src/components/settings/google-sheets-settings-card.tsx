@@ -1,14 +1,24 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Sheet, RefreshCw, Trash2, Plus, Table2, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { disconnectGoogleSheets, deleteDataSource, syncDataSource } from '@/server/actions/google-sheets';
-import { useRouter } from 'next/navigation';
-import { SheetDataBrowser } from './sheet-data-browser';
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Sheet, RefreshCw, Trash2, Plus, Table2, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  disconnectGoogleSheets,
+  deleteDataSource,
+  syncDataSource,
+} from "@/server/actions/google-sheets";
+import { useRouter } from "next/navigation";
+import { SheetDataBrowser } from "./sheet-data-browser";
 
 interface DataSource {
   id: string;
@@ -52,14 +62,19 @@ export function GoogleSheetsSettingsCard({
   };
 
   const handleDisconnect = async () => {
-    if (!confirm('Disconnect Google Sheets? All imported data sources will be removed.')) return;
+    if (
+      !confirm(
+        "Disconnect Google Sheets? All imported data sources will be removed.",
+      )
+    )
+      return;
     setIsDisconnecting(true);
     try {
       await disconnectGoogleSheets();
-      toast.success('Google Sheets disconnected');
+      toast.success("Google Sheets disconnected");
       await refresh();
     } catch {
-      toast.error('Failed to disconnect');
+      toast.error("Failed to disconnect");
     } finally {
       setIsDisconnecting(false);
     }
@@ -70,27 +85,27 @@ export function GoogleSheetsSettingsCard({
     try {
       const result = await syncDataSource(id);
       if (result.success) {
-        toast.success('Data refreshed');
+        toast.success("Data refreshed");
         await refresh();
       } else {
-        toast.error(result.error || 'Failed to sync');
+        toast.error(result.error || "Failed to sync");
       }
     } catch {
-      toast.error('Failed to sync');
+      toast.error("Failed to sync");
     } finally {
       setSyncingId(null);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Remove this data source?')) return;
+    if (!confirm("Remove this data source?")) return;
     setDeletingId(id);
     try {
       await deleteDataSource(id);
-      toast.success('Data source removed');
+      toast.success("Data source removed");
       await refresh();
     } catch {
-      toast.error('Failed to delete');
+      toast.error("Failed to delete");
     } finally {
       setDeletingId(null);
     }
@@ -117,8 +132,12 @@ export function GoogleSheetsSettingsCard({
                   <Sheet className="w-4 h-4 text-green-700" />
                 </div>
                 <div>
-                  <div className="font-medium text-sm">{account.googleEmail}</div>
-                  <div className="text-xs text-muted-foreground">Google Sheets connected</div>
+                  <div className="font-medium text-sm">
+                    {account.googleEmail}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Google Sheets connected
+                  </div>
                 </div>
               </div>
               <Button
@@ -127,15 +146,19 @@ export function GoogleSheetsSettingsCard({
                 onClick={handleDisconnect}
                 disabled={isDisconnecting}
               >
-                {isDisconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+                {isDisconnecting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Disconnect"
+                )}
               </Button>
             </div>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Connect your Google account to import spreadsheet data for test scripts.
-                This allows you to reference cells, columns, and rows from Google Sheets
-                directly in your test code.
+                Connect your Google account to import spreadsheet data for test
+                scripts. This allows you to reference cells, columns, and rows
+                from Google Sheets directly in your test code.
               </p>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
@@ -182,7 +205,10 @@ export function GoogleSheetsSettingsCard({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Badge variant="secondary" className="font-mono text-xs">
+                          <Badge
+                            variant="secondary"
+                            className="font-mono text-xs"
+                          >
                             {ds.alias}
                           </Badge>
                           <span className="text-sm">{ds.spreadsheetName}</span>
@@ -223,17 +249,18 @@ export function GoogleSheetsSettingsCard({
                       {/* Preview headers and row count */}
                       {ds.cachedHeaders && ds.cachedHeaders.length > 0 && (
                         <div className="text-xs text-muted-foreground">
-                          <span className="font-medium">Columns:</span>{' '}
-                          {ds.cachedHeaders.slice(0, 6).join(', ')}
-                          {ds.cachedHeaders.length > 6 && ` +${ds.cachedHeaders.length - 6} more`}
-                          {' '}&middot;{' '}
-                          {ds.cachedData?.length || 0} rows
+                          <span className="font-medium">Columns:</span>{" "}
+                          {ds.cachedHeaders.slice(0, 6).join(", ")}
+                          {ds.cachedHeaders.length > 6 &&
+                            ` +${ds.cachedHeaders.length - 6} more`}{" "}
+                          &middot; {ds.cachedData?.length || 0} rows
                         </div>
                       )}
 
                       {/* Usage hint */}
                       <div className="text-xs bg-muted/50 px-2 py-1 rounded font-mono">
-                        {'{{'}sheet:{ds.alias}.{ds.cachedHeaders?.[0] || 'column'}[0]{'}}'}
+                        {"{{"}sheet:{ds.alias}.
+                        {ds.cachedHeaders?.[0] || "column"}[0]{"}}"}
                       </div>
                     </div>
                   ))}

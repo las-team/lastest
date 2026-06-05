@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useOptimistic, useTransition } from 'react';
-import { AlertTriangle } from 'lucide-react';
-import { Switch } from '@/components/ui/switch';
-import { toast } from 'sonner';
-import { updateEarlyAdopterMode } from '@/server/actions/settings';
+import { useOptimistic, useTransition } from "react";
+import { AlertTriangle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import { updateEarlyAdopterMode } from "@/server/actions/settings";
 
 interface EarlyAdopterToggleProps {
   enabled: boolean;
@@ -19,9 +19,13 @@ export function EarlyAdopterToggle({ enabled }: EarlyAdopterToggleProps) {
       setOptimisticEnabled(checked);
       try {
         await updateEarlyAdopterMode(checked);
-        toast.success(checked ? 'Early adopter mode enabled' : 'Early adopter mode disabled');
+        toast.success(
+          checked
+            ? "Early adopter mode enabled"
+            : "Early adopter mode disabled",
+        );
       } catch {
-        toast.error('Failed to update setting');
+        toast.error("Failed to update setting");
       }
     });
   }

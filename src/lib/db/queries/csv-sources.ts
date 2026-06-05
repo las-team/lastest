@@ -1,24 +1,38 @@
-import { db } from '../index';
-import { csvDataSources } from '../schema';
-import type { NewCsvDataSource } from '../schema';
-import { and, eq } from 'drizzle-orm';
-import { v4 as uuid } from 'uuid';
+import { db } from "../index";
+import { csvDataSources } from "../schema";
+import type { NewCsvDataSource } from "../schema";
+import { and, eq } from "drizzle-orm";
+import { v4 as uuid } from "uuid";
 
 export async function getCsvDataSources(repositoryId?: string | null) {
   if (!repositoryId) return [];
-  return db.select().from(csvDataSources).where(eq(csvDataSources.repositoryId, repositoryId));
+  return db
+    .select()
+    .from(csvDataSources)
+    .where(eq(csvDataSources.repositoryId, repositoryId));
 }
 
 export async function getCsvDataSource(id: string) {
-  const [row] = await db.select().from(csvDataSources).where(eq(csvDataSources.id, id));
-  return row || null;
-}
-
-export async function getCsvDataSourceByAlias(repositoryId: string, alias: string) {
   const [row] = await db
     .select()
     .from(csvDataSources)
-    .where(and(eq(csvDataSources.repositoryId, repositoryId), eq(csvDataSources.alias, alias)));
+    .where(eq(csvDataSources.id, id));
+  return row || null;
+}
+
+export async function getCsvDataSourceByAlias(
+  repositoryId: string,
+  alias: string,
+) {
+  const [row] = await db
+    .select()
+    .from(csvDataSources)
+    .where(
+      and(
+        eq(csvDataSources.repositoryId, repositoryId),
+        eq(csvDataSources.alias, alias),
+      ),
+    );
   return row || null;
 }
 

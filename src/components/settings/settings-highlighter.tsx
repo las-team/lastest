@@ -1,17 +1,19 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { SECTION_TO_TAB } from '@/components/settings/settings-tabs';
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { SECTION_TO_TAB } from "@/components/settings/settings-tabs";
 
 export function SettingsHighlighter() {
   const router = useRouter();
 
   useEffect(() => {
-    const highlight = new URLSearchParams(window.location.search).get('highlight');
+    const highlight = new URLSearchParams(window.location.search).get(
+      "highlight",
+    );
     if (!highlight) return;
 
-    const ids = highlight.split(',');
+    const ids = highlight.split(",");
     const firstId = ids[0];
 
     // Switch to the tab containing the highlighted section. SettingsTabs's
@@ -28,7 +30,9 @@ export function SettingsHighlighter() {
       // the event is silently dropped.
       requestAnimationFrame(() => {
         window.dispatchEvent(
-          new CustomEvent('lastest:settings-tab', { detail: { tab: targetTab } })
+          new CustomEvent("lastest:settings-tab", {
+            detail: { tab: targetTab },
+          }),
         );
       });
     }
@@ -47,7 +51,7 @@ export function SettingsHighlighter() {
         // browsers (Safari) where smooth-scrolling into a nested overflow
         // container is flaky.
         try {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
         } catch {
           target.scrollIntoView();
         }
@@ -57,12 +61,14 @@ export function SettingsHighlighter() {
       // param doesn't linger across navigations.
       cleanupTimer = setTimeout(() => {
         for (const el of els) {
-          el.classList.remove('settings-highlight');
+          el.classList.remove("settings-highlight");
         }
         const url = new URL(window.location.href);
-        if (url.searchParams.has('highlight')) {
-          url.searchParams.delete('highlight');
-          router.replace(url.pathname + url.search + url.hash, { scroll: false });
+        if (url.searchParams.has("highlight")) {
+          url.searchParams.delete("highlight");
+          router.replace(url.pathname + url.search + url.hash, {
+            scroll: false,
+          });
         }
       }, 3200);
     };
@@ -75,7 +81,7 @@ export function SettingsHighlighter() {
       for (const id of ids) {
         const el = document.getElementById(id);
         if (el) {
-          el.classList.add('settings-highlight');
+          el.classList.add("settings-highlight");
           els.push(el);
         }
       }
@@ -103,9 +109,11 @@ export function SettingsHighlighter() {
         observer?.disconnect();
         observer = null;
         const url = new URL(window.location.href);
-        if (url.searchParams.has('highlight')) {
-          url.searchParams.delete('highlight');
-          router.replace(url.pathname + url.search + url.hash, { scroll: false });
+        if (url.searchParams.has("highlight")) {
+          url.searchParams.delete("highlight");
+          router.replace(url.pathname + url.search + url.hash, {
+            scroll: false,
+          });
         }
       }, 5000);
     }

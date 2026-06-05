@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Globe, Maximize2, Minimize2, Camera, Monitor } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useState } from "react";
+import { Globe, Maximize2, Minimize2, Camera, Monitor } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
 
 const VIEWPORT_PRESETS = [
-  { label: '1280×720', width: 1280, height: 720 },
-  { label: '1920×1080', width: 1920, height: 1080 },
-  { label: '1024×768', width: 1024, height: 768 },
-  { label: '375×812 (Mobile)', width: 375, height: 812 },
-  { label: '768×1024 (Tablet)', width: 768, height: 1024 },
+  { label: "1280×720", width: 1280, height: 720 },
+  { label: "1920×1080", width: 1920, height: 1080 },
+  { label: "1024×768", width: 1024, height: 768 },
+  { label: "375×812 (Mobile)", width: 375, height: 812 },
+  { label: "768×1024 (Tablet)", width: 768, height: 1024 },
 ];
 
 interface BrowserToolbarProps {
@@ -49,7 +49,7 @@ export function BrowserToolbar({
   hideViewportSelector,
   readOnly,
 }: BrowserToolbarProps) {
-  const [urlInput, setUrlInput] = useState(currentUrl ?? '');
+  const [urlInput, setUrlInput] = useState(currentUrl ?? "");
   const [userEdited, setUserEdited] = useState(false);
 
   const displayUrl = userEdited ? urlInput : (currentUrl ?? urlInput);
@@ -58,7 +58,7 @@ export function BrowserToolbar({
     e.preventDefault();
     if (urlInput.trim()) {
       let url = urlInput.trim();
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
         url = `https://${url}`;
       }
       onNavigate?.(url);
@@ -83,7 +83,7 @@ export function BrowserToolbar({
           onBlur={() => setUserEdited(false)}
           readOnly={readOnly}
           placeholder="Enter URL..."
-          className={`h-7 text-sm ${readOnly ? 'cursor-default opacity-70' : ''}`}
+          className={`h-7 text-sm ${readOnly ? "cursor-default opacity-70" : ""}`}
         />
       </form>
 
@@ -94,9 +94,14 @@ export function BrowserToolbar({
             <Select
               value={viewportLabel}
               onValueChange={(val) => {
-                const preset = VIEWPORT_PRESETS.find((p) => `${p.width}×${p.height}` === val);
+                const preset = VIEWPORT_PRESETS.find(
+                  (p) => `${p.width}×${p.height}` === val,
+                );
                 if (preset) {
-                  onViewportChange?.({ width: preset.width, height: preset.height });
+                  onViewportChange?.({
+                    width: preset.width,
+                    height: preset.height,
+                  });
                 }
               }}
             >
@@ -106,7 +111,10 @@ export function BrowserToolbar({
               </SelectTrigger>
               <SelectContent>
                 {VIEWPORT_PRESETS.map((preset) => (
-                  <SelectItem key={preset.label} value={`${preset.width}×${preset.height}`}>
+                  <SelectItem
+                    key={preset.label}
+                    value={`${preset.width}×${preset.height}`}
+                  >
                     {preset.label}
                   </SelectItem>
                 ))}
@@ -116,7 +124,13 @@ export function BrowserToolbar({
 
           {/* Screenshot */}
           {!hideScreenshot && (
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onScreenshot} title="Take screenshot">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onScreenshot}
+              title="Take screenshot"
+            >
               <Camera className="h-4 w-4" />
             </Button>
           )}
@@ -125,8 +139,18 @@ export function BrowserToolbar({
 
       {/* Fullscreen — hidden when controls are hidden or explicitly disabled */}
       {!hideControls && !hideFullscreenToggle && (
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onFullscreenToggle} title="Toggle fullscreen">
-          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onFullscreenToggle}
+          title="Toggle fullscreen"
+        >
+          {isFullscreen ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
         </Button>
       )}
     </div>

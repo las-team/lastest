@@ -1,17 +1,43 @@
-'use server';
+"use server";
 
-import type { AssertionType, WaitParams } from '@/lib/playwright/types';
-import { eventsToCodeLines } from '@/lib/playwright/event-to-code';
-import { createTest, createFunctionalArea, getFunctionalAreas, getPlaywrightSettings, getTest, getSetupScript, getRepository, getStorageState, getDefaultSetupSteps } from '@/lib/db/queries';
-import { requireCapability, requireRepoCapability } from '@/lib/auth';
-import { DEFAULT_SELECTOR_PRIORITY } from '@/lib/db/schema';
-import type { SelectorConfig } from '@/lib/db/schema';
-import { analyzeHtmlForSelectors, recommendPriorityFromAnalysis, isMeaningful } from '@/lib/playwright/selector-analysis';
-import { v4 as uuid } from 'uuid';
-import { revalidatePath } from 'next/cache';
-import { createMessage } from '@/lib/ws/protocol';
-import type { StartRecordingCommand, StopRecordingCommand, CaptureScreenshotCommand, CreateAssertionCommand, CreateWaitCommand, FlagDownloadCommand, InsertTimestampCommand, PromoteSelectorCommand } from '@/lib/ws/protocol';
-import { claimOrProvisionPoolEB, releasePoolEB } from '@/server/actions/embedded-sessions';
+import type { AssertionType, WaitParams } from "@/lib/playwright/types";
+import { eventsToCodeLines } from "@/lib/playwright/event-to-code";
+import {
+  createTest,
+  createFunctionalArea,
+  getFunctionalAreas,
+  getPlaywrightSettings,
+  getTest,
+  getSetupScript,
+  getRepository,
+  getStorageState,
+  getDefaultSetupSteps,
+} from "@/lib/db/queries";
+import { requireCapability, requireRepoCapability } from "@/lib/auth";
+import { DEFAULT_SELECTOR_PRIORITY } from "@/lib/db/schema";
+import type { SelectorConfig } from "@/lib/db/schema";
+import {
+  analyzeHtmlForSelectors,
+  recommendPriorityFromAnalysis,
+  isMeaningful,
+} from "@/lib/playwright/selector-analysis";
+import { v4 as uuid } from "uuid";
+import { revalidatePath } from "next/cache";
+import { createMessage } from "@/lib/ws/protocol";
+import type {
+  StartRecordingCommand,
+  StopRecordingCommand,
+  CaptureScreenshotCommand,
+  CreateAssertionCommand,
+  CreateWaitCommand,
+  FlagDownloadCommand,
+  InsertTimestampCommand,
+  PromoteSelectorCommand,
+} from "@/lib/ws/protocol";
+import {
+  claimOrProvisionPoolEB,
+  releasePoolEB,
+} from "@/server/actions/embedded-sessions";
 import {
   queueCommandToDB,
   createRemoteRecordingSession,
@@ -21,7 +47,7 @@ import {
   clearRemoteRecordingSession,
   type RemoteRecordingEvent,
   type RemoteRecordingEventUpdate,
-} from '@/app/api/ws/runner/route';
+} from "@/app/api/ws/runner/route";
 
 export async function startRecording(
   url: string,
@@ -30,45 +56,62 @@ export async function startRecording(
   setupOptions?: {
     testId?: string | null;
     scriptId?: string | null;
-    steps?: Array<{ stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null }>;
+    steps?: Array<{
+      stepType: "test" | "script" | "storage_state";
+      testId?: string | null;
+      scriptId?: string | null;
+      storageStateId?: string | null;
+    }>;
     rerecordTestId?: string | null;
   },
   _storageStateId?: string,
 ): Promise<{ sessionId?: string; resolvedRunnerId?: string; error?: string }> {
-  const session = await requireCapability('recording:write');
+  const session = await requireCapability("recording:write");
   // Validate URL format
   try {
     new URL(url);
   } catch {
-    return { error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com)' };
+    return {
+      error:
+        "Invalid URL format. Please enter a valid URL (e.g., https://example.com)",
+    };
   }
 
   const sessionId = uuid();
   const settings = await getPlaywrightSettings(repositoryId);
-  const selectorPriority = settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+  const selectorPriority =
+    settings.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
 
   // Tag every claim attempt with team+user+repo so a user-reported "disconnected"
   // can be traced to a specific runner (or to "no EB available") without
   // grepping a sea of anonymous `[Pool] Claimed EB ...` lines.
-  const traceTag = `team=${session.team.id} user=${session.user.id} repo=${repositoryId ?? 'none'}`;
+  const traceTag = `team=${session.team.id} user=${session.user.id} repo=${repositoryId ?? "none"}`;
 
   // Resolve 'auto' to a pool-managed system EB (atomic claim, with on-demand
   // provisioning when EB_PROVISIONER=kubernetes and no idle EB is available).
-  if (runnerId === 'auto') {
+  if (runnerId === "auto") {
     const poolEB = await claimOrProvisionPoolEB();
     if (!poolEB) {
-      console.warn(`[Recording] No EB available (claimOrProvisionPoolEB → null) ${traceTag} url=${url}`);
-      return { error: 'All browsers are busy. Please try again later.' };
+      console.warn(
+        `[Recording] No EB available (claimOrProvisionPoolEB → null) ${traceTag} url=${url}`,
+      );
+      return { error: "All browsers are busy. Please try again later." };
     }
-    console.log(`[Recording] EB claimed runner=${poolEB.runnerId.slice(0, 8)} ${traceTag} url=${url}`);
+    console.log(
+      `[Recording] EB claimed runner=${poolEB.runnerId.slice(0, 8)} ${traceTag} url=${url}`,
+    );
     runnerId = poolEB.runnerId;
   } else {
-    console.log(`[Recording] Recording on explicit runner=${runnerId?.slice(0, 8) ?? 'none'} ${traceTag} url=${url}`);
+    console.log(
+      `[Recording] Recording on explicit runner=${runnerId?.slice(0, 8) ?? "none"} ${traceTag} url=${url}`,
+    );
   }
 
   // Require a runner or EB — local recording is not supported
-  if (!runnerId || runnerId === 'local') {
-    return { error: 'Please select a runner or embedded browser for recording.' };
+  if (!runnerId || runnerId === "local") {
+    return {
+      error: "Please select a runner or embedded browser for recording.",
+    };
   }
 
   // Clear any existing remote session for this repository —
@@ -79,7 +122,13 @@ export async function startRecording(
   }
 
   // Create the remote recording session on the server
-  createRemoteRecordingSession(sessionId, runnerId, repositoryId ?? null, url, selectorPriority);
+  createRemoteRecordingSession(
+    sessionId,
+    runnerId,
+    repositoryId ?? null,
+    url,
+    selectorPriority,
+  );
 
   // Resolve setup steps to code (runners have no DB access).
   //
@@ -94,14 +143,19 @@ export async function startRecording(
   // Storage-state steps are realised as a synthesized cookie-injection setup
   // script — matches the orchestrator's `context.addCookies` behaviour without
   // requiring a protocol change.
-  type ChainStep = { stepType: 'test' | 'script' | 'storage_state'; testId?: string | null; scriptId?: string | null; storageStateId?: string | null };
+  type ChainStep = {
+    stepType: "test" | "script" | "storage_state";
+    testId?: string | null;
+    scriptId?: string | null;
+    storageStateId?: string | null;
+  };
   const stepsToResolve: ChainStep[] = [];
 
   if (setupOptions?.steps?.length) {
     stepsToResolve.push(...setupOptions.steps);
   } else if (setupOptions?.testId || setupOptions?.scriptId) {
     stepsToResolve.push({
-      stepType: setupOptions.testId ? 'test' : 'script',
+      stepType: setupOptions.testId ? "test" : "script",
       testId: setupOptions.testId ?? null,
       scriptId: setupOptions.scriptId ?? null,
     });
@@ -115,15 +169,29 @@ export async function startRecording(
         const skipped = new Set(overrides?.skippedDefaultStepIds ?? []);
         for (const d of defaults) {
           if (skipped.has(d.id)) continue;
-          stepsToResolve.push({ stepType: d.stepType as ChainStep['stepType'], testId: d.testId, scriptId: d.scriptId, storageStateId: d.storageStateId });
+          stepsToResolve.push({
+            stepType: d.stepType as ChainStep["stepType"],
+            testId: d.testId,
+            scriptId: d.scriptId,
+            storageStateId: d.storageStateId,
+          });
         }
         for (const e of overrides?.extraSteps ?? []) {
-          stepsToResolve.push({ stepType: e.stepType as ChainStep['stepType'], testId: e.testId ?? null, scriptId: e.scriptId ?? null, storageStateId: (e as { storageStateId?: string | null }).storageStateId ?? null });
+          stepsToResolve.push({
+            stepType: e.stepType as ChainStep["stepType"],
+            testId: e.testId ?? null,
+            scriptId: e.scriptId ?? null,
+            storageStateId:
+              (e as { storageStateId?: string | null }).storageStateId ?? null,
+          });
         }
       } else if (existing.setupTestId) {
-        stepsToResolve.push({ stepType: 'test', testId: existing.setupTestId });
+        stepsToResolve.push({ stepType: "test", testId: existing.setupTestId });
       } else if (existing.setupScriptId) {
-        stepsToResolve.push({ stepType: 'script', scriptId: existing.setupScriptId });
+        stepsToResolve.push({
+          stepType: "script",
+          scriptId: existing.setupScriptId,
+        });
       }
     }
   } else if (repositoryId) {
@@ -131,14 +199,25 @@ export async function startRecording(
     const defaults = await getDefaultSetupSteps(repositoryId);
     if (defaults.length > 0) {
       for (const d of defaults) {
-        stepsToResolve.push({ stepType: d.stepType as ChainStep['stepType'], testId: d.testId, scriptId: d.scriptId, storageStateId: d.storageStateId });
+        stepsToResolve.push({
+          stepType: d.stepType as ChainStep["stepType"],
+          testId: d.testId,
+          scriptId: d.scriptId,
+          storageStateId: d.storageStateId,
+        });
       }
     } else {
       const repo = await getRepository(repositoryId);
       if (repo?.defaultSetupTestId) {
-        stepsToResolve.push({ stepType: 'test', testId: repo.defaultSetupTestId });
+        stepsToResolve.push({
+          stepType: "test",
+          testId: repo.defaultSetupTestId,
+        });
       } else if (repo?.defaultSetupScriptId) {
-        stepsToResolve.push({ stepType: 'script', scriptId: repo.defaultSetupScriptId });
+        stepsToResolve.push({
+          stepType: "script",
+          scriptId: repo.defaultSetupScriptId,
+        });
       }
     }
   }
@@ -147,7 +226,7 @@ export async function startRecording(
   if (stepsToResolve.length > 0) {
     resolvedSetupSteps = [];
     for (const step of stepsToResolve) {
-      if (step.stepType === 'storage_state') {
+      if (step.stepType === "storage_state") {
         if (!step.storageStateId) continue;
         const ss = await getStorageState(step.storageStateId);
         if (!ss?.storageStateJson) continue;
@@ -158,43 +237,58 @@ export async function startRecording(
           // Synthesize a one-line setup script that re-uses the orchestrator
           // contract: `export async function setup(page)` with `page.context().addCookies`.
           const code = `export async function setup(page) { await page.context().addCookies(${JSON.stringify(cookies)}); }`;
-          resolvedSetupSteps.push({ code, codeHash: '' });
+          resolvedSetupSteps.push({ code, codeHash: "" });
         } catch (err) {
-          console.warn(`[Recording] Failed to parse storage state ${step.storageStateId}: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn(
+            `[Recording] Failed to parse storage state ${step.storageStateId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
         continue;
       }
-      const id = step.stepType === 'test' ? step.testId : step.scriptId;
+      const id = step.stepType === "test" ? step.testId : step.scriptId;
       if (!id) continue;
-      const record = step.stepType === 'test' ? await getTest(id) : await getSetupScript(id);
+      const record =
+        step.stepType === "test" ? await getTest(id) : await getSetupScript(id);
       if (record?.code) {
         const hash = (record as Record<string, unknown>).codeHash;
-        resolvedSetupSteps.push({ code: record.code, codeHash: typeof hash === 'string' ? hash : '' });
+        resolvedSetupSteps.push({
+          code: record.code,
+          codeHash: typeof hash === "string" ? hash : "",
+        });
       }
     }
     if (resolvedSetupSteps.length === 0) resolvedSetupSteps = undefined;
   }
 
-  console.log(`[Recording] Setup chain: ${stepsToResolve.length} step(s) declared, ${resolvedSetupSteps?.length ?? 0} resolved with code ${traceTag}`);
+  console.log(
+    `[Recording] Setup chain: ${stepsToResolve.length} step(s) declared, ${resolvedSetupSteps?.length ?? 0} resolved with code ${traceTag}`,
+  );
 
   // Queue start_recording command to the runner
-  const command = createMessage<StartRecordingCommand>('command:start_recording', {
-    sessionId,
-    targetUrl: url,
-    viewport: {
-      width: settings.viewportWidth ?? 1280,
-      height: settings.viewportHeight ?? 720,
+  const command = createMessage<StartRecordingCommand>(
+    "command:start_recording",
+    {
+      sessionId,
+      targetUrl: url,
+      viewport: {
+        width: settings.viewportWidth ?? 1280,
+        height: settings.viewportHeight ?? 720,
+      },
+      browser:
+        (settings.browser as "chromium" | "firefox" | "webkit") ?? "chromium",
+      selectorPriority,
+      ocrEnabled:
+        selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false,
+      pointerGestures: settings.pointerGestures ?? false,
+      cursorFPS: settings.cursorFPS ?? 30,
+      setupSteps: resolvedSetupSteps,
     },
-    browser: (settings.browser as 'chromium' | 'firefox' | 'webkit') ?? 'chromium',
-    selectorPriority,
-    ocrEnabled: selectorPriority.find(s => s.type === 'ocr-text')?.enabled ?? false,
-    pointerGestures: settings.pointerGestures ?? false,
-    cursorFPS: settings.cursorFPS ?? 30,
-    setupSteps: resolvedSetupSteps,
-  });
+  );
   await queueCommandToDB(runnerId, command);
 
-  console.log(`[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`);
+  console.log(
+    `[Recording] Dispatched recording to runner ${runnerId}, session ${sessionId}`,
+  );
   return { sessionId, resolvedRunnerId: runnerId };
 }
 
@@ -228,14 +322,17 @@ export interface AnalyzeUrlSelectorsResult {
  */
 export async function analyzeUrlForSelectors(
   url: string,
-  repositoryId?: string | null
+  repositoryId?: string | null,
 ): Promise<AnalyzeUrlSelectorsResult> {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
 
   try {
     new URL(url);
   } catch {
-    return { error: 'Invalid URL format. Please enter a valid URL (e.g., https://example.com)' };
+    return {
+      error:
+        "Invalid URL format. Please enter a valid URL (e.g., https://example.com)",
+    };
   }
 
   const settings = await getPlaywrightSettings(repositoryId);
@@ -244,48 +341,78 @@ export async function analyzeUrlForSelectors(
   let html: string;
   try {
     const res = await fetch(url, {
-      redirect: 'follow',
+      redirect: "follow",
       signal: AbortSignal.timeout(10000),
       headers: {
         // Present as a real browser so servers return the full document.
-        'user-agent':
-          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        "user-agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
     if (!res.ok) {
-      return { error: `Could not load page (HTTP ${res.status}). Check the URL and try again.` };
+      return {
+        error: `Could not load page (HTTP ${res.status}). Check the URL and try again.`,
+      };
     }
-    const contentType = res.headers.get('content-type') ?? '';
+    const contentType = res.headers.get("content-type") ?? "";
     if (contentType && !/(text\/html|application\/xhtml)/i.test(contentType)) {
-      return { error: `Page is not HTML (${contentType.split(';')[0]}). Selector analysis needs an HTML page.` };
+      return {
+        error: `Page is not HTML (${contentType.split(";")[0]}). Selector analysis needs an HTML page.`,
+      };
     }
     html = await res.text();
   } catch (err) {
-    const reason = err instanceof Error && err.name === 'TimeoutError' ? 'timed out' : 'failed';
-    return { error: `Request to the URL ${reason}. The page may be unreachable from the server.` };
+    const reason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "timed out"
+        : "failed";
+    return {
+      error: `Request to the URL ${reason}. The page may be unreachable from the server.`,
+    };
   }
 
-  const coverage = analyzeHtmlForSelectors(html, { customAttributeName: settings.customAttributeName });
+  const coverage = analyzeHtmlForSelectors(html, {
+    customAttributeName: settings.customAttributeName,
+  });
   const recommendedPriority = recommendPriorityFromAnalysis(current, coverage);
   const meaningful = isMeaningful(coverage);
 
-  const SUMMARY_SKIP = new Set(['css-path', 'coords', 'text', 'ocr-text']);
-  const topStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
-    .filter((type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] > 0)
-    .map((type) => ({ type, count: coverage.counts[type], unique: coverage.uniqueCounts[type] }))
+  const SUMMARY_SKIP = new Set(["css-path", "coords", "text", "ocr-text"]);
+  const topStrategies = (
+    Object.keys(coverage.uniqueCounts) as Array<
+      keyof typeof coverage.uniqueCounts
+    >
+  )
+    .filter(
+      (type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] > 0,
+    )
+    .map((type) => ({
+      type,
+      count: coverage.counts[type],
+      unique: coverage.uniqueCounts[type],
+    }))
     .sort((a, b) => b.unique - a.unique || b.count - a.count)
     .slice(0, 4);
 
   // Strategies that are present but ambiguous (single repeated value across
   // many occurrences) — the misleading case we explicitly downrank.
-  const ambiguousStrategies = (Object.keys(coverage.uniqueCounts) as Array<keyof typeof coverage.uniqueCounts>)
+  const ambiguousStrategies = (
+    Object.keys(coverage.uniqueCounts) as Array<
+      keyof typeof coverage.uniqueCounts
+    >
+  )
     .filter(
-      (type) => !SUMMARY_SKIP.has(type) && coverage.uniqueCounts[type] === 1 && coverage.counts[type] > 1
+      (type) =>
+        !SUMMARY_SKIP.has(type) &&
+        coverage.uniqueCounts[type] === 1 &&
+        coverage.counts[type] > 1,
     )
     .map((type) => ({ type, count: coverage.counts[type] }));
 
-  const changed = JSON.stringify(recommendedPriority) !== JSON.stringify(current);
+  const changed =
+    JSON.stringify(recommendedPriority) !== JSON.stringify(current);
 
   return {
     recommendedPriority,
@@ -298,19 +425,22 @@ export async function analyzeUrlForSelectors(
 }
 
 export async function stopRecording(repositoryId?: string | null) {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
     // Queue stop command to the runner
-    const command = createMessage<StopRecordingCommand>('command:stop_recording', {
-      sessionId: remoteSession.sessionId,
-    });
+    const command = createMessage<StopRecordingCommand>(
+      "command:stop_recording",
+      {
+        sessionId: remoteSession.sessionId,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
 
     // Wait for the runner to confirm stop (poll for up to 10 seconds)
     for (let i = 0; i < 20; i++) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       const session = getRemoteRecordingSession(repositoryId);
       if (!session?.isRecording) break;
     }
@@ -349,14 +479,17 @@ export async function stopRecording(repositoryId?: string | null) {
 }
 
 export async function captureScreenshot(repositoryId?: string | null) {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
     // Queue screenshot command to the runner
-    const command = createMessage<CaptureScreenshotCommand>('command:capture_screenshot', {
-      sessionId: remoteSession.sessionId,
-    });
+    const command = createMessage<CaptureScreenshotCommand>(
+      "command:capture_screenshot",
+      {
+        sessionId: remoteSession.sessionId,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
 
     // The screenshot event will come back through recording events
@@ -367,16 +500,22 @@ export async function captureScreenshot(repositoryId?: string | null) {
   return { screenshotPath: null };
 }
 
-export async function createAssertion(type: AssertionType, repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireCapability('recording:write');
+export async function createAssertion(
+  type: AssertionType,
+  repositoryId?: string | null,
+): Promise<{ success: boolean }> {
+  await requireCapability("recording:write");
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    const command = createMessage<CreateAssertionCommand>('command:create_assertion', {
-      sessionId: remoteSession.sessionId,
-      assertionType: type,
-    });
+    const command = createMessage<CreateAssertionCommand>(
+      "command:create_assertion",
+      {
+        sessionId: remoteSession.sessionId,
+        assertionType: type,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
     return { success: true };
   }
@@ -384,32 +523,63 @@ export async function createAssertion(type: AssertionType, repositoryId?: string
   return { success: false };
 }
 
-export async function createWait(params: WaitParams, repositoryId?: string | null): Promise<{ success: boolean; error?: string }> {
-  await requireCapability('recording:write');
+export async function createWait(
+  params: WaitParams,
+  repositoryId?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  await requireCapability("recording:write");
 
-  if (params.waitType === 'duration') {
-    if (typeof params.durationMs !== 'number' || params.durationMs < 0 || !Number.isFinite(params.durationMs)) {
-      return { success: false, error: 'durationMs must be a non-negative finite number' };
+  if (params.waitType === "duration") {
+    if (
+      typeof params.durationMs !== "number" ||
+      params.durationMs < 0 ||
+      !Number.isFinite(params.durationMs)
+    ) {
+      return {
+        success: false,
+        error: "durationMs must be a non-negative finite number",
+      };
     }
-  } else if (params.waitType === 'selector') {
-    const hasSelector = (params.selector && params.selector.trim().length > 0)
-      || (params.selectors && params.selectors.some(s => s.value && s.value.trim()));
+  } else if (params.waitType === "selector") {
+    const hasSelector =
+      (params.selector && params.selector.trim().length > 0) ||
+      (params.selectors &&
+        params.selectors.some((s) => s.value && s.value.trim()));
     if (!hasSelector) {
-      return { success: false, error: 'selector or selectors must be provided' };
+      return {
+        success: false,
+        error: "selector or selectors must be provided",
+      };
     }
-    if (params.condition && params.condition !== 'visible' && params.condition !== 'hidden') {
-      return { success: false, error: "condition must be 'visible' or 'hidden'" };
+    if (
+      params.condition &&
+      params.condition !== "visible" &&
+      params.condition !== "hidden"
+    ) {
+      return {
+        success: false,
+        error: "condition must be 'visible' or 'hidden'",
+      };
     }
-    if (params.timeoutMs !== undefined && (!Number.isFinite(params.timeoutMs) || params.timeoutMs < 0)) {
-      return { success: false, error: 'timeoutMs must be a non-negative finite number' };
+    if (
+      params.timeoutMs !== undefined &&
+      (!Number.isFinite(params.timeoutMs) || params.timeoutMs < 0)
+    ) {
+      return {
+        success: false,
+        error: "timeoutMs must be a non-negative finite number",
+      };
     }
   } else {
-    return { success: false, error: "waitType must be 'duration' or 'selector'" };
+    return {
+      success: false,
+      error: "waitType must be 'duration' or 'selector'",
+    };
   }
 
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    const command = createMessage<CreateWaitCommand>('command:create_wait', {
+    const command = createMessage<CreateWaitCommand>("command:create_wait", {
       sessionId: remoteSession.sessionId,
       waitType: params.waitType,
       durationMs: params.durationMs,
@@ -422,18 +592,23 @@ export async function createWait(params: WaitParams, repositoryId?: string | nul
     return { success: true };
   }
 
-  return { success: false, error: 'No active recording session' };
+  return { success: false, error: "No active recording session" };
 }
 
-export async function insertTimestamp(repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireCapability('recording:write');
+export async function insertTimestamp(
+  repositoryId?: string | null,
+): Promise<{ success: boolean }> {
+  await requireCapability("recording:write");
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    const command = createMessage<InsertTimestampCommand>('command:insert_timestamp', {
-      sessionId: remoteSession.sessionId,
-    });
+    const command = createMessage<InsertTimestampCommand>(
+      "command:insert_timestamp",
+      {
+        sessionId: remoteSession.sessionId,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
     return { success: true };
   }
@@ -446,33 +621,43 @@ export async function promoteSelector(
   selectorValue: string,
   repositoryId?: string | null,
 ): Promise<{ success: boolean; error?: string }> {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   if (!actionId || !selectorValue) {
-    return { success: false, error: 'actionId and selectorValue are required' };
+    return { success: false, error: "actionId and selectorValue are required" };
   }
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    const command = createMessage<PromoteSelectorCommand>('command:promote_selector', {
-      sessionId: remoteSession.sessionId,
-      actionId,
-      selectorValue,
-    });
+    const command = createMessage<PromoteSelectorCommand>(
+      "command:promote_selector",
+      {
+        sessionId: remoteSession.sessionId,
+        actionId,
+        selectorValue,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
     return { success: true };
   }
-  return { success: false, error: 'No active recording session' };
+  return { success: false, error: "No active recording session" };
 }
 
-export async function flagDownload(repositoryId?: string | null): Promise<{ success: boolean }> {
-  await requireCapability('recording:write');
+export async function flagDownload(
+  repositoryId?: string | null,
+): Promise<{ success: boolean }> {
+  await requireCapability("recording:write");
 
   // Check for remote recording session
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession?.isRecording) {
-    console.log(`[flagDownload] Dispatching to remote runner ${remoteSession.runnerId}`);
-    const command = createMessage<FlagDownloadCommand>('command:flag_download', {
-      sessionId: remoteSession.sessionId,
-    });
+    console.log(
+      `[flagDownload] Dispatching to remote runner ${remoteSession.runnerId}`,
+    );
+    const command = createMessage<FlagDownloadCommand>(
+      "command:flag_download",
+      {
+        sessionId: remoteSession.sessionId,
+      },
+    );
     await queueCommandToDB(remoteSession.runnerId, command);
     return { success: true };
   }
@@ -480,9 +665,14 @@ export async function flagDownload(repositoryId?: string | null): Promise<{ succ
   return { success: false };
 }
 
-export async function togglePauseRecording(_repositoryId?: string | null): Promise<{ paused: boolean; error?: string }> {
-  await requireCapability('recording:write');
-  return { paused: false, error: 'Pause is not supported for remote recording sessions' };
+export async function togglePauseRecording(
+  _repositoryId?: string | null,
+): Promise<{ paused: boolean; error?: string }> {
+  await requireCapability("recording:write");
+  return {
+    paused: false,
+    error: "Pause is not supported for remote recording sessions",
+  };
 }
 
 export async function getRecordingStatus(
@@ -495,7 +685,7 @@ export async function getRecordingStatus(
   // tears down the BrowserViewer mid-recording.
   hint?: { sessionId?: string; runnerId?: string },
 ) {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   // Check for remote recording session first
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession) {
@@ -503,12 +693,14 @@ export async function getRecordingStatus(
     // cross-pod recording_event POSTs).
     const events = await getRemoteRecordingEvents(repositoryId, sinceSequence);
     const allCount = remoteSession.events.length; // for legacy eventsCount; DB-merged may differ but in-memory is fine here
-    const lastSequence = events.length > 0
-      ? events[events.length - 1]!.sequence
-      : (remoteSession.events.at(-1)?.sequence ?? sinceSequence ?? 0);
+    const lastSequence =
+      events.length > 0
+        ? events[events.length - 1]!.sequence
+        : (remoteSession.events.at(-1)?.sequence ?? sinceSequence ?? 0);
 
     // If recording stopped and we have generated code, return as completed session
-    const isCompleted = !remoteSession.isRecording && remoteSession.generatedCode;
+    const isCompleted =
+      !remoteSession.isRecording && remoteSession.generatedCode;
 
     // Drain late updates (verification settled, thumbnails arrived,
     // autorepair fired) for events whose sequence the UI already polled
@@ -523,16 +715,20 @@ export async function getRecordingStatus(
       events,
       lastSequence,
       verificationUpdates,
-      session: remoteSession.isRecording ? {
-        id: remoteSession.sessionId,
-        url: remoteSession.targetUrl,
-        startedAt: remoteSession.startedAt,
-        eventsCount: allCount,
-      } : null,
-      lastCompletedSession: isCompleted ? {
-        id: remoteSession.sessionId,
-        generatedCode: remoteSession.generatedCode!,
-      } : null,
+      session: remoteSession.isRecording
+        ? {
+            id: remoteSession.sessionId,
+            url: remoteSession.targetUrl,
+            startedAt: remoteSession.startedAt,
+            eventsCount: allCount,
+          }
+        : null,
+      lastCompletedSession: isCompleted
+        ? {
+            id: remoteSession.sessionId,
+            generatedCode: remoteSession.generatedCode!,
+          }
+        : null,
       errorMessage: remoteSession.errorMessage ?? null,
     };
   }
@@ -543,9 +739,10 @@ export async function getRecordingStatus(
   // we just don't have local mirror state. Returning isRecording=false here
   // would unmount the BrowserViewer mid-recording (canvas disappears).
   if (hint?.runnerId) {
-    const { db } = await import('@/lib/db');
-    const { runners, embeddedSessions, remoteRecordingEvents } = await import('@/lib/db/schema');
-    const { and: andOp, eq: eqOp, gt: gtOp } = await import('drizzle-orm');
+    const { db } = await import("@/lib/db");
+    const { runners, embeddedSessions, remoteRecordingEvents } =
+      await import("@/lib/db/schema");
+    const { and: andOp, eq: eqOp, gt: gtOp } = await import("drizzle-orm");
     const [runnerRow] = await db
       .select({
         runnerStatus: runners.status,
@@ -556,18 +753,23 @@ export async function getRecordingStatus(
       .where(eqOp(runners.id, hint.runnerId))
       .limit(1);
 
-    const stillBusy = !!runnerRow
-      && runnerRow.runnerStatus === 'busy'
-      && (runnerRow.sessionStatus === null || runnerRow.sessionStatus === 'busy');
+    const stillBusy =
+      !!runnerRow &&
+      runnerRow.runnerStatus === "busy" &&
+      (runnerRow.sessionStatus === null || runnerRow.sessionStatus === "busy");
 
     if (stillBusy) {
       // Pull DB-forwarded events for this sessionId so the UI continues to
       // grow the timeline even when polls bounce to the wrong pod.
       let dbEvents: RemoteRecordingEvent[] = [];
       if (hint.sessionId) {
-        const where = sinceSequence !== undefined
-          ? andOp(eqOp(remoteRecordingEvents.sessionId, hint.sessionId), gtOp(remoteRecordingEvents.sequence, sinceSequence))
-          : eqOp(remoteRecordingEvents.sessionId, hint.sessionId);
+        const where =
+          sinceSequence !== undefined
+            ? andOp(
+                eqOp(remoteRecordingEvents.sessionId, hint.sessionId),
+                gtOp(remoteRecordingEvents.sequence, sinceSequence),
+              )
+            : eqOp(remoteRecordingEvents.sessionId, hint.sessionId);
         const rows = await db
           .select()
           .from(remoteRecordingEvents)
@@ -577,25 +779,29 @@ export async function getRecordingStatus(
           type: r.type,
           timestamp: r.timestamp,
           sequence: r.sequence,
-          status: r.status as 'preview' | 'committed',
-          verification: (r.verification ?? undefined) as RemoteRecordingEvent['verification'],
+          status: r.status as "preview" | "committed",
+          verification: (r.verification ??
+            undefined) as RemoteRecordingEvent["verification"],
           data: (r.data ?? {}) as Record<string, unknown>,
         }));
       }
-      const lastSequence = dbEvents.length > 0
-        ? dbEvents[dbEvents.length - 1]!.sequence
-        : (sinceSequence ?? 0);
+      const lastSequence =
+        dbEvents.length > 0
+          ? dbEvents[dbEvents.length - 1]!.sequence
+          : (sinceSequence ?? 0);
       return {
         isRecording: true,
         events: dbEvents,
         lastSequence,
         verificationUpdates: [] as RemoteRecordingEventUpdate[],
-        session: hint.sessionId ? {
-          id: hint.sessionId,
-          url: '',
-          startedAt: new Date(),
-          eventsCount: dbEvents.length,
-        } : null,
+        session: hint.sessionId
+          ? {
+              id: hint.sessionId,
+              url: "",
+              startedAt: new Date(),
+              eventsCount: dbEvents.length,
+            }
+          : null,
         lastCompletedSession: null,
         errorMessage: null,
       };
@@ -615,7 +821,7 @@ export async function getRecordingStatus(
 }
 
 export async function clearLastCompletedSession(repositoryId?: string | null) {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   // Clear remote session if it exists and is completed
   const remoteSession = getRemoteRecordingSession(repositoryId);
   if (remoteSession && !remoteSession.isRecording) {
@@ -629,28 +835,44 @@ export async function saveRecordedTest(data: {
   targetUrl: string;
   code: string;
   repositoryId?: string | null;
-  requiredCapabilities?: { fileUpload?: boolean; clipboard?: boolean; networkInterception?: boolean; downloads?: boolean } | null;
+  requiredCapabilities?: {
+    fileUpload?: boolean;
+    clipboard?: boolean;
+    networkInterception?: boolean;
+    downloads?: boolean;
+  } | null;
   viewportWidth?: number;
   viewportHeight?: number;
-  extraSetupSteps?: Array<{ stepType: 'test' | 'script'; testId?: string | null; scriptId?: string | null }>;
+  extraSetupSteps?: Array<{
+    stepType: "test" | "script";
+    testId?: string | null;
+    scriptId?: string | null;
+  }>;
   skippedDefaultStepIds?: string[];
-  domSnapshot?: import('@/lib/db/schema').DomSnapshotData | null;
+  domSnapshot?: import("@/lib/db/schema").DomSnapshotData | null;
 }) {
-  if (data.repositoryId) await requireRepoCapability(data.repositoryId, 'tests:write');
-  else await requireCapability('tests:write');
-  const test = await createTest({
-    name: data.name,
-    functionalAreaId: data.functionalAreaId,
-    targetUrl: data.targetUrl,
-    code: data.code,
-    repositoryId: data.repositoryId ?? null,
-    requiredCapabilities: data.requiredCapabilities ?? undefined,
-    domSnapshot: data.domSnapshot ?? undefined,
-  }, null, data.viewportWidth ? { width: data.viewportWidth, height: data.viewportHeight } : null);
+  if (data.repositoryId)
+    await requireRepoCapability(data.repositoryId, "tests:write");
+  else await requireCapability("tests:write");
+  const test = await createTest(
+    {
+      name: data.name,
+      functionalAreaId: data.functionalAreaId,
+      targetUrl: data.targetUrl,
+      code: data.code,
+      repositoryId: data.repositoryId ?? null,
+      requiredCapabilities: data.requiredCapabilities ?? undefined,
+      domSnapshot: data.domSnapshot ?? undefined,
+    },
+    null,
+    data.viewportWidth
+      ? { width: data.viewportWidth, height: data.viewportHeight }
+      : null,
+  );
 
   // Auto-enable Playwright settings for detected capabilities
   if (data.requiredCapabilities && data.repositoryId) {
-    const { upsertPlaywrightSettings } = await import('@/lib/db/queries');
+    const { upsertPlaywrightSettings } = await import("@/lib/db/queries");
     const updates: Record<string, boolean> = {};
     if (data.requiredCapabilities.fileUpload) {
       // fileUpload always works (no setting needed), but it's good to track
@@ -674,7 +896,7 @@ export async function saveRecordedTest(data: {
   if (data.targetUrl && data.repositoryId) {
     try {
       const origin = new URL(data.targetUrl).origin;
-      const { upsertEnvironmentConfig } = await import('@/lib/db/queries');
+      const { upsertEnvironmentConfig } = await import("@/lib/db/queries");
       await upsertEnvironmentConfig(data.repositoryId, { baseUrl: origin });
     } catch {
       // Invalid URL — skip baseUrl update
@@ -682,13 +904,14 @@ export async function saveRecordedTest(data: {
   }
 
   // Persist setup overrides (skipped defaults and/or extra steps)
-  const hasSkipped = data.skippedDefaultStepIds && data.skippedDefaultStepIds.length > 0;
+  const hasSkipped =
+    data.skippedDefaultStepIds && data.skippedDefaultStepIds.length > 0;
   const hasExtra = data.extraSetupSteps && data.extraSetupSteps.length > 0;
   if (hasSkipped || hasExtra) {
-    const { updateTestSetupOverrides } = await import('@/lib/db/queries');
+    const { updateTestSetupOverrides } = await import("@/lib/db/queries");
     await updateTestSetupOverrides(test.id, {
       skippedDefaultStepIds: data.skippedDefaultStepIds ?? [],
-      extraSteps: (data.extraSetupSteps ?? []).map(s => ({
+      extraSteps: (data.extraSetupSteps ?? []).map((s) => ({
         stepType: s.stepType,
         testId: s.testId ?? null,
         scriptId: s.scriptId ?? null,
@@ -696,8 +919,8 @@ export async function saveRecordedTest(data: {
     });
   }
 
-  revalidatePath('/tests');
-  revalidatePath('/');
+  revalidatePath("/tests");
+  revalidatePath("/");
 
   return test;
 }
@@ -709,11 +932,12 @@ export async function updateRerecordedTest(data: {
   viewportWidth?: number;
   viewportHeight?: number;
 }) {
-  const { requireTestOwnership } = await import('@/lib/auth/ownership');
+  const { requireTestOwnership } = await import("@/lib/auth/ownership");
   const { test } = await requireTestOwnership(data.testId);
 
-  const { updateTestWithVersion, updateTest } = await import('@/lib/db/queries');
-  const { getCurrentBranchForRepo } = await import('@/lib/git-utils');
+  const { updateTestWithVersion, updateTest } =
+    await import("@/lib/db/queries");
+  const { getCurrentBranchForRepo } = await import("@/lib/git-utils");
 
   const branch = await getCurrentBranchForRepo(test.repositoryId);
 
@@ -728,24 +952,26 @@ export async function updateRerecordedTest(data: {
       code: data.code,
       ...(data.targetUrl && { targetUrl: data.targetUrl }),
     },
-    'rerecorded',
+    "rerecorded",
     branch ?? undefined,
-    viewport
+    viewport,
   );
 
   // Clear placeholder flag after re-recording
   await updateTest(data.testId, { isPlaceholder: false });
 
-  revalidatePath('/tests');
+  revalidatePath("/tests");
   revalidatePath(`/tests/${data.testId}`);
 
   return { id: data.testId };
 }
 
 export async function getOrCreateFunctionalArea(name: string) {
-  await requireCapability('recording:write');
+  await requireCapability("recording:write");
   const areas = await getFunctionalAreas();
-  const existing = areas.find(a => a.name.toLowerCase() === name.toLowerCase());
+  const existing = areas.find(
+    (a) => a.name.toLowerCase() === name.toLowerCase(),
+  );
 
   if (existing) {
     return existing;
@@ -769,20 +995,22 @@ function generateCodeFromRemoteEvents(
   selectorTimeoutMs = 3000,
 ): string {
   const baseOrigin = new URL(targetUrl).origin;
-  const coordsEnabled = selectorPriority.find(s => s.type === 'coords')?.enabled ?? true;
-  const hasCursorEvents = events.some(e => e.type === 'cursor-move');
+  const coordsEnabled =
+    selectorPriority.find((s) => s.type === "coords")?.enabled ?? true;
+  const hasCursorEvents = events.some((e) => e.type === "cursor-move");
   // Baked into the recorded test so plain `npx playwright test` runs respect
   // the user's selector-timeout setting at record time. When the runner /
   // EB executes the test, both strip this inline `locateWithFallback` and
   // substitute their own helper which reads the live setting from the run
   // command — so changes after recording still apply via the runtime path.
-  const recordedTimeoutMs = Number.isFinite(selectorTimeoutMs) && selectorTimeoutMs > 0
-    ? Math.floor(selectorTimeoutMs)
-    : 3000;
+  const recordedTimeoutMs =
+    Number.isFinite(selectorTimeoutMs) && selectorTimeoutMs > 0
+      ? Math.floor(selectorTimeoutMs)
+      : 3000;
 
   const lines: string[] = [
     `import { Page } from 'playwright';`,
-    '',
+    "",
     `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {`,
     `  // Per-candidate waitFor budget for locateWithFallback, baked at record time`,
     `  const __SELECTOR_TIMEOUT_MS = ${recordedTimeoutMs};`,
@@ -834,20 +1062,22 @@ function generateCodeFromRemoteEvents(
     `        return target;`,
     `      } catch { continue; }`,
     `    }`,
-    ...(coordsEnabled ? [
-    `    if (action === 'click' && coords) {`,
-    `      console.log('Falling back to coordinate click at', coords.x, coords.y);`,
-    `      await page.mouse.click(coords.x, coords.y, options || {});`,
-    `      return;`,
-    `    }`,
-    `    if (action === 'fill' && coords) {`,
-    `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
-    `      await page.mouse.click(coords.x, coords.y);`,
-    `      await page.keyboard.press('Control+a');`,
-    `      await page.keyboard.type(value || '');`,
-    `      return;`,
-    `    }`,
-    ] : []),
+    ...(coordsEnabled
+      ? [
+          `    if (action === 'click' && coords) {`,
+          `      console.log('Falling back to coordinate click at', coords.x, coords.y);`,
+          `      await page.mouse.click(coords.x, coords.y, options || {});`,
+          `      return;`,
+          `    }`,
+          `    if (action === 'fill' && coords) {`,
+          `      console.log('Falling back to coordinate fill at', coords.x, coords.y);`,
+          `      await page.mouse.click(coords.x, coords.y);`,
+          `      await page.keyboard.press('Control+a');`,
+          `      await page.keyboard.type(value || '');`,
+          `      return;`,
+          `    }`,
+        ]
+      : []),
     `    throw new Error('No selector matched: ' + JSON.stringify(validSelectors));`,
     `  }`,
     ``,
@@ -867,11 +1097,11 @@ function generateCodeFromRemoteEvents(
 
   // Use shared event-to-code conversion for the body
   const bodyLines = eventsToCodeLines(events, baseOrigin, coordsEnabled, {
-    indent: '  ',
+    indent: "  ",
     includeCursorReplay: hasCursorEvents,
   });
   lines.push(...bodyLines);
 
-  lines.push('}', '');
-  return lines.join('\n');
+  lines.push("}", "");
+  return lines.join("\n");
 }

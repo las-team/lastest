@@ -13,12 +13,12 @@
  *
  * Idempotent: if the repo already has tests, seeding is a no-op.
  */
-import { db } from '@/lib/db';
-import { tests, testVersions, functionalAreas } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
-import { randomUUID as uuid } from 'crypto';
+import { db } from "@/lib/db";
+import { tests, testVersions, functionalAreas } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { randomUUID as uuid } from "crypto";
 
-export type SandboxSeedId = 'todomvc' | 'the-internet' | 'playwright-docs';
+export type SandboxSeedId = "todomvc" | "the-internet" | "playwright-docs";
 
 type SeedTest = {
   name: string;
@@ -130,43 +130,48 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
 export const SANDBOX_SEEDS: Record<SandboxSeedId, SeedDefinition> = {
   todomvc: {
     area: {
-      name: 'TodoMVC Sample',
-      description: 'A starter suite that exercises the classic TodoMVC playground.',
+      name: "TodoMVC Sample",
+      description:
+        "A starter suite that exercises the classic TodoMVC playground.",
     },
     test: {
-      name: 'Add and complete todos',
-      targetUrl: 'https://demo.playwright.dev/todomvc/',
-      functionalArea: 'TodoMVC Sample',
+      name: "Add and complete todos",
+      targetUrl: "https://demo.playwright.dev/todomvc/",
+      functionalArea: "TodoMVC Sample",
       code: TODOMVC_CODE,
     },
   },
-  'the-internet': {
+  "the-internet": {
     area: {
-      name: 'The Internet Sample',
-      description: 'A starter suite against the the-internet.herokuapp.com QA playground.',
+      name: "The Internet Sample",
+      description:
+        "A starter suite against the the-internet.herokuapp.com QA playground.",
     },
     test: {
-      name: 'Form authentication login',
-      targetUrl: 'https://the-internet.herokuapp.com/',
-      functionalArea: 'The Internet Sample',
+      name: "Form authentication login",
+      targetUrl: "https://the-internet.herokuapp.com/",
+      functionalArea: "The Internet Sample",
       code: HEROKUAPP_CODE,
     },
   },
-  'playwright-docs': {
+  "playwright-docs": {
     area: {
-      name: 'Playwright Docs Sample',
-      description: 'A starter suite that walks the public Playwright docs site.',
+      name: "Playwright Docs Sample",
+      description:
+        "A starter suite that walks the public Playwright docs site.",
     },
     test: {
-      name: 'Homepage to docs navigation',
-      targetUrl: 'https://playwright.dev',
-      functionalArea: 'Playwright Docs Sample',
+      name: "Homepage to docs navigation",
+      targetUrl: "https://playwright.dev",
+      functionalArea: "Playwright Docs Sample",
       code: PLAYWRIGHT_DOCS_CODE,
     },
   },
 };
 
-export function isSandboxSeedId(id: string | null | undefined): id is SandboxSeedId {
+export function isSandboxSeedId(
+  id: string | null | undefined,
+): id is SandboxSeedId {
   return !!id && Object.prototype.hasOwnProperty.call(SANDBOX_SEEDS, id);
 }
 
@@ -202,7 +207,7 @@ export async function seedSandboxTemplate(
     name: seed.test.name,
     code: seed.test.code,
     targetUrl: seed.test.targetUrl,
-    executionMode: 'procedural',
+    executionMode: "procedural",
     createdAt: now,
     updatedAt: now,
   });
@@ -214,7 +219,7 @@ export async function seedSandboxTemplate(
     code: seed.test.code,
     name: seed.test.name,
     targetUrl: seed.test.targetUrl,
-    changeReason: 'manual_edit',
+    changeReason: "manual_edit",
     createdAt: now,
   });
 

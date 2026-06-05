@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 interface TutorialStepCalloutProps {
   targetSelector: string;
-  side: 'top' | 'bottom';
+  side: "top" | "bottom";
   title: string;
   description: string;
   stepNumber: number;
@@ -29,7 +29,7 @@ const CALLOUT_GAP = 12;
 
 function computePosition(
   rect: DOMRect,
-  side: 'top' | 'bottom',
+  side: "top" | "bottom",
 ): Position | null {
   if (!rect.width && !rect.height) return null;
 
@@ -50,9 +50,7 @@ function computePosition(
   }
 
   const top =
-    side === 'top'
-      ? rect.top - CALLOUT_GAP
-      : rect.bottom + CALLOUT_GAP;
+    side === "top" ? rect.top - CALLOUT_GAP : rect.bottom + CALLOUT_GAP;
 
   return { top, left, arrowLeft };
 }
@@ -89,16 +87,16 @@ export function TutorialStepCallout({
     queueMicrotask(updatePosition);
 
     // Re-position on resize/scroll
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
 
     // ResizeObserver for layout shifts (e.g. fullscreen toggle)
     const observer = new ResizeObserver(updatePosition);
     observer.observe(document.body);
 
     return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
       observer.disconnect();
     };
   }, [updatePosition]);
@@ -116,17 +114,17 @@ export function TutorialStepCallout({
   // Adjust top for 'top' side: we need to measure callout height and position above
   // We'll use transform to shift up by 100% of callout height
   const style: React.CSSProperties =
-    side === 'top'
+    side === "top"
       ? {
-          position: 'fixed',
+          position: "fixed",
           left: position.left,
           top: position.top,
-          transform: 'translateY(-100%)',
+          transform: "translateY(-100%)",
           width: CALLOUT_WIDTH,
           zIndex: 40,
         }
       : {
-          position: 'fixed',
+          position: "fixed",
           left: position.left,
           top: position.top,
           width: CALLOUT_WIDTH,
@@ -145,7 +143,8 @@ export function TutorialStepCallout({
             width: targetRect.width + 8,
             height: targetRect.height + 8,
             zIndex: 39,
-            boxShadow: '0 0 0 2px oklch(0.65 0.25 264), 0 0 12px 2px oklch(0.65 0.25 264 / 0.3)',
+            boxShadow:
+              "0 0 0 2px oklch(0.65 0.25 264), 0 0 12px 2px oklch(0.65 0.25 264 / 0.3)",
           }}
         />
       )}
@@ -160,18 +159,18 @@ export function TutorialStepCallout({
         <div
           className="absolute w-3 h-3 bg-popover border rotate-45"
           style={
-            side === 'top'
+            side === "top"
               ? {
                   bottom: -6,
                   left: position.arrowLeft - 6,
-                  borderTop: 'none',
-                  borderLeft: 'none',
+                  borderTop: "none",
+                  borderLeft: "none",
                 }
               : {
                   top: -6,
                   left: position.arrowLeft - 6,
-                  borderBottom: 'none',
-                  borderRight: 'none',
+                  borderBottom: "none",
+                  borderRight: "none",
                 }
           }
         />
@@ -188,7 +187,9 @@ export function TutorialStepCallout({
               <X className="h-3 w-3" />
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {description}
+          </p>
 
           {/* Footer: dots + nav */}
           <div className="flex items-center justify-between pt-1">
@@ -197,23 +198,24 @@ export function TutorialStepCallout({
                 <div
                   key={i}
                   className={`h-1.5 w-1.5 rounded-full ${
-                    i === stepNumber ? 'bg-primary' : 'bg-muted-foreground/30'
+                    i === stepNumber ? "bg-primary" : "bg-muted-foreground/30"
                   }`}
                 />
               ))}
             </div>
             <div className="flex items-center gap-1">
               {onPrev && (
-                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onPrev}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={onPrev}
+                >
                   <ChevronLeft className="h-3 w-3" />
                 </Button>
               )}
-              <Button
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={onNext}
-              >
-                {isLast ? 'Done' : 'Next'}
+              <Button size="sm" className="h-6 px-2 text-xs" onClick={onNext}>
+                {isLast ? "Done" : "Next"}
                 {!isLast && <ChevronRight className="h-3 w-3 ml-0.5" />}
               </Button>
             </div>

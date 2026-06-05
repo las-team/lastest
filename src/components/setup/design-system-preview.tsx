@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /**
  * Claude-Design-style preview of the uploaded design system. Mirrors the
@@ -11,14 +11,17 @@
  * component is a pure renderer — no parsing, no state besides which
  * sections are expanded.
  */
-import { useState } from 'react';
-import { ChevronDown, ChevronRight, AlertTriangle, Check, Upload } from 'lucide-react';
-import type {
-  DesignSystemConfig,
-  DesignRoleToken,
-} from '@/lib/db/schema';
-import { detectMissingFonts } from '@/lib/design-system/tokens';
-import { cn } from '@/lib/utils';
+import { useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  AlertTriangle,
+  Check,
+  Upload,
+} from "lucide-react";
+import type { DesignSystemConfig, DesignRoleToken } from "@/lib/db/schema";
+import { detectMissingFonts } from "@/lib/design-system/tokens";
+import { cn } from "@/lib/utils";
 
 interface DesignSystemPreviewProps {
   config: DesignSystemConfig;
@@ -29,7 +32,11 @@ interface DesignSystemPreviewProps {
   repoName?: string;
 }
 
-export function DesignSystemPreview({ config, enabled, repoName }: DesignSystemPreviewProps) {
+export function DesignSystemPreview({
+  config,
+  enabled,
+  repoName,
+}: DesignSystemPreviewProps) {
   const g = config.groups ?? {};
   const meta = config.meta ?? {};
   const missingFonts = detectMissingFonts(config);
@@ -44,33 +51,46 @@ export function DesignSystemPreview({ config, enabled, repoName }: DesignSystemP
     (g.typeScale?.length ?? 0) +
     (g.fonts?.length ?? 0);
 
-  const title = meta.title || 'Your design system is ready';
-  const description = meta.description
-    || `Tests in ${repoName ? `the ${repoName} repo` : 'this repo'} will compare captured DOM against this set. Update it any time by uploading a fresh bundle below.`;
+  const title = meta.title || "Your design system is ready";
+  const description =
+    meta.description ||
+    `Tests in ${repoName ? `the ${repoName} repo` : "this repo"} will compare captured DOM against this set. Update it any time by uploading a fresh bundle below.`;
 
   return (
     <div className="space-y-4">
       {/* Header card */}
       <div className="rounded-md border p-4">
         <h3 className="text-base font-semibold tracking-tight mb-1">{title}</h3>
-        <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {description}
+        </p>
         <div className="mt-3 pt-3 border-t flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{totalTokens} tokens loaded</span>
+            <span className="font-medium text-foreground">
+              {totalTokens} tokens loaded
+            </span>
             {meta.files && meta.files.length > 0 && (
-              <span>· {meta.files.length} source file{meta.files.length === 1 ? '' : 's'}</span>
+              <span>
+                · {meta.files.length} source file
+                {meta.files.length === 1 ? "" : "s"}
+              </span>
             )}
           </div>
           <span
             className={cn(
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border',
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border",
               enabled
-                ? 'bg-success/15 text-success border-success/30'
-                : 'bg-muted text-muted-foreground border-border',
+                ? "bg-success/15 text-success border-success/30"
+                : "bg-muted text-muted-foreground border-border",
             )}
           >
-            <span className={cn('w-1.5 h-1.5 rounded-full', enabled ? 'bg-success' : 'bg-muted-foreground/50')} />
-            {enabled ? 'Active' : 'Inactive'}
+            <span
+              className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                enabled ? "bg-success" : "bg-muted-foreground/50",
+              )}
+            />
+            {enabled ? "Active" : "Inactive"}
           </span>
         </div>
       </div>
@@ -83,7 +103,9 @@ export function DesignSystemPreview({ config, enabled, repoName }: DesignSystemP
             <div className="min-w-0">
               <div className="text-sm font-medium">Missing brand fonts</div>
               <div className="text-xs text-muted-foreground truncate">
-                {missingFonts.join(', ')} {missingFonts.length === 1 ? 'is' : 'are'} declared but not in the bundle. Tests will see substitute web fonts.
+                {missingFonts.join(", ")}{" "}
+                {missingFonts.length === 1 ? "is" : "are"} declared but not in
+                the bundle. Tests will see substitute web fonts.
               </div>
             </div>
           </div>
@@ -191,10 +213,18 @@ export function DesignSystemPreview({ config, enabled, repoName }: DesignSystemP
 
 // ── Building blocks ──────────────────────────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-2">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">{title}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+        {title}
+      </div>
       <div className="space-y-2">{children}</div>
     </div>
   );
@@ -234,7 +264,9 @@ function Collapsible({
           )}
         </div>
         {badge && (
-          <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-2 py-0.5">{badge}</span>
+          <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-2 py-0.5">
+            {badge}
+          </span>
         )}
       </button>
       {open && (
@@ -271,17 +303,27 @@ function BrandPaletteGrid({ tokens }: { tokens: DesignRoleToken[] }) {
           >
             <div
               className={cn(
-                'text-[10px] font-mono uppercase tracking-widest font-semibold',
-                dark ? 'text-white/85' : 'text-black/70',
+                "text-[10px] font-mono uppercase tracking-widest font-semibold",
+                dark ? "text-white/85" : "text-black/70",
               )}
             >
-              {t.role ?? ''}
+              {t.role ?? ""}
             </div>
             <div>
-              <div className={cn('text-base font-semibold leading-none', dark ? 'text-white' : 'text-black')}>
+              <div
+                className={cn(
+                  "text-base font-semibold leading-none",
+                  dark ? "text-white" : "text-black",
+                )}
+              >
                 {t.label}
               </div>
-              <div className={cn('text-[11px] font-mono mt-0.5', dark ? 'text-white/75' : 'text-black/60')}>
+              <div
+                className={cn(
+                  "text-[11px] font-mono mt-0.5",
+                  dark ? "text-white/75" : "text-black/60",
+                )}
+              >
                 {t.value.toUpperCase()}
               </div>
             </div>
@@ -298,7 +340,10 @@ function SemanticGrid({ tokens }: { tokens: DesignRoleToken[] }) {
       {tokens.map((t) => {
         const dark = isDark(t.value);
         return (
-          <div key={t.name} className="rounded-md border overflow-hidden flex items-stretch">
+          <div
+            key={t.name}
+            className="rounded-md border overflow-hidden flex items-stretch"
+          >
             <div
               className="w-10 shrink-0 flex items-center justify-center"
               style={{ backgroundColor: t.value }}
@@ -306,18 +351,28 @@ function SemanticGrid({ tokens }: { tokens: DesignRoleToken[] }) {
               {t.role && (
                 <span
                   className={cn(
-                    'text-[9px] font-mono uppercase font-semibold writing-mode-vertical px-1',
-                    dark ? 'text-white/80' : 'text-black/60',
+                    "text-[9px] font-mono uppercase font-semibold writing-mode-vertical px-1",
+                    dark ? "text-white/80" : "text-black/60",
                   )}
-                  style={{ writingMode: 'vertical-rl' as const, transform: 'rotate(180deg)' }}
+                  style={{
+                    writingMode: "vertical-rl" as const,
+                    transform: "rotate(180deg)",
+                  }}
                 >
                   {t.role.slice(0, 4)}
                 </span>
               )}
             </div>
             <div className="flex-1 min-w-0 px-2.5 py-2">
-              <div className="text-xs font-medium font-mono truncate" title={t.name}>{t.name}</div>
-              <div className="text-[10px] text-muted-foreground font-mono">{t.value.toUpperCase()}</div>
+              <div
+                className="text-xs font-medium font-mono truncate"
+                title={t.name}
+              >
+                {t.name}
+              </div>
+              <div className="text-[10px] text-muted-foreground font-mono">
+                {t.value.toUpperCase()}
+              </div>
             </div>
           </div>
         );
@@ -334,8 +389,12 @@ function RadiusTile({ token }: { token: DesignRoleToken }) {
         className="w-12 h-12 bg-primary/15 border-2 border-primary/40"
         style={{ borderRadius: `${px}px` }}
       />
-      <div className="text-[11px] font-mono">{token.name.replace(/^--/, '')}</div>
-      <div className="text-[10px] text-muted-foreground font-mono">{token.value}</div>
+      <div className="text-[11px] font-mono">
+        {token.name.replace(/^--/, "")}
+      </div>
+      <div className="text-[10px] text-muted-foreground font-mono">
+        {token.value}
+      </div>
     </div>
   );
 }
@@ -344,9 +403,19 @@ function SpacingRow({ token }: { token: DesignRoleToken }) {
   const px = parseFloat(token.value) || 0;
   return (
     <div className="flex items-center gap-3">
-      <div className="font-mono text-[11px] w-20 shrink-0 truncate" title={token.name}>{token.name.replace(/^--/, '')}</div>
-      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">{token.value}</div>
-      <div className="bg-primary/30 h-3 rounded-sm" style={{ width: `${Math.min(px, 320)}px` }} />
+      <div
+        className="font-mono text-[11px] w-20 shrink-0 truncate"
+        title={token.name}
+      >
+        {token.name.replace(/^--/, "")}
+      </div>
+      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">
+        {token.value}
+      </div>
+      <div
+        className="bg-primary/30 h-3 rounded-sm"
+        style={{ width: `${Math.min(px, 320)}px` }}
+      />
     </div>
   );
 }
@@ -354,7 +423,9 @@ function SpacingRow({ token }: { token: DesignRoleToken }) {
 function TypeFamilyTile({ token }: { token: DesignRoleToken }) {
   return (
     <div className="rounded-md border p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{token.label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+        {token.label}
+      </div>
       <div
         className="text-2xl mt-1 truncate"
         style={{ fontFamily: `${token.value}, system-ui, sans-serif` }}
@@ -362,7 +433,9 @@ function TypeFamilyTile({ token }: { token: DesignRoleToken }) {
       >
         Aa
       </div>
-      <div className="text-[11px] font-mono text-muted-foreground mt-1 truncate">{token.value}</div>
+      <div className="text-[11px] font-mono text-muted-foreground mt-1 truncate">
+        {token.value}
+      </div>
     </div>
   );
 }
@@ -371,8 +444,12 @@ function TypeScaleRow({ token }: { token: DesignRoleToken }) {
   const px = parseFloat(token.value) || 14;
   return (
     <div className="flex items-baseline gap-3 py-1 border-b last:border-0">
-      <div className="font-mono text-[10px] text-muted-foreground w-16 shrink-0">{token.name.replace(/^--/, '')}</div>
-      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">{token.value}</div>
+      <div className="font-mono text-[10px] text-muted-foreground w-16 shrink-0">
+        {token.name.replace(/^--/, "")}
+      </div>
+      <div className="font-mono text-[10px] text-muted-foreground w-12 shrink-0">
+        {token.value}
+      </div>
       <div
         className="truncate flex-1"
         style={{ fontSize: `${Math.min(px, 48)}px`, lineHeight: 1.1 }}
