@@ -223,7 +223,6 @@ Create tests (one-time)          Run tests (forever)
 - **Role-Based Access** — Owner, admin, member, viewer roles.
 - **Multiple Auth Methods** — Email/password (Argon2 hashing), GitHub OAuth, GitLab OAuth, Google OAuth via better-auth.
 - **Email Invitations** — Send team invitations via Resend with verification and password reset tokens.
-- **Billing (hosted)** — Stripe subscriptions for hosted deployments: Starter / Growth / Pro tiers, monthly + yearly, checkout + customer portal, period-end downgrades, immediate prorated upgrades. Self-hosted instances run free with billing disabled (no Stripe keys needed).
 
 ---
 
@@ -514,7 +513,6 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
 - **Email**: Resend
-- **Billing**: Stripe via `@better-auth/stripe` (hosted plans; optional)
 - **Testing**: Vitest (unit), Playwright (visual)
 - **State**: TanStack React Query
 
@@ -553,12 +551,6 @@ DATABASE_URL=                     # Default: postgresql://lastest:lastest@localh
 MONITORED_BRANCHES=               # Default: main,master,develop
 NEXT_PUBLIC_APP_URL=              # Your app's public URL
 NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
-
-# Stripe billing (hosted deployments only — leave unset when self-hosting)
-STRIPE_SECRET_KEY=                # Enables the billing plugin + plan catalog
-STRIPE_WEBHOOK_SECRET=            # Webhook signature validation
-STRIPE_AUTOMATIC_TAX=             # Optional: 'true' to add tax at checkout (requires Stripe Tax)
-EARLY_ADOPTER_PRICING=            # Default: true — show/charge early-adopter prices
 ```
 
 ---
@@ -653,7 +645,6 @@ EARLY_ADOPTER_PRICING=            # Default: true — show/charge early-adopter 
 - [x] Design-system verification layer (design-token drift detection)
 - [x] URL diff (navigation trajectory capture + comparison)
 - [x] Analyze URL (selector-priority tuning before recording)
-- [x] Stripe billing for hosted plans (monthly/yearly subscriptions, customer portal)
 - [ ] Hosted (managed) deployment option — in progress
 
 

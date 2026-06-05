@@ -77,7 +77,6 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
   - `schedules.ts` — cron-based scheduled test runs
   - `background-jobs.ts` — background jobs
   - `auth.ts` — teams, users, sessions, oauth, tokens, invitations
-  - `billing.ts` — team billing snapshot, stripe webhook event log
   - `storage.ts` — team storage usage/quota + run-minute usage/quota
   - `setup.ts` — setup/teardown scripts, configs, steps, resolution
   - `storage-states.ts` — browser storage state management
@@ -96,7 +95,6 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
   - `misc.ts` — selector stats, bug reports, review todos
 - `src/lib/execution/executor.ts` — test executor (~1800 lines)
 - `src/lib/verify/` — check-modes system: 9 layers (visual, text, dom, network, console, a11y, design, perf, url) × enforce/log/disable; case-status derivation
-- `src/lib/billing/` — Stripe billing: plans, live catalog, webhook sync (see Billing below)
 - `src/lib/design-system/` — design-token comparison engine (the "design" check layer)
 - `src/lib/url-diff/` — URL trajectory capture + diffing, rate-limit, SSRF guards
 - `src/lib/playwright/` — recorder, runner, server manager, OCR, assertion-parser, selector-analysis ("Analyze URL")
@@ -110,16 +108,6 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
 - `packages/vscode-extension/` — VS Code extension (esbuild)
-
-## Billing (Stripe)
-
-- `@better-auth/stripe` plugin wired in `src/lib/auth/auth.ts`; no-op when `STRIPE_SECRET_KEY` is unset (self-hosted stays free)
-- Plans: `free` / `starter` / `growth` / `pro` (+ legacy `demo`/`trial`), monthly + yearly — defined in `src/lib/billing/plans.ts`; run-minute quotas + project limits per tier
-- Live catalog fetched from Stripe (`src/lib/billing/catalog.ts`, 10-min TTL, webhook-invalidated); static fallback from `plans.ts` when Stripe unreachable
-- `subscriptions` table is plugin-managed — read-only from app code; `stripe_webhook_events` is the app-owned idempotency/forensic log
-- Webhooks flip `teams.plan` immediately (no admin gate) via `src/lib/billing/webhook-sync.ts`; upgrades prorate now, downgrades apply at period end via Subscription Schedule
-- Provision/refresh the Stripe catalog + portal config: `STRIPE_SECRET_KEY=sk_test_... node scripts/stripe-provision-test.mjs` (re-runnable; re-run after flipping `EARLY_ADOPTER_PRICING`)
-- Env: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_AUTOMATIC_TAX` (optional), `EARLY_ADOPTER_PRICING` (default `true`)
 
 ## Schema Changes
 
