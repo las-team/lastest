@@ -8,18 +8,14 @@
  * plugin performs the actual subscription sync; this table just lets
  * admins reconcile/replay against Stripe).
  */
-import { db } from '../index';
-import {
-  teams,
-  subscriptions,
-  stripeWebhookEvents,
-} from '../schema';
-import { eq, sql } from 'drizzle-orm';
+import { db } from "../index";
+import { teams, subscriptions, stripeWebhookEvents } from "../schema";
+import { eq, sql } from "drizzle-orm";
 import type {
   TeamPlan,
   SubscriptionStatus,
   NewStripeWebhookEvent,
-} from '../schema';
+} from "../schema";
 
 export interface TeamBillingSnapshot {
   id: string;
@@ -48,9 +44,19 @@ export interface TeamBillingSnapshot {
   /** 'month' | 'year' — drives the monthly/yearly toggle preselection. */
   billingInterval: string | null;
   monthlyRunQuota: number | null;
+  /**
+   * `referenceId` of the picked subscription row (null when the team has
+   * no subscription). Always equals the team id by construction, but is
+   * surfaced so server actions can assert tenant ownership before
+   * mutating — a fail-closed guard against the capability layer ever
+   * being changed to accept an external teamId.
+   */
+  subscriptionReferenceId: string | null;
 }
 
-export async function getTeamBilling(teamId: string): Promise<TeamBillingSnapshot | null> {
+export async function getTeamBilling(
+  teamId: string,
+): Promise<TeamBillingSnapshot | null> {
   const [team] = await db
     .select({
       id: teams.id,
@@ -79,11 +85,13 @@ export async function getTeamBilling(teamId: string): Promise<TeamBillingSnapsho
     stripeSubscriptionId: sub?.stripeSubscriptionId ?? null,
     subscriptionStatus: sub?.status ?? null,
     subscriptionCurrentPeriodEnd: sub?.periodEnd ?? null,
-    subscriptionCancelAtPeriodEnd: Boolean(sub?.cancelAtPeriodEnd) || sub?.cancelAt != null,
+    subscriptionCancelAtPeriodEnd:
+      Boolean(sub?.cancelAtPeriodEnd) || sub?.cancelAt != null,
     subscriptionCancelAt: sub?.cancelAt ?? null,
     subscriptionScheduleId: sub?.stripeScheduleId ?? null,
     subscriptionPlan: (sub?.plan as TeamPlan | undefined) ?? null,
     billingInterval: sub?.billingInterval ?? null,
+    subscriptionReferenceId: sub?.referenceId ?? null,
   };
 }
 
@@ -97,7 +105,7 @@ export async function getTeamBilling(teamId: string): Promise<TeamBillingSnapsho
 // ─────────────────────────────────────────────────────────────────────
 
 export async function recordStripeWebhookReceipt(
-  input: Omit<NewStripeWebhookEvent, 'receivedAt' | 'processedAt' | 'error'>,
+  input: Omit<NewStripeWebhookEvent, "receivedAt" | "processedAt" | "error">,
 ): Promise<boolean> {
   const inserted = await db
     .insert(stripeWebhookEvents)
@@ -107,7 +115,10 @@ export async function recordStripeWebhookReceipt(
   return inserted.length > 0;
 }
 
-export async function markStripeWebhookProcessed(eventId: string, error?: string) {
+export async function markStripeWebhookProcessed(
+  eventId: string,
+  error?: string,
+) {
   await db
     .update(stripeWebhookEvents)
     .set({ processedAt: new Date(), error: error ?? null })

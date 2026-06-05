@@ -1812,14 +1812,14 @@ export type TeamStatus = "active" | "suspended";
 // Mirror of Stripe's subscription.status enum, narrowed to what we react to.
 // `null` means the team has never had a paid subscription (free plan).
 export type SubscriptionStatus =
-  | 'incomplete'
-  | 'incomplete_expired'
-  | 'trialing'
-  | 'active'
-  | 'past_due'
-  | 'canceled'
-  | 'unpaid'
-  | 'paused';
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "paused";
 
 // Teams - Multi-tenancy support
 export const teams = pgTable("teams", {
@@ -4402,49 +4402,64 @@ export type NewLaunchMonthlyWinner = typeof launchMonthlyWinners.$inferInsert;
 // table as read-only from app code.
 // ─────────────────────────────────────────────────────────────────────
 
-export const subscriptions = pgTable('subscription', {
-  id: text('id').primaryKey(),
-  /** Plan name from src/lib/billing/plans.ts (e.g. 'starter', 'pro'). */
-  plan: text('plan').notNull(),
-  /** Our internal teamId — set via plugin's `customerType: 'organization'`. */
-  referenceId: text('referenceId').notNull(),
-  stripeCustomerId: text('stripeCustomerId'),
-  stripeSubscriptionId: text('stripeSubscriptionId'),
-  status: text('status').$type<SubscriptionStatus>().default('incomplete'),
-  periodStart: timestamp('periodStart'),
-  periodEnd: timestamp('periodEnd'),
-  trialStart: timestamp('trialStart'),
-  trialEnd: timestamp('trialEnd'),
-  cancelAtPeriodEnd: boolean('cancelAtPeriodEnd').default(false),
-  cancelAt: timestamp('cancelAt'),
-  canceledAt: timestamp('canceledAt'),
-  endedAt: timestamp('endedAt'),
-  seats: integer('seats'),
-  billingInterval: text('billingInterval'),
-  stripeScheduleId: text('stripeScheduleId'),
-}, (table) => ([
-  index('idx_subscription_reference').on(table.referenceId),
-  index('idx_subscription_stripe_sub').on(table.stripeSubscriptionId),
-]));
+export const subscriptions = pgTable(
+  "subscription",
+  {
+    id: text("id").primaryKey(),
+    /** Plan name from src/lib/billing/plans.ts (e.g. 'starter', 'pro'). */
+    plan: text("plan").notNull(),
+    /** Our internal teamId — set via plugin's `customerType: 'organization'`. */
+    referenceId: text("referenceId").notNull(),
+    stripeCustomerId: text("stripeCustomerId"),
+    stripeSubscriptionId: text("stripeSubscriptionId"),
+    status: text("status").$type<SubscriptionStatus>().default("incomplete"),
+    periodStart: timestamp("periodStart"),
+    periodEnd: timestamp("periodEnd"),
+    trialStart: timestamp("trialStart"),
+    trialEnd: timestamp("trialEnd"),
+    cancelAtPeriodEnd: boolean("cancelAtPeriodEnd").default(false),
+    cancelAt: timestamp("cancelAt"),
+    canceledAt: timestamp("canceledAt"),
+    endedAt: timestamp("endedAt"),
+    // Written by @better-auth/stripe on every subscription create/update
+    // (member count for org subs / quantity = 1 otherwise). We don't bill
+    // per seat and never read this, but the column must exist or the
+    // plugin's adapter writes fail — so it stays as part of the plugin's
+    // managed table, not something we added.
+    seats: integer("seats"),
+    billingInterval: text("billingInterval"),
+    stripeScheduleId: text("stripeScheduleId"),
+  },
+  (table) => [
+    index("idx_subscription_reference").on(table.referenceId),
+    index("idx_subscription_stripe_sub").on(table.stripeSubscriptionId),
+  ],
+);
 
 export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
 
-export type StripeWebhookEventStatus = 'received' | 'processed' | 'failed';
+export type StripeWebhookEventStatus = "received" | "processed" | "failed";
 
-export const stripeWebhookEvents = pgTable('stripe_webhook_events', {
-  // Stripe's `evt_*` event ID — globally unique per delivery, guarantees
-  // idempotency across retries (Stripe Standard Webhooks spec).
-  eventId: text('event_id').primaryKey(),
-  type: text('type').notNull(),
-  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
-  receivedAt: timestamp('received_at').$defaultFn(() => new Date()).notNull(),
-  processedAt: timestamp('processed_at'),
-  error: text('error'),
-}, (table) => ([
-  index('idx_stripe_webhook_events_type').on(table.type),
-  index('idx_stripe_webhook_events_received').on(table.receivedAt),
-]));
+export const stripeWebhookEvents = pgTable(
+  "stripe_webhook_events",
+  {
+    // Stripe's `evt_*` event ID — globally unique per delivery, guarantees
+    // idempotency across retries (Stripe Standard Webhooks spec).
+    eventId: text("event_id").primaryKey(),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    receivedAt: timestamp("received_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+    processedAt: timestamp("processed_at"),
+    error: text("error"),
+  },
+  (table) => [
+    index("idx_stripe_webhook_events_type").on(table.type),
+    index("idx_stripe_webhook_events_received").on(table.receivedAt),
+  ],
+);
 
 export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
 export type NewStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;

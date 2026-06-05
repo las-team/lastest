@@ -1,10 +1,8 @@
 #!/bin/bash
 #
-# Pre-commit guard: block commits whose staged changes contain Stripe
-# API keys (secret sk_, restricted rk_, or webhook whsec_ secrets).
-#
-# Install (one-time, per clone):
-#   cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Block commits whose staged changes contain Stripe API keys (secret
+# sk_, restricted rk_, or webhook whsec_ secrets). Wired into the Husky
+# pre-commit hook (.husky/pre-commit).
 #
 # Bypass intentionally (e.g. docs mentioning the prefix in prose):
 #   git commit --no-verify

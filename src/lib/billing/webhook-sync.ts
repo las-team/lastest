@@ -9,10 +9,10 @@
  * Extracted out of the plugin config in `src/lib/auth/auth.ts` so the
  * mapping logic is unit-testable without standing up better-auth.
  */
-import * as queries from '@/lib/db/queries';
-import { planConfig } from '@/lib/billing/plans';
-import { resolvePlanForPriceId, getCatalog } from '@/lib/billing/catalog';
-import type { TeamPlan } from '@/lib/db/schema';
+import * as queries from "@/lib/db/queries";
+import { planConfig } from "@/lib/billing/plans";
+import { resolvePlanForPriceId, getCatalog } from "@/lib/billing/catalog";
+import type { TeamPlan } from "@/lib/db/schema";
 
 /**
  * Run-minute quota for a tier — live Stripe product metadata first
@@ -35,7 +35,10 @@ async function quotaForPlan(plan: TeamPlan): Promise<number> {
  * webhook deliveries don't churn the row). Quota is re-checked even on
  * a same-plan event so dashboard quota edits propagate.
  */
-export async function syncTeamPlanForBilling(teamId: string, plan: TeamPlan): Promise<void> {
+export async function syncTeamPlanForBilling(
+  teamId: string,
+  plan: TeamPlan,
+): Promise<void> {
   const team = await queries.getTeam(teamId);
   if (!team) return;
   const monthlyRunQuota = await quotaForPlan(plan);
@@ -61,10 +64,11 @@ interface SubscriptionDeletedPayload {
 }
 
 /** Payment landed for a fresh subscription — flip the team to the paid tier. */
-export async function handleSubscriptionComplete(
-  { subscription, plan }: SubscriptionCompletePayload,
-): Promise<void> {
-  const planId = (plan.name as TeamPlan) ?? 'free';
+export async function handleSubscriptionComplete({
+  subscription,
+  plan,
+}: SubscriptionCompletePayload): Promise<void> {
+  const planId = (plan.name as TeamPlan) ?? "free";
   await syncTeamPlanForBilling(subscription.referenceId, planId);
 }
 
@@ -73,18 +77,30 @@ export async function handleSubscriptionComplete(
  * mapping the live Stripe price ID back to a tier — that's authoritative
  * even mid-proration — and fall back to the plugin's mirrored plan name.
  */
-export async function handleSubscriptionUpdate(
-  { stripeSubscription, subscription }: SubscriptionUpdatePayload,
-): Promise<void> {
+export async function handleSubscriptionUpdate({
+  stripeSubscription,
+  subscription,
+}: SubscriptionUpdatePayload): Promise<void> {
   const priceId = stripeSubscription.items.data[0]?.price.id;
   const lookup = priceId ? await resolvePlanForPriceId(priceId) : null;
   const planId = lookup?.plan ?? (subscription.plan as TeamPlan | undefined);
-  if (planId) await syncTeamPlanForBilling(subscription.referenceId, planId);
+  if (!planId) {
+    // Neither the live price ID nor the plugin's mirrored plan name
+    // resolved to a known tier — a portal-initiated change to an
+    // unmapped price would otherwise be dropped silently. Leave the
+    // team plan untouched but make the gap visible for reconciliation.
+    console.warn(
+      `[billing] subscription.update for team ${subscription.referenceId}: ` +
+        `unresolved plan (priceId=${priceId ?? "none"}); team plan left unchanged.`,
+    );
+    return;
+  }
+  await syncTeamPlanForBilling(subscription.referenceId, planId);
 }
 
 /** Subscription ended (cancelled past period end / unpaid) — drop to free. */
-export async function handleSubscriptionDeleted(
-  { subscription }: SubscriptionDeletedPayload,
-): Promise<void> {
-  await syncTeamPlanForBilling(subscription.referenceId, 'free');
+export async function handleSubscriptionDeleted({
+  subscription,
+}: SubscriptionDeletedPayload): Promise<void> {
+  await syncTeamPlanForBilling(subscription.referenceId, "free");
 }

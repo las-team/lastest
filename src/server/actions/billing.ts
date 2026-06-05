@@ -1,19 +1,52 @@
-'use server';
+"use server";
 
-import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
-import { requireCapability } from '@/lib/auth/capabilities';
-import * as queries from '@/lib/db/queries';
-import { planConfig, planRank, type BillingInterval } from '@/lib/billing/plans';
+import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { requireCapability } from "@/lib/auth/capabilities";
+import * as queries from "@/lib/db/queries";
+import {
+  planConfig,
+  planRank,
+  type BillingInterval,
+} from "@/lib/billing/plans";
 import {
   callUpgradeSubscription,
   callCancelSubscription,
   callRestoreSubscription,
   callBillingPortal,
-} from '@/lib/billing/api';
-import type { TeamPlan } from '@/lib/db/schema';
+} from "@/lib/billing/api";
+import type { TeamPlan } from "@/lib/db/schema";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+/**
+ * Fail-closed tenant guard. Today every action passes
+ * `session.team.id` as the `referenceId`, and `getTeamBilling` keys on
+ * it, so the picked subscription always belongs to the caller. This
+ * asserts that invariant explicitly so a future change to
+ * `requireCapability` (e.g. accepting an external teamId) can't silently
+ * mutate another team's subscription.
+ */
+function assertBillingOwnedByTeam(
+  billing: { subscriptionReferenceId: string | null } | null,
+  teamId: string,
+): void {
+  if (
+    billing?.subscriptionReferenceId &&
+    billing.subscriptionReferenceId !== teamId
+  ) {
+    throw new Error("Subscription does not belong to the active team.");
+  }
+}
+
+/** Stripe states in which proration/plan changes will fail or misbehave. */
+function assertBillable(status: string | null): void {
+  if (status === "past_due" || status === "unpaid") {
+    throw new Error(
+      "Resolve the outstanding payment before changing your plan.",
+    );
+  }
+}
 
 /**
  * Subscribe-or-switch entry point. Calls the better-auth Stripe
@@ -27,9 +60,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
  */
 export async function startCheckout(
   plan: TeamPlan,
-  interval: BillingInterval = 'monthly',
+  interval: BillingInterval = "monthly",
 ): Promise<{ url: string; success: true }> {
-  const session = await requireCapability('team:admin');
+  const session = await requireCapability("team:admin");
 
   const cfg = planConfig(plan);
   if (!cfg.purchasable) {
@@ -39,8 +72,8 @@ export async function startCheckout(
   const result = await callUpgradeSubscription(
     {
       plan,
-      annual: interval === 'yearly',
-      customerType: 'organization',
+      annual: interval === "yearly",
+      customerType: "organization",
       referenceId: session.team.id,
       successUrl: `${APP_URL}/settings?checkout=success#billing`,
       cancelUrl: `${APP_URL}/settings?checkout=cancelled#billing`,
@@ -53,7 +86,7 @@ export async function startCheckout(
   );
 
   if (!result.url) {
-    throw new Error('Upgrade did not return a checkout URL');
+    throw new Error("Upgrade did not return a checkout URL");
   }
   return { url: result.url, success: true };
 }
@@ -66,19 +99,24 @@ export async function startCheckout(
  */
 export async function changeTeamPlan(
   plan: TeamPlan,
-  interval: BillingInterval = 'monthly',
+  interval: BillingInterval = "monthly",
 ): Promise<{ url?: string; success: boolean }> {
-  const session = await requireCapability('team:admin');
+  const session = await requireCapability("team:admin");
   const cfg = planConfig(plan);
   if (!cfg.purchasable) {
     throw new Error(`Plan "${plan}" is not purchasable`);
   }
 
   const billing = await queries.getTeamBilling(session.team.id);
+  assertBillingOwnedByTeam(billing, session.team.id);
   if (!billing?.stripeSubscriptionId) {
     return startCheckout(plan, interval);
   }
-  const currentInterval: BillingInterval = billing.billingInterval === 'year' ? 'yearly' : 'monthly';
+  // A past_due/unpaid subscription can't take a proration charge — Stripe
+  // would reject the upgrade. Make the user settle up via the portal first.
+  assertBillable(billing.subscriptionStatus);
+  const currentInterval: BillingInterval =
+    billing.billingInterval === "year" ? "yearly" : "monthly";
   if (billing.plan === plan && currentInterval === interval) {
     return { success: true };
   }
@@ -89,14 +127,16 @@ export async function changeTeamPlan(
   // proration (unused time on the old plan is credited).
   const isDowngrade =
     planRank(plan) < planRank(billing.plan) ||
-    (plan === billing.plan && currentInterval === 'yearly' && interval === 'monthly');
-  const billingParam = isDowngrade ? 'downgrade_scheduled' : 'plan_changed';
+    (plan === billing.plan &&
+      currentInterval === "yearly" &&
+      interval === "monthly");
+  const billingParam = isDowngrade ? "downgrade_scheduled" : "plan_changed";
 
   const result = await callUpgradeSubscription(
     {
       plan,
-      annual: interval === 'yearly',
-      customerType: 'organization',
+      annual: interval === "yearly",
+      customerType: "organization",
       referenceId: session.team.id,
       scheduleAtPeriodEnd: isDowngrade,
       successUrl: `${APP_URL}/settings?billing=${billingParam}#billing`,
@@ -110,24 +150,32 @@ export async function changeTeamPlan(
     await headers(),
   );
 
-  revalidatePath('/settings/billing');
-  revalidatePath('/settings');
+  revalidatePath("/settings/billing");
+  revalidatePath("/settings");
   if (result.url) return { url: result.url, success: true };
   return { success: true };
 }
 
 export async function openCustomerPortal(): Promise<{ url: string }> {
-  const session = await requireCapability('team:admin');
+  const session = await requireCapability("team:admin");
+  const billing = await queries.getTeamBilling(session.team.id);
+  assertBillingOwnedByTeam(billing, session.team.id);
+  // The portal is keyed on a Stripe customer, which only exists after a
+  // first checkout. Free-tier teams (no customer) would hit a Stripe
+  // error or empty portal — refuse before opening a session.
+  if (!billing?.stripeCustomerId) {
+    throw new Error("No billing account to manage yet.");
+  }
   const result = await callBillingPortal(
     {
       referenceId: session.team.id,
-      customerType: 'organization',
+      customerType: "organization",
       returnUrl: `${APP_URL}/settings#billing`,
     },
     await headers(),
   );
   if (!result.url) {
-    throw new Error('Billing portal session returned no URL');
+    throw new Error("Billing portal session returned no URL");
   }
   return { url: result.url };
 }
@@ -139,44 +187,55 @@ export async function openCustomerPortal(): Promise<{ url: string }> {
  * the plugin's `customer.subscription.updated` webhook flips
  * `cancelAtPeriodEnd` so the UI reflects the pending state immediately.
  */
-export async function cancelTeamSubscription(): Promise<{ url?: string; success: true }> {
-  const session = await requireCapability('team:admin');
+export async function cancelTeamSubscription(): Promise<{
+  url?: string;
+  success: true;
+}> {
+  const session = await requireCapability("team:admin");
   const billing = await queries.getTeamBilling(session.team.id);
+  assertBillingOwnedByTeam(billing, session.team.id);
   if (!billing?.stripeSubscriptionId) {
-    throw new Error('No active subscription to cancel.');
+    throw new Error("No active subscription to cancel.");
   }
 
   const result = await callCancelSubscription(
     {
       referenceId: session.team.id,
-      customerType: 'organization',
+      customerType: "organization",
       returnUrl: `${APP_URL}/settings?billing=cancel_pending#billing`,
     },
     await headers(),
   );
 
-  revalidatePath('/settings/billing');
-  revalidatePath('/settings');
+  revalidatePath("/settings/billing");
+  revalidatePath("/settings");
   if (result.url) return { url: result.url, success: true };
   return { success: true };
 }
 
 export async function resumeTeamSubscription(): Promise<{ success: true }> {
-  const session = await requireCapability('team:admin');
+  const session = await requireCapability("team:admin");
   const billing = await queries.getTeamBilling(session.team.id);
+  assertBillingOwnedByTeam(billing, session.team.id);
   if (!billing?.stripeSubscriptionId) {
-    throw new Error('No subscription to resume.');
+    throw new Error("No subscription to resume.");
+  }
+  // Restoring a subscription that isn't scheduled to cancel is a no-op
+  // at Stripe and confuses the UI (the resume button shouldn't show).
+  // `subscriptionCancelAtPeriodEnd` already folds in portal `cancel_at`.
+  if (!billing.subscriptionCancelAtPeriodEnd) {
+    throw new Error("Subscription is not scheduled for cancellation.");
   }
 
   await callRestoreSubscription(
     {
       referenceId: session.team.id,
-      customerType: 'organization',
+      customerType: "organization",
     },
     await headers(),
   );
 
-  revalidatePath('/settings/billing');
-  revalidatePath('/settings');
+  revalidatePath("/settings/billing");
+  revalidatePath("/settings");
   return { success: true };
 }

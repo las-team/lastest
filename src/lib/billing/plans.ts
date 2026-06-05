@@ -16,10 +16,10 @@
  *  - This static catalog — display-only fallback when Stripe is
  *    unconfigured (self-hosters) or unreachable.
  */
-import type { TeamPlan } from '@/lib/db/schema';
-import { isEarlyAdopterPricing } from './config';
+import type { TeamPlan } from "@/lib/db/schema";
+import { isEarlyAdopterPricing } from "./config";
 
-export type BillingInterval = 'monthly' | 'yearly';
+export type BillingInterval = "monthly" | "yearly";
 
 export interface PlanConfig {
   /** Tier ID matching the TeamPlan enum. */
@@ -48,11 +48,12 @@ export interface PlanConfig {
   features: string[];
 }
 
-export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
+export const PLANS: Record<Exclude<TeamPlan, "demo" | "trial">, PlanConfig> = {
   free: {
-    id: 'free',
-    name: 'Free',
-    tagline: 'Try it out — hosted by us. Kick the tires on a real project. No credit card.',
+    id: "free",
+    name: "Free",
+    tagline:
+      "Try it out — hosted by us. Kick the tires on a real project. No credit card.",
     priceCents: 0,
     earlyAdopterPriceCents: 0,
     yearlyPriceCents: 0,
@@ -62,17 +63,18 @@ export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
     concurrentRunLimit: 1,
     purchasable: false,
     features: [
-      '1 project',
-      'Shared runner pool',
-      '500 capped runner-minutes',
-      '1 concurrent run',
-      'Community support',
+      "1 project",
+      "Shared runner pool",
+      "500 capped runner-minutes",
+      "1 concurrent run",
+      "Community support",
     ],
   },
   starter: {
-    id: 'starter',
-    name: 'Starter',
-    tagline: 'Solo devs & small teams — for builders shipping regularly. Locked-in early adopter price.',
+    id: "starter",
+    name: "Starter",
+    tagline:
+      "Solo devs & small teams — for builders shipping regularly. Locked-in early adopter price.",
     priceCents: 2900,
     earlyAdopterPriceCents: 1400,
     yearlyPriceCents: 29000, // 10x monthly — two months free
@@ -82,16 +84,17 @@ export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
     concurrentRunLimit: 2,
     purchasable: true,
     features: [
-      '3 projects',
-      '5,000 priority run-minutes',
-      '2 concurrent runs',
-      'Email support',
+      "3 projects",
+      "5,000 priority run-minutes",
+      "2 concurrent runs",
+      "Email support",
     ],
   },
   growth: {
-    id: 'growth',
-    name: 'Growth',
-    tagline: 'Growing teams + CI — multiple apps, CI pipelines, Slack-speed support.',
+    id: "growth",
+    name: "Growth",
+    tagline:
+      "Growing teams + CI — multiple apps, CI pipelines, Slack-speed support.",
     priceCents: 9900,
     earlyAdopterPriceCents: 4950,
     yearlyPriceCents: 99000,
@@ -101,18 +104,19 @@ export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
     concurrentRunLimit: 5,
     purchasable: true,
     features: [
-      '10 projects',
-      '30,000 priority run-minutes',
-      '5 concurrent runs',
-      'Slack support',
-      'CI integrations (GitHub, GitLab, Bitbucket)',
-      'Cross-browser add-on €49 / mo',
+      "10 projects",
+      "30,000 priority run-minutes",
+      "5 concurrent runs",
+      "Slack support",
+      "CI integrations (GitHub, GitLab, Bitbucket)",
+      "Cross-browser add-on €49 / mo",
     ],
   },
   pro: {
-    id: 'pro',
-    name: 'Pro',
-    tagline: 'Larger teams + SSO — capacity, SSO, and priority response for serious teams.',
+    id: "pro",
+    name: "Pro",
+    tagline:
+      "Larger teams + SSO — capacity, SSO, and priority response for serious teams.",
     priceCents: 29900,
     earlyAdopterPriceCents: 14950,
     yearlyPriceCents: 299000,
@@ -122,12 +126,12 @@ export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
     concurrentRunLimit: 15,
     purchasable: true,
     features: [
-      'Unlimited projects (reasonable quotas)',
-      '120,000 priority run-minutes',
-      '15 concurrent runs',
-      'SSO / SAML',
-      'Priority support',
-      'Custom cross-browser pricing',
+      "Unlimited projects (reasonable quotas)",
+      "120,000 priority run-minutes",
+      "15 concurrent runs",
+      "SSO / SAML",
+      "Priority support",
+      "Custom cross-browser pricing",
     ],
   },
 };
@@ -137,9 +141,9 @@ export const PLANS: Record<Exclude<TeamPlan, 'demo' | 'trial'>, PlanConfig> = {
  * (read-only sandboxes — they don't pay, so we don't render checkout).
  */
 export const FALLBACK_PLAN: PlanConfig = {
-  id: 'free',
-  name: 'Sandbox',
-  tagline: 'Read-only sandbox.',
+  id: "free",
+  name: "Sandbox",
+  tagline: "Read-only sandbox.",
   priceCents: 0,
   earlyAdopterPriceCents: 0,
   yearlyPriceCents: 0,
@@ -152,8 +156,13 @@ export const FALLBACK_PLAN: PlanConfig = {
 };
 
 export function planConfig(plan: TeamPlan): PlanConfig {
-  if (plan === 'demo' || plan === 'trial') return FALLBACK_PLAN;
-  return PLANS[plan];
+  if (plan === "demo" || plan === "trial") return FALLBACK_PLAN;
+  const cfg = PLANS[plan];
+  // `plan` is typed, but values can arrive from forms/API at runtime —
+  // reject unknown tiers ('enterprise', typos) with a clear error rather
+  // than returning undefined and crashing later on `.purchasable`.
+  if (!cfg) throw new Error(`Unknown plan tier: ${plan}`);
+  return cfg;
 }
 
 /**
@@ -161,9 +170,13 @@ export function planConfig(plan: TeamPlan): PlanConfig {
  * Server-only (reads `EARLY_ADOPTER_PRICING`) — the UI receives prices
  * pre-computed via `toUiCatalog()` so SSR/CSR can't disagree.
  */
-export function displayPriceCents(plan: PlanConfig, interval: BillingInterval = 'monthly'): number {
+export function displayPriceCents(
+  plan: PlanConfig,
+  interval: BillingInterval = "monthly",
+): number {
   const ea = isEarlyAdopterPricing();
-  if (interval === 'yearly') return ea ? plan.earlyAdopterYearlyPriceCents : plan.yearlyPriceCents;
+  if (interval === "yearly")
+    return ea ? plan.earlyAdopterYearlyPriceCents : plan.yearlyPriceCents;
   return ea ? plan.earlyAdopterPriceCents : plan.priceCents;
 }
 
@@ -179,11 +192,17 @@ export const PURCHASABLE_PLANS: PlanConfig[] = [
  */
 export function planRank(plan: TeamPlan): number {
   switch (plan) {
-    case 'demo': return -1;
-    case 'trial': return 0;
-    case 'free': return 0;
-    case 'starter': return 1;
-    case 'growth': return 2;
-    case 'pro': return 3;
+    case "demo":
+      return -1;
+    case "trial":
+      return 0;
+    case "free":
+      return 0;
+    case "starter":
+      return 1;
+    case "growth":
+      return 2;
+    case "pro":
+      return 3;
   }
 }
