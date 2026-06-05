@@ -128,6 +128,11 @@ Create tests (one-time)          Run tests (forever)
 - **Multi-Engine Visual Diffing** — Three comparison engines: pixelmatch (pixel-perfect), SSIM (structural similarity), and Butteraugli (human-perception-aligned). Choose the best trade-off between speed and accuracy.
 - **Multi-Step Screenshots** — Capture multiple labeled screenshots per test run for multi-page flow testing.
 - **Approval Workflow** — Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
+- **Check Modes** — Unified verification control across 9 layers (visual, text, DOM, network, console, a11y, design, performance, URL), each set to enforce, log, or disable per repo — replacing scattered per-feature toggles.
+- **Verify Board** — Per-step card board for reviewing multi-layer check results: change map, per-layer baselines, and reviewer feedback in one focused view.
+- **Design System Verification** — Design-token comparison layer that flags drift from your design system (colors, spacing, typography) as its own check layer.
+- **URL Diff** — Capture and diff URL trajectories across runs to catch unexpected redirects and navigation changes.
+- **Analyze URL** — Pre-recording selector tuning: scans the target page, measures selector-strategy coverage (data-testid, aria, ids, …), and recommends a priority order matched to your app.
 - **Git-Aware Builds** — Run tests per branch/commit. Compare across PRs. Track coverage.
 - **Branch Comparison** — Dedicated compare view for side-by-side branch-to-branch test result diffing.
 - **Test Suites** — Organize tests into ordered suites for structured execution.
@@ -194,7 +199,7 @@ Create tests (one-time)          Run tests (forever)
 - **Parallel Test Execution** — Configurable max parallel tests for the embedded-browser pool and remote runners.
 - **Embedded Browser** — Containerized Chromium with CDP live streaming back to the UI. Record and run tests without local Playwright. JPEG streaming with configurable quality/framerate, WebSocket auth, concurrent contexts.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
-- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 50 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
+- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing 52 tools for AI agent integration: run tests, review diffs, approve baselines, create/heal tests, check coverage. Install via `npx @lastest/mcp-server`.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
 - **Accessibility Audits** — Automated axe-core checks on every screenshot capture with WCAG 2.2 AA compliance scoring.
 - **Network & Console Tracking** — Capture network requests and browser console errors during test runs.
@@ -218,6 +223,7 @@ Create tests (one-time)          Run tests (forever)
 - **Role-Based Access** — Owner, admin, member, viewer roles.
 - **Multiple Auth Methods** — Email/password (Argon2 hashing), GitHub OAuth, GitLab OAuth, Google OAuth via better-auth.
 - **Email Invitations** — Send team invitations via Resend with verification and password reset tokens.
+- **Billing (hosted)** — Stripe subscriptions for hosted deployments: Starter / Growth / Pro tiers, monthly + yearly, checkout + customer portal, period-end downgrades, immediate prorated upgrades. Self-hosted instances run free with billing disabled (no Stripe keys needed).
 
 ---
 
@@ -379,7 +385,7 @@ Distributed test execution via HTTP polling. The Lastest server queues commands;
 | **Setup/teardown orchestration** | **Yes** | No | No | No | No | No | No |
 | **Branch baseline management** | **Yes** | Yes | Yes | Yes | No | No | No |
 | **Scheduled test runs** | **Yes (cron)** | Cloud | Cloud | Cloud | Cloud | Cloud | No |
-| **MCP server (AI agent API)** | **Yes (50 tools)** | No | No | No | No | No | No |
+| **MCP server (AI agent API)** | **Yes (52 tools)** | No | No | No | No | No | No |
 | **WCAG compliance scoring** | **Yes (0–100)** | No | No | No | No | No | No |
 | **AI failure triage** | **Yes** | No | No | No | No | No | No |
 | **Assertion tracking** | **Yes** | No | No | No | No | No | No |
@@ -397,7 +403,7 @@ Distributed test execution via HTTP polling. The Lastest server queues commands;
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
 - **Self-hosted with unlimited screenshots** — no per-screenshot pricing, no volume limits when you run it on your own infra
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
-- **MCP server with 50 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
+- **MCP server with 52 tools** — let AI agents (Claude, etc.) run tests, review diffs, and heal failures autonomously
 - **Scheduled test runs** — cron-based automation with smart failure handling
 - **WCAG 2.2 AA compliance scoring** — automated 0–100 accessibility score per build with trend tracking
 - **6 AI providers including OpenAI and Ollama** — run AI completely locally with zero API costs
@@ -452,7 +458,7 @@ In-depth docs for every integration live on the [Lastest Wiki](https://github.co
 | **Smart Run** | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests) |
 | **Self-Hosted Deployment** | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment) |
 | **Remote Runners** | `@lastest/runner` on npm — register in Settings → Runners, then `lastest-runner start -t <token> -s <url>`; supports run, record, parallel, daemon mode, system-info reporting | [Remote Runners](https://github.com/las-team/lastest/wiki/Remote-Runners) |
-| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 50 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
+| **MCP Server** | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 52 tools (run/poll/list/heal/approve/reject/coverage/…) for Claude and other agents; structured JSON responses | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server) |
 | **Scheduled Runs** | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs) |
 | **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
 | **Custom Webhooks** | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
@@ -477,7 +483,7 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 | **Playwright** | Browser type, viewport, headless/shell mode, selector priority, recording engine, animation freezing, screenshot delay, max parallel tests, headed playback for debugging | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference) |
 | **Stabilization** | Network idle, DOM stability, timestamp freezing, random seeding, third-party blocking, font loading, loading-indicator hiding, cross-OS consistency, burst capture, auto-mask dynamic content | [Stabilization](https://github.com/las-team/lastest/wiki/Stabilization-Features) |
 | **Environment** | Server startup (manual vs auto-start), health check URLs, EB-mode toggles | [Environment Vars](https://github.com/las-team/lastest/wiki/Environment-Variables) |
-| **Diff Sensitivity** | Diff engine selection (pixelmatch / SSIM / Butteraugli), text-region-aware diffing, DOM-diff fallback, pixel/percentage thresholds, page-shift detection, per-step ignore regions | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
+| **Check Modes** | Per-layer verification control (visual / text / DOM / network / console / a11y / design / perf / URL — enforce, log, or disable); supersedes the old Diff Sensitivity card. Diff engine selection (pixelmatch / SSIM / Butteraugli), text-region-aware diffing, page-shift detection, per-step ignore regions | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
 | **AI** | Test-generation provider, diff-analysis provider, API keys, model, custom instructions, Ollama / OpenAI / Claude / OpenRouter support, MCP wiring for "Enhance with AI" | [AI Configuration](https://github.com/las-team/lastest/wiki/AI-Configuration) |
 | **Notifications** | Slack, Discord, custom webhook config, auto-create GitHub issue from a visual diff | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks) |
 | **Branches** | Baseline and scanning branch selection, branch baseline fork/merge/promote | [Visual Diffing](https://github.com/las-team/lastest/wiki/Visual-Diffing) |
@@ -508,6 +514,7 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 - **OCR Fallback**: Tesseract.js
 - **Test Data**: Google Sheets integration
 - **Email**: Resend
+- **Billing**: Stripe via `@better-auth/stripe` (hosted plans; optional)
 - **Testing**: Vitest (unit), Playwright (visual)
 - **State**: TanStack React Query
 
@@ -546,6 +553,12 @@ DATABASE_URL=                     # Default: postgresql://lastest:lastest@localh
 MONITORED_BRANCHES=               # Default: main,master,develop
 NEXT_PUBLIC_APP_URL=              # Your app's public URL
 NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
+
+# Stripe billing (hosted deployments only — leave unset when self-hosting)
+STRIPE_SECRET_KEY=                # Enables the billing plugin + plan catalog
+STRIPE_WEBHOOK_SECRET=            # Webhook signature validation
+STRIPE_AUTOMATIC_TAX=             # Optional: 'true' to add tax at checkout (requires Stripe Tax)
+EARLY_ADOPTER_PRICING=            # Default: true — show/charge early-adopter prices
 ```
 
 ---
@@ -598,7 +611,7 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Runner management UI (register, monitor, configure from dashboard)
 - [x] Play Agent (autonomous 11-step test generation pipeline with sub-agents)
 - [x] Guided onboarding (8-step setup guide with auto-detection)
-- [x] MCP server v2 (`@lastest/mcp-server` — 50 tools for AI agent integration)
+- [x] MCP server v2 (`@lastest/mcp-server` — 52 tools for AI agent integration)
 - [x] AI failure triage (auto-classify failures: regression, flaky, environment, maintenance)
 - [x] Scheduled test runs (cron-based automation with preset schedules)
 - [x] WCAG 2.2 AA compliance scoring (severity-weighted 0–100 score with trends)
@@ -635,6 +648,12 @@ NEXT_PUBLIC_BASE_URL=             # Base URL for API calls
 - [x] Watermarked share links + share-link refactor (publicly viewable runs/diffs)
 - [x] Gamification / "Beat the Bot" (scoring, seasons, leaderboards, Bug Blitz)
 - [x] "Enhance with AI" MCP wiring (live test names while AI builds)
+- [x] Check modes (9 verification layers with enforce/log/disable control)
+- [x] Verify board (per-step multi-layer review with change map)
+- [x] Design-system verification layer (design-token drift detection)
+- [x] URL diff (navigation trajectory capture + comparison)
+- [x] Analyze URL (selector-priority tuning before recording)
+- [x] Stripe billing for hosted plans (monthly/yearly subscriptions, customer portal)
 - [ ] Hosted (managed) deployment option — in progress
 
 
