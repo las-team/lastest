@@ -1,4 +1,7 @@
 name: CI
+env:
+  CI: true
+  HUSKY: 0
 on:
   push:
     branches: [main]
@@ -13,8 +16,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'pnpm'
+          node-version: "24"
+          cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm format:check
       - run: pnpm test
