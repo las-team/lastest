@@ -17,7 +17,7 @@ import type {
   StepComparisonEvidence,
   StepVerdict,
 } from '../schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNotNull } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 export async function createPublicShare(
@@ -60,8 +60,23 @@ export async function listPublicSharesForTest(testId: string): Promise<PublicSha
 // Limited at the call site (sitemap.ts) to keep the XML under Google's 50k-URL
 // cap; the share table is currently far below that ceiling but the limit makes
 // the contract explicit.
+//
+// Video fields feed the <video:video> sitemap extension on /r/<slug> entries.
+// Google requires the sitemap metadata to be CONSISTENT with the on-page
+// VideoObject JSON-LD (title/thumbnail/contentUrl), so the fields mirror what
+// the share page selects: the test-share's result video for the share's build
+// run. Build shares (testId null) never join a video — same as the page,
+// which only emits VideoObject markup for test shares.
 export async function listPublicSharesForSitemap(limit = 5000): Promise<
-  Array<{ slug: string; updatedAt: Date | null }>
+  Array<{
+    slug: string;
+    updatedAt: Date | null;
+    targetDomain: string | null;
+    testName: string | null;
+    changesDetected: number;
+    videoPath: string | null;
+    videoDurationMs: number | null;
+  }>
 > {
   const rows = await db
     .select({
@@ -69,16 +84,44 @@ export async function listPublicSharesForSitemap(limit = 5000): Promise<
       buildCompletedAt: builds.completedAt,
       buildCreatedAt: builds.createdAt,
       shareCreatedAt: publicShares.createdAt,
+      targetDomain: publicShares.targetDomain,
+      testName: tests.name,
+      changesDetected: builds.changesDetected,
+      videoPath: testResults.videoPath,
+      videoDurationMs: testResults.durationMs,
     })
     .from(publicShares)
     .leftJoin(builds, eq(publicShares.buildId, builds.id))
+    .leftJoin(tests, eq(publicShares.testId, tests.id))
+    .leftJoin(
+      testResults,
+      and(
+        eq(testResults.testRunId, builds.testRunId),
+        eq(testResults.testId, publicShares.testId),
+        isNotNull(testResults.videoPath),
+      ),
+    )
     .where(eq(publicShares.status, 'public'))
     .orderBy(desc(publicShares.createdAt))
     .limit(limit);
-  return rows.map((r) => ({
-    slug: r.slug,
-    updatedAt: r.buildCompletedAt ?? r.buildCreatedAt ?? r.shareCreatedAt ?? null,
-  }));
+  // Retried runs can leave multiple results per (run, test) — keep the first
+  // row per slug so each sitemap entry carries at most one video.
+  const seen = new Set<string>();
+  const out: Awaited<ReturnType<typeof listPublicSharesForSitemap>> = [];
+  for (const r of rows) {
+    if (seen.has(r.slug)) continue;
+    seen.add(r.slug);
+    out.push({
+      slug: r.slug,
+      updatedAt: r.buildCompletedAt ?? r.buildCreatedAt ?? r.shareCreatedAt ?? null,
+      targetDomain: r.targetDomain,
+      testName: r.testName,
+      changesDetected: r.changesDetected ?? 0,
+      videoPath: r.videoPath,
+      videoDurationMs: r.videoDurationMs,
+    });
+  }
+  return out;
 }
 
 export async function revokePublicShareById(id: string): Promise<void> {
