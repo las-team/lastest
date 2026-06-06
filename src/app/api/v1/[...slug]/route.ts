@@ -1232,6 +1232,11 @@ export async function POST(
       const { repositoryId, name, functionalAreaId, targetUrl, description } = body;
       const testType = body.testType === 'api' ? 'api' : 'browser';
       const apiDefinition = body.apiDefinition as import('@/lib/db/schema').ApiTestDefinition | undefined;
+      // E3: optional load config (api tests only). Concurrency/total are capped
+      // server-side in the load runner.
+      const loadConfig = testType === 'api' && body.loadConfig && typeof body.loadConfig === 'object'
+        ? (body.loadConfig as import('@/lib/db/schema').LoadTestConfig)
+        : undefined;
       // API tests carry an apiDefinition; the `code` column stores a readable
       // JSON rendering of it (the column is NOT NULL). Browser tests require code.
       let code = body.code as string | undefined;
@@ -1271,6 +1276,7 @@ export async function POST(
         code,
         testType,
         apiDefinition: testType === 'api' ? apiDefinition : undefined,
+        loadConfig,
         targetUrl: targetUrl ?? (testType === 'api' ? (apiDefinition?.url ?? null) : null),
         functionalAreaId: functionalAreaId ?? null,
         createdByBotId: mcpBot?.id ?? null,

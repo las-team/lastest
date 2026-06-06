@@ -334,6 +334,41 @@ export interface ApiTestResultData {
   responseSnippet?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Load / performance testing on API tests (E3). Stored on tests.loadConfig and
+// test_results.loadResult; latency/error breaches surface on the `perf` layer.
+// ---------------------------------------------------------------------------
+
+export interface LoadTestThresholds {
+  p95Ms?: number;
+  p99Ms?: number;
+  /** Fraction 0..1 of requests allowed to fail before gating. */
+  maxErrorRate?: number;
+  minThroughputRps?: number;
+}
+
+export interface LoadTestConfig {
+  concurrency: number;
+  /** Total requests to issue. Mutually exclusive with durationMs (totalRequests wins). */
+  totalRequests?: number;
+  durationMs?: number;
+  thresholds?: LoadTestThresholds;
+}
+
+export interface LoadTestResultData {
+  count: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  mean: number;
+  min: number;
+  max: number;
+  throughputRps: number;
+  errorRate: number;
+  passed: boolean;
+  breaches: string[];
+}
+
 export const tests = pgTable('tests', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -375,6 +410,8 @@ export const tests = pgTable('tests', {
   // E1: test type discriminator. 'browser' (Playwright, default) | 'api' (headless HTTP).
   testType: text('test_type').default('browser'),
   apiDefinition: jsonb('api_definition').$type<ApiTestDefinition>(),
+  // E3: when set on an api-type test, runs as a load test (N concurrent requests).
+  loadConfig: jsonb('load_config').$type<LoadTestConfig>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
@@ -720,6 +757,8 @@ export const testResults = pgTable('test_results', {
   status: text('status'), // 'passed', 'failed', 'skipped'
   // E1: result of a headless API test (null for browser tests).
   apiResult: jsonb('api_result').$type<ApiTestResultData>(),
+  // E3: load-test aggregate result (null unless the test ran as a load test).
+  loadResult: jsonb('load_result').$type<LoadTestResultData>(),
   screenshotPath: text('screenshot_path'),
   screenshots: jsonb('screenshots').$type<CapturedScreenshot[]>(),
   diffPath: text('diff_path'),
@@ -1434,6 +1473,14 @@ export const DEFAULT_API_TEST_SETTINGS = {
   latencyBudgetMs: 2000,
   followRedirects: true,
 };
+
+// Default load-test thresholds (E3) + server-side safety caps.
+export const DEFAULT_LOAD_TEST_THRESHOLDS = {
+  p95Ms: 1000,
+  maxErrorRate: 0.01,
+};
+export const LOAD_TEST_MAX_CONCURRENCY = 50;
+export const LOAD_TEST_MAX_TOTAL_REQUESTS = 2000;
 
 // Diff classification type
 export type DiffClassification = 'unchanged' | 'flaky' | 'changed';

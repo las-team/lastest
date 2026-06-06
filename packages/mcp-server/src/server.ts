@@ -1138,6 +1138,7 @@ export function createServer(client: LastestClient): McpServer {
       description: z.string().optional().describe('Test description (direct browser mode)'),
       testType: z.enum(['browser', 'api']).optional().describe('"api" creates a headless HTTP test (E1). Defaults to browser.'),
       apiDefinition: z.record(z.any()).optional().describe('API test definition for direct API mode: { method, url, headers?, query?, body?, auth?, assertions: [...] }. Assertion kinds: status|header|jsonPath|jsonSchema|bodyContains|latencyMs.'),
+      loadConfig: z.record(z.any()).optional().describe('E3 load-test config for an api test: { concurrency, totalRequests?, durationMs?, thresholds?: { p95Ms?, p99Ms?, maxErrorRate?, minThroughputRps? } }. When set, lastest_run_tests runs this test as a load test (concurrency/total capped server-side).'),
       endpoint: z.string().optional().describe('Focus endpoint for AI API generation, e.g. "POST /api/users".'),
       openapiSpec: z.string().optional().describe('Raw OpenAPI/Swagger JSON to ground AI API generation.'),
     },
@@ -1156,11 +1157,12 @@ export function createServer(client: LastestClient): McpServer {
           name,
           testType: 'api',
           apiDefinition: params.apiDefinition as Record<string, unknown>,
+          loadConfig: params.loadConfig as Record<string, unknown> | undefined,
           functionalAreaId,
         });
         const response: ToolResponse = {
           status: 'test_created',
-          summary: `API test "${result.name}" created (ID: ${result.id}). Use lastest_run_tests to execute it.`,
+          summary: `API test "${result.name}" created (ID: ${result.id})${params.loadConfig ? ' as a load test' : ''}. Use lastest_run_tests to execute it.`,
           actionRequired: ['Run the test with lastest_run_tests to verify it works'],
           details: result,
         };

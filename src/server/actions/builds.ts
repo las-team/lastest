@@ -617,7 +617,7 @@ async function runBuildAsync(
   let currentBrowserType = 'chromium';
 
   // Result callback for processing diffs
-  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot; apiResult?: import('@/lib/db/schema').ApiTestResultData }) => {
+  const onResult = async (result: { testId: string; status: string; screenshotPath?: string; screenshots: { path: string; label?: string }[]; errorMessage?: string; durationMs?: number; consoleErrors?: string[]; networkRequests?: import('@/lib/db/schema').NetworkRequest[]; downloads?: import('@/lib/db/schema').DownloadRecord[]; a11yViolations?: import('@/lib/db/schema').A11yViolation[]; a11yPassesCount?: number; designSystemViolations?: import('@/lib/db/schema').DesignSystemViolation[]; designSystemRulesChecked?: number; designSystemTokenUsage?: import('@/lib/db/schema').DesignSystemTokenUsage; stabilityMetadata?: { frameCount: number; stableFrames: number; maxFrameDiff: number; isStable: boolean }; videoPath?: string; softErrors?: string[]; assertionResults?: import('@/lib/db/schema').AssertionResult[]; networkBodiesPath?: string; domSnapshot?: import('@/lib/db/schema').DomSnapshotData; lastReachedStep?: number; totalSteps?: number; extractedVariables?: Record<string, string>; assignedVariables?: Record<string, string>; logs?: Array<{ timestamp: number; level: string; message: string }>; urlTrajectory?: import('@/lib/db/schema').UrlTrajectoryStep[]; webVitals?: import('@/lib/db/schema').WebVitalsSample[]; storageStateSnapshot?: import('@/lib/db/schema').StorageStateSnapshot; apiResult?: import('@/lib/db/schema').ApiTestResultData; loadResult?: import('@/lib/db/schema').LoadTestResultData }) => {
     processedCount++;
 
     // Save test result immediately
@@ -627,6 +627,7 @@ async function runBuildAsync(
       testVersionId: versionIdMap.get(result.testId) ?? null,
       status: result.status,
       apiResult: result.apiResult,
+      loadResult: result.loadResult,
       screenshotPath: result.screenshotPath,
       screenshots: result.screenshots,
       errorMessage: result.errorMessage,
@@ -789,10 +790,16 @@ async function runBuildAsync(
     // triage unit. Best-effort — failure here never blocks the build.
     try {
       const { scoreMultiLayer } = await import('@/lib/comparison/scorer');
-      // E1: fold api-test assertion evidence into the step verdict.
-      const apiEvidence = result.apiResult
-        ? (await import('@/lib/api-test/evidence')).apiResultToEvidence(result.apiResult)
-        : undefined;
+      // E1/E3: fold api-test assertion + load-test (perf-layer) evidence into
+      // the step verdict. Both carry their own layer, so they can share the
+      // scorer's apiEvidence channel.
+      const apiEvidence: import('@/lib/db/schema').EvidenceItem[] = [];
+      if (result.apiResult) {
+        apiEvidence.push(...(await import('@/lib/api-test/evidence')).apiResultToEvidence(result.apiResult));
+      }
+      if (result.loadResult) {
+        apiEvidence.push(...(await import('@/lib/api-test/load-evidence')).loadResultToEvidence(result.loadResult));
+      }
       const prevResult = await queries.getPreviousTestResultForTest(result.testId, testRunId);
       const visualDiffs = await queries.getVisualDiffsByTestResult(testResult.id);
 
