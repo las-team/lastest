@@ -42,180 +42,80 @@ function withActivityReporting(
   };
 }
 
+/** Throw a clear error when a required param for the chosen action is absent. */
+function requireParam<T>(value: T | undefined | null, name: string, action: string): T {
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`'${name}' is required when action is '${action}'`);
+  }
+  return value;
+}
+
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: 'lastest',
     version: '0.3.7',
   });
 
-  // ===== Health & Status =====
-
-  // --- lastest_health_check ---
+  // ===== lastest_status (health, jobs, job) =====
+  // Replaces lastest_health_check, lastest_list_active_jobs, lastest_get_job_status.
   server.tool(
-    'lastest_health_check',
-    'Check connectivity to the Lastest instance.',
-    {},
-    async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.health();
-      const response: ToolResponse = {
-        status: result.ok ? 'healthy' : 'unhealthy',
-        summary: result.ok ? 'Lastest is reachable and healthy' : 'Lastest health check failed',
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_list_active_jobs ---
-  server.tool(
-    'lastest_list_active_jobs',
-    'List currently active background jobs (builds, AI operations, etc.).',
-    {},
-    async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const jobs = await client.getActiveJobs() as Array<Record<string, unknown>>;
-      const response: ToolResponse = {
-        status: jobs.length > 0 ? 'has_active_jobs' : 'idle',
-        summary: jobs.length > 0
-          ? `${jobs.length} active job(s) running`
-          : 'No active background jobs',
-        details: { count: jobs.length, jobs },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_get_job_status ---
-  server.tool(
-    'lastest_get_job_status',
-    'Get the status and progress of a specific background job.',
+    'lastest_status',
+    'Instance & background-job status. `action`: "health" (check connectivity to the Lastest instance), "jobs" (list currently active background jobs — builds, AI operations, etc.), "job" (get status/progress of a specific background job — requires `jobId`).',
     {
-      jobId: z.string().describe('Background job ID'),
+      action: z.enum(['health', 'jobs', 'job']).describe('"health" = connectivity check; "jobs" = list active jobs; "job" = single job status (needs jobId)'),
+      jobId: z.string().optional().describe('Background job ID — required when action is "job"'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const job = (await client.getJob(params.jobId)) as Record<string, unknown>;
+      const action = params.action as 'health' | 'jobs' | 'job';
+      if (action === 'health') {
+        const result = await client.health();
+        const response: ToolResponse = {
+          status: result.ok ? 'healthy' : 'unhealthy',
+          summary: result.ok ? 'Lastest is reachable and healthy' : 'Lastest health check failed',
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+      if (action === 'jobs') {
+        const jobs = await client.getActiveJobs() as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: jobs.length > 0 ? 'has_active_jobs' : 'idle',
+          summary: jobs.length > 0
+            ? `${jobs.length} active job(s) running`
+            : 'No active background jobs',
+          details: { count: jobs.length, jobs },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+      // action === 'job'
+      const jobId = requireParam(params.jobId as string | undefined, 'jobId', 'job');
+      const job = (await client.getJob(jobId)) as Record<string, unknown>;
       const response: ToolResponse = {
         status: job.status as string,
-        summary: `Job ${params.jobId}: ${job.status}${job.progress ? ` (${job.progress}%)` : ''}`,
+        summary: `Job ${jobId}: ${job.status}${job.progress ? ` (${job.progress}%)` : ''}`,
         details: job,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     },
   );
 
-  // ===== Repositories =====
-
-  // --- lastest_list_repos ---
+  // ===== lastest_repo (list, get, create, update, get_settings, update_settings) =====
+  // Replaces lastest_list_repos, lastest_get_repo, lastest_create_repo, lastest_update_repo,
+  // lastest_get_playwright_settings, lastest_update_playwright_settings.
   server.tool(
-    'lastest_list_repos',
-    'List all repositories accessible to the current team.',
-    {},
-    async (): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const repos = await client.listRepos() as Array<Record<string, unknown>>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `${repos.length} repository(ies) found`,
-        details: {
-          count: repos.length,
-          repos: repos.map(r => ({ id: r.id, name: r.name, url: r.url })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_get_repo ---
-  server.tool(
-    'lastest_get_repo',
-    'Get details about a specific repository.',
+    'lastest_repo',
+    'Repository resource. `action`: "list" (all repos for the team), "get" (one repo — needs repositoryId), "create" (new local repo — needs name; optional baseUrl points the repo at an external app so generated tests target the right origin), "update" (rename / branches / baseUrl — needs repositoryId), "get_settings" (repo-level Playwright settings — needs repositoryId), "update_settings" (upsert repo-level Playwright settings — needs repositoryId + at least one field).',
     {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const repo = (await client.getRepo(params.repositoryId)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `Repository: ${repo.name}`,
-        details: repo,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_create_repo ---
-  server.tool(
-    'lastest_create_repo',
-    'Create a new local repository in the current team. Use this when you need a fresh workspace for tests without connecting to GitHub/GitLab. Pass `baseUrl` to point the repo at an external app (e.g. https://staging.example.com) so generated tests target the right origin instead of localhost:3000.',
-    {
-      name: z.string().describe('Repository name (e.g. "my-app")'),
-      baseUrl: z.string().url().optional().describe('Base URL passed to `test(page, baseUrl, ...)` for this repo (e.g. https://staging.example.com). Defaults to http://localhost:3000.'),
-    },
-    withActivityReporting(client, 'lastest_create_repo', async (params) => {
-      const repo = await client.createRepo(params.name as string, {
-        baseUrl: params.baseUrl as string | undefined,
-      });
-      const response: ToolResponse = {
-        status: 'created',
-        summary: `Repository "${repo.name}" created (ID: ${repo.id}${repo.baseUrl ? `, baseUrl: ${repo.baseUrl}` : ''})`,
-        actionRequired: [
-          'Create functional areas with lastest_create_area',
-          'Add tests with lastest_create_test',
-        ],
-        details: repo,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_update_repo ---
-  server.tool(
-    'lastest_update_repo',
-    'Update a repository\'s name, default branch, selected branch, or base URL. `baseUrl` is the value passed to `test(page, baseUrl, ...)` — set it to point a repo at an external app instead of the default http://localhost:3000.',
-    {
-      repositoryId: z.string().describe('Repository ID to update'),
-      name: z.string().optional().describe('New repository name'),
-      defaultBranch: z.string().optional().describe('New default branch name'),
-      selectedBranch: z.string().optional().describe('Branch selected for test runs'),
-      baseUrl: z.string().url().optional().describe('Base URL for tests in this repo (e.g. https://staging.example.com).'),
-    },
-    withActivityReporting(client, 'lastest_update_repo', async (params) => {
-      const { repositoryId, ...rest } = params;
-      const cleanUpdates = Object.fromEntries(
-        Object.entries(rest).filter(([, v]) => v !== undefined),
-      ) as { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string };
-      const result = (await client.updateRepo(repositoryId as string, cleanUpdates)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'updated',
-        summary: `Repository ${repositoryId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_get_playwright_settings ---
-  server.tool(
-    'lastest_get_playwright_settings',
-    'Get the repo-level Playwright settings (browser, viewport, timeouts, error modes, stabilization, parallelism caps, etc.). Falls back to the global row + built-in defaults when no per-repo row exists.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const settings = (await client.getPlaywrightSettings(params.repositoryId as string)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `Playwright settings for repo ${params.repositoryId} (browser=${settings.browser}, viewport=${settings.viewportWidth}x${settings.viewportHeight}, parallel=${settings.maxParallelTests})`,
-        details: settings,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_update_playwright_settings ---
-  server.tool(
-    'lastest_update_playwright_settings',
-    'Upsert repo-level Playwright settings. Pass any subset of fields — unknown keys are rejected, unspecified ones stay at their current value. Use this when the demo skill needs to retarget a repo at a different browser, viewport, or error policy without touching every test individually.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
+      action: z.enum(['list', 'get', 'create', 'update', 'get_settings', 'update_settings']).describe('Repo operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for get/update/get_settings/update_settings'),
+      // create
+      name: z.string().optional().describe('Repository name (required for create; optional new name for update)'),
+      // create + update
+      baseUrl: z.string().url().optional().describe('Base URL passed to `test(page, baseUrl, ...)` (e.g. https://staging.example.com). Defaults to http://localhost:3000.'),
+      // update
+      defaultBranch: z.string().optional().describe('New default branch name (update)'),
+      selectedBranch: z.string().optional().describe('Branch selected for test runs (update)'),
+      // update_settings (Playwright settings — pass any subset)
       browser: z.enum(['chromium', 'firefox', 'webkit']).optional().describe('Default browser for tests in this repo'),
       headlessMode: z.enum(['true', 'false', 'shell']).optional().describe('Headless mode'),
       viewportWidth: z.number().positive().optional().describe('Default viewport width'),
@@ -248,13 +148,95 @@ export function createServer(client: LastestClient): McpServer {
       stabilization: z.record(z.unknown()).nullable().optional().describe('StabilizationSettings object (waitForNetworkIdle, freezeTimestamps, mask patterns, etc.). Pass null to clear.'),
       selectorPriority: z.array(z.unknown()).optional().describe('SelectorConfig[] ordering — leave unset to use the global default.'),
     },
-    withActivityReporting(client, 'lastest_update_playwright_settings', async (params) => {
-      const { repositoryId, ...rest } = params;
-      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+    withActivityReporting(client, 'lastest_repo', async (params) => {
+      const action = params.action as 'list' | 'get' | 'create' | 'update' | 'get_settings' | 'update_settings';
+
+      if (action === 'list') {
+        const repos = await client.listRepos() as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${repos.length} repository(ies) found`,
+          details: {
+            count: repos.length,
+            repos: repos.map(r => ({ id: r.id, name: r.name, url: r.url })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'get') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'get');
+        const repo = (await client.getRepo(repositoryId)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `Repository: ${repo.name}`,
+          details: repo,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'create') {
+        const name = requireParam(params.name as string | undefined, 'name', 'create');
+        const repo = await client.createRepo(name, {
+          baseUrl: params.baseUrl as string | undefined,
+        });
+        const response: ToolResponse = {
+          status: 'created',
+          summary: `Repository "${repo.name}" created (ID: ${repo.id}${repo.baseUrl ? `, baseUrl: ${repo.baseUrl}` : ''})`,
+          actionRequired: [
+            "Create functional areas with lastest_area action:'create'",
+            'Add tests with lastest_create_test',
+          ],
+          details: repo,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'update') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'update');
+        const cleanUpdates = Object.fromEntries(
+          (['name', 'defaultBranch', 'selectedBranch', 'baseUrl'] as const)
+            .map((k) => [k, params[k]])
+            .filter(([, v]) => v !== undefined),
+        ) as { name?: string; defaultBranch?: string; selectedBranch?: string; baseUrl?: string };
+        const result = (await client.updateRepo(repositoryId, cleanUpdates)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'updated',
+          summary: `Repository ${repositoryId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'get_settings') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'get_settings');
+        const settings = (await client.getPlaywrightSettings(repositoryId)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `Playwright settings for repo ${repositoryId} (browser=${settings.browser}, viewport=${settings.viewportWidth}x${settings.viewportHeight}, parallel=${settings.maxParallelTests})`,
+          details: settings,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'update_settings'
+      const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'update_settings');
+      const settingsKeys = [
+        'browser', 'headlessMode', 'viewportWidth', 'viewportHeight', 'lockViewportToRecording',
+        'navigationTimeout', 'actionTimeout', 'selectorTimeoutMs', 'screenshotDelay', 'maxParallelTests',
+        'autoRetryCount', 'cursorFPS', 'cursorPlaybackSpeed', 'networkErrorMode', 'consoleErrorMode',
+        'ignoreExternalNetworkErrors', 'acceptAnyCertificate', 'grantClipboardAccess', 'acceptDownloads',
+        'enableNetworkInterception', 'enableDomDiff', 'enableA11y', 'enableVideoRecording', 'pointerGestures',
+        'freezeAnimations', 'customAttributeName', 'browsers', 'enabledRecordingEngines', 'defaultRecordingEngine',
+        'stabilization', 'selectorPriority',
+      ] as const;
+      const cleanUpdates = Object.fromEntries(
+        settingsKeys.map((k) => [k, params[k]]).filter(([, v]) => v !== undefined),
+      );
       if (Object.keys(cleanUpdates).length === 0) {
         throw new Error('No fields to update');
       }
-      const result = (await client.updatePlaywrightSettings(repositoryId as string, cleanUpdates)) as Record<string, unknown>;
+      const result = (await client.updatePlaywrightSettings(repositoryId, cleanUpdates)) as Record<string, unknown>;
       const response: ToolResponse = {
         status: 'updated',
         summary: `Playwright settings for repo ${repositoryId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
@@ -264,106 +246,81 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // ===== Functional Areas =====
-
-  // --- lastest_list_areas ---
+  // ===== lastest_area (list, create, update, delete, list_tests) =====
+  // Replaces lastest_list_areas, lastest_create_area, lastest_update_area, lastest_delete_area,
+  // lastest_list_tests_by_area.
   server.tool(
-    'lastest_list_areas',
-    'List functional areas (test groupings) for a repository.',
+    'lastest_area',
+    'Functional-area resource (test groupings). `action`: "list" (areas for a repo — needs repositoryId), "create" (new area — needs name; optional repositoryId/parentId), "update" (rename/describe/reparent — needs functionalAreaId), "delete" (soft-delete; tests become unassigned — needs functionalAreaId), "list_tests" (tests within an area — needs functionalAreaId).',
     {
-      repositoryId: z.string().describe('Repository ID'),
+      action: z.enum(['list', 'create', 'update', 'delete', 'list_tests']).describe('Area operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for "list"; optional for "create"'),
+      functionalAreaId: z.string().optional().describe('Functional area ID — required for update/delete/list_tests'),
+      name: z.string().optional().describe('Area name (required for create; optional new name for update)'),
+      description: z.string().optional().describe('New description (update)'),
+      parentId: z.string().optional().describe('Parent area ID for nesting (create) / new parent (update — pass empty string to clear)'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const areas = await client.listAreas(params.repositoryId) as Array<Record<string, unknown>>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `${areas.length} functional area(s)`,
-        details: {
-          count: areas.length,
-          areas: areas.map(a => ({ id: a.id, name: a.name, parentId: a.parentId })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+    withActivityReporting(client, 'lastest_area', async (params) => {
+      const action = params.action as 'list' | 'create' | 'update' | 'delete' | 'list_tests';
 
-  // --- lastest_create_area ---
-  server.tool(
-    'lastest_create_area',
-    'Create a new functional area for organizing tests.',
-    {
-      name: z.string().describe('Name of the functional area'),
-      repositoryId: z.string().optional().describe('Repository ID to associate with'),
-      parentId: z.string().optional().describe('Parent area ID for nesting'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = (await client.createArea({
-        name: params.name,
-        repositoryId: params.repositoryId,
-        parentId: params.parentId,
-      })) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'created',
-        summary: `Functional area "${params.name}" created${result.id ? ` (ID: ${result.id})` : ''}`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+      if (action === 'list') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'list');
+        const areas = await client.listAreas(repositoryId) as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${areas.length} functional area(s)`,
+          details: {
+            count: areas.length,
+            areas: areas.map(a => ({ id: a.id, name: a.name, parentId: a.parentId })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
 
-  // --- lastest_update_area ---
-  server.tool(
-    'lastest_update_area',
-    'Update a functional area\'s name, description, or parent.',
-    {
-      functionalAreaId: z.string().describe('Functional area ID to update'),
-      name: z.string().optional().describe('New name'),
-      description: z.string().optional().describe('New description'),
-      parentId: z.string().optional().describe('New parent area ID (pass empty string to clear)'),
-    },
-    withActivityReporting(client, 'lastest_update_area', async (params) => {
-      const { functionalAreaId, ...rest } = params;
-      const cleanUpdates: { name?: string; description?: string; parentId?: string | null } = {};
-      if (rest.name !== undefined) cleanUpdates.name = rest.name as string;
-      if (rest.description !== undefined) cleanUpdates.description = rest.description as string;
-      if (rest.parentId !== undefined) cleanUpdates.parentId = (rest.parentId as string) || null;
-      const result = (await client.updateArea(functionalAreaId as string, cleanUpdates)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'updated',
-        summary: `Functional area ${functionalAreaId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
+      if (action === 'create') {
+        const name = requireParam(params.name as string | undefined, 'name', 'create');
+        const result = (await client.createArea({
+          name,
+          repositoryId: params.repositoryId as string | undefined,
+          parentId: params.parentId as string | undefined,
+        })) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'created',
+          summary: `Functional area "${name}" created${result.id ? ` (ID: ${result.id})` : ''}`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
 
-  // --- lastest_delete_area ---
-  server.tool(
-    'lastest_delete_area',
-    'Soft-delete a functional area. Tests remain but become unassigned.',
-    {
-      functionalAreaId: z.string().describe('Functional area ID to delete'),
-    },
-    withActivityReporting(client, 'lastest_delete_area', async (params) => {
-      const result = await client.deleteArea(params.functionalAreaId as string);
-      const response: ToolResponse = {
-        status: 'deleted',
-        summary: `Functional area ${params.functionalAreaId} soft-deleted`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
+      if (action === 'update') {
+        const functionalAreaId = requireParam(params.functionalAreaId as string | undefined, 'functionalAreaId', 'update');
+        const cleanUpdates: { name?: string; description?: string; parentId?: string | null } = {};
+        if (params.name !== undefined) cleanUpdates.name = params.name as string;
+        if (params.description !== undefined) cleanUpdates.description = params.description as string;
+        if (params.parentId !== undefined) cleanUpdates.parentId = (params.parentId as string) || null;
+        const result = (await client.updateArea(functionalAreaId, cleanUpdates)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'updated',
+          summary: `Functional area ${functionalAreaId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
 
-  // --- lastest_list_tests_by_area ---
-  server.tool(
-    'lastest_list_tests_by_area',
-    'List tests within a specific functional area.',
-    {
-      functionalAreaId: z.string().describe('Functional area ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const tests = await client.listTestsByArea(params.functionalAreaId) as Array<Record<string, unknown>>;
+      if (action === 'delete') {
+        const functionalAreaId = requireParam(params.functionalAreaId as string | undefined, 'functionalAreaId', 'delete');
+        const result = await client.deleteArea(functionalAreaId);
+        const response: ToolResponse = {
+          status: 'deleted',
+          summary: `Functional area ${functionalAreaId} soft-deleted`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'list_tests'
+      const functionalAreaId = requireParam(params.functionalAreaId as string | undefined, 'functionalAreaId', 'list_tests');
+      const tests = await client.listTestsByArea(functionalAreaId) as Array<Record<string, unknown>>;
       const passing = tests.filter(t => t.lastRunStatus === 'passed').length;
       const failing = tests.filter(t => t.lastRunStatus === 'failed').length;
       const response: ToolResponse = {
@@ -377,30 +334,12 @@ export function createServer(client: LastestClient): McpServer {
         },
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
-  // ===== Test Details & Mutations =====
-
-  // --- lastest_get_test ---
-  server.tool(
-    'lastest_get_test',
-    'Get full details of a single test including code, URL, and last run status.',
-    {
-      testId: z.string().describe('Test ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const test = (await client.getTest(params.testId)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `Test "${test.name}": ${test.lastRunStatus ?? 'not_run'}`,
-        details: test,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_update_test ---
+  // ===== lastest_test (list, get, update, delete) =====
+  // Replaces lastest_list_tests, lastest_list_failing_tests, lastest_get_test, lastest_update_test,
+  // lastest_delete_test. (Creation is lastest_create_test; healing is lastest_heal_test — both standalone.)
   const setupStepSchema = z.object({
     stepType: z.enum(['test', 'script', 'storage_state']),
     testId: z.string().nullable().optional(),
@@ -425,14 +364,18 @@ export function createServer(client: LastestClient): McpServer {
     selectorTimeoutMs: z.number().nonnegative().optional(),
   });
   server.tool(
-    'lastest_update_test',
-    'Update a test\'s name, code, URL, functional area, setup wiring, or runtime overrides. Pass `setupTestId` to point this test at another test for setup (the most common pattern when two tests share a login), or `setupScriptId` to point at a saved setup script — these two are mutually exclusive. Use `setupOverrides` / `teardownOverrides` to skip specific default steps or inject extra ones (test / script / storage-state) just for this test. `playwrightOverrides` lets the test self-configure runtime knobs (browser, timeouts, error modes, baseUrl) without touching the repo-wide settings. `diffOverrides` and `stabilizationOverrides` accept partial blocks that fall through to repo defaults. Pass `null` for any override block to clear it.',
+    'lastest_test',
+    'Test resource (read/update/delete). `action`: "list" (all tests in a repo with pass/fail status — needs repositoryId; pass filter:"failing" to return only failing tests with error details), "get" (full details of one test incl. code/URL/last run — needs testId), "update" (name/code/URL/area/setup wiring/runtime overrides — needs testId), "delete" (soft-delete, restorable — needs testId). To create a test use lastest_create_test; to auto-fix a failing test use lastest_heal_test. For update, pass `setupTestId` to point this test at another test for setup, or `setupScriptId` to point at a saved setup script (mutually exclusive). Use `setupOverrides`/`teardownOverrides` to skip default steps or inject extra ones. `playwrightOverrides` self-configures runtime knobs without touching repo settings. Pass `null` for any override block to clear it.',
     {
-      testId: z.string().describe('Test ID to update'),
-      name: z.string().optional().describe('New test name'),
-      code: z.string().optional().describe('New Playwright test code'),
-      targetUrl: z.string().optional().describe('New target URL'),
-      functionalAreaId: z.string().optional().describe('New functional area ID'),
+      action: z.enum(['list', 'get', 'update', 'delete']).describe('Test operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for "list"'),
+      filter: z.enum(['all', 'failing']).optional().describe('For "list": "all" (default) lists every test; "failing" returns only currently-failing tests with error details.'),
+      testId: z.string().optional().describe('Test ID — required for get/update/delete'),
+      // update fields
+      name: z.string().optional().describe('New test name (update)'),
+      code: z.string().optional().describe('New Playwright test code (update). Expected signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`'),
+      targetUrl: z.string().optional().describe('New target URL (update)'),
+      functionalAreaId: z.string().optional().describe('New functional area ID (update)'),
       quarantined: z.boolean().optional().describe('Quarantine the test so it runs but does not block builds.'),
       executionMode: z.enum(['procedural', 'agent']).optional().describe('Execution mode'),
       viewportOverride: z.object({ width: z.number().positive(), height: z.number().positive() }).nullable().optional().describe('Override the recording viewport for this test. Pass null to clear.'),
@@ -444,83 +387,334 @@ export function createServer(client: LastestClient): McpServer {
       setupOverrides: overridesSchema.nullable().optional().describe('Per-test setup override block: `skippedDefaultStepIds` lists default_setup_steps to skip, `extraSteps` lists test/script/storage_state ids to inject after defaults. Pass null to clear.'),
       teardownOverrides: overridesSchema.nullable().optional().describe('Same shape as setupOverrides, applied to teardown. Pass null to clear.'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const { testId, ...rest } = params;
-      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
-      const result = (await client.updateTest(testId as string, cleanUpdates as Parameters<typeof client.updateTest>[1])) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'updated',
-        summary: `Test ${testId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+    withActivityReporting(client, 'lastest_test', async (params) => {
+      const action = params.action as 'list' | 'get' | 'update' | 'delete';
 
-  // --- lastest_delete_test ---
-  server.tool(
-    'lastest_delete_test',
-    'Soft-delete a test (can be restored). Does not permanently remove test data.',
-    {
-      testId: z.string().describe('Test ID to delete'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.deleteTest(params.testId);
+      if (action === 'list') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'list');
+        const filter = (params.filter as 'all' | 'failing' | undefined) ?? 'all';
+        const tests = (await client.listTests(repositoryId)) as Array<Record<string, unknown>>;
+
+        if (filter === 'failing') {
+          const failing = tests.filter(t => t.lastRunStatus === 'failed');
+          const response: ToolResponse = {
+            status: failing.length > 0 ? 'has_failures' : 'all_passing',
+            summary: failing.length > 0
+              ? `${failing.length} failing test(s): ${failing.map(t => t.name).join(', ')}`
+              : 'All tests are passing',
+            actionRequired: failing.length > 0
+              ? ['Use lastest_heal_test to auto-fix failing tests']
+              : undefined,
+            details: {
+              failingCount: failing.length,
+              tests: failing.map(t => ({
+                id: t.id,
+                name: t.name,
+                errorMessage: t.lastErrorMessage,
+                functionalAreaId: t.functionalAreaId,
+              })),
+            },
+          };
+          return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+        }
+
+        const passing = tests.filter(t => t.lastRunStatus === 'passed').length;
+        const failing = tests.filter(t => t.lastRunStatus === 'failed').length;
+        const noRuns = tests.filter(t => !t.lastRunStatus).length;
+        const response: ToolResponse = {
+          status: failing > 0 ? 'has_failures' : 'all_passing',
+          summary: `${tests.length} tests: ${passing} passing, ${failing} failing, ${noRuns} not yet run`,
+          details: {
+            total: tests.length,
+            passing,
+            failing,
+            notRun: noRuns,
+            tests: tests.map(t => ({
+              id: t.id,
+              name: t.name,
+              status: t.lastRunStatus ?? 'not_run',
+              functionalAreaId: t.functionalAreaId,
+            })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'get') {
+        const testId = requireParam(params.testId as string | undefined, 'testId', 'get');
+        const test = (await client.getTest(testId)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `Test "${test.name}": ${test.lastRunStatus ?? 'not_run'}`,
+          details: test,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'update') {
+        const testId = requireParam(params.testId as string | undefined, 'testId', 'update');
+        const updateKeys = [
+          'name', 'code', 'targetUrl', 'functionalAreaId', 'quarantined', 'executionMode',
+          'viewportOverride', 'playwrightOverrides', 'diffOverrides', 'stabilizationOverrides',
+          'setupTestId', 'setupScriptId', 'setupOverrides', 'teardownOverrides',
+        ] as const;
+        const cleanUpdates = Object.fromEntries(
+          updateKeys.map((k) => [k, params[k]]).filter(([, v]) => v !== undefined),
+        );
+        const result = (await client.updateTest(testId, cleanUpdates as Parameters<typeof client.updateTest>[1])) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'updated',
+          summary: `Test ${testId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'delete'
+      const testId = requireParam(params.testId as string | undefined, 'testId', 'delete');
+      const result = await client.deleteTest(testId);
       const response: ToolResponse = {
         status: 'deleted',
-        summary: `Test ${params.testId} soft-deleted`,
+        summary: `Test ${testId} soft-deleted`,
         details: result,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
-  // ===== Test Runs =====
-
-  // --- lastest_get_test_run ---
+  // ===== lastest_storage_state (list, create, delete) =====
+  // Replaces lastest_list_storage_states, lastest_create_storage_state, lastest_delete_storage_state.
   server.tool(
-    'lastest_get_test_run',
-    'Get detailed results for a specific test run, including individual test results, errors, and durations.',
+    'lastest_storage_state',
+    'Storage-state resource — saved Playwright `storageState()` blobs (cookies + localStorage). `action`: "list" (metadata only for a repo; raw JSON omitted because it holds live auth tokens — needs repositoryId), "create" (save a new state from a storageState() JSON string — needs repositoryId + name + storageStateJson), "delete" (remove a state — needs storageStateId). Wire a state into a test with lastest_test action:"update" using setupOverrides.extraSteps.',
     {
-      runId: z.string().describe('Test run ID'),
+      action: z.enum(['list', 'create', 'delete']).describe('Storage-state operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for list/create'),
+      storageStateId: z.string().optional().describe('Storage state ID — required for "delete"'),
+      name: z.string().optional().describe('Display name (required for create; e.g. "Admin login (staging)")'),
+      storageStateJson: z.string().optional().describe('Playwright storageState JSON string — `{ "cookies": [...], "origins": [...] }` (required for create). Include `indexedDB` per-origin entries when the source app stores tokens there (Firebase Auth, Clerk, Supabase v2).'),
+      authFlavor: z.string().optional().describe('Hint at the auth library so future runs pick the right recapture strategy. Suggested values: firebase | supabase | clerk | next-auth | better-auth | cookie | unknown'),
+      tokenLocations: z.array(z.string()).optional().describe('Where the session token lives. Subset of: cookie | localStorage | sessionStorage | indexedDB.'),
+      firebaseApiKey: z.string().optional().describe('When authFlavor=firebase, the project Web API key (public, not a secret) so the documented PW #35302/#35504 IndexedDB workaround can target the right `firebase:authUser:<apiKey>:[DEFAULT]` record.'),
+      expiresAt: z.string().optional().describe('Best-effort capture-validity hint (ISO date string).'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const data = (await client.getTestRun(params.runId)) as Record<string, unknown>;
-      const run = data.run as Record<string, unknown>;
-      const results = (data.results ?? []) as Array<Record<string, unknown>>;
-      const passed = results.filter(r => r.status === 'passed').length;
-      const failed = results.filter(r => r.status === 'failed').length;
+    withActivityReporting(client, 'lastest_storage_state', async (params) => {
+      const action = params.action as 'list' | 'create' | 'delete';
+
+      if (action === 'list') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'list');
+        const states = (await client.listStorageStates(repositoryId)) as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${states.length} storage state(s)`,
+          details: {
+            count: states.length,
+            storageStates: states.map(s => ({
+              id: s.id,
+              name: s.name,
+              cookieCount: s.cookieCount,
+              originCount: s.originCount,
+              createdAt: s.createdAt,
+              updatedAt: s.updatedAt,
+            })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'create') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'create');
+        const name = requireParam(params.name as string | undefined, 'name', 'create');
+        const storageStateJson = requireParam(params.storageStateJson as string | undefined, 'storageStateJson', 'create');
+        const result = (await client.createStorageState(repositoryId, {
+          name,
+          storageStateJson,
+          authFlavor: (params.authFlavor as string | undefined) ?? null,
+          tokenLocations: (params.tokenLocations as string[] | undefined) ?? null,
+          firebaseApiKey: (params.firebaseApiKey as string | undefined) ?? null,
+          expiresAt: (params.expiresAt as string | undefined) ?? null,
+        })) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'created',
+          summary: `Storage state "${result.name}" created (ID: ${result.id}, cookies: ${result.cookieCount ?? 0}, origins: ${result.originCount ?? 0}, indexedDB: ${result.includesIndexedDB ? 'yes' : 'no'})`,
+          actionRequired: [
+            'Wire it into a test by calling lastest_test action:"update" with setupOverrides.extraSteps = [{ stepType: "storage_state", storageStateId: "<this id>" }]',
+          ],
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'delete'
+      const storageStateId = requireParam(params.storageStateId as string | undefined, 'storageStateId', 'delete');
+      const result = await client.deleteStorageState(storageStateId);
       const response: ToolResponse = {
-        status: run.status as string,
-        summary: `Run ${params.runId}: ${passed}/${results.length} passed, ${failed} failed`,
-        details: data,
+        status: 'deleted',
+        summary: `Storage state ${storageStateId} deleted`,
+        details: result,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
+    }),
   );
 
-  // ===== Builds =====
-
-  // --- lastest_list_builds ---
+  // ===== lastest_setup_script (list, get, create, update, delete) =====
+  // Replaces the 5 setup-script tools.
   server.tool(
-    'lastest_list_builds',
-    'List recent builds for a repository with status and test counts.',
+    'lastest_setup_script',
+    'Setup-script resource — reusable Playwright/API setup blocks. `action`: "list" (scripts for a repo with id/name/type/code — needs repositoryId), "get" (one script incl. code — needs setupScriptId), "create" (new script — needs repositoryId + name + type + code), "update" (name/type/code/description — needs setupScriptId), "delete" (remove; 409 if a test still references it — needs setupScriptId). Attach a script to a test via lastest_test action:"update" with setupScriptId.',
     {
-      repositoryId: z.string().describe('Repository ID'),
-      limit: z.number().optional().describe('Number of builds to return (default 10, max 100)'),
+      action: z.enum(['list', 'get', 'create', 'update', 'delete']).describe('Setup-script operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for list/create'),
+      setupScriptId: z.string().optional().describe('Setup script ID — required for get/update/delete'),
+      name: z.string().optional().describe('Script name (required for create; optional for update)'),
+      type: z.enum(['playwright', 'api']).optional().describe('Script type: `playwright` (async fn with page+context) or `api` (HTTP seeding). Required for create.'),
+      code: z.string().optional().describe('Script source code (required for create; optional for update)'),
+      description: z.string().optional().describe('Optional description'),
+    },
+    withActivityReporting(client, 'lastest_setup_script', async (params) => {
+      const action = params.action as 'list' | 'get' | 'create' | 'update' | 'delete';
+
+      if (action === 'list') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'list');
+        const scripts = (await client.listSetupScripts(repositoryId)) as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${scripts.length} setup script(s)`,
+          details: {
+            count: scripts.length,
+            setupScripts: scripts.map(s => ({
+              id: s.id,
+              name: s.name,
+              type: s.type,
+              description: s.description,
+            })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'get') {
+        const setupScriptId = requireParam(params.setupScriptId as string | undefined, 'setupScriptId', 'get');
+        const script = (await client.getSetupScript(setupScriptId)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `Setup script: ${script.name}`,
+          details: script,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'create') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'create');
+        const name = requireParam(params.name as string | undefined, 'name', 'create');
+        const type = requireParam(params.type as 'playwright' | 'api' | undefined, 'type', 'create');
+        const code = requireParam(params.code as string | undefined, 'code', 'create');
+        const result = (await client.createSetupScript(repositoryId, {
+          name,
+          type,
+          code,
+          description: params.description as string | undefined,
+        })) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'created',
+          summary: `Setup script "${result.name}" created (ID: ${result.id}, type: ${result.type})`,
+          actionRequired: [
+            'Attach to a test with lastest_test action:"update" setting setupScriptId to this ID',
+          ],
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      if (action === 'update') {
+        const setupScriptId = requireParam(params.setupScriptId as string | undefined, 'setupScriptId', 'update');
+        const cleanUpdates = Object.fromEntries(
+          (['name', 'type', 'code', 'description'] as const)
+            .map((k) => [k, params[k]])
+            .filter(([, v]) => v !== undefined),
+        );
+        const result = (await client.updateSetupScript(setupScriptId, cleanUpdates as Parameters<typeof client.updateSetupScript>[1])) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: 'updated',
+          summary: `Setup script ${setupScriptId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'delete'
+      const setupScriptId = requireParam(params.setupScriptId as string | undefined, 'setupScriptId', 'delete');
+      const result = await client.deleteSetupScript(setupScriptId);
+      const response: ToolResponse = {
+        status: 'deleted',
+        summary: `Setup script ${setupScriptId} deleted`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== lastest_get_diffs (scope: single | build) =====
+  // Replaces lastest_get_diff, lastest_get_visual_diff.
+  server.tool(
+    'lastest_get_diffs',
+    'Read visual diffs. `scope`: "single" (full details of one visual diff incl. pixel data, AI analysis, test info — needs diffId), "build" (all visual diffs for a build with AI classification/confidence + aiAnalysis commentary — needs buildId). For "build", pass `full: true` only if you also need the heavy joined payloads.',
+    {
+      scope: z.enum(['single', 'build']).describe('"single" = one diff by diffId; "build" = all diffs for a buildId'),
+      diffId: z.string().optional().describe('Visual diff ID — required when scope is "single"'),
+      buildId: z.string().optional().describe('Build ID — required when scope is "build"'),
+      full: z.boolean().optional().describe('Reserved for "build" scope; the build fetch always uses the full payload so aiAnalysis is available.'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const builds = await client.listBuilds(params.repositoryId, params.limit) as Array<Record<string, unknown>>;
+      const scope = params.scope as 'single' | 'build';
+
+      if (scope === 'single') {
+        const diffId = requireParam(params.diffId as string | undefined, 'diffId', 'single');
+        const diff = (await client.getDiff(diffId)) as Record<string, unknown>;
+        const response: ToolResponse = {
+          status: diff.status as string,
+          summary: `Diff ${diffId}: ${diff.status} (${diff.percentageDifference ?? 0}% changed)`,
+          details: diff,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // scope === 'build'
+      const buildId = requireParam(params.buildId as string | undefined, 'buildId', 'build');
+      // This surfaces aiAnalysis (LLM commentary on each diff) which is
+      // stripped from the slim build payload — fetch full so it's available.
+      const build = (await client.getBuild(buildId, { full: true })) as Record<string, unknown>;
+      const diffs = (build.diffs ?? []) as Array<Record<string, unknown>>;
+
+      const pending = diffs.filter(d => d.status === 'pending');
+      const approved = diffs.filter(d => d.status === 'approved');
+      const rejected = diffs.filter(d => d.status === 'rejected');
+
+      const actionRequired: string[] = [];
+      if (pending.length > 0) {
+        actionRequired.push(
+          `${pending.length} diff(s) need review. Use lastest_decide_diff with action:"approve" or "reject" and diffIds: [${pending.map(d => `"${d.id}"`).join(', ')}]`,
+        );
+      }
+
       const response: ToolResponse = {
-        status: 'ok',
-        summary: `${builds.length} build(s) for repository`,
+        status: pending.length > 0 ? 'needs_review' : 'all_reviewed',
+        summary: `${diffs.length} visual diff(s): ${approved.length} approved, ${rejected.length} rejected, ${pending.length} pending review`,
+        actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
         details: {
-          count: builds.length,
-          builds: builds.map(b => ({
-            id: b.id,
-            status: b.overallStatus,
-            createdAt: b.createdAt,
-            totalTests: b.totalTests,
+          total: diffs.length,
+          pendingCount: pending.length,
+          approvedCount: approved.length,
+          rejectedCount: rejected.length,
+          diffs: diffs.map(d => ({
+            id: d.id,
+            testName: d.testName,
+            status: d.status,
+            classification: d.classification,
+            percentageDifference: d.percentageDifference,
+            aiRecommendation: d.aiRecommendation,
+            aiAnalysis: d.aiAnalysis,
+            stepLabel: d.stepLabel,
           })),
         },
       };
@@ -528,176 +722,163 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
-  // ===== Individual Diff Operations =====
-
-  // --- lastest_get_diff ---
+  // ===== lastest_decide_diff (approve | reject) =====
+  // Replaces lastest_approve_diff, lastest_reject_diff, lastest_approve_all_diffs,
+  // lastest_approve_baseline, lastest_reject_baseline.
   server.tool(
-    'lastest_get_diff',
-    'Get full details of a single visual diff including pixel data, AI analysis, and test info.',
+    'lastest_decide_diff',
+    'Approve or reject visual diffs (updates baselines / marks regressions). `action`: "approve" or "reject". Provide either `diffIds` (a batch of one or more diff IDs to approve/reject) OR, for action:"approve", a `buildId` to approve ALL pending diffs in that build at once. Exactly one of diffIds / buildId is required.',
     {
-      diffId: z.string().describe('Visual diff ID'),
+      action: z.enum(['approve', 'reject']).describe('"approve" accepts the current screenshots as new baselines; "reject" marks them as regressions'),
+      diffIds: z.array(z.string()).optional().describe('Visual diff IDs to approve/reject (batch). Mutually exclusive with buildId.'),
+      buildId: z.string().optional().describe('Build ID — approve ALL pending diffs in this build (only valid with action:"approve").'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const diff = (await client.getDiff(params.diffId)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: diff.status as string,
-        summary: `Diff ${params.diffId}: ${diff.status} (${diff.percentageDifference ?? 0}% changed)`,
-        details: diff,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+    withActivityReporting(client, 'lastest_decide_diff', async (params) => {
+      const action = params.action as 'approve' | 'reject';
+      const diffIds = params.diffIds as string[] | undefined;
+      const buildId = params.buildId as string | undefined;
 
-  // --- lastest_approve_diff ---
-  server.tool(
-    'lastest_approve_diff',
-    'Approve a single visual diff, accepting the current screenshot as the new baseline.',
-    {
-      diffId: z.string().describe('Visual diff ID to approve'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.approveDiff(params.diffId);
-      const response: ToolResponse = {
-        status: 'approved',
-        summary: `Diff ${params.diffId} approved. Baseline updated.`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+      if (!diffIds?.length && !buildId) {
+        throw new Error("Provide either 'diffIds' (batch) or 'buildId' (approve all in build).");
+      }
+      if (diffIds?.length && buildId) {
+        throw new Error("Provide only one of 'diffIds' or 'buildId', not both.");
+      }
 
-  // --- lastest_reject_diff ---
-  server.tool(
-    'lastest_reject_diff',
-    'Reject a single visual diff, marking it as a regression.',
-    {
-      diffId: z.string().describe('Visual diff ID to reject'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.rejectDiff(params.diffId);
+      if (buildId) {
+        if (action !== 'approve') {
+          throw new Error("buildId is only valid with action:'approve' (approve all diffs in the build).");
+        }
+        const result = await client.approveAllDiffs(buildId);
+        const response: ToolResponse = {
+          status: 'approved',
+          summary: `All diffs in build ${buildId} approved.`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // diffIds batch
+      if (action === 'approve') {
+        const result = await client.approveDiffs(diffIds as string[]);
+        const response: ToolResponse = {
+          status: 'approved',
+          summary: `Approved ${result.approvedCount} visual diff(s). Baselines updated.`,
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      const result = await client.rejectDiffs(diffIds as string[]);
       const response: ToolResponse = {
         status: 'rejected',
-        summary: `Diff ${params.diffId} rejected. Marked as regression.`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_approve_all_diffs ---
-  server.tool(
-    'lastest_approve_all_diffs',
-    'Approve all pending visual diffs in a build at once.',
-    {
-      buildId: z.string().describe('Build ID to approve all diffs for'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const result = await client.approveAllDiffs(params.buildId);
-      const response: ToolResponse = {
-        status: 'approved',
-        summary: `All diffs in build ${params.buildId} approved.`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_publish_share ---
-  server.tool(
-    'lastest_publish_share',
-    'Publish a public-share link for a build (or a single test within it). Returns a `/r/<slug>` URL anyone can view without logging in. Use after a build completes so demos and outreach messages can link directly to the visual result. Pass `scopedTestId` to scope the share to one test instead of the whole build.',
-    {
-      buildId: z.string().describe('Build ID to publish a share for'),
-      scopedTestId: z.string().optional().describe('Optional — restrict the share to a single test within the build'),
-    },
-    withActivityReporting(client, 'lastest_publish_share', async (params) => {
-      const result = await client.publishShare(params.buildId as string, {
-        scopedTestId: params.scopedTestId as string | undefined,
-      });
-      const response: ToolResponse = {
-        status: 'share_published',
-        summary: params.scopedTestId
-          ? `Test share published: ${result.url}`
-          : `Build share published: ${result.url}`,
+        summary: `Rejected ${result.rejectedCount} visual diff(s). Build may be blocked.`,
         details: result,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );
 
-  // --- lastest_list_build_shares ---
+  // ===== lastest_build (list, get, review) =====
+  // Replaces lastest_list_builds, lastest_get_build_status, lastest_review_build.
+  // (lastest_get_test_run is dropped — build "get" covers it.)
   server.tool(
-    'lastest_list_build_shares',
-    'List public shares anchored on a build (includes revoked ones — check `status`). Use to find an existing share before publishing a duplicate, or to grab a slug for revoke.',
+    'lastest_build',
+    'Build resource. `action`: "list" (recent builds for a repo with status/test counts — needs repositoryId; optional limit), "get" (current status & results of a build; slim diff index by default — needs buildId; pass includeDiffs:"full" for joined a11y/network/AI payloads), "review" (comprehensive QA review: build details + visual diffs + failed tests into a structured summary with action items — needs buildId).',
     {
-      buildId: z.string().describe('Build ID'),
+      action: z.enum(['list', 'get', 'review']).describe('Build operation to perform'),
+      repositoryId: z.string().optional().describe('Repository ID — required for "list"'),
+      buildId: z.string().optional().describe('Build ID — required for get/review'),
+      limit: z.number().optional().describe('For "list": number of builds to return (default 10, max 100)'),
+      includeDiffs: z
+        .enum(['slim', 'full'])
+        .optional()
+        .describe('For "get": "slim" (default) returns only id/testId/stepLabel/status/classification/pct per diff. "full" returns every joined column (heavy — can be 100KB+).'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const shares = (await client.listBuildShares(params.buildId as string)) as Array<Record<string, unknown>>;
-      const active = shares.filter(s => s.status === 'public');
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `${shares.length} share(s) for build ${params.buildId} (${active.length} active)`,
-        details: {
-          count: shares.length,
-          shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, testId: s.testId, createdAt: s.createdAt })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+      const action = params.action as 'list' | 'get' | 'review';
 
-  // --- lastest_list_test_shares ---
-  server.tool(
-    'lastest_list_test_shares',
-    'List public shares anchored on a single test.',
-    {
-      testId: z.string().describe('Test ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const shares = (await client.listTestShares(params.testId as string)) as Array<Record<string, unknown>>;
-      const active = shares.filter(s => s.status === 'public');
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `${shares.length} share(s) for test ${params.testId} (${active.length} active)`,
-        details: {
-          count: shares.length,
-          shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, buildId: s.buildId, createdAt: s.createdAt })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
+      if (action === 'list') {
+        const repositoryId = requireParam(params.repositoryId as string | undefined, 'repositoryId', 'list');
+        const builds = await client.listBuilds(repositoryId, params.limit as number | undefined) as Array<Record<string, unknown>>;
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${builds.length} build(s) for repository`,
+          details: {
+            count: builds.length,
+            builds: builds.map(b => ({
+              id: b.id,
+              status: b.overallStatus,
+              createdAt: b.createdAt,
+              totalTests: b.totalTests,
+            })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
 
-  // --- lastest_revoke_share ---
-  server.tool(
-    'lastest_revoke_share',
-    'Revoke a public share by its share ID. The `/r/<slug>` URL stops resolving immediately. Find share IDs via lastest_list_build_shares or lastest_list_test_shares.',
-    {
-      shareId: z.string().describe('Share ID to revoke (NOT the slug — call lastest_list_build_shares to find it)'),
-    },
-    withActivityReporting(client, 'lastest_revoke_share', async (params) => {
-      const result = await client.revokeShare(params.shareId as string);
-      const response: ToolResponse = {
-        status: 'revoked',
-        summary: `Share ${params.shareId} revoked. The /r/<slug> URL is now dead.`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
+      if (action === 'get') {
+        const buildId = requireParam(params.buildId as string | undefined, 'buildId', 'get');
+        const includeDiffs = (params.includeDiffs as string | undefined) ?? 'slim';
+        // Slim is the default. The API now slims server-side too so the wire
+        // payload stays small unless `full` is explicitly requested.
+        const build = (await client.getBuild(buildId, { full: includeDiffs === 'full' })) as Record<string, unknown>;
 
-  // ===== Composite QA Workflows =====
+        const status = build.overallStatus as string;
+        const passed = build.passedCount as number;
+        const failed = build.failedCount as number;
+        const total = build.totalTests as number;
+        const changes = build.changesDetected as number;
+        const flaky = build.flakyCount as number;
 
-  // --- lastest_review_build ---
-  server.tool(
-    'lastest_review_build',
-    'Comprehensive build review: fetches build details, visual diffs, and failed tests into a structured QA summary with action items.',
-    {
-      buildId: z.string().describe('Build ID to review'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const build = (await client.getBuild(params.buildId)) as Record<string, unknown>;
+        const actionRequired: string[] = [];
+        if (status === 'review_required') {
+          actionRequired.push(`Review ${changes} visual change(s) — use lastest_get_diffs scope:"build" to inspect`);
+        }
+        if (status === 'blocked') {
+          actionRequired.push('Build is blocked — review failed tests and rejected diffs');
+        }
+        if (failed > 0) {
+          actionRequired.push(`${failed} test(s) failed — use lastest_test action:"list" filter:"failing" to see details`);
+        }
+
+        // Slim the response by default. The REST API joins a11yViolations,
+        // consoleErrors, networkRequests, aiAnalysis, and diff metadata onto
+        // every diff — for builds with N diffs that can easily clear 100KB and
+        // saturate an agent's context. Most callers only need the diff index;
+        // they fetch heavy payloads per-diff via lastest_get_diffs.
+        const rawDiffs = Array.isArray(build.diffs) ? (build.diffs as Array<Record<string, unknown>>) : [];
+        const slimDiffs = rawDiffs.map((d) => ({
+          id: d.id,
+          testId: d.testId,
+          testName: d.testName,
+          stepLabel: d.stepLabel,
+          status: d.status,
+          classification: d.classification,
+          percentageDifference: d.percentageDifference,
+          pixelDifference: d.pixelDifference,
+          testResultStatus: d.testResultStatus,
+          browser: d.browser,
+          aiRecommendation: d.aiRecommendation,
+        }));
+        const { diffs: _omitDiffs, ...buildScalars } = build;
+        const details =
+          includeDiffs === 'full'
+            ? { ...buildScalars, diffs: rawDiffs }
+            : { ...buildScalars, diffs: slimDiffs, diffsTrimmed: true, diffsCount: rawDiffs.length };
+
+        const response: ToolResponse = {
+          status,
+          summary: `Build ${buildId}: ${passed}/${total} passed, ${failed} failed, ${changes} visual changes, ${flaky} flaky. Status: ${status}`,
+          actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
+          details,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'review'
+      const buildId = requireParam(params.buildId as string | undefined, 'buildId', 'review');
+      const build = (await client.getBuild(buildId)) as Record<string, unknown>;
       const diffs = ((build.diffs ?? []) as Array<Record<string, unknown>>);
 
       const pending = diffs.filter(d => d.status === 'pending');
@@ -720,17 +901,17 @@ export function createServer(client: LastestClient): McpServer {
         );
       }
       if (pending.length > 0) {
-        actionRequired.push(`Review ${pending.length} pending diff(s) — use lastest_get_diff, lastest_approve_diff, or lastest_reject_diff`);
+        actionRequired.push(`Review ${pending.length} pending diff(s) — use lastest_get_diffs (scope:"single") then lastest_decide_diff`);
       }
       if (failed > 0) {
-        actionRequired.push(`${failed} test(s) failed — use lastest_list_failing_tests or lastest_heal_test`);
+        actionRequired.push(`${failed} test(s) failed — use lastest_test action:"list" filter:"failing" or lastest_heal_test`);
       }
 
       const response: ToolResponse = {
         status,
         summary: status === 'executor_failed'
-          ? `Build ${params.buildId}: EXECUTOR FAILED. ${passed}/${total} tests ran (executor crashed before completion). ${executorError ? executorError.split('\n')[0] : ''}`
-          : `Build ${params.buildId}: ${status}. ${passed}/${total} passed. ${diffs.length} diffs (${pending.length} pending, ${approved.length} approved, ${rejected.length} rejected).`,
+          ? `Build ${buildId}: EXECUTOR FAILED. ${passed}/${total} tests ran (executor crashed before completion). ${executorError ? executorError.split('\n')[0] : ''}`
+          : `Build ${buildId}: ${status}. ${passed}/${total} passed. ${diffs.length} diffs (${pending.length} pending, ${approved.length} approved, ${rejected.length} rejected).`,
         actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
         details: {
           build: {
@@ -760,22 +941,139 @@ export function createServer(client: LastestClient): McpServer {
           },
         },
       };
-
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     },
   );
 
-  // --- lastest_qa_summary ---
+  // ===== lastest_share (list, revoke) =====
+  // Replaces lastest_list_build_shares, lastest_list_test_shares, lastest_revoke_share.
+  // (Publishing stays as lastest_publish_share.)
   server.tool(
-    'lastest_qa_summary',
-    'Get a comprehensive QA overview for a repository: test health, recent builds, and action items.',
+    'lastest_share',
+    'Manage existing public shares (publishing is lastest_publish_share). `action`: "list" (shares anchored on a build — needs buildId — or on a test — needs testId; includes revoked ones, check `status`), "revoke" (kill a share by its share ID so the /r/<slug> URL stops resolving — needs shareId; find share IDs via a "list" call).',
     {
+      action: z.enum(['list', 'revoke']).describe('"list" shares for a build or test; "revoke" a share by ID'),
+      buildId: z.string().optional().describe('Build ID — for "list" of build shares'),
+      testId: z.string().optional().describe('Test ID — for "list" of test shares'),
+      shareId: z.string().optional().describe('Share ID to revoke (NOT the slug — use "list" to find it). Required for "revoke".'),
+    },
+    withActivityReporting(client, 'lastest_share', async (params) => {
+      const action = params.action as 'list' | 'revoke';
+
+      if (action === 'list') {
+        const buildId = params.buildId as string | undefined;
+        const testId = params.testId as string | undefined;
+        if (!buildId && !testId) {
+          throw new Error("Provide either 'buildId' or 'testId' to list shares.");
+        }
+        if (buildId) {
+          const shares = (await client.listBuildShares(buildId)) as Array<Record<string, unknown>>;
+          const active = shares.filter(s => s.status === 'public');
+          const response: ToolResponse = {
+            status: 'ok',
+            summary: `${shares.length} share(s) for build ${buildId} (${active.length} active)`,
+            details: {
+              count: shares.length,
+              shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, testId: s.testId, createdAt: s.createdAt })),
+            },
+          };
+          return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+        }
+        const shares = (await client.listTestShares(testId as string)) as Array<Record<string, unknown>>;
+        const active = shares.filter(s => s.status === 'public');
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: `${shares.length} share(s) for test ${testId} (${active.length} active)`,
+          details: {
+            count: shares.length,
+            shares: shares.map(s => ({ id: s.id, slug: s.slug, status: s.status, buildId: s.buildId, createdAt: s.createdAt })),
+          },
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'revoke'
+      const shareId = requireParam(params.shareId as string | undefined, 'shareId', 'revoke');
+      const result = await client.revokeShare(shareId);
+      const response: ToolResponse = {
+        status: 'revoked',
+        summary: `Share ${shareId} revoked. The /r/<slug> URL is now dead.`,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== lastest_verify (view, change_map) =====
+  // Replaces lastest_verify_build, lastest_get_change_map.
+  server.tool(
+    'lastest_verify',
+    'Verify-phase reads for a build (needs buildId). `action`: "view" (full verify-build view — Change Map + step comparisons grouped by regression vs intent gate, plus `visualUrlsByDiffId` clickable /api/media URLs and `testsByTestId` source/setup hints), "change_map" (just the build-level Change Map — 4-signal area ranking + AI intent/risk summary).',
+    {
+      action: z.enum(['view', 'change_map']).describe('"view" = full verify view; "change_map" = build-level Change Map only'),
+      buildId: z.string().describe('Build ID'),
+    },
+    withActivityReporting(client, 'lastest_verify', async (params) => {
+      const action = params.action as 'view' | 'change_map';
+      const buildId = params.buildId as string;
+      if (action === 'change_map') {
+        const result = await client.getChangeMap(buildId);
+        const response: ToolResponse = {
+          status: 'ok',
+          summary: 'Change Map retrieved.',
+          details: result as Record<string, unknown>,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+      // action === 'view'
+      const result = await client.verifyBuild(buildId);
+      const response: ToolResponse = {
+        status: 'ok',
+        summary: 'Verify view retrieved.',
+        details: result as Record<string, unknown>,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
+  // ===== lastest_insights (coverage, qa) =====
+  // Replaces lastest_get_coverage, lastest_qa_summary.
+  server.tool(
+    'lastest_insights',
+    'Repository-level insights (needs repositoryId). `action`: "coverage" (test coverage statistics by functional area and route), "qa" (comprehensive QA overview: test health, recent builds, and action items).',
+    {
+      action: z.enum(['coverage', 'qa']).describe('"coverage" = coverage stats; "qa" = QA health summary'),
       repositoryId: z.string().describe('Repository ID'),
     },
     async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
+      const action = params.action as 'coverage' | 'qa';
+      const repositoryId = params.repositoryId as string;
+
+      if (action === 'coverage') {
+        const coverage = (await client.getCoverage(repositoryId)) as Record<string, unknown>;
+
+        const routeCoverage = coverage.routeCoverage as Record<string, unknown> | undefined;
+        const areaCoverage = coverage.areaCoverage as Record<string, unknown> | undefined;
+
+        const routePct = routeCoverage?.percentage as number | undefined;
+        const areaTotal = areaCoverage?.total as number | undefined;
+        const areaTested = areaCoverage?.tested as number | undefined;
+
+        const response: ToolResponse = {
+          status: 'coverage_retrieved',
+          summary: `Route coverage: ${routePct ?? 'N/A'}%. Areas: ${areaTested ?? '?'}/${areaTotal ?? '?'} have tests.`,
+          actionRequired: routePct !== undefined && routePct < 80
+            ? ['Coverage is below 80% — consider generating tests for uncovered routes with lastest_create_test']
+            : undefined,
+          details: coverage,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // action === 'qa'
       const [tests, builds] = await Promise.all([
-        client.listTests(params.repositoryId) as Promise<Array<Record<string, unknown>>>,
-        client.listBuilds(params.repositoryId, 5) as Promise<Array<Record<string, unknown>>>,
+        client.listTests(repositoryId) as Promise<Array<Record<string, unknown>>>,
+        client.listBuilds(repositoryId, 5) as Promise<Array<Record<string, unknown>>>,
       ]);
 
       const passing = tests.filter(t => t.lastRunStatus === 'passed').length;
@@ -787,10 +1085,10 @@ export function createServer(client: LastestClient): McpServer {
 
       const actionRequired: string[] = [];
       if (failing > 0) {
-        actionRequired.push(`${failing} test(s) currently failing — use lastest_list_failing_tests`);
+        actionRequired.push(`${failing} test(s) currently failing — use lastest_test action:"list" filter:"failing"`);
       }
       if (buildsNeedingReview.length > 0) {
-        actionRequired.push(`${buildsNeedingReview.length} build(s) need review — use lastest_review_build`);
+        actionRequired.push(`${buildsNeedingReview.length} build(s) need review — use lastest_build action:"review"`);
       }
       if (neverRun > 0) {
         actionRequired.push(`${neverRun} test(s) never run — use lastest_run_tests`);
@@ -810,12 +1108,11 @@ export function createServer(client: LastestClient): McpServer {
           buildsNeedingReview: buildsNeedingReview.map(b => b.id),
         },
       };
-
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     },
   );
 
-  // ===== Original Tools =====
+  // ===== Workflow verbs (standalone, unchanged) =====
 
   // --- lastest_run_tests ---
   server.tool(
@@ -842,7 +1139,7 @@ export function createServer(client: LastestClient): McpServer {
         status: 'build_started',
         summary: `Build started: ${result.testCount} test(s) queued. Build ID: ${result.buildId}`,
         actionRequired: [
-          `Poll build status with lastest_get_build_status using buildId: ${result.buildId}`,
+          `Poll build status with lastest_build action:"get" using buildId: ${result.buildId}`,
         ],
         details: result,
       };
@@ -860,7 +1157,7 @@ export function createServer(client: LastestClient): McpServer {
       diff: z.string().optional().describe('Unified git diff text. Changed file paths are extracted from the headers. Required for local (non-GitHub) repos.'),
       baseBranch: z.string().optional().describe('Base branch for GitHub compare mode (used when no diff text is given).'),
       headBranch: z.string().optional().describe('Head branch for GitHub compare mode.'),
-      wait: z.boolean().optional().describe('Default true: block until the scoped build finishes and return the verdict. false → return buildId to poll with lastest_get_build_status.'),
+      wait: z.boolean().optional().describe('Default true: block until the scoped build finishes and return the verdict. false → return buildId to poll with lastest_build action:"get".'),
       maxWaitMs: z.number().optional().describe('Cap on blocking time when wait is true (default 300000).'),
     },
     withActivityReporting(client, 'lastest_validate_diff', async (params) => {
@@ -877,9 +1174,9 @@ export function createServer(client: LastestClient): McpServer {
       if (status === 'fail') {
         actionRequired.push('Affected tests failed — inspect failingTests, then use lastest_suggest_app_fix or lastest_heal_test.');
       } else if (status === 'review_required') {
-        actionRequired.push('Visual/behavioral changes need review — use lastest_get_visual_diff then lastest_decide_diff.');
+        actionRequired.push('Visual/behavioral changes need review — use lastest_get_diffs scope:"build" then lastest_decide_diff.');
       } else if (status === 'build_running') {
-        actionRequired.push(`Poll lastest_get_build_status with buildId ${result.buildId}.`);
+        actionRequired.push(`Poll lastest_build action:"get" with buildId ${result.buildId}.`);
       } else if (status === 'no_affected_tests') {
         actionRequired.push('No tests mapped to the change. Run the full suite with lastest_run_tests if the change is high-risk.');
       }
@@ -889,236 +1186,6 @@ export function createServer(client: LastestClient): McpServer {
         actionRequired: actionRequired.length ? actionRequired : undefined,
         details: result,
       };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_get_build_status ---
-  server.tool(
-    'lastest_get_build_status',
-    'Get the current status and results of a build. Use after lastest_run_tests to check progress. Returns slim build scalars + slim diff index — drill into a specific diff with lastest_get_visual_diff (or pass `includeDiffs: "full"` if you really need the joined a11y/network/AI payloads).',
-    {
-      buildId: z.string().describe('The build ID to check status for'),
-      includeDiffs: z
-        .enum(['slim', 'full'])
-        .optional()
-        .describe('"slim" (default) returns only id/testId/stepLabel/status/classification/pct per diff. "full" returns every joined column (heavy — can be 100KB+ for builds with many diffs).'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const includeDiffs = (params.includeDiffs as string | undefined) ?? 'slim';
-      // Slim is the default. The API now slims server-side too so the wire
-      // payload stays small unless `full` is explicitly requested.
-      const build = (await client.getBuild(params.buildId, { full: includeDiffs === 'full' })) as Record<string, unknown>;
-
-      const status = build.overallStatus as string;
-      const passed = build.passedCount as number;
-      const failed = build.failedCount as number;
-      const total = build.totalTests as number;
-      const changes = build.changesDetected as number;
-      const flaky = build.flakyCount as number;
-
-      const actionRequired: string[] = [];
-      if (status === 'review_required') {
-        actionRequired.push(`Review ${changes} visual change(s) — use lastest_get_visual_diff to inspect`);
-      }
-      if (status === 'blocked') {
-        actionRequired.push('Build is blocked — review failed tests and rejected diffs');
-      }
-      if (failed > 0) {
-        actionRequired.push(`${failed} test(s) failed — use lastest_list_failing_tests to see details`);
-      }
-
-      // Slim the response by default. The REST API joins a11yViolations,
-      // consoleErrors, networkRequests, aiAnalysis, and diff metadata onto
-      // every diff — for builds with N diffs that can easily clear 100KB and
-      // saturate an agent's context. Most callers only need the diff index;
-      // they fetch heavy payloads per-diff via lastest_get_visual_diff.
-      const rawDiffs = Array.isArray(build.diffs) ? (build.diffs as Array<Record<string, unknown>>) : [];
-      const slimDiffs = rawDiffs.map((d) => ({
-        id: d.id,
-        testId: d.testId,
-        testName: d.testName,
-        stepLabel: d.stepLabel,
-        status: d.status,
-        classification: d.classification,
-        percentageDifference: d.percentageDifference,
-        pixelDifference: d.pixelDifference,
-        testResultStatus: d.testResultStatus,
-        browser: d.browser,
-        aiRecommendation: d.aiRecommendation,
-      }));
-      const { diffs: _omitDiffs, ...buildScalars } = build;
-      const details =
-        includeDiffs === 'full'
-          ? { ...buildScalars, diffs: rawDiffs }
-          : { ...buildScalars, diffs: slimDiffs, diffsTrimmed: true, diffsCount: rawDiffs.length };
-
-      const response: ToolResponse = {
-        status,
-        summary: `Build ${params.buildId}: ${passed}/${total} passed, ${failed} failed, ${changes} visual changes, ${flaky} flaky. Status: ${status}`,
-        actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
-        details,
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_list_tests ---
-  server.tool(
-    'lastest_list_tests',
-    'List all tests in a repository with their latest pass/fail status.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const tests = (await client.listTests(params.repositoryId)) as Array<Record<string, unknown>>;
-
-      const passing = tests.filter(t => t.lastRunStatus === 'passed').length;
-      const failing = tests.filter(t => t.lastRunStatus === 'failed').length;
-      const noRuns = tests.filter(t => !t.lastRunStatus).length;
-
-      const response: ToolResponse = {
-        status: failing > 0 ? 'has_failures' : 'all_passing',
-        summary: `${tests.length} tests: ${passing} passing, ${failing} failing, ${noRuns} not yet run`,
-        details: {
-          total: tests.length,
-          passing,
-          failing,
-          notRun: noRuns,
-          tests: tests.map(t => ({
-            id: t.id,
-            name: t.name,
-            status: t.lastRunStatus ?? 'not_run',
-            functionalAreaId: t.functionalAreaId,
-          })),
-        },
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_list_failing_tests ---
-  server.tool(
-    'lastest_list_failing_tests',
-    'List tests that are currently failing, with error details.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const tests = (await client.listTests(params.repositoryId)) as Array<Record<string, unknown>>;
-      const failing = tests.filter(t => t.lastRunStatus === 'failed');
-
-      const response: ToolResponse = {
-        status: failing.length > 0 ? 'has_failures' : 'all_passing',
-        summary: failing.length > 0
-          ? `${failing.length} failing test(s): ${failing.map(t => t.name).join(', ')}`
-          : 'All tests are passing',
-        actionRequired: failing.length > 0
-          ? ['Use lastest_heal_test to auto-fix failing tests']
-          : undefined,
-        details: {
-          failingCount: failing.length,
-          tests: failing.map(t => ({
-            id: t.id,
-            name: t.name,
-            errorMessage: t.lastErrorMessage,
-            functionalAreaId: t.functionalAreaId,
-          })),
-        },
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_get_visual_diff ---
-  server.tool(
-    'lastest_get_visual_diff',
-    'Get visual diff details for a build, including AI classification and confidence scores.',
-    {
-      buildId: z.string().describe('Build ID to get visual diffs for'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      // This tool surfaces aiAnalysis (LLM commentary on each diff) which is
-      // stripped from the slim build payload — fetch full so it's available.
-      const build = (await client.getBuild(params.buildId, { full: true })) as Record<string, unknown>;
-      const diffs = (build.diffs ?? []) as Array<Record<string, unknown>>;
-
-      const pending = diffs.filter(d => d.status === 'pending');
-      const approved = diffs.filter(d => d.status === 'approved');
-      const rejected = diffs.filter(d => d.status === 'rejected');
-
-      const actionRequired: string[] = [];
-      if (pending.length > 0) {
-        actionRequired.push(
-          `${pending.length} diff(s) need review. Use lastest_approve_baseline or lastest_reject_baseline with diffIds: [${pending.map(d => `"${d.id}"`).join(', ')}]`,
-        );
-      }
-
-      const response: ToolResponse = {
-        status: pending.length > 0 ? 'needs_review' : 'all_reviewed',
-        summary: `${diffs.length} visual diff(s): ${approved.length} approved, ${rejected.length} rejected, ${pending.length} pending review`,
-        actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
-        details: {
-          total: diffs.length,
-          pendingCount: pending.length,
-          approvedCount: approved.length,
-          rejectedCount: rejected.length,
-          diffs: diffs.map(d => ({
-            id: d.id,
-            testName: d.testName,
-            status: d.status,
-            classification: d.classification,
-            percentageDifference: d.percentageDifference,
-            aiRecommendation: d.aiRecommendation,
-            aiAnalysis: d.aiAnalysis,
-            stepLabel: d.stepLabel,
-          })),
-        },
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_approve_baseline ---
-  server.tool(
-    'lastest_approve_baseline',
-    'Approve visual changes, updating baselines. Accepts one or more diff IDs.',
-    {
-      diffIds: z.array(z.string()).describe('Array of visual diff IDs to approve'),
-    },
-    withActivityReporting(client, 'lastest_approve_baseline', async (params) => {
-      const result = await client.approveDiffs(params.diffIds as string[]);
-
-      const response: ToolResponse = {
-        status: 'approved',
-        summary: `Approved ${result.approvedCount} visual diff(s). Baselines updated.`,
-        details: result,
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_reject_baseline ---
-  server.tool(
-    'lastest_reject_baseline',
-    'Reject visual changes, marking them as regressions. Accepts one or more diff IDs.',
-    {
-      diffIds: z.array(z.string()).describe('Array of visual diff IDs to reject'),
-    },
-    withActivityReporting(client, 'lastest_reject_baseline', async (params) => {
-      const result = await client.rejectDiffs(params.diffIds as string[]);
-
-      const response: ToolResponse = {
-        status: 'rejected',
-        summary: `Rejected ${result.rejectedCount} visual diff(s). Build may be blocked.`,
-        details: result,
-      };
-
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );
@@ -1264,36 +1331,6 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // --- lastest_get_coverage ---
-  server.tool(
-    'lastest_get_coverage',
-    'Get test coverage statistics by functional area and route.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const coverage = (await client.getCoverage(params.repositoryId)) as Record<string, unknown>;
-
-      const routeCoverage = coverage.routeCoverage as Record<string, unknown> | undefined;
-      const areaCoverage = coverage.areaCoverage as Record<string, unknown> | undefined;
-
-      const routePct = routeCoverage?.percentage as number | undefined;
-      const areaTotal = areaCoverage?.total as number | undefined;
-      const areaTested = areaCoverage?.tested as number | undefined;
-
-      const response: ToolResponse = {
-        status: 'coverage_retrieved',
-        summary: `Route coverage: ${routePct ?? 'N/A'}%. Areas: ${areaTested ?? '?'}/${areaTotal ?? '?'} have tests.`,
-        actionRequired: routePct !== undefined && routePct < 80
-          ? ['Coverage is below 80% — consider generating tests for uncovered routes with lastest_create_test']
-          : undefined,
-        details: coverage,
-      };
-
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
   // --- lastest_heal_test ---
   server.tool(
     'lastest_heal_test',
@@ -1344,245 +1381,58 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
-  // ===== Storage States (saved Playwright auth blobs) =====
-
-  // --- lastest_list_storage_states ---
+  // --- lastest_publish_share (PROTECTED — shape unchanged) ---
   server.tool(
-    'lastest_list_storage_states',
-    'List storage states (saved Playwright `storageState()` blobs — cookies + localStorage) for a repository. Returns metadata only; the raw JSON is omitted because it contains live auth tokens. Use these IDs when wiring `setupOverrides.extraSteps` on a test via lastest_update_test.',
+    'lastest_publish_share',
+    'Publish a public-share link for a build (or a single test within it). Returns a `/r/<slug>` URL anyone can view without logging in. Use after a build completes so demos and outreach messages can link directly to the visual result. Pass `scopedTestId` to scope the share to one test instead of the whole build.',
     {
-      repositoryId: z.string().describe('Repository ID'),
+      buildId: z.string().describe('Build ID to publish a share for'),
+      scopedTestId: z.string().optional().describe('Optional — restrict the share to a single test within the build'),
     },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const states = (await client.listStorageStates(params.repositoryId as string)) as Array<Record<string, unknown>>;
+    withActivityReporting(client, 'lastest_publish_share', async (params) => {
+      const result = await client.publishShare(params.buildId as string, {
+        scopedTestId: params.scopedTestId as string | undefined,
+      });
       const response: ToolResponse = {
-        status: 'ok',
-        summary: `${states.length} storage state(s)`,
-        details: {
-          count: states.length,
-          storageStates: states.map(s => ({
-            id: s.id,
-            name: s.name,
-            cookieCount: s.cookieCount,
-            originCount: s.originCount,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-          })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_create_storage_state ---
-  server.tool(
-    'lastest_create_storage_state',
-    'Create a new storage state for a repo from a Playwright `storageState()` JSON string. The JSON should be the output of `await context.storageState({ indexedDB: true })` (Playwright v1.51+, captures Firebase Auth) or the legacy bare `storageState()` call. Use this to share a logged-in session across tests instead of re-logging in. Treat the raw JSON like a password: only call this with tokens you intend Lastest to use. Optional provenance fields (authFlavor / tokenLocations / firebaseApiKey / expiresAt) let agents pick the right re-auth strategy at re-run time without re-scouting the target.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-      name: z.string().describe('Display name (e.g. "Admin login (staging)")'),
-      storageStateJson: z.string().describe('Playwright storageState JSON string — `{ "cookies": [...], "origins": [...] }`. Include `indexedDB` per-origin entries when the source app stores tokens there (Firebase Auth, Clerk, Supabase v2).'),
-      authFlavor: z.string().optional().describe('Hint at the auth library so future runs pick the right recapture strategy. Suggested values: firebase | supabase | clerk | next-auth | better-auth | cookie | unknown'),
-      tokenLocations: z.array(z.string()).optional().describe('Where the session token lives. Subset of: cookie | localStorage | sessionStorage | indexedDB. Helps surface captures that are missing a location they should have.'),
-      firebaseApiKey: z.string().optional().describe('When authFlavor=firebase, the project Web API key (public, not a secret) so the documented PW #35302/#35504 IndexedDB workaround can target the right `firebase:authUser:<apiKey>:[DEFAULT]` record.'),
-      expiresAt: z.string().optional().describe('Best-effort capture-validity hint (ISO date string). Lets surfaces flag stale captures before silent expiry. See reference_session_lifetime_by_auth_library for defaults per library.'),
-    },
-    withActivityReporting(client, 'lastest_create_storage_state', async (params) => {
-      const result = (await client.createStorageState(params.repositoryId as string, {
-        name: params.name as string,
-        storageStateJson: params.storageStateJson as string,
-        authFlavor: (params.authFlavor as string | undefined) ?? null,
-        tokenLocations: (params.tokenLocations as string[] | undefined) ?? null,
-        firebaseApiKey: (params.firebaseApiKey as string | undefined) ?? null,
-        expiresAt: (params.expiresAt as string | undefined) ?? null,
-      })) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'created',
-        summary: `Storage state "${result.name}" created (ID: ${result.id}, cookies: ${result.cookieCount ?? 0}, origins: ${result.originCount ?? 0}, indexedDB: ${result.includesIndexedDB ? 'yes' : 'no'})`,
-        actionRequired: [
-          'Wire it into a test by calling lastest_update_test with setupOverrides.extraSteps = [{ stepType: "storage_state", storageStateId: "<this id>" }]',
-        ],
+        status: 'share_published',
+        summary: params.scopedTestId
+          ? `Test share published: ${result.url}`
+          : `Build share published: ${result.url}`,
         details: result,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );
 
-  // --- lastest_delete_storage_state ---
+  // --- lastest_approve_layer ---
   server.tool(
-    'lastest_delete_storage_state',
-    'Delete a storage state. Tests referencing it via setupOverrides.extraSteps will lose that step — review usage before deleting.',
+    'lastest_approve_layer',
+    'Per-layer feedback on a step comparison: approve (Mark expected → write baseline), reject (Needs fix → create todo), or snooze (suppress for this build only).',
     {
-      storageStateId: z.string().describe('Storage state ID to delete'),
-    },
-    withActivityReporting(client, 'lastest_delete_storage_state', async (params) => {
-      const result = await client.deleteStorageState(params.storageStateId as string);
-      const response: ToolResponse = {
-        status: 'deleted',
-        summary: `Storage state ${params.storageStateId} deleted`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // ===== Setup Scripts (reusable Playwright/API setup blocks) =====
-
-  // --- lastest_list_setup_scripts ---
-  server.tool(
-    'lastest_list_setup_scripts',
-    'List setup scripts for a repository. Each entry includes id, name, type (`playwright` or `api`), and code so you can pick one to attach to a test via setupScriptId.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const scripts = (await client.listSetupScripts(params.repositoryId as string)) as Array<Record<string, unknown>>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `${scripts.length} setup script(s)`,
-        details: {
-          count: scripts.length,
-          setupScripts: scripts.map(s => ({
-            id: s.id,
-            name: s.name,
-            type: s.type,
-            description: s.description,
-          })),
-        },
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_get_setup_script ---
-  server.tool(
-    'lastest_get_setup_script',
-    'Get a setup script including its code.',
-    {
-      setupScriptId: z.string().describe('Setup script ID'),
-    },
-    async (params): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      const script = (await client.getSetupScript(params.setupScriptId as string)) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `Setup script: ${script.name}`,
-        details: script,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    },
-  );
-
-  // --- lastest_create_setup_script ---
-  server.tool(
-    'lastest_create_setup_script',
-    'Create a reusable setup script for a repository. Two types: `playwright` (async function with page+context) and `api` (HTTP seeding). Attach the returned ID to a test via lastest_update_test with `setupScriptId`.',
-    {
-      repositoryId: z.string().describe('Repository ID'),
-      name: z.string().describe('Script name'),
-      type: z.enum(['playwright', 'api']).describe('Script type'),
-      code: z.string().describe('Script source code'),
-      description: z.string().optional().describe('Optional description'),
-    },
-    withActivityReporting(client, 'lastest_create_setup_script', async (params) => {
-      const result = (await client.createSetupScript(params.repositoryId as string, {
-        name: params.name as string,
-        type: params.type as 'playwright' | 'api',
-        code: params.code as string,
-        description: params.description as string | undefined,
-      })) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'created',
-        summary: `Setup script "${result.name}" created (ID: ${result.id}, type: ${result.type})`,
-        actionRequired: [
-          'Attach to a test with lastest_update_test setting setupScriptId to this ID',
-        ],
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_update_setup_script ---
-  server.tool(
-    'lastest_update_setup_script',
-    'Update a setup script\'s name, type, code, or description.',
-    {
-      setupScriptId: z.string().describe('Setup script ID to update'),
-      name: z.string().optional().describe('New name'),
-      type: z.enum(['playwright', 'api']).optional().describe('New type'),
-      code: z.string().optional().describe('New code'),
-      description: z.string().optional().describe('New description'),
-    },
-    withActivityReporting(client, 'lastest_update_setup_script', async (params) => {
-      const { setupScriptId, ...rest } = params;
-      const cleanUpdates = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
-      const result = (await client.updateSetupScript(setupScriptId as string, cleanUpdates as Parameters<typeof client.updateSetupScript>[1])) as Record<string, unknown>;
-      const response: ToolResponse = {
-        status: 'updated',
-        summary: `Setup script ${setupScriptId} updated (fields: ${Object.keys(cleanUpdates).join(', ')})`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_delete_setup_script ---
-  server.tool(
-    'lastest_delete_setup_script',
-    'Delete a setup script. Refused with 409 if any test still references it via setupScriptId — the response lists the blocking tests.',
-    {
-      setupScriptId: z.string().describe('Setup script ID to delete'),
-    },
-    withActivityReporting(client, 'lastest_delete_setup_script', async (params) => {
-      const result = await client.deleteSetupScript(params.setupScriptId as string);
-      const response: ToolResponse = {
-        status: 'deleted',
-        summary: `Setup script ${params.setupScriptId} deleted`,
-        details: result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // ===== Verify phase (v1.14+) =====
-
-  // --- lastest_get_change_map ---
-  server.tool(
-    'lastest_get_change_map',
-    'Get the build-level Change Map (4-signal area ranking + AI intent/risk summary) for a build.',
-    {
+      stepComparisonId: z.string().describe('Step comparison ID'),
       buildId: z.string().describe('Build ID'),
+      layer: z.enum(['visual', 'dom', 'a11y', 'network', 'console', 'url', 'perf', 'variable']).describe('Layer name'),
+      status: z.enum(['approved', 'rejected', 'snoozed']).describe('approved=Mark expected; rejected=Needs fix; snoozed=Suppress for this build'),
+      note: z.string().optional().describe('Optional note attached to the decision'),
     },
-    withActivityReporting(client, 'lastest_get_change_map', async (params) => {
-      const result = await client.getChangeMap(params.buildId as string);
+    withActivityReporting(client, 'lastest_approve_layer', async (params) => {
+      const result = await client.approveLayer({
+        stepComparisonId: params.stepComparisonId as string,
+        buildId: params.buildId as string,
+        layer: params.layer as string,
+        status: params.status as 'approved' | 'rejected' | 'snoozed',
+        note: params.note as string | undefined,
+      });
       const response: ToolResponse = {
         status: 'ok',
-        summary: 'Change Map retrieved.',
+        summary: `Layer ${params.layer} ${params.status}.`,
         details: result as Record<string, unknown>,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
   );
 
-  // --- lastest_verify_build ---
-  server.tool(
-    'lastest_verify_build',
-    'Get the full verify-build view: Change Map + step comparisons grouped by regression vs intent gate. Includes `visualUrlsByDiffId` (clickable /api/media URLs for baseline/current/diff PNGs per visual diff — same bearer token works) and `testsByTestId` (test name/code/targetUrl + setupTestId/setupScriptId/storageStateId hints) so the agent can read source and screenshots without a follow-up chain.',
-    {
-      buildId: z.string().describe('Build ID'),
-    },
-    withActivityReporting(client, 'lastest_verify_build', async (params) => {
-      const result = await client.verifyBuild(params.buildId as string);
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: 'Verify view retrieved.',
-        details: result as Record<string, unknown>,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // ===== QuickStart agent =====
+  // ===== QuickStart agent (PROTECTED — shapes unchanged) =====
 
   // --- lastest_quickstart ---
   server.tool(
@@ -1669,34 +1519,6 @@ export function createServer(client: LastestClient): McpServer {
         summary: summaryBits.join(' · '),
         actionRequired: actionRequired.length > 0 ? actionRequired : undefined,
         details: result as unknown as Record<string, unknown>,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
-    }),
-  );
-
-  // --- lastest_approve_layer ---
-  server.tool(
-    'lastest_approve_layer',
-    'Per-layer feedback on a step comparison: approve (Mark expected → write baseline), reject (Needs fix → create todo), or snooze (suppress for this build only).',
-    {
-      stepComparisonId: z.string().describe('Step comparison ID'),
-      buildId: z.string().describe('Build ID'),
-      layer: z.enum(['visual', 'dom', 'a11y', 'network', 'console', 'url', 'perf', 'variable']).describe('Layer name'),
-      status: z.enum(['approved', 'rejected', 'snoozed']).describe('approved=Mark expected; rejected=Needs fix; snoozed=Suppress for this build'),
-      note: z.string().optional().describe('Optional note attached to the decision'),
-    },
-    withActivityReporting(client, 'lastest_approve_layer', async (params) => {
-      const result = await client.approveLayer({
-        stepComparisonId: params.stepComparisonId as string,
-        buildId: params.buildId as string,
-        layer: params.layer as string,
-        status: params.status as 'approved' | 'rejected' | 'snoozed',
-        note: params.note as string | undefined,
-      });
-      const response: ToolResponse = {
-        status: 'ok',
-        summary: `Layer ${params.layer} ${params.status}.`,
-        details: result as Record<string, unknown>,
       };
       return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
     }),
