@@ -1037,6 +1037,36 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // Diff-scoped validation: POST /api/v1/validate-diff
+    // Body: { repositoryId, diff?, baseBranch?, headBranch?, wait?, maxWaitMs? }
+    // Maps a code change → affected tests → runs only those → returns a verdict.
+    if (resource === 'validate-diff' && !id) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string;
+        diff?: string;
+        baseBranch?: string;
+        headBranch?: string;
+        wait?: boolean;
+        maxWaitMs?: number;
+      };
+      if (!body.repositoryId || typeof body.repositoryId !== 'string') {
+        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { validateDiffCore } = await import('@/server/actions/validate-diff');
+      const result = await validateDiffCore({
+        repositoryId: body.repositoryId,
+        diff: body.diff,
+        baseBranch: body.baseBranch,
+        headBranch: body.headBranch,
+        wait: body.wait,
+        maxWaitMs: body.maxWaitMs,
+      });
+      return NextResponse.json(result);
+    }
+
     // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
     // Body: { url: string, viewport?: { width, height } }
     // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }

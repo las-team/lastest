@@ -113,6 +113,17 @@ export class LastestClient {
     });
   }
 
+  async validateDiff(opts: {
+    repositoryId: string;
+    diff?: string;
+    baseBranch?: string;
+    headBranch?: string;
+    wait?: boolean;
+    maxWaitMs?: number;
+  }): Promise<Record<string, unknown>> {
+    return this.post('/api/v1/validate-diff', opts);
+  }
+
   async revokeShare(shareId: string): Promise<{ success: boolean }> {
     return this.del(`/api/v1/shares/${shareId}`);
   }

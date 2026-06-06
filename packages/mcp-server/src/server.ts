@@ -851,6 +851,48 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_validate_diff ---
+  server.tool(
+    'lastest_validate_diff',
+    'Diff-scoped validation in one call: pass a git diff (or a base/head branch range for GitHub repos) and Lastest maps the changed files to the affected tests, runs ONLY those, and returns a pass/fail/review verdict with the failing tests and pending visual changes. Use this in a coding-agent loop right after making a change to confirm nothing relevant broke, without running the whole suite. Blocks until the scoped build finishes by default; pass `wait: false` to get a buildId to poll instead.',
+    {
+      repositoryId: z.string().describe('Repository ID to validate against'),
+      diff: z.string().optional().describe('Unified git diff text. Changed file paths are extracted from the headers. Required for local (non-GitHub) repos.'),
+      baseBranch: z.string().optional().describe('Base branch for GitHub compare mode (used when no diff text is given).'),
+      headBranch: z.string().optional().describe('Head branch for GitHub compare mode.'),
+      wait: z.boolean().optional().describe('Default true: block until the scoped build finishes and return the verdict. false → return buildId to poll with lastest_get_build_status.'),
+      maxWaitMs: z.number().optional().describe('Cap on blocking time when wait is true (default 300000).'),
+    },
+    withActivityReporting(client, 'lastest_validate_diff', async (params) => {
+      const result = await client.validateDiff({
+        repositoryId: params.repositoryId as string,
+        diff: params.diff as string | undefined,
+        baseBranch: params.baseBranch as string | undefined,
+        headBranch: params.headBranch as string | undefined,
+        wait: params.wait as boolean | undefined,
+        maxWaitMs: params.maxWaitMs as number | undefined,
+      });
+      const status = result.status as string;
+      const actionRequired: string[] = [];
+      if (status === 'fail') {
+        actionRequired.push('Affected tests failed — inspect failingTests, then use lastest_suggest_app_fix or lastest_heal_test.');
+      } else if (status === 'review_required') {
+        actionRequired.push('Visual/behavioral changes need review — use lastest_get_visual_diff then lastest_decide_diff.');
+      } else if (status === 'build_running') {
+        actionRequired.push(`Poll lastest_get_build_status with buildId ${result.buildId}.`);
+      } else if (status === 'no_affected_tests') {
+        actionRequired.push('No tests mapped to the change. Run the full suite with lastest_run_tests if the change is high-risk.');
+      }
+      const response: ToolResponse = {
+        status,
+        summary: result.summary as string,
+        actionRequired: actionRequired.length ? actionRequired : undefined,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // --- lastest_get_build_status ---
   server.tool(
     'lastest_get_build_status',
