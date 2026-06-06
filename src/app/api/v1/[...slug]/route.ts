@@ -1226,9 +1226,24 @@ export async function POST(
     }
 
     // Create test directly with raw code: POST /api/v1/tests
+    // For API tests (E1) pass `testType: 'api'` + `apiDefinition` instead of code.
     if (resource === 'tests' && !slug[1]) {
       const body = await request.json();
-      const { repositoryId, name, code, functionalAreaId, targetUrl, description } = body;
+      const { repositoryId, name, functionalAreaId, targetUrl, description } = body;
+      const testType = body.testType === 'api' ? 'api' : 'browser';
+      const apiDefinition = body.apiDefinition as import('@/lib/db/schema').ApiTestDefinition | undefined;
+      // API tests carry an apiDefinition; the `code` column stores a readable
+      // JSON rendering of it (the column is NOT NULL). Browser tests require code.
+      let code = body.code as string | undefined;
+      if (testType === 'api') {
+        if (!apiDefinition || typeof apiDefinition !== 'object' || !apiDefinition.method || !apiDefinition.url) {
+          return NextResponse.json({ error: 'apiDefinition with method and url required for api tests' }, { status: 400 });
+        }
+        if (!Array.isArray(apiDefinition.assertions) || apiDefinition.assertions.length === 0) {
+          return NextResponse.json({ error: 'apiDefinition.assertions must be a non-empty array' }, { status: 400 });
+        }
+        code = code && typeof code === 'string' ? code : JSON.stringify(apiDefinition, null, 2);
+      }
       if (!repositoryId) {
         return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
       }
@@ -1254,7 +1269,9 @@ export async function POST(
         repositoryId,
         name,
         code,
-        targetUrl: targetUrl ?? null,
+        testType,
+        apiDefinition: testType === 'api' ? apiDefinition : undefined,
+        targetUrl: targetUrl ?? (testType === 'api' ? (apiDefinition?.url ?? null) : null),
         functionalAreaId: functionalAreaId ?? null,
         createdByBotId: mcpBot?.id ?? null,
         createdByUserId: mcpBot ? null : (session.user?.id ?? null),
@@ -1346,6 +1363,46 @@ export async function POST(
       const { agentHealTestCore } = await import('@/lib/playwright/healer-agent');
       const result = await agentHealTestCore(test.repositoryId!, testId);
       return NextResponse.json(result);
+    }
+
+    // Generate an API test via AI and persist it: POST /api/v1/tests/generate-api
+    // Body: { repositoryId, name?, prompt?, endpoint?, openapiSpec?, graphqlSchema?, functionalAreaId? }
+    if (resource === 'tests' && slug[1] === 'generate-api' && !slug[2]) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string; name?: string; prompt?: string; endpoint?: string;
+        openapiSpec?: string; graphqlSchema?: string; functionalAreaId?: string;
+      };
+      if (!body.repositoryId) {
+        return NextResponse.json({ error: 'repositoryId required' }, { status: 400 });
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const { generateApiTest } = await import('@/lib/api-test/generator');
+      const gen = await generateApiTest({
+        repositoryId: body.repositoryId,
+        prompt: body.prompt,
+        endpoint: body.endpoint,
+        openapiSpec: body.openapiSpec,
+        graphqlSchema: body.graphqlSchema,
+      });
+      if (gen.status !== 'generated' || !gen.definition) {
+        return NextResponse.json({ status: gen.status, error: gen.summary }, { status: 422 });
+      }
+      const mcpBot = await queries.getBotByKind(session.team!.id, 'mcp_server');
+      const name = body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
+      const created = await queries.createTest({
+        repositoryId: body.repositoryId,
+        name,
+        code: JSON.stringify(gen.definition, null, 2),
+        testType: 'api',
+        apiDefinition: gen.definition,
+        targetUrl: gen.definition.url,
+        functionalAreaId: body.functionalAreaId ?? null,
+        createdByBotId: mcpBot?.id ?? null,
+        createdByUserId: mcpBot ? null : (session.user?.id ?? null),
+      });
+      return NextResponse.json({ status: 'generated', summary: gen.summary, test: created, definition: gen.definition }, { status: 201 });
     }
 
     // Suggest an application-code fix for a real_regression failure:

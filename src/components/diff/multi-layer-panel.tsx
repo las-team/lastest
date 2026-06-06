@@ -23,6 +23,7 @@ const LAYER_LABELS: Record<EvidenceLayer, string> = {
   url: 'URL Trajectory',
   perf: 'Performance',
   variable: 'Variables',
+  api: 'API',
 };
 
 function VerdictPill({ verdict }: { verdict: StepVerdict }) {

@@ -21,7 +21,8 @@ export type CheckLayer =
   | 'a11y'
   | 'design'
   | 'perf'
-  | 'url';
+  | 'url'
+  | 'api';
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
@@ -39,6 +40,9 @@ const DEFAULTS: CheckModeMap = {
   design:  'disable',
   perf:    'log',
   url:     'log',
+  // API request/response assertions (E1). Standalone api-type tests run a
+  // headless HTTP request; a failed status/schema/body assertion gates red.
+  api:     'enforce',
 };
 
 /** Repo / global default to use when nothing is persisted. */
@@ -324,7 +328,7 @@ export function pickTestModeOverrides(
     return null;
   };
   const out: Partial<CheckModeMap> = {};
-  const layers: CheckLayer[] = ['visual', 'text', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url'];
+  const layers: CheckLayer[] = ['visual', 'text', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url', 'api'];
   for (const layer of layers) {
     const newKey = `${layer}Mode` as const;
     const raw = (overrides as Record<string, unknown>)[newKey];

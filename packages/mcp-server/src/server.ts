@@ -1126,22 +1126,67 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_create_test ---
   server.tool(
     'lastest_create_test',
-    'Create a test. Two modes: (1) **direct** — pass { name, code } to insert ready-made Playwright code. (2) **AI** — pass { url } and/or { prompt } to have the Lastest AI agent generate the test. Direct mode returns immediately with a test ID; AI mode may take longer and returns the generated code.',
+    'Create a test. Modes: (1) **direct browser** — { name, code } to insert ready-made Playwright code. (2) **AI browser** — { url } and/or { prompt } to have the Lastest AI generate the test. (3) **direct API** (E1) — { name, testType:"api", apiDefinition } to insert a headless HTTP test (method/url/headers/body + assertions, runs without a browser). (4) **AI API** (E1) — { testType:"api", prompt } (and optionally endpoint/openapiSpec) to have the AI generate an API test. Direct modes return immediately; AI modes may take longer.',
     {
       repositoryId: z.string().describe('Repository ID to create the test in'),
-      name: z.string().optional().describe('Test name (required for direct mode)'),
-      code: z.string().optional().describe('Playwright test code (required for direct mode). Expected signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`'),
-      url: z.string().optional().describe('URL to generate a test for (AI mode)'),
-      prompt: z.string().optional().describe('Natural language description of what to test (AI mode)'),
+      name: z.string().optional().describe('Test name (required for direct modes)'),
+      code: z.string().optional().describe('Playwright test code (required for direct browser mode). Expected signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)`'),
+      url: z.string().optional().describe('URL to generate a test for (AI browser mode)'),
+      prompt: z.string().optional().describe('Natural language description of what to test (AI modes)'),
       functionalAreaId: z.string().optional().describe('Functional area to assign the test to'),
-      targetUrl: z.string().optional().describe('Target URL for the test (direct mode)'),
-      description: z.string().optional().describe('Test description (direct mode)'),
+      targetUrl: z.string().optional().describe('Target URL for the test (direct browser mode)'),
+      description: z.string().optional().describe('Test description (direct browser mode)'),
+      testType: z.enum(['browser', 'api']).optional().describe('"api" creates a headless HTTP test (E1). Defaults to browser.'),
+      apiDefinition: z.record(z.any()).optional().describe('API test definition for direct API mode: { method, url, headers?, query?, body?, auth?, assertions: [...] }. Assertion kinds: status|header|jsonPath|jsonSchema|bodyContains|latencyMs.'),
+      endpoint: z.string().optional().describe('Focus endpoint for AI API generation, e.g. "POST /api/users".'),
+      openapiSpec: z.string().optional().describe('Raw OpenAPI/Swagger JSON to ground AI API generation.'),
     },
     withActivityReporting(client, 'lastest_create_test', async (params) => {
       const repositoryId = params.repositoryId as string;
       const name = params.name as string | undefined;
       const code = params.code as string | undefined;
       const functionalAreaId = params.functionalAreaId as string | undefined;
+      const testType = params.testType as 'browser' | 'api' | undefined;
+
+      // Direct API mode: explicit apiDefinition provided.
+      if (testType === 'api' && params.apiDefinition) {
+        if (!name) throw new Error('name is required for direct API test creation.');
+        const result = await client.createTestDirect({
+          repositoryId,
+          name,
+          testType: 'api',
+          apiDefinition: params.apiDefinition as Record<string, unknown>,
+          functionalAreaId,
+        });
+        const response: ToolResponse = {
+          status: 'test_created',
+          summary: `API test "${result.name}" created (ID: ${result.id}). Use lastest_run_tests to execute it.`,
+          actionRequired: ['Run the test with lastest_run_tests to verify it works'],
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
+
+      // AI API mode: generate an API test from a prompt / OpenAPI.
+      if (testType === 'api') {
+        const result = await client.generateApiTest({
+          repositoryId,
+          name,
+          prompt: params.prompt as string | undefined,
+          endpoint: params.endpoint as string | undefined,
+          openapiSpec: params.openapiSpec as string | undefined,
+          functionalAreaId,
+        });
+        const response: ToolResponse = {
+          status: result.status === 'generated' ? 'test_created' : 'ai_generation_failed',
+          summary: (result.summary as string) ?? 'API test generation finished.',
+          actionRequired: result.status === 'generated'
+            ? ['Run the generated API test with lastest_run_tests']
+            : ['Provide an apiDefinition for direct creation, or check Settings → AI.'],
+          details: result,
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+      }
 
       // Direct mode: name + code provided → insert as-is, skip AI
       if (name && code) {

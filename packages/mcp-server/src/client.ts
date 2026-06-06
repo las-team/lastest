@@ -366,12 +366,28 @@ export class LastestClient {
   async createTestDirect(opts: {
     repositoryId: string;
     name: string;
-    code: string;
+    code?: string;
     functionalAreaId?: string;
     targetUrl?: string;
     description?: string;
+    // E1: API tests carry a definition instead of Playwright code.
+    testType?: 'browser' | 'api';
+    apiDefinition?: Record<string, unknown>;
   }): Promise<{ id: string; name: string; code: string }> {
     return this.post('/api/v1/tests', opts);
+  }
+
+  /** Generate an API test from a prompt/OpenAPI and persist it (E1). */
+  async generateApiTest(opts: {
+    repositoryId: string;
+    name?: string;
+    prompt?: string;
+    endpoint?: string;
+    openapiSpec?: string;
+    graphqlSchema?: string;
+    functionalAreaId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.post('/api/v1/tests/generate-api', opts);
   }
 
   async healTest(testId: string): Promise<unknown> {

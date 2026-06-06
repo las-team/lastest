@@ -27,6 +27,7 @@ describe('check-modes — derivation', () => {
       design: 'disable',
       perf: 'log',
       url: 'log',
+      api: 'enforce',
     } satisfies CheckModeMap);
   });
 

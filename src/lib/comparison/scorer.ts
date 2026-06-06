@@ -56,6 +56,10 @@ interface ScoreInputs {
   visualDiff?: Pick<VisualDiff, 'pixelDifference' | 'percentageDifference' | 'id'> | null;
   /** Variable-diff ignore patterns (per-test; defaults to none). */
   variableIgnorePaths?: string[];
+  /** Pre-computed evidence for the `api` layer (E1). API tests assert against
+   *  absolute expectations (status/schema/body), not a baseline, so the
+   *  evidence is produced by the api-test engine and folded in here. */
+  apiEvidence?: EvidenceItem[];
 }
 
 export function scoreMultiLayer({
@@ -63,9 +67,15 @@ export function scoreMultiLayer({
   current,
   visualDiff,
   variableIgnorePaths,
+  apiEvidence,
 }: ScoreInputs): MultiLayerVerdict {
   const evidence: EvidenceItem[] = [];
   const layers: StepComparisonEvidence = {};
+
+  // ── API (E1, baseline-independent) ───────────────────────────────────
+  if (apiEvidence?.length) {
+    for (const e of apiEvidence) evidence.push(e);
+  }
 
   // ── Visual ───────────────────────────────────────────────────────────
   if (visualDiff && (visualDiff.pixelDifference ?? 0) > 0) {
@@ -87,7 +97,11 @@ export function scoreMultiLayer({
   // next build via getPreviousTestResultForTest. Visual already ran above —
   // its baseline lifecycle is independent (getBranchBaseline / auto-approve).
   if (baseline === null) {
-    const verdict: StepVerdict = evidence.some(e => e.signal === 'medium') ? 'yellow' : 'green';
+    // High-signal api evidence (failed assertion) must still gate red on the
+    // very first run — api tests have no baseline-establish semantics.
+    const verdict: StepVerdict = evidence.some(e => e.signal === 'high')
+      ? 'red'
+      : evidence.some(e => e.signal === 'medium') ? 'yellow' : 'green';
     return { verdict, evidence, layers };
   }
 

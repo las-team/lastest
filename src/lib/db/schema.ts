@@ -265,6 +265,75 @@ export const functionalAreas = pgTable('functional_areas', {
   deletedAt: timestamp('deleted_at'),
 });
 
+// ---------------------------------------------------------------------------
+// API tests (E1) — headless HTTP test definition + assertions.
+// A standalone request executed without a browser; results flow through the
+// same test_results / step_comparisons / evidence pipeline as browser tests
+// under the `api` check layer.
+// ---------------------------------------------------------------------------
+
+export type ApiAuth =
+  | { type: 'none' }
+  | { type: 'bearer'; token: string }
+  | { type: 'basic'; username: string; password: string }
+  | { type: 'custom'; headers: Record<string, string> };
+
+export type ApiAssertionKind =
+  | 'status'
+  | 'header'
+  | 'jsonPath'
+  | 'jsonSchema'
+  | 'bodyContains'
+  | 'latencyMs';
+
+export interface ApiAssertion {
+  kind: ApiAssertionKind;
+  /** status: exact status code, or `in` for a set of acceptable codes. */
+  equals?: number;
+  in?: number[];
+  /** header: header name to assert on (case-insensitive). */
+  header?: string;
+  /** jsonPath: dot-path into the JSON response body. */
+  path?: string;
+  /** Expected value (jsonPath / header) or substring (bodyContains). */
+  value?: string | number | boolean;
+  /** jsonSchema: a JSON Schema object validated with ajv. */
+  schema?: unknown;
+  /** latencyMs: max acceptable round-trip latency. */
+  maxMs?: number;
+  description?: string;
+}
+
+export interface ApiTestDefinition {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  auth?: ApiAuth;
+  assertions: ApiAssertion[];
+  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
+  timeoutMs?: number;
+}
+
+export interface ApiAssertionResultData {
+  kind: ApiAssertionKind;
+  passed: boolean;
+  description: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Persisted result of a headless API test (stored on test_results.apiResult). */
+export interface ApiTestResultData {
+  passed: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  assertionResults: ApiAssertionResultData[];
+  error?: string;
+  responseSnippet?: string;
+}
+
 export const tests = pgTable('tests', {
   id: text('id').primaryKey(),
   repositoryId: text('repository_id'),
@@ -303,6 +372,9 @@ export const tests = pgTable('tests', {
   // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
   // fall back to it when AI is misconfigured / rate-limited.
   aiVarLastValues: jsonb('ai_var_last_values').$type<Record<string, string>>(),
+  // E1: test type discriminator. 'browser' (Playwright, default) | 'api' (headless HTTP).
+  testType: text('test_type').default('browser'),
+  apiDefinition: jsonb('api_definition').$type<ApiTestDefinition>(),
   executionMode: text('execution_mode').default('procedural'), // 'procedural' | 'agent'
   quarantined: boolean('quarantined').default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb('dom_snapshot').$type<DomSnapshotData>(), // DOM state captured during recording
@@ -646,6 +718,8 @@ export const testResults = pgTable('test_results', {
   testId: text('test_id').references(() => tests.id),
   testVersionId: text('test_version_id'), // links to testVersions.id — which version was executed
   status: text('status'), // 'passed', 'failed', 'skipped'
+  // E1: result of a headless API test (null for browser tests).
+  apiResult: jsonb('api_result').$type<ApiTestResultData>(),
   screenshotPath: text('screenshot_path'),
   screenshots: jsonb('screenshots').$type<CapturedScreenshot[]>(),
   diffPath: text('diff_path'),
@@ -1351,6 +1425,14 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textDetectionGranularity: 'word' as TextDetectionGranularity,
   regionDetectionMode: 'flood-fill' as RegionDetectionMode,
   textDiffEnabled: false,
+};
+
+// Default settings for API tests (E1). Used when a field is unset on the
+// ApiTestDefinition / repo config.
+export const DEFAULT_API_TEST_SETTINGS = {
+  timeoutMs: 15000,
+  latencyBudgetMs: 2000,
+  followRedirects: true,
 };
 
 // Diff classification type
@@ -2819,7 +2901,8 @@ export type EvidenceLayer =
   | 'console'
   | 'url'
   | 'perf'
-  | 'variable';
+  | 'variable'
+  | 'api';
 
 export interface EvidenceItem {
   layer: EvidenceLayer;
