@@ -110,7 +110,7 @@ export async function getTeamRunUsage(teamId: string) {
 export async function recordTeamRunCompletion(
   teamId: string,
   durationMs: number,
-) {
+): Promise<void> {
   const month = currentUsageMonth();
   const minutes = Math.max(0, durationMs) / 60_000;
   await db
