@@ -27,16 +27,16 @@
  * from `plans.ts` with `live: false` and no price IDs, so the UI still
  * renders tiers but checkout stays disabled.
  */
-import type Stripe from 'stripe';
-import type { TeamPlan } from '@/lib/db/schema';
-import { getStripeClient } from './stripe';
-import { isEarlyAdopterPricing } from './config';
+import type Stripe from "stripe";
+import type { TeamPlan } from "@/lib/db/schema";
+import { getStripeClient } from "./stripe";
+import { isEarlyAdopterPricing } from "./config";
 import {
   PURCHASABLE_PLANS,
   displayPriceCents,
   type BillingInterval,
   type PlanConfig,
-} from './plans';
+} from "./plans";
 
 export interface CatalogPrice {
   priceId: string;
@@ -78,7 +78,7 @@ export function invalidateCatalog(): void {
   cache = null;
 }
 
-const NO_PRICES: CatalogPlan['prices'] = {
+const NO_PRICES: CatalogPlan["prices"] = {
   monthly: null,
   monthlyEa: null,
   yearly: null,
@@ -86,25 +86,32 @@ const NO_PRICES: CatalogPlan['prices'] = {
 };
 
 function staticFallback(): CatalogPlan[] {
-  return PURCHASABLE_PLANS.map((p) => ({ ...p, live: false, prices: { ...NO_PRICES } }));
+  return PURCHASABLE_PLANS.map((p) => ({
+    ...p,
+    live: false,
+    prices: { ...NO_PRICES },
+  }));
 }
 
 const PURCHASABLE_IDS = new Set(PURCHASABLE_PLANS.map((p) => p.id));
 
 function parseIntOr(value: string | undefined, fallback: number): number {
-  const n = Number.parseInt(value ?? '', 10);
+  const n = Number.parseInt(value ?? "", 10);
   return Number.isFinite(n) ? n : fallback;
 }
 
 /** `unlimited` → null; integer → n; missing/garbage → static fallback. */
-function parseProjectLimit(value: string | undefined, fallback: number | null): number | null {
-  if (value === 'unlimited') return null;
-  const n = Number.parseInt(value ?? '', 10);
+function parseProjectLimit(
+  value: string | undefined,
+  fallback: number | null,
+): number | null {
+  if (value === "unlimited") return null;
+  const n = Number.parseInt(value ?? "", 10);
   return Number.isFinite(n) ? n : fallback;
 }
 
 function isEaPrice(price: Stripe.Price): boolean {
-  return price.lookup_key?.endsWith('_ea') || price.metadata?.ea === 'true';
+  return price.lookup_key?.endsWith("_ea") || price.metadata?.ea === "true";
 }
 
 function toCatalogPrice(price: Stripe.Price): CatalogPrice {
@@ -122,11 +129,14 @@ function toCatalogPrice(price: Stripe.Price): CatalogPrice {
  * for the valid tiers.
  */
 function buildFromPrices(prices: Stripe.Price[]): CatalogPlan[] {
-  const byProduct = new Map<string, { product: Stripe.Product; prices: Stripe.Price[] }>();
+  const byProduct = new Map<
+    string,
+    { product: Stripe.Product; prices: Stripe.Price[] }
+  >();
   for (const price of prices) {
     const product = price.product;
     // We request `expand: data.product`; anything else is unusable.
-    if (typeof product === 'string' || !product || product.deleted) continue;
+    if (typeof product === "string" || !product || product.deleted) continue;
     const entry = byProduct.get(product.id);
     if (entry) entry.prices.push(price);
     else byProduct.set(product.id, { product, prices: [price] });
@@ -137,24 +147,32 @@ function buildFromPrices(prices: Stripe.Price[]): CatalogPlan[] {
     const tier = product.metadata?.tier as TeamPlan | undefined;
     if (!tier || !PURCHASABLE_IDS.has(tier)) {
       if (tier !== undefined) {
-        console.error(`[billing/catalog] Product ${product.id} has unknown tier "${tier}" — skipped`);
+        console.error(
+          `[billing/catalog] Product ${product.id} has unknown tier "${tier}" — skipped`,
+        );
       }
       continue;
     }
     if (byTier.has(tier)) {
-      console.error(`[billing/catalog] Duplicate product for tier "${tier}" (${product.id}) — skipped`);
+      console.error(
+        `[billing/catalog] Duplicate product for tier "${tier}" (${product.id}) — skipped`,
+      );
       continue;
     }
 
     const fallback = PURCHASABLE_PLANS.find((p) => p.id === tier)!;
-    const slots: CatalogPlan['prices'] = { ...NO_PRICES };
+    const slots: CatalogPlan["prices"] = { ...NO_PRICES };
     for (const price of productPrices) {
       const interval = price.recurring?.interval;
-      if (interval !== 'month' && interval !== 'year') continue;
+      if (interval !== "month" && interval !== "year") continue;
       const slot =
-        interval === 'month'
-          ? (isEaPrice(price) ? 'monthlyEa' : 'monthly')
-          : (isEaPrice(price) ? 'yearlyEa' : 'yearly');
+        interval === "month"
+          ? isEaPrice(price)
+            ? "monthlyEa"
+            : "monthly"
+          : isEaPrice(price)
+            ? "yearlyEa"
+            : "yearly";
       if (slots[slot]) {
         console.error(
           `[billing/catalog] Tier "${tier}" has multiple active ${slot} prices — keeping ${slots[slot]!.priceId}, ignoring ${price.id}`,
@@ -165,7 +183,9 @@ function buildFromPrices(prices: Stripe.Price[]): CatalogPlan[] {
     }
 
     if (!slots.monthly) {
-      console.error(`[billing/catalog] Tier "${tier}" has no full monthly price — skipped`);
+      console.error(
+        `[billing/catalog] Tier "${tier}" has no full monthly price — skipped`,
+      );
       continue;
     }
 
@@ -178,12 +198,19 @@ function buildFromPrices(prices: Stripe.Price[]): CatalogPlan[] {
       name: product.name || fallback.name,
       tagline: product.metadata?.tagline || fallback.tagline,
       priceCents: slots.monthly.unitAmountCents,
-      earlyAdopterPriceCents: slots.monthlyEa?.unitAmountCents ?? slots.monthly.unitAmountCents,
+      earlyAdopterPriceCents:
+        slots.monthlyEa?.unitAmountCents ?? slots.monthly.unitAmountCents,
       yearlyPriceCents: slots.yearly?.unitAmountCents ?? 0,
       earlyAdopterYearlyPriceCents:
         slots.yearlyEa?.unitAmountCents ?? slots.yearly?.unitAmountCents ?? 0,
-      monthlyRunQuota: parseIntOr(product.metadata?.monthly_run_quota, fallback.monthlyRunQuota),
-      projectLimit: parseProjectLimit(product.metadata?.project_limit, fallback.projectLimit),
+      monthlyRunQuota: parseIntOr(
+        product.metadata?.monthly_run_quota,
+        fallback.monthlyRunQuota,
+      ),
+      projectLimit: parseProjectLimit(
+        product.metadata?.project_limit,
+        fallback.projectLimit,
+      ),
       concurrentRunLimit: parseIntOr(
         product.metadata?.concurrent_run_limit,
         fallback.concurrentRunLimit,
@@ -210,13 +237,15 @@ async function fetchCatalog(): Promise<CatalogPlan[]> {
   }
   const result = await stripe.prices.list({
     active: true,
-    type: 'recurring',
-    expand: ['data.product'],
+    type: "recurring",
+    expand: ["data.product"],
     limit: 100,
   });
   const catalog = buildFromPrices(result.data);
   if (!catalog.some((p) => p.live)) {
-    console.error('[billing/catalog] No valid tiers found in Stripe — using static fallback');
+    console.error(
+      "[billing/catalog] No valid tiers found in Stripe — using static fallback",
+    );
   }
   return catalog;
 }
@@ -231,7 +260,10 @@ export async function getCatalog(): Promise<CatalogPlan[]> {
       cache = { at: Date.now(), ttl: CACHE_TTL_MS, plans };
       return plans;
     } catch (err) {
-      console.error('[billing/catalog] Fetch failed — using static fallback', err);
+      console.error(
+        "[billing/catalog] Fetch failed — using static fallback",
+        err,
+      );
       const plans = staticFallback();
       cache = { at: Date.now(), ttl: FAILURE_TTL_MS, plans };
       return plans;
@@ -246,9 +278,13 @@ export async function getCatalog(): Promise<CatalogPlan[]> {
  * Pick the chargeable price for (plan, interval), honoring the EA flag
  * with fall-through to the full price when no EA variant exists.
  */
-export function selectPrice(plan: CatalogPlan, interval: BillingInterval): CatalogPrice | null {
+export function selectPrice(
+  plan: CatalogPlan,
+  interval: BillingInterval,
+): CatalogPrice | null {
   const ea = isEarlyAdopterPricing();
-  if (interval === 'yearly') return (ea ? plan.prices.yearlyEa : null) ?? plan.prices.yearly;
+  if (interval === "yearly")
+    return (ea ? plan.prices.yearlyEa : null) ?? plan.prices.yearly;
   return (ea ? plan.prices.monthlyEa : null) ?? plan.prices.monthly;
 }
 
@@ -266,10 +302,10 @@ export async function resolvePlanForPriceId(
     for (const plan of catalog) {
       const { monthly, monthlyEa, yearly, yearlyEa } = plan.prices;
       if (monthly?.priceId === priceId || monthlyEa?.priceId === priceId) {
-        return { plan: plan.id, interval: 'monthly' as const };
+        return { plan: plan.id, interval: "monthly" as const };
       }
       if (yearly?.priceId === priceId || yearlyEa?.priceId === priceId) {
-        return { plan: plan.id, interval: 'yearly' as const };
+        return { plan: plan.id, interval: "yearly" as const };
       }
     }
     return null;
@@ -285,12 +321,17 @@ export async function resolvePlanForPriceId(
   const stripe = getStripeClient();
   if (!stripe) return null;
   try {
-    const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
+    const price = await stripe.prices.retrieve(priceId, {
+      expand: ["product"],
+    });
     const product = price.product;
-    if (typeof product === 'string' || !product || product.deleted) return null;
+    if (typeof product === "string" || !product || product.deleted) return null;
     const tier = product.metadata?.tier as TeamPlan | undefined;
     if (!tier || !PURCHASABLE_IDS.has(tier)) return null;
-    return { plan: tier, interval: price.recurring?.interval === 'year' ? 'yearly' : 'monthly' };
+    return {
+      plan: tier,
+      interval: price.recurring?.interval === "year" ? "yearly" : "monthly",
+    };
   } catch (err) {
     console.error(`[billing/catalog] Could not resolve price ${priceId}`, err);
     return null;
@@ -308,8 +349,14 @@ export function toUiCatalog(catalog: CatalogPlan[]): UiCatalogPlan[] {
     name: p.name,
     tagline: p.tagline,
     features: p.features,
-    monthly: { displayCents: displayPriceCents(p, 'monthly'), fullCents: p.priceCents },
-    yearly: { displayCents: displayPriceCents(p, 'yearly'), fullCents: p.yearlyPriceCents },
+    monthly: {
+      displayCents: displayPriceCents(p, "monthly"),
+      fullCents: p.priceCents,
+    },
+    yearly: {
+      displayCents: displayPriceCents(p, "yearly"),
+      fullCents: p.yearlyPriceCents,
+    },
     available: p.live && p.prices.monthly !== null,
   }));
 }

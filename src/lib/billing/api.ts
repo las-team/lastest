@@ -8,13 +8,14 @@
  * runtime errors when stripe is unconfigured are caught by the
  * server actions, which check `isStripeConfigured()` first.
  */
-import { auth } from '@/lib/auth/auth';
+import { auth } from "@/lib/auth/auth";
 
-type AuthApiAny = typeof auth.api & Record<string, (...args: unknown[]) => Promise<unknown>>;
+type AuthApiAny = typeof auth.api &
+  Record<string, (...args: unknown[]) => Promise<unknown>>;
 
 interface UpgradeBody {
   plan: string;
-  customerType?: 'user' | 'organization';
+  customerType?: "user" | "organization";
   referenceId?: string;
   successUrl?: string;
   cancelUrl?: string;
@@ -38,18 +39,18 @@ interface UpgradeBody {
 
 interface CancelBody {
   referenceId?: string;
-  customerType?: 'user' | 'organization';
+  customerType?: "user" | "organization";
   returnUrl: string;
 }
 
 interface RestoreBody {
   referenceId?: string;
-  customerType?: 'user' | 'organization';
+  customerType?: "user" | "organization";
 }
 
 interface PortalBody {
   referenceId?: string;
-  customerType?: 'user' | 'organization';
+  customerType?: "user" | "organization";
   returnUrl: string;
 }
 
@@ -58,34 +59,55 @@ interface UrlResult {
   redirect?: boolean;
 }
 
-export async function callUpgradeSubscription(body: UpgradeBody, headers: Headers): Promise<UrlResult> {
+export async function callUpgradeSubscription(
+  body: UpgradeBody,
+  headers: Headers,
+): Promise<UrlResult> {
   const api = auth.api as AuthApiAny;
-  if (typeof api.upgradeSubscription !== 'function') {
-    throw new Error('Stripe billing is not configured on this instance.');
+  if (typeof api.upgradeSubscription !== "function") {
+    throw new Error("Stripe billing is not configured on this instance.");
   }
-  return (await api.upgradeSubscription({ body, headers } as never)) as UrlResult;
+  return (await api.upgradeSubscription({
+    body,
+    headers,
+  } as never)) as UrlResult;
 }
 
-export async function callCancelSubscription(body: CancelBody, headers: Headers): Promise<UrlResult> {
+export async function callCancelSubscription(
+  body: CancelBody,
+  headers: Headers,
+): Promise<UrlResult> {
   const api = auth.api as AuthApiAny;
-  if (typeof api.cancelSubscription !== 'function') {
-    throw new Error('Stripe billing is not configured on this instance.');
+  if (typeof api.cancelSubscription !== "function") {
+    throw new Error("Stripe billing is not configured on this instance.");
   }
-  return (await api.cancelSubscription({ body, headers } as never)) as UrlResult;
+  return (await api.cancelSubscription({
+    body,
+    headers,
+  } as never)) as UrlResult;
 }
 
-export async function callRestoreSubscription(body: RestoreBody, headers: Headers): Promise<void> {
+export async function callRestoreSubscription(
+  body: RestoreBody,
+  headers: Headers,
+): Promise<void> {
   const api = auth.api as AuthApiAny;
-  if (typeof api.restoreSubscription !== 'function') {
-    throw new Error('Stripe billing is not configured on this instance.');
+  if (typeof api.restoreSubscription !== "function") {
+    throw new Error("Stripe billing is not configured on this instance.");
   }
   await api.restoreSubscription({ body, headers } as never);
 }
 
-export async function callBillingPortal(body: PortalBody, headers: Headers): Promise<UrlResult> {
+export async function callBillingPortal(
+  body: PortalBody,
+  headers: Headers,
+): Promise<UrlResult> {
   const api = auth.api as AuthApiAny;
-  if (typeof api.createBillingPortal !== 'function') {
-    throw new Error('Stripe billing is not configured on this instance.');
+  if (typeof api.createBillingPortal !== "function") {
+    throw new Error("Stripe billing is not configured on this instance.");
   }
-  return (await api.createBillingPortal({ body, headers } as never)) as UrlResult;
+  return (await api.createBillingPortal({
+    body,
+    headers,
+  } as never)) as UrlResult;
 }

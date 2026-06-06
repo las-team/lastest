@@ -66,7 +66,7 @@ export async function createTeam(data: {
     id,
     name: data.name,
     slug,
-    monthlyRunQuota: planConfig('free').monthlyRunQuota,
+    monthlyRunQuota: planConfig("free").monthlyRunQuota,
     createdAt: now,
     updatedAt: now,
   });

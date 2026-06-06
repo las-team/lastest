@@ -8,23 +8,23 @@
  * boundary (`resolvePlanForPriceId`), whose own behaviour is covered by
  * `catalog.test.ts`.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import * as queries from '@/lib/db/queries';
-import { resolvePlanForPriceId } from './catalog';
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as queries from "@/lib/db/queries";
+import { resolvePlanForPriceId } from "./catalog";
 import {
   syncTeamPlanForBilling,
   handleSubscriptionComplete,
   handleSubscriptionUpdate,
   handleSubscriptionDeleted,
-} from './webhook-sync';
-import { planConfig } from './plans';
+} from "./webhook-sync";
+import { planConfig } from "./plans";
 
-vi.mock('@/lib/db/queries', () => ({
+vi.mock("@/lib/db/queries", () => ({
   getTeam: vi.fn(),
   updateTeam: vi.fn(),
 }));
 
-vi.mock('./catalog', () => ({
+vi.mock("./catalog", () => ({
   resolvePlanForPriceId: vi.fn(),
   // Empty catalog → quotaForPlan falls back to the static planConfig
   // values, which is what these tests assert against.
@@ -38,137 +38,147 @@ const resolvePrice = vi.mocked(resolvePlanForPriceId);
 beforeEach(() => {
   vi.clearAllMocks();
   // `getTeam` returns a team currently on free unless a test overrides it.
-  getTeam.mockResolvedValue({ id: 'team_1', plan: 'free' } as never);
+  getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
   updateTeam.mockResolvedValue(undefined as never);
   // Known price IDs resolve through the (mocked) dynamic catalog.
   resolvePrice.mockImplementation(async (priceId: string) => {
-    if (priceId === 'price_growth_monthly') return { plan: 'growth', interval: 'monthly' };
-    if (priceId === 'price_pro_yearly') return { plan: 'pro', interval: 'yearly' };
+    if (priceId === "price_growth_monthly")
+      return { plan: "growth", interval: "monthly" };
+    if (priceId === "price_pro_yearly")
+      return { plan: "pro", interval: "yearly" };
     return null;
   });
 });
 
-describe('syncTeamPlanForBilling', () => {
-  it('updates plan + run quota when the tier changes', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'free' } as never);
+describe("syncTeamPlanForBilling", () => {
+  it("updates plan + run quota when the tier changes", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
 
-    await syncTeamPlanForBilling('team_1', 'growth');
+    await syncTeamPlanForBilling("team_1", "growth");
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'growth',
-      monthlyRunQuota: planConfig('growth').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "growth",
+      monthlyRunQuota: planConfig("growth").monthlyRunQuota,
     });
   });
 
-  it('is a no-op when the team is already on the target plan with the right quota', async () => {
+  it("is a no-op when the team is already on the target plan with the right quota", async () => {
     getTeam.mockResolvedValue({
-      id: 'team_1',
-      plan: 'growth',
-      monthlyRunQuota: planConfig('growth').monthlyRunQuota,
+      id: "team_1",
+      plan: "growth",
+      monthlyRunQuota: planConfig("growth").monthlyRunQuota,
     } as never);
 
-    await syncTeamPlanForBilling('team_1', 'growth');
+    await syncTeamPlanForBilling("team_1", "growth");
 
     expect(updateTeam).not.toHaveBeenCalled();
   });
 
-  it('refreshes the quota on a same-plan event when it drifted', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'growth', monthlyRunQuota: 3000 } as never);
+  it("refreshes the quota on a same-plan event when it drifted", async () => {
+    getTeam.mockResolvedValue({
+      id: "team_1",
+      plan: "growth",
+      monthlyRunQuota: 3000,
+    } as never);
 
-    await syncTeamPlanForBilling('team_1', 'growth');
+    await syncTeamPlanForBilling("team_1", "growth");
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'growth',
-      monthlyRunQuota: planConfig('growth').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "growth",
+      monthlyRunQuota: planConfig("growth").monthlyRunQuota,
     });
   });
 
-  it('is a no-op when the team no longer exists', async () => {
+  it("is a no-op when the team no longer exists", async () => {
     getTeam.mockResolvedValue(null as never);
 
-    await syncTeamPlanForBilling('missing', 'pro');
+    await syncTeamPlanForBilling("missing", "pro");
 
     expect(updateTeam).not.toHaveBeenCalled();
   });
 
-  it('carries the correct quota for each tier', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'free' } as never);
+  it("carries the correct quota for each tier", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
 
-    await syncTeamPlanForBilling('team_1', 'pro');
+    await syncTeamPlanForBilling("team_1", "pro");
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'pro',
-      monthlyRunQuota: planConfig('pro').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "pro",
+      monthlyRunQuota: planConfig("pro").monthlyRunQuota,
     });
   });
 });
 
-describe('handleSubscriptionComplete', () => {
-  it('flips the team to the paid tier from the plan name', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'free' } as never);
+describe("handleSubscriptionComplete", () => {
+  it("flips the team to the paid tier from the plan name", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
 
     await handleSubscriptionComplete({
-      subscription: { referenceId: 'team_1' },
-      plan: { name: 'starter' },
+      subscription: { referenceId: "team_1" },
+      plan: { name: "starter" },
     });
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'starter',
-      monthlyRunQuota: planConfig('starter').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "starter",
+      monthlyRunQuota: planConfig("starter").monthlyRunQuota,
     });
   });
 
-  it('defaults to free when the plan name is absent', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'starter' } as never);
+  it("defaults to free when the plan name is absent", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "starter" } as never);
 
     await handleSubscriptionComplete({
-      subscription: { referenceId: 'team_1' },
+      subscription: { referenceId: "team_1" },
       plan: { name: null },
     });
 
     // team was on starter, target resolves to free → update to free
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'free',
-      monthlyRunQuota: planConfig('free').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "free",
+      monthlyRunQuota: planConfig("free").monthlyRunQuota,
     });
   });
 });
 
-describe('handleSubscriptionUpdate', () => {
-  it('maps the live Stripe price ID back to a tier (authoritative over the mirror)', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'starter' } as never);
+describe("handleSubscriptionUpdate", () => {
+  it("maps the live Stripe price ID back to a tier (authoritative over the mirror)", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "starter" } as never);
 
     await handleSubscriptionUpdate({
-      stripeSubscription: { items: { data: [{ price: { id: 'price_growth_monthly' } }] } },
+      stripeSubscription: {
+        items: { data: [{ price: { id: "price_growth_monthly" } }] },
+      },
       // Mirror still says starter mid-proration; price ID must win.
-      subscription: { referenceId: 'team_1', plan: 'starter' },
+      subscription: { referenceId: "team_1", plan: "starter" },
     });
 
-    expect(resolvePrice).toHaveBeenCalledWith('price_growth_monthly');
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'growth',
-      monthlyRunQuota: planConfig('growth').monthlyRunQuota,
+    expect(resolvePrice).toHaveBeenCalledWith("price_growth_monthly");
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "growth",
+      monthlyRunQuota: planConfig("growth").monthlyRunQuota,
     });
   });
 
-  it('falls back to the mirrored plan name when the price ID is unknown', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'free' } as never);
+  it("falls back to the mirrored plan name when the price ID is unknown", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
 
     await handleSubscriptionUpdate({
-      stripeSubscription: { items: { data: [{ price: { id: 'price_unrecognized' } }] } },
-      subscription: { referenceId: 'team_1', plan: 'pro' },
+      stripeSubscription: {
+        items: { data: [{ price: { id: "price_unrecognized" } }] },
+      },
+      subscription: { referenceId: "team_1", plan: "pro" },
     });
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'pro',
-      monthlyRunQuota: planConfig('pro').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "pro",
+      monthlyRunQuota: planConfig("pro").monthlyRunQuota,
     });
   });
 
-  it('does nothing when neither the price ID nor the mirror resolves a plan', async () => {
+  it("does nothing when neither the price ID nor the mirror resolves a plan", async () => {
     await handleSubscriptionUpdate({
       stripeSubscription: { items: { data: [] } },
-      subscription: { referenceId: 'team_1', plan: null },
+      subscription: { referenceId: "team_1", plan: null },
     });
 
     expect(getTeam).not.toHaveBeenCalled();
@@ -176,15 +186,17 @@ describe('handleSubscriptionUpdate', () => {
   });
 });
 
-describe('handleSubscriptionDeleted', () => {
-  it('drops the team back to the free tier', async () => {
-    getTeam.mockResolvedValue({ id: 'team_1', plan: 'pro' } as never);
+describe("handleSubscriptionDeleted", () => {
+  it("drops the team back to the free tier", async () => {
+    getTeam.mockResolvedValue({ id: "team_1", plan: "pro" } as never);
 
-    await handleSubscriptionDeleted({ subscription: { referenceId: 'team_1' } });
+    await handleSubscriptionDeleted({
+      subscription: { referenceId: "team_1" },
+    });
 
-    expect(updateTeam).toHaveBeenCalledWith('team_1', {
-      plan: 'free',
-      monthlyRunQuota: planConfig('free').monthlyRunQuota,
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "free",
+      monthlyRunQuota: planConfig("free").monthlyRunQuota,
     });
   });
 });

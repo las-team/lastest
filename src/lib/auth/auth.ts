@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { stripe as stripePlugin } from "@better-auth/stripe";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
@@ -9,6 +10,17 @@ import { getGitHubUser } from "@/lib/github/oauth";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
 import { syncUserToTwentyCRM } from "@/lib/integrations/twenty-crm";
+import { getStripeClient } from "@/lib/billing/stripe";
+import {
+  getCatalog,
+  invalidateCatalog,
+  selectPrice,
+} from "@/lib/billing/catalog";
+import {
+  handleSubscriptionComplete,
+  handleSubscriptionUpdate,
+  handleSubscriptionDeleted,
+} from "@/lib/billing/webhook-sync";
 
 async function syncGithubAccount(account: {
   userId: string;
@@ -92,6 +104,11 @@ export const auth = betterAuth({
       session: schema.sessions,
       account: schema.oauthAccounts,
       verification: schema.verification,
+      // Stripe plugin tables: subscription is managed by the plugin; the
+      // `organization` slot is bridged to our `teams` table so the
+      // plugin reads/writes `teams.stripeCustomerId` directly.
+      subscription: schema.subscriptions,
+      organization: schema.teams,
     },
   }),
 
@@ -155,9 +172,32 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24, // refresh daily
+    // The Stripe plugin's `customerType: 'organization'` flow reads
+    // `session.activeOrganizationId` to scope subscriptions to a team.
+    // We don't run better-auth's organization plugin — instead we mirror
+    // `users.teamId` into this field at session create (see databaseHooks
+    // below) so the plugin can find the team without us touching its
+    // internals.
+    additionalFields: {
+      activeOrganizationId: { type: "string", required: false },
+    },
   },
 
   databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          // Stamp the user's current teamId onto the session so the
+          // Stripe plugin's organization-scoped subscription lookup
+          // works without us running better-auth's organization plugin.
+          const u = await queries.getUserById(session.userId);
+          if (u?.teamId) {
+            return { data: { ...session, activeOrganizationId: u.teamId } };
+          }
+          return { data: session };
+        },
+      },
+    },
     account: {
       create: {
         after: async (account) => {
@@ -217,5 +257,97 @@ export const auth = betterAuth({
     },
   },
 
-  plugins: [nextCookies()],
+  plugins: [
+    nextCookies(),
+    // Lazily skip the Stripe plugin when STRIPE_SECRET_KEY is unset so
+    // self-hosters who don't want billing don't have to set fake env vars.
+    ...buildStripePlugin(),
+  ],
 });
+
+function buildStripePlugin() {
+  const stripeClient = getStripeClient();
+  if (!stripeClient) return [];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) return [];
+
+  // Translate the live Stripe catalog into the plugin's plan shape on
+  // every resolution (the plugin re-invokes this per call, so dashboard
+  // price changes apply without a restart — getCatalog() is TTL-cached).
+  // `selectPrice()` honors the EA-pricing flag with fall-through to the
+  // full price.
+  const plans = async () => {
+    const catalog = await getCatalog();
+    return catalog
+      .filter((p) => p.live && p.prices.monthly)
+      .map((p) => ({
+        name: p.id,
+        priceId: selectPrice(p, "monthly")!.priceId,
+        annualDiscountPriceId: selectPrice(p, "yearly")?.priceId,
+        limits: {
+          monthlyRunQuota: p.monthlyRunQuota,
+          projectLimit: p.projectLimit,
+        },
+      }));
+  };
+
+  return [
+    stripePlugin({
+      stripeClient,
+      stripeWebhookSecret: webhookSecret,
+      createCustomerOnSignUp: false, // we create lazily on first checkout
+      organization: { enabled: true },
+      subscription: {
+        enabled: true,
+        plans,
+        // managed_payments lets Stripe orchestrate auth challenges /
+        // dynamic payment method ordering (and customer-facing tax) for
+        // us — we deliberately do NOT enable Stripe Tax / automatic_tax.
+        getCheckoutSessionParams: () => ({
+          params: {
+            managed_payments: { enabled: true },
+            allow_promotion_codes: true,
+          },
+        }),
+        // Gate every subscription mutation on team-admin role.
+        authorizeReference: async ({ user, referenceId }) => {
+          const u = await queries.getUserById(user.id);
+          if (!u || u.teamId !== referenceId) return false;
+          return u.role === "admin" || u.role === "owner";
+        },
+        // Mirror plugin events into our app: keep teams.plan +
+        // monthlyRunQuota in sync the moment payment lands so the
+        // capability layer (capabilitiesFor) sees the new tier on the
+        // very next request — no admin review, no audit log gate.
+        onSubscriptionComplete: handleSubscriptionComplete,
+        onSubscriptionUpdate: handleSubscriptionUpdate,
+        onSubscriptionDeleted: handleSubscriptionDeleted,
+      },
+      // Forensic webhook log: the plugin performs the subscription sync
+      // itself (above) — this just records every delivery so admins can
+      // reconcile against Stripe. Stripe retries are no-op'd by the
+      // primary key on event id; it does not gate the plugin's sync.
+      onEvent: async (event) => {
+        // Dashboard catalog edits (price/product create/update/archive)
+        // bust the in-memory catalog cache so the UI + plugin pick up
+        // the change on the next read instead of waiting out the TTL.
+        if (
+          event.type.startsWith("price.") ||
+          event.type.startsWith("product.")
+        ) {
+          invalidateCatalog();
+        }
+        try {
+          await queries.recordStripeWebhookReceipt({
+            eventId: event.id,
+            type: event.type,
+            payload: event as unknown as Record<string, unknown>,
+          });
+          await queries.markStripeWebhookProcessed(event.id);
+        } catch (err) {
+          console.error("[better-auth/stripe] webhook log write failed", err);
+        }
+      },
+    }),
+  ];
+}

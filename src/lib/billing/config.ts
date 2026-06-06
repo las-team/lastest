@@ -13,5 +13,7 @@
  * tier). Flip to "false" to display + charge catalog prices.
  */
 export function isEarlyAdopterPricing(): boolean {
-  return (process.env.EARLY_ADOPTER_PRICING ?? 'true').toLowerCase() !== 'false';
+  return (
+    (process.env.EARLY_ADOPTER_PRICING ?? "true").toLowerCase() !== "false"
+  );
 }

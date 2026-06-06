@@ -1,16 +1,30 @@
-'use client';
+"use client";
 
-import { useState, useTransition } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { CreditCard, Check, ExternalLink, RotateCcw } from 'lucide-react';
-import { toast } from 'sonner';
-import type { TeamPlan, SubscriptionStatus } from '@/lib/db/schema';
-import { planConfig, planRank, type BillingInterval } from '@/lib/billing/plans';
-import type { UiCatalogPlan } from '@/lib/billing/catalog';
-import { changeTeamPlan, openCustomerPortal, resumeTeamSubscription } from '@/server/actions/billing';
-import { CancelSubscriptionDialog } from './cancel-subscription-dialog';
+import { useState, useTransition } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { CreditCard, Check, ExternalLink, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
+import type { TeamPlan, SubscriptionStatus } from "@/lib/db/schema";
+import {
+  planConfig,
+  planRank,
+  type BillingInterval,
+} from "@/lib/billing/plans";
+import type { UiCatalogPlan } from "@/lib/billing/catalog";
+import {
+  changeTeamPlan,
+  openCustomerPortal,
+  resumeTeamSubscription,
+} from "@/server/actions/billing";
+import { CancelSubscriptionDialog } from "./cancel-subscription-dialog";
 
 export interface BillingCardProps {
   /** Current team plan (source of truth for capabilities + quota). */
@@ -37,38 +51,50 @@ export interface BillingCardProps {
 }
 
 function formatPrice(cents: number): string {
-  if (cents === 0) return 'Free';
+  if (cents === 0) return "Free";
   const euros = cents / 100;
   // Deterministic format so SSR/CSR don't disagree.
   return `€${euros % 1 === 0 ? euros.toFixed(0) : euros.toFixed(2)}`;
 }
 
-function statusBadgeVariant(status: SubscriptionStatus | null): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusBadgeVariant(
+  status: SubscriptionStatus | null,
+): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
-    case 'active':
-    case 'trialing':
-      return 'default';
-    case 'past_due':
-    case 'unpaid':
-      return 'destructive';
-    case 'canceled':
-      return 'outline';
+    case "active":
+    case "trialing":
+      return "default";
+    case "past_due":
+    case "unpaid":
+      return "destructive";
+    case "canceled":
+      return "outline";
     default:
-      return 'secondary';
+      return "secondary";
   }
 }
 
-function statusLabel(status: SubscriptionStatus | null, cancelAtPeriodEnd: boolean): string {
-  if (!status) return 'Free plan';
-  if (cancelAtPeriodEnd && status === 'active') return 'Cancels at period end';
+function statusLabel(
+  status: SubscriptionStatus | null,
+  cancelAtPeriodEnd: boolean,
+): string {
+  if (!status) return "Free plan";
+  if (cancelAtPeriodEnd && status === "active") return "Cancels at period end";
   switch (status) {
-    case 'active': return 'Active';
-    case 'trialing': return 'In trial';
-    case 'past_due': return 'Payment past due';
-    case 'unpaid': return 'Unpaid';
-    case 'canceled': return 'Canceled';
-    case 'incomplete': return 'Incomplete';
-    default: return String(status);
+    case "active":
+      return "Active";
+    case "trialing":
+      return "In trial";
+    case "past_due":
+      return "Payment past due";
+    case "unpaid":
+      return "Unpaid";
+    case "canceled":
+      return "Canceled";
+    case "incomplete":
+      return "Incomplete";
+    default:
+      return String(status);
   }
 }
 
@@ -85,18 +111,19 @@ export function BillingCard({
 }: BillingCardProps) {
   const [isPending, startTransition] = useTransition();
   const [cancelOpen, setCancelOpen] = useState(false);
-  const initialInterval: BillingInterval = currentBillingInterval === 'year' ? 'yearly' : 'monthly';
+  const initialInterval: BillingInterval =
+    currentBillingInterval === "year" ? "yearly" : "monthly";
   const [interval, setInterval] = useState<BillingInterval>(initialInterval);
   const currentRank = planRank(plan);
   const currentConfig = planConfig(plan);
 
   const periodEndLabel = currentPeriodEnd
     ? new Date(currentPeriodEnd).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
+        year: "numeric",
+        month: "short",
+        day: "numeric",
       })
-    : '';
+    : "";
 
   function go(target: TeamPlan) {
     startTransition(async () => {
@@ -111,10 +138,12 @@ export function BillingCard({
           window.location.assign(url);
           return;
         }
-        toast.success('Plan updated');
+        toast.success("Plan updated");
         window.location.reload();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Could not update plan');
+        toast.error(
+          err instanceof Error ? err.message : "Could not update plan",
+        );
       }
     });
   }
@@ -123,10 +152,12 @@ export function BillingCard({
     startTransition(async () => {
       try {
         await resumeTeamSubscription();
-        toast.success('Subscription resumed');
+        toast.success("Subscription resumed");
         window.location.reload();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Could not resume subscription');
+        toast.error(
+          err instanceof Error ? err.message : "Could not resume subscription",
+        );
       }
     });
   }
@@ -137,7 +168,9 @@ export function BillingCard({
         const { url } = await openCustomerPortal();
         window.location.assign(url);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Could not open billing portal');
+        toast.error(
+          err instanceof Error ? err.message : "Could not open billing portal",
+        );
       }
     });
   }
@@ -155,26 +188,27 @@ export function BillingCard({
           </Badge>
         </div>
         <CardDescription>
-          Current plan: <span className="font-semibold">{currentConfig.name}</span>
-          {currentPeriodEnd && subscriptionStatus === 'active' && !cancelAtPeriodEnd && (
-            <> · renews {periodEndLabel}</>
-          )}
+          Current plan:{" "}
+          <span className="font-semibold">{currentConfig.name}</span>
+          {currentPeriodEnd &&
+            subscriptionStatus === "active" &&
+            !cancelAtPeriodEnd && <> · renews {periodEndLabel}</>}
           {currentPeriodEnd && cancelAtPeriodEnd && (
             <> · access until {periodEndLabel}</>
           )}
           {pendingPlanChange && !cancelAtPeriodEnd && (
-            <> · plan change scheduled for {periodEndLabel || 'period end'}</>
+            <> · plan change scheduled for {periodEndLabel || "period end"}</>
           )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {!stripeConfigured && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-            Billing is not configured on this instance. Set{' '}
-            <code className="font-mono">STRIPE_SECRET_KEY</code> and{' '}
-            <code className="font-mono">STRIPE_WEBHOOK_SECRET</code>, then run{' '}
-            <code className="font-mono">scripts/stripe-provision-test.mjs</code> to create the
-            product catalog in Stripe.
+            Billing is not configured on this instance. Set{" "}
+            <code className="font-mono">STRIPE_SECRET_KEY</code> and{" "}
+            <code className="font-mono">STRIPE_WEBHOOK_SECRET</code>, then run{" "}
+            <code className="font-mono">scripts/stripe-provision-test.mjs</code>{" "}
+            to create the product catalog in Stripe.
           </div>
         )}
 
@@ -184,20 +218,22 @@ export function BillingCard({
             {/* Active state mirrors the tests page tabs (ui/tabs TabsTrigger). */}
             <button
               type="button"
-              className={`px-3 py-1 rounded ${interval === 'monthly' ? 'bg-accent text-accent-foreground shadow-sm' : 'text-muted-foreground'}`}
-              onClick={() => setInterval('monthly')}
+              className={`px-3 py-1 rounded ${interval === "monthly" ? "bg-accent text-accent-foreground shadow-sm" : "text-muted-foreground"}`}
+              onClick={() => setInterval("monthly")}
               disabled={isPending}
             >
               Monthly
             </button>
             <button
               type="button"
-              className={`px-3 py-1 rounded flex items-center gap-1.5 ${interval === 'yearly' ? 'bg-accent text-accent-foreground shadow-sm' : 'text-muted-foreground'}`}
-              onClick={() => setInterval('yearly')}
+              className={`px-3 py-1 rounded flex items-center gap-1.5 ${interval === "yearly" ? "bg-accent text-accent-foreground shadow-sm" : "text-muted-foreground"}`}
+              onClick={() => setInterval("yearly")}
               disabled={isPending}
             >
               Yearly
-              <span className="text-[10px] uppercase tracking-wide opacity-80">2 mo. free</span>
+              <span className="text-[10px] uppercase tracking-wide opacity-80">
+                2 mo. free
+              </span>
             </button>
           </div>
         </div>
@@ -208,19 +244,19 @@ export function BillingCard({
             const isCurrent = p.id === plan;
             const isUpgrade = targetRank > currentRank;
             const label = isCurrent
-              ? 'Current plan'
+              ? "Current plan"
               : isUpgrade
                 ? `Upgrade to ${p.name}`
                 : `Switch to ${p.name}`;
             const price = p[interval].displayCents;
             const fullPrice = p[interval].fullCents;
             const discounted = price < fullPrice;
-            const priceLabel = interval === 'yearly' ? '/yr' : '/mo';
+            const priceLabel = interval === "yearly" ? "/yr" : "/mo";
 
             return (
               <div
                 key={p.id}
-                className={`rounded-lg border p-4 flex flex-col gap-3 ${isCurrent ? 'border-primary bg-primary/5' : 'border-border'}`}
+                className={`rounded-lg border p-4 flex flex-col gap-3 ${isCurrent ? "border-primary bg-primary/5" : "border-border"}`}
               >
                 <div>
                   <div className="flex items-baseline justify-between">
@@ -229,7 +265,7 @@ export function BillingCard({
                       {/* Until live Stripe prices are available, show an XX
                           placeholder instead of hardcoded amounts. */}
                       <div className="text-lg font-bold">
-                        {p.available ? formatPrice(price) : '€XX'}
+                        {p.available ? formatPrice(price) : "€XX"}
                         {p.available && price > 0 && (
                           // whitespace-nowrap keeps "/mo + tax" together — at
                           // narrow widths the whole suffix wraps under the
@@ -241,12 +277,15 @@ export function BillingCard({
                       </div>
                       {p.available && discounted && (
                         <div className="text-xs text-muted-foreground line-through whitespace-nowrap">
-                          {formatPrice(fullPrice)}{priceLabel}
+                          {formatPrice(fullPrice)}
+                          {priceLabel}
                         </div>
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">{p.tagline}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {p.tagline}
+                  </p>
                 </div>
 
                 <ul className="space-y-1 text-xs flex-1">
@@ -267,7 +306,9 @@ export function BillingCard({
                     !p.available ||
                     isPending
                   }
-                  variant={isCurrent ? 'outline' : isUpgrade ? 'default' : 'secondary'}
+                  variant={
+                    isCurrent ? "outline" : isUpgrade ? "default" : "secondary"
+                  }
                   size="sm"
                 >
                   {label}
@@ -278,10 +319,11 @@ export function BillingCard({
         </div>
 
         {/* Free tier reminder */}
-        {plan === 'free' && (
+        {plan === "free" && (
           <p className="text-xs text-muted-foreground">
-            You&apos;re on the {planConfig('free').name} plan — shared runner pool, 500 capped
-            runner-minutes. Paid plans add priority run-minutes, more projects, and CI integrations.
+            You&apos;re on the {planConfig("free").name} plan — shared runner
+            pool, 500 capped runner-minutes. Paid plans add priority
+            run-minutes, more projects, and CI integrations.
           </p>
         )}
 

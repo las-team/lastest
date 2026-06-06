@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useTransition } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useTransition } from "react";
+import { AlertTriangle, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -10,9 +10,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { cancelTeamSubscription } from '@/server/actions/billing';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { cancelTeamSubscription } from "@/server/actions/billing";
 
 interface CancelSubscriptionDialogProps {
   open: boolean;
@@ -49,12 +49,12 @@ export function CancelSubscriptionDialog({
         toast.success(
           periodEndLabel
             ? `Subscription will end on ${periodEndLabel}`
-            : 'Subscription will end at period end',
+            : "Subscription will end at period end",
         );
         onOpenChange(false);
         window.location.reload();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to cancel');
+        toast.error(err instanceof Error ? err.message : "Failed to cancel");
       }
     });
   }
@@ -81,7 +81,11 @@ export function CancelSubscriptionDialog({
         </DialogHeader>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={pending}
+          >
             Keep subscription
           </Button>
           <Button variant="default" onClick={submit} disabled={pending}>

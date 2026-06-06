@@ -84,7 +84,9 @@ export function RunUsageCard({
         : "bg-green-500";
 
   const minutesDisplay =
-    runMinutesThisMonth < 10 ? runMinutesThisMonth.toFixed(1) : formatNumber(runMinutesThisMonth);
+    runMinutesThisMonth < 10
+      ? runMinutesThisMonth.toFixed(1)
+      : formatNumber(runMinutesThisMonth);
 
   // Defer relative-time formatting to after mount; `new Date()` inside
   // formatRelativeTime would otherwise produce different "Xm ago" strings on

@@ -96,7 +96,9 @@ export async function getTeamRunUsage(teamId: string) {
     runMinutesThisMonth: minutes,
     usageMonth: sameMonth ? team.usageMonth : month,
     runUsageLastCalculatedAt: team.runUsageLastCalculatedAt,
-    percentUsed: quota > 0 ? Math.round((runs / quota) * 100) : 0,
+    // Quota is denominated in run-minutes (plans.ts / Stripe metadata),
+    // so the percentage must measure minutes used, not the run count.
+    percentUsed: quota > 0 ? Math.round((minutes / quota) * 100) : 0,
   };
 }
 

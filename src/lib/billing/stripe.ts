@@ -8,7 +8,7 @@
  * the export stays so future code that needs the client doesn't have
  * to re-wire the env-var plumbing.
  */
-import Stripe from 'stripe';
+import Stripe from "stripe";
 
 let cachedClient: Stripe | null = null;
 
@@ -18,7 +18,7 @@ export function getStripeClient(): Stripe | null {
   if (!key) return null;
   cachedClient = new Stripe(key, {
     typescript: true,
-    appInfo: { name: 'lastest', version: '0.1.0' },
+    appInfo: { name: "lastest", version: "0.1.0" },
   });
   return cachedClient;
 }

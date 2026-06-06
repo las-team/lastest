@@ -78,7 +78,12 @@ import { DeleteRepoDialog } from "@/components/settings/delete-repo-dialog";
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; error?: string; checkout?: string; billing?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    checkout?: string;
+    billing?: string;
+  }>;
 }) {
   const params = await searchParams;
   const session = await getCurrentSession();
@@ -160,7 +165,10 @@ export default async function SettingsPage({
   // either direction (false "cancellation scheduled" / false "no changes").
   let cancelAtPeriodEnd = Boolean(teamBilling?.subscriptionCancelAtPeriodEnd);
   let billingPeriodEnd = teamBilling?.subscriptionCurrentPeriodEnd ?? null;
-  if (params.billing === "cancel_pending" && teamBilling?.stripeSubscriptionId) {
+  if (
+    params.billing === "cancel_pending" &&
+    teamBilling?.stripeSubscriptionId
+  ) {
     const stripe = getStripeClient();
     if (stripe) {
       try {
@@ -618,36 +626,39 @@ export default async function SettingsPage({
       {/* Billing — plan + checkout + cancel (admin-only) */}
       {isAdmin && teamBilling && (
         <div id="billing" className="space-y-2">
-          {params.checkout === 'success' && (
+          {params.checkout === "success" && (
             <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
-              Subscription updated. It may take a moment for the new plan to appear here while Stripe sends the webhook.
+              Subscription updated. It may take a moment for the new plan to
+              appear here while Stripe sends the webhook.
             </div>
           )}
-          {params.billing === 'plan_changed' && (
+          {params.billing === "plan_changed" && (
             <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
-              Plan changed. Stripe will prorate the difference on your next invoice.
+              Plan changed. Stripe will prorate the difference on your next
+              invoice.
             </div>
           )}
-          {params.billing === 'downgrade_scheduled' && (
+          {params.billing === "downgrade_scheduled" && (
             <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
-              Downgrade scheduled — your current plan stays active until the end of the billing
-              period, then the new plan takes over. Nothing is charged today.
+              Downgrade scheduled — your current plan stays active until the end
+              of the billing period, then the new plan takes over. Nothing is
+              charged today.
             </div>
           )}
           {/* State-aware: cancelAtPeriodEnd/billingPeriodEnd are read live
               from Stripe on this param (see above), so this never claims a
               cancellation that didn't happen — or misses one that did. */}
-          {params.billing === 'cancel_pending' &&
+          {params.billing === "cancel_pending" &&
             (cancelAtPeriodEnd ? (
               <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-                Cancellation scheduled — your plan stays active until{' '}
+                Cancellation scheduled — your plan stays active until{" "}
                 {billingPeriodEnd
-                  ? billingPeriodEnd.toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
+                  ? billingPeriodEnd.toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
                     })
-                  : 'the end of the billing period'}
+                  : "the end of the billing period"}
                 .
               </div>
             ) : (
@@ -655,11 +666,11 @@ export default async function SettingsPage({
                 No changes made — your subscription is still active.
               </div>
             ))}
-          {(params.billing === 'error' || params.checkout === 'cancelled') && (
+          {(params.billing === "error" || params.checkout === "cancelled") && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-              {params.checkout === 'cancelled'
-                ? 'Checkout cancelled.'
-                : 'Something went wrong with the billing change. Please try again or contact support.'}
+              {params.checkout === "cancelled"
+                ? "Checkout cancelled."
+                : "Something went wrong with the billing change. Please try again or contact support."}
             </div>
           )}
           <BillingCard
@@ -674,8 +685,16 @@ export default async function SettingsPage({
             stripeConfigured={stripeConfigured}
           />
           <div className="text-right">
-            <Button asChild variant="link" size="sm" className="text-xs h-auto p-0">
-              <Link href="/settings/billing">Open full billing page <CreditCard className="w-3 h-3 ml-1 inline" /></Link>
+            <Button
+              asChild
+              variant="link"
+              size="sm"
+              className="text-xs h-auto p-0"
+            >
+              <Link href="/settings/billing">
+                Open full billing page{" "}
+                <CreditCard className="w-3 h-3 ml-1 inline" />
+              </Link>
             </Button>
           </div>
         </div>
