@@ -1420,7 +1420,7 @@ export const DEFAULT_AI_SETTINGS = {
 };
 
 // AI Prompt Logging for debugging and auditing
-export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value';
+export type AIActionType = 'create_test' | 'fix_test' | 'enhance_test' | 'scan_routes' | 'test_connection' | 'mcp_explore' | 'analyze_diff' | 'extract_user_stories' | 'generate_spec_tests' | 'classify_template' | 'agent_discover' | 'agent_generate' | 'agent_heal' | 'agent_play' | 'triage' | 'generate_var_value' | 'suggest_app_fix';
 export type AILogStatus = 'pending' | 'success' | 'error';
 
 export const aiPromptLogs = pgTable('ai_prompt_logs', {
@@ -3240,6 +3240,46 @@ export const buildDemoNotes = pgTable('build_demo_notes', {
 
 export type BuildDemoNotesRow = typeof buildDemoNotes.$inferSelect;
 export type NewBuildDemoNotesRow = typeof buildDemoNotes.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// App-fix suggestions — "Fix the app" loop (E5)
+// ---------------------------------------------------------------------------
+//
+// When a failure is classified `real_regression`, the advisor produces a
+// structured *application-code* fix recommendation that is returned to the
+// calling coding agent (never auto-applied). Distinct from the test healer,
+// which patches test code.
+
+export interface AppFixSuggestionFile {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  currentSnippet?: string;
+  suggestedSnippet?: string;
+  rationale: string;
+}
+
+export interface AppFixSuggestion {
+  summary: string;
+  classification: 'real_regression';
+  confidence: number;
+  files: AppFixSuggestionFile[];
+  /** Files from the build's change map that likely introduced the regression. */
+  relatedChangeMapFiles?: string[];
+  generatedAt: string;
+  modelId: string;
+}
+
+export const appFixSuggestions = pgTable('app_fix_suggestions', {
+  id: text('id').primaryKey(),
+  buildId: text('build_id').references(() => builds.id, { onDelete: 'cascade' }),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }),
+  payload: jsonb('payload').$type<AppFixSuggestion>().notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+});
+
+export type AppFixSuggestionRow = typeof appFixSuggestions.$inferSelect;
+export type NewAppFixSuggestionRow = typeof appFixSuggestions.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Verify phase — Per-layer baselines (v1.14+)

@@ -124,6 +124,10 @@ export class LastestClient {
     return this.post('/api/v1/validate-diff', opts);
   }
 
+  async suggestAppFix(testId: string, opts?: { buildId?: string }): Promise<Record<string, unknown>> {
+    return this.post(`/api/v1/tests/${testId}/suggest-app-fix`, { buildId: opts?.buildId });
+  }
+
   async revokeShare(shareId: string): Promise<{ success: boolean }> {
     return this.del(`/api/v1/shares/${shareId}`);
   }

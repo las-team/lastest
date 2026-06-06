@@ -1272,6 +1272,31 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_suggest_app_fix ---
+  server.tool(
+    'lastest_suggest_app_fix',
+    'For a failing test classified as a real regression, get a structured APPLICATION-code fix recommendation (file, snippet, rationale) localized against the build\'s change map. This is the "fix the app" loop: it complements lastest_heal_test (which fixes the *test*). The suggestion is advisory only — Lastest never edits your application code; review and apply it yourself. Returns `not_a_regression` when the failure was triaged as flaky/environment/test-maintenance.',
+    {
+      testId: z.string().describe('A failing test (ideally already triaged as real_regression)'),
+      buildId: z.string().optional().describe('Build context; defaults to the test\'s latest failing build'),
+    },
+    withActivityReporting(client, 'lastest_suggest_app_fix', async (params) => {
+      const result = await client.suggestAppFix(params.testId as string, {
+        buildId: params.buildId as string | undefined,
+      });
+      const status = result.status as string;
+      const response: ToolResponse = {
+        status,
+        summary: result.summary as string,
+        actionRequired: status === 'app_fix_suggested'
+          ? ['Review the suggested change and apply it manually — Lastest does not modify application code. Then re-run lastest_validate_diff or lastest_run_tests.']
+          : undefined,
+        details: result,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(response, null, 2) }] };
+    }),
+  );
+
   // ===== Storage States (saved Playwright auth blobs) =====
 
   // --- lastest_list_storage_states ---

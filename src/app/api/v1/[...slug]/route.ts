@@ -1348,6 +1348,33 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // Suggest an application-code fix for a real_regression failure:
+    // POST /api/v1/tests/:id/suggest-app-fix   Body: { buildId? }
+    // Returns a recommendation only — never applies changes.
+    if (resource === 'tests' && slug[2] === 'suggest-app-fix') {
+      const testId = slug[1];
+      if (!testId) {
+        return NextResponse.json({ error: 'testId required' }, { status: 400 });
+      }
+      const test = await queries.getTest(testId);
+      if (!test) {
+        return NextResponse.json({ error: 'Test not found' }, { status: 404 });
+      }
+      if (test.repositoryId) {
+        if (!(await verifyRepoOwnership(test.repositoryId, session))) {
+          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        }
+      }
+      const body = (await request.json().catch(() => ({}))) as { buildId?: string };
+      const { suggestAppFix } = await import('@/lib/ai/app-fix-advisor');
+      const result = await suggestAppFix({
+        repositoryId: test.repositoryId!,
+        testId,
+        buildId: typeof body.buildId === 'string' ? body.buildId : undefined,
+      });
+      return NextResponse.json(result);
+    }
+
     // Approve single diff: POST /api/v1/diffs/:id/approve
     if (resource === 'diffs' && id && subResource === 'approve') {
       if (!(await verifyDiffOwnership(id, session))) {
