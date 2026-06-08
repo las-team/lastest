@@ -319,7 +319,7 @@ export function BillingCard({
                   ))}
                 </ul>
 
-                {subscriptionStatus ? (
+                {subscriptionStatus && subscriptionStatus !== "canceled" ? (
                   // Existing subscribers change plans in the Stripe Customer
                   // Portal (the "Manage" button below) — the grid stays a
                   // read-only comparison, current plan marked.
@@ -328,6 +328,17 @@ export function BillingCard({
                       Current plan
                     </Badge>
                   ) : null
+                ) : subscriptionStatus === "canceled" ? (
+                  <Button
+                    onClick={() => go(p.id)}
+                    disabled={
+                      !isAdmin || !stripeConfigured || !p.available || isPending
+                    }
+                    variant={isUpgrade ? "default" : "secondary"}
+                    size="sm"
+                  >
+                    {label}
+                  </Button>
                 ) : (
                   // No subscription yet (free tier): the Portal can't
                   // bootstrap a subscription, so first purchase still goes
@@ -379,20 +390,27 @@ export function BillingCard({
                   Resume
                 </Button>
               ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={cancel}
-                  disabled={!isAdmin || !stripeConfigured || isPending}
-                >
-                  Cancel subscription
-                </Button>
+                plan !== "free" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={cancel}
+                    disabled={!isAdmin || !stripeConfigured || isPending}
+                  >
+                    Cancel subscription
+                  </Button>
+                )
               )}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={manage}
-                disabled={!isAdmin || !stripeConfigured || isPending}
+                disabled={
+                  !isAdmin ||
+                  !stripeConfigured ||
+                  !subscriptionStatus ||
+                  isPending
+                }
               >
                 Manage <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
               </Button>
