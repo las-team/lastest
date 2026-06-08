@@ -18,6 +18,7 @@ import {
   handleSubscriptionDeleted,
 } from "./webhook-sync";
 import { planConfig } from "./plans";
+import { getStripeClient } from "@/lib/billing/stripe";
 
 vi.mock("@/lib/db/queries", () => ({
   getTeam: vi.fn(),
@@ -31,15 +32,37 @@ vi.mock("./catalog", () => ({
   getCatalog: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/lib/billing/stripe", () => ({
+  getStripeClient: vi.fn(() => null),
+}));
+
 const getTeam = vi.mocked(queries.getTeam);
 const updateTeam = vi.mocked(queries.updateTeam);
 const resolvePrice = vi.mocked(resolvePlanForPriceId);
+const stripeClient = vi.mocked(getStripeClient);
+
+/** Stripe stub whose subscriptions.list returns the given subs. */
+function fakeStripe(subs: Array<{ status: string; priceId: string }>) {
+  return {
+    subscriptions: {
+      list: vi.fn().mockResolvedValue({
+        data: subs.map((s) => ({
+          status: s.status,
+          items: { data: [{ price: { id: s.priceId } }] },
+        })),
+      }),
+    },
+  } as unknown as ReturnType<typeof getStripeClient>;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   // `getTeam` returns a team currently on free unless a test overrides it.
   getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
   updateTeam.mockResolvedValue(undefined as never);
+  // Stripe unconfigured by default — deletion drops to free unless a test
+  // wires up a surviving subscription.
+  stripeClient.mockReturnValue(null);
   // Known price IDs resolve through the (mocked) dynamic catalog.
   resolvePrice.mockImplementation(async (priceId: string) => {
     if (priceId === "price_growth_monthly")
@@ -189,6 +212,51 @@ describe("handleSubscriptionUpdate", () => {
 describe("handleSubscriptionDeleted", () => {
   it("drops the team back to the free tier", async () => {
     getTeam.mockResolvedValue({ id: "team_1", plan: "pro" } as never);
+
+    await handleSubscriptionDeleted({
+      subscription: { referenceId: "team_1" },
+    });
+
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "free",
+      monthlyRunQuota: planConfig("free").monthlyRunQuota,
+    });
+  });
+
+  it("keeps the surviving plan when another live subscription remains", async () => {
+    // Cleanup of a duplicate: one sub is cancelled (fires this event) but
+    // the team still has an active Pro sub — it must NOT drop to free.
+    getTeam.mockResolvedValue({
+      id: "team_1",
+      plan: "pro",
+      stripeCustomerId: "cus_1",
+    } as never);
+    stripeClient.mockReturnValue(
+      fakeStripe([
+        { status: "canceled", priceId: "price_growth_monthly" },
+        { status: "active", priceId: "price_pro_yearly" },
+      ]),
+    );
+
+    await handleSubscriptionDeleted({
+      subscription: { referenceId: "team_1" },
+    });
+
+    expect(updateTeam).toHaveBeenCalledWith("team_1", {
+      plan: "pro",
+      monthlyRunQuota: planConfig("pro").monthlyRunQuota,
+    });
+  });
+
+  it("drops to free when the only remaining sub is canceled", async () => {
+    getTeam.mockResolvedValue({
+      id: "team_1",
+      plan: "growth",
+      stripeCustomerId: "cus_1",
+    } as never);
+    stripeClient.mockReturnValue(
+      fakeStripe([{ status: "canceled", priceId: "price_growth_monthly" }]),
+    );
 
     await handleSubscriptionDeleted({
       subscription: { referenceId: "team_1" },

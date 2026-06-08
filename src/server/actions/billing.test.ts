@@ -37,6 +37,10 @@ vi.mock("@/lib/billing/api", () => ({
   callBillingPortal: vi.fn(),
 }));
 
+vi.mock("@/lib/billing/stripe", () => ({
+  getStripeClient: vi.fn(() => null),
+}));
+
 import { requireCapability } from "@/lib/auth/capabilities";
 import * as queries from "@/lib/db/queries";
 import {
@@ -45,6 +49,17 @@ import {
   callRestoreSubscription,
   callBillingPortal,
 } from "@/lib/billing/api";
+import { getStripeClient } from "@/lib/billing/stripe";
+
+/**
+ * Minimal Stripe stub whose `subscriptions.list` returns the given live
+ * subscriptions — used to drive the double-subscription safeguards.
+ */
+function fakeStripe(subs: Array<{ id: string; status: string }>) {
+  return {
+    subscriptions: { list: vi.fn().mockResolvedValue({ data: subs }) },
+  } as unknown as ReturnType<typeof getStripeClient>;
+}
 import {
   startCheckout,
   changeTeamPlan,
@@ -94,6 +109,9 @@ const BILLING_ACTIVE_STARTER_MONTHLY = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(requireCapability).mockResolvedValue(SESSION);
+  // Default: Stripe unconfigured — the safeguards fall back to the local
+  // subscription id and never block. Individual tests override this.
+  vi.mocked(getStripeClient).mockReturnValue(null);
 });
 
 describe("startCheckout", () => {
@@ -156,6 +174,43 @@ describe("startCheckout", () => {
     await expect(startCheckout("starter", "monthly")).rejects.toThrow(
       /Forbidden/,
     );
+  });
+
+  it("refuses to start a second Checkout when a live Stripe subscription exists", async () => {
+    // The team already has a Stripe customer + live subscription. Starting
+    // a fresh Checkout here would create a SECOND subscription — the bug
+    // this guard exists to prevent.
+    vi.mocked(queries.getTeamBilling).mockResolvedValue({
+      ...BILLING_NONE,
+      stripeCustomerId: "cus_dup",
+    });
+    vi.mocked(getStripeClient).mockReturnValue(
+      fakeStripe([{ id: "sub_existing", status: "active" }]),
+    );
+
+    await expect(startCheckout("starter", "monthly")).rejects.toThrow(
+      /already has a subscription/i,
+    );
+    expect(callUpgradeSubscription).not.toHaveBeenCalled();
+  });
+
+  it("allows Checkout when Stripe shows only an abandoned (incomplete) sub", async () => {
+    // `incomplete` is an abandoned checkout that auto-expires; it must not
+    // block the user from retrying.
+    vi.mocked(queries.getTeamBilling).mockResolvedValue({
+      ...BILLING_NONE,
+      stripeCustomerId: "cus_x",
+    });
+    vi.mocked(getStripeClient).mockReturnValue(
+      fakeStripe([{ id: "sub_incomplete", status: "incomplete" }]),
+    );
+    vi.mocked(callUpgradeSubscription).mockResolvedValue({
+      url: "https://checkout.test/retry",
+    });
+
+    const result = await startCheckout("starter", "monthly");
+    expect(result.success).toBe(true);
+    expect(callUpgradeSubscription).toHaveBeenCalled();
   });
 
   it("does not write any audit-log row before redirecting to Checkout", async () => {
@@ -284,6 +339,55 @@ describe("changeTeamPlan", () => {
         annual: true,
         scheduleAtPeriodEnd: false,
       }),
+      expect.any(Headers),
+    );
+  });
+
+  it("pins the change to the live Stripe subscription id (forces in-place update)", async () => {
+    vi.mocked(queries.getTeamBilling).mockResolvedValue(
+      BILLING_ACTIVE_STARTER_MONTHLY,
+    );
+    vi.mocked(getStripeClient).mockReturnValue(
+      fakeStripe([{ id: "sub_live", status: "active" }]),
+    );
+    vi.mocked(callUpgradeSubscription).mockResolvedValue({});
+
+    await changeTeamPlan("pro", "monthly");
+
+    expect(callUpgradeSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ plan: "pro", subscriptionId: "sub_live" }),
+      expect.any(Headers),
+    );
+  });
+
+  it("refuses to change plan when Stripe shows multiple live subscriptions", async () => {
+    vi.mocked(queries.getTeamBilling).mockResolvedValue(
+      BILLING_ACTIVE_STARTER_MONTHLY,
+    );
+    vi.mocked(getStripeClient).mockReturnValue(
+      fakeStripe([
+        { id: "sub_a", status: "active" },
+        { id: "sub_b", status: "active" },
+      ]),
+    );
+
+    await expect(changeTeamPlan("pro", "monthly")).rejects.toThrow(
+      /multiple active subscriptions/i,
+    );
+    expect(callUpgradeSubscription).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the local subscription id when Stripe is unconfigured", async () => {
+    vi.mocked(queries.getTeamBilling).mockResolvedValue(
+      BILLING_ACTIVE_STARTER_MONTHLY,
+    );
+    vi.mocked(getStripeClient).mockReturnValue(null);
+    vi.mocked(callUpgradeSubscription).mockResolvedValue({});
+
+    await changeTeamPlan("pro", "monthly");
+
+    expect(callUpgradeSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionId: "sub_123" }),
       expect.any(Headers),
     );
   });

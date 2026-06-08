@@ -10,8 +10,9 @@
  * mapping logic is unit-testable without standing up better-auth.
  */
 import * as queries from "@/lib/db/queries";
-import { planConfig } from "@/lib/billing/plans";
+import { planConfig, planRank } from "@/lib/billing/plans";
 import { resolvePlanForPriceId, getCatalog } from "@/lib/billing/catalog";
+import { getStripeClient } from "@/lib/billing/stripe";
 import type { TeamPlan } from "@/lib/db/schema";
 
 /**
@@ -98,9 +99,42 @@ export async function handleSubscriptionUpdate({
   await syncTeamPlanForBilling(subscription.referenceId, planId);
 }
 
-/** Subscription ended (cancelled past period end / unpaid) — drop to free. */
+/**
+ * Highest-ranked plan the team still has a live (active/trialing) Stripe
+ * subscription for, or null if none / Stripe unreachable. Used so that
+ * deleting ONE subscription doesn't revoke a team that still has another
+ * (the duplicate-subscription cleanup case, and defense in depth).
+ */
+async function survivingPaidPlan(teamId: string): Promise<TeamPlan | null> {
+  const team = await queries.getTeam(teamId);
+  const customerId = team?.stripeCustomerId;
+  if (!customerId) return null;
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+  const { data } = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  let best: TeamPlan | null = null;
+  for (const sub of data) {
+    if (sub.status !== "active" && sub.status !== "trialing") continue;
+    const priceId = sub.items.data[0]?.price.id;
+    const plan = priceId ? (await resolvePlanForPriceId(priceId))?.plan : null;
+    if (plan && (best === null || planRank(plan) > planRank(best))) best = plan;
+  }
+  return best;
+}
+
+/**
+ * Subscription ended (cancelled past period end / unpaid). Drop to free
+ * ONLY if no other live subscription remains for the team — otherwise
+ * keep the surviving plan so cancelling a duplicate (or any one of
+ * several subs) can't strip a still-paying team of its tier.
+ */
 export async function handleSubscriptionDeleted({
   subscription,
 }: SubscriptionDeletedPayload): Promise<void> {
-  await syncTeamPlanForBilling(subscription.referenceId, "free");
+  const surviving = await survivingPaidPlan(subscription.referenceId);
+  await syncTeamPlanForBilling(subscription.referenceId, surviving ?? "free");
 }

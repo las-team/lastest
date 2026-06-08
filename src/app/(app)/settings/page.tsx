@@ -8,18 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
-import {
-  Github,
-  Check,
-  X,
-  Users,
-  Bot,
-  Mail,
-  Terminal,
-  CreditCard,
-} from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -684,19 +673,6 @@ export default async function SettingsPage({
             isAdmin={isAdmin}
             stripeConfigured={stripeConfigured}
           />
-          <div className="text-right">
-            <Button
-              asChild
-              variant="link"
-              size="sm"
-              className="text-xs h-auto p-0"
-            >
-              <Link href="/settings/billing">
-                Open full billing page{" "}
-                <CreditCard className="w-3 h-3 ml-1 inline" />
-              </Link>
-            </Button>
-          </div>
         </div>
       )}
 

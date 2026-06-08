@@ -5,6 +5,8 @@ import * as queries from "@/lib/db/queries";
 import { isStripeConfigured } from "@/lib/billing/stripe";
 import { getCatalog, toUiCatalog } from "@/lib/billing/catalog";
 import { BillingCard } from "@/components/settings/billing-card-client";
+import { StorageUsageCard } from "@/components/settings/storage-usage-card-client";
+import { RunUsageCard } from "@/components/settings/run-usage-card-client";
 
 export default async function BillingSettingsPage({
   searchParams,
@@ -19,9 +21,16 @@ export default async function BillingSettingsPage({
   }
 
   const teamId = session.team!.id;
-  const billing = await queries.getTeamBilling(teamId);
+  const [billing, runUsage, storageUsage] = await Promise.all([
+    queries.getTeamBilling(teamId),
+    queries.getTeamRunUsage(teamId),
+    queries.getTeamStorageUsage(teamId),
+  ]);
 
   const stripeConfigured = isStripeConfigured();
+  const storageEnforcementEnabled =
+    process.env.ENFORCE_STORAGE_LIMITS === "true";
+  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === "true";
   // Live paid-tier catalog from Stripe (TTL-cached; static fallback when
   // unconfigured/unreachable). Display prices are computed here so the
   // client never reads the server-only EA flag.
@@ -75,6 +84,33 @@ export default async function BillingSettingsPage({
           currentBillingInterval={billing.billingInterval}
           isAdmin={true}
           stripeConfigured={stripeConfigured}
+        />
+      )}
+
+      {/* Usage (read-only). Rendered here rather than inside BillingCard so
+          it isn't duplicated on /settings, which already shows these cards
+          above the billing section. */}
+      {storageUsage && (
+        <StorageUsageCard
+          usedBytes={storageUsage.storageUsedBytes}
+          quotaBytes={storageUsage.storageQuotaBytes}
+          lastCalculatedAt={
+            storageUsage.storageLastCalculatedAt?.toISOString() ?? null
+          }
+          isAdmin={true}
+          enforcementEnabled={storageEnforcementEnabled}
+        />
+      )}
+      {runUsage && (
+        <RunUsageCard
+          runsThisMonth={runUsage.runsThisMonth}
+          monthlyRunQuota={runUsage.monthlyRunQuota}
+          runMinutesThisMonth={runUsage.runMinutesThisMonth}
+          usageMonth={runUsage.usageMonth ?? ""}
+          lastCalculatedAt={
+            runUsage.runUsageLastCalculatedAt?.toISOString() ?? null
+          }
+          enforcementEnabled={runEnforcementEnabled}
         />
       )}
     </div>

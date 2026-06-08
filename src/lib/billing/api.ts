@@ -17,6 +17,14 @@ interface UpgradeBody {
   plan: string;
   customerType?: "user" | "organization";
   referenceId?: string;
+  /**
+   * Pin the plan change to a SPECIFIC Stripe subscription id. The plugin
+   * otherwise decides "update vs new Checkout" from our local
+   * `subscription` table; when that row is briefly out of sync it can
+   * create a second subscription. Passing the live Stripe id forces the
+   * in-place update path (plugin index.mjs:709).
+   */
+  subscriptionId?: string;
   successUrl?: string;
   cancelUrl?: string;
   /**

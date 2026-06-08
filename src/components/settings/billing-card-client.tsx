@@ -23,8 +23,8 @@ import {
   changeTeamPlan,
   openCustomerPortal,
   resumeTeamSubscription,
+  cancelTeamSubscription,
 } from "@/server/actions/billing";
-import { CancelSubscriptionDialog } from "./cancel-subscription-dialog";
 
 export interface BillingCardProps {
   /** Current team plan (source of truth for capabilities + quota). */
@@ -110,7 +110,6 @@ export function BillingCard({
   stripeConfigured,
 }: BillingCardProps) {
   const [isPending, startTransition] = useTransition();
-  const [cancelOpen, setCancelOpen] = useState(false);
   const initialInterval: BillingInterval =
     currentBillingInterval === "year" ? "yearly" : "monthly";
   const [interval, setInterval] = useState<BillingInterval>(initialInterval);
@@ -157,6 +156,29 @@ export function BillingCard({
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Could not resume subscription",
+        );
+      }
+    });
+  }
+
+  function cancel() {
+    startTransition(async () => {
+      try {
+        // Cancellation is confirmed in the Stripe Customer Portal — the
+        // action returns a portal URL. We don't show our own confirm
+        // dialog; Stripe's portal collects the confirmation and the
+        // `customer.subscription.updated` webhook flips cancelAtPeriodEnd
+        // on return.
+        const { url } = await cancelTeamSubscription();
+        if (url) {
+          window.location.assign(url);
+          return;
+        }
+        toast.success("Subscription will end at period end");
+        window.location.reload();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not cancel subscription",
         );
       }
     });
@@ -297,22 +319,30 @@ export function BillingCard({
                   ))}
                 </ul>
 
-                <Button
-                  onClick={() => go(p.id)}
-                  disabled={
-                    (isCurrent && initialInterval === interval) ||
-                    !isAdmin ||
-                    !stripeConfigured ||
-                    !p.available ||
-                    isPending
-                  }
-                  variant={
-                    isCurrent ? "outline" : isUpgrade ? "default" : "secondary"
-                  }
-                  size="sm"
-                >
-                  {label}
-                </Button>
+                {subscriptionStatus ? (
+                  // Existing subscribers change plans in the Stripe Customer
+                  // Portal (the "Manage" button below) — the grid stays a
+                  // read-only comparison, current plan marked.
+                  isCurrent ? (
+                    <Badge variant="outline" className="w-fit">
+                      Current plan
+                    </Badge>
+                  ) : null
+                ) : (
+                  // No subscription yet (free tier): the Portal can't
+                  // bootstrap a subscription, so first purchase still goes
+                  // through Stripe Checkout.
+                  <Button
+                    onClick={() => go(p.id)}
+                    disabled={
+                      !isAdmin || !stripeConfigured || !p.available || isPending
+                    }
+                    variant={isUpgrade ? "default" : "secondary"}
+                    size="sm"
+                  >
+                    {label}
+                  </Button>
+                )}
               </div>
             );
           })}
@@ -352,7 +382,7 @@ export function BillingCard({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setCancelOpen(true)}
+                  onClick={cancel}
                   disabled={!isAdmin || !stripeConfigured || isPending}
                 >
                   Cancel subscription
@@ -375,13 +405,6 @@ export function BillingCard({
             Only team owners and admins can change billing.
           </p>
         )}
-
-        <CancelSubscriptionDialog
-          open={cancelOpen}
-          onOpenChange={setCancelOpen}
-          planName={currentConfig.name}
-          periodEndLabel={periodEndLabel}
-        />
       </CardContent>
     </Card>
   );

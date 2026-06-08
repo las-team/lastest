@@ -15,9 +15,52 @@ import {
   callRestoreSubscription,
   callBillingPortal,
 } from "@/lib/billing/api";
+import { getStripeClient } from "@/lib/billing/stripe";
 import type { TeamPlan } from "@/lib/db/schema";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+/**
+ * Stripe statuses that mean a subscription already "occupies" the team —
+ * a new Checkout must NOT be started while one of these exists, or the
+ * team ends up paying for two subscriptions. `incomplete` /
+ * `incomplete_expired` are excluded on purpose: those are abandoned
+ * checkouts that auto-expire, and blocking on them would lock a user out
+ * of retrying for ~23h.
+ */
+const OCCUPYING_SUB_STATUSES = new Set<string>([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+]);
+
+/**
+ * Source-of-truth check against double-subscribing. The better-auth
+ * plugin picks "update existing vs create new Checkout" from our local
+ * `subscription` table; a brief sync gap there can make it create a
+ * SECOND Stripe subscription on the same customer. We ask Stripe
+ * directly so the guard never trusts stale local state.
+ *
+ * Returns the live Stripe subscription ids (empty when none / Stripe
+ * unconfigured / no customer yet).
+ */
+async function liveStripeSubscriptionIds(
+  customerId: string | null | undefined,
+): Promise<string[]> {
+  if (!customerId) return [];
+  const stripe = getStripeClient();
+  if (!stripe) return [];
+  const subs = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  return subs.data
+    .filter((s) => OCCUPYING_SUB_STATUSES.has(s.status))
+    .map((s) => s.id);
+}
 
 /**
  * Fail-closed tenant guard. Today every action passes
@@ -67,6 +110,19 @@ export async function startCheckout(
   const cfg = planConfig(plan);
   if (!cfg.purchasable) {
     throw new Error(`Plan "${plan}" is not purchasable`);
+  }
+
+  // Never start a second Checkout while a live subscription exists — that
+  // is how a team ends up with two subscriptions. Checked against Stripe,
+  // not our local table, so a webhook sync gap can't slip a duplicate
+  // through. Callers that want to CHANGE an existing plan go through
+  // changeTeamPlan (in-place update), not here.
+  const billing = await queries.getTeamBilling(session.team.id);
+  assertBillingOwnedByTeam(billing, session.team.id);
+  if ((await liveStripeSubscriptionIds(billing?.stripeCustomerId)).length > 0) {
+    throw new Error(
+      'This team already has a subscription. Use "Manage" to change your plan.',
+    );
   }
 
   const result = await callUpgradeSubscription(
@@ -132,12 +188,26 @@ export async function changeTeamPlan(
       interval === "monthly");
   const billingParam = isDowngrade ? "downgrade_scheduled" : "plan_changed";
 
+  // Pin the change to the team's real live Stripe subscription. This
+  // forces the plugin's in-place update path even if our local row is
+  // briefly stale (otherwise it can spin up a second subscription). If
+  // Stripe shows more than one live sub the team is already in the bad
+  // state — refuse rather than mutate an ambiguous target.
+  const liveIds = await liveStripeSubscriptionIds(billing.stripeCustomerId);
+  if (liveIds.length > 1) {
+    throw new Error(
+      "This team has multiple active subscriptions. Contact support to consolidate them before changing plans.",
+    );
+  }
+  const subscriptionId = liveIds[0] ?? billing.stripeSubscriptionId;
+
   const result = await callUpgradeSubscription(
     {
       plan,
       annual: interval === "yearly",
       customerType: "organization",
       referenceId: session.team.id,
+      subscriptionId,
       scheduleAtPeriodEnd: isDowngrade,
       successUrl: `${APP_URL}/settings?billing=${billingParam}#billing`,
       cancelUrl: `${APP_URL}/settings#billing`,
