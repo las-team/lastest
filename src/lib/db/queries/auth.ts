@@ -32,6 +32,7 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+import { planConfig } from "@/lib/billing/plans";
 
 function generateSlug(name: string): string {
   return name
@@ -58,10 +59,14 @@ export async function createTeam(data: {
     counter++;
   }
 
+  // New teams start on the free tier with the free-tier run quota — the
+  // schema-level default (500) is kept generous for back-compat, but new
+  // signups should match the public pricing page.
   await db.insert(teams).values({
     id,
     name: data.name,
     slug,
+    monthlyRunQuota: planConfig("free").monthlyRunQuota,
     createdAt: now,
     updatedAt: now,
   });

@@ -45,6 +45,13 @@ export async function updateTeamStorageUsage(
     .where(eq(teams.id, teamId));
 }
 
+/**
+ * PRIVILEGED: sets a team's storage quota with no auth check of its own.
+ * Quota is a paid-plan entitlement — any caller MUST first pass
+ * `requireCapability('team:admin')` (or be a trusted system/webhook
+ * path). Has no callers today; keep it that way unless the call site is
+ * behind an admin guard, or this becomes a tenant-escalation vector.
+ */
 export async function updateTeamStorageQuota(
   teamId: string,
   quotaBytes: number,
@@ -89,7 +96,9 @@ export async function getTeamRunUsage(teamId: string) {
     runMinutesThisMonth: minutes,
     usageMonth: sameMonth ? team.usageMonth : month,
     runUsageLastCalculatedAt: team.runUsageLastCalculatedAt,
-    percentUsed: quota > 0 ? Math.round((runs / quota) * 100) : 0,
+    // Quota is denominated in run-minutes (plans.ts / Stripe metadata),
+    // so the percentage must measure minutes used, not the run count.
+    percentUsed: quota > 0 ? Math.round((minutes / quota) * 100) : 0,
   };
 }
 
@@ -101,7 +110,7 @@ export async function getTeamRunUsage(teamId: string) {
 export async function recordTeamRunCompletion(
   teamId: string,
   durationMs: number,
-) {
+): Promise<void> {
   const month = currentUsageMonth();
   const minutes = Math.max(0, durationMs) / 60_000;
   await db
@@ -115,6 +124,12 @@ export async function recordTeamRunCompletion(
     .where(eq(teams.id, teamId));
 }
 
+/**
+ * PRIVILEGED: sets a team's monthly run quota with no auth check of its
+ * own. Same contract as {@link updateTeamStorageQuota} — only call from
+ * behind `requireCapability('team:admin')` or a trusted billing/webhook
+ * path (the plan-sync in `webhook-sync.ts` is the legitimate writer).
+ */
 export async function updateTeamRunQuota(teamId: string, quota: number) {
   await db
     .update(teams)

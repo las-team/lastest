@@ -1,1 +1,2 @@
+bash scripts/git-hooks/check-stripe-keys.sh
 pnpm lint-staged --config .lintstagedrc.json

@@ -6,6 +6,14 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 
+const OCCUPYING_SUB_STATUSES = new Set<string>([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+]);
+
 export async function deleteMyAccount(
   confirmation: string,
 ): Promise<{ success: true } | { error: string }> {
@@ -17,6 +25,21 @@ export async function deleteMyAccount(
     return {
       error: `Confirmation does not match. Type "${expected}" exactly to confirm.`,
     };
+  }
+
+  // Block account deletion while the team has an active subscription.
+  if (user.teamId) {
+    const billing = await queries.getTeamBilling(user.teamId);
+    if (
+      billing?.stripeSubscriptionId &&
+      (OCCUPYING_SUB_STATUSES.has(billing.subscriptionStatus ?? "") ||
+        billing.subscriptionCancelAtPeriodEnd)
+    ) {
+      return {
+        error:
+          "You must cancel your subscription before deleting your account.",
+      };
+    }
   }
 
   // If user is a team owner with other members, require ownership transfer first.
