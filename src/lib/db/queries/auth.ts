@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { encryptField, decryptField } from "@/lib/crypto";
 import {
   teams,
   users,
@@ -143,7 +144,12 @@ export async function getGithubAccountByTeam(teamId: string) {
     .select()
     .from(githubAccounts)
     .where(eq(githubAccounts.teamId, teamId));
-  return row;
+  if (!row) return row;
+  return {
+    ...row,
+    accessToken: decryptField(row.accessToken),
+    refreshToken: decryptField(row.refreshToken),
+  };
 }
 
 // Team-scoped invitations
@@ -349,6 +355,21 @@ export async function createLaunchToken(data: {
 // OAuth Accounts
 // ============================================
 
+function decryptOAuthRow<
+  T extends {
+    accessToken?: string | null;
+    refreshToken?: string | null;
+    idToken?: string | null;
+  },
+>(row: T): T {
+  return {
+    ...row,
+    accessToken: decryptField(row.accessToken),
+    refreshToken: decryptField(row.refreshToken),
+    idToken: decryptField(row.idToken),
+  };
+}
+
 export async function getOAuthAccount(
   provider: string,
   providerAccountId: string,
@@ -362,14 +383,16 @@ export async function getOAuthAccount(
         eq(oauthAccounts.providerAccountId, providerAccountId),
       ),
     );
-  return row;
+  if (!row) return row;
+  return decryptOAuthRow(row);
 }
 
 export async function getOAuthAccountsByUser(userId: string) {
-  return db
+  const rows = await db
     .select()
     .from(oauthAccounts)
     .where(eq(oauthAccounts.userId, userId));
+  return rows.map(decryptOAuthRow);
 }
 
 export async function createOAuthAccount(
@@ -377,7 +400,14 @@ export async function createOAuthAccount(
 ) {
   const id = uuid();
   const now = new Date();
-  await db.insert(oauthAccounts).values({ ...data, id, createdAt: now });
+  await db.insert(oauthAccounts).values({
+    ...data,
+    id,
+    createdAt: now,
+    accessToken: encryptField(data.accessToken),
+    refreshToken: encryptField(data.refreshToken),
+    idToken: encryptField(data.idToken),
+  });
   return { id, ...data, createdAt: now };
 }
 
@@ -385,7 +415,13 @@ export async function updateOAuthAccount(
   id: string,
   data: Partial<NewOAuthAccount>,
 ) {
-  await db.update(oauthAccounts).set(data).where(eq(oauthAccounts.id, id));
+  const toWrite: Partial<NewOAuthAccount> = { ...data };
+  if ("accessToken" in data)
+    toWrite.accessToken = encryptField(data.accessToken);
+  if ("refreshToken" in data)
+    toWrite.refreshToken = encryptField(data.refreshToken);
+  if ("idToken" in data) toWrite.idToken = encryptField(data.idToken);
+  await db.update(oauthAccounts).set(toWrite).where(eq(oauthAccounts.id, id));
 }
 
 export async function deleteOAuthAccount(id: string) {
