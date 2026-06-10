@@ -68,9 +68,12 @@ export function RunUsageCard({
   lastCalculatedAt,
   enforcementEnabled,
 }: RunUsageCardProps) {
+  // The plan quota is denominated in run-minutes (plans.ts / Stripe
+  // product metadata) — minutes drive the capped progress bar; the raw
+  // run count is informational.
   const percentUsed =
     monthlyRunQuota > 0
-      ? Math.min(100, Math.round((runsThisMonth / monthlyRunQuota) * 100))
+      ? Math.min(100, Math.round((runMinutesThisMonth / monthlyRunQuota) * 100))
       : 0;
 
   const progressColor =
@@ -81,9 +84,9 @@ export function RunUsageCard({
         : "bg-green-500";
 
   const minutesDisplay =
-    runMinutesThisMonth >= 60
-      ? `${(runMinutesThisMonth / 60).toFixed(1)} h`
-      : `${runMinutesThisMonth.toFixed(1)} min`;
+    runMinutesThisMonth < 10
+      ? runMinutesThisMonth.toFixed(1)
+      : formatNumber(runMinutesThisMonth);
 
   // Defer relative-time formatting to after mount; `new Date()` inside
   // formatRelativeTime would otherwise produce different "Xm ago" strings on
@@ -114,8 +117,8 @@ export function RunUsageCard({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium">
-              {formatNumber(runsThisMonth)} of {formatNumber(monthlyRunQuota)}{" "}
-              runs used
+              {minutesDisplay} of {formatNumber(monthlyRunQuota)} run-minutes
+              used
             </span>
             <span className="text-muted-foreground">{percentUsed}%</span>
           </div>
@@ -126,7 +129,9 @@ export function RunUsageCard({
             />
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{minutesDisplay} of run time (measured, not capped)</span>
+            <span>
+              {formatNumber(runsThisMonth)} test runs this month (not capped)
+            </span>
             {mounted && lastCalculatedAt && (
               <span>Last updated: {formatRelativeTime(lastCalculatedAt)}</span>
             )}
