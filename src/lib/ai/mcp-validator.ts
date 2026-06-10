@@ -79,8 +79,17 @@ function segmentToSelector(method: string, args: string): string | null {
     }
     case "filter": {
       const m = trimmed.match(HAS_TEXT_OPT_RE);
-      if (m) return `internal:has-text=${JSON.stringify(m[1] ?? m[2])}i`;
-      return null;
+      if (!m) return null;
+      // `hasText` has two forms with DIFFERENT Playwright matching semantics:
+      //   • string  → matched against whitespace-NORMALIZED text (newlines/indent collapsed)
+      //   • RegExp  → matched against RAW, non-normalized textContent
+      // m[1] is the string branch, m[2] the regex-body branch. Coercing a regex
+      // into a quoted literal (the old `m[1] ?? m[2]` path) both mis-modelled
+      // runtime matching AND false-rejected valid regexes — e.g. /A.*B/ over text
+      // split across block elements. Emit the slash form for the regex branch so
+      // the reachability check runs the actual regex against raw text.
+      if (m[2] !== undefined) return `internal:has-text=/${m[2]}/i`;
+      return `internal:has-text=${JSON.stringify(m[1])}i`;
     }
     default:
       return null;
@@ -365,10 +374,34 @@ export function formatValidationFeedback(result: MCPValidationResult): string {
     return "All selectors are valid.";
   }
 
-  const invalidSelectors = result.results
-    .filter((r) => !r.valid)
+  const invalid = result.results.filter((r) => !r.valid);
+  const invalidSelectors = invalid
     .map((r) => `- "${r.selector}": ${r.error || "No matching elements found"}`)
     .join("\n");
 
-  return `The following selectors are invalid:\n${invalidSelectors}\n\nPlease update the test code to use valid selectors.`;
+  // Targeted, actionable hints for the brittle patterns that most commonly
+  // produce zero-match chains, so the regenerate() retry can fix the root cause
+  // instead of guessing.
+  const hints: string[] = [];
+  if (invalid.some((r) => /internal:has-text=\//.test(r.selector))) {
+    hints.push(
+      "A filter({ hasText: /regex/ }) matched 0 elements. Playwright matches a RegExp against RAW, non-normalized text, so whitespace/newlines between block elements break patterns like /A.*B/. Use a plain string hasText (it is whitespace-normalized) or page.getByText(), or anchor directly on the leaf element.",
+    );
+  }
+  if (
+    invalid.some(
+      (r) =>
+        /(?:^|→\s*)[a-z][a-z0-9-]*$/.test(r.selector.trim()) ||
+        /→\s*[a-z][a-z0-9-]*$/.test(r.selector),
+    )
+  ) {
+    hints.push(
+      "A structural ancestor (e.g. section/div) matched 0 elements. Drop the ancestor scope and target the leaf element directly (e.g. page.getByRole('link', { name }).first()).",
+    );
+  }
+  const hintBlock = hints.length
+    ? `\n\nHints:\n${hints.map((h) => `- ${h}`).join("\n")}`
+    : "";
+
+  return `The following selectors are invalid:\n${invalidSelectors}${hintBlock}\n\nPlease update the test code to use valid selectors.`;
 }

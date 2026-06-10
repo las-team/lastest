@@ -9,7 +9,10 @@
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth";
 import { generateWithAI } from "@/lib/ai";
-import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import {
+  extractCodeFromResponse,
+  SELECTOR_ROBUSTNESS_RULES,
+} from "@/lib/ai/prompts";
 import type { TestGenerationContext } from "@/lib/ai/types";
 import { runValidationWithRetry } from "@/lib/ai/validation-retry";
 import { getAIConfig, buildSeedFixture } from "./agent-context";
@@ -67,7 +70,9 @@ CRITICAL RULES:
 - Use stepLogger.log() for step descriptions — prefix with "Scenario N:" for multi-scenario tests
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
 - Every variable must use const or let
-- Output ONLY the code block, no explanations`;
+- Output ONLY the code block, no explanations
+
+${SELECTOR_ROBUSTNESS_RULES}`;
 
 // ---------------------------------------------------------------------------
 // Scenario parser — extracts individual test scenarios from an area's plan

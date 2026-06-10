@@ -20,6 +20,25 @@ describe("extractSelectors (chained-call aware)", () => {
     expect(selectors.some((s) => /internal:has-text/.test(s))).toBe(true);
   });
 
+  it("emits regex hasText as the slash form, not a quoted literal", () => {
+    // RegExp hasText must round-trip as `internal:has-text=/.../i` so the
+    // reachability check runs the real regex against raw text. The old code
+    // JSON.stringify'd it into a normalized literal substring, which both
+    // mis-modelled runtime matching and false-rejected valid regexes.
+    const code = `await page.locator('section').filter({ hasText: /Welcome.*I'm Mark Tolmacs/ }).click();`;
+    const selectors = extractSelectors(code);
+    expect(selectors).toContain(
+      "internal:has-text=/Welcome.*I'm Mark Tolmacs/i",
+    );
+    expect(selectors.some((s) => /internal:has-text="/.test(s))).toBe(false);
+  });
+
+  it("emits string hasText as a quoted (normalized) literal", () => {
+    const code = `await page.locator('section').filter({ hasText: 'Welcome' }).click();`;
+    const selectors = extractSelectors(code);
+    expect(selectors).toContain('internal:has-text="Welcome"i');
+  });
+
   it("still handles flat page.X calls", () => {
     const code = `
       await page.getByTestId('submit-btn').click();

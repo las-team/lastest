@@ -5,6 +5,17 @@ import type {
 
 export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any)`;
 
+/**
+ * Shared selector-robustness rules, injected into every generation/fix/heal
+ * prompt. Single source of truth so the two failure classes we keep hitting
+ * (regex hasText over multi-block text; brittle structural-ancestor scoping)
+ * are discouraged consistently. See mcp-validator.ts for the matching
+ * validation hints.
+ */
+export const SELECTOR_ROBUSTNESS_RULES = `SELECTOR ROBUSTNESS:
+- Anchor on the LEAF interactive element: prefer page.getByRole('link', { name }).first() over scoping through a structural ancestor like page.locator('section').filter({ hasText: ... }). Only add ancestor scoping when the same accessible name appears multiple times AND you verified that ancestor exists in the snapshot.
+- NEVER use a RegExp inside filter({ hasText }). Playwright matches a regex against RAW, non-normalized text, so whitespace/newlines between block elements break patterns like /A.*B/. Use a plain string (it is whitespace-normalized) or page.getByText().`;
+
 export const MCP_SYSTEM_PROMPT = `You are an expert visual regression test engineer. Use Playwright MCP tools to EXPLORE pages and discover accurate selectors, then OUTPUT standard Playwright test code.
 
 MCP TOOLS: browser_navigate, browser_snapshot (accessibility tree + refs), browser_click, browser_type, browser_wait_for
@@ -30,6 +41,8 @@ CONSTRAINTS:
 - NEVER use toBeTruthy() on textContent() or getAttribute() results
 - Every variable must use const or let
 - Never mix regex text and CSS selectors in one locator — use page.getByText(/pattern/i) for regex, page.locator('[attr="x"]') for CSS
+
+${SELECTOR_ROBUSTNESS_RULES}
 
 FINAL OUTPUT: After exploration, generate standard Playwright test code using discovered selectors. Output ONLY the code block.
 
@@ -97,6 +110,8 @@ SELECTORS — this app uses shadcn/ui + Tailwind CSS:
 - Tables: page.getByRole('table'), page.getByRole('row')
 - Headings: page.getByRole('heading', { name: '...' })
 - Prefer getByRole() > getByText() > page.locator('[data-testid]') > CSS selectors
+
+${SELECTOR_ROBUSTNESS_RULES}
 
 ASSERTIONS — prefer resilient checks:
 - Use toContainText() over exact toHaveText() when possible
@@ -437,6 +452,8 @@ Rules:
 - Every statement must end with a semicolon or closing brace
 - Every variable declaration must use const or let
 
+${SELECTOR_ROBUSTNESS_RULES}
+
 DYNAMIC ROUTES: If testing a detail page (e.g., /tests/[id]), navigate to the list page first, find a real link, then follow it. Never hardcode fake IDs.
 
 BEFORE RETURNING — verify your output:
@@ -491,6 +508,8 @@ Instructions:
 - If the error is "Expected value to be truthy but got false", replace toBeTruthy() with toBeVisible() on a locator or remove the assertion
 - Every variable declaration must use const or let
 - Every statement must end with a semicolon or closing brace
+
+${SELECTOR_ROBUSTNESS_RULES}
 
 BEFORE RETURNING — verify your output has no TypeScript, no imports, balanced brackets, and addresses the specific error.
 
