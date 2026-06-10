@@ -45,7 +45,7 @@ import {
   isRunnerBusy,
 } from "./jobs";
 import { emitJobEvent } from "@/lib/ws/job-events";
-import { triggerAIDiffAnalysis } from "./ai-diffs";
+import { triggerAIDiffAnalysis } from "@/lib/ai/trigger-diff-analysis";
 import { forkBaselinesForBranch } from "./baselines";
 import {
   STORAGE_DIRS,
