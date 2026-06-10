@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { encryptField, decryptField } from "@/lib/crypto";
 import {
   repositories,
   pullRequests,
@@ -91,9 +92,13 @@ export async function getGithubAccount() {
 
 export async function createGithubAccount(data: Omit<NewGithubAccount, "id">) {
   const id = uuid();
-  await db
-    .insert(githubAccounts)
-    .values({ ...data, id, createdAt: new Date() });
+  await db.insert(githubAccounts).values({
+    ...data,
+    id,
+    createdAt: new Date(),
+    accessToken: encryptField(data.accessToken),
+    refreshToken: encryptField(data.refreshToken),
+  });
   return { id, ...data, createdAt: new Date() };
 }
 
@@ -101,7 +106,12 @@ export async function updateGithubAccount(
   id: string,
   data: Partial<NewGithubAccount>,
 ) {
-  await db.update(githubAccounts).set(data).where(eq(githubAccounts.id, id));
+  const toWrite: Partial<NewGithubAccount> = { ...data };
+  if ("accessToken" in data)
+    toWrite.accessToken = encryptField(data.accessToken);
+  if ("refreshToken" in data)
+    toWrite.refreshToken = encryptField(data.refreshToken);
+  await db.update(githubAccounts).set(toWrite).where(eq(githubAccounts.id, id));
 }
 
 export async function deleteGithubAccount(id: string) {
@@ -120,14 +130,25 @@ export async function getGitlabAccountByTeam(teamId: string) {
     .select()
     .from(gitlabAccounts)
     .where(eq(gitlabAccounts.teamId, teamId));
-  return row;
+  if (!row) return row;
+  return {
+    ...row,
+    accessToken: decryptField(row.accessToken),
+    refreshToken: decryptField(row.refreshToken),
+    oauthClientSecret: decryptField(row.oauthClientSecret),
+  };
 }
 
 export async function createGitlabAccount(data: Omit<NewGitlabAccount, "id">) {
   const id = uuid();
-  await db
-    .insert(gitlabAccounts)
-    .values({ ...data, id, createdAt: new Date() });
+  await db.insert(gitlabAccounts).values({
+    ...data,
+    id,
+    createdAt: new Date(),
+    accessToken: encryptField(data.accessToken),
+    refreshToken: encryptField(data.refreshToken),
+    oauthClientSecret: encryptField(data.oauthClientSecret),
+  });
   return { id, ...data, createdAt: new Date() };
 }
 
@@ -135,7 +156,14 @@ export async function updateGitlabAccount(
   id: string,
   data: Partial<NewGitlabAccount>,
 ) {
-  await db.update(gitlabAccounts).set(data).where(eq(gitlabAccounts.id, id));
+  const toWrite: Partial<NewGitlabAccount> = { ...data };
+  if ("accessToken" in data)
+    toWrite.accessToken = encryptField(data.accessToken);
+  if ("refreshToken" in data)
+    toWrite.refreshToken = encryptField(data.refreshToken);
+  if ("oauthClientSecret" in data)
+    toWrite.oauthClientSecret = encryptField(data.oauthClientSecret);
+  await db.update(gitlabAccounts).set(toWrite).where(eq(gitlabAccounts.id, id));
 }
 
 export async function deleteGitlabAccount(id: string) {
