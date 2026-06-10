@@ -1535,7 +1535,7 @@ async function runBuildAsync(
     // with no evidence is treated as Done on the verify board. We persist a
     // step_layer_feedback row so the count of "verified" cases is accurate
     // without the reviewer having to click through.
-    import("./layer-feedback-auto")
+    import("@/lib/verify/auto-approve")
       .then(({ autoApproveZeroDiffCases }) => {
         autoApproveZeroDiffCases(buildId).catch((e) => {
           console.error(

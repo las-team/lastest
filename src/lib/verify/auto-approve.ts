@@ -1,6 +1,9 @@
-"use server";
-
 import * as queries from "@/lib/db/queries";
+
+// NOTE: Plain module, NOT a `"use server"` file. This mutates verification
+// feedback for every step of a build — exposing it as a server action would let
+// any caller mark another team's cases as approved (cross-team IDOR). It is
+// called only from trusted build-finalization code.
 
 /**
  * Auto-approve "0-diff" verification cases at build completion.
