@@ -47,12 +47,6 @@ export async function getAISettings(repositoryId?: string | null) {
   };
 }
 
-export async function getAISettingsRaw(repositoryId?: string | null) {
-  if (repositoryId) await requireRepoAccess(repositoryId);
-  else await requireTeamAccess();
-  return queries.getAISettings(repositoryId);
-}
-
 function isMaskedValue(value: string | null | undefined): boolean {
   return !!value && value.startsWith("••••••••");
 }
