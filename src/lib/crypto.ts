@@ -27,6 +27,11 @@ export function encrypt(text: string): string {
 export function decrypt(value: string): string {
   if (!value.startsWith(PREFIX)) return value; // legacy plaintext passthrough
   const key = getKey();
+  return decryptWithKey(value, key);
+}
+
+export function decryptWithKey(value: string, key: Buffer): string {
+  if (!value.startsWith(PREFIX)) return value;
   const [ivB64, tagB64, ctB64] = value.slice(PREFIX.length).split(":");
   const decipher = createDecipheriv(
     ALGORITHM,
