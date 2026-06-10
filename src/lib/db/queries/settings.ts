@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { encryptField, decryptField } from "@/lib/crypto";
 import {
   playwrightSettings,
   environmentConfigs,
@@ -405,13 +406,30 @@ export async function deleteDiffSensitivitySettings(id: string) {
 }
 
 // AI Settings
+function decryptAISettingsRow<
+  T extends {
+    openrouterApiKey?: string | null;
+    anthropicApiKey?: string | null;
+    openaiApiKey?: string | null;
+    aiDiffingApiKey?: string | null;
+  },
+>(row: T): T {
+  return {
+    ...row,
+    openrouterApiKey: decryptField(row.openrouterApiKey),
+    anthropicApiKey: decryptField(row.anthropicApiKey),
+    openaiApiKey: decryptField(row.openaiApiKey),
+    aiDiffingApiKey: decryptField(row.aiDiffingApiKey),
+  };
+}
+
 export async function getAISettings(repositoryId?: string | null) {
   if (repositoryId) {
     const [settings] = await db
       .select()
       .from(aiSettings)
       .where(eq(aiSettings.repositoryId, repositoryId));
-    if (settings) return settings;
+    if (settings) return decryptAISettingsRow(settings);
   }
 
   // Return global settings (no repositoryId) or defaults
@@ -420,7 +438,7 @@ export async function getAISettings(repositoryId?: string | null) {
     .from(aiSettings)
     .where(eq(aiSettings.repositoryId, ""));
 
-  if (globalSettings) return globalSettings;
+  if (globalSettings) return decryptAISettingsRow(globalSettings);
 
   // Return default settings object (not saved)
   return {
@@ -462,6 +480,10 @@ export async function createAISettings(
     id,
     createdAt: now,
     updatedAt: now,
+    openrouterApiKey: encryptField(data.openrouterApiKey),
+    anthropicApiKey: encryptField(data.anthropicApiKey),
+    openaiApiKey: encryptField(data.openaiApiKey),
+    aiDiffingApiKey: encryptField(data.aiDiffingApiKey),
   });
   return { id, ...data, createdAt: now, updatedAt: now };
 }
@@ -470,10 +492,16 @@ export async function updateAISettings(
   id: string,
   data: Partial<NewAISettings>,
 ) {
-  await db
-    .update(aiSettings)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(aiSettings.id, id));
+  const toWrite: Partial<NewAISettings> = { ...data, updatedAt: new Date() };
+  if ("openrouterApiKey" in data)
+    toWrite.openrouterApiKey = encryptField(data.openrouterApiKey);
+  if ("anthropicApiKey" in data)
+    toWrite.anthropicApiKey = encryptField(data.anthropicApiKey);
+  if ("openaiApiKey" in data)
+    toWrite.openaiApiKey = encryptField(data.openaiApiKey);
+  if ("aiDiffingApiKey" in data)
+    toWrite.aiDiffingApiKey = encryptField(data.aiDiffingApiKey);
+  await db.update(aiSettings).set(toWrite).where(eq(aiSettings.id, id));
 }
 
 export async function upsertAISettings(

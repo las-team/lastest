@@ -9,6 +9,7 @@
 import type { Browser, Page, BrowserContext } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
 import { setupFreezeScripts } from "./stabilization.js";
+import { isUsableSelectorValue } from "@lastest/shared";
 
 // Types matching the protocol definitions
 export interface DebugStep {
@@ -602,9 +603,8 @@ export class EmbeddedDebugExecutor {
             value: legacy?.selector || legacy?.css || legacy?.text || "",
           };
         })
-        .filter(
-          (s: { type: string; value: string }) =>
-            s.value && s.value.trim() && !s.value.includes("undefined"),
+        .filter((s: { type: string; value: string }) =>
+          isUsableSelectorValue(s.value),
         );
 
       for (const sel of validSelectors) {
@@ -613,6 +613,18 @@ export class EmbeddedDebugExecutor {
           if (sel.type === "ocr-text") {
             const text = sel.value.replace(/^ocr-text="/, "").replace(/"$/, "");
             locator = pg.getByText(text, { exact: false });
+          } else if (sel.type === "label") {
+            locator = pg.getByLabel(
+              sel.value.replace(/^label="/, "").replace(/"$/, ""),
+            );
+          } else if (sel.type === "alt-text") {
+            locator = pg.getByAltText(
+              sel.value.replace(/^alt-text="/, "").replace(/"$/, ""),
+            );
+          } else if (sel.type === "title") {
+            locator = pg.getByTitle(
+              sel.value.replace(/^title="/, "").replace(/"$/, ""),
+            );
           } else if (sel.type === "role-name") {
             const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
             if (match) {
