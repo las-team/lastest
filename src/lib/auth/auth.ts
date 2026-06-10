@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
+import { encryptField, decryptField } from "@/lib/crypto";
 import { getGitHubUser } from "@/lib/github/oauth";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
@@ -160,16 +161,44 @@ export const auth = betterAuth({
   databaseHooks: {
     account: {
       create: {
+        before: async (account) => ({
+          data: {
+            ...account,
+            accessToken: encryptField(account.accessToken),
+            refreshToken: encryptField(account.refreshToken),
+            idToken: encryptField(account.idToken),
+          },
+        }),
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
-            await syncGithubAccount(account);
+            await syncGithubAccount({
+              ...account,
+              accessToken: decryptField(account.accessToken),
+            });
           }
         },
       },
       update: {
+        before: async (account) => ({
+          data: {
+            ...account,
+            ...(account.accessToken !== undefined && {
+              accessToken: encryptField(account.accessToken),
+            }),
+            ...(account.refreshToken !== undefined && {
+              refreshToken: encryptField(account.refreshToken),
+            }),
+            ...(account.idToken !== undefined && {
+              idToken: encryptField(account.idToken),
+            }),
+          },
+        }),
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
-            await syncGithubAccount(account);
+            await syncGithubAccount({
+              ...account,
+              accessToken: decryptField(account.accessToken),
+            });
           }
         },
       },
