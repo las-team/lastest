@@ -227,27 +227,20 @@ export const auth = betterAuth({
             });
             return;
           }
-          const invite = await queries.getInvitationByEmail(user.email);
-          if (
-            invite &&
-            !invite.acceptedAt &&
-            invite.expiresAt &&
-            invite.expiresAt > new Date()
-          ) {
-            await queries.updateUser(user.id, {
-              teamId: invite.teamId ?? undefined,
-              role: (invite.role as schema.UserRole) ?? "member",
-            });
-            await queries.markInvitationAccepted(invite.token);
-          } else {
-            const team = await queries.createTeam({
-              name: `${user.name || user.email.split("@")[0]}'s Team`,
-            });
-            await queries.updateUser(user.id, {
-              teamId: team.id,
-              role: "owner",
-            });
-          }
+          // SECURITY: do NOT auto-join a team by matching user.email against a
+          // pending invitation. Email/password sign-up does not prove control
+          // of the address, so an attacker could register a victim's invited
+          // email and inherit the team + role. Every new account starts in its
+          // own personal team; joining an invited team happens only via the
+          // token-bound acceptInvitation() flow (see server/actions/users.ts),
+          // which verifies the invite token AND that it was issued to this email.
+          const team = await queries.createTeam({
+            name: `${user.name || user.email.split("@")[0]}'s Team`,
+          });
+          await queries.updateUser(user.id, {
+            teamId: team.id,
+            role: "owner",
+          });
           syncUserToTwentyCRM({
             name: user.name || "",
             email: user.email,
