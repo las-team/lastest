@@ -356,14 +356,17 @@ export async function updateEmbeddedSessionStatus(
 }
 
 /**
- * Get embedded session by runner ID
+ * Get embedded session by runner ID (internal helper — NOT a server action).
+ *
+ * System EBs carry teamId=__system__ but are claimed by any team's users
+ * through the pool, so this does not filter by team. Authorization is the
+ * caller's responsibility — see `getStreamUrlForRunner`. Kept un-exported so it
+ * is not directly RPC-invocable (it returns cdpUrl, which must not leak across
+ * teams).
  */
-export async function getEmbeddedSessionForRunner(
+async function lookupSessionByRunner(
   runnerId: string,
 ): Promise<EmbeddedSession | null> {
-  // System EBs carry teamId=__system__ but are claimed by any team's users
-  // through the pool. Don't filter by session.team here or the executor's
-  // streamUrl/cdpUrl lookup returns null mid-recording.
   const [result] = await db
     .select()
     .from(embeddedSessions)
@@ -380,8 +383,22 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
   sessionId: string | null;
   streamAuthToken: string | null;
 } | null> {
-  const session = await getEmbeddedSessionForRunner(runnerId);
+  const authed = await requireTeamAccess();
+  const session = await lookupSessionByRunner(runnerId);
   if (!session || !session.streamUrl) return null;
+
+  // Authorization: the caller's team must own the session. The one exception is
+  // a shared system EB from the warm pool, which is intentionally streamable by
+  // any team that claimed a slot (see listSystemEmbeddedSessions). Without this
+  // check, any authenticated user could pull another team's live CDP stream URL
+  // and the shared STREAM_AUTH_TOKEN.
+  if (session.teamId !== authed.team.id) {
+    const [runner] = await db
+      .select({ isSystem: runners.isSystem })
+      .from(runners)
+      .where(eq(runners.id, runnerId));
+    if (!runner?.isSystem) return null;
+  }
 
   const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
