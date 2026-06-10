@@ -27,6 +27,8 @@ import {
 async function syncGithubAccount(account: {
   userId: string;
   accessToken?: string | null;
+  refreshToken?: string | null;
+  tokenExpiresAt?: Date | null;
 }) {
   if (!account.accessToken) return;
   try {
@@ -37,9 +39,13 @@ async function syncGithubAccount(account: {
     const existing = teamId
       ? await queries.getGithubAccountByTeam(teamId)
       : null;
+    const refreshToken = account.refreshToken ?? null;
+    const tokenExpiresAt = account.tokenExpiresAt ?? null;
     if (existing) {
       await queries.updateGithubAccount(existing.id, {
         accessToken: account.accessToken,
+        refreshToken,
+        tokenExpiresAt,
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
       });
@@ -48,6 +54,8 @@ async function syncGithubAccount(account: {
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
         accessToken: account.accessToken,
+        refreshToken,
+        tokenExpiresAt,
         teamId,
       });
     }
@@ -236,8 +244,12 @@ export const auth = betterAuth({
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
             await syncGithubAccount({
-              ...account,
+              userId: account.userId,
               accessToken: decryptField(account.accessToken),
+              refreshToken: account.refreshToken
+                ? decryptField(account.refreshToken)
+                : null,
+              tokenExpiresAt: account.accessTokenExpiresAt ?? null,
             });
           }
         },
@@ -260,8 +272,12 @@ export const auth = betterAuth({
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
             await syncGithubAccount({
-              ...account,
+              userId: account.userId,
               accessToken: decryptField(account.accessToken),
+              refreshToken: account.refreshToken
+                ? decryptField(account.refreshToken)
+                : null,
+              tokenExpiresAt: account.accessTokenExpiresAt ?? null,
             });
           }
         },
