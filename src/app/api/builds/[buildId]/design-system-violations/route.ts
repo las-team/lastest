@@ -26,7 +26,10 @@ async function verifyAuth(request: NextRequest) {
 
 function escapeCsv(v: string | number | undefined | null): string {
   if (v === undefined || v === null) return "";
-  const s = String(v);
+  let s = String(v);
+  // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR leading char)
+  // before CSV-quoting — selectors/values here are page-derived.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   if (s.includes(",") || s.includes('"') || s.includes("\n")) {
     return `"${s.replace(/"/g, '""')}"`;
   }

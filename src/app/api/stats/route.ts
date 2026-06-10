@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { getUserCount } from "@/lib/db/queries/auth";
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 function validateApiKey(request: Request): boolean {
   const key = process.env.STATS_API_KEY;
   if (!key) return false;
 
+  // Header only — a `?key=` query string would land the secret in proxy/access
+  // logs. Compared in constant time to avoid a byte-by-byte timing oracle.
   const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7) === key;
-  }
-
-  const url = new URL(request.url);
-  return url.searchParams.get("key") === key;
+  if (!authHeader?.startsWith("Bearer ")) return false;
+  return safeEqual(authHeader.slice(7), key);
 }
 
 export async function GET(request: Request) {

@@ -2597,7 +2597,11 @@ export async function downloadBuildA11yViolationsCsv(
   ];
   const escape = (cell: string | number | undefined | null): string => {
     if (cell === null || cell === undefined) return "";
-    const s = String(cell);
+    let s = String(cell);
+    // Neutralize spreadsheet formula injection: a cell starting with one of
+    // these triggers formula evaluation (=, +, -, @, tab, CR) in Excel/Sheets.
+    // test_name / area are user-authored and flow into this export.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines: string[] = [header.join(",")];

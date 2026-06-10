@@ -340,6 +340,7 @@ export function AISettingsCard({
         ollamaModel,
         anthropicApiKey || undefined,
         openaiApiKey || undefined,
+        repositoryId,
       );
       setTestResult(result);
       if (result.success) {
