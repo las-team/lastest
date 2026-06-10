@@ -96,6 +96,25 @@ export const auth = betterAuth({
     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
     : undefined,
 
+  // Filter one benign startup line. @better-auth/stripe logs
+  // "Organization plugin not found" at init because we enable its
+  // organization-scoped subscriptions (customerType: "organization") without
+  // running better-auth's organization plugin — we bridge teams -> org by hand
+  // via session.activeOrganizationId (see below). The plugin only looks up the
+  // org plugin to wire optional hooks (name sync, seat billing, deletion
+  // guard) we never use, so the warning is pure noise; subscriptions still
+  // register and work. Everything else logs as before, in better-auth's own
+  // non-color format (level filtering is unchanged — default stays "warn").
+  logger: {
+    log: (level, message, ...args) => {
+      if (message.includes("Organization plugin not found")) return;
+      const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${message}`;
+      if (level === "error") console.error(line, ...args);
+      else if (level === "warn") console.warn(line, ...args);
+      else console.log(line, ...args);
+    },
+  },
+
   advanced: {
     defaultCookieAttributes: {
       sameSite: COOKIE_SAMESITE,
@@ -358,6 +377,10 @@ function buildStripePlugin() {
       stripeClient,
       stripeWebhookSecret: webhookSecret,
       createCustomerOnSignUp: false, // we create lazily on first checkout
+      // Required for customerType: "organization" subscriptions (per-team
+      // billing). We don't run better-auth's organization plugin; the
+      // resulting "Organization plugin not found" init warning is filtered
+      // out in the `logger` config above.
       organization: { enabled: true },
       subscription: {
         enabled: true,
