@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
+import { encryptField, decryptField } from "@/lib/crypto";
 import { getGitHubUser } from "@/lib/github/oauth";
 import { socialProviderEnabled } from "@/lib/auth/social-providers";
 import { sendPasswordResetEmail } from "@/lib/email";
@@ -161,6 +162,9 @@ export const auth = betterAuth({
             clientId: process.env.GITHUB_CLIENT_ID!,
             clientSecret: process.env.GITHUB_CLIENT_SECRET!,
             scope: ["read:user", "user:email", "repo", "workflow"],
+            mapProfileToUser: (profile) => ({
+              email: profile.email ?? `${profile.id}@github.placeholder.local`,
+            }),
           },
         }
       : {}),
@@ -221,16 +225,44 @@ export const auth = betterAuth({
     },
     account: {
       create: {
+        before: async (account) => ({
+          data: {
+            ...account,
+            accessToken: encryptField(account.accessToken),
+            refreshToken: encryptField(account.refreshToken),
+            idToken: encryptField(account.idToken),
+          },
+        }),
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
-            await syncGithubAccount(account);
+            await syncGithubAccount({
+              ...account,
+              accessToken: decryptField(account.accessToken),
+            });
           }
         },
       },
       update: {
+        before: async (account) => ({
+          data: {
+            ...account,
+            ...(account.accessToken !== undefined && {
+              accessToken: encryptField(account.accessToken),
+            }),
+            ...(account.refreshToken !== undefined && {
+              refreshToken: encryptField(account.refreshToken),
+            }),
+            ...(account.idToken !== undefined && {
+              idToken: encryptField(account.idToken),
+            }),
+          },
+        }),
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
-            await syncGithubAccount(account);
+            await syncGithubAccount({
+              ...account,
+              accessToken: decryptField(account.accessToken),
+            });
           }
         },
       },

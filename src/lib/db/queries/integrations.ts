@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { encryptField, decryptField } from "@/lib/crypto";
 import {
   specImports,
   googleSheetsAccounts,
@@ -89,7 +90,12 @@ export async function getGoogleSheetsAccount(teamId?: string | null) {
     .select()
     .from(googleSheetsAccounts)
     .where(eq(googleSheetsAccounts.teamId, teamId));
-  return row || null;
+  if (!row) return null;
+  return {
+    ...row,
+    accessToken: decryptField(row.accessToken),
+    refreshToken: decryptField(row.refreshToken),
+  };
 }
 
 export async function upsertGoogleSheetsAccount(data: {
@@ -113,8 +119,10 @@ export async function upsertGoogleSheetsAccount(data: {
         googleUserId: data.googleUserId,
         googleEmail: data.googleEmail,
         googleName: data.googleName,
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken || existing.refreshToken,
+        accessToken: encryptField(data.accessToken),
+        refreshToken: encryptField(
+          data.refreshToken || decryptField(existing.refreshToken),
+        ),
         tokenExpiresAt: data.tokenExpiresAt,
       })
       .where(eq(googleSheetsAccounts.id, existing.id));
@@ -128,14 +136,18 @@ export async function upsertGoogleSheetsAccount(data: {
     googleUserId: data.googleUserId,
     googleEmail: data.googleEmail,
     googleName: data.googleName,
-    accessToken: data.accessToken,
-    refreshToken: data.refreshToken,
+    accessToken: encryptField(data.accessToken),
+    refreshToken: encryptField(data.refreshToken),
     tokenExpiresAt: data.tokenExpiresAt,
     createdAt: new Date(),
   };
 
   await db.insert(googleSheetsAccounts).values(newAccount);
-  return newAccount;
+  return {
+    ...newAccount,
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+  };
 }
 
 export async function updateGoogleSheetsAccountTokens(
@@ -145,7 +157,7 @@ export async function updateGoogleSheetsAccountTokens(
 ) {
   await db
     .update(googleSheetsAccounts)
-    .set({ accessToken, tokenExpiresAt })
+    .set({ accessToken: encryptField(accessToken), tokenExpiresAt })
     .where(eq(googleSheetsAccounts.id, accountId));
 }
 

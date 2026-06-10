@@ -36,9 +36,14 @@ import {
   hashSelectors,
   sortSelectorsByStats,
   selectorTimeoutFor,
+  selectorStatKey,
+  buildStatMap,
+  relevantStats,
+  isUsableSelectorValue,
   extractTestBody,
   createExpect,
   type SelectorRef,
+  type SelectorStatRow,
 } from "@lastest/shared";
 
 /**
@@ -1531,7 +1536,13 @@ export class TestRunner {
     // Create locateWithFallback helper (matches local runner signature)
     const stats = payload?.selectorStats ?? [];
     const defaultSelectorTimeoutMs = payload?.selectorTimeoutMs ?? 3000;
-    const sortCache = new Map<string, Array<{ type: string; value: string }>>();
+    const sortCache = new Map<
+      string,
+      {
+        ordered: Array<{ type: string; value: string }>;
+        statMap: Map<string, SelectorStatRow>;
+      }
+    >();
     const locateWithFallback = async (
       pg: Page,
       selectors: Array<{ type: string; value: string }>,
@@ -1540,30 +1551,34 @@ export class TestRunner {
       coords?: { x: number; y: number } | null,
       options?: Record<string, unknown> | null,
     ) => {
-      const validSelectors = selectors.filter(
-        (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
+      const validSelectors = selectors.filter((s) =>
+        isUsableSelectorValue(s.value),
       );
 
       const hash = hashSelectors(validSelectors as SelectorRef[]);
-      let ordered = sortCache.get(hash);
-      if (!ordered) {
-        ordered =
-          stats.length > 0
-            ? sortSelectorsByStats(
-                validSelectors,
-                stats.filter((r) => r.hash === hash),
-              )
-            : validSelectors;
-        sortCache.set(hash, ordered);
+      let cached = sortCache.get(hash);
+      if (!cached) {
+        const hashStats = relevantStats(stats, hash);
+        cached = {
+          ordered:
+            hashStats.length > 0
+              ? sortSelectorsByStats(validSelectors, hashStats)
+              : validSelectors,
+          statMap: buildStatMap(hashStats),
+        };
+        sortCache.set(hash, cached);
       }
+      const { ordered, statMap } = cached;
 
       log(
         "info",
         `[action] ${action}${value ? ` "${value}"` : ""} (${ordered.length} selectors)`,
       );
 
-      for (const sel of ordered) {
-        const attemptStart = Date.now();
+      for (let rank = 0; rank < ordered.length; rank++) {
+        const sel = ordered[rank];
+        let target!: ReturnType<Page["locator"]>;
+        const waitStart = Date.now();
         try {
           let locator;
           if (sel.type === "ocr-text") {
@@ -1598,41 +1613,14 @@ export class TestRunner {
             locator = pg.locator(sel.value);
           }
 
-          const target = locator.first();
-          const stat = stats.find(
-            (s) =>
-              s.hash === hash && s.type === sel.type && s.value === sel.value,
-          );
+          target = locator.first();
+          const stat = statMap.get(selectorStatKey(sel.type, sel.value));
           const candidateTimeout = selectorTimeoutFor(
             stat,
             defaultSelectorTimeoutMs,
+            rank,
           );
           await target.waitFor({ timeout: candidateTimeout });
-
-          log("info", `[action] ${action} matched via ${sel.type}`);
-          if (action === "locate") {
-            selectorOutcomes?.push({
-              hash,
-              type: sel.type,
-              value: sel.value,
-              success: true,
-              responseTimeMs: Date.now() - attemptStart,
-            });
-            return target;
-          }
-          if (action === "click") await target.click(options || {});
-          else if (action === "fill") await target.fill(value || "");
-          else if (action === "selectOption")
-            await target.selectOption(value || "");
-
-          selectorOutcomes?.push({
-            hash,
-            type: sel.type,
-            value: sel.value,
-            success: true,
-            responseTimeMs: Date.now() - attemptStart,
-          });
-          return target;
         } catch {
           selectorOutcomes?.push({
             hash,
@@ -1642,6 +1630,47 @@ export class TestRunner {
           });
           continue;
         }
+
+        // Locate succeeded — record the outcome now, scoped to the waitFor
+        // alone. An action failure below is an interaction problem (overlay,
+        // detach race), not a selector-quality signal, and must not poison
+        // the next run's ranking.
+        selectorOutcomes?.push({
+          hash,
+          type: sel.type,
+          value: sel.value,
+          success: true,
+          responseTimeMs: Date.now() - waitStart,
+        });
+        log("info", `[action] ${action} matched via ${sel.type}`);
+        await target.scrollIntoViewIfNeeded().catch(() => {});
+        if (action === "locate") return target;
+
+        const performAction = async () => {
+          if (action === "click") await target.click(options || {});
+          else if (action === "fill") await target.fill(value || "");
+          else if (action === "selectOption")
+            await target.selectOption(value || "");
+          else if (action === "check") await target.check();
+          else if (action === "uncheck") await target.uncheck();
+        };
+        try {
+          await performAction();
+        } catch {
+          // One retry on the matched element before trying the next
+          // candidate — transient overlays/detach races usually clear.
+          await pg.waitForTimeout(250);
+          try {
+            await performAction();
+          } catch (actionErr) {
+            log(
+              "warn",
+              `[action] ${action} failed on matched ${sel.type}: ${actionErr instanceof Error ? actionErr.message : String(actionErr)}`,
+            );
+            continue;
+          }
+        }
+        return target;
       }
 
       // Coordinate fallback for clicks
