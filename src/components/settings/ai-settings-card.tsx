@@ -182,31 +182,41 @@ export function AISettingsCard({
 
   const doSave = useCallback(() => {
     startTransition(async () => {
-      await saveAISettings({
-        repositoryId,
-        provider,
-        openrouterApiKey: openrouterApiKey || null,
-        openrouterModel,
-        agentSdkPermissionMode,
-        agentSdkModel: agentSdkModel || null,
-        agentSdkWorkingDir: agentSdkWorkingDir || null,
-        ollamaBaseUrl: ollamaBaseUrl || null,
-        ollamaModel: ollamaModel || null,
-        anthropicApiKey: anthropicApiKey || null,
-        anthropicModel: anthropicModel || null,
-        openaiApiKey: openaiApiKey || null,
-        openaiModel: openaiModel || null,
-        customInstructions: customInstructions || null,
-        aiDiffingEnabled,
-        aiDiffingProvider: aiDiffingProvider || null,
-        aiDiffingApiKey: aiDiffingApiKey || null,
-        aiDiffingModel: aiDiffingModel || null,
-        aiDiffingOllamaBaseUrl: aiDiffingOllamaBaseUrl || null,
-        aiDiffingOllamaModel: aiDiffingOllamaModel || null,
-        pwAgentModel: pwAgentModel || null,
-        pwAgentTimeout,
-      });
-      toast.success("AI settings saved");
+      // A rejected save must not bubble as an uncaught error: that tears
+      // down the in-flight transition and remounts this card, which wiped
+      // whatever the user was typing (the BYOK key field would reset and
+      // the caret jumped to the start). Surface it as a toast instead.
+      try {
+        await saveAISettings({
+          repositoryId,
+          provider,
+          openrouterApiKey: openrouterApiKey || null,
+          openrouterModel,
+          agentSdkPermissionMode,
+          agentSdkModel: agentSdkModel || null,
+          agentSdkWorkingDir: agentSdkWorkingDir || null,
+          ollamaBaseUrl: ollamaBaseUrl || null,
+          ollamaModel: ollamaModel || null,
+          anthropicApiKey: anthropicApiKey || null,
+          anthropicModel: anthropicModel || null,
+          openaiApiKey: openaiApiKey || null,
+          openaiModel: openaiModel || null,
+          customInstructions: customInstructions || null,
+          aiDiffingEnabled,
+          aiDiffingProvider: aiDiffingProvider || null,
+          aiDiffingApiKey: aiDiffingApiKey || null,
+          aiDiffingModel: aiDiffingModel || null,
+          aiDiffingOllamaBaseUrl: aiDiffingOllamaBaseUrl || null,
+          aiDiffingOllamaModel: aiDiffingOllamaModel || null,
+          pwAgentModel: pwAgentModel || null,
+          pwAgentTimeout,
+        });
+        toast.success("AI settings saved");
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save AI settings",
+        );
+      }
     });
   }, [
     repositoryId,
