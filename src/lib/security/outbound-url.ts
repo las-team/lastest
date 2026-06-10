@@ -199,6 +199,39 @@ export async function assertSafeOutboundUrl(
   }
 }
 
+export interface SafeFetchOptions extends AssertSafeOptions {
+  /** Max redirect hops to follow (each re-validated). Default 5. */
+  maxRedirects?: number;
+}
+
+/**
+ * SSRF-safe `fetch` for user-influenced URLs. Validates the target with
+ * `assertSafeOutboundUrl` and follows redirects *manually*, re-validating every
+ * hop — `redirect: "follow"` would let a public URL bounce to an internal one
+ * (e.g. the cloud-metadata endpoint) without a second check. Throws
+ * `SsrfBlockedError` on any blocked hop or redirect overflow.
+ */
+export async function safeOutboundFetch(
+  url: string,
+  init: RequestInit = {},
+  opts: SafeFetchOptions = {},
+): Promise<Response> {
+  const maxRedirects = opts.maxRedirects ?? 5;
+  let currentUrl = url;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    await assertSafeOutboundUrl(currentUrl, { sourceIp: opts.sourceIp });
+    const res = await fetch(currentUrl, { ...init, redirect: "manual" });
+    const location =
+      res.status >= 300 && res.status < 400
+        ? res.headers.get("location")
+        : null;
+    if (!location) return res;
+    // Resolve relative redirects against the current URL, then re-validate.
+    currentUrl = new URL(location, currentUrl).toString();
+  }
+  throw new SsrfBlockedError("Too many redirects");
+}
+
 export function extractSourceIp(headers: Headers): string {
   const xff = headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0]!.trim();

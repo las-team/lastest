@@ -14,6 +14,10 @@ import {
   getDefaultSetupSteps,
 } from "@/lib/db/queries";
 import { requireCapability, requireRepoCapability } from "@/lib/auth";
+import {
+  safeOutboundFetch,
+  SsrfBlockedError,
+} from "@/lib/security/outbound-url";
 import { DEFAULT_SELECTOR_PRIORITY } from "@/lib/db/schema";
 import type { SelectorConfig } from "@/lib/db/schema";
 import {
@@ -340,17 +344,22 @@ export async function analyzeUrlForSelectors(
 
   let html: string;
   try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000),
-      headers: {
-        // Present as a real browser so servers return the full document.
-        "user-agent":
-          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    // SSRF guard: validate the target and re-validate every redirect hop so a
+    // public URL can't bounce the server fetch to localhost / cloud metadata.
+    const res = await safeOutboundFetch(
+      url,
+      {
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          // Present as a real browser so servers return the full document.
+          "user-agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
       },
-    });
+      { maxRedirects: 5 },
+    );
     if (!res.ok) {
       return {
         error: `Could not load page (HTTP ${res.status}). Check the URL and try again.`,
@@ -364,6 +373,12 @@ export async function analyzeUrlForSelectors(
     }
     html = await res.text();
   } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      return {
+        error:
+          "That URL points to a private or internal address and can't be analyzed.",
+      };
+    }
     const reason =
       err instanceof Error && err.name === "TimeoutError"
         ? "timed out"
