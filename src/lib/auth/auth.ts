@@ -7,6 +7,7 @@ import * as schema from "@/lib/db/schema";
 import { hash, verify } from "@node-rs/argon2";
 import * as queries from "@/lib/db/queries";
 import { getGitHubUser } from "@/lib/github/oauth";
+import { socialProviderEnabled } from "@/lib/auth/social-providers";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
 import { syncUserToTwentyCRM } from "@/lib/integrations/twenty-crm";
@@ -148,25 +149,45 @@ export const auth = betterAuth({
     },
   },
 
+  // Only register providers whose client id + secret are present. An
+  // unconfigured provider used to register with `process.env.X!` = undefined,
+  // which made better-auth emit a broken `client_id=undefined` authorize URL
+  // (Discord 500'd on click in envs without the secret). The login/register UI
+  // gates its buttons off the same check (see social-providers.ts).
   socialProviders: {
-    github: {
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
-      scope: ["read:user", "user:email", "repo", "workflow"],
-    },
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    },
-    discord: {
-      clientId: process.env.DISCORD_CLIENT_ID!,
-      clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-      // Phone-only Discord accounts return email: null even with the `email` scope.
-      // Fall back to a synthetic .local placeholder so onboarding doesn't fail.
-      mapProfileToUser: (profile: { id: string; email?: string | null }) => ({
-        email: profile.email ?? `${profile.id}@discord.placeholder.local`,
-      }),
-    },
+    ...(socialProviderEnabled.github()
+      ? {
+          github: {
+            clientId: process.env.GITHUB_CLIENT_ID!,
+            clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+            scope: ["read:user", "user:email", "repo", "workflow"],
+          },
+        }
+      : {}),
+    ...(socialProviderEnabled.google()
+      ? {
+          google: {
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+          },
+        }
+      : {}),
+    ...(socialProviderEnabled.discord()
+      ? {
+          discord: {
+            clientId: process.env.DISCORD_CLIENT_ID!,
+            clientSecret: process.env.DISCORD_CLIENT_SECRET!,
+            // Phone-only Discord accounts return email: null even with the `email` scope.
+            // Fall back to a synthetic .local placeholder so onboarding doesn't fail.
+            mapProfileToUser: (profile: {
+              id: string;
+              email?: string | null;
+            }) => ({
+              email: profile.email ?? `${profile.id}@discord.placeholder.local`,
+            }),
+          },
+        }
+      : {}),
   },
 
   session: {
