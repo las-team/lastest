@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
+import { planConfig } from "@/lib/billing/plans";
 import {
   requireTeamAccess,
   requireRepoAccess,
@@ -232,6 +233,21 @@ export async function createLocalRepo(
   templateId?: string,
 ) {
   const session = await requireCapability("repos:manage");
+
+  // Project-limit enforcement (off by default; same flag as run limits). The
+  // plan's projectLimit was advisory — nothing stopped a team exceeding it.
+  if (process.env.ENFORCE_RUN_LIMITS === "true") {
+    const limit = planConfig(session.team.plan).projectLimit;
+    if (limit !== null) {
+      const existing = await queries.getRepositoriesByTeam(session.team.id);
+      if (existing.length >= limit) {
+        throw new Error(
+          `Your plan allows up to ${limit} project${limit === 1 ? "" : "s"}. Upgrade your plan to add more.`,
+        );
+      }
+    }
+  }
+
   const repo = await queries.createRepository({
     teamId: session.team.id,
     provider: "local",
