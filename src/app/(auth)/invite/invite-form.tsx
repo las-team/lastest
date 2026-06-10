@@ -9,13 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { recordRegistrationConsent } from "@/server/actions/consent";
+import { acceptInvitation } from "@/server/actions/users";
 
 interface InviteFormProps {
   email: string;
   token: string;
 }
 
-export function InviteForm({ email, token: _token }: InviteFormProps) {
+export function InviteForm({ email, token }: InviteFormProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -28,8 +29,8 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
     setError("");
     setLoading(true);
 
-    // Sign up with the invited email — the databaseHook in auth.ts
-    // auto-detects the pending invitation and assigns the user to the team
+    // Create the account first. Sign-up never auto-joins a team by email match;
+    // we explicitly redeem the invite token below once the user is signed in.
     const result = await authClient.signUp.email({
       name,
       email,
@@ -38,6 +39,15 @@ export function InviteForm({ email, token: _token }: InviteFormProps) {
 
     if (result.error) {
       setError(result.error.message ?? "Sign up failed");
+      setLoading(false);
+      return;
+    }
+
+    // Token-bound acceptance — joins the invited team only if the token is
+    // valid and was issued to this email.
+    const accept = await acceptInvitation(token);
+    if ("error" in accept) {
+      setError(accept.error);
       setLoading(false);
       return;
     }
