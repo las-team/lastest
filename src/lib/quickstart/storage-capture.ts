@@ -1,15 +1,23 @@
 /**
- * Run a freshly-rendered auth-setup test in a transient Chromium context, then
- * capture the resulting `context.storageState()` and persist it via
- * createStorageState so the QuickStart walkthrough test can re-use it via
- * setupOverrides.extraSteps.
+ * Run a freshly-rendered auth-setup test, then capture the resulting
+ * `context.storageState()` and persist it via createStorageState so the
+ * QuickStart walkthrough test can re-use it via setupOverrides.extraSteps.
  *
- * Lives outside the EB pod path on purpose — this is a one-shot session that
- * needs to return the auth blob to the caller, not a Lastest test run.
+ * SECURITY: the auth-setup code is AI/user-derived arbitrary Playwright code.
+ * On a provisioned (Kubernetes) deployment it is executed in a disposable
+ * runner/EB pod via executeSetupViaRunner — never `eval`'d in the host process
+ * (which holds DATABASE_URL / STRIPE_* / SYSTEM_EB_TOKEN). Only a self-hosted
+ * single-tenant install with no runner pool falls back to in-process execution.
  */
 
 import { chromium } from "playwright";
 import * as queries from "@/lib/db/queries";
+import { executeSetupViaRunner } from "@/lib/execution/executor";
+import {
+  claimOrProvisionPoolEB,
+  releasePoolEB,
+} from "@/server/actions/embedded-sessions";
+import { isKubernetesMode } from "@/lib/eb/provisioner";
 
 export interface CaptureStorageStateInput {
   repositoryId: string;
@@ -113,6 +121,50 @@ async function attemptCapture(
   }
 }
 
+/**
+ * Run the auth-setup code in a disposable runner/EB pod and return its captured
+ * storage state. Returns null when no pooled browser could be claimed (so the
+ * caller can decide whether a host fallback is permitted).
+ */
+async function tryCaptureViaRunner(
+  input: CaptureStorageStateInput,
+): Promise<
+  { ok: true; storageStateJson: string } | { ok: false; reason: string } | null
+> {
+  let runnerId: string | null = null;
+  try {
+    const poolEB = await claimOrProvisionPoolEB({ purpose: "interactive" });
+    runnerId = poolEB?.runnerId ?? null;
+  } catch {
+    runnerId = null;
+  }
+  if (!runnerId) return null;
+
+  try {
+    const result = await executeSetupViaRunner(
+      input.testCode,
+      `quickstart-auth-${input.repositoryId}`,
+      runnerId,
+      input.baseUrl,
+      undefined,
+      input.timeoutMs ?? 90_000,
+      null,
+    );
+    const json = result.storageStateJson;
+    if (!json) {
+      return { ok: false, reason: "runner returned no storage state" };
+    }
+    return { ok: true, storageStateJson: json };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    await releasePoolEB(runnerId).catch(() => {});
+  }
+}
+
 export async function captureStorageState(
   input: CaptureStorageStateInput,
 ): Promise<CaptureStorageStateResult> {
@@ -126,13 +178,30 @@ export async function captureStorageState(
     };
   }
 
-  // First attempt; one retry on transient network/browser errors.
-  let attempt = await attemptCapture(input, body);
-  if (!attempt.ok && TRANSIENT_ERROR_RE.test(attempt.reason)) {
-    console.warn(
-      `[QuickStart auth-setup] transient error, retrying once: ${attempt.reason}`,
-    );
+  // Preferred path: execute off-host in a disposable runner/EB pod.
+  let attempt = await tryCaptureViaRunner(input);
+
+  if (!attempt) {
+    // No pooled browser available. On a provisioned deployment we must NOT fall
+    // back to in-process eval of arbitrary auth code.
+    if (isKubernetesMode()) {
+      return {
+        captured: false,
+        failureReason: "All browsers are busy. Please try again later.",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    // Self-hosted / local-dev fallback: no runner pool configured. Such
+    // deployments are single-tenant, so in-process execution is acceptable.
+    // First attempt; one retry on transient network/browser errors.
     attempt = await attemptCapture(input, body);
+    if (!attempt.ok && TRANSIENT_ERROR_RE.test(attempt.reason)) {
+      console.warn(
+        `[QuickStart auth-setup] transient error, retrying once: ${attempt.reason}`,
+      );
+      attempt = await attemptCapture(input, body);
+    }
   }
 
   if (!attempt.ok) {
