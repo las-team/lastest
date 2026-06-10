@@ -109,6 +109,25 @@ export async function runTestsCore(
     }
   }
 
+  // Run-minute quota enforcement (off by default). The metered counter is
+  // incremented after each run; without this gate it never actually blocks, so
+  // paid-tier run-minute limits were advisory only.
+  if (process.env.ENFORCE_RUN_LIMITS === "true" && repositoryId) {
+    const repo = await queries.getRepository(repositoryId);
+    if (repo?.teamId) {
+      const usage = await queries.getTeamRunUsage(repo.teamId);
+      if (
+        usage &&
+        usage.monthlyRunQuota > 0 &&
+        usage.runMinutesThisMonth >= usage.monthlyRunQuota
+      ) {
+        throw new Error(
+          "Monthly run-minute quota exceeded. Upgrade your plan or wait for the next billing cycle.",
+        );
+      }
+    }
+  }
+
   const targetRunner = runnerId || "auto";
 
   // If targeting a specific runner and it's busy, queue this run.
