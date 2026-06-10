@@ -86,6 +86,8 @@ export interface TestResultLite {
   extractedVariables: Record<string, string> | null;
   assignedVariables: Record<string, string> | null;
   domSnapshot: import('@/lib/db/schema').DomSnapshotData | null;
+  apiResult?: import('@/lib/db/schema').ApiTestResultData | null;
+  loadResult?: import('@/lib/db/schema').LoadTestResultData | null;
 }
 
 export interface VerifyFilters {
@@ -232,12 +234,12 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   type CheckModeMapT = {
     visual: CheckModeT; text: CheckModeT; dom: CheckModeT;
     network: CheckModeT; console: CheckModeT; a11y: CheckModeT;
-    design: CheckModeT; perf: CheckModeT; url: CheckModeT;
+    design: CheckModeT; perf: CheckModeT; url: CheckModeT; api: CheckModeT;
   };
   const DEFAULT_CHECK_MODES: CheckModeMapT = {
     visual: 'enforce', text: 'disable', dom: 'disable',
     network: 'enforce', console: 'enforce', a11y: 'disable',
-    design: 'disable', perf: 'log', url: 'log',
+    design: 'disable', perf: 'log', url: 'log', api: 'enforce',
   };
   const [checkModes, setCheckModes] = useState<CheckModeMapT>(DEFAULT_CHECK_MODES);
   const [checkModesByTestId, setCheckModesByTestId] = useState<

@@ -23,6 +23,12 @@ describe('evaluateApiAssertions', () => {
     expect(r.actual).toBe(200);
   });
 
+  it('treats a bare status assertion (no equals/in) as "any 2xx"', () => {
+    expect(evaluateApiAssertions([{ kind: 'status' }], baseRes)[0].passed).toBe(true);
+    const non2xx = { ...baseRes, statusCode: 500 };
+    expect(evaluateApiAssertions([{ kind: 'status' }], non2xx)[0].passed).toBe(false);
+  });
+
   it('evaluates jsonPath including array indices (loose-equal)', () => {
     const ok = evaluateApiAssertions([{ kind: 'jsonPath', path: 'data.id', value: 42 }], baseRes)[0];
     const arr = evaluateApiAssertions([{ kind: 'jsonPath', path: 'items.0.id', value: '1' }], baseRes)[0];

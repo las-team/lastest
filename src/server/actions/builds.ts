@@ -608,7 +608,12 @@ async function runBuildAsync(
   const browsers: string[] = playwrightSettings?.browsers && (playwrightSettings.browsers as string[]).length > 0
     ? playwrightSettings.browsers as string[]
     : ['chromium'];
-  const totalTestsAcrossBrowsers = tests.length * browsers.length;
+  // E1: api tests are browser-independent — they run exactly once per build,
+  // not once per browser. Partition them out of the per-browser accounting and
+  // loop so a multi-browser build doesn't duplicate api test_results.
+  const apiTestsForBuild = tests.filter((t) => t.testType === 'api');
+  const browserTestsForBuild = tests.filter((t) => t.testType !== 'api');
+  const totalTestsAcrossBrowsers = browserTestsForBuild.length * browsers.length + apiTestsForBuild.length;
 
   // Store browsers on the build record
   await queries.updateBuild(buildId, { browsers, totalTests: totalTestsAcrossBrowsers });
@@ -917,8 +922,23 @@ async function runBuildAsync(
       setupStatus: remoteSetupInfo ? 'running' : 'skipped',
     });
 
+    // E1: run api tests once, before the per-browser loop (they execute
+    // in-process — no runner/EB dispatch — and are browser-independent).
+    if (apiTestsForBuild.length > 0) {
+      currentBrowserType = browsers[0];
+      await executeTests(apiTestsForBuild, testRunId, {
+        repositoryId,
+        teamId,
+        runnerId,
+        environmentConfig: envConfig,
+        playwrightSettings,
+        jobId,
+      }, onProgress, onResult);
+    }
+
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
+      if (browserTestsForBuild.length === 0) break;
       currentBrowserType = browserType;
       console.log(`[build] Running tests with browser: ${browserType}`);
 
@@ -937,7 +957,7 @@ async function runBuildAsync(
       }
 
       try {
-        await executeTests(tests, testRunId, {
+        await executeTests(browserTestsForBuild, testRunId, {
           repositoryId,
           teamId,
           runnerId,
@@ -967,6 +987,12 @@ async function runBuildAsync(
         }
         throw error;
       }
+    }
+
+    // api-only build: the browser loop (which owns setup completion) was
+    // skipped — don't leave a resolved setup stuck in 'running'.
+    if (browserTestsForBuild.length === 0 && remoteSetupInfo) {
+      await queries.updateBuild(buildId, { setupStatus: 'skipped' });
     }
 
     // Check if this build was cancelled while running

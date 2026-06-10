@@ -67,23 +67,36 @@ export async function runApiLoadTest(
   ctx: RunApiTestContext = {},
 ): Promise<LoadTestResultData> {
   const concurrency = Math.max(1, Math.min(config.concurrency || 1, LOAD_TEST_MAX_CONCURRENCY));
-  const total = Math.max(
-    1,
-    Math.min(config.totalRequests ?? concurrency * 10, LOAD_TEST_MAX_TOTAL_REQUESTS),
-  );
+  // Stop on a request budget (totalRequests, which wins when both are set) or a
+  // wall-clock window (durationMs). The hard cap always protects target + host.
+  const durationMode = config.totalRequests === undefined && config.durationMs !== undefined && config.durationMs > 0;
+  const total = durationMode
+    ? LOAD_TEST_MAX_TOTAL_REQUESTS
+    : Math.max(1, Math.min(config.totalRequests ?? concurrency * 10, LOAD_TEST_MAX_TOTAL_REQUESTS));
   const thresholds: LoadTestThresholds = { ...DEFAULT_LOAD_TEST_THRESHOLDS, ...config.thresholds };
 
   const latencies: number[] = [];
   let failures = 0;
   let dispatched = 0;
   const started = Date.now();
+  const deadline = durationMode ? started + config.durationMs! : Infinity;
 
-  // Bounded worker pool: each worker pulls the next request slot until the
-  // total is exhausted. Caps protect the target and the host.
+  // SSRF-validate the target once up front rather than once per request — a
+  // 2000-request load test should not do 2000 DNS resolutions.
+  const precheck = await runApiTest({ ...def, assertions: [] }, ctx);
+  if (precheck.error) {
+    return summarizeLoad([precheck.latencyMs], 1, Date.now() - started, thresholds);
+  }
+  latencies.push(precheck.latencyMs);
+  dispatched++;
+  const loopCtx = { ...ctx, skipSsrfCheck: true };
+
+  // Bounded worker pool: each worker pulls the next slot until the budget or
+  // the deadline is exhausted.
   async function worker() {
-    while (dispatched < total) {
+    while (dispatched < total && Date.now() < deadline) {
       dispatched++;
-      const res = await runApiTest(def, ctx);
+      const res = await runApiTest(def, loopCtx);
       latencies.push(res.latencyMs);
       if (!res.passed) failures++;
     }

@@ -22,6 +22,7 @@ import {
   Palette,
   Gauge,
   Link as LinkIcon,
+  Webhook,
 } from 'lucide-react';
 import { savePlaywrightSettings } from '@/server/actions/settings';
 import {
@@ -61,6 +62,7 @@ const LAYERS: LayerMeta[] = [
   { id: 'design',  name: 'Design',   icon: Palette,       description: 'Compare computed tokens (colors / radii / fonts) against the repo bundle.' },
   { id: 'perf',    name: 'Perf',     icon: Gauge,         description: 'Capture Web Vitals (LCP, CLS, TBT) and compare against the baseline.' },
   { id: 'url',     name: 'URL',      icon: LinkIcon,      description: 'Compare the trajectory of URLs visited during the test.' },
+  { id: 'api',     name: 'API',      icon: Webhook,       description: 'Gate api-type tests on their request/response assertions (status, schema, body, latency).' },
 ];
 
 const MODE_OPTIONS: { id: CheckMode; label: string; hint: string; icon: typeof Check; tone: string }[] = [

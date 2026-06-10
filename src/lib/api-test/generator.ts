@@ -5,7 +5,7 @@
  */
 
 import { generateWithAI, gatherCodebaseIntelligence } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import { aiConfigFromSettings } from '@/lib/ai/provider-config';
 import { parseAiJson } from '@/lib/ai/json-parse';
 import * as queries from '@/lib/db/queries';
 import type { ApiTestDefinition, ApiAssertion } from '@/lib/db/schema';
@@ -47,21 +47,6 @@ Respond with ONLY a JSON object (no markdown fencing) matching this shape:
 }
 Prefer relative urls (the runner prepends the repo baseUrl). Always include at least a status assertion.`;
 
-function buildConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
-  return {
-    provider: settings.provider as AIProviderConfig['provider'],
-    openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel ?? undefined,
-    anthropicApiKey: settings.anthropicApiKey,
-    anthropicModel: settings.anthropicModel ?? undefined,
-    ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
-    ollamaModel: settings.ollamaModel ?? undefined,
-    openaiApiKey: settings.openaiApiKey,
-    openaiModel: settings.openaiModel ?? undefined,
-    agentSdkPermissionMode: 'plan',
-    agentSdkDisallowedTools: ['Bash', 'Write', 'Edit', 'NotebookEdit'],
-  };
-}
 
 const VALID_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -103,7 +88,7 @@ ${contextParts.join('\n\n')}`;
 
   let response: string;
   try {
-    response = await generateWithAI(buildConfig(settings), prompt, SYSTEM_PROMPT, {
+    response = await generateWithAI(aiConfigFromSettings(settings, { readOnly: true }), prompt, SYSTEM_PROMPT, {
       actionType: 'create_test',
       repositoryId,
       responseFormat: 'json_object',

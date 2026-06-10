@@ -35,12 +35,18 @@ export function evaluateApiAssertions(
   return assertions.map((a): ApiAssertionResult => {
     switch (a.kind) {
       case 'status': {
-        const ok = a.in ? a.in.includes(res.statusCode) : res.statusCode === a.equals;
+        // No explicit expectation → any 2xx passes (a bare { kind: 'status' }
+        // must not compare against undefined and always fail).
+        const ok = a.in
+          ? a.in.includes(res.statusCode)
+          : a.equals !== undefined
+            ? res.statusCode === a.equals
+            : res.statusCode >= 200 && res.statusCode < 300;
         return {
           kind: a.kind,
           passed: ok,
-          description: a.description ?? `status ${a.in ? `in [${a.in.join(', ')}]` : `== ${a.equals}`}`,
-          expected: a.in ?? a.equals,
+          description: a.description ?? `status ${a.in ? `in [${a.in.join(', ')}]` : a.equals !== undefined ? `== ${a.equals}` : 'is 2xx'}`,
+          expected: a.in ?? a.equals ?? '2xx',
           actual: res.statusCode,
         };
       }
@@ -124,6 +130,9 @@ function applyAuth(headers: Record<string, string>, auth?: ApiAuth): void {
 export interface RunApiTestContext {
   /** Prefix for relative `url` values (the repo's baseUrl). */
   baseUrl?: string;
+  /** Skip the per-request SSRF/DNS validation. Only set by callers that
+   *  validated the same URL immediately beforehand (e.g. the load runner). */
+  skipSsrfCheck?: boolean;
 }
 
 /** Resolve an absolute URL, optionally joining a relative path to baseUrl, and
@@ -147,12 +156,15 @@ export async function runApiTest(def: ApiTestDefinition, ctx: RunApiTestContext 
     return { passed: false, statusCode: null, latencyMs: 0, assertionResults: [], error: `Invalid URL: ${e instanceof Error ? e.message : String(e)}` };
   }
 
-  // SSRF guard — API tests can target arbitrary URLs from the server.
-  try {
-    await validateTargetUrl(url);
-  } catch (e) {
-    const msg = e instanceof SsrfBlockedError ? `Blocked by SSRF guard: ${e.message}` : String(e);
-    return { passed: false, statusCode: null, latencyMs: 0, assertionResults: [], error: msg };
+  // SSRF guard — API tests can target arbitrary URLs from the server. The load
+  // runner validates once up front and sets skipSsrfCheck for the inner storm.
+  if (!ctx.skipSsrfCheck) {
+    try {
+      await validateTargetUrl(url);
+    } catch (e) {
+      const msg = e instanceof SsrfBlockedError ? `Blocked by SSRF guard: ${e.message}` : String(e);
+      return { passed: false, statusCode: null, latencyMs: 0, assertionResults: [], error: msg };
+    }
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...def.headers };

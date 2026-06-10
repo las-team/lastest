@@ -202,6 +202,8 @@ export class LastestClient {
       code?: string;
       targetUrl?: string;
       functionalAreaId?: string;
+      apiDefinition?: Record<string, unknown>;
+      loadConfig?: Record<string, unknown> | null;
       quarantined?: boolean;
       executionMode?: 'procedural' | 'agent';
       viewportOverride?: { width: number; height: number } | null;
@@ -304,11 +306,6 @@ export class LastestClient {
     return this.del(`/api/v1/tests/${testId}`);
   }
 
-  // --- Test Runs ---
-
-  async getTestRun(runId: string): Promise<unknown> {
-    return this.get(`/api/v1/runs/${runId}`);
-  }
 
   // --- Diffs ---
 

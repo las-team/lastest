@@ -386,6 +386,8 @@ export function createServer(client: LastestClient): McpServer {
       setupScriptId: z.string().nullable().optional().describe('Use a saved setup script as setup. Pass null/empty to clear. Mutually exclusive with setupTestId.'),
       setupOverrides: overridesSchema.nullable().optional().describe('Per-test setup override block: `skippedDefaultStepIds` lists default_setup_steps to skip, `extraSteps` lists test/script/storage_state ids to inject after defaults. Pass null to clear.'),
       teardownOverrides: overridesSchema.nullable().optional().describe('Same shape as setupOverrides, applied to teardown. Pass null to clear.'),
+      apiDefinition: z.record(z.unknown()).optional().describe('For api-type tests (update): the request + assertion definition { method, url, headers?, query?, body?, auth?, assertions[] }. The code column is re-synced from this automatically.'),
+      loadConfig: z.record(z.unknown()).nullable().optional().describe('For api-type tests (update): load-test config { concurrency, totalRequests?, durationMs?, thresholds? }. Pass null to make it a plain (single-request) api test.'),
     },
     withActivityReporting(client, 'lastest_test', async (params) => {
       const action = params.action as 'list' | 'get' | 'update' | 'delete';
@@ -457,6 +459,7 @@ export function createServer(client: LastestClient): McpServer {
           'name', 'code', 'targetUrl', 'functionalAreaId', 'quarantined', 'executionMode',
           'viewportOverride', 'playwrightOverrides', 'diffOverrides', 'stabilizationOverrides',
           'setupTestId', 'setupScriptId', 'setupOverrides', 'teardownOverrides',
+          'apiDefinition', 'loadConfig',
         ] as const;
         const cleanUpdates = Object.fromEntries(
           updateKeys.map((k) => [k, params[k]]).filter(([, v]) => v !== undefined),

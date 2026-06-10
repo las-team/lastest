@@ -983,7 +983,7 @@ interface LayerCardSummary {
 }
 
 const ALL_LAYERS: ReadonlyArray<EvidenceLayer> = [
-  'visual', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url', 'variable',
+  'visual', 'dom', 'network', 'console', 'a11y', 'design', 'perf', 'url', 'variable', 'api',
 ];
 
 /** EvidenceLayer subset that maps to a `*Mode` column in `playwright_settings`.
@@ -1068,6 +1068,7 @@ function wasLayerCaptured(layer: EvidenceLayer, result: TestResultLite | null, v
     case 'perf': return result?.webVitals != null;
     case 'url': return result?.urlTrajectory != null;
     case 'variable': return result?.extractedVariables != null || result?.assignedVariables != null;
+    case 'api': return result?.apiResult != null || result?.loadResult != null;
   }
 }
 

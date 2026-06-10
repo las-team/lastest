@@ -8,7 +8,7 @@
  */
 
 import { generateWithAI } from '@/lib/ai';
-import type { AIProviderConfig } from '@/lib/ai/types';
+import { aiConfigFromSettings, aiModelId } from '@/lib/ai/provider-config';
 import { parseAiJson } from '@/lib/ai/json-parse';
 import * as queries from '@/lib/db/queries';
 import type { AppFixSuggestion, AppFixSuggestionFile } from '@/lib/db/schema';
@@ -39,35 +39,6 @@ Respond with ONLY a JSON object (no markdown fencing):
   ]
 }`;
 
-function buildConfig(settings: Awaited<ReturnType<typeof queries.getAISettings>>): AIProviderConfig {
-  const config: AIProviderConfig = {
-    provider: settings.provider as AIProviderConfig['provider'],
-    openrouterApiKey: settings.openrouterApiKey,
-    openrouterModel: settings.openrouterModel ?? undefined,
-    anthropicApiKey: settings.anthropicApiKey,
-    anthropicModel: settings.anthropicModel ?? undefined,
-    ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
-    ollamaModel: settings.ollamaModel ?? undefined,
-    openaiApiKey: settings.openaiApiKey,
-    openaiModel: settings.openaiModel ?? undefined,
-  };
-  // Read-only guard: even though we don't enable MCP/tools, force plan mode and
-  // disallow any file-mutating tools for the agent-SDK provider.
-  config.agentSdkPermissionMode = 'plan';
-  config.agentSdkDisallowedTools = ['Bash', 'Write', 'Edit', 'NotebookEdit'];
-  return config;
-}
-
-function modelIdFor(config: AIProviderConfig): string {
-  switch (config.provider) {
-    case 'openrouter': return `openrouter:${config.openrouterModel ?? 'default'}`;
-    case 'anthropic': return `anthropic:${config.anthropicModel ?? 'default'}`;
-    case 'openai': return `openai:${config.openaiModel ?? 'default'}`;
-    case 'ollama': return `ollama:${config.ollamaModel ?? 'default'}`;
-    default: return config.provider;
-  }
-}
-
 export async function suggestAppFix(opts: {
   repositoryId: string;
   testId: string;
@@ -78,19 +49,22 @@ export async function suggestAppFix(opts: {
   const test = await queries.getTest(testId);
   if (!test) return { status: 'no_suggestion', summary: 'Test not found.' };
 
-  // Locate the latest failing result (full row carries triage/console/network).
+  // Locate the latest failing result, then load that single full row (it
+  // carries triage/console/network/apiResult the slim history select omits).
   const history = await queries.getTestResultsByTest(testId);
   const failingMeta = history.find((r) => r.status === 'failed');
   if (!failingMeta?.testRunId) {
     return { status: 'no_suggestion', summary: 'No failing result found for this test.' };
   }
-  const fullResults = await queries.getTestResultsByRun(failingMeta.testRunId);
-  const failing = fullResults.find((r) => r.id === failingMeta.id) ?? null;
+  const failing = await queries.getTestResultById(failingMeta.id);
   if (!failing) return { status: 'no_suggestion', summary: 'Failing result could not be loaded.' };
 
-  // Gate strictly on a real_regression classification when triage is present.
+  // Gate only when triage positively classified the failure as NOT an app bug.
+  // real_regression, unknown, and untriaged all proceed — api tests in
+  // particular often triage as unknown for lack of browser signals.
   const triage = failing.triage;
-  if (triage?.classification && triage.classification !== 'real_regression') {
+  const nonAppClassifications = ['flaky_test', 'environment_issue', 'test_maintenance'];
+  if (triage?.classification && nonAppClassifications.includes(triage.classification)) {
     return {
       status: 'not_a_regression',
       summary: `Failure classified as ${triage.classification} — an app-code fix is not applicable. Consider lastest_heal_test instead.`,
@@ -111,9 +85,12 @@ export async function suggestAppFix(opts: {
     return { status: 'ai_unavailable', summary: 'App-fix suggestions require a JSON-capable AI provider (not claude-cli).' };
   }
 
-  const config = buildConfig(settings);
+  const config = aiConfigFromSettings(settings, { readOnly: true });
 
   const consoleErrors = (failing.consoleErrors ?? []).slice(0, 8).join('\n') || 'None';
+  const apiSection = failing.apiResult
+    ? `\n**API result:** status ${failing.apiResult.statusCode ?? 'n/a'}, ${failing.apiResult.latencyMs}ms${failing.apiResult.error ? `, transport error: ${failing.apiResult.error}` : ''}\n**Failed API assertions:**\n${failing.apiResult.assertionResults.filter((a) => !a.passed).map((a) => `- ${a.description} (expected ${JSON.stringify(a.expected)}, got ${JSON.stringify(a.actual)})`).join('\n') || '(none)'}\n**Response snippet:** ${failing.apiResult.responseSnippet?.slice(0, 800) ?? '(none)'}\n`
+    : '';
   const prompt = `A previously passing end-to-end test is now failing. Suggest an application-code fix.
 
 **Test:** ${test.name}
@@ -121,7 +98,7 @@ export async function suggestAppFix(opts: {
 **Error:** ${failing.errorMessage ?? 'No error message'}
 **Console errors:**
 ${consoleErrors}
-
+${apiSection}
 **Recently changed files (most likely root cause):**
 ${changedFiles.length ? changedFiles.map((f) => `- ${f}`).join('\n') : '(no change map available — infer from the error)'}
 
@@ -174,7 +151,7 @@ ${test.code.slice(0, 4000)}
     files,
     relatedChangeMapFiles: changedFiles.length ? changedFiles : undefined,
     generatedAt: new Date().toISOString(),
-    modelId: modelIdFor(config),
+    modelId: aiModelId(config),
   };
 
   await queries.insertAppFixSuggestion(build?.id ?? null, testId, suggestion).catch(() => {});

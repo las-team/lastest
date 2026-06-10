@@ -30,6 +30,12 @@ async function recomputeBuildStatus(buildId: string): Promise<void> {
 /**
  * Maps each non-visual layer to its baseline kind. Visual stays in the
  * existing visualDiffs/baselines table; here we cover the seven other layers.
+ *
+ * `api` is intentionally absent: api-test evidence asserts ABSOLUTE
+ * expectations the user authored (status/schema/body), not drift vs a
+ * baseline — there is nothing to baseline-suppress. Approve/snooze on an api
+ * layer records the feedback row (suppressing it for this build's review);
+ * the durable fix is editing the test's apiDefinition.
  */
 const LAYER_TO_BASELINE_KIND: Partial<Record<EvidenceLayer, LayerBaselineKind>> = {
   network: 'network',

@@ -204,6 +204,9 @@ function classifyLayer(
       return 'clean';
     case 'variable':
       return (result?.extractedVariables != null || result?.assignedVariables != null) ? 'clean' : 'absent';
+    case 'api':
+      // api tests carry an apiResult/loadResult; absent for browser tests.
+      return (result?.apiResult != null || result?.loadResult != null) ? 'clean' : 'absent';
   }
 }
 
@@ -1422,6 +1425,11 @@ function absentHint(layer: CompareTab, testId: string | null, result?: TestResul
       // test detail page's Vars tab via the URL-hash deep-link.
       settingsHref: testId ? `/tests/${testId}#vars` : undefined,
       settingsLabel: 'Open test Vars',
+    };
+    case 'api': return {
+      message: 'This is not an API test — API request/response assertions only apply to api-type tests.',
+      settingsHref: testId ? `/tests/${testId}` : undefined,
+      settingsLabel: testId ? 'Open test' : undefined,
     };
   }
 }

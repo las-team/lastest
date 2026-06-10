@@ -67,6 +67,7 @@ const MODE_LAYERS: { id: CheckLayer; name: string }[] = [
   { id: 'design',  name: 'Design' },
   { id: 'perf',    name: 'Perf' },
   { id: 'url',     name: 'URL' },
+  { id: 'api',     name: 'API' },
 ];
 
 const MODE_OPTIONS: { id: CheckMode | null; label: string; hint: string }[] = [

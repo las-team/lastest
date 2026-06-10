@@ -73,6 +73,7 @@ type LegacySource = Partial<
     | 'designMode'
     | 'perfMode'
     | 'urlMode'
+    | 'apiMode'
   >
 > & {
   textDiffEnabled?: boolean | null;
@@ -147,6 +148,7 @@ export function deriveCheckModes(source: LegacySource | null | undefined): Check
   // --- perf / url ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
   out.url = normalizeMode(source.urlMode) ?? DEFAULTS.url;
+  out.api = normalizeMode(source.apiMode) ?? DEFAULTS.api;
 
   return out;
 }
@@ -168,6 +170,7 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
+  apiMode?: CheckMode;
   // legacy mirrors
   enableA11y?: boolean;
   enableDesignSystem?: boolean;
@@ -211,6 +214,7 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   }
   if (modes.perf)    { patch.perfMode = modes.perf; }
   if (modes.url)     { patch.urlMode = modes.url; }
+  if (modes.api)     { patch.apiMode = modes.api; }
 
   return patch;
 }
@@ -314,6 +318,7 @@ export function pickTestModeOverrides(
         designMode?: string | null;
         perfMode?: string | null;
         urlMode?: string | null;
+        apiMode?: string | null;
         networkErrorMode?: 'fail' | 'warn' | 'ignore' | null;
         consoleErrorMode?: 'fail' | 'warn' | 'ignore' | null;
       }
@@ -371,6 +376,7 @@ export function testModeOverridesToOverridesPatch(modes: Partial<CheckModeMap>):
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
+  apiMode?: CheckMode;
   networkErrorMode?: 'fail' | 'warn' | 'ignore';
   consoleErrorMode?: 'fail' | 'warn' | 'ignore';
 } {
@@ -383,6 +389,7 @@ export function testModeOverridesToOverridesPatch(modes: Partial<CheckModeMap>):
   if (modes.dom)     patch.domMode = modes.dom;
   if (modes.perf)    patch.perfMode = modes.perf;
   if (modes.url)     patch.urlMode = modes.url;
+  if (modes.api)     patch.apiMode = modes.api;
   if (modes.a11y)    patch.a11yMode = modes.a11y;
   if (modes.design)  patch.designMode = modes.design;
   if (modes.network) {

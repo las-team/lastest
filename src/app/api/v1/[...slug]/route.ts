@@ -219,6 +219,18 @@ function normalizePlaywrightOverrides(raw: unknown): { ok: true; value: Record<s
     }
     out[key] = r[key];
   }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    'visualMode', 'textMode', 'domMode', 'networkMode', 'consoleMode',
+    'a11yMode', 'designMode', 'perfMode', 'urlMode', 'apiMode',
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== 'enforce' && r[key] !== 'log' && r[key] !== 'disable') {
+      return { ok: false, error: `${key} must be "enforce" | "log" | "disable"` };
+    }
+    out[key] = r[key];
+  }
   if (r.acceptAnyCertificate !== undefined) {
     if (typeof r.acceptAnyCertificate !== 'boolean') {
       return { ok: false, error: 'acceptAnyCertificate must be boolean' };
@@ -279,6 +291,18 @@ function normalizePlaywrightSettingsPatch(raw: unknown): { ok: true; value: Reco
     if (r[key] === undefined) continue;
     if (r[key] !== 'fail' && r[key] !== 'warn' && r[key] !== 'ignore') {
       return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
+    }
+    out[key] = r[key];
+  }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    'visualMode', 'textMode', 'domMode', 'networkMode', 'consoleMode',
+    'a11yMode', 'designMode', 'perfMode', 'urlMode', 'apiMode',
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== 'enforce' && r[key] !== 'log' && r[key] !== 'disable') {
+      return { ok: false, error: `${key} must be "enforce" | "log" | "disable"` };
     }
     out[key] = r[key];
   }
@@ -1874,6 +1898,24 @@ export async function PUT(
       if (body.code !== undefined) updates.code = body.code;
       if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
       if (body.functionalAreaId !== undefined) updates.functionalAreaId = body.functionalAreaId;
+      // E1: api tests are edited via their definition; keep the code column (a
+      // readable JSON rendering) in sync unless code was set explicitly.
+      if (body.apiDefinition !== undefined) {
+        const def = body.apiDefinition;
+        if (def === null || typeof def !== 'object' || Array.isArray(def) || !def.method || !def.url || !Array.isArray(def.assertions)) {
+          return NextResponse.json({ error: 'apiDefinition must be an object with method, url, and assertions[]' }, { status: 400 });
+        }
+        updates.apiDefinition = def;
+        if (body.code === undefined) updates.code = JSON.stringify(def, null, 2);
+        if (body.targetUrl === undefined) updates.targetUrl = def.url;
+      }
+      // E3: per-test load config (null clears it → runs as a plain api test).
+      if (body.loadConfig !== undefined) {
+        if (body.loadConfig !== null && (typeof body.loadConfig !== 'object' || Array.isArray(body.loadConfig) || typeof body.loadConfig.concurrency !== 'number')) {
+          return NextResponse.json({ error: 'loadConfig must be { concurrency, totalRequests?, durationMs?, thresholds? } or null' }, { status: 400 });
+        }
+        updates.loadConfig = body.loadConfig;
+      }
       if (body.quarantined !== undefined) {
         if (typeof body.quarantined !== 'boolean') {
           return NextResponse.json({ error: 'quarantined must be a boolean' }, { status: 400 });

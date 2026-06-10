@@ -1334,6 +1334,7 @@ export const playwrightSettings = pgTable('playwright_settings', {
   designMode: text('design_mode'),   // token compliance (legacy enableDesignSystem)
   perfMode: text('perf_mode'),       // web vitals capture
   urlMode: text('url_mode'),         // URL trajectory comparison
+  apiMode: text('api_mode'),         // api request/response assertions (E1)
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 });
@@ -1467,11 +1468,9 @@ export const DEFAULT_DIFF_THRESHOLDS = {
 };
 
 // Default settings for API tests (E1). Used when a field is unset on the
-// ApiTestDefinition / repo config.
+// ApiTestDefinition.
 export const DEFAULT_API_TEST_SETTINGS = {
   timeoutMs: 15000,
-  latencyBudgetMs: 2000,
-  followRedirects: true,
 };
 
 // Default load-test thresholds (E3) + server-side safety caps.
@@ -1492,7 +1491,7 @@ export type DiffClassification = 'unchanged' | 'flaky' | 'changed';
 // "infrastructure broke". See `runBuildAsync` catch block.
 export type BuildStatus = 'safe_to_merge' | 'review_required' | 'blocked' | 'has_todos' | 'executor_failed';
 export type DiffStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved' | 'todo';
-export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled';
+export type TriggerType = 'webhook' | 'manual' | 'push' | 'scheduled' | 'validate_diff';
 
 // AI Provider settings for test generation
 export type AIProvider = 'claude-cli' | 'openrouter' | 'claude-agent-sdk' | 'ollama' | 'openai' | 'anthropic';
