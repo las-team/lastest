@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentSession } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { ensureStepComparisonsForBuild } from "@/lib/verify/backfill-step-comparisons";
-import { computeChangeMap } from "@/server/actions/change-map";
+import { computeChangeMap } from "@/lib/change-map/compute";
 import {
   deriveCheckModes,
   pickTestModeOverrides,

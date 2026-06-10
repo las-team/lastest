@@ -1,4 +1,8 @@
 import type { BuildStatus } from "@/lib/db/schema";
+import {
+  assertSafeOutboundUrl,
+  SsrfBlockedError,
+} from "@/lib/security/outbound-url";
 
 export interface CustomWebhookConfig {
   url: string;
@@ -101,8 +105,12 @@ export async function sendCustomWebhookNotification(
   const payload = buildWebhookPayload(notification);
 
   try {
+    // SSRF guard: a user-configured webhook URL must not target internal hosts.
+    await assertSafeOutboundUrl(config.url);
     const response = await fetch(config.url, {
       method: config.method,
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: {
         "Content-Type": "application/json",
         ...config.headers,
@@ -114,12 +122,19 @@ export async function sendCustomWebhookNotification(
       const text = await response.text();
       return {
         success: false,
-        error: `Webhook failed: ${response.status} ${text}`,
+        error: `Webhook failed: ${response.status} ${text.slice(0, 500)}`,
       };
     }
 
     return { success: true };
   } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      return {
+        success: false,
+        error:
+          "Webhook URL points to a private or internal address and was blocked.",
+      };
+    }
     return {
       success: false,
       error:
@@ -152,8 +167,12 @@ export async function testCustomWebhook(
   };
 
   try {
+    // SSRF guard: block test requests aimed at internal/metadata hosts. Without
+    // this, the reflected status + body below is a near-full SSRF read oracle.
+    await assertSafeOutboundUrl(config.url);
     const response = await fetch(config.url, {
       method: config.method,
+      redirect: "manual",
       headers: {
         "Content-Type": "application/json",
         ...config.headers,
@@ -163,11 +182,22 @@ export async function testCustomWebhook(
 
     if (!response.ok) {
       const text = await response.text();
-      return { success: false, statusCode: response.status, error: text };
+      return {
+        success: false,
+        statusCode: response.status,
+        error: text.slice(0, 500),
+      };
     }
 
     return { success: true, statusCode: response.status };
   } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      return {
+        success: false,
+        error:
+          "Webhook URL points to a private or internal address and was blocked.",
+      };
+    }
     return {
       success: false,
       error:

@@ -45,7 +45,7 @@ import {
   isRunnerBusy,
 } from "./jobs";
 import { emitJobEvent } from "@/lib/ws/job-events";
-import { triggerAIDiffAnalysis } from "./ai-diffs";
+import { triggerAIDiffAnalysis } from "@/lib/ai/trigger-diff-analysis";
 import { forkBaselinesForBranch } from "./baselines";
 import {
   STORAGE_DIRS,
@@ -1509,7 +1509,7 @@ async function runBuildAsync(
 
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
-    import("./change-map")
+    import("@/lib/change-map/compute")
       .then(({ computeChangeMap }) => {
         computeChangeMap(buildId).catch((e) => {
           console.error(`[change-map] compute failed for build ${buildId}:`, e);
@@ -1535,7 +1535,7 @@ async function runBuildAsync(
     // with no evidence is treated as Done on the verify board. We persist a
     // step_layer_feedback row so the count of "verified" cases is accurate
     // without the reviewer having to click through.
-    import("./layer-feedback-auto")
+    import("@/lib/verify/auto-approve")
       .then(({ autoApproveZeroDiffCases }) => {
         autoApproveZeroDiffCases(buildId).catch((e) => {
           console.error(

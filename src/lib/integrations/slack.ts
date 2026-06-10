@@ -1,4 +1,5 @@
 import type { BuildStatus } from "@/lib/db/schema";
+import { assertSafeOutboundUrl } from "@/lib/security/outbound-url";
 
 export interface SlackBuildNotification {
   buildId: string;
@@ -83,6 +84,7 @@ export async function sendSlackNotification(
   ];
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

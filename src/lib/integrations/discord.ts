@@ -1,4 +1,5 @@
 import type { BuildStatus, BugReportSeverity } from "@/lib/db/schema";
+import { assertSafeOutboundUrl } from "@/lib/security/outbound-url";
 
 export interface DiscordBuildNotification {
   buildId: string;
@@ -64,6 +65,7 @@ export async function sendDiscordNotification(
   };
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -148,6 +150,7 @@ export async function sendDiscordBugReport(
   }
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     let response: Response;
 
     if (notification.screenshotBuffer) {
@@ -252,6 +255,7 @@ export async function sendDiscordShareNotification(
   };
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

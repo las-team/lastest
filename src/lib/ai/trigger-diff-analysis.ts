@@ -1,5 +1,3 @@
-"use server";
-
 import * as queries from "@/lib/db/queries";
 
 import {
@@ -7,7 +5,13 @@ import {
   type DiffingProviderConfig,
 } from "@/lib/ai/diff-analyzer";
 import type { AIDiffingProvider } from "@/lib/db/schema";
-import { createChildJob, completeJob, failJob } from "./jobs";
+import { createChildJob, completeJob, failJob } from "@/server/actions/jobs";
+
+// NOTE: Plain module, NOT a `"use server"` file. This reads a diff's images and
+// overwrites the owning team's stored AI analysis/verdict while spending their
+// AI budget — exposing it as a server action would be a cross-team IDOR. It is
+// invoked only from trusted build-finalization code, which already resolved the
+// diff's repository.
 
 const MAX_CONCURRENT_AI = 10;
 let activeAI = 0;

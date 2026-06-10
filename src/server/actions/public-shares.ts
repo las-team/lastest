@@ -11,9 +11,10 @@ import { STORAGE_DIRS, toRelativePath } from "@/lib/storage/paths";
 import { sendDiscordShareNotification } from "@/lib/integrations/discord";
 import type { PublicShare } from "@/lib/db/schema";
 
+// Internal "new share published" ping. Opt-in via env only — never hardcode a
+// webhook URL here (it is a bearer credential and would be committed to source).
 const INTERNAL_SHARE_DISCORD_WEBHOOK_URL =
-  process.env.LASTEST_SHARE_DISCORD_WEBHOOK_URL ||
-  "https://discord.com/api/webhooks/1506995703593828434/8mwqS7FH7dk9SxqBok4QEMPv2sZ9f1w5J5DD1PR5Wajqtp2mHvNf0C99ggZobDo6V_If";
+  process.env.LASTEST_SHARE_DISCORD_WEBHOOK_URL || "";
 
 export interface PublishShareResult {
   shareId: string;
