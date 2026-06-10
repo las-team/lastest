@@ -8,25 +8,29 @@
 
 ## Summary
 
-| # | Severity | Finding | Location |
-|---|----------|---------|----------|
-| 1 | **CRITICAL** | Host-process eval of customer/AI code (setup-script test + QuickStart) → cross-tenant RCE | `setup-scripts.ts`, `script-runner.ts:524`, `quickstart/storage-capture.ts:75` |
-| 2 | **HIGH** | AI provider API keys serialized to the browser in plaintext | `settings/page.tsx:110,553` → `ai-settings-card.tsx:113-138` |
-| 3 | **HIGH** | Invitations consumed by raw email match + no email verification → team/role takeover | `auth.ts:230-241`, `queries/auth.ts:531` |
-| 4 | **HIGH** | `getStreamUrlForRunner` leaks live CDP stream URL + shared `STREAM_AUTH_TOKEN` to any user | `embedded-sessions.ts:378-392` |
-| 5 | **HIGH** | "Analyze URL" SSRF — unguarded `fetch` with `redirect: follow` | `recording.ts:343` |
-| 6 | **HIGH** | Notification-webhook SSRF with response reflection (metadata-cred read primitive) | `settings.ts:236`, `integrations/custom-webhook.ts:155` |
-| 7 | **MEDIUM** | Unguarded `"use server"` IDOR: `computeChangeMap` | `change-map.ts:50` |
-| 8 | **MEDIUM** | Unguarded `"use server"` IDOR: `autoApproveZeroDiffCases` | `layer-feedback-auto.ts:22` |
-| 9 | **MEDIUM** | Unguarded `"use server"` IDOR: `triggerAIDiffAnalysis` | `ai-diffs.ts:34` |
-| 10 | **MEDIUM** | Hardcoded live Discord webhook URL+token committed | `public-shares.ts:14-16` |
-| 11 | **MEDIUM** | Run-minute quota & project limits not enforced server-side | `runs.ts:91`, `repos.ts:229` |
-| 12 | **MEDIUM** | DNS-rebinding TOCTOU on URL-diff capture path | `url-diff/capture.ts` |
-| 13 | **LOW** | Session/API tokens stored plaintext at rest | `queries/auth.ts:246` |
-| 14 | **LOW** | Admins can mint `owner`-role invitations | `users.ts:18` |
-| 15 | **LOW** | CSV formula injection in violation exports | `builds.ts:2598`, `design-system-violations/route.ts:27` |
-| 16 | **LOW** | `getAISettingsRaw` unmasked action, team-member callable | `ai-settings.ts:50` |
-| 17 | **LOW** | `/api/stats` non-constant-time key compare + key in query string | `api/stats/route.ts:10` |
+Status legend: ✅ fixed · ⊘ deferred (by request).
+
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | **CRITICAL** | Host-process eval of customer/AI code (setup-script test + QuickStart + play-agent) → cross-tenant RCE | ✅ routed off-host via runner; host fallback only for self-hosted single-tenant |
+| 2 | **HIGH** | AI provider API keys serialized to the browser in plaintext | ✅ page uses masking action |
+| 3 | **HIGH** | Invitations consumed by raw email match + no email verification → team/role takeover | ✅ token-bound `acceptInvitation` |
+| 4 | **HIGH** | `getStreamUrlForRunner` leaks live CDP stream URL + shared `STREAM_AUTH_TOKEN` to any user | ✅ team-ownership check; lookup made private |
+| 5 | **HIGH** | "Analyze URL" SSRF — unguarded `fetch` with `redirect: follow` | ✅ `safeOutboundFetch` (per-hop revalidation) |
+| 6 | **HIGH** | Notification-webhook SSRF with response reflection (metadata-cred read primitive) | ✅ guarded + manual redirect + capped body |
+| 7 | **MEDIUM** | Unguarded `"use server"` IDOR: `computeChangeMap` | ✅ moved to `lib/change-map/compute.ts` |
+| 8 | **MEDIUM** | Unguarded `"use server"` IDOR: `autoApproveZeroDiffCases` | ✅ moved to `lib/verify/auto-approve.ts` |
+| 9 | **MEDIUM** | Unguarded `"use server"` IDOR: `triggerAIDiffAnalysis` | ✅ moved to `lib/ai/trigger-diff-analysis.ts` |
+| 10 | **MEDIUM** | Hardcoded live Discord webhook URL+token committed | ✅ removed (env-only); **rotate the leaked webhook** |
+| 11 | **MEDIUM** | Run-minute quota & project limits not enforced server-side | ✅ enforced behind `ENFORCE_RUN_LIMITS` |
+| 12 | **MEDIUM** | DNS-rebinding TOCTOU on URL-diff capture path | ✅ EB-pod egress NetworkPolicy (needs enforcing CNI) |
+| 13 | **LOW** | Session/API tokens stored plaintext at rest | ⊘ deferred by request |
+| 14 | **LOW** | Admins can mint `owner`-role invitations | ✅ owner-only |
+| 15 | **LOW** | CSV formula injection in violation exports | ✅ leading `=+-@` neutralized |
+| 16 | **LOW** | `getAISettingsRaw` unmasked action, team-member callable | ✅ removed |
+| 17 | **LOW** | `/api/stats` non-constant-time key compare + key in query string | ✅ header-only + `timingSafeEqual` |
+
+> **Action still required:** rotate the Discord webhook token that was previously committed in `public-shares.ts` (finding #10) — removing it from source does not invalidate it.
 
 ---
 
