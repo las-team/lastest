@@ -5,7 +5,7 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "dev": "NODE_OPTIONS='--require ./scripts/ws-proxy-preload.js' next dev -p 3000",
-    "prepare": "node .husky/install.mjs",
+    "prepare": "node .husky/install.mjs || true",
     "build": "pnpm --filter @lastest/mcp-server build && next build",
     "start": "next start",
     "lint": "eslint",

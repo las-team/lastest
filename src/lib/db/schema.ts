@@ -1920,6 +1920,13 @@ export const sessions = pgTable("sessions", {
   // Space-separated OAuth-style scopes for 'launch' tokens
   // (e.g. "launch:vote launch:submit"). Null for browser/api sessions.
   scope: text("scope"),
+  // Mirrors users.teamId onto the session so the Stripe plugin's
+  // organization-scoped subscription lookup resolves without running
+  // better-auth's organization plugin. Declared as a session
+  // additionalField in auth.ts and stamped by the session.create hook —
+  // the Drizzle adapter requires this matching column or session
+  // creation throws ("field does not exist in the session schema").
+  activeOrganizationId: text("active_organization_id"),
 });
 
 export type Session = typeof sessions.$inferSelect;
