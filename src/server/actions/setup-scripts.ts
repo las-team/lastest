@@ -12,6 +12,12 @@ import { validateApiScript } from "@/lib/setup/api-seeder";
 import { chromium } from "playwright";
 import { runPlaywrightSetup } from "@/lib/setup/script-runner";
 import type { SetupScript, SetupContext } from "@/lib/setup/types";
+import { executeSetupViaRunner } from "@/lib/execution/executor";
+import {
+  claimOrProvisionPoolEB,
+  releasePoolEB,
+} from "@/server/actions/embedded-sessions";
+import { isKubernetesMode } from "@/lib/eb/provisioner";
 
 export interface CreateSetupScriptInput {
   repositoryId: string;
@@ -148,14 +154,78 @@ export async function testSetupScript(
     };
   }
 
+  const code = script.code;
+  if (!code) {
+    return { success: false, duration: 0, error: "No setup code" };
+  }
+
+  const settings = await queries.getPlaywrightSettings(script.repositoryId);
+  const viewport =
+    settings?.viewportWidth && settings?.viewportHeight
+      ? { width: settings.viewportWidth, height: settings.viewportHeight }
+      : { width: 1280, height: 720 };
+
+  // SECURITY: setup scripts are arbitrary customer-authored Playwright code.
+  // Prefer running them in a disposable runner/EB pod so they never `eval` in
+  // the host process (which holds DATABASE_URL / STRIPE_* / SYSTEM_EB_TOKEN).
+  // On a provisioned (Kubernetes) deployment this path is mandatory; only a
+  // self-hosted single-tenant install with no pool falls back to host execution.
+  let runnerId: string | null = null;
+  try {
+    const poolEB = await claimOrProvisionPoolEB({ purpose: "interactive" });
+    runnerId = poolEB?.runnerId ?? null;
+  } catch {
+    runnerId = null;
+  }
+
+  if (runnerId) {
+    const start = Date.now();
+    try {
+      const result = await executeSetupViaRunner(
+        code,
+        script.id,
+        runnerId,
+        targetUrl,
+        viewport,
+        settings?.navigationTimeout ?? undefined,
+        settings,
+      );
+      return {
+        success: true,
+        duration: Date.now() - start,
+        variables: result.variables,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        duration: Date.now() - start,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await releasePoolEB(runnerId).catch(() => {});
+    }
+  }
+
+  // No pooled browser was available. In a provisioned deployment we must NOT
+  // fall back to in-process eval — return a transient busy error instead.
+  if (isKubernetesMode()) {
+    return {
+      success: false,
+      duration: 0,
+      error: "All browsers are busy. Please try again later.",
+    };
+  }
+
+  // Self-hosted / local-dev fallback: no runner pool is configured, so there is
+  // no disposable sandbox to use. Execute in-process. This is acceptable only
+  // because such deployments are single-tenant (every team member is already
+  // trusted with the host); a multi-tenant deployment always runs a pool above.
   let browser = null;
   let page = null;
 
   try {
     browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-    });
+    const context = await browser.newContext({ viewport });
     page = await context.newPage();
 
     const setupContext: SetupContext = {

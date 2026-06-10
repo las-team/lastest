@@ -24,8 +24,7 @@ import { createHash } from "crypto";
 import { generateWithAI, extractCodeFromResponse } from "@/lib/ai";
 import type { AIProviderConfig } from "@/lib/ai/types";
 import { chromium } from "playwright";
-import type { SetupContext, SetupScript } from "@/lib/setup/types";
-import { runPlaywrightSetup } from "@/lib/setup/script-runner";
+import { executeSetupViaRunner } from "@/lib/execution/executor";
 import { classifyTemplate } from "@/lib/templates/classifier";
 import { gatherCodebaseIntelligence } from "@/lib/ai/codebase-intelligence";
 import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
@@ -626,47 +625,28 @@ async function testLoginScript(
   code: string,
   baseUrl: string,
   repositoryId: string,
-  cdpUrl: string,
+  runnerId: string,
 ): Promise<{ success: boolean; error?: string; duration: number }> {
-  let browser = null;
-  let context = null;
+  const start = Date.now();
   try {
-    browser = await chromium.connectOverCDP(cdpUrl);
-    context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-    });
-    const page = await context.newPage();
-
-    const script: SetupScript = {
-      id: "temp-login-test",
-      repositoryId,
-      name: "Login Test",
-      type: "playwright",
+    // SECURITY: the login script is AI-generated arbitrary Playwright code.
+    // Execute it inside the EB pod via the runner (run_setup) rather than
+    // eval'ing it in the host process — connecting over CDP would still run the
+    // script's JavaScript in-host, where DATABASE_URL / STRIPE_* live.
+    await executeSetupViaRunner(
       code,
-      createdAt: null,
-      updatedAt: null,
-    };
-
-    const setupContext: SetupContext = {
+      `play-agent-login-${repositoryId}`,
+      runnerId,
       baseUrl,
-      page,
-      variables: {},
-      repositoryId,
-    };
-
-    const result = await runPlaywrightSetup(page, script, setupContext);
-    return {
-      success: result.success,
-      error: result.error,
-      duration: result.duration,
-    };
+      { width: 1280, height: 720 },
+      undefined,
+      null,
+    );
+    return { success: true, duration: Date.now() - start };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Script execution failed";
-    return { success: false, error: message, duration: 0 };
-  } finally {
-    if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    return { success: false, error: message, duration: Date.now() - start };
   }
 }
 
@@ -963,7 +943,7 @@ async function runEnvSetup(
       scriptResult.code,
       baseUrl,
       repositoryId,
-      eb.cdpUrl,
+      eb.runnerId,
     );
 
     if (!testResult.success) {
