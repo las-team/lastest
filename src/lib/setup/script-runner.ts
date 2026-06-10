@@ -4,6 +4,10 @@ import {
   hashSelectors,
   sortSelectorsByStats,
   selectorTimeoutFor,
+  selectorStatKey,
+  buildStatMap,
+  relevantStats,
+  isUsableSelectorValue,
   type SelectorRef,
   type SelectorStatRow,
 } from "@lastest/shared";
@@ -248,32 +252,45 @@ function createLocateWithFallback(
     value?: string | null,
     coords?: { x: number; y: number } | null,
   ) => {
-    const validSelectors = selectors.filter(
-      (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
+    const validSelectors = selectors.filter((s) =>
+      isUsableSelectorValue(s.value),
     );
 
     const hash = hashSelectors(validSelectors as SelectorRef[]);
 
     const allStats = await getAllStats();
+    const hashStats = relevantStats(allStats, hash);
+    const statMap = buildStatMap(hashStats);
     let ordered = sortCache.get(hash);
     if (!ordered) {
       ordered =
-        allStats.length > 0
-          ? sortSelectorsByStats(
-              validSelectors,
-              allStats.filter((r) => r.hash === hash),
-            )
+        hashStats.length > 0
+          ? sortSelectorsByStats(validSelectors, hashStats)
           : validSelectors;
       sortCache.set(hash, ordered);
     }
 
-    for (const sel of ordered) {
-      const attemptStart = Date.now();
+    for (let rank = 0; rank < ordered.length; rank++) {
+      const sel = ordered[rank];
+      let target: Locator;
+      const waitStart = Date.now();
       try {
         let locator: Locator;
         if (sel.type === "ocr-text") {
           const text = sel.value.replace(/^ocr-text="/, "").replace(/"$/, "");
           locator = pg.getByText(text, { exact: false });
+        } else if (sel.type === "label") {
+          locator = pg.getByLabel(
+            sel.value.replace(/^label="/, "").replace(/"$/, ""),
+          );
+        } else if (sel.type === "alt-text") {
+          locator = pg.getByAltText(
+            sel.value.replace(/^alt-text="/, "").replace(/"$/, ""),
+          );
+        } else if (sel.type === "title") {
+          locator = pg.getByTitle(
+            sel.value.replace(/^title="/, "").replace(/"$/, ""),
+          );
         } else if (sel.type === "role-name") {
           const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
           if (match)
@@ -284,28 +301,14 @@ function createLocateWithFallback(
         } else {
           locator = pg.locator(sel.value);
         }
-        const target = locator.first();
-        const stat = allStats.find(
-          (r) =>
-            r.hash === hash && r.type === sel.type && r.value === sel.value,
+        target = locator.first();
+        const stat = statMap.get(selectorStatKey(sel.type, sel.value));
+        const candidateTimeout = selectorTimeoutFor(
+          stat,
+          defaultTimeoutMs,
+          rank,
         );
-        const candidateTimeout = selectorTimeoutFor(stat, defaultTimeoutMs);
         await target.waitFor({ timeout: candidateTimeout });
-        if (action === "click") await target.click();
-        else if (action === "fill") await target.fill(value || "");
-        else if (action === "selectOption")
-          await target.selectOption(value || "");
-        if (testId) {
-          const elapsed = Date.now() - attemptStart;
-          recordSelectorSuccess(
-            testId,
-            hash,
-            sel.type,
-            sel.value,
-            elapsed,
-          ).catch(() => {});
-        }
-        return;
       } catch {
         if (testId) {
           recordSelectorFailure(testId, hash, sel.type, sel.value).catch(
@@ -314,6 +317,38 @@ function createLocateWithFallback(
         }
         continue;
       }
+
+      // Locate succeeded — record the outcome now, scoped to the waitFor
+      // alone. An action failure below is an interaction problem, not a
+      // selector-quality signal, and must not poison the next run's ranking.
+      if (testId) {
+        recordSelectorSuccess(
+          testId,
+          hash,
+          sel.type,
+          sel.value,
+          Date.now() - waitStart,
+        ).catch(() => {});
+      }
+
+      const performAction = async () => {
+        if (action === "click") await target.click();
+        else if (action === "fill") await target.fill(value || "");
+        else if (action === "selectOption")
+          await target.selectOption(value || "");
+      };
+      try {
+        await performAction();
+      } catch {
+        // One retry on the matched element before trying the next candidate.
+        await pg.waitForTimeout(250);
+        try {
+          await performAction();
+        } catch {
+          continue;
+        }
+      }
+      return;
     }
     // Coordinate fallback
     if (action === "click" && coords) {

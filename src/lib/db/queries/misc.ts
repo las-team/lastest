@@ -7,11 +7,13 @@ import {
   functionalAreas,
 } from "../schema";
 import type { NewReviewTodo } from "../schema";
-import { eq, desc, and, inArray, gte } from "drizzle-orm";
+import { eq, desc, and, inArray, gte, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import {
   hashSelectors,
+  relevantStats,
   sortSelectorsByStats,
+  selectorStatKey,
   type SelectorOutcome,
   type SelectorRef,
   type SelectorStatRow,
@@ -40,51 +42,15 @@ export async function recordSelectorSuccess(
   selectorValue: string,
   responseTimeMs: number,
 ) {
-  const now = new Date();
-  const [existing] = await db
-    .select()
-    .from(selectorStats)
-    .where(
-      and(
-        eq(selectorStats.testId, testId),
-        eq(selectorStats.selectorArrayHash, selectorArrayHash),
-        eq(selectorStats.selectorType, selectorType),
-        eq(selectorStats.selectorValue, selectorValue),
-      ),
-    );
-
-  if (existing) {
-    const newSuccessCount = (existing.successCount ?? 0) + 1;
-    const newTotalAttempts = (existing.totalAttempts ?? 0) + 1;
-    const oldAvg = existing.avgResponseTimeMs ?? responseTimeMs;
-    const newAvg = Math.round(
-      (oldAvg * (newSuccessCount - 1) + responseTimeMs) / newSuccessCount,
-    );
-
-    await db
-      .update(selectorStats)
-      .set({
-        successCount: newSuccessCount,
-        totalAttempts: newTotalAttempts,
-        avgResponseTimeMs: newAvg,
-        lastUsedAt: now,
-      })
-      .where(eq(selectorStats.id, existing.id));
-  } else {
-    await db.insert(selectorStats).values({
-      id: uuid(),
-      testId,
-      selectorArrayHash,
-      selectorType,
-      selectorValue,
-      successCount: 1,
-      failureCount: 0,
-      totalAttempts: 1,
-      avgResponseTimeMs: responseTimeMs,
-      lastUsedAt: now,
-      createdAt: now,
-    });
-  }
+  await recordSelectorOutcomes(testId, [
+    {
+      hash: selectorArrayHash,
+      type: selectorType,
+      value: selectorValue,
+      success: true,
+      responseTimeMs,
+    },
+  ]);
 }
 
 export async function recordSelectorFailure(
@@ -93,43 +59,14 @@ export async function recordSelectorFailure(
   selectorType: string,
   selectorValue: string,
 ) {
-  const now = new Date();
-  const [existing] = await db
-    .select()
-    .from(selectorStats)
-    .where(
-      and(
-        eq(selectorStats.testId, testId),
-        eq(selectorStats.selectorArrayHash, selectorArrayHash),
-        eq(selectorStats.selectorType, selectorType),
-        eq(selectorStats.selectorValue, selectorValue),
-      ),
-    );
-
-  if (existing) {
-    await db
-      .update(selectorStats)
-      .set({
-        failureCount: (existing.failureCount ?? 0) + 1,
-        totalAttempts: (existing.totalAttempts ?? 0) + 1,
-        lastUsedAt: now,
-      })
-      .where(eq(selectorStats.id, existing.id));
-  } else {
-    await db.insert(selectorStats).values({
-      id: uuid(),
-      testId,
-      selectorArrayHash,
-      selectorType,
-      selectorValue,
-      successCount: 0,
-      failureCount: 1,
-      totalAttempts: 1,
-      avgResponseTimeMs: null,
-      lastUsedAt: now,
-      createdAt: now,
-    });
-  }
+  await recordSelectorOutcomes(testId, [
+    {
+      hash: selectorArrayHash,
+      type: selectorType,
+      value: selectorValue,
+      success: false,
+    },
+  ]);
 }
 
 /**
@@ -158,8 +95,10 @@ export async function getSelectorStatsForTest(
 
 /**
  * Host-side helper for code paths with direct DB access (currently
- * `src/lib/setup/script-runner.ts`). Reads stats for the (test, hash)
- * pair and returns the input array sorted by historical success.
+ * `src/lib/setup/script-runner.ts`). Reads all stats for the test and
+ * returns the input array sorted by historical success — preferring rows
+ * recorded under this exact candidate-array hash, falling back to
+ * per-(type, value) history across hashes when the array was edited.
  *
  * Falls back to the original order if stats lookup fails — selector stats
  * are best-effort and must never break test execution.
@@ -170,25 +109,8 @@ export async function getSortedSelectors<T extends SelectorRef>(
 ): Promise<T[]> {
   const hash = hashSelectors(selectors);
   try {
-    const rows = await db
-      .select()
-      .from(selectorStats)
-      .where(
-        and(
-          eq(selectorStats.testId, testId),
-          eq(selectorStats.selectorArrayHash, hash),
-        ),
-      );
-    const stats: SelectorStatRow[] = rows.map((r) => ({
-      hash: r.selectorArrayHash,
-      type: r.selectorType,
-      value: r.selectorValue,
-      successCount: r.successCount ?? 0,
-      failureCount: r.failureCount ?? 0,
-      totalAttempts: r.totalAttempts ?? 0,
-      avgResponseTimeMs: r.avgResponseTimeMs,
-    }));
-    return sortSelectorsByStats(selectors, stats);
+    const stats = await getSelectorStatsForTest(testId);
+    return sortSelectorsByStats(selectors, relevantStats(stats, hash));
   } catch {
     return [...selectors];
   }
@@ -196,34 +118,106 @@ export async function getSortedSelectors<T extends SelectorRef>(
 
 /**
  * Batch-write per-attempt outcomes reported by the runner / EB at the end
- * of a test run. Each row is an upsert against the existing
- * `recordSelectorSuccess` / `recordSelectorFailure` recorders. Failures
- * are swallowed — the test result must not be lost on a stats write blip.
+ * of a test run. Outcomes are pre-aggregated per (hash, type, value) —
+ * `ON CONFLICT DO UPDATE` cannot touch the same row twice in one statement
+ * — then merged atomically in a single upsert, so concurrent runs of the
+ * same test cannot create duplicate rows or lose increments. Failures are
+ * swallowed — the test result must not be lost on a stats write blip.
  */
 export async function recordSelectorOutcomes(
   testId: string,
   outcomes: ReadonlyArray<SelectorOutcome>,
 ): Promise<void> {
   if (outcomes.length === 0) return;
-  for (const o of outcomes) {
-    try {
-      if (o.success) {
-        await recordSelectorSuccess(
-          testId,
-          o.hash,
-          o.type,
-          o.value,
-          o.responseTimeMs ?? 0,
-        );
-      } else {
-        await recordSelectorFailure(testId, o.hash, o.type, o.value);
-      }
-    } catch (err) {
-      console.warn(
-        `[selector-stats] write failed for ${testId}/${o.hash}:${o.type}:${o.value}:`,
-        err,
-      );
+
+  const byKey = new Map<
+    string,
+    {
+      hash: string;
+      type: string;
+      value: string;
+      successes: number;
+      failures: number;
+      timeSumMs: number;
+      timedSuccesses: number;
     }
+  >();
+  for (const o of outcomes) {
+    const key = `${o.hash}::${selectorStatKey(o.type, o.value)}`;
+    let agg = byKey.get(key);
+    if (!agg) {
+      agg = {
+        hash: o.hash,
+        type: o.type,
+        value: o.value,
+        successes: 0,
+        failures: 0,
+        timeSumMs: 0,
+        timedSuccesses: 0,
+      };
+      byKey.set(key, agg);
+    }
+    if (o.success) {
+      agg.successes++;
+      // Only fold real measurements into the average — defaulting missing
+      // times to 0 would drag the avg down and shrink future adaptive
+      // timeouts below what the selector actually needs.
+      if (typeof o.responseTimeMs === "number") {
+        agg.timeSumMs += o.responseTimeMs;
+        agg.timedSuccesses++;
+      }
+    } else {
+      agg.failures++;
+    }
+  }
+
+  const now = new Date();
+  const values = [...byKey.values()].map((a) => ({
+    id: uuid(),
+    testId,
+    selectorArrayHash: a.hash,
+    selectorType: a.type,
+    selectorValue: a.value,
+    successCount: a.successes,
+    failureCount: a.failures,
+    totalAttempts: a.successes + a.failures,
+    avgResponseTimeMs:
+      a.timedSuccesses > 0 ? Math.round(a.timeSumMs / a.timedSuccesses) : null,
+    lastUsedAt: now,
+    createdAt: now,
+  }));
+
+  try {
+    await db
+      .insert(selectorStats)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [
+          selectorStats.testId,
+          selectorStats.selectorArrayHash,
+          selectorStats.selectorType,
+          selectorStats.selectorValue,
+        ],
+        set: {
+          successCount: sql`${selectorStats.successCount} + excluded.success_count`,
+          failureCount: sql`${selectorStats.failureCount} + excluded.failure_count`,
+          totalAttempts: sql`${selectorStats.totalAttempts} + excluded.total_attempts`,
+          // Success-weighted merge of the existing average with the batch
+          // average; either side may be NULL (no timed successes yet).
+          avgResponseTimeMs: sql`CASE
+            WHEN excluded.avg_response_time_ms IS NULL THEN ${selectorStats.avgResponseTimeMs}
+            WHEN ${selectorStats.avgResponseTimeMs} IS NULL THEN excluded.avg_response_time_ms
+            ELSE ROUND(
+              (${selectorStats.avgResponseTimeMs}::numeric * ${selectorStats.successCount}
+                + excluded.avg_response_time_ms::numeric * excluded.success_count)
+              / NULLIF(${selectorStats.successCount} + excluded.success_count, 0)
+            )::int
+          END`,
+          lastUsedAt: now,
+        },
+      });
+  } catch (err) {
+    console.warn(`[selector-stats] batch write failed for ${testId}:`, err);
   }
 }
 
