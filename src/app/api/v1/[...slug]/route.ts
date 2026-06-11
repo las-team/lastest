@@ -828,8 +828,7 @@ export async function GET(
         const cached = await queries.getBuildChangeMap(id);
         if (cached) return NextResponse.json(cached);
         // Lazy compute on first request
-        const { computeChangeMap } =
-          await import("@/server/actions/change-map");
+        const { computeChangeMap } = await import("@/lib/change-map/compute");
         const computed = await computeChangeMap(id).catch(() => null);
         return NextResponse.json(
           computed ?? { error: "Unable to compute change map" },

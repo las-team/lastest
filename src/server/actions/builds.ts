@@ -1509,7 +1509,7 @@ async function runBuildAsync(
 
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
-    import("./change-map")
+    import("@/lib/change-map/compute")
       .then(({ computeChangeMap }) => {
         computeChangeMap(buildId).catch((e) => {
           console.error(`[change-map] compute failed for build ${buildId}:`, e);
