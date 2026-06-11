@@ -21,6 +21,7 @@ import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
+import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -1899,39 +1900,46 @@ function DiffSlider({
   const style = { "--pct": "50%" } as CSSProperties;
   const hasDiff = !!diff;
   const isStepIndex = Number.isFinite(stepNumber);
+  // Outer wrapper owns the step-jump scroll anchor (data-step / id /
+  // scroll-mt-20) so <StepStrip> jumps land on an always-laid-out element —
+  // the desktop figure is `display:none` on touch/narrow viewports, where a
+  // hidden anchor would make scrollIntoView a no-op. The desktop hover-wipe
+  // slider and the mobile mini-gallery are mutually-exclusive variants gated
+  // on pointer type AND width: fine pointer + ≥md → wipe; anything else
+  // (coarse pointer, or narrow viewport, or unknown) → gallery.
   return (
-    <figure
-      className="share-slider space-y-2 scroll-mt-20"
-      style={style}
-      data-active={hasDiff ? "false" : "true"}
-      data-has-diff={hasDiff ? "true" : "false"}
-      // Scroll target for thumbnail clicks in <StepStrip>. Only set when the
-      // label parsed to a real number — "Final" / unlabelled rows aren't
-      // jumpable from the strip.
+    <div
+      className="scroll-mt-20"
       {...(isStepIndex
         ? { "data-step": String(stepNumber), id: `share-step-${stepNumber}` }
         : {})}
     >
-      <header className="flex items-center justify-between gap-3 text-xs">
-        <span className="font-medium text-foreground truncate">
-          {stepLabel || "Visual diff"}
-        </span>
-        {pixelDifference > 0 && (
-          <span className="tabular-nums text-muted-foreground">
-            {pixelDifference.toLocaleString()} px changed
-          </span>
-        )}
-      </header>
-      <div
-        className="share-slider-stage relative grid grid-cols-1 grid-rows-1 rounded-md border bg-muted overflow-hidden touch-none select-none data-[active=true]:cursor-ew-resize"
-        tabIndex={0}
-        role="slider"
-        aria-label="Compare before and after"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={50}
+      <figure
+        className="share-slider space-y-2 hidden pointer-fine:md:block"
+        style={style}
+        data-active={hasDiff ? "false" : "true"}
+        data-has-diff={hasDiff ? "true" : "false"}
       >
-        {/* All three images occupy the same grid cell so the stage sizes
+        <header className="flex items-center justify-between gap-3 text-xs">
+          <span className="font-medium text-foreground truncate">
+            {stepLabel || "Visual diff"}
+          </span>
+          {pixelDifference > 0 && (
+            <span className="tabular-nums text-muted-foreground">
+              {pixelDifference.toLocaleString()} px changed
+            </span>
+          )}
+        </header>
+        <div
+          className="share-slider-stage relative grid grid-cols-1 grid-rows-1 rounded-md border bg-muted overflow-hidden touch-none select-none data-[active=true]:cursor-ew-resize"
+          tabIndex={0}
+          role="slider"
+          aria-label="Compare before and after"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={50}
+        >
+          {/* All three images occupy the same grid cell so the stage sizes
             itself to the tallest natural height. Previously the baseline
             set the frame and current/diff were `object-cover`-cropped to
             it — when the page grew taller between baseline and current
@@ -1939,14 +1947,14 @@ function DiffSlider({
             of the current screenshot and its diff were silently hidden.
             Grid stacking lets each image render at natural aspect, top-
             aligned, with the shorter one leaving frame-bg below. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={baseline}
-          alt="Before"
-          draggable={false}
-          className="col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none"
-        />
-        {/* Current revealed on the RIGHT side of the divider via clipPath
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={baseline}
+            alt="Before"
+            draggable={false}
+            className="col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none"
+          />
+          {/* Current revealed on the RIGHT side of the divider via clipPath
             — `inset(0 0 0 --pct)` clips the left --pct off, so baseline
             ("Before") shows on the left and current ("After") on the right,
             matching the build-page slider convention. The previous
@@ -1954,53 +1962,62 @@ function DiffSlider({
             revealed current on the LEFT, swapping it with the "Before"
             label and inverting baseline/current visually.
             Hidden while the stage is idle (data-active=false). */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={current}
-          alt="After"
-          draggable={false}
-          className="share-slider-current col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
-          style={{ clipPath: "inset(0 0 0 var(--pct, 50%))" }}
-        />
-        {/* Diff heat-map overlay — the idle view. Hidden once the slider
-            becomes active. */}
-        {hasDiff && (
-          // eslint-disable-next-line @next/next/no-img-element
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={diff}
-            alt="Diff"
+            src={current}
+            alt="After"
             draggable={false}
-            className="share-slider-diff col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
+            className="share-slider-current col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
+            style={{ clipPath: "inset(0 0 0 var(--pct, 50%))" }}
           />
-        )}
-        {/* Divider + drag handle — only visible while active. */}
-        <div
-          className="share-slider-divider absolute top-0 bottom-0 w-px bg-primary pointer-events-none transition-opacity duration-150"
-          style={{ left: "var(--pct, 50%)" }}
-          aria-hidden
-        >
-          <div className="share-slider-handle absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border-2 border-primary bg-background shadow flex items-center justify-center text-primary text-xs font-bold">
-            ⇔
+          {/* Diff heat-map overlay — the idle view. Hidden once the slider
+            becomes active. */}
+          {hasDiff && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={diff}
+              alt="Diff"
+              draggable={false}
+              className="share-slider-diff col-start-1 row-start-1 block w-full h-auto self-start select-none pointer-events-none transition-opacity duration-150"
+            />
+          )}
+          {/* Divider + drag handle — only visible while active. */}
+          <div
+            className="share-slider-divider absolute top-0 bottom-0 w-px bg-primary pointer-events-none transition-opacity duration-150"
+            style={{ left: "var(--pct, 50%)" }}
+            aria-hidden
+          >
+            <div className="share-slider-handle absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border-2 border-primary bg-background shadow flex items-center justify-center text-primary text-xs font-bold">
+              ⇔
+            </div>
           </div>
+          <span className="share-slider-label-before absolute top-2 left-2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border transition-opacity duration-150">
+            Before
+          </span>
+          <span className="share-slider-label-after absolute top-2 right-2 rounded bg-primary text-primary-foreground px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
+            After
+          </span>
+          {hasDiff && (
+            <span className="share-slider-label-diff absolute top-2 right-2 rounded bg-rose-500 text-white px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
+              Changes
+            </span>
+          )}
+          {hasDiff && (
+            <span className="share-slider-hint absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border pointer-events-none transition-opacity duration-150">
+              Hover to compare
+            </span>
+          )}
         </div>
-        <span className="share-slider-label-before absolute top-2 left-2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border transition-opacity duration-150">
-          Before
-        </span>
-        <span className="share-slider-label-after absolute top-2 right-2 rounded bg-primary text-primary-foreground px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
-          After
-        </span>
-        {hasDiff && (
-          <span className="share-slider-label-diff absolute top-2 right-2 rounded bg-rose-500 text-white px-2 py-0.5 text-[11px] font-medium transition-opacity duration-150">
-            Changes
-          </span>
-        )}
-        {hasDiff && (
-          <span className="share-slider-hint absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-background/85 px-2 py-0.5 text-[11px] font-medium border pointer-events-none transition-opacity duration-150">
-            Hover to compare
-          </span>
-        )}
-      </div>
-    </figure>
+      </figure>
+      <MobileDiffGallery
+        baseline={baseline}
+        current={current}
+        diff={diff}
+        stepLabel={stepLabel}
+        pixelDifference={pixelDifference}
+        className="block pointer-fine:md:hidden"
+      />
+    </div>
   );
 }
 
