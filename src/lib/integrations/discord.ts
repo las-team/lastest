@@ -1,4 +1,5 @@
 import type { BuildStatus, BugReportSeverity } from "@/lib/db/schema";
+import { assertSafeOutboundUrl } from "@/lib/security/outbound-url";
 
 export interface DiscordBuildNotification {
   buildId: string;
@@ -64,8 +65,11 @@ export async function sendDiscordNotification(
   };
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         content: `Visual Test Build ${statusText}: ${notification.passedCount}/${notification.totalTests} passed, ${notification.changesDetected} changes detected`,
@@ -148,6 +152,7 @@ export async function sendDiscordBugReport(
   }
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     let response: Response;
 
     if (notification.screenshotBuffer) {
@@ -169,11 +174,15 @@ export async function sendDiscordBugReport(
         : `${webhookUrl}?wait=true`;
       response = await fetch(url, {
         method: "POST",
+        // Do not chase redirects to a (possibly internal) Location.
+        redirect: "manual",
         body: formData,
       });
     } else {
       response = await fetch(webhookUrl, {
         method: "POST",
+        // Do not chase redirects to a (possibly internal) Location.
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           embeds: [embed],
@@ -252,8 +261,11 @@ export async function sendDiscordShareNotification(
   };
 
   try {
+    await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         embeds: [embed],
