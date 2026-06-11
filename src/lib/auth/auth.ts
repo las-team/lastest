@@ -27,6 +27,8 @@ import {
 async function syncGithubAccount(account: {
   userId: string;
   accessToken?: string | null;
+  refreshToken?: string | null;
+  tokenExpiresAt?: Date | null;
 }) {
   if (!account.accessToken) return;
   try {
@@ -37,9 +39,13 @@ async function syncGithubAccount(account: {
     const existing = teamId
       ? await queries.getGithubAccountByTeam(teamId)
       : null;
+    const refreshToken = account.refreshToken ?? null;
+    const tokenExpiresAt = account.tokenExpiresAt ?? null;
     if (existing) {
       await queries.updateGithubAccount(existing.id, {
         accessToken: account.accessToken,
+        refreshToken,
+        tokenExpiresAt,
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
       });
@@ -48,6 +54,8 @@ async function syncGithubAccount(account: {
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
         accessToken: account.accessToken,
+        refreshToken,
+        tokenExpiresAt,
         teamId,
       });
     }
@@ -87,6 +95,25 @@ export const auth = betterAuth({
   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",")
     : undefined,
+
+  // Filter one benign startup line. @better-auth/stripe logs
+  // "Organization plugin not found" at init because we enable its
+  // organization-scoped subscriptions (customerType: "organization") without
+  // running better-auth's organization plugin — we bridge teams -> org by hand
+  // via session.activeOrganizationId (see below). The plugin only looks up the
+  // org plugin to wire optional hooks (name sync, seat billing, deletion
+  // guard) we never use, so the warning is pure noise; subscriptions still
+  // register and work. Everything else logs as before, in better-auth's own
+  // non-color format (level filtering is unchanged — default stays "warn").
+  logger: {
+    log: (level, message, ...args) => {
+      if (message.includes("Organization plugin not found")) return;
+      const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${message}`;
+      if (level === "error") console.error(line, ...args);
+      else if (level === "warn") console.warn(line, ...args);
+      else console.log(line, ...args);
+    },
+  },
 
   advanced: {
     defaultCookieAttributes: {
@@ -236,8 +263,12 @@ export const auth = betterAuth({
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
             await syncGithubAccount({
-              ...account,
+              userId: account.userId,
               accessToken: decryptField(account.accessToken),
+              refreshToken: account.refreshToken
+                ? decryptField(account.refreshToken)
+                : null,
+              tokenExpiresAt: account.accessTokenExpiresAt ?? null,
             });
           }
         },
@@ -260,8 +291,12 @@ export const auth = betterAuth({
         after: async (account) => {
           if (account.providerId === "github" && account.accessToken) {
             await syncGithubAccount({
-              ...account,
+              userId: account.userId,
               accessToken: decryptField(account.accessToken),
+              refreshToken: account.refreshToken
+                ? decryptField(account.refreshToken)
+                : null,
+              tokenExpiresAt: account.accessTokenExpiresAt ?? null,
             });
           }
         },
@@ -342,6 +377,10 @@ function buildStripePlugin() {
       stripeClient,
       stripeWebhookSecret: webhookSecret,
       createCustomerOnSignUp: false, // we create lazily on first checkout
+      // Required for customerType: "organization" subscriptions (per-team
+      // billing). We don't run better-auth's organization plugin; the
+      // resulting "Organization plugin not found" init warning is filtered
+      // out in the `logger` config above.
       organization: { enabled: true },
       subscription: {
         enabled: true,

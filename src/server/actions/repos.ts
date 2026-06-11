@@ -10,6 +10,7 @@ import {
   requireRepoCapability,
 } from "@/lib/auth";
 import { getUserRepos, getRepoBranches } from "@/lib/github/oauth";
+import { getValidGithubAccessToken } from "@/lib/github/token";
 import {
   getUserProjectsDetailed,
   getProjectBranches,
@@ -111,7 +112,9 @@ export async function syncReposIfStale(teamId: string): Promise<void> {
       Date.now() - ghAccount.reposSyncedAt.getTime() > REPO_SYNC_TTL_MS;
     if (isStale) {
       try {
-        await syncGithubReposForTeam(teamId, ghAccount.accessToken);
+        const token =
+          (await getValidGithubAccessToken(teamId)) ?? ghAccount.accessToken;
+        await syncGithubReposForTeam(teamId, token);
         await queries.updateGithubAccount(ghAccount.id, {
           reposSyncedAt: new Date(),
         });
@@ -150,10 +153,9 @@ export async function fetchAndSyncRepos(): Promise<{
   const account = await queries.getGithubAccountByTeam(session.team.id);
   if (!account) return { success: false, count: 0 };
 
-  const count = await syncGithubReposForTeam(
-    session.team.id,
-    account.accessToken,
-  );
+  const token =
+    (await getValidGithubAccessToken(session.team.id)) ?? account.accessToken;
+  const count = await syncGithubReposForTeam(session.team.id, token);
   if (count > 0) {
     await queries.updateGithubAccount(account.id, {
       reposSyncedAt: new Date(),
@@ -379,11 +381,9 @@ export async function fetchRepoBranches(
     const account = await queries.getGithubAccountByTeam(session.team.id);
     if (!account) return [];
 
-    const branches = await getRepoBranches(
-      account.accessToken,
-      repo.owner,
-      repo.name,
-    );
+    const token =
+      (await getValidGithubAccessToken(session.team.id)) ?? account.accessToken;
+    const branches = await getRepoBranches(token, repo.owner, repo.name);
     // Transform GitHub branch format to common format
     return branches.map((b) => ({
       name: b.name,

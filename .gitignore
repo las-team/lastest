@@ -105,3 +105,5 @@ yarn-error.log*
 
 # OS / misc
 .DS_Store
+spawned-composer.yml
+zapic.state.raw.json

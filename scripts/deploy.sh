@@ -117,7 +117,16 @@ run_checks() {
 }
 
 # --- Build ---
+# Keep the Dockerfile's exact-version `.pnpm/<pkg>@<ver>` runner-stage pins in
+# sync with the installed store, so a dependency bump can't fail the build deep
+# in the runner stage with a cryptic "failed to compute cache key … not found".
+sync_docker_pins() {
+  log "Syncing Dockerfile pnpm pins to installed store..."
+  node "$SCRIPT_DIR/sync-docker-pins.mjs" || err "Dockerfile pin sync failed"
+}
+
 build_app() {
+  sync_docker_pins
   log "Building $IMAGE_APP:latest (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
   docker build \
     -t "$IMAGE_APP:latest" \
@@ -159,6 +168,7 @@ build_olares() {
   if [ -z "${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}" ]; then
     err "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY not set in .env.local — required for stable Server Action IDs across deploys"
   fi
+  sync_docker_pins
   log "Building $IMAGE_APP:olares (hash: $GIT_HASH, build #$GIT_COMMIT_COUNT)"
   docker build \
     -t "$IMAGE_APP:olares" \

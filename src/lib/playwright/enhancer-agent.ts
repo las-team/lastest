@@ -10,7 +10,10 @@
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth";
 import { generateWithAI } from "@/lib/ai";
-import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import {
+  extractCodeFromResponse,
+  SELECTOR_ROBUSTNESS_RULES,
+} from "@/lib/ai/prompts";
 import { runValidationWithRetry } from "@/lib/ai/validation-retry";
 import { getAIConfig, buildSeedFixture } from "./agent-context";
 
@@ -55,7 +58,9 @@ CRITICAL RULES:
 - Use baseUrl for navigation (no hardcoded URLs)
 - Keep stepLogger.log() calls for step descriptions
 - Preserve existing test functionality while adding enhancements
-- Output ONLY the enhanced code block, no explanations`;
+- Output ONLY the enhanced code block, no explanations
+
+${SELECTOR_ROBUSTNESS_RULES}`;
 
 // ---------------------------------------------------------------------------
 // Server-action-compatible wrappers

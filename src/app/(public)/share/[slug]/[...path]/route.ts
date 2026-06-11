@@ -111,6 +111,42 @@ async function buildAllowedPaths(share: PublicShare): Promise<Set<string>> {
   return allowed;
 }
 
+// The allow-list for a public share is deterministic and its assets are served
+// `immutable`, but a Range-served video makes the browser fire many sequential
+// GETs to this route — and each one previously rebuilt the list from scratch
+// (several DB round-trips + a storage readdir/stat scan in `resolveTestVideoUrl`).
+// That per-request cost, paid once per byte-range request, is what stalled
+// first-frame paint by seconds on the share page. Cache the computed set per
+// slug so the work runs at most once per TTL instead of once per request.
+const ALLOW_CACHE_TTL_MS = 60_000;
+const ALLOW_CACHE_MAX = 500;
+const allowedPathsCache = new Map<
+  string,
+  { paths: Set<string>; expiresAt: number }
+>();
+
+async function getAllowedPaths(
+  slug: string,
+  share: PublicShare,
+): Promise<Set<string>> {
+  const hit = allowedPathsCache.get(slug);
+  if (hit && hit.expiresAt > Date.now()) return hit.paths;
+
+  const paths = await buildAllowedPaths(share);
+
+  // Bounded eviction: Map preserves insertion order, so the first key is the
+  // oldest. Keeps the cache from growing unbounded across many distinct slugs.
+  if (allowedPathsCache.size >= ALLOW_CACHE_MAX) {
+    const oldest = allowedPathsCache.keys().next().value;
+    if (oldest !== undefined) allowedPathsCache.delete(oldest);
+  }
+  allowedPathsCache.set(slug, {
+    paths,
+    expiresAt: Date.now() + ALLOW_CACHE_TTL_MS,
+  });
+  return paths;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string; path: string[] }> },
@@ -130,7 +166,7 @@ export async function GET(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const allowed = await buildAllowedPaths(share);
+  const allowed = await getAllowedPaths(slug, share);
   if (!allowed.has(requested)) {
     return new Response("Not Found", { status: 404 });
   }

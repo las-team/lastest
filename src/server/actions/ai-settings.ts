@@ -91,9 +91,25 @@ export async function saveAISettings(data: {
 
   // SSRF guard at write-time: a team admin cannot point the app at an
   // internal address (cloud metadata, k8s API, etc.) via Ollama baseUrls.
+  //
+  // Only validate the baseUrl that the *active* selection will actually
+  // fetch. The settings form always sends the default `http://localhost:11434`
+  // for the Ollama fields even when another provider (Anthropic, OpenRouter,
+  // …) is selected, so an unconditional check rejected localhost in local dev
+  // for users who never chose Ollama. Switching the provider *to* Ollama runs
+  // through here again and re-validates, and the runtime fetch path
+  // (lib/ai/ollama.ts) re-checks the URL before every request, so this stays
+  // defense-in-depth either way.
   try {
-    await assertOllamaBaseUrlSafe(settingsData.ollamaBaseUrl);
-    await assertOllamaBaseUrlSafe(settingsData.aiDiffingOllamaBaseUrl);
+    if (settingsData.provider === "ollama") {
+      await assertOllamaBaseUrlSafe(settingsData.ollamaBaseUrl);
+    }
+    if (
+      settingsData.aiDiffingEnabled &&
+      settingsData.aiDiffingProvider === "ollama"
+    ) {
+      await assertOllamaBaseUrlSafe(settingsData.aiDiffingOllamaBaseUrl);
+    }
   } catch (err) {
     if (err instanceof SsrfBlockedError) {
       throw new Error(`Ollama baseUrl rejected: ${err.message}`);

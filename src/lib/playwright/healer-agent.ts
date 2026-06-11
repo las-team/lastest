@@ -12,7 +12,10 @@ import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { generateWithAI } from "@/lib/ai";
-import { extractCodeFromResponse } from "@/lib/ai/prompts";
+import {
+  extractCodeFromResponse,
+  SELECTOR_ROBUSTNESS_RULES,
+} from "@/lib/ai/prompts";
 import { runValidationWithRetry } from "@/lib/ai/validation-retry";
 import { getAIConfig, buildSeedFixture } from "./agent-context";
 
@@ -56,7 +59,9 @@ CRITICAL RULES:
 - Use baseUrl for navigation (no hardcoded URLs)
 - Keep stepLogger.log() calls for step descriptions
 - Output ONLY the fixed code block, no explanations
-- Do not add test.fixme() — always attempt a real fix`;
+- Do not add test.fixme() — always attempt a real fix
+
+${SELECTOR_ROBUSTNESS_RULES}`;
 
 // ---------------------------------------------------------------------------
 // Server-action-compatible wrappers

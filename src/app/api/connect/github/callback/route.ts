@@ -89,6 +89,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // GitHub only returns refresh_token + expires_in when the app opts into
+  // token expiration; otherwise these stay null and the access token never
+  // expires. Persist them so getValidGithubAccessToken() can refresh later.
+  const refreshToken = tokenResponse.refresh_token ?? null;
+  const tokenExpiresAt = tokenResponse.expires_in
+    ? new Date(Date.now() + tokenResponse.expires_in * 1000)
+    : null;
+
   const ghUser = await getGitHubUser(tokenResponse.access_token);
   if (!ghUser) {
     return NextResponse.redirect(
@@ -149,6 +157,8 @@ export async function GET(request: NextRequest) {
     if (existingGhAccount) {
       await queries.updateGithubAccount(existingGhAccount.id, {
         accessToken: tokenResponse.access_token,
+        refreshToken,
+        tokenExpiresAt,
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
       });
@@ -158,6 +168,8 @@ export async function GET(request: NextRequest) {
         githubUserId: ghUser.id.toString(),
         githubUsername: ghUser.login,
         accessToken: tokenResponse.access_token,
+        refreshToken,
+        tokenExpiresAt,
       });
     }
   }
