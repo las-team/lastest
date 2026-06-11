@@ -23,6 +23,7 @@ import { deleteRepoStorage } from "@/lib/storage/cleanup";
 import {
   isSandboxSeedId,
   seedSandboxTemplate,
+  seedGenericSmokeTest,
   type SandboxSeedId,
 } from "@/lib/demo/sandbox-seeds";
 
@@ -269,6 +270,11 @@ export async function createLocalRepo(
       repo.id,
       templateId as SandboxSeedId,
     );
+  } else if (baseUrl) {
+    // "Bring your own URL" (e.g. the Blank template): seed a generic,
+    // URL-adaptive smoke test against *their* site so the first test targets
+    // the user's app rather than a third-party demo.
+    seededTestId = await seedGenericSmokeTest(repo.id, baseUrl);
   }
   revalidatePath("/");
   revalidatePath("/settings");

@@ -230,6 +230,29 @@ export function OnboardingClient({
                 next();
               });
             }}
+            onQuickStart={() =>
+              startTransition(async () => {
+                try {
+                  const created = await createLocalRepo(
+                    "My First Project",
+                    "https://demo.playwright.dev/todomvc/",
+                    "todomvc",
+                  );
+                  track(Events.repo_linked, { source: "sandbox" });
+                  await finish(
+                    created.seededTestId
+                      ? `/tests?test=${encodeURIComponent(created.seededTestId)}`
+                      : "/",
+                  );
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not start the sample test",
+                  );
+                }
+              })
+            }
           />
         )}
 
@@ -396,12 +419,14 @@ function Step1Fork({
   selected,
   onSelect,
   onNext,
+  onQuickStart,
   pending,
 }: {
   userName: string;
   selected: OnboardingPath | null;
   onSelect: (p: OnboardingPath) => void;
   onNext: () => void;
+  onQuickStart: () => void;
   pending: boolean;
 }) {
   return (
@@ -414,6 +439,33 @@ function Step1Fork({
           You can always switch later. This just tailors the setup.
         </p>
       </div>
+
+      {/* Fastest path: skip every setup step and land on a ready-to-run test. */}
+      <Card className="border-primary/40 bg-primary/5">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="flex items-center gap-2">
+            <Rocket className="h-4 w-4 text-primary" />
+            <div>
+              <div className="text-sm font-medium">
+                Just want to see it run?
+              </div>
+              <div className="text-xs text-muted-foreground">
+                We&apos;ll create a sample project and drop you on a test you
+                can run right now. Set up your own app later.
+              </div>
+            </div>
+          </div>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={onQuickStart}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null}
+            Run a sample test
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {PATHS.map((p) => {
@@ -504,7 +556,7 @@ const SANDBOX_TEMPLATES: SandboxTemplate[] = [
     name: "The Internet",
     url: "https://the-internet.herokuapp.com/",
     description:
-      "A QA testing playground with logins, drag-drop, frames, and more.",
+      "A QA playground (logins, drag-drop, frames). Third-party host — can be slow or briefly unavailable.",
   },
   {
     id: "playwright-docs",
