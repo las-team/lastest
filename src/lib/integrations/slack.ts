@@ -87,6 +87,8 @@ export async function sendSlackNotification(
     await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         text: `Visual Test Build ${statusText}: ${notification.passedCount}/${notification.totalTests} passed, ${notification.changesDetected} changes detected`,

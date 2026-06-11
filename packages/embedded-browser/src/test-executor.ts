@@ -46,6 +46,10 @@ import {
   hashSelectors,
   sortSelectorsByStats,
   selectorTimeoutFor,
+  selectorStatKey,
+  buildStatMap,
+  relevantStats,
+  isUsableSelectorValue,
   extractTestBody,
   createExpect,
   createFileUploadHelper,
@@ -1518,7 +1522,10 @@ export class EmbeddedTestExecutor {
       const lwfDefaultTimeoutMs = command.selectorTimeoutMs ?? 3000;
       const lwfSortCache = new Map<
         string,
-        Array<{ type: string; value: string }>
+        {
+          ordered: Array<{ type: string; value: string }>;
+          statMap: Map<string, SelectorStatRow>;
+        }
       >();
       const locateWithFallback = async (
         pg: Page,
@@ -1549,30 +1556,32 @@ export class EmbeddedTestExecutor {
               value: legacy.selector || legacy.css || legacy.text || "",
             };
           })
-          .filter(
-            (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
-          );
+          .filter((s) => isUsableSelectorValue(s.value));
 
         const lwfHash = hashSelectors(validSelectors as SelectorRef[]);
-        let ordered = lwfSortCache.get(lwfHash);
-        if (!ordered) {
-          ordered =
-            lwfStats.length > 0
-              ? sortSelectorsByStats(
-                  validSelectors,
-                  lwfStats.filter((r) => r.hash === lwfHash),
-                )
-              : validSelectors;
-          lwfSortCache.set(lwfHash, ordered);
+        let lwfCached = lwfSortCache.get(lwfHash);
+        if (!lwfCached) {
+          const hashStats = relevantStats(lwfStats, lwfHash);
+          lwfCached = {
+            ordered:
+              hashStats.length > 0
+                ? sortSelectorsByStats(validSelectors, hashStats)
+                : validSelectors,
+            statMap: buildStatMap(hashStats),
+          };
+          lwfSortCache.set(lwfHash, lwfCached);
         }
+        const { ordered, statMap } = lwfCached;
 
         logFn(
           "info",
           `[action] ${action}${value ? ` "${value}"` : ""} (${ordered.length} selectors)`,
         );
 
-        for (const sel of ordered) {
-          const attemptStart = Date.now();
+        for (let rank = 0; rank < ordered.length; rank++) {
+          const sel = ordered[rank];
+          let target!: ReturnType<Page["locator"]>;
+          const waitStart = Date.now();
           try {
             let locator;
             if (sel.type === "ocr-text") {
@@ -1580,6 +1589,21 @@ export class EmbeddedTestExecutor {
                 .replace(/^ocr-text="/, "")
                 .replace(/"$/, "");
               locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === "label") {
+              const labelText = sel.value
+                .replace(/^label="/, "")
+                .replace(/"$/, "");
+              locator = pg.getByLabel(labelText);
+            } else if (sel.type === "alt-text") {
+              const altText = sel.value
+                .replace(/^alt-text="/, "")
+                .replace(/"$/, "");
+              locator = pg.getByAltText(altText);
+            } else if (sel.type === "title") {
+              const titleText = sel.value
+                .replace(/^title="/, "")
+                .replace(/"$/, "");
+              locator = pg.getByTitle(titleText);
             } else if (sel.type === "role-name") {
               const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
               if (match) {
@@ -1594,45 +1618,14 @@ export class EmbeddedTestExecutor {
               locator = pg.locator(sel.value);
             }
 
-            const target = locator.first();
-            const lwfStat = lwfStats.find(
-              (r) =>
-                r.hash === lwfHash &&
-                r.type === sel.type &&
-                r.value === sel.value,
-            );
+            target = locator.first();
+            const lwfStat = statMap.get(selectorStatKey(sel.type, sel.value));
             const lwfCandidateTimeout = selectorTimeoutFor(
               lwfStat,
               lwfDefaultTimeoutMs,
+              rank,
             );
             await target.waitFor({ timeout: lwfCandidateTimeout });
-
-            logFn("info", `[action] ${action} matched via ${sel.type}`);
-            if (action === "locate") {
-              selectorOutcomes.push({
-                hash: lwfHash,
-                type: sel.type,
-                value: sel.value,
-                success: true,
-                responseTimeMs: Date.now() - attemptStart,
-              });
-              return target;
-            }
-            if (action === "click") await target.click(options || {});
-            else if (action === "fill") await target.fill(value || "");
-            else if (action === "selectOption")
-              await target.selectOption(value || "");
-            else if (action === "check") await target.check();
-            else if (action === "uncheck") await target.uncheck();
-
-            selectorOutcomes.push({
-              hash: lwfHash,
-              type: sel.type,
-              value: sel.value,
-              success: true,
-              responseTimeMs: Date.now() - attemptStart,
-            });
-            return target;
           } catch {
             selectorOutcomes.push({
               hash: lwfHash,
@@ -1642,6 +1635,47 @@ export class EmbeddedTestExecutor {
             });
             continue;
           }
+
+          // Locate succeeded — record the outcome now, scoped to the waitFor
+          // alone. An action failure below is an interaction problem
+          // (overlay, detach race), not a selector-quality signal, and must
+          // not poison the next run's ranking.
+          selectorOutcomes.push({
+            hash: lwfHash,
+            type: sel.type,
+            value: sel.value,
+            success: true,
+            responseTimeMs: Date.now() - waitStart,
+          });
+          logFn("info", `[action] ${action} matched via ${sel.type}`);
+          await target.scrollIntoViewIfNeeded().catch(() => {});
+          if (action === "locate") return target;
+
+          const performAction = async () => {
+            if (action === "click") await target.click(options || {});
+            else if (action === "fill") await target.fill(value || "");
+            else if (action === "selectOption")
+              await target.selectOption(value || "");
+            else if (action === "check") await target.check();
+            else if (action === "uncheck") await target.uncheck();
+          };
+          try {
+            await performAction();
+          } catch {
+            // One retry on the matched element before trying the next
+            // candidate — transient overlays/detach races usually clear.
+            await pg.waitForTimeout(250);
+            try {
+              await performAction();
+            } catch (actionErr) {
+              logFn(
+                "warn",
+                `[action] ${action} failed on matched ${sel.type}: ${actionErr instanceof Error ? actionErr.message : String(actionErr)}`,
+              );
+              continue;
+            }
+          }
+          return target;
         }
 
         // Coordinate fallback for clicks
@@ -1661,6 +1695,7 @@ export class EmbeddedTestExecutor {
             `Falling back to coordinate fill at (${coords.x}, ${coords.y})`,
           );
           await pg.mouse.click(coords.x, coords.y);
+          await pg.waitForTimeout(100);
           await pg.keyboard.press("Control+a");
           await pg.keyboard.type(value || "");
           return;
@@ -2874,9 +2909,7 @@ export class EmbeddedTestExecutor {
               value: legacy.selector || legacy.css || legacy.text || "",
             };
           })
-          .filter(
-            (s) => s.value && s.value.trim() && !s.value.includes("undefined"),
-          );
+          .filter((s) => isUsableSelectorValue(s.value));
 
         logFn(
           "info",
@@ -2891,6 +2924,18 @@ export class EmbeddedTestExecutor {
                 .replace(/^ocr-text="/, "")
                 .replace(/"$/, "");
               locator = pg.getByText(text, { exact: false });
+            } else if (sel.type === "label") {
+              locator = pg.getByLabel(
+                sel.value.replace(/^label="/, "").replace(/"$/, ""),
+              );
+            } else if (sel.type === "alt-text") {
+              locator = pg.getByAltText(
+                sel.value.replace(/^alt-text="/, "").replace(/"$/, ""),
+              );
+            } else if (sel.type === "title") {
+              locator = pg.getByTitle(
+                sel.value.replace(/^title="/, "").replace(/"$/, ""),
+              );
             } else if (sel.type === "role-name") {
               const match = sel.value.match(/^role=(\w+)\[name="(.+)"\]$/);
               if (match)
