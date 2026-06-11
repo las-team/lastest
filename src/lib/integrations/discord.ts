@@ -68,6 +68,8 @@ export async function sendDiscordNotification(
     await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         content: `Visual Test Build ${statusText}: ${notification.passedCount}/${notification.totalTests} passed, ${notification.changesDetected} changes detected`,
@@ -172,11 +174,15 @@ export async function sendDiscordBugReport(
         : `${webhookUrl}?wait=true`;
       response = await fetch(url, {
         method: "POST",
+        // Do not chase redirects to a (possibly internal) Location.
+        redirect: "manual",
         body: formData,
       });
     } else {
       response = await fetch(webhookUrl, {
         method: "POST",
+        // Do not chase redirects to a (possibly internal) Location.
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           embeds: [embed],
@@ -258,6 +264,8 @@ export async function sendDiscordShareNotification(
     await assertSafeOutboundUrl(webhookUrl);
     const response = await fetch(webhookUrl, {
       method: "POST",
+      // Do not chase redirects to a (possibly internal) Location.
+      redirect: "manual",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         embeds: [embed],

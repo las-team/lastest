@@ -1774,19 +1774,35 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
 };
 
 // Selector statistics for optimizing fallback strategy
-export const selectorStats = pgTable("selector_stats", {
-  id: text("id").primaryKey(),
-  testId: text("test_id").references(() => tests.id, { onDelete: "cascade" }),
-  selectorArrayHash: text("selector_array_hash").notNull(),
-  selectorType: text("selector_type").notNull(),
-  selectorValue: text("selector_value").notNull(),
-  successCount: integer("success_count").default(0),
-  failureCount: integer("failure_count").default(0),
-  totalAttempts: integer("total_attempts").default(0),
-  avgResponseTimeMs: integer("avg_response_time_ms"),
-  lastUsedAt: timestamp("last_used_at"),
-  createdAt: timestamp("created_at"),
-});
+export const selectorStats = pgTable(
+  "selector_stats",
+  {
+    id: text("id").primaryKey(),
+    testId: text("test_id").references(() => tests.id, { onDelete: "cascade" }),
+    selectorArrayHash: text("selector_array_hash").notNull(),
+    selectorType: text("selector_type").notNull(),
+    selectorValue: text("selector_value").notNull(),
+    successCount: integer("success_count").default(0),
+    failureCount: integer("failure_count").default(0),
+    totalAttempts: integer("total_attempts").default(0),
+    avgResponseTimeMs: integer("avg_response_time_ms"),
+    lastUsedAt: timestamp("last_used_at"),
+    createdAt: timestamp("created_at"),
+  },
+  (table) => [
+    // Conflict target for the atomic batched upsert in
+    // `recordSelectorOutcomes`; leading column also covers the per-test
+    // fetch in `getSelectorStatsForTest`. If `pnpm db:push` rejects this
+    // index because legacy duplicate rows exist, run
+    // `node scripts/dedupe-selector-stats.mjs` first.
+    uniqueIndex("uniq_selector_stats_test_hash_type_value").on(
+      table.testId,
+      table.selectorArrayHash,
+      table.selectorType,
+      table.selectorValue,
+    ),
+  ],
+);
 
 export type SelectorStat = typeof selectorStats.$inferSelect;
 export type NewSelectorStat = typeof selectorStats.$inferInsert;
@@ -1920,6 +1936,13 @@ export const sessions = pgTable("sessions", {
   // Space-separated OAuth-style scopes for 'launch' tokens
   // (e.g. "launch:vote launch:submit"). Null for browser/api sessions.
   scope: text("scope"),
+  // Mirrors users.teamId onto the session so the Stripe plugin's
+  // organization-scoped subscription lookup resolves without running
+  // better-auth's organization plugin. Declared as a session
+  // additionalField in auth.ts and stamped by the session.create hook —
+  // the Drizzle adapter requires this matching column or session
+  // creation throws ("field does not exist in the session schema").
+  activeOrganizationId: text("active_organization_id"),
 });
 
 export type Session = typeof sessions.$inferSelect;

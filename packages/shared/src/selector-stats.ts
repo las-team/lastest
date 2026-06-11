@@ -41,6 +41,86 @@ export interface SelectorOutcome {
 }
 
 /**
+ * Filter for recorder/AI-emitted selector values that leaked a JS
+ * `undefined` through template interpolation (`#undefined`,
+ * `[data-id="undefined"]`, `undefined > div`). Matches `undefined` only as
+ * a standalone token — `#undefined-state-banner` and other identifiers that
+ * merely contain the substring stay usable. Text selectors whose natural
+ * language includes the bare word "undefined" are still dropped; acceptable
+ * for the interpolation-leak protection this buys.
+ */
+const UNDEFINED_TOKEN = /(^|[^\w-])undefined($|[^\w-])/;
+
+export function isUsableSelectorValue(
+  value: string | null | undefined,
+): boolean {
+  if (!value || !value.trim()) return false;
+  return !UNDEFINED_TOKEN.test(value);
+}
+
+export function selectorStatKey(type: string, value: string): string {
+  return `${type}::${value}`;
+}
+
+/** O(1) lookup map for per-candidate stat rows, keyed `${type}::${value}`. */
+export function buildStatMap(
+  rows: ReadonlyArray<SelectorStatRow>,
+): Map<string, SelectorStatRow> {
+  const map = new Map<string, SelectorStatRow>();
+  for (const row of rows) map.set(selectorStatKey(row.type, row.value), row);
+  return map;
+}
+
+/**
+ * Stats relevant to one candidate array: rows recorded under `hash`, or —
+ * when the hash has no history (the candidate list was edited/re-recorded,
+ * which changes the hash) — rows for the same (type, value) aggregated
+ * across all hashes of the test. This keeps a learned winner warm across
+ * re-recordings instead of starting cold.
+ */
+export function relevantStats(
+  allStats: ReadonlyArray<SelectorStatRow>,
+  hash: string,
+): SelectorStatRow[] {
+  const exact = allStats.filter((r) => r.hash === hash);
+  if (exact.length > 0) return exact;
+
+  const merged = new Map<string, SelectorStatRow>();
+  for (const row of allStats) {
+    const key = selectorStatKey(row.type, row.value);
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, { ...row, hash });
+      continue;
+    }
+    const successCount = prev.successCount + row.successCount;
+    // Weight the running average by success counts — avg is only ever
+    // recorded on successful attempts.
+    let avgResponseTimeMs = prev.avgResponseTimeMs;
+    if (row.avgResponseTimeMs != null) {
+      avgResponseTimeMs =
+        prev.avgResponseTimeMs == null
+          ? row.avgResponseTimeMs
+          : Math.round(
+              (prev.avgResponseTimeMs * prev.successCount +
+                row.avgResponseTimeMs * row.successCount) /
+                Math.max(successCount, 1),
+            );
+    }
+    merged.set(key, {
+      hash,
+      type: row.type,
+      value: row.value,
+      successCount,
+      failureCount: prev.failureCount + row.failureCount,
+      totalAttempts: prev.totalAttempts + row.totalAttempts,
+      avgResponseTimeMs,
+    });
+  }
+  return [...merged.values()];
+}
+
+/**
  * FNV-1a 32-bit hash over the canonical JSON of the selectors array.
  *
  * Pure JS so it works identically in Node (host + runner + EB) and the
@@ -113,18 +193,27 @@ export function sortSelectorsByStats<T extends SelectorRef>(
 /**
  * Adaptive per-candidate `waitFor` timeout for `locateWithFallback`.
  *
- * Cold start (no stats, or fewer than 3 attempts) returns the configured
- * default. Once a selector has 3+ attempts on record, we cap its budget at
- * `max(avg * 2, 500)` (clamped above by the default), so historically slow
- * or always-failing candidates are skipped sooner instead of burning the
- * full default each run. The 500ms floor avoids racing UI paint when a
- * selector's avg is artificially tiny.
+ * - `rank === 0` (the top-sorted candidate) always gets the full default:
+ *   shortening the budget of the historical winner risks a self-reinforcing
+ *   spiral where one slow page-load records a failure, lowers its rate, and
+ *   demotes the selector that actually works.
+ * - A known loser (3+ attempts, zero successes) gets `min(default, 500)` so
+ *   re-heal runs stop burning the full default on candidates that have
+ *   never matched. (Failures never record a response time, so the avg-based
+ *   branch below can't cover this case.)
+ * - A known-slow candidate (3+ attempts with a recorded avg) is capped at
+ *   `max(avg * 2, 500)` (clamped above by the default). The 500ms floor
+ *   avoids racing UI paint when a selector's avg is artificially tiny.
+ * - Cold start (no stats, or fewer than 3 attempts) returns the default.
  */
 export function selectorTimeoutFor(
   stat: SelectorStatRow | undefined,
   defaultMs: number,
+  rank?: number,
 ): number {
-  if (!stat || stat.totalAttempts < 3 || !stat.avgResponseTimeMs)
-    return defaultMs;
+  if (rank === 0) return defaultMs;
+  if (!stat || stat.totalAttempts < 3) return defaultMs;
+  if (stat.successCount === 0) return Math.min(defaultMs, 500);
+  if (!stat.avgResponseTimeMs) return defaultMs;
   return Math.min(defaultMs, Math.max(stat.avgResponseTimeMs * 2, 500));
 }

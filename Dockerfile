@@ -128,9 +128,9 @@ RUN ln -sf .pnpm/esbuild@0.25.12/node_modules/esbuild ./node_modules/esbuild && 
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk \
-  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai/claude-agent-sdk
-RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.98_zod@4.3.5/node_modules/@anthropic-ai \
+  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk \
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk
+RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 
 # Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)
@@ -167,8 +167,8 @@ RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
 
 # Copy ws (used by activity-feed-server + embedded-browser)
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.19.0/node_modules/ws ./node_modules/.pnpm/ws@8.19.0/node_modules/ws
-RUN ln -sf .pnpm/ws@8.19.0/node_modules/ws ./node_modules/ws
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.21.0/node_modules/ws ./node_modules/.pnpm/ws@8.21.0/node_modules/ws
+RUN ln -sf .pnpm/ws@8.21.0/node_modules/ws ./node_modules/ws
 
 # Copy embedded-browser dist + runtime deps
 COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/dist /app/embedded-browser/dist
