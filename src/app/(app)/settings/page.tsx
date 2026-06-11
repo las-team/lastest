@@ -21,6 +21,7 @@ function GitLabIcon({ className }: { className?: string }) {
 import { PlaywrightSettingsCard } from "@/components/settings/playwright-settings-card";
 import { DiffSensitivityCard } from "@/components/settings/diff-sensitivity-card";
 import { AISettingsCard } from "@/components/settings/ai-settings-card";
+import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
 import { NotificationSettingsCard } from "@/components/settings/notification-settings-card";
 import { ResetSetupGuide } from "@/components/setup-guide/reset-setup-guide";
@@ -107,7 +108,9 @@ export default async function SettingsPage({
   const diffSensitivitySettings = await queries.getDiffSensitivitySettings(
     selectedRepo?.id,
   );
-  const aiSettings = await queries.getAISettings(selectedRepo?.id);
+  // Masked: API-key columns are redacted before reaching the client component
+  // (raw keys must never be serialized into the page payload).
+  const aiSettings = await getMaskedAISettings(selectedRepo?.id);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
   const notificationSettings = await queries.getNotificationSettings(
     selectedRepo?.id,

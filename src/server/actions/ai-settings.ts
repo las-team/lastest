@@ -130,11 +130,34 @@ export async function testAIConnection(
   ollamaModel?: string,
   anthropicApiKey?: string,
   openaiApiKey?: string,
+  repositoryId?: string | null,
 ): Promise<{
   success: boolean;
   message: string;
 }> {
-  await requireTeamAccess();
+  if (repositoryId) await requireRepoAccess(repositoryId);
+  else await requireTeamAccess();
+
+  // The settings UI only ever sends masked placeholders (or empty) for keys the
+  // user didn't re-type — the real secrets never leave the server. Resolve those
+  // back to the stored key so "Test connection" works without re-entry.
+  if (
+    !apiKey ||
+    isMaskedValue(apiKey) ||
+    !anthropicApiKey ||
+    isMaskedValue(anthropicApiKey) ||
+    !openaiApiKey ||
+    isMaskedValue(openaiApiKey)
+  ) {
+    const stored = await queries.getAISettings(repositoryId);
+    if (!apiKey || isMaskedValue(apiKey))
+      apiKey = stored.openrouterApiKey ?? undefined;
+    if (!anthropicApiKey || isMaskedValue(anthropicApiKey))
+      anthropicApiKey = stored.anthropicApiKey ?? undefined;
+    if (!openaiApiKey || isMaskedValue(openaiApiKey))
+      openaiApiKey = stored.openaiApiKey ?? undefined;
+  }
+
   try {
     if (provider === "claude-cli") {
       // Test claude CLI by running a simple command
