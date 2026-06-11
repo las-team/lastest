@@ -12,6 +12,13 @@ export interface ReplayClip {
    * and the scrubber misbehaves.
    */
   durationMs?: number | null;
+  /**
+   * First-frame thumbnail (the test's first captured screenshot). Painted by
+   * the `<video>` element while the webm buffers, so the autoplaying hero clip
+   * shows a frame instead of black on load. Also serves as the
+   * GSC-recommended `<video poster>` thumbnail.
+   */
+  poster?: string | null;
 }
 
 export interface ReplayPlayerProps {
@@ -55,6 +62,7 @@ export function ReplayPlayer({ clips, className }: ReplayPlayerProps) {
         <VideoPlayer
           key={i}
           src={clip.src}
+          poster={clip.poster ?? undefined}
           durationMsFallback={clip.durationMs ?? null}
           autoPlay
           loop

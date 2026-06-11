@@ -138,17 +138,6 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   const isTestShare = !!share.testId;
 
-  // Executor sometimes omits video_path even when a .webm exists. Scan disk
-  // under storage/videos/<repositoryId>/ for a file ending in `-<testId>.webm`.
-  // `resolveTestVideoUrl` returns the bare `/videos/<repo>/<file>.webm` path;
-  // funnel it through `toUrl()` so unauthenticated share viewers fetch via
-  // /share/{slug}/... (which the same route auth-checks against the slug's
-  // allowed paths) instead of /api/media/... (which 401s without a session).
-  const fallbackVideoRaw = isTestShare
-    ? await resolveTestVideoUrl(share.repositoryId, share.testId)
-    : null;
-  const fallbackVideoUrl = fallbackVideoRaw ? toUrl(fallbackVideoRaw) : null;
-
   const shareUrl = buildShareUrl(slug);
   const primaryResult: ShareTestResult | null = isTestShare
     ? (scopedResults.find((r) => r.testId === share.testId) ??
@@ -166,21 +155,50 @@ export default async function PublicSharePage({ params }: PageProps) {
   // Google only indexes videos on "watch pages" where the video is the main
   // content (GSC video indexing report: "Is on a watch page"), so prominence
   // here is what makes the VideoObject markup below actually eligible.
-  const clips: { src: string; durationMs: number | null }[] = isTestShare
+  //
+  // `poster` is the result's first captured screenshot: because this hero clip
+  // autoplays on load, the buffer window is the first thing viewers see — the
+  // poster paints an instant frame there instead of black. It also doubles as
+  // the `<video poster>` thumbnail Google's video guidelines recommend.
+  type Clip = { src: string; durationMs: number | null; poster: string | null };
+  const posterFor = (r: ShareTestResult): string | null => {
+    const path = r.screenshots?.[0]?.path ?? r.screenshotPath ?? null;
+    return path ? toUrl(path) : null;
+  };
+  const clips: Clip[] = isTestShare
     ? scopedResults
-        .map((r) => {
+        .map((r): Clip | null => {
           const src = r.videoPath ? toUrl(r.videoPath) : null;
-          return src ? { src, durationMs: r.durationMs ?? null } : null;
+          return src
+            ? { src, durationMs: r.durationMs ?? null, poster: posterFor(r) }
+            : null;
         })
-        .filter((c): c is { src: string; durationMs: number | null } => !!c)
+        .filter((c): c is Clip => !!c)
     : [];
-  // Disk-fallback when no result has a persisted video_path. Use the primary
-  // result's recorded duration so the scrubber has a usable max even though
-  // we can't trust the webm to embed it.
+
+  // Executor sometimes omits video_path even when a .webm exists. Only then do
+  // we scan disk (readdir + stat under storage/videos/<repo>/ via
+  // `resolveTestVideoUrl`) — keeping that scan off the common render path where
+  // the result already carries a persisted path. The bare
+  // `/videos/<repo>/<file>.webm` URL is funneled through `toUrl()` so share
+  // viewers fetch via /share/{slug}/... (auth-checked against the slug) rather
+  // than /api/media/... (which 401s without a session).
+  let fallbackVideoUrl: string | null = null;
+  if (isTestShare && (clips.length === 0 || !primaryResult?.videoPath)) {
+    const fallbackRaw = await resolveTestVideoUrl(
+      share.repositoryId,
+      share.testId,
+    );
+    fallbackVideoUrl = fallbackRaw ? toUrl(fallbackRaw) : null;
+  }
+  // Disk-fallback clip when no result has a persisted video_path. Use the
+  // primary result's recorded duration so the scrubber has a usable max even
+  // though we can't trust the webm to embed it.
   if (clips.length === 0 && fallbackVideoUrl) {
     clips.push({
       src: fallbackVideoUrl,
       durationMs: primaryResult?.durationMs ?? null,
+      poster: primaryResult ? posterFor(primaryResult) : null,
     });
   }
 
