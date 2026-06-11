@@ -78,6 +78,12 @@ export async function getPendingInvitations() {
 export async function inviteUser(email: string, role: UserRole = "member") {
   const session = await requireTeamAdmin();
 
+  // Only an owner may mint an owner-level invitation. Without this, a non-owner
+  // admin could introduce a new owner-role member.
+  if (role === "owner" && session.user.role !== "owner") {
+    return { error: "Only the team owner can grant the owner role" };
+  }
+
   // Check if user already exists
   const existingUser = await queries.getUserByEmail(email);
   if (existingUser) {
@@ -126,6 +132,11 @@ export async function updateUserRole(userId: string, role: UserRole) {
   // Cannot change owner role
   if (targetUser.role === "owner") {
     return { error: "Cannot change the role of the team owner" };
+  }
+
+  // Only an owner may promote a member to owner.
+  if (role === "owner" && session.user.role !== "owner") {
+    return { error: "Only the team owner can grant the owner role" };
   }
 
   await queries.updateUserRole(userId, role);
