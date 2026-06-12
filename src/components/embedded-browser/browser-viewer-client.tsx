@@ -153,6 +153,10 @@ export const BrowserViewer = forwardRef<
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [fileChooserPending, setFileChooserPending] = useState(false);
+  // True while the EB reports status "busy" (e.g. running setup steps before
+  // a recording) and no frames are arriving — drives a "please wait" overlay
+  // so the user doesn't stare at a blank/stale canvas wondering if it broke.
+  const [busyNoFrames, setBusyNoFrames] = useState(false);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -162,6 +166,11 @@ export const BrowserViewer = forwardRef<
   const lastFrameTimeRef = useRef(0);
   const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const screencastPausedRef = useRef(false);
+  // Unlike lastFrameTimeRef (which status keepalives also bump, for stall
+  // detection), this tracks ACTUAL frames only — used for the FPS readout and
+  // the busy overlay.
+  const lastRealFrameRef = useRef(0);
+  const remoteStatusRef = useRef<string>("");
 
   // Session expiry countdown
   useEffect(() => {
@@ -309,16 +318,31 @@ export const BrowserViewer = forwardRef<
         // the CDP screencast likely died silently. Force reconnect to recover.
         if (stallCheckRef.current) clearInterval(stallCheckRef.current);
         stallCheckRef.current = setInterval(() => {
+          const now = Date.now();
+          // FPS readout honesty: when frames stop, the counter previously
+          // froze on its last value (it only updated when a frame arrived),
+          // masking dead streams as "2 FPS". Zero it after 2s of silence.
+          if (now - lastRealFrameRef.current > 2000) {
+            setFps(0);
+            frameCountRef.current = 0;
+            lastFpsUpdateRef.current = now;
+          }
+          // Busy overlay: EB reports "busy" (setup running) and nothing is
+          // being streamed right now.
+          setBusyNoFrames(
+            remoteStatusRef.current === "busy" &&
+              now - lastRealFrameRef.current > 2500,
+          );
           if (
             lastFrameTimeRef.current > 0 &&
-            Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
+            now - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
             wsRef.current?.readyState === WebSocket.OPEN &&
             !screencastPausedRef.current
           ) {
             console.warn("[BrowserViewer] Frame stall detected — reconnecting");
             wsRef.current?.close();
           }
-        }, 3000);
+        }, 1000);
 
         // Apply the initial viewport size to the remote browser — but only
         // when the caller explicitly provided one. The old unconditional
@@ -350,6 +374,8 @@ export const BrowserViewer = forwardRef<
 
               // Reset stall timer on every frame
               lastFrameTimeRef.current = Date.now();
+              lastRealFrameRef.current = Date.now();
+              setBusyNoFrames(false);
 
               // Update FPS
               frameCountRef.current++;
@@ -391,6 +417,7 @@ export const BrowserViewer = forwardRef<
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
+              remoteStatusRef.current = status;
               if (
                 status === "busy" ||
                 status === "recording" ||
@@ -921,6 +948,18 @@ export const BrowserViewer = forwardRef<
                 </Button>
               </div>
             )}
+          </div>
+        )}
+
+        {connectionStatus === "connected" && busyNoFrames && (
+          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/60">
+            <div className="flex flex-col items-center gap-2 text-white">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <span className="text-sm">Preparing browser…</span>
+              <span className="text-xs text-white/70">
+                Running setup steps — the live view starts shortly
+              </span>
+            </div>
           </div>
         )}
 

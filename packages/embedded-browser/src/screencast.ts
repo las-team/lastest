@@ -45,6 +45,8 @@ export class ScreencastManager {
   private height: number;
   private ackFailCount = 0;
   private recovering = false;
+  private lastFrameAt = 0;
+  private frameWatchdog: ReturnType<typeof setInterval> | null = null;
 
   constructor(private options: ScreencastOptions = {}) {
     this.width = options.maxWidth ?? 1280;
@@ -68,6 +70,8 @@ export class ScreencastManager {
     session.on("Page.screencastFrame", (frame: ScreencastFrame) => {
       // Ignore frames from a superseded session (start() was called again).
       if (!this.running || this.cdpSession !== session) return;
+
+      this.lastFrameAt = Date.now();
 
       // Relay frame to callback
       this.frameCallback?.({
@@ -107,6 +111,37 @@ export class ScreencastManager {
       everyNthFrame: this.options.everyNthFrame ?? 1,
     });
 
+    // Frame watchdog: an idle page legitimately produces no frames, but a
+    // wedged screencast (lost ack, renderer hiccup) looks identical — the
+    // viewer shows a stale picture while clicks demonstrably reach the page.
+    // Re-kicking start/stop on the live session is cheap, forces Chrome to
+    // emit a fresh frame immediately, and recovers a broken ack chain. If the
+    // session itself is dead, the sends throw and we fall through to a full
+    // detach/re-attach recovery.
+    this.lastFrameAt = Date.now();
+    this.frameWatchdog = setInterval(() => {
+      if (!this.running || this.cdpSession !== session) return;
+      if (Date.now() - this.lastFrameAt < 30_000) return;
+      this.lastFrameAt = Date.now(); // avoid re-kicking every tick while idle
+      session
+        .send("Page.stopScreencast")
+        .then(() =>
+          session.send("Page.startScreencast", {
+            format: this.options.format ?? "jpeg",
+            quality: this.options.quality ?? 80,
+            maxWidth: this.width,
+            maxHeight: this.height,
+            everyNthFrame: this.options.everyNthFrame ?? 1,
+          }),
+        )
+        .catch(() => {
+          console.error(
+            "[Screencast] Watchdog re-kick failed — CDP session dead, re-attaching",
+          );
+          void this.recover(session);
+        });
+    }, 10_000);
+
     console.log(
       `[Screencast] Started (${this.width}x${this.height}, ${this.options.format ?? "jpeg"} q${this.options.quality ?? 80})`,
     );
@@ -139,6 +174,11 @@ export class ScreencastManager {
     this.running = false;
     this.frameCallback = null;
     this.currentPage = null;
+
+    if (this.frameWatchdog) {
+      clearInterval(this.frameWatchdog);
+      this.frameWatchdog = null;
+    }
 
     const session = this.cdpSession;
     this.cdpSession = null;

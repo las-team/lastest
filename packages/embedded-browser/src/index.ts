@@ -893,14 +893,40 @@ async function startup(): Promise<void> {
             for (let i = 0; i < payload.setupSteps.length; i++) {
               const step = payload.setupSteps[i]!;
               const stepSetupId = `rec-${payload.sessionId.slice(0, 8)}-${i}`;
-              const result = await testExecutor.runSetup(browser, {
-                setupId: stepSetupId,
-                code: step.code,
-                codeHash: step.codeHash,
-                targetUrl: payload.targetUrl,
-                timeout: 120_000,
-                viewport: payload.viewport,
-              });
+              const result = await testExecutor.runSetup(
+                browser,
+                {
+                  setupId: stepSetupId,
+                  code: step.code,
+                  codeHash: step.codeHash,
+                  targetUrl: payload.targetUrl,
+                  timeout: 120_000,
+                  viewport: payload.viewport,
+                },
+                {
+                  // Stream the setup page live (same as debug-session setup) —
+                  // the screencast was stopped above, so without this the
+                  // viewer sat on a blank canvas with no sign of progress
+                  // until the recording page finally attached.
+                  onPageCreated: async (setupPage: Page) => {
+                    try {
+                      await screencast?.start(setupPage, (frame) => {
+                        streamServer!.broadcastFrame(
+                          frame.data,
+                          frame.width,
+                          frame.height,
+                          frame.timestamp,
+                        );
+                      });
+                    } catch (err) {
+                      console.error(
+                        "[Command] Failed to attach screencast to recording-setup page:",
+                        err,
+                      );
+                    }
+                  },
+                },
+              );
               if (result.status !== "passed") {
                 throw new Error(
                   `Setup step ${i + 1}/${payload.setupSteps.length} failed: ${result.error ?? "unknown"}`,
@@ -1401,13 +1427,20 @@ async function startup(): Promise<void> {
           steps?: import("./debug-executor.js").DebugStep[];
         };
 
+        // Replays replace the BrowserContext + page (step_back, run_to_step
+        // going backward, or any action re-running stale code after an edit).
+        // Compare page identity around the action and re-attach the screencast
+        // + input whenever it changed — keying off step_back alone left the
+        // stream bound to a closed page after run_to_step replays ("insert
+        // click → click a step → stream dead").
+        const pageBefore = debugExecutor.getPage();
+
         await debugExecutor.handleAction(payload.action, payload);
 
-        // After step_back, screencast needs restart on new page (old context closed)
-        if (payload.action === "step_back") {
+        const newPage = debugExecutor.getPage();
+        if (newPage !== pageBefore) {
           await screencast?.stop();
           await inputHandler?.detach();
-          const newPage = debugExecutor.getPage();
           if (newPage && screencast) {
             // Force the new debug page to render at the EB's native resolution
             const cdp = await newPage.context().newCDPSession(newPage);
