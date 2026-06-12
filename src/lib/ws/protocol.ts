@@ -848,6 +848,18 @@ export interface StreamMouseEvent {
   clickCount?: number;
   deltaX?: number;
   deltaY?: number;
+  // Authoritative modifier state sampled from the browser event itself.
+  // Without it the EB infers modifiers from previously-forwarded keyboard
+  // events — if a modifier keyup is lost (focus left the canvas while the key
+  // was held), that state sticks and every later click dispatches as
+  // Ctrl/Alt+click, which links treat as open-in-new-tab (the page visibly
+  // ignores the click).
+  modifiers?: {
+    ctrl?: boolean;
+    shift?: boolean;
+    alt?: boolean;
+    meta?: boolean;
+  };
 }
 
 export interface StreamKeyboardEvent {

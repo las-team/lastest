@@ -560,6 +560,14 @@ export const BrowserViewer = forwardRef<
         x,
         y,
         button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left",
+        // Live modifier truth from the event — overrides any stale keyboard
+        // state tracked on the EB (see StreamMouseEvent.modifiers).
+        modifiers: {
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+        },
       };
 
       if (action === "down" || action === "up") {
@@ -649,6 +657,12 @@ export const BrowserViewer = forwardRef<
     }
   }, [interactive]);
 
+  // Modifier keys whose keydown was forwarded to the EB but whose keyup may
+  // never arrive (focus left the canvas while the key was held — clicking the
+  // timeline, alt-tab, …). The EB would keep the key pressed forever and
+  // treat every later click as a Ctrl/Alt+click. Released on textarea blur.
+  const heldModifierKeysRef = useRef<Set<string>>(new Set());
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // During IME composition, let the browser handle everything
@@ -682,6 +696,14 @@ export const BrowserViewer = forwardRef<
 
       // Everything else (non-printable keys, modifier combos): forward directly
       e.preventDefault();
+      if (
+        e.key === "Control" ||
+        e.key === "Shift" ||
+        e.key === "Alt" ||
+        e.key === "Meta"
+      ) {
+        heldModifierKeysRef.current.add(e.key);
+      }
       sendWs({
         type: "stream:input",
         payload: {
@@ -705,6 +727,7 @@ export const BrowserViewer = forwardRef<
   const handleKeyUp = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (composingRef.current || e.key === "Dead") return;
+      heldModifierKeysRef.current.delete(e.key);
       // Only forward non-printable keyups (printable chars handled via input event)
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       e.preventDefault();
@@ -744,6 +767,21 @@ export const BrowserViewer = forwardRef<
       } satisfies StreamKeyboardEvent,
     });
     ta.value = "";
+  }, [sendWs]);
+
+  const releaseHeldModifiers = useCallback(() => {
+    for (const key of heldModifierKeysRef.current) {
+      sendWs({
+        type: "stream:input",
+        payload: {
+          type: "keyboard",
+          action: "keyup",
+          key,
+          modifiers: { ctrl: false, shift: false, alt: false, meta: false },
+        } satisfies StreamKeyboardEvent,
+      });
+    }
+    heldModifierKeysRef.current.clear();
   }, [sendWs]);
 
   // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
@@ -1087,6 +1125,7 @@ export const BrowserViewer = forwardRef<
             onInput={handleTextareaInput}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
+            onBlur={releaseHeldModifiers}
           />
         )}
       </div>
