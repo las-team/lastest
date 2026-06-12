@@ -1391,7 +1391,10 @@ export function TestDetailClient({
                     isRunning={isRunning}
                     selectorStats={selectorStats}
                     actionProgress={actionProgress}
-                    className="h-[540px]"
+                    // Side-by-side (lg): stretch to the viewer card's full row
+                    // height so the panels line up; stacked (mobile): keep a
+                    // fixed height (h-full would collapse against the auto row).
+                    className="h-[540px] lg:h-full"
                   />
                 )}
               </div>
