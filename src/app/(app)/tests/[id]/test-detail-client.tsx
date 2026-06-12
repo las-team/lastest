@@ -130,7 +130,10 @@ import type { ScreenshotGroup } from "@/server/actions/tests";
 import { SheetDataPreview } from "@/components/test-data/sheet-data-preview";
 import { SheetReferenceInserter } from "@/components/test-data/sheet-reference-inserter";
 import { VarReferenceInserter } from "@/components/test-data/var-reference-inserter";
-import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
+import {
+  BrowserViewer,
+  type ActionProgressInfo,
+} from "@/components/embedded-browser/browser-viewer-client";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
 import { appendStreamToken } from "@/lib/eb/stream-token";
 import { TestSpecEditor } from "@/components/tests/test-spec-editor";
@@ -393,6 +396,25 @@ function CollapsibleTestCode({
   );
 }
 
+/** Shown in place of the BrowserViewer while a headed run's EB pod is being
+ *  provisioned (streamUrl resolves only once the actual runner is known). */
+function ViewerProvisioningPlaceholder({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center gap-2 bg-black text-white",
+        className,
+      )}
+    >
+      <Loader2 className="h-8 w-8 animate-spin" />
+      <span className="text-sm">Provisioning browser…</span>
+      <span className="text-xs text-white/70">
+        Live playback starts as soon as the browser pod is ready
+      </span>
+    </div>
+  );
+}
+
 export function TestDetailClient({
   test,
   results,
@@ -483,6 +505,10 @@ export function TestDetailClient({
 
   // Live browser viewer state
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  // True for the whole lifetime of a headed run — the viewer panel renders
+  // immediately on Run (with a provisioning placeholder) instead of popping
+  // in ~10s later when the EB pod is assigned and streamUrl resolves.
+  const [headedRunActive, setHeadedRunActive] = useState(false);
   const [showViewer, setShowViewer] = useState(true);
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
@@ -490,6 +516,31 @@ export function TestDetailClient({
   // Live step timeline state
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
   const [stepResults, setStepResults] = useState<StepResultsMap>({});
+  // In-flight action countdown from the live stream (selector wait, page
+  // load, fallback click). Carries the EB-reported stepIndex, so it both
+  // anchors the bar under the right timeline row AND advances the highlight
+  // ahead of the slower DB-polled step state.
+  const [actionProgress, setActionProgress] =
+    useState<ActionProgressInfo | null>(null);
+
+  // Safety net: expire a countdown whose `clear` event was lost (stream
+  // reconnect, killed pod) shortly after its own deadline.
+  useEffect(() => {
+    if (!actionProgress) return;
+    const timer = setTimeout(
+      () => setActionProgress(null),
+      actionProgress.timeoutMs + 3000,
+    );
+    return () => clearTimeout(timer);
+  }, [actionProgress]);
+
+  // The freshest known step: stream-reported action progress beats the
+  // DB-polled step state (the poll lags by a second or more, which used to
+  // leave the highlight stuck several steps behind the live browser).
+  const liveStepIndex = Math.max(
+    currentStepIndex,
+    actionProgress?.stepIndex ?? -1,
+  );
 
   // Per-step selector fallback stats from the selector_stats table. Loaded
   // once on mount and refreshed when a run completes so newly recorded
@@ -689,6 +740,10 @@ export function TestDetailClient({
     setIsRunning(true);
     setCurrentStepIndex(-1);
     setStepResults({});
+    setActionProgress(null);
+    // Show the viewer panel (with its provisioning placeholder) immediately —
+    // streamUrl resolves only once the EB pod is assigned, ~10s later.
+    setHeadedRunActive(!headless);
     try {
       track(Events.test_run_started, {
         trigger: "manual",
@@ -764,6 +819,8 @@ export function TestDetailClient({
           }
           setIsRunning(false);
           setStreamUrl(null);
+          setHeadedRunActive(false);
+          setActionProgress(null);
           router.refresh();
           // Pull fresh selector_stats so the per-step hover reflects this
           // run's outcomes. Best-effort.
@@ -788,6 +845,7 @@ export function TestDetailClient({
       }, 1000);
     } catch (error) {
       setIsRunning(false);
+      setHeadedRunActive(false);
       toast.error(
         error instanceof Error ? error.message : "Failed to run test",
       );
@@ -1213,8 +1271,10 @@ export function TestDetailClient({
           </Card>
         )}
 
-        {/* Live Browser Viewer (headed runs on embedded/system runners) */}
-        {streamUrl && isRunning && (
+        {/* Live Browser Viewer (headed runs on embedded/system runners).
+            Rendered from the moment a headed run starts — with a provisioning
+            placeholder until the EB pod is assigned and streamUrl resolves. */}
+        {isRunning && (streamUrl || headedRunActive) && (
           <div
             ref={viewerLayoutRef}
             className={
@@ -1226,20 +1286,26 @@ export function TestDetailClient({
             {isViewerFullscreen ? (
               <>
                 <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
-                  <BrowserViewer
-                    streamUrl={streamUrl}
-                    hideControls
-                    fit
-                    className="flex-1 min-h-0"
-                  />
+                  {streamUrl ? (
+                    <BrowserViewer
+                      streamUrl={streamUrl}
+                      hideControls
+                      fit
+                      className="flex-1 min-h-0"
+                      onActionProgress={setActionProgress}
+                    />
+                  ) : (
+                    <ViewerProvisioningPlaceholder className="flex-1 min-h-0" />
+                  )}
                   {plannedSteps.length > 0 && (
                     <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 layer-playback-timeline hidden md:block">
                       <PlaybackTimeline
                         steps={plannedSteps}
-                        currentStepIndex={currentStepIndex}
+                        currentStepIndex={liveStepIndex}
                         results={stepResults}
                         isRunning={isRunning}
                         selectorStats={selectorStats}
+                        actionProgress={actionProgress}
                         compact
                         className="h-full pointer-events-auto"
                       />
@@ -1301,25 +1367,30 @@ export function TestDetailClient({
                       </Button>
                     )}
                   </div>
-                  {showViewer && (
-                    <BrowserViewer
-                      streamUrl={streamUrl}
-                      className="h-[500px]"
-                      fit
-                      hideFullscreenToggle
-                      hideScreenshot
-                      hideViewportSelector
-                      readOnlyUrl
-                    />
-                  )}
+                  {showViewer &&
+                    (streamUrl ? (
+                      <BrowserViewer
+                        streamUrl={streamUrl}
+                        className="h-[500px]"
+                        fit
+                        hideFullscreenToggle
+                        hideScreenshot
+                        hideViewportSelector
+                        readOnlyUrl
+                        onActionProgress={setActionProgress}
+                      />
+                    ) : (
+                      <ViewerProvisioningPlaceholder className="h-[500px]" />
+                    ))}
                 </Card>
                 {plannedSteps.length > 0 && showViewer && (
                   <PlaybackTimeline
                     steps={plannedSteps}
-                    currentStepIndex={currentStepIndex}
+                    currentStepIndex={liveStepIndex}
                     results={stepResults}
                     isRunning={isRunning}
                     selectorStats={selectorStats}
+                    actionProgress={actionProgress}
                     className="h-[540px]"
                   />
                 )}

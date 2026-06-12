@@ -27,6 +27,7 @@ export interface ActionProgressPayload {
   label?: string;
   kind?: "selector" | "wait" | "navigation" | "fallback";
   timeoutMs?: number;
+  stepIndex?: number;
 }
 
 export class StreamServer {

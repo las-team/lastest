@@ -971,6 +971,9 @@ export interface StreamActionProgressPayload {
   label?: string;
   kind?: "selector" | "wait" | "navigation" | "fallback";
   timeoutMs?: number;
+  /** Instrumented step the operation runs inside (-1 before the first step)
+   *  — lets UIs attach the countdown to the matching timeline row. */
+  stepIndex?: number;
 }
 
 export interface StreamActionProgressMessage extends BaseMessage {

@@ -460,12 +460,16 @@ export class EmbeddedTestExecutor {
       }) => void;
       /** Start/end of a deadline-bound operation (selector wait, page-load
        *  wait, navigation, fallback click). `timeoutMs` is the full budget —
-       *  consumers animate the countdown locally. `active: false` clears. */
+       *  consumers animate the countdown locally. `stepIndex` ties the
+       *  operation to the instrumented step it runs inside (-1 before the
+       *  first step) so UIs can render it under the right timeline row.
+       *  `active: false` clears. */
       onActionProgress?: (progress: {
         active: boolean;
         label?: string;
         kind?: "selector" | "wait" | "navigation" | "fallback";
         timeoutMs?: number;
+        stepIndex?: number;
       }) => void;
     },
   ): Promise<EmbeddedTestResult> {
@@ -513,7 +517,14 @@ export class EmbeddedTestExecutor {
       if (!onActionProgress) return () => {};
       actionProgressDepth++;
       try {
-        onActionProgress({ active: true, ...progress });
+        // outerCurrentStepIdx is declared further down (hoisted step-tracking
+        // state) but is always initialized before any instrumented operation
+        // runs — the closure only reads it at emit time.
+        onActionProgress({
+          active: true,
+          stepIndex: outerCurrentStepIdx,
+          ...progress,
+        });
       } catch {
         /* telemetry must never break the test */
       }

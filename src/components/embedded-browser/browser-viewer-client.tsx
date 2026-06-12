@@ -49,6 +49,19 @@ export interface DomSnapshotResult {
   timestamp: number;
 }
 
+/** In-flight deadline-bound action reported by the EB over the stream
+ *  (selector wait, page-load wait, fallback click). `timeoutMs` is the
+ *  remaining budget at receipt — consumers animate the countdown locally.
+ *  `key` changes per action so bars restart full; `stepIndex` ties the
+ *  action to the playback-timeline row it runs inside (-1 = pre-step). */
+export interface ActionProgressInfo {
+  key: string;
+  stepIndex: number;
+  label: string;
+  kind: string;
+  timeoutMs: number;
+}
+
 interface BrowserViewerProps {
   streamUrl: string;
   initialViewport?: { width: number; height: number };
@@ -75,6 +88,10 @@ interface BrowserViewerProps {
   onInspectResult?: (result: InspectElementResult | null) => void;
   onDomSnapshot?: (result: DomSnapshotResult) => void;
   onViewportChange?: (viewport: { width: number; height: number }) => void;
+  /** Live action countdown events from the EB (null = cleared). The viewer
+   *  doesn't render these itself — the parent attaches them to the playback
+   *  timeline so the bar sits under the step it belongs to. */
+  onActionProgress?: (progress: ActionProgressInfo | null) => void;
 }
 
 export interface BrowserViewerHandle {
@@ -105,6 +122,7 @@ export const BrowserViewer = forwardRef<
     onInspectResult,
     onDomSnapshot,
     onViewportChange,
+    onActionProgress,
   },
   ref,
 ) {
@@ -164,16 +182,6 @@ export const BrowserViewer = forwardRef<
   const [blockingPhase, setBlockingPhase] = useState<
     "setup" | "starting" | null
   >(null);
-  // In-flight action countdown (selector wait / page-load wait / fallback
-  // click) reported by the EB. Only the start is sent — the bar animates
-  // down locally over timeoutMs from receipt; `key` remounts the bar so each
-  // new action restarts it full.
-  const [actionProgress, setActionProgress] = useState<{
-    key: string;
-    label: string;
-    kind: string;
-    timeoutMs: number;
-  } | null>(null);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -201,17 +209,6 @@ export const BrowserViewer = forwardRef<
     return () => clearInterval(interval);
   }, [expiresAt]);
 
-  // Safety net: if the EB's `active: false` clear is lost (reconnect race,
-  // killed pod), expire the countdown bar shortly after its own deadline.
-  useEffect(() => {
-    if (!actionProgress) return;
-    const timer = setTimeout(
-      () => setActionProgress(null),
-      actionProgress.timeoutMs + 3000,
-    );
-    return () => clearTimeout(timer);
-  }, [actionProgress]);
-
   // Track the latest frame dimensions so the canvas/wrapper can match the
   // *real* stream aspect ratio. CDP's deviceWidth/Height drifts from the
   // requested viewport (browser chrome, scrollbar, device-metrics rounding)
@@ -221,6 +218,8 @@ export const BrowserViewer = forwardRef<
   );
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+  const onActionProgressRef = useRef(onActionProgress);
+  onActionProgressRef.current = onActionProgress;
 
   // Render a frame onto the canvas. CDP's metadata width/height can drift
   // from the encoded JPEG's natural dimensions (DPR, scrollbar, device-metrics
@@ -446,7 +445,7 @@ export const BrowserViewer = forwardRef<
               // A phase transition obsoletes any in-flight action countdown
               // (the EB also clears it, but don't rely on message ordering).
               if (status === "setup" || status === "starting") {
-                setActionProgress(null);
+                onActionProgressRef.current?.(null);
               }
               if (
                 status === "busy" ||
@@ -469,6 +468,7 @@ export const BrowserViewer = forwardRef<
                     label?: string;
                     kind?: string;
                     timeoutMs?: number;
+                    stepIndex?: number;
                   }
                 | undefined;
               // Counts as liveness — the EB is mid-action, not stalled.
@@ -478,14 +478,15 @@ export const BrowserViewer = forwardRef<
                 typeof p.timeoutMs === "number" &&
                 p.timeoutMs > 0
               ) {
-                setActionProgress({
+                onActionProgressRef.current?.({
                   key: message.id ?? String(Date.now()),
+                  stepIndex: typeof p.stepIndex === "number" ? p.stepIndex : -1,
                   label: p.label ?? "Working…",
                   kind: p.kind ?? "wait",
                   timeoutMs: p.timeoutMs,
                 });
               } else {
-                setActionProgress(null);
+                onActionProgressRef.current?.(null);
               }
               break;
             }
@@ -1072,31 +1073,6 @@ export const BrowserViewer = forwardRef<
             </div>
           </div>
         )}
-
-        {/* In-flight action countdown — label + bar that drains over the
-            action's timeout budget (selector wait, page-load wait, fallback
-            click). Animated locally; the EB only sends start/clear. */}
-        {connectionStatus === "connected" &&
-          !blockingPhase &&
-          actionProgress && (
-            <div className="absolute bottom-2 left-2 right-2 layer-canvas-overlay pointer-events-none flex justify-center">
-              <div className="w-full max-w-md rounded-md bg-black/70 px-3 py-2 text-white shadow-lg">
-                <div className="mb-1.5 flex items-center gap-2 text-xs">
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                  <span className="truncate">{actionProgress.label}</span>
-                </div>
-                <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
-                  <div
-                    key={actionProgress.key}
-                    className={`h-full rounded-full ${actionProgress.kind === "fallback" ? "bg-amber-400" : "bg-sky-400"}`}
-                    style={{
-                      animation: `stream-action-countdown ${actionProgress.timeoutMs}ms linear forwards`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
 
         {fileChooserPending && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
