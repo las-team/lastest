@@ -402,13 +402,13 @@ function ViewerProvisioningPlaceholder({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-2 bg-black text-white",
+        "flex flex-col items-center justify-center gap-2 bg-background",
         className,
       )}
     >
-      <Loader2 className="h-8 w-8 animate-spin" />
-      <span className="text-sm">Provisioning browser…</span>
-      <span className="text-xs text-white/70">
+      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <span className="text-sm text-foreground">Provisioning browser…</span>
+      <span className="text-xs text-muted-foreground">
         Live playback starts as soon as the browser pod is ready
       </span>
     </div>

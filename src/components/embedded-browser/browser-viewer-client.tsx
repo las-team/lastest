@@ -1018,7 +1018,7 @@ export const BrowserViewer = forwardRef<
            • default:        1:1 pixels with intrinsic-height container —
                              scrolls only when parent imposes a height. */}
       <div
-        className={`relative ${hideToolbar ? "" : "rounded-b-lg border"} ${hideToolbar && hideStatusBar ? "" : "bg-black"} ${fit ? "flex-1 min-h-0 overflow-hidden flex items-center justify-center" : cropIndicators ? "flex-1 min-h-0 overflow-hidden" : "overflow-auto"}`}
+        className={`relative ${hideToolbar ? "" : "rounded-b-lg border"} ${hideToolbar && hideStatusBar ? "" : "bg-background"} ${fit ? "flex-1 min-h-0 overflow-hidden flex items-center justify-center" : cropIndicators ? "flex-1 min-h-0 overflow-hidden" : "overflow-auto"}`}
       >
         {connectionStatus !== "connected" && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
