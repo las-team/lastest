@@ -71,6 +71,10 @@ import type {
 import { getAISettings } from "@/lib/db/queries";
 import { generateWithAI, type AIProviderConfig } from "@/lib/ai";
 import { buildAIVarPrompt, sanitizeAIVarOutput } from "@/lib/vars/ai-presets";
+import {
+  classifyRunError,
+  formatClassifiedError,
+} from "@/lib/execution/error-classify";
 /**
  * Generate SHA256 hash of test code for integrity verification.
  */
@@ -1083,11 +1087,14 @@ async function executeViaRunner(
       ) {
         inFlight.delete(dbCmd.id);
         completedCount++;
-        // No result payload — runner timed out or disconnected
-        const errorMsg =
-          dbCmd.status === "timeout"
-            ? `Test execution timed out`
-            : `Runner disconnected during test execution`;
+        // No result payload — runner timed out or disconnected. Surface a
+        // human-readable reason instead of a bare status string.
+        const errorMsg = formatClassifiedError(
+          classifyRunError({
+            runnerStatus:
+              dbCmd.status === "timeout" ? "timeout" : "disconnected",
+          })!,
+        );
         const timeoutResult: TestRunResult = {
           testId: info.testId,
           status: "failed",
@@ -1201,6 +1208,35 @@ async function executeViaRunner(
             | undefined)
         : undefined;
 
+      const rawErrorMessage = errorPayload?.message as string | undefined;
+      const rawConsoleErrors = Array.isArray(payload.consoleErrors)
+        ? (payload.consoleErrors as string[])
+        : null;
+      const rawNetworkRequests = Array.isArray(payload.networkRequests)
+        ? (payload.networkRequests as NetworkRequest[])
+        : null;
+      // For failures, replace cryptic Playwright/network errors with a
+      // human-readable reason (bot challenge, DNS, connection refused, …).
+      // Genuine assertion failures classify to null and are shown verbatim.
+      const isFailed =
+        payload.status === "failed" ||
+        payload.status === "error" ||
+        payload.status === "timeout";
+      let resolvedErrorMessage = rawErrorMessage;
+      if (isFailed) {
+        const classified = classifyRunError({
+          errorMessage: rawErrorMessage,
+          consoleErrors: rawConsoleErrors,
+          networkRequests: rawNetworkRequests,
+        });
+        if (classified) {
+          resolvedErrorMessage = formatClassifiedError(
+            classified,
+            rawErrorMessage,
+          );
+        }
+      }
+
       const testResult: TestRunResult = {
         testId: (payload.testId as string) || info.testId,
         status:
@@ -1212,7 +1248,7 @@ async function executeViaRunner(
         durationMs: (payload.durationMs as number) || 0,
         screenshotPath: allScreenshots[0]?.path,
         screenshots: allScreenshots,
-        errorMessage: errorPayload?.message as string | undefined,
+        errorMessage: resolvedErrorMessage,
         consoleErrors:
           Array.isArray(payload.consoleErrors) &&
           payload.consoleErrors.length > 0

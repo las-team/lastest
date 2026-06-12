@@ -6,6 +6,7 @@ import { requireAuth, requireTeamAccess } from "@/lib/auth";
 import { assertHttpScheme } from "@/lib/security/url-validation";
 import type { OnboardingPath } from "@/lib/db/schema";
 import { startPlayAgent } from "./play-agent";
+import { repointSeededSampleToSmoke } from "@/lib/demo/sandbox-seeds";
 
 export async function setOnboardingPath(path: OnboardingPath) {
   const session = await requireAuth();
@@ -30,6 +31,14 @@ export async function setBaseUrl(repositoryId: string, url: string) {
   await queries.updateRepository(repositoryId, {
     branchBaseUrls: { ...existing, default: url, [branch]: url },
   });
+  // If the only test is an untouched auto-seeded sample (e.g. the herokuapp
+  // demo), re-point it at the URL the user just entered so their first test
+  // targets their own app instead of a third-party playground that fails.
+  try {
+    await repointSeededSampleToSmoke(repositoryId, url);
+  } catch (err) {
+    console.warn("[onboarding] Failed to re-point seeded sample:", err);
+  }
   revalidatePath("/onboarding");
   revalidatePath("/settings");
 }

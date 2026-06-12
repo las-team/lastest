@@ -127,6 +127,35 @@ export async function test(page: Page, baseUrl: string, screenshotPath: string, 
 }
 `;
 
+/**
+ * Generic, URL-agnostic smoke test. Unlike the template seeds, this navigates
+ * to whatever `baseUrl` the test runs against and captures a baseline — so it
+ * works for a user's *own* app, not a hardcoded third-party playground. Used
+ * when a sandbox is created with a custom URL, and when a user later sets a
+ * custom base URL (we re-point an untouched sample at their site).
+ */
+const SMOKE_TEST_CODE = `import { Page } from 'playwright';
+
+export async function test(page: Page, baseUrl: string, screenshotPath: string, stepLogger: any) {
+  let screenshotStep = 0;
+  function getScreenshotPath() {
+    screenshotStep++;
+    const ext = screenshotPath.lastIndexOf('.');
+    if (ext > 0) {
+      return screenshotPath.slice(0, ext) + '-step' + screenshotStep + screenshotPath.slice(ext);
+    }
+    return screenshotPath + '-step' + screenshotStep;
+  }
+
+  stepLogger.log('Open the page');
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('load').catch(() => {});
+
+  stepLogger.log('Capture a baseline screenshot');
+  await page.screenshot({ path: getScreenshotPath(), fullPage: true });
+}
+`;
+
 export const SANDBOX_SEEDS: Record<SandboxSeedId, SeedDefinition> = {
   todomvc: {
     area: {
@@ -224,4 +253,140 @@ export async function seedSandboxTemplate(
   });
 
   return testId;
+}
+
+/** Codes we seed automatically. Used to recognise an *untouched* sample so we
+ *  can safely re-point or replace it without clobbering user edits. */
+const SEED_CODES = new Set<string>([
+  TODOMVC_CODE,
+  HEROKUAPP_CODE,
+  PLAYWRIGHT_DOCS_CODE,
+  SMOKE_TEST_CODE,
+]);
+
+/**
+ * Seed a generic smoke test against an arbitrary base URL. Idempotent: a no-op
+ * when the repo already has any test. This is the "bring your own URL" seed —
+ * a fresh repo with a custom URL gets a real, runnable first test of *their*
+ * app instead of a third-party demo.
+ */
+export async function seedGenericSmokeTest(
+  repositoryId: string,
+  targetUrl: string,
+): Promise<string | null> {
+  const existing = await db
+    .select({ id: tests.id })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId))
+    .limit(1);
+  if (existing.length > 0) return existing[0].id;
+
+  const now = new Date();
+  const faId = uuid();
+  await db.insert(functionalAreas).values({
+    id: faId,
+    repositoryId,
+    name: "Smoke test",
+    parentId: null,
+    agentPlan: "A starter test that loads your app and captures a baseline.",
+    planGeneratedAt: now,
+  });
+
+  const testId = uuid();
+  await db.insert(tests).values({
+    id: testId,
+    repositoryId,
+    functionalAreaId: faId,
+    name: "Homepage loads",
+    code: SMOKE_TEST_CODE,
+    targetUrl,
+    executionMode: "procedural",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await db.insert(testVersions).values({
+    id: uuid(),
+    testId,
+    version: 1,
+    code: SMOKE_TEST_CODE,
+    name: "Homepage loads",
+    targetUrl,
+    changeReason: "manual_edit",
+    createdAt: now,
+  });
+
+  return testId;
+}
+
+/**
+ * When a user sets a custom base URL during onboarding, re-point an *untouched*
+ * seeded sample at their site. Fixes the case where a demo template (e.g. the
+ * herokuapp "form auth" test) was seeded but the user actually wants to test
+ * their own URL — without this the first test still targets the demo site and
+ * fails. No-op when the repo has multiple tests or the sample was edited.
+ */
+export async function repointSeededSampleToSmoke(
+  repositoryId: string,
+  newBaseUrl: string,
+): Promise<boolean> {
+  const repoTests = await db
+    .select({
+      id: tests.id,
+      code: tests.code,
+      targetUrl: tests.targetUrl,
+      functionalAreaId: tests.functionalAreaId,
+    })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId));
+
+  // Only act when the repo holds exactly one, unedited, auto-seeded sample.
+  if (repoTests.length !== 1) return false;
+  const t = repoTests[0];
+  if (!t.code || !SEED_CODES.has(t.code)) return false;
+  // Already a smoke test pointing at the right URL — nothing to do.
+  if (t.code === SMOKE_TEST_CODE && t.targetUrl === newBaseUrl) return false;
+
+  const now = new Date();
+  await db
+    .update(tests)
+    .set({
+      code: SMOKE_TEST_CODE,
+      name: "Homepage loads",
+      targetUrl: newBaseUrl,
+      executionMode: "procedural",
+      updatedAt: now,
+    })
+    .where(eq(tests.id, t.id));
+
+  if (t.functionalAreaId) {
+    await db
+      .update(functionalAreas)
+      .set({
+        name: "Smoke test",
+        agentPlan:
+          "A starter test that loads your app and captures a baseline.",
+      })
+      .where(eq(functionalAreas.id, t.functionalAreaId));
+  }
+
+  const versionRows = await db
+    .select({ version: testVersions.version })
+    .from(testVersions)
+    .where(eq(testVersions.testId, t.id));
+  const nextVersion =
+    versionRows.reduce((max, r) => Math.max(max, r.version ?? 0), 0) + 1;
+
+  await db.insert(testVersions).values({
+    id: uuid(),
+    testId: t.id,
+    version: nextVersion,
+    code: SMOKE_TEST_CODE,
+    name: "Homepage loads",
+    targetUrl: newBaseUrl,
+    changeReason: "manual_edit",
+    createdAt: now,
+  });
+
+  return true;
 }
