@@ -153,10 +153,13 @@ export const BrowserViewer = forwardRef<
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [fileChooserPending, setFileChooserPending] = useState(false);
-  // True while the EB reports status "busy" (e.g. running setup steps before
-  // a recording) and no frames are arriving — drives a "please wait" overlay
-  // so the user doesn't stare at a blank/stale canvas wondering if it broke.
-  const [busyNoFrames, setBusyNoFrames] = useState(false);
+  // True while the EB reports status "setup" (running setup steps before a
+  // recording / headed run). Drives a blocking "please wait" overlay for the
+  // WHOLE setup phase — input is detached on the EB during setup, so clicks
+  // would be silently ignored. Status-driven only: an earlier "busy + no
+  // frames recently" heuristic flapped during headed replay every time the
+  // page paused repainting for a few seconds.
+  const [setupActive, setSetupActive] = useState(false);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -167,10 +170,8 @@ export const BrowserViewer = forwardRef<
   const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const screencastPausedRef = useRef(false);
   // Unlike lastFrameTimeRef (which status keepalives also bump, for stall
-  // detection), this tracks ACTUAL frames only — used for the FPS readout and
-  // the busy overlay.
+  // detection), this tracks ACTUAL frames only — used for the FPS readout.
   const lastRealFrameRef = useRef(0);
-  const remoteStatusRef = useRef<string>("");
 
   // Session expiry countdown
   useEffect(() => {
@@ -327,12 +328,6 @@ export const BrowserViewer = forwardRef<
             frameCountRef.current = 0;
             lastFpsUpdateRef.current = now;
           }
-          // Busy overlay: EB reports "busy" (setup running) and nothing is
-          // being streamed right now.
-          setBusyNoFrames(
-            remoteStatusRef.current === "busy" &&
-              now - lastRealFrameRef.current > 2500,
-          );
           if (
             lastFrameTimeRef.current > 0 &&
             now - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
@@ -375,7 +370,6 @@ export const BrowserViewer = forwardRef<
               // Reset stall timer on every frame
               lastFrameTimeRef.current = Date.now();
               lastRealFrameRef.current = Date.now();
-              setBusyNoFrames(false);
 
               // Update FPS
               frameCountRef.current++;
@@ -417,9 +411,10 @@ export const BrowserViewer = forwardRef<
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
-              remoteStatusRef.current = status;
+              setSetupActive(status === "setup");
               if (
                 status === "busy" ||
+                status === "setup" ||
                 status === "recording" ||
                 status === "debugging"
               ) {
@@ -989,13 +984,17 @@ export const BrowserViewer = forwardRef<
           </div>
         )}
 
-        {connectionStatus === "connected" && busyNoFrames && (
-          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/60">
+        {/* Blocking setup overlay — translucent so setup progress stays
+            visible behind it; absorbs pointer events (the EB ignores input
+            during setup anyway). Shown for the entire setup phase, cleared
+            by the next status broadcast (recording / busy / ready). */}
+        {connectionStatus === "connected" && setupActive && (
+          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/50">
             <div className="flex flex-col items-center gap-2 text-white">
               <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="text-sm">Preparing browser…</span>
+              <span className="text-sm">Running setup steps…</span>
               <span className="text-xs text-white/70">
-                Running setup steps — the live view starts shortly
+                Interaction is disabled until setup finishes
               </span>
             </div>
           </div>

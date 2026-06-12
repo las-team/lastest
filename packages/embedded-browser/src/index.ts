@@ -862,8 +862,14 @@ async function startup(): Promise<void> {
 
         runnerClient.setStatus("busy", payload.sessionId);
 
-        // Notify stream viewers before stopping screencast so they suppress stall detection
-        streamServer?.broadcastStatus("busy");
+        // Distinct "setup" stream status: viewers show a blocking "running
+        // setup, please wait" overlay for the WHOLE setup phase (the setup
+        // pages stream live but input is detached, so interaction would be
+        // silently ignored). Cleared by the "recording" broadcast once the
+        // recorder is live. Suppresses viewer stall detection like "busy".
+        streamServer?.broadcastStatus(
+          payload.setupSteps?.length ? "setup" : "busy",
+        );
 
         // Stop screencast/input on idle page
         await screencast?.stop();
@@ -1554,7 +1560,9 @@ async function startup(): Promise<void> {
         activeTasks++;
         if (activeTasks === 1) {
           capturedClient.setStatus("busy", `setup:${payload.setupId}`);
-          streamServer?.broadcastStatus("busy", payload.targetUrl);
+          // "setup" (vs generic "busy") drives the viewer's blocking
+          // "running setup, please wait" overlay for the whole setup phase.
+          streamServer?.broadcastStatus("setup", payload.targetUrl);
           if (!setupHeaded) {
             // Pause screencast to free Chromium CPU for setup execution.
             // In headed (debug) mode we keep it alive and re-route it to the

@@ -93,13 +93,15 @@ export class StreamServer {
         `[StreamServer] Client connected: ${clientId} (total: ${this.clients.size})`,
       );
 
-      // Send current status
+      // Send the CURRENT status (not a hardcoded "connected") so a viewer
+      // that (re)connects mid-phase — e.g. while setup streams frames and no
+      // keepalive fires — immediately knows the EB is in setup/recording/etc.
       this.sendToClient(ws, {
         type: "stream:status",
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         payload: {
-          status: "connected",
+          status: this.lastStatus,
         },
       });
 
