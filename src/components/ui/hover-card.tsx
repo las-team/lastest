@@ -25,8 +25,15 @@ function HoverCardContent({
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
+  // Portal into the fullscreen element when one is active — content portaled
+  // to document.body is not rendered while another element is fullscreen
+  // (e.g. selector-stats hover panels next to the fullscreen live viewer).
+  const portalContainer =
+    typeof document !== "undefined"
+      ? ((document.fullscreenElement as HTMLElement | null) ?? undefined)
+      : undefined;
   return (
-    <HoverCardPrimitive.Portal>
+    <HoverCardPrimitive.Portal container={portalContainer}>
       <HoverCardPrimitive.Content
         data-slot="hover-card-content"
         align={align}

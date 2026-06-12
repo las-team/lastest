@@ -48,6 +48,16 @@ export class StreamServer {
     payload: ActionProgressPayload;
     startedAt: number;
   } | null = null;
+  // Last broadcast frame, replayed to newly connected clients. CDP only
+  // emits frames on repaint — without the replay, a viewer that (re)connects
+  // mid-wait (fullscreen toggle remount, reconnect) stares at a blank canvas
+  // until the page next repaints, which can be the rest of a long wait.
+  private lastFrame: {
+    data: string;
+    width: number;
+    height: number;
+    timestamp: number;
+  } | null = null;
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
@@ -120,6 +130,17 @@ export class StreamServer {
           status: this.lastStatus,
         },
       });
+
+      // Replay the most recent frame so the canvas paints immediately
+      // instead of staying blank until the page next repaints.
+      if (this.lastFrame) {
+        this.sendToClient(ws, {
+          type: "stream:frame",
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          payload: this.lastFrame,
+        });
+      }
 
       // Replay any in-flight action countdown with the remaining (not the
       // original) budget so a viewer joining mid-wait sees an accurate bar.
@@ -228,6 +249,7 @@ export class StreamServer {
     timestamp: number,
   ): void {
     this.lastBroadcastTime = Date.now();
+    this.lastFrame = { data, width, height, timestamp };
     const message = JSON.stringify({
       type: "stream:frame",
       id: crypto.randomUUID(),

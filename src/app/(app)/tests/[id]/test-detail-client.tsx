@@ -1277,70 +1277,39 @@ export function TestDetailClient({
         {isRunning && (streamUrl || headedRunActive) && (
           <div
             ref={viewerLayoutRef}
+            // Opaque bg-background in fullscreen: the browser paints a black
+            // ::backdrop behind the fullscreen element, so a translucent fill
+            // rendered everything near-black.
             className={
               isViewerFullscreen
-                ? "flex-1 flex flex-col h-full overflow-hidden bg-muted/50"
+                ? "flex flex-col h-full overflow-hidden bg-background"
                 : ""
             }
           >
-            {isViewerFullscreen ? (
-              <>
-                <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
-                  {streamUrl ? (
-                    <BrowserViewer
-                      streamUrl={streamUrl}
-                      hideControls
-                      fit
-                      className="flex-1 min-h-0"
-                      onActionProgress={setActionProgress}
-                    />
-                  ) : (
-                    <ViewerProvisioningPlaceholder className="flex-1 min-h-0" />
-                  )}
-                  {plannedSteps.length > 0 && (
-                    <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 layer-playback-timeline hidden md:block">
-                      <PlaybackTimeline
-                        steps={plannedSteps}
-                        currentStepIndex={liveStepIndex}
-                        results={stepResults}
-                        isRunning={isRunning}
-                        selectorStats={selectorStats}
-                        actionProgress={actionProgress}
-                        compact
-                        className="h-full pointer-events-auto"
-                      />
-                    </div>
-                  )}
-                </div>
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
-                  <div className="flex items-center gap-2 px-1">
-                    <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-sm font-medium text-foreground">
-                      Running
-                    </span>
-                  </div>
-                  <div className="w-px h-5 bg-border" />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={toggleViewerFullscreen}
-                    title="Exit fullscreen"
-                  >
-                    <Minimize2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div
-                className={cn(
-                  "grid gap-3",
-                  plannedSteps.length > 0
-                    ? "lg:grid-cols-[minmax(0,1fr)_320px]"
-                    : "grid-cols-1",
-                )}
+            {/* One persistent tree for both layouts — toggling fullscreen
+                only swaps classNames. Branching the JSX remounted
+                BrowserViewer, which dropped the WebSocket + canvas and left
+                the stream black until the page next repainted. */}
+            <div
+              className={
+                isViewerFullscreen
+                  ? "flex-1 relative flex flex-col overflow-hidden min-h-0"
+                  : cn(
+                      "grid gap-3",
+                      plannedSteps.length > 0
+                        ? "lg:grid-cols-[minmax(0,1fr)_320px]"
+                        : "grid-cols-1",
+                    )
+              }
+            >
+              <Card
+                className={
+                  isViewerFullscreen
+                    ? "flex-1 min-h-0 flex flex-col overflow-hidden gap-0 rounded-none border-0 py-0 shadow-none"
+                    : "overflow-hidden py-0 min-w-0"
+                }
               >
-                <Card className="overflow-hidden py-0 min-w-0">
+                {!isViewerFullscreen && (
                   <div className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium bg-muted/50">
                     <button
                       type="button"
@@ -1367,23 +1336,46 @@ export function TestDetailClient({
                       </Button>
                     )}
                   </div>
-                  {showViewer &&
-                    (streamUrl ? (
-                      <BrowserViewer
-                        streamUrl={streamUrl}
-                        className="h-[500px]"
-                        fit
-                        hideFullscreenToggle
-                        hideScreenshot
-                        hideViewportSelector
-                        readOnlyUrl
-                        onActionProgress={setActionProgress}
-                      />
-                    ) : (
-                      <ViewerProvisioningPlaceholder className="h-[500px]" />
-                    ))}
-                </Card>
-                {plannedSteps.length > 0 && showViewer && (
+                )}
+                {(showViewer || isViewerFullscreen) &&
+                  (streamUrl ? (
+                    <BrowserViewer
+                      streamUrl={streamUrl}
+                      className={
+                        isViewerFullscreen ? "flex-1 min-h-0" : "h-[500px]"
+                      }
+                      fit
+                      hideControls={isViewerFullscreen}
+                      hideFullscreenToggle
+                      hideScreenshot
+                      hideViewportSelector
+                      readOnlyUrl
+                      onActionProgress={setActionProgress}
+                    />
+                  ) : (
+                    <ViewerProvisioningPlaceholder
+                      className={
+                        isViewerFullscreen ? "flex-1 min-h-0" : "h-[500px]"
+                      }
+                    />
+                  ))}
+              </Card>
+              {plannedSteps.length > 0 &&
+                (showViewer || isViewerFullscreen) &&
+                (isViewerFullscreen ? (
+                  <div className="pointer-events-none absolute right-4 top-4 bottom-4 w-72 layer-playback-timeline hidden md:block">
+                    <PlaybackTimeline
+                      steps={plannedSteps}
+                      currentStepIndex={liveStepIndex}
+                      results={stepResults}
+                      isRunning={isRunning}
+                      selectorStats={selectorStats}
+                      actionProgress={actionProgress}
+                      compact
+                      className="h-full pointer-events-auto"
+                    />
+                  </div>
+                ) : (
                   <PlaybackTimeline
                     steps={plannedSteps}
                     currentStepIndex={liveStepIndex}
@@ -1396,7 +1388,26 @@ export function TestDetailClient({
                     // fixed height (h-full would collapse against the auto row).
                     className="h-[540px] lg:h-full"
                   />
-                )}
+                ))}
+            </div>
+            {isViewerFullscreen && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
+                <div className="flex items-center gap-2 px-1">
+                  <div className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-sm font-medium text-foreground">
+                    Running
+                  </span>
+                </div>
+                <div className="w-px h-5 bg-border" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={toggleViewerFullscreen}
+                  title="Exit fullscreen"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                </Button>
               </div>
             )}
           </div>
