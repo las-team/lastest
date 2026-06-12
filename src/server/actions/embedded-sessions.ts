@@ -741,7 +741,9 @@ export async function processPoolQueue(): Promise<void> {
   // Don't bother if no EBs are available — avoids churning jobs
   if (await isPoolBusy()) return;
 
-  // Find first pending job with no target runner (queued because all EBs were busy)
+  // Find the OLDEST pending job with no target runner (queued because all EBs
+  // were busy). Without the explicit ordering, Postgres returns an arbitrary
+  // row — newer jobs could jump the queue and starve older ones.
   const [pendingJob] = await db
     .select()
     .from(backgroundJobs)
@@ -751,6 +753,7 @@ export async function processPoolQueue(): Promise<void> {
         isNull(backgroundJobs.targetRunnerId),
       ),
     )
+    .orderBy(backgroundJobs.createdAt)
     .limit(1);
 
   if (!pendingJob) return;

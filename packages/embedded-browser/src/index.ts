@@ -68,11 +68,33 @@ let isRecording = false;
 let isDebugging = false;
 let recordingWatchdog: ReturnType<typeof setInterval> | null = null;
 let lastRecordingEventTime = 0;
-const RECORDING_INACTIVITY_TIMEOUT = 60_000; // 1 minute
+// Reaps abandoned recording sessions. Live stream input also counts as
+// activity (wired via streamServer.onInputActivity below) — previously only
+// *recorded* events reset this clock, so a user who paused for 60s to read
+// the page had their recording silently auto-stopped ("recording froze").
+const RECORDING_INACTIVITY_TIMEOUT = 300_000; // 5 minutes
+// Active session IDs — used to drop redispatched start commands for a session
+// that is already running (the server redelivers commands whose ack was lost).
+let currentRecordingSessionId: string | null = null;
+let currentDebugSessionId: string | null = null;
 
 // Concurrent test execution tracking (each test gets its own BrowserContext)
 let activeTasks = 0;
 const activeTestIds = new Set<string>();
+
+// Command-id dedup (mirrors packages/runner client.ts). The server redelivers
+// a command when its ack is lost or its row is reaped back to pending; without
+// this guard a redispatched start_recording / start_debug / debug_action /
+// run_setup executes twice (run_test alone had testId-based dedup).
+let seenCommandIds = new Set<string>();
+function isDuplicateCommand(id: string): boolean {
+  if (seenCommandIds.has(id)) return true;
+  seenCommandIds.add(id);
+  if (seenCommandIds.size > 1000) {
+    seenCommandIds = new Set([...seenCommandIds].slice(-500));
+  }
+  return false;
+}
 
 async function startup(): Promise<void> {
   console.log("=== Embedded Browser Service ===");
@@ -371,6 +393,12 @@ async function startup(): Promise<void> {
   await inputHandler.attach(page);
   streamServer.setInputHandler(inputHandler);
 
+  // Live viewer input keeps the recording session alive — the inactivity
+  // watchdog must only reap sessions nobody is interacting with.
+  streamServer.onInputActivity = () => {
+    if (isRecording) lastRecordingEventTime = Date.now();
+  };
+
   // 4b. Notify clients when a file chooser dialog opens
   page.on("filechooser", () => {
     streamServer?.broadcastStatus("connected", page?.url(), undefined, true);
@@ -417,6 +445,13 @@ async function startup(): Promise<void> {
       .catch(() => {
         /* swallow — redispatch covers loss */
       });
+
+    // Drop redeliveries AFTER acking (the ack is idempotent server-side and
+    // re-confirms receipt so the row doesn't bounce back to pending again).
+    if (isDuplicateCommand(command.id)) {
+      console.log(`[Command] Skipping duplicate command ${command.id}`);
+      return;
+    }
 
     switch (command.type) {
       case "command:run_test": {
@@ -795,6 +830,18 @@ async function startup(): Promise<void> {
 
       case "command:start_recording": {
         if (!browser || !runnerClient || !recorder) break;
+        const startRecPayload = command.payload as { sessionId: string };
+        // Redispatch guard: the same session arriving again (lost ack /
+        // reaped command row) must not tear down and restart a live recording.
+        if (
+          isRecording &&
+          currentRecordingSessionId === startRecPayload.sessionId
+        ) {
+          console.log(
+            `[Command] Ignoring duplicate start_recording for active session ${startRecPayload.sessionId}`,
+          );
+          break;
+        }
         // Reset inspect mode (may have been left on by a debug session)
         if (streamServer) {
           streamServer.inspectMode = false;
@@ -910,8 +957,11 @@ async function startup(): Promise<void> {
           });
           await inputHandler?.attach(recordingPage);
           isRecording = true;
+          currentRecordingSessionId = payload.sessionId;
 
-          // Start inactivity watchdog
+          // Start inactivity watchdog. Cleared before re-arming — a leftover
+          // interval from a previous session would double-fire stop commands.
+          if (recordingWatchdog) clearInterval(recordingWatchdog);
           lastRecordingEventTime = Date.now();
           recordingWatchdog = setInterval(() => {
             if (
@@ -919,9 +969,11 @@ async function startup(): Promise<void> {
               Date.now() - lastRecordingEventTime > RECORDING_INACTIVITY_TIMEOUT
             ) {
               console.warn(
-                "[Watchdog] Recording inactive for 60s — auto-stopping",
+                `[Watchdog] Recording inactive for ${RECORDING_INACTIVITY_TIMEOUT / 1000}s — auto-stopping`,
               );
-              runnerClient?.onCommand?.({
+              // Route through the command chain so it can't interleave with a
+              // server-sent command that's mid-flight.
+              runnerClient?.enqueueCommand({
                 id: crypto.randomUUID(),
                 type: "command:stop_recording",
                 timestamp: Date.now(),
@@ -937,6 +989,7 @@ async function startup(): Promise<void> {
         } catch (err) {
           console.error(`[Command] Failed to start recording:`, err);
           isRecording = false;
+          currentRecordingSessionId = null;
           if (recordingWatchdog) {
             clearInterval(recordingWatchdog);
             recordingWatchdog = null;
@@ -1037,6 +1090,7 @@ async function startup(): Promise<void> {
             await recorder.forceCleanup();
           }
           isRecording = false;
+          currentRecordingSessionId = null;
 
           // Re-attach screencast + input to idle page
           try {
@@ -1178,6 +1232,39 @@ async function startup(): Promise<void> {
 
       case "command:start_debug": {
         if (!browser || !runnerClient) break;
+        const startDbgPayload = command.payload as { sessionId: string };
+        // Redispatch guard: don't rebuild a live debug session from scratch
+        // when the server redelivers the same start command.
+        if (
+          isDebugging &&
+          currentDebugSessionId === startDbgPayload.sessionId
+        ) {
+          console.log(
+            `[Command] Ignoring duplicate start_debug for active session ${startDbgPayload.sessionId}`,
+          );
+          break;
+        }
+        // A different session is replacing the current one — tear the old one
+        // down first. Previously the old executor (context + page + paused
+        // execution loop) and its state-reporter interval were simply
+        // overwritten and leaked: two intervals kept POSTing debug_state and
+        // the orphaned context held Chromium resources.
+        if (debugStateReporter) {
+          clearInterval(debugStateReporter);
+          debugStateReporter = null;
+        }
+        if (debugExecutor) {
+          try {
+            await debugExecutor.stop();
+          } catch (err) {
+            console.error(
+              "[Command] Error stopping previous debug session:",
+              err,
+            );
+          }
+          debugExecutor = null;
+          isDebugging = false;
+        }
         // Remember & reset inspect mode from any previous session
         const wasInspecting = streamServer?.inspectMode ?? false;
         if (streamServer) {
@@ -1234,6 +1321,7 @@ async function startup(): Promise<void> {
           }
 
           isDebugging = true;
+          currentDebugSessionId = payload.sessionId;
 
           // Re-inject inspect overlay on the new debug page if it was active
           if (wasInspecting && streamServer) {
@@ -1263,6 +1351,7 @@ async function startup(): Promise<void> {
         } catch (err) {
           console.error(`[Command] Failed to start debug session:`, err);
           isDebugging = false;
+          currentDebugSessionId = null;
           if (debugStateReporter) {
             clearInterval(debugStateReporter);
             debugStateReporter = null;
@@ -1367,6 +1456,7 @@ async function startup(): Promise<void> {
           }
           debugExecutor = null;
           isDebugging = false;
+          currentDebugSessionId = null;
 
           // Re-attach screencast + input to idle page
           try {

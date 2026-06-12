@@ -26,7 +26,12 @@ type ConnectionStatus =
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
-const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "connected"
+// Reconnect if no frames/status for this long while "connected". Must be
+// comfortably larger than the EB stream-server's keepalive cadence (2s) —
+// the previous 8s value raced the old 5s keepalive (which could legally
+// arrive ~8s after the last frame) and false-positived on short user pauses,
+// force-reconnecting mid-recording.
+const FRAME_STALL_TIMEOUT_MS = 15000;
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
@@ -315,16 +320,23 @@ export const BrowserViewer = forwardRef<
           }
         }, 3000);
 
-        // Apply the initial viewport size to the remote browser
-        ws.send(
-          JSON.stringify({
-            type: "stream:session",
-            payload: {
-              action: "resize",
-              viewport: initialViewport ?? { width: 1280, height: 720 },
-            },
-          }),
-        );
+        // Apply the initial viewport size to the remote browser — but only
+        // when the caller explicitly provided one. The old unconditional
+        // 1280×720 fallback was re-sent on every (re)connect and the EB
+        // routes resizes to the ACTIVE page, so a mid-session reconnect
+        // resized a live recording/debug page to the default and restarted
+        // the screencast at the wrong dimensions.
+        if (initialViewport) {
+          ws.send(
+            JSON.stringify({
+              type: "stream:session",
+              payload: {
+                action: "resize",
+                viewport: initialViewport,
+              },
+            }),
+          );
+        }
       };
 
       ws.onmessage = (event) => {
@@ -367,9 +379,12 @@ export const BrowserViewer = forwardRef<
               if (message.payload.viewport) {
                 setViewport(message.payload.viewport);
               }
-              setFileChooserPending(
-                message.payload.fileChooserPending ?? false,
-              );
+              // Only honor explicit values — keepalive status messages omit
+              // the field, and the old `?? false` cleared the "File upload
+              // requested" overlay within seconds of it appearing.
+              if (message.payload.fileChooserPending !== undefined) {
+                setFileChooserPending(message.payload.fileChooserPending);
+              }
 
               // Any status message from the server proves the connection is alive
               lastFrameTimeRef.current = Date.now();

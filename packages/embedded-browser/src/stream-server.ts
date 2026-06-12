@@ -31,6 +31,7 @@ export class StreamServer {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private lastBroadcastTime = 0;
+  private lastStatus = "idle";
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
@@ -42,6 +43,10 @@ export class StreamServer {
   onDomSnapshot?: () => Promise<object>;
   /** Callback when inspect mode toggles (for CDP overlay) */
   onInspectModeChange?: (enabled: boolean) => void;
+  /** Called on any forwarded input event — used as a liveness signal so the
+   *  recording inactivity watchdog doesn't kill a session the user is
+   *  actively looking at / interacting with. */
+  onInputActivity?: () => void;
   /** Whether inspect mode is active (suppresses non-mouse input forwarding) */
   inspectMode = false;
 
@@ -152,11 +157,21 @@ export class StreamServer {
 
     // Send keepalive status when no frames have been broadcast recently,
     // so clients don't mistake an idle page for a broken connection.
+    //
+    // Two fixes vs the original 5s/"idle" keepalive:
+    //  - Re-broadcast the CURRENT status, not a hardcoded "idle". During a
+    //    recording, an "idle" keepalive flipped the viewer's stall-detection
+    //    suppression off; a short user pause then raced the keepalive against
+    //    the viewer's stall timeout and intermittently forced a reconnect
+    //    (canvas freeze + viewport reset mid-recording).
+    //  - Fire every 2s instead of 5s — the old cadence could deliver the
+    //    first keepalive ~8s after the last frame, exactly at the viewer's
+    //    stall deadline, making the false-stall race tight and frequent.
     this.keepaliveInterval = setInterval(() => {
       if (this.clients.size === 0) return;
-      if (Date.now() - this.lastBroadcastTime < 3000) return;
-      this.broadcastStatus("idle");
-    }, 5000);
+      if (Date.now() - this.lastBroadcastTime < 2000) return;
+      this.broadcastStatus(this.lastStatus);
+    }, 2000);
 
     console.log(`[StreamServer] Listening on port ${this.options.port}`);
   }
@@ -200,6 +215,7 @@ export class StreamServer {
     viewport?: { width: number; height: number },
     fileChooserPending?: boolean,
   ): void {
+    this.lastStatus = status;
     const message = JSON.stringify({
       type: "stream:status",
       id: crypto.randomUUID(),
@@ -224,6 +240,7 @@ export class StreamServer {
       case "stream:input": {
         const payload = (message as { payload: InputEvent }).payload;
         if (!payload) break;
+        this.onInputActivity?.();
         // In inspect mode, only forward mouse moves (for CDP overlay highlighting)
         if (
           this.inspectMode &&
@@ -232,7 +249,21 @@ export class StreamServer {
         )
           break;
         if (this.inputHandler) {
-          this.inputHandler.handleInput(payload);
+          const handled = this.inputHandler.handleInput(payload);
+          // Once a file upload is applied, tell all viewers the chooser is
+          // resolved so their "File upload requested" overlay clears.
+          if (payload.type === "file_upload") {
+            handled
+              .then(() =>
+                this.broadcastStatus(
+                  this.lastStatus,
+                  undefined,
+                  undefined,
+                  false,
+                ),
+              )
+              .catch(() => {});
+          }
         }
         break;
       }

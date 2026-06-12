@@ -25,6 +25,17 @@ const REDISPATCH_TTL_MS = 10_000;
 // executor test timeout.
 const MAX_CLAIMED_NO_RESULT_MS = 90_000;
 
+// Command types that terminate by inserting a `runner_command_results` row.
+// Everything else (start/stop recording & debug, debug_action, assertions,
+// cancel, ping, shutdown, …) is a session-control command: receipt IS
+// completion. Those used to sit at status='claimed' forever, which (a) made
+// the claimed-no-result reaper bounce them back to 'pending' every ~90s —
+// redispatching start_recording/start_debug into a LIVE session and resetting
+// it (the "recording/debug randomly restarts" flakiness) — and (b) forced
+// teardownPoolEB to burn its full shutdown grace waiting for rows that could
+// never reach a terminal state.
+const RESULT_BEARING_COMMAND_TYPES = ["command:run_test", "command:run_setup"];
+
 // Runner queries
 export async function getRunnerById(runnerId: string) {
   const [row] = await db.select().from(runners).where(eq(runners.id, runnerId));
@@ -92,11 +103,32 @@ export async function dispatchPendingCommands(
  * the `response:command_ack` handler in /api/ws/runner. Idempotent — only
  * flips rows still at status='pending' so a duplicate ack (from redispatch +
  * EB dedup-retry) is a no-op.
+ *
+ * Result-bearing commands (run_test / run_setup) move to 'claimed' and wait
+ * for their result row. Session-control commands are complete the moment the
+ * runner receives them — flip straight to 'completed' so they can't be
+ * reaped/redispatched into a live session.
  */
 export async function ackDispatchedCommand(commandId: string) {
+  const [cmd] = await db
+    .select({ type: runnerCommands.type })
+    .from(runnerCommands)
+    .where(eq(runnerCommands.id, commandId));
+  if (!cmd) return;
+
+  const now = new Date();
+  const resultBearing = RESULT_BEARING_COMMAND_TYPES.includes(cmd.type);
   await db
     .update(runnerCommands)
-    .set({ status: "claimed" as RunnerCommandStatus, claimedAt: new Date() })
+    .set(
+      resultBearing
+        ? { status: "claimed" as RunnerCommandStatus, claimedAt: now }
+        : {
+            status: "completed" as RunnerCommandStatus,
+            claimedAt: now,
+            completedAt: now,
+          },
+    )
     .where(
       and(
         eq(runnerCommands.id, commandId),
@@ -323,6 +355,12 @@ export async function timeoutStaleCommands(
   //    Chromium/CDP init hang inside the EB pod. Reset to pending so the next
   //    heartbeat redelivers; EB dedup prevents the original pod from running
   //    it twice if it's just slow.
+  //
+  //    Only result-bearing types qualify — session-control commands
+  //    (start_recording, start_debug, …) never produce result rows, so
+  //    reclaiming them here redispatches them into live sessions. They now
+  //    complete on ack, but the type filter also protects rows acked by older
+  //    runner builds.
   await db
     .update(runnerCommands)
     .set({
@@ -333,6 +371,7 @@ export async function timeoutStaleCommands(
     .where(
       and(
         eq(runnerCommands.status, "claimed"),
+        inArray(runnerCommands.type, RESULT_BEARING_COMMAND_TYPES),
         lt(runnerCommands.claimedAt, noResultCutoff),
         notExists(
           db

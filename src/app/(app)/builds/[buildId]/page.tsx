@@ -10,6 +10,7 @@ import { BuildActionsClient } from "./build-actions-client";
 import { BuildPollingWrapper } from "./build-polling-wrapper";
 import { PublishShareDialog, type ShareRecord } from "./publish-share-dialog";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
+import { appendStreamToken } from "@/lib/eb/stream-token";
 import { buildShareUrl } from "@/lib/share/slug";
 import * as queries from "@/lib/db/queries";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
@@ -45,11 +46,11 @@ export default async function BuildPage({ params }: PageProps) {
     if (testRun?.runnerId) {
       const streamInfo = await getStreamUrlForRunner(testRun.runnerId);
       if (streamInfo?.streamUrl) {
-        const token = streamInfo.streamAuthToken;
         // Pass direct stream URL — BrowserViewer will replace hostname for remote access
-        embeddedStreamUrl = token
-          ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-          : streamInfo.streamUrl;
+        embeddedStreamUrl = appendStreamToken(
+          streamInfo.streamUrl,
+          streamInfo.streamAuthToken,
+        );
       }
     }
   }

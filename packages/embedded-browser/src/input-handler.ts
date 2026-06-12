@@ -339,12 +339,12 @@ export class InputHandler {
   private async handleTouch(event: TouchEvent): Promise<void> {
     if (!this.cdpSession) return;
 
-    const CDP_TOUCH_TYPE: Record<string, string> = {
+    const CDP_TOUCH_TYPE = {
       start: "touchStart",
       move: "touchMove",
       end: "touchEnd",
       cancel: "touchCancel",
-    };
+    } as const;
 
     const cdpType = CDP_TOUCH_TYPE[event.action];
     if (!cdpType) return;

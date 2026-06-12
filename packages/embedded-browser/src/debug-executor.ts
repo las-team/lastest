@@ -96,6 +96,14 @@ class PauseController {
   private pendingResolve: (() => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
   private onPause: () => void;
+  // A resume that arrived while no checkpoint was waiting (the previous step
+  // was still executing). Without buffering, that user action (step_forward /
+  // run_to_end clicked mid-step) was silently dropped and the session looked
+  // unresponsive — the user had to click again.
+  private queuedResume: {
+    mode: "paused" | "running" | "run_to_step";
+    target?: number;
+  } | null = null;
 
   constructor(
     mode: "paused" | "running" | "run_to_step",
@@ -112,6 +120,18 @@ class PauseController {
     if (this.mode === "running") return;
     if (this.mode === "run_to_step" && stepIdx < this.target) return;
 
+    // Consume a resume that was issued while the previous step was running.
+    if (this.queuedResume) {
+      const q = this.queuedResume;
+      this.queuedResume = null;
+      this.mode = q.mode;
+      if (q.target !== undefined) this.target = q.target;
+      if (this.mode === "running") return;
+      if (this.mode === "run_to_step" && stepIdx < this.target) return;
+      // mode === "paused" means single-step: execute this step, pause at next.
+      if (this.mode === "paused") return;
+    }
+
     if (this.mode === "run_to_step") this.mode = "paused";
     this.onPause();
 
@@ -122,6 +142,12 @@ class PauseController {
   }
 
   resume(newMode: "paused" | "running" | "run_to_step", target?: number): void {
+    if (!this.pendingResolve) {
+      // Nothing is waiting (a step is mid-execution) — buffer for the next
+      // checkpoint instead of dropping the action.
+      this.queuedResume = { mode: newMode, target };
+      return;
+    }
     this.mode = newMode;
     if (target !== undefined) this.target = target;
     const resolve = this.pendingResolve;

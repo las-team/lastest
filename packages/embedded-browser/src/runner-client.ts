@@ -90,9 +90,25 @@ export class EmbeddedRunnerClient {
   // the pod exits. Without this the k8s DELETE can race a result/network_bodies
   // POST and the test's artefacts never land.
   private pendingSends: Set<Promise<boolean>> = new Set();
+  // Serializes onCommand invocations so commands run in queue order (e.g. a
+  // start_debug and stop_debug delivered in the same heartbeat batch can't
+  // interleave their screencast/input teardown). run_test / run_setup handlers
+  // spawn their work internally, so chaining doesn't serialize test execution.
+  // The chain is intentionally NOT awaited by the heartbeat loop.
+  private commandChain: Promise<void> = Promise.resolve();
 
   /** Called when the main app sends a command (test/recording) */
   onCommand?: (command: BaseMessage) => Promise<void>;
+
+  /** Public so locally-synthesized commands (e.g. the recording inactivity
+   *  watchdog's stop_recording) go through the same ordering chain. */
+  enqueueCommand(cmd: BaseMessage): void {
+    this.commandChain = this.commandChain
+      .then(() => this.onCommand?.(cmd))
+      .catch((err) => {
+        console.error(`[EmbeddedRunner] Command ${cmd.type} failed:`, err);
+      });
+  }
 
   constructor(options: EmbeddedRunnerOptions) {
     this.serverUrl = options.serverUrl.replace(/\/$/, "");
@@ -185,7 +201,7 @@ export class EmbeddedRunnerClient {
       // Process any pending commands
       if (data.commands && data.commands.length > 0) {
         for (const cmd of data.commands) {
-          this.onCommand?.(cmd);
+          this.enqueueCommand(cmd);
         }
       }
 
@@ -372,7 +388,7 @@ export class EmbeddedRunnerClient {
         const data = (await response.json()) as HeartbeatResponse;
         if (data.commands && data.commands.length > 0) {
           for (const cmd of data.commands) {
-            this.onCommand?.(cmd);
+            this.enqueueCommand(cmd);
           }
         }
       }
