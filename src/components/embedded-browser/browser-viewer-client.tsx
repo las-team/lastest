@@ -153,13 +153,27 @@ export const BrowserViewer = forwardRef<
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [fileChooserPending, setFileChooserPending] = useState(false);
-  // True while the EB reports status "setup" (running setup steps before a
-  // recording / headed run). Drives a blocking "please wait" overlay for the
-  // WHOLE setup phase — input is detached on the EB during setup, so clicks
-  // would be silently ignored. Status-driven only: an earlier "busy + no
-  // frames recently" heuristic flapped during headed replay every time the
-  // page paused repainting for a few seconds.
-  const [setupActive, setSetupActive] = useState(false);
+  // Blocking placeholder phase reported by the EB:
+  //  - "setup":    setup steps are running before a recording / headed run.
+  //  - "starting": headed playback accepted but the screencast is still bound
+  //                to the idle page until the test page attaches.
+  // Both drive a "please wait" overlay — input is detached on the EB during
+  // these phases, so clicks would be silently ignored. Status-driven only:
+  // an earlier "busy + no frames recently" heuristic flapped during headed
+  // replay every time the page paused repainting for a few seconds.
+  const [blockingPhase, setBlockingPhase] = useState<
+    "setup" | "starting" | null
+  >(null);
+  // In-flight action countdown (selector wait / page-load wait / fallback
+  // click) reported by the EB. Only the start is sent — the bar animates
+  // down locally over timeoutMs from receipt; `key` remounts the bar so each
+  // new action restarts it full.
+  const [actionProgress, setActionProgress] = useState<{
+    key: string;
+    label: string;
+    kind: string;
+    timeoutMs: number;
+  } | null>(null);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -186,6 +200,17 @@ export const BrowserViewer = forwardRef<
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [expiresAt]);
+
+  // Safety net: if the EB's `active: false` clear is lost (reconnect race,
+  // killed pod), expire the countdown bar shortly after its own deadline.
+  useEffect(() => {
+    if (!actionProgress) return;
+    const timer = setTimeout(
+      () => setActionProgress(null),
+      actionProgress.timeoutMs + 3000,
+    );
+    return () => clearTimeout(timer);
+  }, [actionProgress]);
 
   // Track the latest frame dimensions so the canvas/wrapper can match the
   // *real* stream aspect ratio. CDP's deviceWidth/Height drifts from the
@@ -411,16 +436,56 @@ export const BrowserViewer = forwardRef<
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
-              setSetupActive(status === "setup");
+              setBlockingPhase(
+                status === "setup"
+                  ? "setup"
+                  : status === "starting"
+                    ? "starting"
+                    : null,
+              );
+              // A phase transition obsoletes any in-flight action countdown
+              // (the EB also clears it, but don't rely on message ordering).
+              if (status === "setup" || status === "starting") {
+                setActionProgress(null);
+              }
               if (
                 status === "busy" ||
                 status === "setup" ||
+                status === "starting" ||
                 status === "recording" ||
                 status === "debugging"
               ) {
                 screencastPausedRef.current = true;
               } else {
                 screencastPausedRef.current = false;
+              }
+              break;
+            }
+
+            case "stream:action_progress": {
+              const p = message.payload as
+                | {
+                    active?: boolean;
+                    label?: string;
+                    kind?: string;
+                    timeoutMs?: number;
+                  }
+                | undefined;
+              // Counts as liveness — the EB is mid-action, not stalled.
+              lastFrameTimeRef.current = Date.now();
+              if (
+                p?.active &&
+                typeof p.timeoutMs === "number" &&
+                p.timeoutMs > 0
+              ) {
+                setActionProgress({
+                  key: message.id ?? String(Date.now()),
+                  label: p.label ?? "Working…",
+                  kind: p.kind ?? "wait",
+                  timeoutMs: p.timeoutMs,
+                });
+              } else {
+                setActionProgress(null);
               }
               break;
             }
@@ -984,21 +1049,54 @@ export const BrowserViewer = forwardRef<
           </div>
         )}
 
-        {/* Blocking setup overlay — translucent so setup progress stays
-            visible behind it; absorbs pointer events (the EB ignores input
-            during setup anyway). Shown for the entire setup phase, cleared
-            by the next status broadcast (recording / busy / ready). */}
-        {connectionStatus === "connected" && setupActive && (
+        {/* Blocking placeholder overlay — translucent so any streamed
+            progress stays visible behind it; absorbs pointer events (the EB
+            ignores input during these phases anyway). Shown while setup runs
+            or while headed playback waits for the test page to attach;
+            cleared by the next status broadcast (running / recording /
+            busy / ready). */}
+        {connectionStatus === "connected" && blockingPhase && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/50">
             <div className="flex flex-col items-center gap-2 text-white">
               <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="text-sm">Running setup steps…</span>
+              <span className="text-sm">
+                {blockingPhase === "setup"
+                  ? "Running setup steps…"
+                  : "Starting test…"}
+              </span>
               <span className="text-xs text-white/70">
-                Interaction is disabled until setup finishes
+                {blockingPhase === "setup"
+                  ? "Interaction is disabled until setup finishes"
+                  : "Live playback will appear here in a moment"}
               </span>
             </div>
           </div>
         )}
+
+        {/* In-flight action countdown — label + bar that drains over the
+            action's timeout budget (selector wait, page-load wait, fallback
+            click). Animated locally; the EB only sends start/clear. */}
+        {connectionStatus === "connected" &&
+          !blockingPhase &&
+          actionProgress && (
+            <div className="absolute bottom-2 left-2 right-2 layer-canvas-overlay pointer-events-none flex justify-center">
+              <div className="w-full max-w-md rounded-md bg-black/70 px-3 py-2 text-white shadow-lg">
+                <div className="mb-1.5 flex items-center gap-2 text-xs">
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                  <span className="truncate">{actionProgress.label}</span>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
+                  <div
+                    key={actionProgress.key}
+                    className={`h-full rounded-full ${actionProgress.kind === "fallback" ? "bg-amber-400" : "bg-sky-400"}`}
+                    style={{
+                      animation: `stream-action-countdown ${actionProgress.timeoutMs}ms linear forwards`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
         {fileChooserPending && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">

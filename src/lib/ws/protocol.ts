@@ -53,7 +53,8 @@ export type MessageType =
   | "stream:inspect_element_response"
   | "stream:dom_snapshot_request"
   | "stream:dom_snapshot_response"
-  | "stream:inspect_mode";
+  | "stream:inspect_mode"
+  | "stream:action_progress";
 
 export interface BaseMessage {
   id: string;
@@ -960,6 +961,23 @@ export interface InspectModeMessage extends BaseMessage {
   payload: { enabled: boolean };
 }
 
+/** Server → Client: An action with a deadline is in flight (selector wait,
+ *  page-load wait, fallback click). Viewers render a decreasing countdown
+ *  bar locally from `timeoutMs` starting at message receipt — no per-tick
+ *  updates are sent. `active: false` clears the bar (also auto-expires
+ *  client-side after timeoutMs as a safety net). */
+export interface StreamActionProgressPayload {
+  active: boolean;
+  label?: string;
+  kind?: "selector" | "wait" | "navigation" | "fallback";
+  timeoutMs?: number;
+}
+
+export interface StreamActionProgressMessage extends BaseMessage {
+  type: "stream:action_progress";
+  payload: StreamActionProgressPayload;
+}
+
 export type StreamMessage =
   | ScreencastFrameMessage
   | StreamInputMessage
@@ -969,7 +987,8 @@ export type StreamMessage =
   | InspectElementResponseMessage
   | DomSnapshotRequestMessage
   | DomSnapshotResponseMessage
-  | InspectModeMessage;
+  | InspectModeMessage
+  | StreamActionProgressMessage;
 
 export function isStreamMessage(msg: { type: string }): boolean {
   return msg.type.startsWith("stream:");
