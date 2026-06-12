@@ -63,6 +63,7 @@ import {
 } from "@/components/embedded-browser/browser-viewer-client";
 import { Input } from "@/components/ui/input";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
+import { appendStreamToken } from "@/lib/eb/stream-token";
 
 interface DebugClientProps {
   test: Test;
@@ -414,11 +415,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           const streamInfo = await getStreamUrlForRunner(resolvedRunnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
-            const token = streamInfo.streamAuthToken;
             setStreamUrl(
-              token
-                ? `${streamInfo.streamUrl}?token=${encodeURIComponent(token)}`
-                : streamInfo.streamUrl,
+              appendStreamToken(
+                streamInfo.streamUrl,
+                streamInfo.streamAuthToken,
+              ),
             );
           } else {
             setStreamUrl(null);
@@ -601,8 +602,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 {hasPastStepWarning && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
                     <p className="text-xs text-yellow-600 flex-1">
-                      Code changed at an already-executed step. Step back to
-                      apply changes.
+                      Code changed after steps already ran. The next Step / Run
+                      / step click re-runs the test from the start with the new
+                      code.
                     </p>
                     <Button
                       variant="outline"

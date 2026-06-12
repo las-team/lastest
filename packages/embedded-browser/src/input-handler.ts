@@ -19,6 +19,17 @@ export interface MouseEvent {
   clickCount?: number;
   deltaX?: number;
   deltaY?: number;
+  // Live modifier state sampled from the viewer's browser event. Preferred
+  // over the keyboard-tracked state below, which can stick when a modifier
+  // keyup is never forwarded (canvas lost focus while the key was held) —
+  // stuck Ctrl/Alt turned every later click into a ctrl/alt+click that links
+  // interpret as open-in-new-tab, so the page visibly ignored the click.
+  modifiers?: {
+    ctrl?: boolean;
+    shift?: boolean;
+    alt?: boolean;
+    meta?: boolean;
+  };
 }
 
 export interface KeyboardEvent {
@@ -175,6 +186,14 @@ export class InputHandler {
     if (!this.cdpSession) return;
 
     const button = BUTTON_MAP[event.button ?? "left"] ?? "left";
+    // Prefer the event's own modifier snapshot; resync the tracked state from
+    // it so stale keyboard-derived modifiers can't stick around.
+    if (event.modifiers) {
+      this.modifiers.ctrl = event.modifiers.ctrl ?? false;
+      this.modifiers.shift = event.modifiers.shift ?? false;
+      this.modifiers.alt = event.modifiers.alt ?? false;
+      this.modifiers.meta = event.modifiers.meta ?? false;
+    }
     // CDP modifiers bitmask: 1=Alt, 2=Ctrl, 4=Meta, 8=Shift
     const modifiers =
       (this.modifiers.alt ? 1 : 0) |
@@ -339,12 +358,12 @@ export class InputHandler {
   private async handleTouch(event: TouchEvent): Promise<void> {
     if (!this.cdpSession) return;
 
-    const CDP_TOUCH_TYPE: Record<string, string> = {
+    const CDP_TOUCH_TYPE = {
       start: "touchStart",
       move: "touchMove",
       end: "touchEnd",
       cancel: "touchCancel",
-    };
+    } as const;
 
     const cdpType = CDP_TOUCH_TYPE[event.action];
     if (!cdpType) return;

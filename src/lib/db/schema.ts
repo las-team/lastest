@@ -2781,7 +2781,14 @@ export const remoteRecordingEvents = pgTable(
       .notNull(),
   },
   (table) => [
-    index("idx_remote_recording_events_session_seq").on(
+    // MUST be unique: the recording_event ingest upserts on (sessionId,
+    // sequence) — the EB re-emits an event with the same sequence when its
+    // verification settles or a thumbnail arrives, and replaces trailing
+    // hover-previews in place. With a plain index the insert's ON CONFLICT
+    // never fired and every re-emit piled up a duplicate row; the merged
+    // timeline (and the code generated from it at stop time) then picked an
+    // arbitrary stale/new copy per sequence.
+    uniqueIndex("idx_remote_recording_events_session_seq").on(
       table.sessionId,
       table.sequence,
     ),

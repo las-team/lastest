@@ -761,9 +761,14 @@ export async function prewarmForBuild(targetCount: number): Promise<number> {
   if (!isKubernetesMode()) return 0;
   if (targetCount <= 0) return 0;
 
+  // Builds must respect the interactive reservation here too —
+  // claimOrProvisionPoolEB({purpose:'build'}) enforces it on demand-provision,
+  // but prewarming to the full hard cap let a build occupy the slots reserved
+  // for recording/debug before any interactive caller could claim one.
   const cap = await poolMax();
   const size = await currentPoolSize();
-  const canLaunch = Math.min(targetCount, Math.max(0, cap - size));
+  const effectiveCap = Math.max(0, cap - interactiveReservedSlots());
+  const canLaunch = Math.min(targetCount, Math.max(0, effectiveCap - size));
   if (canLaunch <= 0) return 0;
 
   let launched = 0;

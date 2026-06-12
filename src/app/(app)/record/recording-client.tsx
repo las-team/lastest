@@ -102,6 +102,7 @@ import { TraceScrub } from "@/components/recording/trace-scrub";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { track } from "@/lib/analytics/umami";
 import { Events } from "@/lib/analytics/events";
+import { appendStreamToken } from "@/lib/eb/stream-token";
 
 interface SetupStepInfo {
   id: string;
@@ -1012,11 +1013,11 @@ export function RecordingClient({
                         s.runnerId === resolvedTarget,
                     );
                     if (session?.streamUrl) {
-                      const token = data.streamAuthToken;
                       setEmbeddedStreamUrl(
-                        token
-                          ? `${session.streamUrl}?token=${encodeURIComponent(token)}`
-                          : session.streamUrl,
+                        appendStreamToken(
+                          session.streamUrl,
+                          data.streamAuthToken,
+                        ),
                       );
                       return;
                     }
@@ -1347,11 +1348,8 @@ export function RecordingClient({
               (s: { runnerId: string }) => s.runnerId === runnerId,
             );
             if (session?.streamUrl) {
-              const token = data.streamAuthToken;
               setPlaybackStreamUrl(
-                token
-                  ? `${session.streamUrl}?token=${encodeURIComponent(token)}`
-                  : session.streamUrl,
+                appendStreamToken(session.streamUrl, data.streamAuthToken),
               );
               return;
             }

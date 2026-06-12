@@ -96,6 +96,14 @@ class PauseController {
   private pendingResolve: (() => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
   private onPause: () => void;
+  // A resume that arrived while no checkpoint was waiting (the previous step
+  // was still executing). Without buffering, that user action (step_forward /
+  // run_to_end clicked mid-step) was silently dropped and the session looked
+  // unresponsive — the user had to click again.
+  private queuedResume: {
+    mode: "paused" | "running" | "run_to_step";
+    target?: number;
+  } | null = null;
 
   constructor(
     mode: "paused" | "running" | "run_to_step",
@@ -112,6 +120,18 @@ class PauseController {
     if (this.mode === "running") return;
     if (this.mode === "run_to_step" && stepIdx < this.target) return;
 
+    // Consume a resume that was issued while the previous step was running.
+    if (this.queuedResume) {
+      const q = this.queuedResume;
+      this.queuedResume = null;
+      this.mode = q.mode;
+      if (q.target !== undefined) this.target = q.target;
+      if (this.mode === "running") return;
+      if (this.mode === "run_to_step" && stepIdx < this.target) return;
+      // mode === "paused" means single-step: execute this step, pause at next.
+      if (this.mode === "paused") return;
+    }
+
     if (this.mode === "run_to_step") this.mode = "paused";
     this.onPause();
 
@@ -122,6 +142,12 @@ class PauseController {
   }
 
   resume(newMode: "paused" | "running" | "run_to_step", target?: number): void {
+    if (!this.pendingResolve) {
+      // Nothing is waiting (a step is mid-execution) — buffer for the next
+      // checkpoint instead of dropping the action.
+      this.queuedResume = { mode: newMode, target };
+      return;
+    }
     this.mode = newMode;
     if (target !== undefined) this.target = target;
     const resolve = this.pendingResolve;
@@ -163,6 +189,11 @@ export class EmbeddedDebugExecutor {
   private setupVariables?: Record<string, unknown>;
   private stabilization?: StabilizationPayload;
   private generation = 0;
+  // Set when update_code changes the step list while an execution built from
+  // the OLD instrumented body is still alive. Resuming that body would run
+  // stale code (the inserted/edited steps would silently not exist), so any
+  // resume while stale triggers a replay with the new code instead.
+  private staleCode = false;
 
   constructor(browser: Browser) {
     this.browser = browser;
@@ -183,6 +214,7 @@ export class EmbeddedDebugExecutor {
     this.status = "initializing";
     this.error = undefined;
     this.codeVersion = 0;
+    this.staleCode = false;
     this.targetUrl = payload.targetUrl;
     this.viewport = payload.viewport || { width: 1280, height: 720 };
     this.storageState = payload.storageState;
@@ -240,6 +272,7 @@ export class EmbeddedDebugExecutor {
     this.currentStepIndex = 0;
     this.status = "running";
     this.error = undefined;
+    this.staleCode = false;
     this.generation++;
     const gen = this.generation;
     this.runExecution(gen, targetStep).catch((err) => {
@@ -256,6 +289,13 @@ export class EmbeddedDebugExecutor {
   ): Promise<void> {
     switch (action) {
       case "step_forward":
+        if (this.staleCode) {
+          // The running body predates the latest code edit — re-run with the
+          // new code and land paused right after the current step (so an
+          // inserted step right after it is the next thing to execute).
+          await this.replayToStep(Math.max(0, this.currentStepIndex + 1));
+          break;
+        }
         if (this.pauseController) {
           this.status = "stepping";
           this.pauseController.resume("paused");
@@ -269,6 +309,10 @@ export class EmbeddedDebugExecutor {
       }
 
       case "run_to_end":
+        if (this.staleCode) {
+          await this.replayToStep(this.steps.length);
+          break;
+        }
         if (this.pauseController) {
           this.status = "running";
           this.pauseController.resume("running");
@@ -279,11 +323,12 @@ export class EmbeddedDebugExecutor {
         if (payload?.stepIndex === undefined) break;
         const targetIdx = payload.stepIndex;
         if (targetIdx < 0 || targetIdx >= this.steps.length) break;
-        if (targetIdx === this.currentStepIndex) break;
+        if (targetIdx === this.currentStepIndex && !this.staleCode) break;
 
         if (
           targetIdx > this.currentStepIndex &&
           this.pauseController &&
+          !this.staleCode &&
           this.status !== "completed" &&
           this.status !== "error"
         ) {
@@ -291,7 +336,7 @@ export class EmbeddedDebugExecutor {
           this.status = "running";
           this.pauseController.resume("run_to_step", targetIdx);
         } else {
-          // BACKWARD or forward from completed/error: full replay
+          // BACKWARD, forward from completed/error, or stale code: full replay
           await this.replayToStep(targetIdx);
         }
         break;
@@ -303,6 +348,10 @@ export class EmbeddedDebugExecutor {
           this.cleanBody = payload.cleanBody;
           if (payload.code) this.code = payload.code;
           this.codeVersion++;
+          // The live execution (if any) was instrumented from the OLD body —
+          // resuming it would silently run stale code. Any subsequent control
+          // action replays with the new code instead (see staleCode checks).
+          this.staleCode = true;
 
           // Check if changes affect already-executed steps
           const executedCount = this.stepResults.filter(
@@ -327,9 +376,13 @@ export class EmbeddedDebugExecutor {
             );
             this.stepResults = newResults;
 
-            // If current step is past the changed area, warn
+            // Steps already ran with the old code — surface that the next
+            // control action re-executes from the start with the new code.
+            // Keep the legacy "Step back to apply" marker: the debug UI keys
+            // its soft-warning banner off that substring.
             if (this.currentStepIndex < payload.steps.length) {
-              this.error = "Step back to apply code changes";
+              this.error =
+                "Code changed — Step back to apply, or any step action will re-run from the start with the new code";
               this.status = "error";
             }
           } else {

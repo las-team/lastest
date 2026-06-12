@@ -400,7 +400,8 @@ export async function updateRunnerStatus(
  * Called when a runner transitions to 'online'.
  */
 async function pickUpQueuedJobs(runnerId: string): Promise<void> {
-  // Find first pending job with no target runner (queued because no runner was available)
+  // Find the OLDEST pending job with no target runner (queued because no
+  // runner was available) — explicit ordering keeps the queue FIFO.
   const [pendingJob] = await db
     .select()
     .from(backgroundJobs)
@@ -410,6 +411,7 @@ async function pickUpQueuedJobs(runnerId: string): Promise<void> {
         isNull(backgroundJobs.targetRunnerId),
       ),
     )
+    .orderBy(backgroundJobs.createdAt)
     .limit(1);
 
   if (!pendingJob) return;

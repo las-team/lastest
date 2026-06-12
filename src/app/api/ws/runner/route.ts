@@ -617,24 +617,48 @@ export async function POST(request: NextRequest) {
             const { db: dbRw } = await import("@/lib/db");
             const { remoteRecordingEvents: remoteEventsTable } =
               await import("@/lib/db/schema");
+            const { sql: sqlOp } = await import("drizzle-orm");
+            // Upsert on (sessionId, sequence): the EB re-emits the same
+            // sequence when verification settles / a thumbnail arrives, and
+            // replaces trailing hover-previews in place — the latest copy is
+            // canonical. A batch can also legally contain the same sequence
+            // twice (event + its late update flushed together), so dedupe
+            // within the batch first; multi-row upserts hitting the same
+            // conflict target twice make Postgres error out.
+            const latestBySeq = new Map<number, RemoteRecordingEvent>();
+            for (const e of events) {
+              const ev = e as RemoteRecordingEvent;
+              latestBySeq.set(ev.sequence, ev);
+            }
             await dbRw
               .insert(remoteEventsTable)
               .values(
-                events.map((e) => ({
+                Array.from(latestBySeq.values()).map((e) => ({
                   sessionId: recSessionId,
-                  sequence: (e as RemoteRecordingEvent).sequence,
-                  type: (e as RemoteRecordingEvent).type,
-                  timestamp: (e as RemoteRecordingEvent).timestamp,
-                  status: (e as RemoteRecordingEvent).status,
-                  verification: ((e as RemoteRecordingEvent).verification ??
-                    null) as Record<string, unknown> | null,
-                  data: (e as RemoteRecordingEvent).data as Record<
+                  sequence: e.sequence,
+                  type: e.type,
+                  timestamp: e.timestamp,
+                  status: e.status,
+                  verification: (e.verification ?? null) as Record<
                     string,
                     unknown
-                  >,
+                  > | null,
+                  data: e.data as Record<string, unknown>,
                 })),
               )
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: [
+                  remoteEventsTable.sessionId,
+                  remoteEventsTable.sequence,
+                ],
+                set: {
+                  type: sqlOp`excluded.type`,
+                  timestamp: sqlOp`excluded.timestamp`,
+                  status: sqlOp`excluded.status`,
+                  verification: sqlOp`excluded.verification`,
+                  data: sqlOp`excluded.data`,
+                },
+              });
           } catch (err) {
             console.warn(
               `[Recording] Failed to persist events for session ${recSessionId}:`,

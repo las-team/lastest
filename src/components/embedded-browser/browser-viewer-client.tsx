@@ -26,7 +26,12 @@ type ConnectionStatus =
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
-const FRAME_STALL_TIMEOUT_MS = 8000; // Reconnect if no frames for 8s while "connected"
+// Reconnect if no frames/status for this long while "connected". Must be
+// comfortably larger than the EB stream-server's keepalive cadence (2s) —
+// the previous 8s value raced the old 5s keepalive (which could legally
+// arrive ~8s after the last frame) and false-positived on short user pauses,
+// force-reconnecting mid-recording.
+const FRAME_STALL_TIMEOUT_MS = 15000;
 
 const SESSION_EXPIRY_WARN_MS = 5 * 60 * 1000; // Warn when <5 min remain
 
@@ -148,6 +153,13 @@ export const BrowserViewer = forwardRef<
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [fileChooserPending, setFileChooserPending] = useState(false);
+  // True while the EB reports status "setup" (running setup steps before a
+  // recording / headed run). Drives a blocking "please wait" overlay for the
+  // WHOLE setup phase — input is detached on the EB during setup, so clicks
+  // would be silently ignored. Status-driven only: an earlier "busy + no
+  // frames recently" heuristic flapped during headed replay every time the
+  // page paused repainting for a few seconds.
+  const [setupActive, setSetupActive] = useState(false);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -157,6 +169,9 @@ export const BrowserViewer = forwardRef<
   const lastFrameTimeRef = useRef(0);
   const stallCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const screencastPausedRef = useRef(false);
+  // Unlike lastFrameTimeRef (which status keepalives also bump, for stall
+  // detection), this tracks ACTUAL frames only — used for the FPS readout.
+  const lastRealFrameRef = useRef(0);
 
   // Session expiry countdown
   useEffect(() => {
@@ -304,27 +319,43 @@ export const BrowserViewer = forwardRef<
         // the CDP screencast likely died silently. Force reconnect to recover.
         if (stallCheckRef.current) clearInterval(stallCheckRef.current);
         stallCheckRef.current = setInterval(() => {
+          const now = Date.now();
+          // FPS readout honesty: when frames stop, the counter previously
+          // froze on its last value (it only updated when a frame arrived),
+          // masking dead streams as "2 FPS". Zero it after 2s of silence.
+          if (now - lastRealFrameRef.current > 2000) {
+            setFps(0);
+            frameCountRef.current = 0;
+            lastFpsUpdateRef.current = now;
+          }
           if (
             lastFrameTimeRef.current > 0 &&
-            Date.now() - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
+            now - lastFrameTimeRef.current > FRAME_STALL_TIMEOUT_MS &&
             wsRef.current?.readyState === WebSocket.OPEN &&
             !screencastPausedRef.current
           ) {
             console.warn("[BrowserViewer] Frame stall detected — reconnecting");
             wsRef.current?.close();
           }
-        }, 3000);
+        }, 1000);
 
-        // Apply the initial viewport size to the remote browser
-        ws.send(
-          JSON.stringify({
-            type: "stream:session",
-            payload: {
-              action: "resize",
-              viewport: initialViewport ?? { width: 1280, height: 720 },
-            },
-          }),
-        );
+        // Apply the initial viewport size to the remote browser — but only
+        // when the caller explicitly provided one. The old unconditional
+        // 1280×720 fallback was re-sent on every (re)connect and the EB
+        // routes resizes to the ACTIVE page, so a mid-session reconnect
+        // resized a live recording/debug page to the default and restarted
+        // the screencast at the wrong dimensions.
+        if (initialViewport) {
+          ws.send(
+            JSON.stringify({
+              type: "stream:session",
+              payload: {
+                action: "resize",
+                viewport: initialViewport,
+              },
+            }),
+          );
+        }
       };
 
       ws.onmessage = (event) => {
@@ -338,6 +369,7 @@ export const BrowserViewer = forwardRef<
 
               // Reset stall timer on every frame
               lastFrameTimeRef.current = Date.now();
+              lastRealFrameRef.current = Date.now();
 
               // Update FPS
               frameCountRef.current++;
@@ -367,17 +399,22 @@ export const BrowserViewer = forwardRef<
               if (message.payload.viewport) {
                 setViewport(message.payload.viewport);
               }
-              setFileChooserPending(
-                message.payload.fileChooserPending ?? false,
-              );
+              // Only honor explicit values — keepalive status messages omit
+              // the field, and the old `?? false` cleared the "File upload
+              // requested" overlay within seconds of it appearing.
+              if (message.payload.fileChooserPending !== undefined) {
+                setFileChooserPending(message.payload.fileChooserPending);
+              }
 
               // Any status message from the server proves the connection is alive
               lastFrameTimeRef.current = Date.now();
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
+              setSetupActive(status === "setup");
               if (
                 status === "busy" ||
+                status === "setup" ||
                 status === "recording" ||
                 status === "debugging"
               ) {
@@ -518,6 +555,14 @@ export const BrowserViewer = forwardRef<
         x,
         y,
         button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left",
+        // Live modifier truth from the event — overrides any stale keyboard
+        // state tracked on the EB (see StreamMouseEvent.modifiers).
+        modifiers: {
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+        },
       };
 
       if (action === "down" || action === "up") {
@@ -607,6 +652,12 @@ export const BrowserViewer = forwardRef<
     }
   }, [interactive]);
 
+  // Modifier keys whose keydown was forwarded to the EB but whose keyup may
+  // never arrive (focus left the canvas while the key was held — clicking the
+  // timeline, alt-tab, …). The EB would keep the key pressed forever and
+  // treat every later click as a Ctrl/Alt+click. Released on textarea blur.
+  const heldModifierKeysRef = useRef<Set<string>>(new Set());
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // During IME composition, let the browser handle everything
@@ -640,6 +691,14 @@ export const BrowserViewer = forwardRef<
 
       // Everything else (non-printable keys, modifier combos): forward directly
       e.preventDefault();
+      if (
+        e.key === "Control" ||
+        e.key === "Shift" ||
+        e.key === "Alt" ||
+        e.key === "Meta"
+      ) {
+        heldModifierKeysRef.current.add(e.key);
+      }
       sendWs({
         type: "stream:input",
         payload: {
@@ -663,6 +722,7 @@ export const BrowserViewer = forwardRef<
   const handleKeyUp = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (composingRef.current || e.key === "Dead") return;
+      heldModifierKeysRef.current.delete(e.key);
       // Only forward non-printable keyups (printable chars handled via input event)
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return;
       e.preventDefault();
@@ -702,6 +762,21 @@ export const BrowserViewer = forwardRef<
       } satisfies StreamKeyboardEvent,
     });
     ta.value = "";
+  }, [sendWs]);
+
+  const releaseHeldModifiers = useCallback(() => {
+    for (const key of heldModifierKeysRef.current) {
+      sendWs({
+        type: "stream:input",
+        payload: {
+          type: "keyboard",
+          action: "keyup",
+          key,
+          modifiers: { ctrl: false, shift: false, alt: false, meta: false },
+        } satisfies StreamKeyboardEvent,
+      });
+    }
+    heldModifierKeysRef.current.clear();
   }, [sendWs]);
 
   // IME composition handlers for accented/special characters (á, ú, ő, ó, ü, é, etc.)
@@ -909,6 +984,22 @@ export const BrowserViewer = forwardRef<
           </div>
         )}
 
+        {/* Blocking setup overlay — translucent so setup progress stays
+            visible behind it; absorbs pointer events (the EB ignores input
+            during setup anyway). Shown for the entire setup phase, cleared
+            by the next status broadcast (recording / busy / ready). */}
+        {connectionStatus === "connected" && setupActive && (
+          <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/50">
+            <div className="flex flex-col items-center gap-2 text-white">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <span className="text-sm">Running setup steps…</span>
+              <span className="text-xs text-white/70">
+                Interaction is disabled until setup finishes
+              </span>
+            </div>
+          </div>
+        )}
+
         {fileChooserPending && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 layer-canvas-overlay bg-background/90 border rounded-lg p-6 shadow-lg flex flex-col items-center gap-3">
             <Upload className="h-8 w-8 text-muted-foreground" />
@@ -1033,6 +1124,7 @@ export const BrowserViewer = forwardRef<
             onInput={handleTextareaInput}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
+            onBlur={releaseHeldModifiers}
           />
         )}
       </div>
