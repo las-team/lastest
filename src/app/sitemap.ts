@@ -10,6 +10,20 @@ function origin(): string {
   );
 }
 
+// Next's sitemap serializer raw-interpolates every field into the XML with NO
+// escaping (see node_modules/next/.../metadata/resolve-route-data.js), so a
+// bare `&`, `<`, or `>` from a user-controlled test name or domain produces
+// invalid XML (`xmlParseEntityRef: no name`). Escape values ourselves before
+// handing them over — Next escapes nothing, so there's no double-encoding risk.
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = origin();
   const now = new Date();
@@ -49,14 +63,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       const videos = s.videoPath
         ? [
             {
-              title: `${displayName} · Lastest visual regression run`,
-              description:
+              title: xmlEscape(
+                `${displayName} · Lastest visual regression run`,
+              ),
+              description: xmlEscape(
                 s.changesDetected > 0
                   ? `Visual regression recording for ${domain} — ${s.changesDetected} change${s.changesDetected === 1 ? "" : "s"} detected.`
                   : `Visual regression recording for ${domain} — no changes detected against baseline.`,
-              thumbnail_loc: `${base}/api/og/share/${s.slug}`,
+              ),
+              thumbnail_loc: xmlEscape(`${base}/api/og/share/${s.slug}`),
               // Same /share/<slug>/... public media route the page player uses.
-              content_loc: `${base}/share/${s.slug}/${s.videoPath.replace(/^\/+/, "")}`,
+              content_loc: xmlEscape(
+                `${base}/share/${s.slug}/${encodeURI(s.videoPath.replace(/^\/+/, ""))}`,
+              ),
               ...(s.videoDurationMs && s.videoDurationMs > 0
                 ? {
                     duration: Math.min(
@@ -74,7 +93,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           ]
         : undefined;
       return {
-        url: `${base}/r/${s.slug}`,
+        url: xmlEscape(`${base}/r/${s.slug}`),
         lastModified: s.updatedAt ?? now,
         changeFrequency: "monthly" as const,
         priority: 0.7,
