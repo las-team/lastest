@@ -134,10 +134,71 @@ async function bumpPoolDefaults() {
   }
 }
 
+// Unique indexes whose CREATE can be blocked by pre-existing duplicate data.
+// drizzle-kit push has NO dedup step, so if a table accumulated duplicate rows
+// while the index was missing (chicken-and-egg: ON CONFLICT kept failing → dupes
+// piled up → push could never add the unique index), push fails this DDL on every
+// boot and silently continues. We clear the blocker (dedup, keeping the newest
+// row per key) and create the index ourselves so it converges on any environment.
+// Add an entry here whenever a new uniqueIndex() is introduced over data that may
+// already contain duplicates in the wild.
+const DEDUP_UNIQUE_INDEXES = [
+  {
+    table: "remote_recording_events",
+    columns: ["session_id", "sequence"],
+    indexName: "idx_remote_recording_events_session_seq",
+    // keep the most-recently-written row per (session_id, sequence)
+    keepOrder: "created_at DESC, ctid DESC",
+  },
+];
+
+async function ensureUniqueIndexes() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    for (const ix of DEDUP_UNIQUE_INDEXES) {
+      const cols = ix.columns.map((c) => `"${c}"`).join(", ");
+      try {
+        // 1. Remove rows that would violate the unique constraint, keeping the
+        //    canonical (newest) copy per key.
+        const del = await sql.unsafe(`
+          DELETE FROM "${ix.table}" t WHERE t.ctid NOT IN (
+            SELECT DISTINCT ON (${cols}) ctid FROM "${ix.table}"
+            ORDER BY ${cols}, ${ix.keepOrder}
+          )
+        `);
+        const dc = (del && del.count) || 0;
+        if (dc > 0) {
+          console.warn(
+            `[migrate] deduped ${dc} row(s) in ${ix.table} for ${ix.indexName}`,
+          );
+        }
+        // 2. Create the index explicitly (idempotent) so ON CONFLICT works even
+        //    if drizzle-kit push doesn't reconcile it. Same name + column order
+        //    as the schema declaration, so push then treats it as a no-op.
+        await sql.unsafe(
+          `CREATE UNIQUE INDEX IF NOT EXISTS "${ix.indexName}" ON "${ix.table}" (${cols})`,
+        );
+      } catch (e) {
+        console.warn(
+          `[migrate] unique-index ensure skipped for ${ix.indexName}:`,
+          e.message,
+        );
+      }
+    }
+  } catch (e) {
+    console.log("[migrate] unique-index ensure skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await nullOrphans();
   await bumpPoolDefaults();
+  await ensureUniqueIndexes();
 
   console.log("[migrate] Running drizzle-kit push...");
   try {

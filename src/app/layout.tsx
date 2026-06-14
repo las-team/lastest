@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "sonner";
 import { UmamiScript } from "@/components/analytics/umami-script";
 import { CookieNotice } from "@/components/layout/cookie-notice-client";
+import { getCurrentSession } from "@/lib/auth";
+import { hasAcceptedTerms } from "@/lib/db/queries";
 import Script from "next/script";
 
 const inter = Inter({
@@ -74,6 +76,13 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const nonce = (await headers()).get("x-nonce") ?? undefined;
+  // Suppress the informational cookie notice for signed-in users who already
+  // accepted the terms (which cover the cookie policy) at registration. This
+  // also drops the /cookies link — and its RSC prefetch — from authed pages.
+  const session = await getCurrentSession();
+  const cookieNoticeAccepted = session?.user
+    ? await hasAcceptedTerms(session.user.id)
+    : false;
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -98,7 +107,7 @@ export default async function RootLayout({
           {children}
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
-        <CookieNotice />
+        {!cookieNoticeAccepted && <CookieNotice />}
         <UmamiScript nonce={nonce} />
       </body>
     </html>

@@ -208,6 +208,17 @@ export const auth = betterAuth({
           discord: {
             clientId: process.env.DISCORD_CLIENT_ID!,
             clientSecret: process.env.DISCORD_CLIENT_SECRET!,
+            // better-auth's Discord provider builds the authorize URL with
+            // `prompt=${options.prompt || "none"}`. The default `prompt=none`
+            // tells Discord to authorize SILENTLY — never showing the
+            // login/consent screen. For any user who hasn't already granted
+            // this app (first login, or after a scope change), Discord can't
+            // consent silently, so it bounces straight back to our callback
+            // with an `?error=` instead of a code. better-auth then can't
+            // complete sign-in and lands the user back on /login (the
+            // "Discord → loads a sec → back to login" loop). Force the consent
+            // screen so the grant actually happens.
+            prompt: "consent",
             // Phone-only Discord accounts return email: null even with the `email` scope.
             // Fall back to a synthetic .local placeholder so onboarding doesn't fail.
             mapProfileToUser: (profile: {
