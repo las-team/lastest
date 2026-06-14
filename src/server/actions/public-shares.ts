@@ -64,20 +64,45 @@ export async function publishBuildShare(
 
   const targetDomain = deriveTargetDomain(domainTest?.targetUrl);
 
-  const slug = generateShareSlug();
-  const share = await queries.createPublicShare({
-    slug,
-    buildId,
-    testId: scopedTest?.id ?? null,
-    repositoryId: repoId,
-    ownerTeamId: session.team.id,
-    publishedByUserId: session.user.id,
-    status: "public",
-    targetDomain,
-  });
+  // Reuse an existing live share instead of minting a new URL on every publish:
+  //  - Test-scoped shares are keyed by testId across builds, so re-running a
+  //    test (which produces a NEW build) returns the SAME /r/<slug>, repointed
+  //    at the fresh build so the content refreshes but the link is stable.
+  //  - Build-wide shares are keyed by buildId (1 share per build); the build is
+  //    an immutable snapshot, so the existing share is returned as-is.
+  // Revoked shares are intentionally NOT reused — an explicitly killed link
+  // stays dead and re-publishing mints a fresh one.
+  const existing = scopedTest
+    ? await queries.getActiveTestShare(scopedTest.id)
+    : await queries.getActiveBuildShare(buildId);
+
+  let share: PublicShare;
+  if (existing && scopedTest) {
+    share = await queries.repointPublicShare(existing.id, {
+      buildId,
+      targetDomain,
+      publishedByUserId: session.user.id,
+    });
+  } else if (existing) {
+    share = existing;
+  } else {
+    const slug = generateShareSlug();
+    share = await queries.createPublicShare({
+      slug,
+      buildId,
+      testId: scopedTest?.id ?? null,
+      repositoryId: repoId,
+      ownerTeamId: session.team.id,
+      publishedByUserId: session.user.id,
+      status: "public",
+      targetDomain,
+    });
+  }
 
   const shareUrl = buildShareUrl(share.slug);
-  if (INTERNAL_SHARE_DISCORD_WEBHOOK_URL) {
+  // Only ping on a genuinely new share — re-runs that refresh an existing link
+  // shouldn't spam the channel.
+  if (!existing && INTERNAL_SHARE_DISCORD_WEBHOOK_URL) {
     void sendDiscordShareNotification(INTERNAL_SHARE_DISCORD_WEBHOOK_URL, {
       shareUrl,
       slug: share.slug,

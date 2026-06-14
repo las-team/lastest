@@ -73,6 +73,72 @@ export async function listPublicSharesForTest(
     .orderBy(desc(publicShares.createdAt));
 }
 
+// Most recent live build-wide share for a build (testId IS NULL). Backs the
+// "1 share per build" reuse rule — re-publishing a build returns this slug
+// instead of minting a new one.
+export async function getActiveBuildShare(
+  buildId: string,
+): Promise<PublicShare | undefined> {
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(
+      and(
+        eq(publicShares.buildId, buildId),
+        eq(publicShares.status, "public"),
+        sql`${publicShares.testId} IS NULL`,
+      ),
+    )
+    .orderBy(desc(publicShares.createdAt))
+    .limit(1);
+  return row;
+}
+
+// Most recent live share scoped to a single test, across ALL builds. Backs the
+// "1 stable URL per test" reuse rule — re-running a test produces a new build,
+// but re-publishing returns this same slug (repointed at the fresh build) so the
+// shared link never changes.
+export async function getActiveTestShare(
+  testId: string,
+): Promise<PublicShare | undefined> {
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(
+      and(eq(publicShares.testId, testId), eq(publicShares.status, "public")),
+    )
+    .orderBy(desc(publicShares.createdAt))
+    .limit(1);
+  return row;
+}
+
+// Repoint an existing share at a newer build and refresh its derived fields,
+// keeping the same id/slug so the public URL is stable across re-runs.
+export async function repointPublicShare(
+  id: string,
+  data: {
+    buildId: string;
+    targetDomain: string | null;
+    publishedByUserId?: string | null;
+  },
+): Promise<PublicShare> {
+  await db
+    .update(publicShares)
+    .set({
+      buildId: data.buildId,
+      targetDomain: data.targetDomain,
+      ...(data.publishedByUserId
+        ? { publishedByUserId: data.publishedByUserId }
+        : {}),
+    })
+    .where(eq(publicShares.id, id));
+  const [row] = await db
+    .select()
+    .from(publicShares)
+    .where(eq(publicShares.id, id));
+  return row;
+}
+
 // Sitemap input: every non-revoked share with its build timestamp for lastmod.
 // Limited at the call site (sitemap.ts) to keep the XML under Google's 50k-URL
 // cap; the share table is currently far below that ceiling but the limit makes
