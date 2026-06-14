@@ -1551,6 +1551,8 @@ function wasLayerCaptured(
       return (
         result?.extractedVariables != null || result?.assignedVariables != null
       );
+    case "api":
+      return result?.apiResult != null || result?.loadResult != null;
   }
 }
 

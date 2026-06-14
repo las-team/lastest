@@ -54,6 +54,10 @@ export interface TestRunResult {
   urlTrajectory?: UrlTrajectoryStep[];
   webVitals?: WebVitalsSample[];
   storageStateSnapshot?: StorageStateSnapshot;
+  // ── API tests (E1) — set for testType==='api' results (headless HTTP) ──
+  apiResult?: import("@/lib/db/schema").ApiTestResultData;
+  // ── Load tests (E3) — set when an api test ran as a load test ──
+  loadResult?: import("@/lib/db/schema").LoadTestResultData;
 }
 
 export type AssertionType =
