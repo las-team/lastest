@@ -9,6 +9,7 @@ import {
   SAFE_CTA_PATTERN,
   DESTRUCTIVE_CTA_PATTERN,
   CAPTCHA_LOCATOR,
+  AUTH_CHAIN_FAILED_MARKER,
 } from "./quickstart-templates";
 
 const sampleEmail = "viktor+postbox202604030915@lastest.cloud";
@@ -105,8 +106,18 @@ describe("renderWalkthroughCode — authed (chained storage state) mode", () => 
     expect(code).not.toMatch(/CHAINED_AUTH/);
   });
 
-  it("verifies storage-state auth via Sign-in CTA absence after navigation", () => {
-    expect(code).toMatch(/Storage state did not authenticate the browser/);
+  it("reds the build via the auth-fail marker when the chain doesn't authenticate", () => {
+    expect(code).toContain(AUTH_CHAIN_FAILED_MARKER);
+    // The marker throw must sit OUTSIDE the best-effort try/catch so it surfaces
+    // as a failed test rather than a swallowed warning. It captures an
+    // 'auth-failed' frame just before throwing.
+    expect(code).toMatch(/shot\(publicScenario, 'auth-failed'\)/);
+    const markerIdx = code.indexOf(AUTH_CHAIN_FAILED_MARKER);
+    const firstTryIdx = code.indexOf("try {");
+    expect(markerIdx).toBeGreaterThan(-1);
+    expect(firstTryIdx).toBeGreaterThan(-1);
+    // throw appears before the first try block opens (gate runs before the walk).
+    expect(markerIdx).toBeLessThan(firstTryIdx);
   });
 
   it("takes every screenshot at fullPage: true", () => {
@@ -161,6 +172,39 @@ describe("renderWalkthroughCode — public-only mode", () => {
     expect(code).toMatch(/Scenario 1: Homepage/);
     expect(code).toMatch(/page\.\$\$eval\('a\[href\]'/);
   });
+});
+
+describe("EB Chromium bootstrap (both renderers)", () => {
+  const authCode = renderAuthSetupCode({
+    email: sampleEmail,
+    password: samplePassword,
+    registerUrl: "/sign-up",
+  });
+  const walkCode = renderWalkthroughCode({
+    authAutomatable: true,
+    chainedAuth: true,
+  });
+
+  for (const [label, code] of [
+    ["auth-setup", authCode],
+    ["walkthrough", walkCode],
+  ] as const) {
+    it(`${label}: overrides the HeadlessChrome User-Agent before navigation`, () => {
+      expect(code).toMatch(/setExtraHTTPHeaders\(\{ 'User-Agent':/);
+      expect(code).toMatch(/Chrome\/\d/);
+    });
+
+    it(`${label}: route-blocks known third-party console-noise scripts`, () => {
+      expect(code).toContain("email-decode.min.js");
+      expect(code).toMatch(/page\.route\(pattern, function \(r\)/);
+    });
+
+    it(`${label}: settle is a hoisted function (not a scoped-out const arrow), with a hydration wait`, () => {
+      expect(code).toMatch(/async function settle\(\)/);
+      expect(code).not.toMatch(/const settle = \(\) =>/);
+      expect(code).toMatch(/\[role="main"\]/);
+    });
+  }
 });
 
 describe("SAFE_CTA_PATTERN / DESTRUCTIVE_CTA_PATTERN", () => {

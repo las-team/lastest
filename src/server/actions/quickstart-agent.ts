@@ -21,6 +21,7 @@ import {
   renderQuickstartPassword,
   utcStamp,
   slugify,
+  AUTH_CHAIN_FAILED_MARKER,
 } from "@/lib/playwright/quickstart-templates";
 import {
   runQuickstartScoutPublic,
@@ -258,6 +259,64 @@ async function isCancelled(
 }
 
 // ---------------------------------------------------------------------------
+// Build helper — create a build and poll to completion. Used for the public-only
+// downgrade rerun inside runQsRunAndNotes. The primary run + the pairing rerun
+// keep their inline loops (they emit progress-specific activity between create
+// and poll); this helper is for the conditional auth-downgrade path only.
+// ---------------------------------------------------------------------------
+
+type QsBuildSummary = NonNullable<Awaited<ReturnType<typeof getBuildSummary>>>;
+
+async function runBuildAndWait(
+  repositoryId: string,
+  testIds: string[],
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<
+  | { ok: true; buildId: string; summary: QsBuildSummary }
+  | { ok: false; error: string }
+> {
+  let buildId: string;
+  try {
+    const result = await createAndRunBuildCore(
+      "manual",
+      testIds,
+      repositoryId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    if (!result.buildId) {
+      return {
+        ok: false,
+        error: `Build was queued (EB pool busy). Job ID: ${(result as { jobId?: string }).jobId ?? "unknown"}.`,
+      };
+    }
+    buildId = result.buildId;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const started = Date.now();
+  let summary = await getBuildSummary(buildId);
+  while (!summary || !summary.completedAt) {
+    if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
+      return { ok: false, error: "Build timed out (>8 min)." };
+    }
+    if (await isCancelled(sessionId, signal)) {
+      return { ok: false, error: "cancelled" };
+    }
+    await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
+    summary = await getBuildSummary(buildId);
+  }
+  return { ok: true, buildId, summary };
+}
+
+// ---------------------------------------------------------------------------
 // Step runners
 // ---------------------------------------------------------------------------
 
@@ -304,10 +363,30 @@ async function runQsPreflight(
     quickstartStamp: stamp,
   });
 
+  // Force the repo's EB error gates to "warn" before the first run. Founder
+  // sites almost always emit benign console/network noise (analytics 401s,
+  // third-party scripts); with the default "fail" mode every clean screenshot
+  // reds the walk. The walkthrough template also route-blocks known noise, but
+  // this is the belt to that suspenders. Best-effort — never fail preflight on it.
+  let errorModesSet = false;
+  try {
+    await queries.upsertPlaywrightSettings(repositoryId, {
+      consoleErrorMode: "warn",
+      networkErrorMode: "warn",
+    });
+    errorModesSet = true;
+  } catch (err) {
+    console.warn(
+      "[QuickStart] could not set console/network error modes:",
+      err,
+    );
+  }
+
   await setCompleted(sessionId, "qs_preflight", {
     baseUrl: gate.baseUrl,
     slug,
     stamp,
+    errorModesSet,
   });
   emitActivity(
     teamId,
@@ -750,10 +829,74 @@ async function runQsRunAndNotes(
   }
 
   // Build run facts from the summary + test results
-  const build = await queries.getBuild(buildId);
-  const testResults = build?.testRunId
+  let build = await queries.getBuild(buildId);
+  let testResults = build?.testRunId
     ? await queries.getTestResultsWithTestInfo(build.testRunId).catch(() => [])
     : [];
+
+  // ── Post-run auth verification (the skill's "is the authed frame real?" gate) ──
+  // The walkthrough throws AUTH_CHAIN_FAILED_MARKER when the chained storage_state
+  // didn't replay an authenticated session. Rather than publish a red build (or
+  // login-page screenshots dressed up as authed), downgrade the walkthrough to
+  // public-only and rerun ONCE so the user still gets a clean public share, with
+  // the reason recorded in the demo notes.
+  const chainedAuth0 = !!meta.authSetup?.storageStateId;
+  let authDowngraded = false;
+  if (chainedAuth0) {
+    const wt = testResults.find((r) => r.testId === walkthroughTestId);
+    const wtFailed =
+      !!wt && (wt.status === "failed" || wt.status === "setup_failed");
+    const authChainFailed =
+      wtFailed && (wt?.errorMessage ?? "").includes(AUTH_CHAIN_FAILED_MARKER);
+    if (authChainFailed) {
+      emitActivity(
+        teamId,
+        repositoryId,
+        sessionId,
+        "step:start",
+        "Login session did not verify — downgrading walkthrough to public-only and re-running",
+        { stepId: "qs_run_and_notes" },
+      );
+      const biz = meta.publicScout?.businessInteraction;
+      const publicOnlyCode = renderWalkthroughCode({
+        authAutomatable: false,
+        chainedAuth: false,
+        primaryInputLabel: biz?.primaryInputLabel,
+        primaryCtaLabel: biz?.primaryCtaLabel,
+        demoInputValue: biz?.demoInputValue,
+      });
+      await queries.updateTest(walkthroughTestId, {
+        code: publicOnlyCode,
+        setupOverrides: null,
+      });
+      const rerun = await runBuildAndWait(
+        repositoryId,
+        [walkthroughTestId],
+        sessionId,
+        signal,
+      );
+      if (rerun.ok) {
+        buildId = rerun.buildId;
+        summary = rerun.summary;
+        build = await queries.getBuild(buildId);
+        testResults = build?.testRunId
+          ? await queries
+              .getTestResultsWithTestInfo(build.testRunId)
+              .catch(() => [])
+          : [];
+        authDowngraded = true;
+        await mergeMetadata(sessionId, { buildId });
+      } else {
+        // Downgrade rerun failed to start/complete; keep the original (red)
+        // build so the failure stays visible rather than vanishing.
+        console.warn(
+          "[QuickStart] public-only downgrade rerun failed:",
+          rerun.error,
+        );
+      }
+    }
+  }
+
   const runFacts: QuickstartRunFacts = {
     passedCount: summary.passedCount,
     failedCount: summary.failedCount,
@@ -781,6 +924,7 @@ async function runQsRunAndNotes(
       authedScout: meta.authedScout,
       authSetup: meta.authSetup,
       runFacts,
+      authVerificationFailed: authDowngraded,
     });
     await queries.upsertBuildDemoNotes(buildId, notes);
     demoNotesPersisted = true;
@@ -797,6 +941,7 @@ async function runQsRunAndNotes(
     failed: summary.failedCount,
     changes: summary.changesDetected,
     demoNotesPersisted,
+    authDowngraded,
   });
 
   emitActivity(

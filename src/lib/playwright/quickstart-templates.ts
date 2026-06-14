@@ -20,6 +20,56 @@ export const DESTRUCTIVE_CTA_PATTERN =
 export const CAPTCHA_LOCATOR =
   'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="cloudflare"][src*="challenge"]';
 
+/**
+ * Stable marker thrown by the walkthrough when chained `storage_state` failed to
+ * replay an authenticated session. The orchestrator (`runQsRunAndNotes`) detects
+ * this in the failed test's error message and downgrades to a public-only rerun
+ * rather than shipping login-page screenshots as if they were authed.
+ */
+export const AUTH_CHAIN_FAILED_MARKER =
+  "QuickStart authed walkthrough: storage_state did not authenticate";
+
+/** Current stable Chrome UA. EB's default `HeadlessChrome` string is rejected by
+ *  Cloudflare Turnstile, Clerk, Supabase Auth, and several SaaS edge routers. */
+const EB_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+
+/** Known third-party console-noise scripts to abort before the first navigation.
+ *  The EB executor reds a test on ANY console error; Cloudflare's auto-injected
+ *  email-decoder is the #1 false positive across customer sites. */
+const EB_NOISE_PATTERNS = [
+  "**/cdn-cgi/scripts/**/email-decode.min.js",
+  "**/cdn-cgi/scripts/**/cloudflare-static/**",
+  "**/sentry-cdn.com/**",
+  "**/browser.sentry-cdn.com/**",
+  "**/cdn.segment.com/**",
+  "**/connect.facebook.net/**",
+];
+
+/**
+ * EB Chromium bootstrap, emitted at the top of every rendered test body (mirrors
+ * the mandatory header in the skill's `test-template.md`). Two mitigations that
+ * otherwise falsely-fail 50%+ of runs on the EB pod:
+ *   1. Override the HeadlessChrome User-Agent with a current stable Chrome string.
+ *   2. Abort known third-party console-noise scripts before the first navigation.
+ * The route loop is INLINED (run once) rather than wrapped in a `const fn = () =>`
+ * arrow — the runner's per-statement instrumentation can scope cross-statement
+ * arrow helpers out, throwing "fn is not defined" mid-walk.
+ */
+export function renderEbBootstrap(): string {
+  const patterns = EB_NOISE_PATTERNS.map((p) => `    ${jsString(p)},`).join(
+    "\n",
+  );
+  return [
+    `  await page.context().setExtraHTTPHeaders({ 'User-Agent': ${jsString(EB_USER_AGENT)} }).catch(function () {});`,
+    `  for (const pattern of [`,
+    patterns,
+    `  ]) {`,
+    `    await page.route(pattern, function (r) { return r.abort(); }).catch(function () {});`,
+    `  }`,
+  ].join("\n");
+}
+
 export interface RenderAuthSetupOptions {
   email: string;
   password: string;
@@ -76,7 +126,13 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
   const DEMO_NAME = ${jsString(name)};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const settle = () => page.waitForLoadState('networkidle').catch(() => {});
+  async function settle() {
+    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
 
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   const accept = page.getByRole('button', { name: /accept|allow|got it|ok$/i });
@@ -247,7 +303,13 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const HAS_BIZ_INTERACTION = ${hasBizInteraction};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const settle = () => page.waitForLoadState('networkidle').catch(() => {});
+  async function settle() {
+    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
 
   stepLogger.log('Scenario 1: Homepage');
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
@@ -284,18 +346,23 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
 
   let authed = false;
   if (AUTH_AUTOMATABLE) {
-    try {
-      // Storage state (cookies + localStorage) was attached by the runner via
-      // setupOverrides.extraSteps. Just verify the chain actually authenticated.
-      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-      await settle();
-      const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
-        .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
-      if (await signInCta.isVisible().catch(() => false)) {
-        throw new Error('Storage state did not authenticate the browser (sign-in CTA still visible)');
-      }
-      authed = true;
+    // Hard gate (OUTSIDE the best-effort try/catch below): the runner attached
+    // the captured storage_state (cookies + localStorage) via
+    // setupOverrides.extraSteps. If it did NOT replay an authenticated session
+    // (expired, dropped, or never injected), RED the build instead of silently
+    // shipping login-page screenshots as "authed". The orchestrator detects this
+    // marker on the failed result and downgrades to a public-only rerun.
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await settle();
+    const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
+      .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
+    if (await signInCta.isVisible().catch(() => false)) {
+      await page.screenshot({ path: shot(publicScenario, 'auth-failed'), fullPage: true });
+      throw new Error(${jsString(AUTH_CHAIN_FAILED_MARKER + " (sign-in CTA still visible)")});
+    }
+    authed = true;
 
+    try {
       stepLogger.log(\`Scenario \${publicScenario}: Post-auth landing\`);
       await page.screenshot({ path: shot(publicScenario, 'post-auth'), fullPage: true });
       publicScenario++;
@@ -424,10 +491,6 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
   await settle();
   await page.screenshot({ path: screenshotPath, fullPage: true });
-
-  if (AUTH_AUTOMATABLE && !authed) {
-    stepLogger.warn('Authed phase did not run — see warnings above');
-  }
 }
 `;
 }
