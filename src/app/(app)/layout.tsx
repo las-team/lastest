@@ -8,10 +8,8 @@ import { BugReportWidget } from "@/components/bug-report/bug-report-widget";
 import { ActivityFeedProvider } from "@/components/activity-feed/activity-feed-provider-client";
 import { ActivityFeedPanel } from "@/components/activity-feed/activity-feed-panel-client";
 import { CelebrationListener } from "@/components/gamification/celebration-listener-client";
-import { ConsentBanner } from "@/components/layout/consent-banner-client";
 import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
 import { getCurrentSession } from "@/lib/auth";
-import { hasAcceptedTerms } from "@/lib/db/queries";
 
 export default async function AppLayout({
   children,
@@ -37,10 +35,7 @@ export default async function AppLayout({
   // `<ActivityFeedProvider>`, mismatching the client tree that wraps it in
   // `<div className="flex h-screen">`. Awaiting here also dedupes the
   // sidebar's DB/GitHub calls that used to run twice.
-  const [showConsentBanner, sidebarEl, mobileTopBarEl] = await Promise.all([
-    session?.user
-      ? hasAcceptedTerms(session.user.id).then((v) => !v)
-      : Promise.resolve(false),
+  const [sidebarEl, mobileTopBarEl] = await Promise.all([
     SidebarServer(),
     MobileTopBarServer(),
   ]);
@@ -59,7 +54,6 @@ export default async function AppLayout({
             <div className="hidden md:flex">{sidebarEl}</div>
             <div className="flex-1 flex flex-col overflow-hidden">
               {mobileTopBarEl}
-              {showConsentBanner && <ConsentBanner />}
               <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                 {children}
               </main>

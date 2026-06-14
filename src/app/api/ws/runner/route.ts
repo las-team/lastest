@@ -660,8 +660,22 @@ export async function POST(request: NextRequest) {
                 },
               });
           } catch (err) {
-            console.warn(
-              `[Recording] Failed to persist events for session ${recSessionId}:`,
+            // On the multi-pod (Olares) split this DB write is the ONLY path
+            // back: the EB POSTs to the envoy-less -internal pod, which has no
+            // in-memory recording session to append to. A swallowed failure
+            // here = every recorded interaction silently lost. Log loudly (not
+            // warn) so it surfaces; don't throw — this is best-effort and a 500
+            // would break the runner POST channel and trigger retry storms.
+            const pgCode =
+              (err as { code?: string })?.code ??
+              (err as { cause?: { code?: string } })?.cause?.code ??
+              "";
+            const hint =
+              pgCode === "42P10"
+                ? " — missing unique index on remote_recording_events(session_id, sequence); run scripts/migrate.js (ensureUniqueIndexes) or create it manually"
+                : "";
+            console.error(
+              `[Recording] CRITICAL: dropped ${events.length} recorded event(s) for session ${recSessionId} (pg ${pgCode || "?"})${hint}`,
               err,
             );
           }

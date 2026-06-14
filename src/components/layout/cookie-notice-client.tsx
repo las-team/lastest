@@ -28,6 +28,7 @@ export function CookieNotice() {
       secure. No tracking or advertising cookies. See our{" "}
       <Link
         href="/cookies"
+        prefetch={false}
         className="underline underline-offset-4 hover:text-foreground"
       >
         Cookie Policy

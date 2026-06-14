@@ -193,7 +193,7 @@ export function eventsToCodeLines(
         // Skip duplicate navigation (revalidatePath refresh), just wait for mutation
         if (lastAction === "click") {
           lines.push(
-            `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+            `${indent}await page.waitForLoadState('load').catch(() => {});`,
           );
         }
       } else if (lastEmittedEventType === "action" && lastAction === "click") {
@@ -201,10 +201,14 @@ export function eventsToCodeLines(
         // Re-issuing page.goto on a click-triggered nav double-loads (and can 404 on
         // SPA/intermediate URLs that resolve in-app but not via a cold HTTP fetch).
         lines.push(
-          `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+          `${indent}await page.waitForLoadState('load').catch(() => {});`,
         );
+        // Prefix-match the URL: a click frequently lands on an intermediate
+        // route that the app then redirects to a dynamic child (e.g. /verify ->
+        // /verify/<buildId>). Asserting the recorded path as an anchored prefix
+        // tolerates that trailing segment, which also changes per run.
         lines.push(
-          `${indent}await expect(page).toHaveURL(buildUrl(baseUrl, '${relativePath}'));`,
+          `${indent}await expect(page).toHaveURL(urlMatch(baseUrl, '${relativePath}'));`,
         );
         lastNavigatedPath = relativePath;
       } else if (!lastAction.includes("goto")) {
@@ -212,7 +216,7 @@ export function eventsToCodeLines(
           `${indent}await page.goto(buildUrl(baseUrl, '${relativePath}'));`,
         );
         lines.push(
-          `${indent}await page.waitForLoadState('networkidle').catch(() => {});`,
+          `${indent}await page.waitForLoadState('load').catch(() => {});`,
         );
         lastNavigatedPath = relativePath;
       }

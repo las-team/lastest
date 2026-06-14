@@ -492,7 +492,15 @@ async function startup(): Promise<void> {
         const isHeaded = !!payload.headed;
         if (activeTasks === 1) {
           capturedClient.setStatus("busy", payload.testId);
-          streamServer?.broadcastStatus("busy", payload.targetUrl);
+          // Headed playback gets a distinct "starting" status: the screencast
+          // is still bound to the idle page until onPageCreated re-attaches
+          // it to the test page, so viewers show a "Starting test…"
+          // placeholder instead of a stale/blank idle frame. Cleared by the
+          // "running" broadcast once the test page is streaming.
+          streamServer?.broadcastStatus(
+            isHeaded ? "starting" : "busy",
+            payload.targetUrl,
+          );
           if (!isHeaded) {
             // Pause screencast to free Chromium CPU for test execution
             await screencast?.stop();
@@ -545,12 +553,24 @@ async function startup(): Promise<void> {
                             frame.timestamp,
                           );
                         });
+                        // Test page is live on the stream — clear the
+                        // viewer's "Starting test…" placeholder.
+                        capturedStreamServer.broadcastStatus(
+                          "running",
+                          payload.targetUrl,
+                        );
                       } catch (err) {
                         console.error(
                           "[Command] Failed to attach screencast to test page:",
                           err,
                         );
                       }
+                    },
+                    onActionProgress: (progress) => {
+                      // Countdown telemetry for the live viewer (selector
+                      // waits, load waits, fallback clicks). Stream-only —
+                      // never blocks the test.
+                      capturedStreamServer.broadcastActionProgress(progress);
                     },
                     onBeforePageClose: async () => {
                       try {

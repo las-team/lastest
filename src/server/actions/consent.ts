@@ -114,36 +114,3 @@ export async function getMyConsents() {
   const session = await requireAuth();
   return queries.getUserActiveConsents(session.user.id);
 }
-
-export async function dismissConsentBanner() {
-  const session = await requireAuth();
-  const userId = session.user.id;
-  const hdrs = await headers();
-  const ipAddress =
-    hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    hdrs.get("x-real-ip") ??
-    undefined;
-  const userAgent = hdrs.get("user-agent") ?? undefined;
-
-  const existing = await queries.hasAcceptedTerms(userId);
-  if (existing) return;
-
-  await Promise.all([
-    queries.recordConsent({
-      userId,
-      consentType: "terms_of_service",
-      granted: true,
-      version: `${TERMS_VERSION}-migration`,
-      ipAddress,
-      userAgent,
-    }),
-    queries.recordConsent({
-      userId,
-      consentType: "privacy_policy",
-      granted: true,
-      version: `${PRIVACY_VERSION}-migration`,
-      ipAddress,
-      userAgent,
-    }),
-  ]);
-}

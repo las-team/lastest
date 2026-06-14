@@ -555,6 +555,11 @@ async function executeViaRunner(
       viewport,
       options.playwrightSettings?.navigationTimeout ?? undefined,
       options.playwrightSettings,
+      undefined,
+      // Headed playback: stream the setup pages live so the viewer's
+      // "Running setup steps…" overlay sits over real progress instead of a
+      // frozen idle frame.
+      options.headless === false,
     );
     // Merge remote setup results into setupContext for test commands
     options.setupContext = {

@@ -240,7 +240,7 @@ export async function testCustomWebhookAction(data: {
 }): Promise<{ success: boolean; statusCode?: number; error?: string }> {
   await requireTeamAccess();
   const { testCustomWebhook } =
-    await import("@/lib/integrations/custom-webhook");
+    await import("@/lib/integrations/custom-webhook-server");
 
   let parsedHeaders: Record<string, string> | undefined;
   if (data.headers) {

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LastestClient, type ToolResponse } from "./client.js";
 import { redactSecrets } from "./redact.js";
+import { summarizeTestRun, type IncludeFlag } from "./test-run-summary.js";
 
 type ToolHandler = (
   params: Record<string, unknown>,
@@ -737,9 +738,25 @@ export function createServer(client: LastestClient): McpServer {
   // --- lastest_get_test_run ---
   server.tool(
     "lastest_get_test_run",
-    "Get detailed results for a specific test run, including individual test results, errors, and durations.",
+    "Get results for a test run. By default returns the changes/signal only: pass/fail status, errors, durations, and the deviations each check layer flagged (failed network requests, console errors, a11y + design-system violations). Heavy raw context (full network log, DOM snapshots, web-vitals, URL trajectory, execution logs, storage state) is omitted by default — request it per-section via `include`.",
     {
       runId: z.string().describe("Test run ID"),
+      include: z
+        .array(
+          z.enum([
+            "network",
+            "dom",
+            "vitals",
+            "trajectory",
+            "logs",
+            "storage",
+            "all",
+          ]),
+        )
+        .optional()
+        .describe(
+          "Raw sections to add back per result: 'network' (full request log), 'dom' (DOM snapshot), 'vitals' (web-vitals), 'trajectory' (URL trajectory), 'logs' (execution logs), 'storage' (storage state), or 'all' (entire raw payload). Omit for the lean changes-only view.",
+        ),
     },
     async (
       params,
@@ -755,10 +772,13 @@ export function createServer(client: LastestClient): McpServer {
       const response: ToolResponse = {
         status: run.status as string,
         summary: `Run ${params.runId}: ${passed}/${results.length} passed, ${failed} failed`,
-        details: data,
+        details: summarizeTestRun(
+          data,
+          (params.include as IncludeFlag[]) ?? [],
+        ),
       };
       return {
-        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(response) }],
       };
     },
   );

@@ -333,6 +333,17 @@
   animation: step-rise 320ms ease-out both;
 }
 
+/* Live-stream action countdown — bar drains over the action's timeout budget.
+   Duration is set inline per action (BrowserViewer), only the shape lives here. */
+@keyframes stream-action-countdown {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
 /* ---------- Z-index layer scale ---------------------------------------------
    Centralizes stacking order for the headed-playback / recording surfaces so
    ad-hoc `z-10/40/50` values don't drift out of sync.

@@ -49,6 +49,19 @@ export interface DomSnapshotResult {
   timestamp: number;
 }
 
+/** In-flight deadline-bound action reported by the EB over the stream
+ *  (selector wait, page-load wait, fallback click). `timeoutMs` is the
+ *  remaining budget at receipt — consumers animate the countdown locally.
+ *  `key` changes per action so bars restart full; `stepIndex` ties the
+ *  action to the playback-timeline row it runs inside (-1 = pre-step). */
+export interface ActionProgressInfo {
+  key: string;
+  stepIndex: number;
+  label: string;
+  kind: string;
+  timeoutMs: number;
+}
+
 interface BrowserViewerProps {
   streamUrl: string;
   initialViewport?: { width: number; height: number };
@@ -75,6 +88,10 @@ interface BrowserViewerProps {
   onInspectResult?: (result: InspectElementResult | null) => void;
   onDomSnapshot?: (result: DomSnapshotResult) => void;
   onViewportChange?: (viewport: { width: number; height: number }) => void;
+  /** Live action countdown events from the EB (null = cleared). The viewer
+   *  doesn't render these itself — the parent attaches them to the playback
+   *  timeline so the bar sits under the step it belongs to. */
+  onActionProgress?: (progress: ActionProgressInfo | null) => void;
 }
 
 export interface BrowserViewerHandle {
@@ -105,6 +122,7 @@ export const BrowserViewer = forwardRef<
     onInspectResult,
     onDomSnapshot,
     onViewportChange,
+    onActionProgress,
   },
   ref,
 ) {
@@ -153,13 +171,17 @@ export const BrowserViewer = forwardRef<
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [fileChooserPending, setFileChooserPending] = useState(false);
-  // True while the EB reports status "setup" (running setup steps before a
-  // recording / headed run). Drives a blocking "please wait" overlay for the
-  // WHOLE setup phase — input is detached on the EB during setup, so clicks
-  // would be silently ignored. Status-driven only: an earlier "busy + no
-  // frames recently" heuristic flapped during headed replay every time the
-  // page paused repainting for a few seconds.
-  const [setupActive, setSetupActive] = useState(false);
+  // Blocking placeholder phase reported by the EB:
+  //  - "setup":    setup steps are running before a recording / headed run.
+  //  - "starting": headed playback accepted but the screencast is still bound
+  //                to the idle page until the test page attaches.
+  // Both drive a "please wait" overlay — input is detached on the EB during
+  // these phases, so clicks would be silently ignored. Status-driven only:
+  // an earlier "busy + no frames recently" heuristic flapped during headed
+  // replay every time the page paused repainting for a few seconds.
+  const [blockingPhase, setBlockingPhase] = useState<
+    "setup" | "starting" | null
+  >(null);
 
   // FPS counter refs — initialized in useEffect to avoid impure render calls
   const frameCountRef = useRef(0);
@@ -196,6 +218,8 @@ export const BrowserViewer = forwardRef<
   );
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
+  const onActionProgressRef = useRef(onActionProgress);
+  onActionProgressRef.current = onActionProgress;
 
   // Render a frame onto the canvas. CDP's metadata width/height can drift
   // from the encoded JPEG's natural dimensions (DPR, scrollbar, device-metrics
@@ -411,16 +435,58 @@ export const BrowserViewer = forwardRef<
 
               // Track intentional screencast pauses to suppress stall detection
               const status = message.payload.status;
-              setSetupActive(status === "setup");
+              setBlockingPhase(
+                status === "setup"
+                  ? "setup"
+                  : status === "starting"
+                    ? "starting"
+                    : null,
+              );
+              // A phase transition obsoletes any in-flight action countdown
+              // (the EB also clears it, but don't rely on message ordering).
+              if (status === "setup" || status === "starting") {
+                onActionProgressRef.current?.(null);
+              }
               if (
                 status === "busy" ||
                 status === "setup" ||
+                status === "starting" ||
                 status === "recording" ||
                 status === "debugging"
               ) {
                 screencastPausedRef.current = true;
               } else {
                 screencastPausedRef.current = false;
+              }
+              break;
+            }
+
+            case "stream:action_progress": {
+              const p = message.payload as
+                | {
+                    active?: boolean;
+                    label?: string;
+                    kind?: string;
+                    timeoutMs?: number;
+                    stepIndex?: number;
+                  }
+                | undefined;
+              // Counts as liveness — the EB is mid-action, not stalled.
+              lastFrameTimeRef.current = Date.now();
+              if (
+                p?.active &&
+                typeof p.timeoutMs === "number" &&
+                p.timeoutMs > 0
+              ) {
+                onActionProgressRef.current?.({
+                  key: message.id ?? String(Date.now()),
+                  stepIndex: typeof p.stepIndex === "number" ? p.stepIndex : -1,
+                  label: p.label ?? "Working…",
+                  kind: p.kind ?? "wait",
+                  timeoutMs: p.timeoutMs,
+                });
+              } else {
+                onActionProgressRef.current?.(null);
               }
               break;
             }
@@ -952,7 +1018,7 @@ export const BrowserViewer = forwardRef<
            • default:        1:1 pixels with intrinsic-height container —
                              scrolls only when parent imposes a height. */}
       <div
-        className={`relative ${hideToolbar ? "" : "rounded-b-lg border"} ${hideToolbar && hideStatusBar ? "" : "bg-black"} ${fit ? "flex-1 min-h-0 overflow-hidden flex items-center justify-center" : cropIndicators ? "flex-1 min-h-0 overflow-hidden" : "overflow-auto"}`}
+        className={`relative ${hideToolbar ? "" : "rounded-b-lg border"} ${hideToolbar && hideStatusBar ? "" : "bg-background"} ${fit ? "flex-1 min-h-0 overflow-hidden flex items-center justify-center" : cropIndicators ? "flex-1 min-h-0 overflow-hidden" : "overflow-auto"}`}
       >
         {connectionStatus !== "connected" && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/80">
@@ -984,17 +1050,25 @@ export const BrowserViewer = forwardRef<
           </div>
         )}
 
-        {/* Blocking setup overlay — translucent so setup progress stays
-            visible behind it; absorbs pointer events (the EB ignores input
-            during setup anyway). Shown for the entire setup phase, cleared
-            by the next status broadcast (recording / busy / ready). */}
-        {connectionStatus === "connected" && setupActive && (
+        {/* Blocking placeholder overlay — translucent so any streamed
+            progress stays visible behind it; absorbs pointer events (the EB
+            ignores input during these phases anyway). Shown while setup runs
+            or while headed playback waits for the test page to attach;
+            cleared by the next status broadcast (running / recording /
+            busy / ready). */}
+        {connectionStatus === "connected" && blockingPhase && (
           <div className="absolute inset-0 layer-canvas-overlay flex items-center justify-center bg-black/50">
             <div className="flex flex-col items-center gap-2 text-white">
               <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="text-sm">Running setup steps…</span>
+              <span className="text-sm">
+                {blockingPhase === "setup"
+                  ? "Running setup steps…"
+                  : "Starting test…"}
+              </span>
               <span className="text-xs text-white/70">
-                Interaction is disabled until setup finishes
+                {blockingPhase === "setup"
+                  ? "Interaction is disabled until setup finishes"
+                  : "Live playback will appear here in a moment"}
               </span>
             </div>
           </div>

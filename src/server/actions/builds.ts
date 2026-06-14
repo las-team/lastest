@@ -23,7 +23,7 @@ import { PNG } from "pngjs";
 import fs from "fs";
 import { sendSlackNotification } from "@/lib/integrations/slack";
 import { sendDiscordNotification } from "@/lib/integrations/discord";
-import { sendCustomWebhookNotification } from "@/lib/integrations/custom-webhook";
+import { sendCustomWebhookNotification } from "@/lib/integrations/custom-webhook-server";
 import { postPRComment } from "@/lib/integrations/github-pr";
 import { postMRComment } from "@/lib/integrations/gitlab-mr";
 import type {

@@ -29,6 +29,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import type { ActionProgressInfo } from "@/components/embedded-browser/browser-viewer-client";
 
 export type StepResultsMap = Record<
   number,
@@ -51,6 +52,10 @@ interface PlaybackTimelineProps {
    *  present, action steps with a parseable `locateWithFallback` array
    *  show a hover panel with per-candidate success/fail history. */
   selectorStats?: SelectorStatRow[];
+  /** In-flight deadline-bound action from the live stream. Rendered as a
+   *  decreasing countdown bar under the step row it belongs to
+   *  (`stepIndex`); stale entries for already-passed steps are dropped. */
+  actionProgress?: ActionProgressInfo | null;
 }
 
 const ITEM_HEIGHT = 64; // px — used to compute the wheel translate
@@ -77,6 +82,7 @@ export function PlaybackTimeline({
   className,
   compact = false,
   selectorStats,
+  actionProgress,
 }: PlaybackTimelineProps) {
   const stripRef = useRef<HTMLDivElement>(null);
   const total = steps.length;
@@ -86,8 +92,12 @@ export function PlaybackTimeline({
   const centerIdx = currentStepIndex < 0 ? 0 : currentStepIndex;
 
   const translateY = useMemo(() => {
-    // viewport center is at half its height; offset so the active row sits there.
-    return -(centerIdx * ITEM_HEIGHT);
+    // The strip is anchored at the viewport's vertical center (top: 50%), so
+    // shifting it up by the active row's center puts that row in the middle.
+    // (The previous `calc(-50% + …)` form subtracted half the STRIP height,
+    // which only centered correctly when the active row was the middle step —
+    // for late steps the active row scrolled clean out of the viewport.)
+    return -((centerIdx + 0.5) * ITEM_HEIGHT);
   }, [centerIdx]);
 
   // Auto-scroll wheel transform is driven by translateY; nothing else to do.
@@ -140,7 +150,7 @@ export function PlaybackTimeline({
           className="absolute inset-x-0 transition-transform duration-500 ease-out will-change-transform"
           style={{
             top: "50%",
-            transform: `translateY(calc(-50% + ${translateY}px))`,
+            transform: `translateY(${translateY}px)`,
           }}
         >
           {steps.map((step, idx) => (
@@ -152,6 +162,15 @@ export function PlaybackTimeline({
               result={results[idx]}
               compact={compact}
               selectorStats={selectorStats}
+              // Attach the countdown to the exact step the EB reports it for,
+              // and drop it once that step has a recorded result (stale clear).
+              progress={
+                actionProgress &&
+                actionProgress.stepIndex === idx &&
+                results[idx] === undefined
+                  ? actionProgress
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -167,6 +186,7 @@ interface StepRowProps {
   result?: StepResultsMap[number];
   compact: boolean;
   selectorStats?: SelectorStatRow[];
+  progress?: ActionProgressInfo;
 }
 
 function StepRow({
@@ -176,6 +196,7 @@ function StepRow({
   result,
   compact,
   selectorStats,
+  progress,
 }: StepRowProps) {
   const isCurrent = index === currentStepIndex;
   const isCompleted = result !== undefined;
@@ -288,6 +309,31 @@ function StepRow({
             title={result.error}
           >
             {result.error}
+          </div>
+        )}
+        {/* In-flight action countdown — drains over the action's configured
+            timeout budget; `key` remounts the bar so each new action (next
+            selector candidate, fallback click) restarts it full. */}
+        {progress && (
+          <div className="mt-1">
+            <div
+              className="truncate text-[9px] leading-3 text-muted-foreground"
+              title={progress.label}
+            >
+              {progress.label}
+            </div>
+            <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                key={progress.key}
+                className={cn(
+                  "h-full rounded-full",
+                  progress.kind === "fallback" ? "bg-amber-400" : "bg-primary",
+                )}
+                style={{
+                  animation: `stream-action-countdown ${progress.timeoutMs}ms linear forwards`,
+                }}
+              />
+            </div>
           </div>
         )}
       </div>
