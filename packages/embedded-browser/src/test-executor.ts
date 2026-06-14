@@ -458,6 +458,19 @@ export class EmbeddedTestExecutor {
         durationMs?: number;
         error?: string;
       }) => void;
+      /** Start/end of a deadline-bound operation (selector wait, page-load
+       *  wait, navigation, fallback click). `timeoutMs` is the full budget —
+       *  consumers animate the countdown locally. `stepIndex` ties the
+       *  operation to the instrumented step it runs inside (-1 before the
+       *  first step) so UIs can render it under the right timeline row.
+       *  `active: false` clears. */
+      onActionProgress?: (progress: {
+        active: boolean;
+        label?: string;
+        kind?: "selector" | "wait" | "navigation" | "fallback";
+        timeoutMs?: number;
+        stepIndex?: number;
+      }) => void;
     },
   ): Promise<EmbeddedTestResult> {
     const abortCtrl = new AbortController();
@@ -487,6 +500,48 @@ export class EmbeddedTestExecutor {
       console.log(
         `  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`,
       );
+    };
+
+    // Action-progress telemetry: live viewers render a decreasing countdown
+    // bar for whatever deadline-bound operation is in flight. Depth-counted
+    // so nested instrumented calls (a wait inside a wait) don't clear the
+    // outer operation's bar early — the innermost start wins the display,
+    // the outermost end clears it.
+    const onActionProgress = callbacks?.onActionProgress;
+    let actionProgressDepth = 0;
+    const beginActionProgress = (progress: {
+      label: string;
+      kind: "selector" | "wait" | "navigation" | "fallback";
+      timeoutMs: number;
+    }): (() => void) => {
+      if (!onActionProgress) return () => {};
+      actionProgressDepth++;
+      try {
+        // outerCurrentStepIdx is declared further down (hoisted step-tracking
+        // state) but is always initialized before any instrumented operation
+        // runs — the closure only reads it at emit time.
+        onActionProgress({
+          active: true,
+          stepIndex: outerCurrentStepIdx,
+          ...progress,
+        });
+      } catch {
+        /* telemetry must never break the test */
+      }
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        actionProgressDepth--;
+        if (actionProgressDepth <= 0) {
+          actionProgressDepth = 0;
+          try {
+            onActionProgress({ active: false });
+          } catch {
+            /* ignore */
+          }
+        }
+      };
     };
 
     const viewport = command.viewport || { width: 1280, height: 720 };
@@ -776,6 +831,103 @@ export class EmbeddedTestExecutor {
       // Set default timeouts (mirrors standard runner)
       page.setDefaultNavigationTimeout(30000);
       page.setDefaultTimeout(15000);
+
+      // Shadow the page's deadline-bound methods with progress-emitting
+      // wrappers (own properties over the prototype methods) so live viewers
+      // get a countdown for navigations and load/URL/selector waits. The
+      // page is per-test and closed afterwards, so the shadowing never leaks.
+      if (onActionProgress) {
+        const NAV_DEFAULT_TIMEOUT = 30000; // mirrors setDefaultNavigationTimeout above
+        const WAIT_DEFAULT_TIMEOUT = 15000; // mirrors setDefaultTimeout above
+        const timeoutFrom = (opts: unknown, fallback: number): number => {
+          const t = (opts as { timeout?: unknown } | undefined)?.timeout;
+          return typeof t === "number" && t > 0 ? t : fallback;
+        };
+        const describeTarget = (target: unknown): string => {
+          // String() renders RegExp as /pattern/ and functions readably;
+          // JSON.stringify would collapse both to "{}"/undefined.
+          const s = typeof target === "string" ? target : String(target);
+          return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+        };
+        const instrument = <A extends unknown[], R>(
+          method: (...args: A) => R,
+          describe: (...args: A) => {
+            label: string;
+            kind: "wait" | "navigation";
+            timeoutMs: number;
+          } | null,
+        ) => {
+          const original = method.bind(page);
+          return (...args: A): R => {
+            const progress = describe(...args);
+            if (!progress) return original(...args);
+            const end = beginActionProgress(progress);
+            const result = original(...args);
+            void Promise.resolve(result).then(end, end);
+            return result;
+          };
+        };
+        page.goto = instrument(page.goto, (url, opts) => ({
+          label: `Loading ${describeTarget(url)}`,
+          kind: "navigation",
+          timeoutMs: timeoutFrom(opts, NAV_DEFAULT_TIMEOUT),
+        }));
+        page.reload = instrument(page.reload, (opts) => ({
+          label: "Reloading page",
+          kind: "navigation",
+          timeoutMs: timeoutFrom(opts, NAV_DEFAULT_TIMEOUT),
+        }));
+        page.waitForLoadState = instrument(
+          page.waitForLoadState,
+          (state, opts) => ({
+            label: `Waiting for page ${state ?? "load"}`,
+            kind: "wait",
+            timeoutMs: timeoutFrom(opts, NAV_DEFAULT_TIMEOUT),
+          }),
+        );
+        page.waitForURL = instrument(page.waitForURL, (url, opts) => ({
+          label: `Waiting for URL ${describeTarget(url)}`,
+          kind: "wait",
+          timeoutMs: timeoutFrom(opts, NAV_DEFAULT_TIMEOUT),
+        }));
+        // waitForSelector / waitForFunction are overloaded — collapse them to
+        // a plain signature for the wrapper and cast back (runtime-identical).
+        page.waitForSelector = instrument(
+          page.waitForSelector as (
+            selector: string,
+            opts?: { timeout?: number },
+          ) => Promise<unknown>,
+          (selector, opts) => ({
+            label: `Waiting for ${describeTarget(selector)}`,
+            kind: "wait",
+            timeoutMs: timeoutFrom(opts, WAIT_DEFAULT_TIMEOUT),
+          }),
+        ) as Page["waitForSelector"];
+        page.waitForFunction = instrument(
+          page.waitForFunction as (
+            fn: unknown,
+            arg?: unknown,
+            opts?: { timeout?: number },
+          ) => Promise<unknown>,
+          (_fn, _arg, opts) => ({
+            label: "Waiting for condition",
+            kind: "wait",
+            timeoutMs: timeoutFrom(opts, WAIT_DEFAULT_TIMEOUT),
+          }),
+        ) as Page["waitForFunction"];
+        // Fixed sleeps: only surface the long ones — cursor-path replay and
+        // helper polling issue hundreds of sub-second waitForTimeout calls
+        // that would just flicker the bar (and flood the stream socket).
+        page.waitForTimeout = instrument(page.waitForTimeout, (ms) =>
+          typeof ms === "number" && ms >= 1000
+            ? {
+                label: `Waiting ${(ms / 1000).toFixed(1)}s`,
+                kind: "wait",
+                timeoutMs: ms,
+              }
+            : null,
+        );
+      }
 
       // Intercept File System Access API so blob downloads trigger Playwright's download event.
       // Always inject — native file dialogs hang forever in headless mode.
@@ -1625,7 +1777,16 @@ export class EmbeddedTestExecutor {
               lwfDefaultTimeoutMs,
               rank,
             );
-            await target.waitFor({ timeout: lwfCandidateTimeout });
+            const endLocateProgress = beginActionProgress({
+              label: `${action}: waiting for ${sel.type} selector (${rank + 1}/${ordered.length})`,
+              kind: "selector",
+              timeoutMs: lwfCandidateTimeout,
+            });
+            try {
+              await target.waitFor({ timeout: lwfCandidateTimeout });
+            } finally {
+              endLocateProgress();
+            }
           } catch {
             selectorOutcomes.push({
               hash: lwfHash,
@@ -1664,8 +1825,15 @@ export class EmbeddedTestExecutor {
           } catch {
             // One retry on the matched element before trying the next
             // candidate — transient overlays/detach races usually clear.
-            await pg.waitForTimeout(250);
+            // Actionability checks inside the retry wait up to the page
+            // default timeout (15s), so surface a countdown for it.
+            const endRetryProgress = beginActionProgress({
+              label: `Retrying ${action} on matched ${sel.type}`,
+              kind: "fallback",
+              timeoutMs: 250 + 15000,
+            });
             try {
+              await pg.waitForTimeout(250);
               await performAction();
             } catch (actionErr) {
               logFn(
@@ -1673,6 +1841,8 @@ export class EmbeddedTestExecutor {
                 `[action] ${action} failed on matched ${sel.type}: ${actionErr instanceof Error ? actionErr.message : String(actionErr)}`,
               );
               continue;
+            } finally {
+              endRetryProgress();
             }
           }
           return target;
@@ -1684,7 +1854,16 @@ export class EmbeddedTestExecutor {
             "info",
             `Falling back to coordinate click at (${coords.x}, ${coords.y})`,
           );
-          await pg.mouse.click(coords.x, coords.y, options || {});
+          const endFallbackProgress = beginActionProgress({
+            label: `Fallback click at (${coords.x}, ${coords.y})`,
+            kind: "fallback",
+            timeoutMs: 1000,
+          });
+          try {
+            await pg.mouse.click(coords.x, coords.y, options || {});
+          } finally {
+            endFallbackProgress();
+          }
           return;
         }
 
@@ -1694,10 +1873,19 @@ export class EmbeddedTestExecutor {
             "info",
             `Falling back to coordinate fill at (${coords.x}, ${coords.y})`,
           );
-          await pg.mouse.click(coords.x, coords.y);
-          await pg.waitForTimeout(100);
-          await pg.keyboard.press("Control+a");
-          await pg.keyboard.type(value || "");
+          const endFallbackProgress = beginActionProgress({
+            label: `Fallback fill at (${coords.x}, ${coords.y})`,
+            kind: "fallback",
+            timeoutMs: 2000,
+          });
+          try {
+            await pg.mouse.click(coords.x, coords.y);
+            await pg.waitForTimeout(100);
+            await pg.keyboard.press("Control+a");
+            await pg.keyboard.type(value || "");
+          } finally {
+            endFallbackProgress();
+          }
           return;
         }
 
@@ -1867,6 +2055,16 @@ export class EmbeddedTestExecutor {
         ]);
       } finally {
         clearTimeout(timeoutTimer);
+        // Force-clear any lingering countdown — the test body is done (or
+        // timed out with its in-flight op killed by the context close).
+        if (actionProgressDepth > 0) {
+          actionProgressDepth = 0;
+          try {
+            onActionProgress?.({ active: false });
+          } catch {
+            /* ignore */
+          }
+        }
         clearInterval(heartbeat);
       }
 

@@ -22,6 +22,14 @@ interface StreamClient {
   alive: boolean;
 }
 
+export interface ActionProgressPayload {
+  active: boolean;
+  label?: string;
+  kind?: "selector" | "wait" | "navigation" | "fallback";
+  timeoutMs?: number;
+  stepIndex?: number;
+}
+
 export class StreamServer {
   private wss: WebSocketServer | null = null;
   private clients = new Map<string, StreamClient>();
@@ -32,6 +40,24 @@ export class StreamServer {
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private lastBroadcastTime = 0;
   private lastStatus = "idle";
+  // Last in-flight action progress (selector wait / load wait / fallback
+  // click) with the wall-clock time it started — replayed to late-joining
+  // viewers with an adjusted remaining budget so their countdown bar lines
+  // up with the action's real deadline.
+  private lastActionProgress: {
+    payload: ActionProgressPayload;
+    startedAt: number;
+  } | null = null;
+  // Last broadcast frame, replayed to newly connected clients. CDP only
+  // emits frames on repaint — without the replay, a viewer that (re)connects
+  // mid-wait (fullscreen toggle remount, reconnect) stares at a blank canvas
+  // until the page next repaints, which can be the rest of a long wait.
+  private lastFrame: {
+    data: string;
+    width: number;
+    height: number;
+    timestamp: number;
+  } | null = null;
 
   /** Callback for navigate requests from stream clients */
   onNavigate?: (url: string) => Promise<void>;
@@ -104,6 +130,35 @@ export class StreamServer {
           status: this.lastStatus,
         },
       });
+
+      // Replay the most recent frame so the canvas paints immediately
+      // instead of staying blank until the page next repaints.
+      if (this.lastFrame) {
+        this.sendToClient(ws, {
+          type: "stream:frame",
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          payload: this.lastFrame,
+        });
+      }
+
+      // Replay any in-flight action countdown with the remaining (not the
+      // original) budget so a viewer joining mid-wait sees an accurate bar.
+      if (this.lastActionProgress?.payload.active) {
+        const { payload, startedAt } = this.lastActionProgress;
+        const remaining =
+          payload.timeoutMs !== undefined
+            ? payload.timeoutMs - (Date.now() - startedAt)
+            : undefined;
+        if (remaining === undefined || remaining > 250) {
+          this.sendToClient(ws, {
+            type: "stream:action_progress",
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            payload: { ...payload, timeoutMs: remaining },
+          });
+        }
+      }
 
       // Mark alive on pong response
       ws.on("pong", () => {
@@ -194,6 +249,7 @@ export class StreamServer {
     timestamp: number,
   ): void {
     this.lastBroadcastTime = Date.now();
+    this.lastFrame = { data, width, height, timestamp };
     const message = JSON.stringify({
       type: "stream:frame",
       id: crypto.randomUUID(),
@@ -217,12 +273,40 @@ export class StreamServer {
     viewport?: { width: number; height: number },
     fileChooserPending?: boolean,
   ): void {
+    // A phase change (setup → busy → ready …) obsoletes any in-flight action
+    // countdown; keepalives re-broadcast the same status and must not clear it.
+    if (status !== this.lastStatus) {
+      this.lastActionProgress = null;
+    }
     this.lastStatus = status;
     const message = JSON.stringify({
       type: "stream:status",
       id: crypto.randomUUID(),
       timestamp: Date.now(),
       payload: { status, currentUrl, viewport, fileChooserPending },
+    });
+
+    for (const [clientId, client] of this.clients) {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(message);
+      } else {
+        this.clients.delete(clientId);
+      }
+    }
+  }
+
+  /** Broadcast the start/end of a deadline-bound action (selector wait,
+   *  page-load wait, fallback click). Viewers animate the countdown locally
+   *  from `timeoutMs`, so only the start and the clear are sent — no ticks. */
+  broadcastActionProgress(payload: ActionProgressPayload): void {
+    this.lastActionProgress = payload.active
+      ? { payload, startedAt: Date.now() }
+      : null;
+    const message = JSON.stringify({
+      type: "stream:action_progress",
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      payload,
     });
 
     for (const [clientId, client] of this.clients) {
