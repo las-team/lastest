@@ -32,6 +32,11 @@ export interface GenerateDemoNotesInput {
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
   runFacts: QuickstartRunFacts;
+  /** True when the captured login session was successfully captured but did NOT
+   *  replay as authenticated on the test runner, so the walkthrough was
+   *  downgraded to public-only. Distinct from authSetup.captured=false (capture
+   *  itself failed). Surfaced as a testingStruggles item. */
+  authVerificationFailed?: boolean;
 }
 
 const SYSTEM_PROMPT = `You are summarising a Lastest visual-regression baseline run for a SaaS product. Generate the demo notes.
@@ -106,6 +111,7 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     authedFriction: input.authedScout?.friction ?? [],
     authSetupCaptured: input.authSetup?.captured ?? false,
     authSetupFailureReason: input.authSetup?.failureReason ?? null,
+    authVerificationFailed: input.authVerificationFailed ?? false,
     runResults: {
       passed: input.runFacts.passedCount,
       failed: input.runFacts.failedCount,
@@ -164,6 +170,12 @@ Produce the demo notes JSON.`;
     fallbackTesting.push({
       label: "Auth setup blocked",
       note: input.authSetup.failureReason,
+    });
+  }
+  if (input.authVerificationFailed) {
+    fallbackTesting.push({
+      label: "Login session could not be verified",
+      note: "The captured login session did not replay as authenticated on the test runner, so the walkthrough ran in public-only mode. This usually means the session expired or is stored where replay can't reach it (e.g. IndexedDB). Re-run, or supply working login credentials for the app.",
     });
   }
   if (
