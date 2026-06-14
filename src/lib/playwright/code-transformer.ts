@@ -202,6 +202,7 @@ function cleanupCode(code: string): string {
 function wrapInRunnerFormat(body: string): string {
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const buildUrl = (base, path) => new URL(path, base).href;
+  const urlMatch = (base, path) => new RegExp("^" + buildUrl(base, path).replace(/[.*+?()|[{}^\\]\\\\$]/g, "\\\\$&"));
   const getScreenshotPath = (label) => screenshotPath.replace('.png', \`-\${label}.png\`);
 
 ${body}
@@ -215,6 +216,7 @@ ${body}
 function generateEmptyTemplate(): string {
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const buildUrl = (base, path) => new URL(path, base).href;
+  const urlMatch = (base, path) => new RegExp("^" + buildUrl(base, path).replace(/[.*+?()|[{}^\\]\\\\$]/g, "\\\\$&"));
   const getScreenshotPath = (label) => screenshotPath.replace('.png', \`-\${label}.png\`);
 
   // Navigate to the page
