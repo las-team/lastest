@@ -2610,6 +2610,12 @@ export interface AgentSessionMetadata {
   publicScout?: QuickstartPublicScout;
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
+  /** Live CDP screencast URL of the EB the scout is currently driving. Set while
+   *  a scout step holds an EB, cleared when it releases. Powers the panel's live
+   *  browser view. */
+  streamUrl?: string;
+  /** True while an agent step is blocked waiting for an EB from the pool. */
+  queuedForBrowser?: boolean;
   walkthroughTestId?: string;
   buildId?: string;
   /** Build id of the second walkthrough run (after baselines are approved). Replaces

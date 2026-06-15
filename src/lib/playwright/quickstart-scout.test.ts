@@ -63,6 +63,50 @@ describe("runQuickstartScoutPublic — happy path", () => {
   });
 });
 
+describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
+  it("parses JSON followed by a trailing summary sentence (no retry)", async () => {
+    mockGen.mockResolvedValueOnce(
+      `${HAPPY_JSON}\n\nI have completed the reconnaissance and classified the sign-up flow as email_password.`,
+    );
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+    );
+
+    expect(data.classification).toBe("email_password");
+    expect(data.registerPath).toBe("/sign-up");
+    // The whole point: a trailing sentence must NOT cost a retry.
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses JSON wrapped in leading prose + a markdown fence", async () => {
+    mockGen.mockResolvedValueOnce(
+      `Here is what I found:\n\n\`\`\`json\n${HAPPY_JSON}\n\`\`\`\n\nDone.`,
+    );
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+    );
+
+    expect(data.classification).toBe("email_password");
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses JSON preceded by prose when there is no fence", async () => {
+    mockGen.mockResolvedValueOnce(`Sure — the result is ${HAPPY_JSON}`);
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+    );
+
+    expect(data.classification).toBe("email_password");
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("runQuickstartScoutPublic — retry on non-JSON", () => {
   it("retries once when the first response is prose, then succeeds", async () => {
     mockGen

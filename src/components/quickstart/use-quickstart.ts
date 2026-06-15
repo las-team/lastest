@@ -48,6 +48,8 @@ export interface QuickstartSessionView {
     buildId?: string;
     demoNotesId?: string;
     disabledReason?: string;
+    streamUrl?: string;
+    queuedForBrowser?: boolean;
   };
   createdAt?: string;
   completedAt?: string;

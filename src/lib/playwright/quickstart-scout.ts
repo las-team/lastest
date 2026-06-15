@@ -136,10 +136,53 @@ Return STRICT JSON (no markdown), shape:
   "friction": [{ "kind": "string", "note": "string" }]
 }`;
 
+/** Return the first balanced {...} or [...] substring, honoring string literals
+ *  and escapes so braces inside strings don't throw off the depth count. Returns
+ *  null when no balanced object/array is present. */
+function firstBalancedJson(text: string): string | null {
+  const start = text.search(/[{[]/);
+  if (start === -1) return null;
+  const open = text[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth++;
+    else if (ch === close && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+/**
+ * Extract a JSON value from a model response. The response may wrap the JSON in
+ * a markdown fence and/or append a trailing summary sentence after the closing
+ * brace — the claude-agent-sdk final message routinely does the latter, which a
+ * strict `JSON.parse` rejects with "Unexpected non-whitespace character after
+ * JSON". Strategy:
+ *   1. Prefer fenced ```json … ``` content when present.
+ *   2. Try a strict parse of the trimmed candidate (clean case).
+ *   3. Fall back to the first balanced {...}/[...] slice — tolerates leading
+ *      AND trailing prose around an otherwise-valid object.
+ */
 function extractJson(response: string): unknown {
   const fence = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  const raw = (fence?.[1] ?? response).trim();
-  return JSON.parse(raw);
+  const candidate = (fence?.[1] ?? response).trim();
+  try {
+    return JSON.parse(candidate);
+  } catch (err) {
+    const sliced = firstBalancedJson(candidate);
+    if (sliced === null) throw err;
+    return JSON.parse(sliced);
+  }
 }
 
 function safeArray<T>(

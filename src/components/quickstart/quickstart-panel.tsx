@@ -23,6 +23,7 @@ import {
   ChevronDown,
   KeyRound,
 } from "lucide-react";
+import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import { useQuickstart, type QuickstartStep } from "./use-quickstart";
 
 interface QuickstartPanelProps {
@@ -101,6 +102,8 @@ export function QuickstartPanel({
   const walkthroughTestId = session?.metadata.walkthroughTestId;
   const publicScout = session?.metadata.publicScout;
   const authSetup = session?.metadata.authSetup;
+  const streamUrl = session?.metadata.streamUrl;
+  const queuedForBrowser = session?.metadata.queuedForBrowser;
   const failedStep = session?.steps.find((s) => s.status === "failed");
 
   return (
@@ -260,6 +263,23 @@ export function QuickstartPanel({
               );
             })}
           </ol>
+
+          {isActive && streamUrl && (
+            <div className="rounded-md overflow-hidden border">
+              <BrowserViewer
+                streamUrl={streamUrl}
+                initialViewport={{ width: 1280, height: 720 }}
+                interactive={false}
+                hideControls
+              />
+            </div>
+          )}
+          {isActive && !streamUrl && queuedForBrowser && (
+            <div className="flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              Waiting for a browser from the pool&hellip;
+            </div>
+          )}
 
           {error && !session && (
             <p className="text-xs text-destructive">{error}</p>

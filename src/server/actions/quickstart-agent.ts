@@ -438,9 +438,14 @@ async function runQsScoutPublic(
   // Claim a containerized browser from the EB pool so the scout's MCP attaches
   // to a dedicated chromium instead of fighting for the user-data-dir held by
   // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch(() => undefined);
+  // Surface the EB's live screencast so the panel can show the scout browsing.
+  await mergeMetadata(sessionId, {
+    streamUrl: eb?.streamUrl,
+    queuedForBrowser: false,
+  });
   try {
     const { data, promptLogId } = await runQuickstartScoutPublic(
       repositoryId,
@@ -489,6 +494,8 @@ async function runQsScoutPublic(
     return false;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    // Stop the panel pointing at a released EB.
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 
@@ -644,9 +651,13 @@ async function runQsScoutAuthed(
     return true;
   }
 
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch(() => undefined);
+  await mergeMetadata(sessionId, {
+    streamUrl: eb?.streamUrl,
+    queuedForBrowser: false,
+  });
   try {
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
@@ -681,6 +692,7 @@ async function runQsScoutAuthed(
     return true;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 

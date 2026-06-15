@@ -1042,6 +1042,11 @@ export async function GET(
           shareSlug: sessionRow.metadata.shareSlug,
           shareUrl: sessionRow.metadata.shareUrl,
           disabledReason: sessionRow.metadata.disabledReason,
+          // Live browser view: the EB screencast URL is host-routable (rewritten
+          // at auth-register) and carries no secrets — safe to surface so the
+          // panel can render the scout's live browsing.
+          streamUrl: sessionRow.metadata.streamUrl,
+          queuedForBrowser: sessionRow.metadata.queuedForBrowser,
         },
         createdAt: sessionRow.createdAt,
         updatedAt: sessionRow.updatedAt,
