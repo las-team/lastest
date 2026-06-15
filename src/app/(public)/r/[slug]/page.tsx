@@ -317,6 +317,8 @@ export default async function PublicSharePage({ params }: PageProps) {
 
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
 
+        <MoreDemosLink />
+
         <ShareFooter slug={slug} />
       </main>
 
@@ -2091,6 +2093,26 @@ function ClaimCTA({
   );
 }
 
+// A prominent, crawlable dofollow link into the demos hub. Without it, each
+// share page is a "dead end" for crawlers (its CTAs are <button>s, not links) —
+// this gives every /r/<slug> an outgoing link into Lastest's content graph and
+// lets crawlers hop between demos. Target is the apex marketing site, which
+// serves a real /demos gallery (the app domain has no /demos route).
+function MoreDemosLink() {
+  return (
+    <div className="pt-2 text-center text-sm text-muted-foreground">
+      <a
+        href="https://lastest.cloud/demos"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-foreground underline-offset-4 hover:underline"
+      >
+        Browse more live Lastest demo reports →
+      </a>
+    </div>
+  );
+}
+
 function ShareFooter({ slug }: { slug: string }) {
   return (
     <footer className="pt-6 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 justify-between">
@@ -2106,6 +2128,14 @@ function ShareFooter({ slug }: { slug: string }) {
         </a>
       </span>
       <div className="flex items-center gap-4">
+        <a
+          href="https://lastest.cloud/demos"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground"
+        >
+          More demos
+        </a>
         <a href="/terms" className="hover:text-foreground">
           Terms
         </a>
