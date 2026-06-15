@@ -139,17 +139,18 @@ export async function repointPublicShare(
   return row;
 }
 
-// Sitemap input: every non-revoked share with its build timestamp for lastmod.
-// Limited at the call site (sitemap.ts) to keep the XML under Google's 50k-URL
-// cap; the share table is currently far below that ceiling but the limit makes
-// the contract explicit.
+// Sitemap input: one entry per indexable PER-TEST share (testId not null),
+// deduped to the most recent live share per test. Build-wide shares (testId
+// null) are EXCLUDED — they're noindex'd on the page to avoid duplicate-content
+// competition with their per-test share, so listing them here would contradict
+// the robots tag (Search Console "Submitted URL marked noindex"). Limited at
+// the call site (sitemap.ts) to keep the XML under Google's 50k-URL cap.
 //
 // Video fields feed the <video:video> sitemap extension on /r/<slug> entries.
 // Google requires the sitemap metadata to be CONSISTENT with the on-page
 // VideoObject JSON-LD (title/thumbnail/contentUrl), so the fields mirror what
 // the share page selects: the test-share's result video for the share's build
-// run. Build shares (testId null) never join a video — same as the page,
-// which only emits VideoObject markup for test shares.
+// run.
 export async function listPublicSharesForSitemap(limit = 5000): Promise<
   Array<{
     slug: string;
@@ -164,6 +165,7 @@ export async function listPublicSharesForSitemap(limit = 5000): Promise<
   const rows = await db
     .select({
       slug: publicShares.slug,
+      testId: publicShares.testId,
       buildCompletedAt: builds.completedAt,
       buildCreatedAt: builds.createdAt,
       shareCreatedAt: publicShares.createdAt,
@@ -184,16 +186,27 @@ export async function listPublicSharesForSitemap(limit = 5000): Promise<
         isNotNull(testResults.videoPath),
       ),
     )
-    .where(eq(publicShares.status, "public"))
+    .where(
+      and(eq(publicShares.status, "public"), isNotNull(publicShares.testId)),
+    )
     .orderBy(desc(publicShares.createdAt))
     .limit(limit);
-  // Retried runs can leave multiple results per (run, test) — keep the first
-  // row per slug so each sitemap entry carries at most one video.
-  const seen = new Set<string>();
+  // Two-level dedup, rows are createdAt-desc:
+  //  - per slug: retried runs leave multiple results per (run, test) — keep the
+  //    first row per slug so each sitemap entry carries at most one video.
+  //  - per test: a test may carry multiple public share rows (legacy links
+  //    minted before the 1-share-per-test reuse rule). Keep only the most
+  //    recent share per test so each test contributes exactly one sitemap URL.
+  const seenSlug = new Set<string>();
+  const seenTest = new Set<string>();
   const out: Awaited<ReturnType<typeof listPublicSharesForSitemap>> = [];
   for (const r of rows) {
-    if (seen.has(r.slug)) continue;
-    seen.add(r.slug);
+    if (seenSlug.has(r.slug)) continue;
+    seenSlug.add(r.slug);
+    if (r.testId) {
+      if (seenTest.has(r.testId)) continue;
+      seenTest.add(r.testId);
+    }
     out.push({
       slug: r.slug,
       updatedAt:
