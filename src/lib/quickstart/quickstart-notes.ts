@@ -110,6 +110,7 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     safeCtas: input.authedScout?.safeCtaCandidates.map((c) => c.label) ?? [],
     authedFriction: input.authedScout?.friction ?? [],
     authSetupCaptured: input.authSetup?.captured ?? false,
+    authSetupMode: input.authSetup?.mode ?? null,
     authSetupFailureReason: input.authSetup?.failureReason ?? null,
     authVerificationFailed: input.authVerificationFailed ?? false,
     runResults: {

@@ -80,6 +80,20 @@ export interface RenderAuthSetupOptions {
   registerUrl: string;
 }
 
+export interface RenderAuthLoginOptions {
+  /** User-supplied app credentials (QuickStart runs against the user's own app). */
+  email: string;
+  password: string;
+  /** Login URL observed by the scout in the page DOM. Relative path (starting with /)
+   *  or full https:// URL. REQUIRED — no path-guessing fallback. */
+  loginUrl: string;
+  /** Auth library REST sign-in endpoint observed by the scout (e.g.
+   *  "/api/auth/sign-in/email"). When present, the test lands the session cookie
+   *  via a direct POST (bypasses React forms that don't persist on .fill()), and
+   *  falls back to the visible form submit if the POST is rejected. */
+  apiLoginEndpoint?: string | null;
+}
+
 export interface RenderWalkthroughOptions {
   authAutomatable: boolean;
   /** When true, walkthrough trusts setupTestId/storageState injection and skips inline login. */
@@ -281,6 +295,115 @@ ${renderEbBootstrap()}
     throw new Error(joined
       ? joined
       : \`auth did not complete — still on \${url}\`);
+  }
+
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+`;
+}
+
+/**
+ * Test 1 (login variant) — signs into the user's OWN app with user-supplied
+ * credentials, captures sign-in screenshots, asserts auth completed. Used when
+ * the user provided creds (QuickStart runs against their own baseURL). When the
+ * scout found an `apiLoginEndpoint`, the test lands the session cookie via a
+ * direct POST (bypasses React forms whose .fill() doesn't persist the session),
+ * then falls back to the visible form submit if the POST is rejected.
+ *
+ * SECURITY: the credentials are baked as literals into the test body, which is
+ * stored team-gated (never exposed on the public /r/ share — that renders
+ * screenshots + notes only). These are the user's own app credentials.
+ */
+export function renderAuthLoginCode(opts: RenderAuthLoginOptions): string {
+  return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  const DEMO_EMAIL = ${jsString(opts.email)};
+  const DEMO_PASSWORD = ${jsString(opts.password)};
+  const API_LOGIN = ${jsString(opts.apiLoginEndpoint ?? "")};
+
+  const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
+  async function settle() {
+    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
+
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  const accept = page.getByRole('button', { name: /accept|allow|got it|ok$/i });
+  if (await accept.isVisible().catch(() => false)) {
+    await accept.click();
+  }
+  await settle();
+
+  stepLogger.log('Scenario 1: Sign-in page');
+  ${gotoExpr(opts.loginUrl)}
+  await settle();
+  await page.screenshot({ path: shot(1, 'sign-in'), fullPage: true });
+
+  const captcha = page.locator(${jsString(CAPTCHA_LOCATOR)});
+  if (await captcha.first().isVisible().catch(() => false)) {
+    throw new Error('captcha-blocked on sign-in page');
+  }
+
+  stepLogger.log('Scenario 2: Submit sign-in');
+  const emailField = page.getByLabel(/email/i).first()
+    .or(page.getByPlaceholder(/email/i).first())
+    .or(page.locator('input[type="email"]').first());
+  const passField = page.getByLabel(/^password$/i).first()
+    .or(page.getByPlaceholder(/^password$/i).first())
+    .or(page.locator('input[type="password"]').first());
+
+  await emailField.click();
+  await emailField.pressSequentially(DEMO_EMAIL, { delay: 20 });
+  await passField.click();
+  await passField.pressSequentially(DEMO_PASSWORD, { delay: 20 });
+  await page.screenshot({ path: shot(2, 'sign-in-filled'), fullPage: true });
+
+  // API-login bypass: POST the credentials directly so the session cookie sticks
+  // even when the React form's submit handler swallows programmatic input.
+  let apiOk = false;
+  if (API_LOGIN) {
+    apiOk = await page.evaluate(async function (args) {
+      try {
+        const r = await fetch(args.url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: args.email, password: args.password }),
+        });
+        return r.ok;
+      } catch (e) {
+        return false;
+      }
+    }, { url: API_LOGIN, email: DEMO_EMAIL, password: DEMO_PASSWORD });
+    if (apiOk) {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    }
+  }
+  if (!apiOk) {
+    const submit = page.getByRole('button', { name: /sign ?in|log ?in|continue|submit|next/i }).first();
+    await submit.click().catch(function () {});
+    await Promise.race([
+      page.waitForURL(/dashboard|onboarding|welcome|home|app|projects|account/i, { timeout: 15000 }),
+      page.waitForSelector('[role="alert"]:visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
+    ]).catch(function () {});
+  }
+  await settle();
+
+  stepLogger.log('Scenario 3: Post-sign-in landing');
+  const url = page.url();
+  const stillSignInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
+    .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
+  const onAuthUrl = /login|signin|sign-in|log-in/i.test(url);
+  if (onAuthUrl && (await stillSignInCta.isVisible().catch(() => false))) {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    let errText = '';
+    const errLoc = page.locator('[role="alert"], [aria-live="polite"], [aria-live="assertive"], .error, .field-error, [class*="text-red"], [class*="text-destructive"]').first();
+    if (await errLoc.isVisible().catch(() => false)) {
+      errText = ((await errLoc.textContent().catch(() => '')) || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    }
+    throw new Error(errText ? ('sign-in failed: ' + errText) : ('sign-in did not complete — still on ' + url));
   }
 
   await page.screenshot({ path: screenshotPath, fullPage: true });

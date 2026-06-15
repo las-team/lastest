@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   Card,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Rocket,
   Loader2,
@@ -18,6 +20,8 @@ import {
   CircleDot,
   Circle,
   X,
+  ChevronDown,
+  KeyRound,
 } from "lucide-react";
 import { useQuickstart, type QuickstartStep } from "./use-quickstart";
 
@@ -63,6 +67,12 @@ export function QuickstartPanel({
     cancel,
     dismiss,
   } = useQuickstart(repositoryId);
+
+  const [showCreds, setShowCreds] = useState(false);
+  const [appEmail, setAppEmail] = useState("");
+  const [appPassword, setAppPassword] = useState("");
+  const handleStart = () =>
+    start(appEmail && appPassword ? { appEmail, appPassword } : undefined);
 
   if (!enabled) {
     // Only render the disabled hint when the team IS early-adopter but baseUrl is missing —
@@ -114,7 +124,7 @@ export function QuickstartPanel({
             {!session && (
               <Button
                 size="sm"
-                onClick={start}
+                onClick={handleStart}
                 disabled={loading || !repositoryId}
               >
                 {loading ? (
@@ -148,6 +158,50 @@ export function QuickstartPanel({
           </div>
         </div>
       </CardHeader>
+
+      {!session && (
+        <CardContent className="pt-0 space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowCreds((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <KeyRound className="size-3" />
+            Use my app login (optional)
+            <ChevronDown
+              className={`size-3 transition-transform ${showCreds ? "rotate-180" : ""}`}
+            />
+          </button>
+          {showCreds && (
+            <div className="space-y-2 pt-1">
+              <p className="text-[11px] text-muted-foreground">
+                QuickStart runs against your app&rsquo;s base URL. Provide a
+                working login to capture an authenticated walkthrough; leave
+                blank to register a throwaway demo account instead. Credentials
+                stay on your team and are never shown on the public share.
+              </p>
+              <Input
+                type="email"
+                autoComplete="off"
+                placeholder="you@yourapp.com"
+                aria-label="App login email"
+                value={appEmail}
+                onChange={(e) => setAppEmail(e.target.value)}
+                className="h-8 text-sm"
+              />
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="App login password"
+                aria-label="App login password"
+                value={appPassword}
+                onChange={(e) => setAppPassword(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+          )}
+        </CardContent>
+      )}
 
       {session && (
         <CardContent className="pt-0 space-y-3">

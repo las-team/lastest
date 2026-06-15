@@ -77,6 +77,9 @@ Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_cl
    - demoInputValue: a SAFE additive demo string to type into primaryInputLabel that exercises the product's core function. Examples: "AI-powered birthday-card generator for parents of 3-7 year olds" for an idea-validator, "https://example.com/article" for a URL summariser, "best coffee shops in Berlin" for a search tool. NEVER pick a value that triggers destructive actions, real payments, outbound messaging on the founder's behalf, or scans of real third-party accounts.
 5. Find the registration page by examining the landing page DOM ONLY. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. NEVER guess paths like /signup, /register, /join — if no CTA exists in the DOM, return registerPath: null and classification: "no_public_register". Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"). NEVER mix the two formats (do not prefix a path with a partial URL).
 6. Snapshot the register page and classify the sign-up flow.
+7. Find the LOGIN page the same DOM-only way (link/button whose visible text matches /sign ?in|log ?in/i). Record loginPath as either a relative path starting with / OR the FULL absolute URL — same format rules as registerPath; null if none found. Note whether the login form exposes email + password fields.
+8. Detect the auth library + its REST sign-in endpoint when actually visible: footer text like "SECURED BY BETTER AUTH", a login form whose action is under /api/auth/, or SDK hints in the page source (Firebase, Supabase, Clerk, NextAuth, Lucia). Report authLibrary (one of better-auth | nextauth | supabase | firebase | clerk | lucia | unknown) and apiLoginEndpoint (the sign-in REST path you SAW, e.g. "/api/auth/sign-in/email" for better-auth; null if you didn't see one — never guess).
+9. Report tokenLocation best-effort from the detected library: better-auth/nextauth/lucia → cookie; firebase/clerk → indexeddb; supabase → localstorage; otherwise unknown.
 
 CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick the first match):
 
@@ -89,6 +92,9 @@ CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick th
 | Only OAuth buttons (Google / GitHub / Apple / SSO) | oauth_only | false |
 | textbox "Email" only + button "Send magic link" / "Continue" | magic_link_only | false |
 | textbox "Email" + textbox "Password" + submit button | email_password | true |
+| Register is oauth-only / magic-link / gated / unreachable, BUT a conventional email + password LOGIN form exists | login_email_password | false |
+
+OVERRIDE: if you would otherwise classify the REGISTER flow as oauth_only / magic_link_only / captcha_gated / otp / no_public_register, but the site ALSO has a standard email + password LOGIN form, classify as "login_email_password" instead. Signup is not automatable there, but login IS — when the user supplies their own credentials.
 
 You MUST have actually loaded a register page (or confirmed no such page exists by following step 4) before classifying as anything other than "no_public_register" or "unknown". If the browser failed, you could not snapshot the landing page, or you have no concrete observations, return "classification": "unknown".
 
@@ -98,7 +104,11 @@ Return STRICT JSON (no markdown, no prose), shape:
   "concept": "1-2 sentence description, no marketing fluff",
   "navLinks": [{ "path": "/features", "label": "Features" }, ...],
   "registerPath": "/sign-up | https://auth.example.com/register | null",
-  "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
+  "loginPath": "/login | https://auth.example.com/sign-in | null",
+  "apiLoginEndpoint": "/api/auth/sign-in/email | null",
+  "authLibrary": "better-auth | nextauth | supabase | firebase | clerk | lucia | unknown",
+  "tokenLocation": "cookie | localstorage | indexeddb | sessionstorage | unknown",
+  "classification": "email_password | login_email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
   "authAutomatable": true | false,
   "cookieBannerSelectorHint": "optional — if you saw a cookie banner, the button label that dismisses it",
   "businessInteraction": {
@@ -199,6 +209,7 @@ function asBusinessInteraction(
 function classify(value: unknown): QuickstartPublicScout["classification"] {
   const allowed = [
     "email_password",
+    "login_email_password",
     "magic_link_only",
     "oauth_only",
     "captcha_gated",
@@ -209,6 +220,30 @@ function classify(value: unknown): QuickstartPublicScout["classification"] {
   return (allowed as readonly string[]).includes(value as string)
     ? (value as QuickstartPublicScout["classification"])
     : "unknown";
+}
+
+function asTokenLocation(
+  value: unknown,
+): QuickstartPublicScout["tokenLocation"] {
+  const allowed = [
+    "cookie",
+    "localstorage",
+    "indexeddb",
+    "sessionstorage",
+    "unknown",
+  ] as const;
+  return (allowed as readonly string[]).includes(value as string)
+    ? (value as QuickstartPublicScout["tokenLocation"])
+    : undefined;
+}
+
+/** Normalise a scout-reported path/URL: a relative path (starts with /) or a full
+ *  https URL passes through; anything else (guessed bare word, partial URL) → null. */
+function asPathOrUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (value.startsWith("/")) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  return null;
 }
 
 export interface QuickstartScoutPublicResult {
@@ -325,8 +360,14 @@ export async function runQuickstartScoutPublic(
     tagline,
     concept,
     navLinks,
-    registerPath:
-      typeof parsed.registerPath === "string" ? parsed.registerPath : null,
+    registerPath: asPathOrUrl(parsed.registerPath),
+    loginPath: asPathOrUrl(parsed.loginPath),
+    apiLoginEndpoint: asPathOrUrl(parsed.apiLoginEndpoint),
+    authLibrary:
+      typeof parsed.authLibrary === "string" && parsed.authLibrary.length > 0
+        ? parsed.authLibrary
+        : undefined,
+    tokenLocation: asTokenLocation(parsed.tokenLocation),
     cookieBannerSelectorHint:
       typeof parsed.cookieBannerSelectorHint === "string"
         ? parsed.cookieBannerSelectorHint

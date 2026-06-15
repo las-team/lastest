@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   renderAuthSetupCode,
+  renderAuthLoginCode,
   renderWalkthroughCode,
   renderQuickstartEmail,
   renderQuickstartPassword,
@@ -171,6 +172,59 @@ describe("renderWalkthroughCode — public-only mode", () => {
   it("still walks the public phase", () => {
     expect(code).toMatch(/Scenario 1: Homepage/);
     expect(code).toMatch(/page\.\$\$eval\('a\[href\]'/);
+  });
+});
+
+describe("renderAuthLoginCode (user-credential login)", () => {
+  const withApi = renderAuthLoginCode({
+    email: "owner@myapp.com",
+    password: "s3cret-pass",
+    loginUrl: "/login",
+    apiLoginEndpoint: "/api/auth/sign-in/email",
+  });
+  const noApi = renderAuthLoginCode({
+    email: "owner@myapp.com",
+    password: "s3cret-pass",
+    loginUrl: "https://auth.example.com/sign-in",
+  });
+
+  it("exports the canonical 4-arg test function", () => {
+    expect(withApi).toMatch(
+      /export async function test\(page, baseUrl, screenshotPath, stepLogger\)/,
+    );
+  });
+
+  it("inlines the supplied credentials", () => {
+    expect(withApi).toContain("owner@myapp.com");
+    expect(withApi).toContain("s3cret-pass");
+  });
+
+  it("navigates relative loginUrl via baseUrl and absolute loginUrl directly", () => {
+    expect(withApi).toMatch(/await page\.goto\(`\$\{baseUrl\}\/login`/);
+    expect(noApi).toMatch(
+      /await page\.goto\('https:\/\/auth\.example\.com\/sign-in'/,
+    );
+  });
+
+  it("does the api-login POST bypass when an endpoint is provided", () => {
+    expect(withApi).toContain("/api/auth/sign-in/email");
+    expect(withApi).toMatch(/fetch\(args\.url/);
+  });
+
+  it("bakes an empty API_LOGIN when no endpoint is provided", () => {
+    expect(noApi).toMatch(/const API_LOGIN = '';/);
+  });
+
+  it("ships the EB bootstrap + hoisted settle", () => {
+    expect(withApi).toMatch(/setExtraHTTPHeaders\(\{ 'User-Agent':/);
+    expect(withApi).toContain("email-decode.min.js");
+    expect(withApi).toMatch(/async function settle\(\)/);
+  });
+
+  it("screenshots fullPage everywhere", () => {
+    const matches = withApi.match(/page\.screenshot\([\s\S]*?\)\s*;/g) ?? [];
+    expect(matches.length).toBeGreaterThan(0);
+    for (const m of matches) expect(m).toMatch(/fullPage:\s*true/);
   });
 });
 
