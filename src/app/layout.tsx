@@ -25,7 +25,8 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
   ),
   title: "Lastest - Visual Regression Testing",
-  description: "AI-powered visual regression testing tool",
+  description:
+    "Lastest is the open-source, AI-powered visual regression testing platform: record browser flows, run them on every build, and catch UI bugs with pixel diffs.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -50,7 +51,8 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Lastest - Visual Regression Testing",
-    description: "AI-powered visual regression testing tool",
+    description:
+      "Lastest is the open-source, AI-powered visual regression testing platform: record browser flows, run them on every build, and catch UI bugs with pixel diffs.",
     images: [
       { url: "/og-image.png", width: 1200, height: 630, alt: "Lastest" },
     ],
@@ -59,7 +61,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Lastest - Visual Regression Testing",
-    description: "AI-powered visual regression testing tool",
+    description:
+      "Lastest is the open-source, AI-powered visual regression testing platform: record browser flows, run them on every build, and catch UI bugs with pixel diffs.",
     images: ["/og-image.png"],
   },
 };
