@@ -16,6 +16,7 @@ import type {
 import { isQuickstartEnabled, gateReasonHint } from "@/lib/quickstart/gating";
 import {
   renderAuthSetupCode,
+  renderAuthLoginCode,
   renderWalkthroughCode,
   renderQuickstartEmail,
   renderQuickstartPassword,
@@ -351,16 +352,35 @@ async function runQsPreflight(
 
   const stamp = utcStamp();
   const slug = slugify(gate.repo.name);
-  const template =
-    gate.team.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
-  const email = renderQuickstartEmail(template, slug, stamp);
-  const password = renderQuickstartPassword(stamp);
+
+  // QuickStart runs against the user's OWN app. If they supplied real login
+  // credentials (set on the session at start), use those for a LOGIN handshake
+  // and skip generating a throwaway demo account. Otherwise fall back to a fresh
+  // demo signup via the team email template.
+  const preMeta = (await queries.getAgentSession(sessionId))?.metadata;
+  const credsProvided =
+    preMeta?.credsProvided === true &&
+    !!preMeta?.quickstartEmail &&
+    !!preMeta?.quickstartPassword;
+
+  let email: string;
+  let password: string;
+  if (credsProvided) {
+    email = preMeta!.quickstartEmail!;
+    password = preMeta!.quickstartPassword!;
+  } else {
+    const template =
+      gate.team.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
+    email = renderQuickstartEmail(template, slug, stamp);
+    password = renderQuickstartPassword(stamp);
+  }
 
   await mergeMetadata(sessionId, {
     quickstartEmail: email,
     quickstartPassword: password,
     quickstartSlug: slug,
     quickstartStamp: stamp,
+    credsProvided,
   });
 
   // Force the repo's EB error gates to "warn" before the first run. Founder
@@ -499,8 +519,8 @@ async function runQsAuthSetup(
 
   const meta = session.metadata;
   const publicScout = meta.publicScout;
-  if (!publicScout || !publicScout.authAutomatable) {
-    await setSkipped(sessionId, "qs_auth_setup", "auth flow not automatable");
+  if (!publicScout) {
+    await setSkipped(sessionId, "qs_auth_setup", "no public scout output");
     return true;
   }
 
@@ -508,49 +528,84 @@ async function runQsAuthSetup(
   const password = meta.quickstartPassword!;
   const stamp = meta.quickstartStamp!;
   const slug = meta.quickstartSlug!;
+  const credsProvided = meta.credsProvided === true;
 
-  if (!publicScout.registerPath) {
-    await setFailed(
-      sessionId,
-      "qs_auth_setup",
-      "Scout did not observe a register URL in the page DOM. Auth setup cannot proceed without one — no path guessing.",
-    );
-    return false;
+  // Decide the handshake. QuickStart runs against the user's OWN app:
+  //  - creds provided + a login surface exists  -> LOGIN (real creds, most reliable)
+  //  - else automatable email+password register -> SIGNUP (fresh demo account)
+  //  - else                                      -> skip (public-only walkthrough)
+  const canLogin =
+    credsProvided &&
+    !!publicScout.loginPath &&
+    (publicScout.classification === "email_password" ||
+      publicScout.classification === "login_email_password");
+  const canSignup = publicScout.authAutomatable && !!publicScout.registerPath;
+
+  let authMode: "login" | "signup";
+  let code: string;
+  let testName: string;
+  if (canLogin) {
+    authMode = "login";
+    code = renderAuthLoginCode({
+      email,
+      password,
+      loginUrl: publicScout.loginPath!,
+      apiLoginEndpoint: publicScout.apiLoginEndpoint ?? undefined,
+    });
+    testName = `${slug} — auth login`;
+  } else if (canSignup) {
+    authMode = "signup";
+    code = renderAuthSetupCode({
+      email,
+      password,
+      registerUrl: publicScout.registerPath!,
+    });
+    testName = `${slug} — auth setup`;
+  } else {
+    const reason = credsProvided
+      ? "Credentials were provided but the scout found no usable login form on the site — running public-only."
+      : publicScout.authAutomatable
+        ? "Scout did not observe a register URL in the page DOM — running public-only (no path guessing)."
+        : "auth flow not automatable — running public-only";
+    await mergeMetadata(sessionId, { authMode: "public_only" });
+    await setSkipped(sessionId, "qs_auth_setup", reason);
+    return true;
   }
 
-  const code = renderAuthSetupCode({
-    email,
-    password,
-    registerUrl: publicScout.registerPath,
-  });
-
-  // Persist the auth setup test so the founder-facing share carries it too.
+  // Persist the auth test so the authed scout can replay it and (in non-chained
+  // mode) the build includes it. Test code is team-gated; the public /r/ share
+  // renders screenshots + notes only, never code.
   const created = await queries.createTest({
     repositoryId,
-    name: `${slug} — auth setup`,
+    name: testName,
     code,
   });
   const testId = created.id;
 
-  // Capture storage state in a transient browser context.
+  // Capture storage state in a disposable runner/EB (or transient host browser).
   const captured = await captureStorageState({
     repositoryId,
     baseUrl: gate.baseUrl,
     testCode: code,
     name: `QuickStart auth ${slug} ${stamp}`,
+    tokenLocation: publicScout.tokenLocation,
+    authFlavor: publicScout.authLibrary,
   });
 
   await mergeMetadata(sessionId, {
+    authMode,
     authSetup: {
       testId,
       storageStateId: captured.storageStateId,
       captured: captured.captured,
       failureReason: captured.failureReason,
+      mode: authMode,
     },
   });
 
   await setCompleted(sessionId, "qs_auth_setup", {
     testId,
+    mode: authMode,
     captured: captured.captured,
     storageStateId: captured.storageStateId,
     failureReason: captured.failureReason,
@@ -671,13 +726,13 @@ async function runQsGenerate(
   }
 
   const slug = meta.quickstartSlug!;
-  // Authed walkthrough requires both: scout said automatable AND storage state
-  // was actually captured AND we have a storageStateId to chain. No fallback to
-  // inline-login (we don't guess login URLs).
+  // Authed walkthrough is driven purely by whether the auth-setup actually
+  // captured a chainable storage_state — true for BOTH the signup path
+  // (classification email_password) and the user-creds login path
+  // (login_email_password, where publicScout.authAutomatable is false). No
+  // fallback to inline-login (we don't guess login URLs).
   const authAutomatable =
-    publicScout.authAutomatable &&
-    (meta.authSetup?.captured ?? false) &&
-    !!meta.authSetup?.storageStateId;
+    (meta.authSetup?.captured ?? false) && !!meta.authSetup?.storageStateId;
 
   const biz = publicScout.businessInteraction;
   const code = renderWalkthroughCode({
@@ -1292,7 +1347,7 @@ async function executeQuickstart(
 
 export async function startQuickstart(
   repositoryId: string,
-  opts?: { emailTemplate?: string },
+  opts?: { emailTemplate?: string; appEmail?: string; appPassword?: string },
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(repositoryId);
 
@@ -1304,6 +1359,16 @@ export async function startQuickstart(
       "quickstart_disabled";
     (err as Error & { code?: string; reason?: string }).reason = reason;
     throw err;
+  }
+
+  // Optional user-supplied login credentials for their own app. Both or neither.
+  const appEmail = opts?.appEmail?.trim();
+  const appPassword = opts?.appPassword;
+  const credsProvided = !!appEmail && !!appPassword;
+  if ((appEmail && !appPassword) || (!appEmail && appPassword)) {
+    throw new Error(
+      "Provide both an email and a password to use your app login, or neither.",
+    );
   }
 
   if (opts?.emailTemplate) {
@@ -1341,7 +1406,15 @@ export async function startQuickstart(
     status: "active",
     currentStepId: "qs_preflight",
     steps: buildInitialQsSteps(),
-    metadata: {},
+    // Seed user creds into metadata so preflight uses them for a LOGIN handshake.
+    // quickstartPassword is never returned by the GET /quickstart API (curated).
+    metadata: credsProvided
+      ? {
+          credsProvided: true,
+          quickstartEmail: appEmail,
+          quickstartPassword: appPassword,
+        }
+      : {},
   });
 
   emitActivity(
