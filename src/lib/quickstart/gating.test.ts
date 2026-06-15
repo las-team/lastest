@@ -52,7 +52,9 @@ describe("pickRepoBaseUrl", () => {
     expect(url).toBe("https://feature.example.com");
   });
 
-  it("still returns the 'default' key when it is the only entry", () => {
+  it("ignores the legacy 'default' key entirely (no real branch ⇒ undefined)", () => {
+    // The repo-wide "default" key is removed from the design: a stale value
+    // there must never be picked, even when it's the only entry.
     const url = pickRepoBaseUrl(
       repo({
         defaultBranch: null,
@@ -60,7 +62,21 @@ describe("pickRepoBaseUrl", () => {
         branchBaseUrls: { default: "https://playwright.dev" },
       }),
     );
-    expect(url).toBe("https://playwright.dev");
+    expect(url).toBeUndefined();
+  });
+
+  it("ignores 'default' even alongside a real branch", () => {
+    const url = pickRepoBaseUrl(
+      repo({
+        defaultBranch: "main",
+        comparisonBaselineBranch: null,
+        branchBaseUrls: {
+          main: "https://app.example.com",
+          default: "https://playwright.dev",
+        },
+      }),
+    );
+    expect(url).toBe("https://app.example.com");
   });
 
   it("skips a local default-branch URL and uses the next non-local candidate", () => {

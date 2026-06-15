@@ -257,7 +257,10 @@ export async function createLocalRepo(
     owner: "local",
     name,
     fullName: name,
-    ...(baseUrl ? { branchBaseUrls: { default: baseUrl } } : {}),
+    // Seed the base URL under the conventional default branch. (We used to
+    // write a repo-wide "default" key here, but it was never updated by the
+    // per-branch base-URL UI and went stale — see pickRepoBaseUrl.)
+    ...(baseUrl ? { branchBaseUrls: { main: baseUrl } } : {}),
   });
   // Auto-select the new repo on user
   await queries.updateUser(session.user.id, { selectedRepositoryId: repo.id });
