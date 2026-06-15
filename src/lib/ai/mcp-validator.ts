@@ -1,5 +1,3 @@
-import { chromium, Browser, Page } from "playwright";
-
 export interface SelectorValidationResult {
   selector: string;
   valid: boolean;
@@ -206,163 +204,29 @@ function flush(
   out.push({ chain: chainSource, selector: composite, segments });
 }
 
-// Convert Playwright-engine selector strings into something `page.locator(...)`
-// understands. Most strings produced by `segmentToSelector` are already valid
-// Playwright engine syntax (role=, text=, [attr=…], internal:has-text=, …) —
-// only bare tag-like identifiers need wrapping in a CSS selector to disambiguate
-// them from a default text-engine match.
-function convertToQueryableSelector(selector: string): string {
-  // Already a Playwright engine selector — pass through.
-  if (/^(role|text|css|xpath|internal:)/i.test(selector)) return selector;
-  // Bracket / class / id selectors are valid CSS — pass through.
-  if (
-    selector.startsWith("[") ||
-    selector.startsWith(".") ||
-    selector.startsWith("#")
-  ) {
-    return selector;
-  }
-  // Anything that looks like a tag name (`section`, `header`, etc.) stays as CSS.
-  if (/^[a-z][a-z0-9-]*$/i.test(selector)) return selector;
-  return selector;
-}
+// Page-snapshot validation (validateSelectorsOnPage / validateLocatorChainsOnPage)
+// previously launched a host-process Chromium to check selectors. This was a
+// security hole — Playwright runs in the same process as Next.js. All test/setup
+// code now executes exclusively inside sandboxed Embedded Browser pods, so the
+// page-snapshot pass is skipped here. The static TS check (layer 1 in
+// validation-retry.ts) still runs; real selector feedback comes from the EB run.
 
 export async function validateSelectorsOnPage(
-  pageUrl: string,
-  selectors: string[],
+  _pageUrl: string,
+  _selectors: string[],
 ): Promise<MCPValidationResult> {
-  let browser: Browser | null = null;
-  let page: Page | null = null;
-
-  try {
-    browser = await chromium.launch({ headless: true });
-    page = await browser.newPage();
-
-    await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 30000 });
-
-    const results: SelectorValidationResult[] = [];
-
-    for (const selector of selectors) {
-      try {
-        // Skip URL-like patterns (from goto)
-        if (selector.startsWith("http") || selector.startsWith("/")) {
-          continue;
-        }
-
-        const queryableSelector = convertToQueryableSelector(selector);
-
-        // Use page.locator(...).count() so we accept the full Playwright engine
-        // syntax (role=…, text=…, internal:has-text=…) — page.$$() only takes CSS.
-        const matchCount = await page.locator(queryableSelector).count();
-
-        results.push({
-          selector,
-          valid: matchCount > 0,
-          matchCount,
-        });
-      } catch (error) {
-        results.push({
-          selector,
-          valid: false,
-          error: error instanceof Error ? error.message : "Invalid selector",
-        });
-      }
-    }
-
-    const valid = results.every((r) => r.valid);
-
-    return { valid, results };
-  } catch (error) {
-    return {
-      valid: false,
-      results: [],
-      pageError: error instanceof Error ? error.message : "Failed to load page",
-    };
-  } finally {
-    if (page) await page.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
-  }
+  return { valid: true, results: [] };
 }
 
-/**
- * Like `validateSelectorsOnPage` but takes whole locator chains (from
- * `extractLocatorChains`) and reports per-chain how many elements the *full*
- * chain resolves to. Also re-checks each constituent segment so callers can
- * pinpoint which segment in the chain is the bad one (the marktolmacs.com
- * `<section>` ancestor case).
- */
 export async function validateLocatorChainsOnPage(
-  pageUrl: string,
-  chains: {
+  _pageUrl: string,
+  _chains: {
     chain: string;
     selector: string;
     segments: { method: string; args: string; selector: string }[];
   }[],
 ): Promise<MCPValidationResult> {
-  let browser: Browser | null = null;
-  let page: Page | null = null;
-
-  try {
-    browser = await chromium.launch({ headless: true });
-    page = await browser.newPage();
-    await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 30000 });
-
-    const results: SelectorValidationResult[] = [];
-
-    for (const c of chains) {
-      // Test the full chain selector first.
-      try {
-        const wholeCount = await page
-          .locator(convertToQueryableSelector(c.selector))
-          .count();
-        results.push({
-          selector: c.chain,
-          valid: wholeCount > 0,
-          matchCount: wholeCount,
-        });
-        if (wholeCount > 0) continue; // chain works — skip per-segment forensics
-      } catch (err) {
-        results.push({
-          selector: c.chain,
-          valid: false,
-          error: err instanceof Error ? err.message : "Invalid locator chain",
-        });
-      }
-
-      // If the whole chain didn't match, drill in: which segment is empty?
-      for (const seg of c.segments) {
-        try {
-          const segCount = await page
-            .locator(convertToQueryableSelector(seg.selector))
-            .count();
-          results.push({
-            selector: `  └─ ${seg.method}(${seg.args}) → ${seg.selector}`,
-            valid: segCount > 0,
-            matchCount: segCount,
-          });
-        } catch (err) {
-          results.push({
-            selector: `  └─ ${seg.method}(${seg.args}) → ${seg.selector}`,
-            valid: false,
-            error:
-              err instanceof Error ? err.message : "Invalid segment selector",
-          });
-        }
-      }
-    }
-
-    const valid = results.every((r) => r.valid);
-    return { valid, results };
-  } catch (error) {
-    return {
-      valid: false,
-      results: [],
-      pageError: error instanceof Error ? error.message : "Failed to load page",
-    };
-  } finally {
-    if (page) await page.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
-  }
+  return { valid: true, results: [] };
 }
 
 export function formatValidationFeedback(result: MCPValidationResult): string {
