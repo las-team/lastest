@@ -440,11 +440,13 @@ async function runQsScoutPublic(
   // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (applyScoutMcpWiring would launch @playwright/mcp without a
-  // --cdp-endpoint, the exact in-host execution this codebase forbids).
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  // --cdp-endpoint, the exact in-host execution this codebase forbids). While
+  // waiting, surface "queued" so the panel reflects the pool back-pressure.
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch(() => undefined);
   if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_public",
@@ -452,6 +454,11 @@ async function runQsScoutPublic(
     );
     return false;
   }
+  // Surface the EB's live screencast so the panel can show the scout browsing.
+  await mergeMetadata(sessionId, {
+    streamUrl: eb?.streamUrl,
+    queuedForBrowser: false,
+  });
   try {
     const { data, promptLogId } = await runQuickstartScoutPublic(
       repositoryId,
@@ -500,6 +507,8 @@ async function runQsScoutPublic(
     return false;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    // Stop the panel pointing at a released EB.
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 
@@ -657,10 +666,11 @@ async function runQsScoutAuthed(
 
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (see runQsScoutPublic for the rationale).
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch(() => undefined);
   if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_authed",
@@ -668,6 +678,10 @@ async function runQsScoutAuthed(
     );
     return false;
   }
+  await mergeMetadata(sessionId, {
+    streamUrl: eb?.streamUrl,
+    queuedForBrowser: false,
+  });
   try {
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
@@ -702,6 +716,7 @@ async function runQsScoutAuthed(
     return true;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 
