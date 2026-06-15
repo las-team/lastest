@@ -37,11 +37,26 @@ function isLocalUrl(url: string): boolean {
 export function pickRepoBaseUrl(repo: Repository): string | undefined {
   const map = repo.branchBaseUrls ?? {};
   const candidates: string[] = [];
+
+  // Prefer the repo's real default branch (e.g. main/master), then its
+  // comparison baseline branch, then any other named branch. The literal
+  // "default" key is a LEGACY fallback that sandbox seeds + repo creation
+  // populate with throwaway URLs (e.g. https://playwright.dev), so it must come
+  // LAST — otherwise it shadows a real, user-configured branch URL and the
+  // QuickStart scout reconnoiters the wrong site. (The reported bug: an
+  // excalidraw repo with {master: excalidraw.com, default: playwright.dev}
+  // resolved to playwright.dev because "default" was tried first.)
+  const seen = new Set<string>();
+  const pushBranch = (branch: string | null | undefined) => {
+    if (!branch || branch === "default" || seen.has(branch)) return;
+    seen.add(branch);
+    if (typeof map[branch] === "string") candidates.push(map[branch]);
+  };
+  pushBranch(repo.defaultBranch);
+  pushBranch(repo.comparisonBaselineBranch);
+  for (const branch of Object.keys(map)) pushBranch(branch);
   if (typeof map.default === "string") candidates.push(map.default);
-  for (const [branch, value] of Object.entries(map)) {
-    if (branch !== "default" && typeof value === "string")
-      candidates.push(value);
-  }
+
   for (const url of candidates) {
     if (url.length > 0 && !isLocalUrl(url)) return url;
   }
