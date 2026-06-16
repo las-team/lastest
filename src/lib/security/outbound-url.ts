@@ -14,7 +14,7 @@
  * `URL_DIFF_ALLOW_PRIVATE_HOSTS` and `URL_DIFF_PRIVATE_HOST_IP_ALLOWLIST`.
  */
 
-import { promises as dns } from "node:dns";
+import { promises as dns, lookup as dnsLookupCb } from "node:dns";
 import net from "node:net";
 
 const ALLOW_GLOBAL = () =>
@@ -230,6 +230,63 @@ export async function safeOutboundFetch(
     currentUrl = new URL(location, currentUrl).toString();
   }
   throw new SsrfBlockedError("Too many redirects");
+}
+
+/**
+ * Connect-time SSRF guard. `assertSafeOutboundUrl` is a pre-flight check, but
+ * between that DNS lookup and the socket actually connecting, a malicious
+ * authoritative server can re-point the name at an internal IP (DNS-rebinding /
+ * TOCTOU). This returns an undici dispatcher whose `lookup` re-validates the
+ * resolved address at the moment of connection and refuses to connect to a
+ * blocked range — closing that window. Pass it as `fetch(url, { dispatcher })`.
+ */
+export async function createSsrfSafeDispatcher(): Promise<
+  import("undici").Dispatcher
+> {
+  // Lazy-import so this module's evaluation doesn't pull `undici` (Node >=20.18)
+  // into the broad import chain (ai -> executor -> builds -> server actions),
+  // which would crash module-eval on older local Node. Only callers that
+  // actually make guarded outbound fetches need it.
+  const { Agent } = await import("undici");
+  return new Agent({
+    connect: {
+      lookup: (
+        hostname: string,
+        options: import("node:dns").LookupOptions,
+        callback: (
+          err: NodeJS.ErrnoException | null,
+          address: string | import("node:dns").LookupAddress[],
+          family?: number,
+        ) => void,
+      ) => {
+        if (ALLOW_GLOBAL()) {
+          // Deployment explicitly opted into private outbound — don't re-block.
+          return dnsLookupCb(hostname, options, callback as never);
+        }
+        dnsLookupCb(
+          hostname,
+          { ...options, all: true },
+          (err: NodeJS.ErrnoException | null, addresses) => {
+            if (err) return callback(err, "");
+            const list = Array.isArray(addresses) ? addresses : [addresses];
+            const safe = list.filter(
+              (a: import("node:dns").LookupAddress) => !isBlockedIp(a.address),
+            );
+            if (safe.length === 0) {
+              return callback(
+                new SsrfBlockedError(
+                  `Target host ${hostname} resolves only to private/internal addresses`,
+                ),
+                "",
+              );
+            }
+            if (options.all) return callback(null, safe);
+            callback(null, safe[0]!.address, safe[0]!.family);
+          },
+        );
+      },
+    },
+  });
 }
 
 export function extractSourceIp(headers: Headers): string {
