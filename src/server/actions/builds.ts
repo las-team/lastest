@@ -1566,9 +1566,17 @@ async function runBuildAsync(
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
     import("@/lib/change-map/compute")
-      .then(({ computeChangeMap }) => {
-        computeChangeMap(buildId).catch((e) => {
+      .then(async ({ computeChangeMap }) => {
+        await computeChangeMap(buildId).catch((e) => {
           console.error(`[change-map] compute failed for build ${buildId}:`, e);
+        });
+        // RCA verdict ("is this diff the test or the code?") fuses the change
+        // map with each diff's pixel/DOM signals, so it must run AFTER the
+        // change map is persisted. Best-effort — the UI treats a missing
+        // verdict as "unknown".
+        const { classifyBuildDiffs } = await import("@/lib/rca/run");
+        await classifyBuildDiffs(buildId).catch((e) => {
+          console.error(`[rca] classify failed for build ${buildId}:`, e);
         });
       })
       .catch(console.error);
