@@ -179,6 +179,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [muted, setMuted] = useState(initialMuted);
     const [playbackRate, setPlaybackRate] = useState(defaultPlaybackRate);
     const [captionsOn, setCaptionsOn] = useState(captionsDefaultOn);
+    // Active cue text for our custom caption bar. We render captions ourselves
+    // (track mode stays "hidden") so they can sit ABOVE the controls instead of
+    // the browser's default bottom position, which overlaps the control bar.
+    const [activeCueText, setActiveCueText] = useState<string | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [controlsVisible, setControlsVisible] = useState(true);
@@ -212,28 +216,65 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       }
     }, [mutedProp]);
 
-    // Apply the captions on/off choice to the <video>'s text tracks. The
-    // browser exposes them via `video.textTracks` once the <track> children
-    // mount; flip every track's mode and persist the preference. Re-runs when
-    // the track set changes so a late-arriving track inherits the current
-    // state.
+    // Drive captions. We never use "showing" mode — that would let the browser
+    // paint cues at the bottom of the video, on top of the controls. Instead we
+    // keep enabled tracks in "hidden" mode (cues still parse and `cuechange`
+    // still fires) and render the active cue ourselves in a bar positioned
+    // above the controls (see the caption overlay in the JSX). When off, tracks
+    // go "disabled" so the browser does no cue work. Persists the preference and
+    // re-runs when the track set changes so a late-arriving track is handled.
     useEffect(() => {
       const v = videoRef.current;
       if (!v) return;
-      const apply = () => {
+
+      const syncMode = () => {
         for (let i = 0; i < v.textTracks.length; i++) {
-          v.textTracks[i]!.mode = captionsOn ? "showing" : "hidden";
+          v.textTracks[i]!.mode = captionsOn ? "hidden" : "disabled";
         }
       };
-      apply();
-      // Tracks can register slightly after mount; `addtrack` catches that.
-      v.textTracks.addEventListener?.("addtrack", apply);
+      const readActiveCue = () => {
+        if (!captionsOn) {
+          setActiveCueText(null);
+          return;
+        }
+        for (let i = 0; i < v.textTracks.length; i++) {
+          const tt = v.textTracks[i]!;
+          if (tt.mode === "disabled") continue;
+          const cues = tt.activeCues;
+          if (cues && cues.length > 0) {
+            setActiveCueText(
+              Array.from(cues)
+                .map((c) => (c as VTTCue).text)
+                .join("\n"),
+            );
+            return;
+          }
+        }
+        setActiveCueText(null);
+      };
+
+      const onAddTrack = () => {
+        syncMode();
+        readActiveCue();
+      };
+
+      syncMode();
+      readActiveCue();
+
+      const tts = Array.from(v.textTracks);
+      tts.forEach((tt) => tt.addEventListener("cuechange", readActiveCue));
+      v.textTracks.addEventListener?.("addtrack", onAddTrack);
+
       try {
         window.localStorage.setItem(CAPTIONS_KEY, captionsOn ? "1" : "0");
       } catch {
         // noop
       }
-      return () => v.textTracks.removeEventListener?.("addtrack", apply);
+
+      return () => {
+        tts.forEach((tt) => tt.removeEventListener("cuechange", readActiveCue));
+        v.textTracks.removeEventListener?.("addtrack", onAddTrack);
+      };
     }, [captionsOn, tracks]);
 
     useEffect(() => {
@@ -671,6 +712,24 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           >
             <Play className="h-7 w-7 translate-x-0.5 fill-current" />
           </button>
+        )}
+
+        {/* Custom caption bar. Sits above the control bar — and lifts further
+            when the controls are visible — so cues never overlap the controls.
+            Driven by the hidden text track's active cue (see the captions
+            effect). */}
+        {captionsOn && activeCueText && (
+          <div
+            aria-live="polite"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 transition-[bottom] duration-150",
+              showControls ? "bottom-24" : "bottom-6",
+            )}
+          >
+            <span className="max-w-[90%] whitespace-pre-line rounded bg-black/75 px-2.5 py-1 text-center text-sm font-medium leading-snug text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+              {activeCueText}
+            </span>
+          </div>
         )}
 
         <div

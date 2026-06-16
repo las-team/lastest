@@ -75,6 +75,7 @@ export function ReplayPlayer({ clips, className, tracks }: ReplayPlayerProps) {
           poster={clip.poster ?? undefined}
           durationMsFallback={clip.durationMs ?? null}
           tracks={i === 0 ? tracks : undefined}
+          captionsDefaultOn={i === 0 && !!tracks && tracks.length > 0}
           autoPlay
           loop
           playsInline
