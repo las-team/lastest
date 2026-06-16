@@ -5,6 +5,8 @@ import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
 import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
+import { claimEmbeddedBrowserForAgent } from "./ai";
+import { releasePoolEB } from "./embedded-sessions";
 
 /**
  * Unified area discovery server action.
@@ -26,7 +28,17 @@ export async function discoverAreas(
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
-  const result = await runAgentDiscovery(repositoryId, baseUrl);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  let result;
+  try {
+    result = await runAgentDiscovery(repositoryId, baseUrl, {
+      cdpEndpoint: eb?.cdpUrl,
+    });
+  } finally {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 
   if (result.success && result.functionalAreas) {
     revalidatePath("/areas");

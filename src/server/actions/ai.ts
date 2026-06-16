@@ -185,7 +185,16 @@ export async function aiEnhanceTest(
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  return agentEnhanceTest(repositoryId, testId, userPrompt);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  try {
+    return await agentEnhanceTest(repositoryId, testId, userPrompt, {
+      cdpEndpoint: eb?.cdpUrl,
+    });
+  } finally {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 export async function saveGeneratedTest(data: {
@@ -1090,5 +1099,14 @@ export async function createTest(
   context: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  return agentCreateTest(repositoryId, context);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  try {
+    return await agentCreateTest(repositoryId, context, {
+      cdpEndpoint: eb?.cdpUrl,
+    });
+  } finally {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }

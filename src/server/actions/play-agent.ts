@@ -3260,13 +3260,22 @@ export async function rerunPlanner(
 
       const { runDeepDiveExploration } =
         await import("@/lib/playwright/planner-agent");
-      const areas = await runDeepDiveExploration(
-        areaName,
-        scoutArea?.routes || [],
-        scoutArea?.focusPoints,
-        session.repositoryId,
-        baseUrl,
+      const diveEB = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+        () => undefined,
       );
+      let areas;
+      try {
+        areas = await runDeepDiveExploration(
+          areaName,
+          scoutArea?.routes || [],
+          scoutArea?.focusPoints,
+          session.repositoryId,
+          baseUrl,
+          { cdpEndpoint: diveEB?.cdpUrl },
+        );
+      } finally {
+        if (diveEB) await releasePoolEB(diveEB.runnerId).catch(() => {});
+      }
       result = {
         source: "browser",
         areas,

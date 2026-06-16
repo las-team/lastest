@@ -74,6 +74,7 @@ export async function agentEnhanceTest(
   repositoryId: string,
   testId: string,
   userPrompt?: string,
+  options?: { cdpEndpoint?: string },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
@@ -110,7 +111,14 @@ ${seed.seedPrompt}`;
     // The system prompt above expects browser_snapshot/browser_navigate from
     // @playwright/mcp — NOT the test-runner MCP that generateWithAI's fallback
     // would otherwise inject for claude-agent-sdk.
-    const mcpArgs = ["@playwright/mcp@latest", "--headless"];
+    const mcpArgs = options?.cdpEndpoint
+      ? [
+          "@playwright/mcp@latest",
+          "--cdp-endpoint",
+          options.cdpEndpoint,
+          "--headless",
+        ]
+      : ["@playwright/mcp@latest", "--headless"];
 
     if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;

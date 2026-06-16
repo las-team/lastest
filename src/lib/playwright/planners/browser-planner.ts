@@ -28,6 +28,28 @@ export interface BrowserPlannerOptions {
   onLogCreated?: (logId: string) => void;
 }
 
+async function claimEB(): Promise<
+  { cdpUrl: string; runnerId: string } | undefined
+> {
+  try {
+    const { claimEmbeddedBrowserForAgent } =
+      await import("@/server/actions/ai");
+    return (await claimEmbeddedBrowserForAgent(5 * 60 * 1000)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function releaseEB(runnerId: string): Promise<void> {
+  try {
+    const { releasePoolEB } =
+      await import("@/server/actions/embedded-sessions");
+    await releasePoolEB(runnerId);
+  } catch {
+    // non-fatal
+  }
+}
+
 export async function runBrowserPlanner(
   repositoryId: string,
   baseUrl: string,
@@ -106,71 +128,81 @@ export async function runBrowserPlanner(
     const { runDeepDiveExploration } =
       await import("@/lib/playwright/planner-agent");
 
-    for (
-      let batch = 0;
-      batch < exploreAreas.length;
-      batch += DEEP_DIVE_CONCURRENCY
-    ) {
-      if (options?.signal?.aborted) break;
+    // Claim one EB for the entire deep-dive phase; each diver batch shares it
+    // via the CDP endpoint (read-only navigation, no concurrent page state conflicts).
+    const eb = await claimEB();
+    const cdpEndpoint = eb?.cdpUrl;
 
-      const chunk = exploreAreas.slice(batch, batch + DEEP_DIVE_CONCURRENCY);
+    try {
+      for (
+        let batch = 0;
+        batch < exploreAreas.length;
+        batch += DEEP_DIVE_CONCURRENCY
+      ) {
+        if (options?.signal?.aborted) break;
 
-      const batchResults = await Promise.allSettled(
-        chunk.map(async (area) => {
-          options?.onDeepDiveStart?.(area.name);
-          const diveStart = Date.now();
-          let diveLogId: string | undefined;
+        const chunk = exploreAreas.slice(batch, batch + DEEP_DIVE_CONCURRENCY);
 
-          try {
-            const areas = await runDeepDiveExploration(
-              area.name,
-              area.routes,
-              area.focusPoints,
-              repositoryId,
-              baseUrl,
-              {
-                onLogCreated: (id) => {
-                  diveLogId = id;
+        const batchResults = await Promise.allSettled(
+          chunk.map(async (area) => {
+            options?.onDeepDiveStart?.(area.name);
+            const diveStart = Date.now();
+            let diveLogId: string | undefined;
+
+            try {
+              const areas = await runDeepDiveExploration(
+                area.name,
+                area.routes,
+                area.focusPoints,
+                repositoryId,
+                baseUrl,
+                {
+                  onLogCreated: (id) => {
+                    diveLogId = id;
+                  },
+                  cdpEndpoint,
                 },
-              },
-            );
-            const diveDuration = Date.now() - diveStart;
-            options?.onDeepDiveComplete?.(
-              area.name,
-              areas.length,
-              diveDuration,
-              diveLogId,
-            );
-            return areas;
-          } catch (_err) {
-            const diveDuration = Date.now() - diveStart;
-            options?.onDeepDiveComplete?.(
-              area.name,
-              0,
-              diveDuration,
-              diveLogId,
-            );
-            // On failure, create a basic plan from scout's focus points
-            return [
-              {
-                name: area.name,
-                routes: area.routes,
-                testPlan: buildFallbackPlanFromFocusPoints(
-                  area.name,
-                  area.routes,
-                  area.focusPoints,
-                ),
-              },
-            ] as PlannerArea[];
-          }
-        }),
-      );
+              );
+              const diveDuration = Date.now() - diveStart;
+              options?.onDeepDiveComplete?.(
+                area.name,
+                areas.length,
+                diveDuration,
+                diveLogId,
+              );
+              return areas;
+            } catch (_err) {
+              const diveDuration = Date.now() - diveStart;
+              options?.onDeepDiveComplete?.(
+                area.name,
+                0,
+                diveDuration,
+                diveLogId,
+              );
+              // On failure, create a basic plan from scout's focus points
+              return [
+                {
+                  name: area.name,
+                  routes: area.routes,
+                  testPlan: buildFallbackPlanFromFocusPoints(
+                    area.name,
+                    area.routes,
+                    area.focusPoints,
+                  ),
+                },
+              ] as PlannerArea[];
+            }
+          }),
+        );
 
-      for (const r of batchResults) {
-        if (r.status === "fulfilled") {
-          deepDiveResults.push(...r.value);
+        for (const r of batchResults) {
+          if (r.status === "fulfilled") {
+            deepDiveResults.push(...r.value);
+          }
         }
       }
+    } finally {
+      if (eb) await releaseEB(eb.runnerId);
     }
   }
 
@@ -194,6 +226,7 @@ async function runFallbackExploration(
   const start = Date.now();
   let promptLogId: string | undefined;
 
+  const eb = await claimEB();
   try {
     const { agentDiscoverAreas } =
       await import("@/lib/playwright/planner-agent");
@@ -202,6 +235,7 @@ async function runFallbackExploration(
         promptLogId = id;
         options?.onLogCreated?.(id);
       },
+      cdpEndpoint: eb?.cdpUrl,
     });
     const durationMs = Date.now() - start;
 
@@ -245,6 +279,8 @@ async function runFallbackExploration(
       durationMs: Date.now() - start,
       inputSummary: `Fallback: baseUrl=${baseUrl}`,
     };
+  } finally {
+    if (eb) await releaseEB(eb.runnerId);
   }
 }
 
