@@ -22,6 +22,7 @@ import {
   Palette,
   Gauge,
   Link as LinkIcon,
+  Webhook,
 } from "lucide-react";
 import { savePlaywrightSettings } from "@/server/actions/settings";
 import {
@@ -109,6 +110,13 @@ const LAYERS: LayerMeta[] = [
     name: "URL",
     icon: LinkIcon,
     description: "Compare the trajectory of URLs visited during the test.",
+  },
+  {
+    id: "api",
+    name: "API",
+    icon: Webhook,
+    description:
+      "Headless HTTP request + response assertions (API-type tests). A failed status/schema/body assertion gates the step.",
   },
 ];
 

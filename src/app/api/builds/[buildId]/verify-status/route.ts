@@ -131,6 +131,8 @@ export async function GET(
     extractedVariables: r.extractedVariables,
     assignedVariables: r.assignedVariables,
     domSnapshot: r.domSnapshot,
+    apiResult: r.apiResult,
+    loadResult: r.loadResult,
   }));
 
   // "running tests" = test_results in 'running' status without an end timestamp.

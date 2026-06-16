@@ -29,6 +29,7 @@ import {
   XCircle,
   CheckCircle as CheckCircleIcon,
   Plus,
+  Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -53,6 +54,11 @@ import {
   type IgnoreRegionRect,
 } from "@/components/diff/slider-comparison";
 import { CheckModesDialog } from "@/components/verify/check-modes-dialog";
+import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import {
+  networkRequestToApiTest,
+  type ApiTestSeed,
+} from "@/lib/api-test/from-network";
 import {
   classifyEvidenceWithMode,
   effectiveVerdict,
@@ -179,6 +185,7 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: "perf", name: "Perf" },
   { id: "url", name: "URL" },
   { id: "variable", name: "Variables" },
+  { id: "api", name: "API" },
 ];
 
 type LayerState = "diff" | "clean" | "absent";
@@ -250,6 +257,10 @@ function classifyLayer(
     case "variable":
       return result?.extractedVariables != null ||
         result?.assignedVariables != null
+        ? "clean"
+        : "absent";
+    case "api":
+      return result?.apiResult != null || result?.loadResult != null
         ? "clean"
         : "absent";
   }
@@ -1155,6 +1166,7 @@ export function FocusView(props: FocusViewProps) {
             buildA11y={props.buildA11y}
             buildDesignSystem={props.buildDesignSystem}
             buildId={props.buildId}
+            repositoryId={props.repositoryId}
             regionsCtx={{
               showRegions,
               setShowRegions,
@@ -1746,6 +1758,8 @@ interface ComparePaneProps {
   /** Build ID forwarded so A11yPane can render <A11yViolationsCard>, which
    *  hits /api/builds/[buildId]/a11y-violations?format=csv for downloads. */
   buildId: string;
+  /** Repo forwarded so the Network pane can seed a new API test from a row. */
+  repositoryId: string | null;
 }
 
 function ComparePane({
@@ -1761,6 +1775,7 @@ function ComparePane({
   buildA11y,
   buildDesignSystem,
   buildId,
+  repositoryId,
 }: ComparePaneProps) {
   if (!step) {
     return (
@@ -1865,7 +1880,12 @@ function ComparePane({
     );
   if (tab === "network")
     return (
-      <NetworkPane step={step} result={result} clean={layerState === "clean"} />
+      <NetworkPane
+        step={step}
+        result={result}
+        clean={layerState === "clean"}
+        repositoryId={repositoryId}
+      />
     );
   if (tab === "console")
     return (
@@ -1907,6 +1927,8 @@ function ComparePane({
         clean={layerState === "clean"}
       />
     );
+  if (tab === "api")
+    return <ApiPane result={result} clean={layerState === "clean"} />;
   return null;
 }
 
@@ -2029,6 +2051,13 @@ function absentHint(
         // test detail page's Vars tab via the URL-hash deep-link.
         settingsHref: testId ? `/tests/${testId}#vars` : undefined,
         settingsLabel: "Open test Vars",
+      };
+    case "api":
+      return {
+        message:
+          "No API result for this case. The API layer runs only on API-type tests (a headless HTTP request + assertions). Convert or create an API test to populate this tab.",
+        settingsHref: testId ? `/tests/${testId}` : undefined,
+        settingsLabel: testId ? "Open test" : undefined,
       };
   }
 }
@@ -3784,13 +3813,16 @@ function NetworkPane({
   step,
   result,
   clean,
+  repositoryId,
 }: {
   step: StepComparison;
   result: TestResultLite | null;
   clean: boolean;
+  repositoryId: string | null;
 }) {
   const net = step.layers?.network;
   const requests = useMemo(() => result?.networkRequests ?? [], [result]);
+  const [apiSeed, setApiSeed] = useState<ApiTestSeed | null>(null);
 
   // When the test failed because of the network layer, auto-focus the table on
   // error rows so reviewers don't have to filter manually. Derived once via
@@ -4215,6 +4247,11 @@ function NetworkPane({
                 req={r}
                 expanded={expanded.has(i)}
                 onToggle={() => toggleExpanded(i)}
+                onCreateApiTest={
+                  repositoryId
+                    ? () => setApiSeed(networkRequestToApiTest(r))
+                    : undefined
+                }
               />
             ))}
             {filtered.length > 500 && (
@@ -4228,6 +4265,21 @@ function NetworkPane({
           </div>
         </div>
       )}
+
+      {/* Create an API test seeded from a captured network request */}
+      {apiSeed && repositoryId && (
+        <ApiTestDialog
+          open={!!apiSeed}
+          onOpenChange={(open) => {
+            if (!open) setApiSeed(null);
+          }}
+          repositoryId={repositoryId}
+          areas={[]}
+          initialName={apiSeed.name}
+          initialDefinition={apiSeed.definition}
+          onSaved={() => setApiSeed(null)}
+        />
+      )}
     </div>
   );
 }
@@ -4236,10 +4288,12 @@ function NetworkRequestRow({
   req,
   expanded,
   onToggle,
+  onCreateApiTest,
 }: {
   req: import("@/lib/db/schema").NetworkRequest;
   expanded: boolean;
   onToggle: () => void;
+  onCreateApiTest?: () => void;
 }) {
   const group = statusGroupOf(req);
   const tone = STATUS_GROUP_TONE[group];
@@ -4320,15 +4374,19 @@ function NetworkRequestRow({
           {req.responseSize != null ? formatBytes(req.responseSize) : "—"}
         </span>
       </button>
-      {expanded && <NetworkRequestDetails req={req} />}
+      {expanded && (
+        <NetworkRequestDetails req={req} onCreateApiTest={onCreateApiTest} />
+      )}
     </>
   );
 }
 
 function NetworkRequestDetails({
   req,
+  onCreateApiTest,
 }: {
   req: import("@/lib/db/schema").NetworkRequest;
+  onCreateApiTest?: () => void;
 }) {
   const reqHeaders = req.requestHeaders ?? {};
   const respHeaders = req.responseHeaders ?? {};
@@ -4345,6 +4403,27 @@ function NetworkRequestDetails({
         gap: 10,
       }}
     >
+      {/* Reproduce this request as an API test */}
+      {onCreateApiTest && (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            onClick={onCreateApiTest}
+            className="v-btn"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 11,
+              padding: "3px 8px",
+            }}
+          >
+            <Webhook size={11} />
+            Create API test
+          </button>
+        </div>
+      )}
+
       {/* Top metadata strip */}
       <div
         style={{
@@ -5167,6 +5246,254 @@ function PerfPane({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * API layer pane (E1/E3). Renders the headless HTTP result — status, latency,
+ * the per-assertion pass/fail table — plus the load-test aggregate (percentiles,
+ * throughput, error rate, threshold breaches) when the test ran as a load test.
+ */
+function ApiPane({
+  result,
+  clean,
+}: {
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
+  const api = result?.apiResult ?? null;
+  const load = result?.loadResult ?? null;
+  const failed = api?.assertionResults.filter((a) => !a.passed).length ?? 0;
+  const total = api?.assertionResults.length ?? 0;
+
+  const fmt = (v: unknown): string => {
+    if (v === undefined) return "—";
+    if (v === null) return "null";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  };
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && api && failed === 0 && !api.error && (
+        <CleanBanner
+          message={`All ${total} assertion${total === 1 ? "" : "s"} passed · ${api.statusCode ?? "—"} · ${api.latencyMs}ms`}
+        />
+      )}
+
+      {api?.error && (
+        <div className="v-card" style={{ padding: 12 }}>
+          <div className="label" style={{ fontSize: 10, marginBottom: 4 }}>
+            Request error
+          </div>
+          <div style={{ fontSize: 13, color: "var(--c-bad, #c0392b)" }}>
+            {api.error}
+          </div>
+        </div>
+      )}
+
+      {api && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <Stat label="STATUS" value={api.statusCode ?? "—"} />
+          <Stat label="LATENCY" value={`${api.latencyMs}ms`} />
+          <Stat
+            label="ASSERTIONS"
+            value={`${total - failed}/${total}`}
+            tone={failed > 0 ? "bad" : "good"}
+          />
+        </div>
+      )}
+
+      {api && api.assertionResults.length > 0 && (
+        <div className="v-card" style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--c-soft)" }}>
+                {["", "Assertion", "Expected", "Actual"].map((h, i) => (
+                  <th
+                    key={i}
+                    className="label"
+                    style={{
+                      textAlign: "left",
+                      padding: "6px 10px",
+                      fontSize: 9,
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {api.assertionResults.map((a, i) => (
+                <tr
+                  key={i}
+                  style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}
+                >
+                  <td style={{ padding: "6px 10px", width: 24 }}>
+                    <span className={`v-chip ${a.passed ? "done" : "missed"}`}>
+                      {a.passed ? "✓" : "✕"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "6px 10px", fontSize: 12 }}>
+                    {a.description}
+                  </td>
+                  <td
+                    style={{
+                      padding: "6px 10px",
+                      fontSize: 11,
+                      color: "var(--fg-3)",
+                      fontFamily: "var(--font-mono, monospace)",
+                    }}
+                  >
+                    {fmt(a.expected)}
+                  </td>
+                  <td
+                    style={{
+                      padding: "6px 10px",
+                      fontSize: 11,
+                      fontFamily: "var(--font-mono, monospace)",
+                      color: a.passed ? "var(--fg-3)" : "var(--c-bad, #c0392b)",
+                    }}
+                  >
+                    {fmt(a.actual)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {load && (
+        <div className="v-card" style={{ padding: 12 }}>
+          <div className="label" style={{ fontSize: 10, marginBottom: 8 }}>
+            Load test · {load.count} request{load.count === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+              gap: 8,
+            }}
+          >
+            <Stat label="P50" value={`${load.p50}ms`} compact />
+            <Stat
+              label="P95"
+              value={`${load.p95}ms`}
+              compact
+              tone={load.passed ? undefined : "bad"}
+            />
+            <Stat label="P99" value={`${load.p99}ms`} compact />
+            <Stat label="MEAN" value={`${load.mean}ms`} compact />
+            <Stat label="RPS" value={String(load.throughputRps)} compact />
+            <Stat
+              label="ERRORS"
+              value={`${(load.errorRate * 100).toFixed(1)}%`}
+              compact
+              tone={load.errorRate > 0 ? "bad" : "good"}
+            />
+          </div>
+          {load.breaches.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div
+                className="label"
+                style={{ fontSize: 9, marginBottom: 4, color: "var(--c-bad)" }}
+              >
+                Threshold breaches
+              </div>
+              {load.breaches.map((b, i) => (
+                <div
+                  key={i}
+                  style={{ fontSize: 11, color: "var(--c-bad, #c0392b)" }}
+                >
+                  • {b}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {api?.responseSnippet && (
+        <details className="v-card" style={{ padding: 12 }}>
+          <summary
+            className="label"
+            style={{ fontSize: 10, cursor: "pointer" }}
+          >
+            Response snippet (secrets redacted)
+          </summary>
+          <pre
+            style={{
+              marginTop: 8,
+              fontSize: 11,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-all",
+              color: "var(--fg-3)",
+            }}
+          >
+            {api.responseSnippet}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+  compact,
+}: {
+  label: string;
+  value: string | number;
+  tone?: "good" | "bad";
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className="v-card"
+      style={{
+        padding: compact ? "8px 10px" : 14,
+        background: "var(--c-soft)",
+      }}
+    >
+      <div className="label" style={{ fontSize: 9 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: compact ? 16 : 22,
+          fontWeight: 600,
+          marginTop: compact ? 2 : 6,
+          color:
+            tone === "bad"
+              ? "var(--c-bad, #c0392b)"
+              : tone === "good"
+                ? "var(--c-good, #27ae60)"
+                : undefined,
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }

@@ -120,6 +120,9 @@ export interface TestResultLite {
   extractedVariables: Record<string, string> | null;
   assignedVariables: Record<string, string> | null;
   domSnapshot: import("@/lib/db/schema").DomSnapshotData | null;
+  // E1/E3: headless API + load-test results (null for browser tests).
+  apiResult: import("@/lib/db/schema").ApiTestResultData | null;
+  loadResult: import("@/lib/db/schema").LoadTestResultData | null;
 }
 
 export interface VerifyFilters {
@@ -311,6 +314,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     design: CheckModeT;
     perf: CheckModeT;
     url: CheckModeT;
+    api: CheckModeT;
   };
   const DEFAULT_CHECK_MODES: CheckModeMapT = {
     visual: "enforce",
@@ -322,6 +326,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     design: "disable",
     perf: "log",
     url: "log",
+    api: "enforce",
   };
   const [checkModes, setCheckModes] =
     useState<CheckModeMapT>(DEFAULT_CHECK_MODES);
