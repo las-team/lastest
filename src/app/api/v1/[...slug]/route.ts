@@ -1003,6 +1003,21 @@ export async function GET(
       if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
+      // Surface demo notes inline once written, so the panel can auto-show them
+      // without a second round-trip. Curated to the founder-safe fields the panel
+      // renders (uxSummary + highlights + frictionPoints).
+      const demoNotesRow = sessionRow.metadata.demoNotesId
+        ? await queries
+            .getBuildDemoNotes(sessionRow.metadata.demoNotesId)
+            .catch(() => null)
+        : null;
+      const demoNotes = demoNotesRow
+        ? {
+            uxSummary: demoNotesRow.uxSummary,
+            highlights: demoNotesRow.highlights ?? [],
+            frictionPoints: demoNotesRow.frictionPoints ?? [],
+          }
+        : null;
       return NextResponse.json({
         id: sessionRow.id,
         kind: sessionRow.kind,
@@ -1042,6 +1057,12 @@ export async function GET(
           shareSlug: sessionRow.metadata.shareSlug,
           shareUrl: sessionRow.metadata.shareUrl,
           disabledReason: sessionRow.metadata.disabledReason,
+          // Live browser view: the EB screencast URL is host-routable (rewritten
+          // at auth-register) and carries no secrets — safe to surface so the
+          // panel can render the scout's live browsing.
+          streamUrl: sessionRow.metadata.streamUrl,
+          queuedForBrowser: sessionRow.metadata.queuedForBrowser,
+          demoNotes,
         },
         createdAt: sessionRow.createdAt,
         updatedAt: sessionRow.updatedAt,

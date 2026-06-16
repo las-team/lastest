@@ -62,7 +62,7 @@ Sitemap -flow
 
 ## commands
 
-/goal create 5 new /gtm-lastest-saas-demo demos with post-log-in content, inc demonotes and screenshots - verify them each to have at least 8 post-login actions. To enable log-in register yourself, check emails via pw mcp, and let the tests start with session cookies or hardcoded login details set up with setupoverrides. no questions this time, have the 10 shares available.dont source from HN
+/goal create 5 new /gtm-lastest-saas-demo demos with post-log-in content, inc demonotes and screenshots - verify them each to have at least 8 post-login actions. To enable log-in register yourself, check emails via pw mcp, and let the tests start with session cookies or hardcoded login details set up with setupoverrides. no questions this time, have the shares available.dont source from HN
 
 ## ourmotto
 

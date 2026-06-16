@@ -5,7 +5,6 @@ import type { CSSProperties } from "react";
 import {
   getPublicShareContext,
   getShareDataBySlug,
-  getActiveBaselinesForTest,
   type PublicShareContext,
   type ShareVisualDiff,
   type ShareTestResult,
@@ -16,12 +15,14 @@ import {
   getLatestDemoNotesForRepo,
 } from "@/lib/db/queries/demo-notes";
 import { getRepoAward } from "@/lib/db/queries/awards";
-import type { Baseline, DemoNotes, RepoAward } from "@/lib/db/schema";
+import type { DemoNotes, DomDiffResult, RepoAward } from "@/lib/db/schema";
 import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
+import { StepStripClient } from "@/components/share/step-strip-client";
+import { DomOverlay } from "@/components/share/dom-overlay-client";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -213,6 +214,14 @@ export default async function PublicSharePage({ params }: PageProps) {
   };
 
   const displayDomain = share.targetDomain || test?.name || "this site";
+  // Link out to the actual product/app that was reviewed. Prefer the test's own
+  // target URL on test shares, fall back to the build's base URL, and finally
+  // synthesize one from the displayed hostname. Sanitized to http(s) only.
+  const productUrl = safeExternalUrl(
+    (share.testId ? test?.targetUrl : null) ??
+      build.baseUrl ??
+      (share.targetDomain ? `https://${share.targetDomain}` : null),
+  );
   const claimLink = `/register?claim=${slug}`;
   const signInLink = `/login?claim=${slug}`;
 
@@ -319,13 +328,9 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
-  // Passing tests produce zero visual_diffs rows. Fall back to the test's
-  // active baselines so viewers still see a side-by-side comparison rather
-  // than an empty "recording + steps" block.
-  const baselineFallback: Baseline[] =
-    isTestShare && share.testId && diffs.length === 0
-      ? await getActiveBaselinesForTest(share.testId)
-      : [];
+  // On-demand mp4 of the recording for native upload to X (autoplays inline
+  // there, unlike a link unfurl). Only offered when a recording exists.
+  const mp4DownloadUrl = clips.length > 0 ? `/share/${slug}/download` : null;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -342,6 +347,7 @@ export default async function PublicSharePage({ params }: PageProps) {
           variant={isTestShare ? "test" : "build"}
           domain={displayDomain}
           targetDomain={share.targetDomain}
+          productUrl={productUrl}
           testName={isTestShare ? (test?.name ?? null) : null}
           build={build}
           testResult={primaryResult}
@@ -360,7 +366,7 @@ export default async function PublicSharePage({ params }: PageProps) {
             shareUrl={shareUrl}
             testName={test?.name ?? displayDomain}
             pixelsChanged={totalPixelsChanged}
-            baselineFallback={baselineFallback}
+            mp4Url={mp4DownloadUrl}
             stepComparisons={scopedStepComparisons}
             demoNotes={demoNotes}
             claimLink={claimLink}
@@ -647,10 +653,47 @@ function formatDuration(ms: number | null | undefined): string | null {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
+// Only ever link out to http(s) targets — guards the "Visit site" button
+// against javascript:/data: URLs slipping in from a test's target URL.
+function safeExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:"
+      ? u.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
+    </svg>
+  );
+}
+
 function OutcomeHeader({
   variant,
   domain,
   targetDomain,
+  productUrl,
   testName,
   build,
   testResult,
@@ -661,6 +704,7 @@ function OutcomeHeader({
   variant: "build" | "test";
   domain: string;
   targetDomain: string | null;
+  productUrl: string | null;
   testName: string | null;
   build: Build;
   testResult: ShareTestResult | null;
@@ -722,6 +766,17 @@ function OutcomeHeader({
             <p className="text-sm text-muted-foreground font-mono break-words">
               {metaBits.join(" · ")}
             </p>
+          )}
+          {productUrl && (
+            <a
+              href={productUrl}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="inline-flex items-center gap-1.5 rounded-md border bg-background/60 px-3 py-1.5 text-sm font-medium hover:bg-background"
+            >
+              Visit site
+              <ExternalLinkIcon />
+            </a>
           )}
         </div>
         {shortCommit && (
@@ -1267,7 +1322,7 @@ function DemoNoteList({
 function CustomerFavicon({ domain }: { domain: string | null }) {
   const letter = (domain ?? "?").charAt(0).toUpperCase();
   return (
-    <div className="relative w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-lg border bg-card shadow-sm flex items-center justify-center overflow-hidden">
+    <div className="relative w-12 h-12 sm:w-14 sm:h-14 shrink-0 self-center rounded-lg border bg-card shadow-sm flex items-center justify-center overflow-hidden">
       <span className="text-xl font-semibold text-muted-foreground">
         {letter}
       </span>
@@ -1486,7 +1541,7 @@ function TestShareBody({
   shareUrl,
   testName,
   pixelsChanged,
-  baselineFallback,
+  mp4Url,
   stepComparisons,
   demoNotes,
   claimLink,
@@ -1500,7 +1555,7 @@ function TestShareBody({
   shareUrl: string;
   testName: string;
   pixelsChanged: number;
-  baselineFallback: Baseline[];
+  mp4Url: string | null;
   stepComparisons: ShareStepComparison[];
   demoNotes: DemoNotes | null;
   claimLink: string;
@@ -1510,24 +1565,16 @@ function TestShareBody({
   const stepPaths = new Set<string>(collectStepPaths(testResult, results));
 
   const durationMs = testResult?.durationMs ?? null;
-  const approxSecPerStep =
-    steps.length > 0 && durationMs && durationMs > 0
-      ? durationMs / 1000 / steps.length
-      : null;
 
   const sliderDiffs = buildSliderDiffs(diffs, toUrl);
-  const passedSliders =
-    sliderDiffs.length === 0
-      ? buildBaselineSliders(baselineFallback, testResult, toUrl)
-      : [];
-  // When there's nothing to compare against (no diffs AND no baselines), the
-  // step strip is the only place screenshots show up — at tiny thumbnail size.
-  // Drop the dedupe-against-strip filter in that case so the gallery renders
-  // the same screenshots large below the strip.
+  // DOM-change overlays (Verify > DOM tab, ported): annotated screenshots for
+  // steps whose recorded DOM diff has added/removed/changed elements.
+  const domOverlays = buildDomOverlays(stepComparisons, diffs, steps, toUrl);
+  // No diffs → there's no comparison to show (the step strip, now clickable to
+  // fullscreen, is the screenshot surface) so render the captured shots large
+  // in the gallery instead of deduping them against the strip.
   const galleryDedupeSet =
-    sliderDiffs.length === 0 && passedSliders.length === 0
-      ? new Set<string>()
-      : stepPaths;
+    sliderDiffs.length === 0 ? new Set<string>() : stepPaths;
   const gallery = buildGallery(diffs, results, toUrl, galleryDedupeSet);
 
   const pullQuote =
@@ -1552,9 +1599,7 @@ function TestShareBody({
         signInLink={signInLink}
       />
 
-      {steps.length > 0 && (
-        <StepStrip steps={steps} secPerStep={approxSecPerStep} />
-      )}
+      {steps.length > 0 && <StepStripClient steps={steps} />}
 
       <div className="grid grid-cols-3 gap-3">
         <StatCard
@@ -1606,25 +1651,19 @@ function TestShareBody({
         </section>
       )}
 
-      {sliderDiffs.length === 0 && passedSliders.length > 0 && (
+      {domOverlays.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            {passedSliders.length === 1
-              ? "Tested view"
-              : `${passedSliders.length} tested views`}
-            <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
-              matches baseline
-            </span>
+            {domOverlays.length === 1
+              ? "DOM change"
+              : `${domOverlays.length} DOM changes`}
           </h2>
-          {passedSliders.map((d) => (
-            <DiffSlider
-              key={d.id}
-              baseline={d.baseline}
-              current={d.current}
-              diff={d.diff}
-              stepLabel={d.stepLabel}
-              pixelDifference={d.pixelDifference}
-              stepNumber={d.stepNumber}
+          {domOverlays.map((o) => (
+            <DomOverlay
+              key={o.key}
+              screenshotSrc={o.src}
+              dom={o.dom}
+              stepLabel={o.stepLabel}
             />
           ))}
         </section>
@@ -1632,7 +1671,7 @@ function TestShareBody({
 
       {gallery.length > 0 && <GallerySection items={gallery} />}
 
-      <SocialShareRow shareUrl={shareUrl} testName={testName} />
+      <SocialShareRow shareUrl={shareUrl} testName={testName} mp4Url={mp4Url} />
     </>
   );
 }
@@ -1677,62 +1716,54 @@ function collectSteps(
   return out;
 }
 
-function StepStrip({
-  steps,
-  secPerStep,
-}: {
-  steps: Step[];
-  secPerStep: number | null;
-}) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-sm font-medium text-muted-foreground">
-        {steps.length} step{steps.length === 1 ? "" : "s"} captured
-      </h2>
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-        {steps.map((s, i) => {
-          const seek =
-            secPerStep != null ? (i * secPerStep).toFixed(2) : undefined;
-          // Prefer the number parsed out of the label ("Step 5" → 5) when
-          // present so step-strip order doesn't have to match slider order;
-          // fall back to the 1-based position in the strip for the common
-          // "Step 1, Step 2 …" case.
-          const parsedStep = stepNumberFromLabel(s.label);
-          const stepJump = Number.isFinite(parsedStep) ? parsedStep : i + 1;
-          return (
-            <button
-              type="button"
-              key={s.src + i}
-              data-seek={seek}
-              data-step-jump={stepJump}
-              className="group relative shrink-0 w-28 rounded-md border bg-card p-1 text-left hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
-              aria-label={`Jump to step ${i + 1}: ${s.label}`}
-            >
-              <div className="relative aspect-[4/3] rounded-sm bg-muted overflow-hidden">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={s.src}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="absolute inset-0 w-full h-full object-cover object-top"
-                />
-                <span className="absolute top-1 left-1 rounded bg-background/85 px-1 text-[10px] font-mono border">
-                  {i + 1}
-                </span>
-              </div>
-              <div
-                className="mt-1 text-[11px] truncate text-muted-foreground group-hover:text-foreground"
-                title={s.label}
-              >
-                {s.label}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
+type DomOverlayItem = {
+  key: string;
+  stepLabel: string | null;
+  src: string;
+  dom: DomDiffResult;
+};
+
+// Pair each step's recorded DOM diff with a base screenshot so the share page
+// can draw the same annotated overlay as Verify > DOM. Prefer the diff's
+// current image (bounding boxes were captured in that coordinate space); fall
+// back to the captured step screenshot of the same label. Steps with no DOM
+// changes — or no resolvable screenshot — are skipped.
+function buildDomOverlays(
+  stepComparisons: ShareStepComparison[],
+  diffs: ShareVisualDiff[],
+  steps: Step[],
+  toUrl: (p: string | null | undefined) => string | null,
+): DomOverlayItem[] {
+  const diffCurrentByLabel = new Map<string, string>();
+  for (const d of diffs) {
+    if (!d.stepLabel || !d.currentImagePath) continue;
+    const url = toUrl(d.currentImagePath);
+    if (url && !diffCurrentByLabel.has(d.stepLabel))
+      diffCurrentByLabel.set(d.stepLabel, url);
+  }
+  const stepByLabel = new Map<string, string>();
+  for (const s of steps) {
+    if (!stepByLabel.has(s.label)) stepByLabel.set(s.label, s.src);
+  }
+
+  const out: DomOverlayItem[] = [];
+  for (const sc of stepComparisons) {
+    const dom = sc.layers?.dom;
+    if (!dom) continue;
+    const count =
+      (dom.added?.length ?? 0) +
+      (dom.removed?.length ?? 0) +
+      (dom.changed?.length ?? 0);
+    if (count === 0) continue;
+    const label = sc.stepLabel;
+    const src =
+      (label
+        ? (diffCurrentByLabel.get(label) ?? stepByLabel.get(label))
+        : null) ?? null;
+    if (!src) continue;
+    out.push({ key: sc.id, stepLabel: label, dom, src });
+  }
+  return out;
 }
 
 function PullQuote({ text }: { text: string }) {
@@ -1751,9 +1782,11 @@ function PullQuote({ text }: { text: string }) {
 function SocialShareRow({
   shareUrl,
   testName,
+  mp4Url,
 }: {
   shareUrl: string;
   testName: string;
+  mp4Url: string | null;
 }) {
   const text = `Visual regression test for ${testName} — ran on Lastest.`;
   const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
@@ -1789,6 +1822,19 @@ function SocialShareRow({
       >
         Copy link
       </a>
+      {mp4Url && (
+        // Plain download link — the route transcodes the recording to mp4 on
+        // first hit (cached after) so it can be attached natively to a tweet,
+        // where video autoplays inline. `download` hints a save rather than a
+        // navigation; the route also sets Content-Disposition: attachment.
+        <a
+          href={mp4Url}
+          download
+          className="inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+        >
+          Download video (MP4)
+        </a>
+      )}
     </section>
   );
 }
@@ -1820,50 +1866,6 @@ function stepNumberFromLabel(label: string | null | undefined): number {
 // For passing tests — no visual_diffs rows exist, so synthesize sliders from
 // active baselines paired with captured screenshots. Match by stepLabel
 // (with 'final' falling back to the result's primary screenshotPath).
-function buildBaselineSliders(
-  baselines: Baseline[],
-  result: ShareTestResult | null,
-  toUrl: (p: string | null | undefined) => string | null,
-): SliderDiff[] {
-  if (!result) return [];
-  const steps = result.screenshots ?? [];
-  const out: SliderDiff[] = [];
-  const seen = new Set<string>();
-  for (const bl of baselines) {
-    const baselineUrl = toUrl(bl.imagePath);
-    if (!baselineUrl) continue;
-    const label = (bl.stepLabel ?? "").trim();
-    const isFinal = !label || label.toLowerCase() === "final";
-    let currentPath: string | null = null;
-    if (isFinal) {
-      currentPath = result.screenshotPath;
-    } else {
-      const match = steps.find((s) => (s.label ?? "").trim() === label);
-      currentPath = match?.path ?? null;
-    }
-    if (!currentPath) continue;
-    const key = `${bl.imagePath}|${currentPath}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const currentUrl = toUrl(currentPath);
-    if (!currentUrl) continue;
-    const stepLabel = bl.stepLabel ?? (isFinal ? "Final" : null);
-    out.push({
-      id: bl.id,
-      baseline: baselineUrl,
-      current: currentUrl,
-      diff: null,
-      stepLabel,
-      pixelDifference: 0,
-      stepNumber: stepNumberFromLabel(stepLabel),
-    });
-  }
-  // Stable sort by step number so the gallery follows capture order regardless
-  // of baselines-table insertion order. Unparseable labels sink to the bottom.
-  out.sort((a, b) => a.stepNumber - b.stepNumber);
-  return out;
-}
-
 function buildSliderDiffs(
   diffs: ShareVisualDiff[],
   toUrl: (p: string | null | undefined) => string | null,
