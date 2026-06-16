@@ -41,11 +41,15 @@ export async function generateMetadata({
   const ctx = await getPublicShareContext(slug);
   if (!ctx) return { title: "Share removed" };
 
+  const isTestShare = !!ctx.share.testId;
   const domain = ctx.share.targetDomain || ctx.test?.name || "this site";
   const title = `${domain} · Lastest`;
-  const description = ctx.build.changesDetected
-    ? `${ctx.build.changesDetected} visual changes detected across ${ctx.build.totalTests} tests.`
-    : `Visual regression check for ${domain} — recording, screenshots, and diff report.`;
+  const description = buildShareDescription({
+    domain,
+    changesDetected: ctx.build.changesDetected ?? 0,
+    totalTests: ctx.build.totalTests ?? 0,
+    runAt: ctx.build.completedAt ?? ctx.build.createdAt ?? null,
+  });
 
   // Resolve the canonical origin from the request first; fall back to the
   // build-time env var. Some Twitter/Slack scrapes ended up with a stale
@@ -62,7 +66,17 @@ export async function generateMetadata({
     title,
     description,
     metadataBase: new URL(origin),
-    robots: { index: true },
+    // Build-wide shares (testId null) render near-identical content to their
+    // per-test share, so they're noindex'd to avoid duplicate-content
+    // competition. The per-test share is the canonical, indexable surface and
+    // self-canonicalizes (relative path resolves against metadataBase, which is
+    // the request-resolved origin — sidesteps buildShareUrl's stale-localhost
+    // fallback). noindex + canonical is a contradictory signal, so build shares
+    // get robots-noindex and NO canonical.
+    robots: isTestShare
+      ? { index: true, follow: true }
+      : { index: false, follow: true },
+    ...(isTestShare ? { alternates: { canonical: `/r/${slug}` } } : {}),
     openGraph: {
       title,
       description,
@@ -104,6 +118,71 @@ async function resolveRequestOrigin(): Promise<string> {
     // headers() unavailable during static analysis / preview builds — fall through.
   }
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+}
+
+const SHARE_DESC_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+// UTC-formatted so the rendered <meta> is stable regardless of server timezone.
+function formatRunDate(d: Date | string | null): string | null {
+  if (!d) return null;
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${SHARE_DESC_MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
+}
+
+// Trim to <= max chars at a word boundary, appending an ellipsis only when the
+// string was actually cut. Keeps the rendered description inside the 160-char
+// SEO limit even for very long customer domains.
+function clampDescription(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).replace(
+    /[\s.,;:—-]+$/,
+    "",
+  );
+  return `${base}…`;
+}
+
+// Composes a unique 110-160 char meta description for an /r/<slug> share from
+// the run data (domain, change/test counts, run date). Replaces two prior
+// templates that came in at 41-87 chars and tripped "meta description too
+// short" audits. The lead sentence carries the data; the tail describes the
+// page content and is what gets clamped away on overly long domains.
+function buildShareDescription({
+  domain,
+  changesDetected,
+  totalTests,
+  runAt,
+}: {
+  domain: string;
+  changesDetected: number;
+  totalTests: number;
+  runAt: Date | string | null;
+}): string {
+  const testWord = `${totalTests} test${totalTests === 1 ? "" : "s"}`;
+  const dateStr = formatRunDate(runAt);
+  const onDate = dateStr ? ` on ${dateStr}` : "";
+  const lead =
+    changesDetected > 0
+      ? `Visual regression report for ${domain}: ${changesDetected} visual change${changesDetected === 1 ? "" : "s"} across ${testWord}${onDate}.`
+      : `Visual regression report for ${domain}: no visual changes across ${testWord}${onDate}.`;
+  const tail =
+    " Watch the recording and review the full-page screenshots and diff in Lastest.";
+  return clampDescription(`${lead}${tail}`, 158);
 }
 
 export default async function PublicSharePage({ params }: PageProps) {
@@ -316,6 +395,8 @@ export default async function PublicSharePage({ params }: PageProps) {
         )}
 
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
+
+        <MoreDemosLink />
 
         <ShareFooter slug={slug} />
       </main>
@@ -2091,6 +2172,26 @@ function ClaimCTA({
   );
 }
 
+// A prominent, crawlable dofollow link into the demos hub. Without it, each
+// share page is a "dead end" for crawlers (its CTAs are <button>s, not links) —
+// this gives every /r/<slug> an outgoing link into Lastest's content graph and
+// lets crawlers hop between demos. Target is the apex marketing site, which
+// serves a real /demos gallery (the app domain has no /demos route).
+function MoreDemosLink() {
+  return (
+    <div className="pt-2 text-center text-sm text-muted-foreground">
+      <a
+        href="https://lastest.cloud/demos"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-foreground underline-offset-4 hover:underline"
+      >
+        Browse more live Lastest demo reports →
+      </a>
+    </div>
+  );
+}
+
 function ShareFooter({ slug }: { slug: string }) {
   return (
     <footer className="pt-6 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-2 justify-between">
@@ -2106,6 +2207,14 @@ function ShareFooter({ slug }: { slug: string }) {
         </a>
       </span>
       <div className="flex items-center gap-4">
+        <a
+          href="https://lastest.cloud/demos"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-foreground"
+        >
+          More demos
+        </a>
         <a href="/terms" className="hover:text-foreground">
           Terms
         </a>
