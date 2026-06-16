@@ -16,6 +16,7 @@ import { tests } from "@/lib/db/schema";
 import type { DiffMetadata } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { classifyDiffSource } from "@/lib/rca/classify";
+import { correlateRegions } from "@/lib/rca/correlate";
 
 /** Classify the build's changed diffs. Returns how many were classified. */
 export async function classifyBuildDiffs(buildId: string): Promise<number> {
@@ -54,9 +55,15 @@ export async function classifyBuildDiffs(buildId: string): Promise<number> {
         },
         now,
       );
+      // Element-level region→cause mapping for the interactive RCA UI. Only
+      // possible where a DOM diff was captured; otherwise stays empty.
+      const regionCauses = correlateRegions({
+        changedRegions: d.metadata?.changedRegions,
+        domDiff: d.metadata?.domDiff,
+      });
       const metadata: DiffMetadata = {
         ...(d.metadata ?? { changedRegions: [] }),
-        rca: verdict,
+        rca: regionCauses.length ? { ...verdict, regionCauses } : verdict,
       };
       await queries.updateVisualDiff(d.id, { metadata });
       count++;

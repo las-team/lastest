@@ -16,7 +16,27 @@ export interface InspectElementResult {
   textContent?: string;
   boundingBox: { x: number; y: number; width: number; height: number };
   selectors: Array<{ type: string; value: string }>;
+  // Curated computed styles, present only when getAllDomSelectors is called
+  // with captureStyles=true (drives RCA CSS-delta drill-down).
+  styles?: Record<string, string>;
 }
+
+// Curated computed-style properties captured for RCA. Kept small and visually
+// meaningful (color/spacing/typography/box) to bound DOM-snapshot payload size.
+export const RCA_STYLE_PROPS = [
+  "color",
+  "background-color",
+  "font-size",
+  "font-weight",
+  "font-family",
+  "padding",
+  "margin",
+  "border",
+  "box-shadow",
+  "opacity",
+  "display",
+  "position",
+] as const;
 
 export interface DomSnapshotResult {
   elements: InspectElementResult[];
@@ -302,9 +322,14 @@ export async function getAllDomSelectors(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   page: { evaluate: (fn: any, arg?: any) => Promise<any>; url?: () => string },
   selectorPriority: SelectorPriorityConfig,
+  captureStyles: boolean = false,
 ): Promise<DomSnapshotResult> {
   const elements = (await page.evaluate(
-    ([priorityArg]: [SelectorPriorityConfig]) => {
+    ([priorityArg, captureStylesArg, stylePropsArg]: [
+      SelectorPriorityConfig,
+      boolean,
+      readonly string[],
+    ]) => {
       const priority = priorityArg;
 
       // --- inline selector utils (duplicated — must be self-contained) ---
@@ -538,6 +563,7 @@ export async function getAllDomSelectors(
         textContent?: string;
         boundingBox: { x: number; y: number; width: number; height: number };
         selectors: Array<{ type: string; value: string }>;
+        styles?: Record<string, string>;
       }> = [];
 
       const MAX_ELEMENTS = 5000;
@@ -556,6 +582,15 @@ export async function getAllDomSelectors(
         const selectors = generateAllSelectors(el);
         if (selectors.length === 0) continue;
 
+        let styles: Record<string, string> | undefined;
+        if (captureStylesArg) {
+          const cs = getComputedStyle(el);
+          styles = {};
+          for (const prop of stylePropsArg) {
+            styles[prop] = cs.getPropertyValue(prop);
+          }
+        }
+
         results.push({
           tag: el.tagName.toLowerCase(),
           id: el.id || undefined,
@@ -567,13 +602,14 @@ export async function getAllDomSelectors(
             height: rect.height,
           },
           selectors,
+          ...(styles ? { styles } : {}),
         });
         count++;
       }
 
       return results;
     },
-    [selectorPriority],
+    [selectorPriority, captureStyles, RCA_STYLE_PROPS],
   )) as InspectElementResult[];
 
   return {

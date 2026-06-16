@@ -17,6 +17,7 @@ import {
 } from "@/components/diff/slider-comparison";
 import { SwipeDeck } from "@/components/diff/swipe-deck-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaPanel } from "@/components/diff/rca-panel";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -712,6 +713,14 @@ export function DiffViewerClient({
                 : undefined
             }
           />
+
+          {/* Root Cause Analysis — element-level region→cause drill-down */}
+          {metadata?.rca && (
+            <RcaPanel
+              rca={metadata.rca}
+              currentImageSrc={diff.currentImagePath}
+            />
+          )}
 
           {/* AI Analysis */}
           {!banAiMode &&

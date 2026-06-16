@@ -236,13 +236,36 @@ export function classifyDiffSource(
 
   signals.sort((a, b) => b.confidence - a.confidence);
 
+  const changedFiles = codeTouchedThisSurface
+    ? allFiles.slice(0, MAX_CHANGED_FILES)
+    : [];
+
   return {
     headline,
     signals,
-    changedFiles: codeTouchedThisSurface
-      ? allFiles.slice(0, MAX_CHANGED_FILES)
-      : [],
+    changedFiles,
+    narrative: buildNarrative(headline, signals[0], changedFiles.length),
     version: RCA_VERSION,
     computedAt: now,
   };
+}
+
+/**
+ * Deterministic one-sentence root-cause summary built from the verdict. Free
+ * and always available; an LLM-backed version (richer phrasing across all
+ * signals + file names) is a follow-up gated on the team's AI settings.
+ */
+function buildNarrative(
+  headline: RcaVerdict["headline"],
+  top: RcaSignal | undefined,
+  fileCount: number,
+): string {
+  const reason = top?.reason ?? "No attributable signal.";
+  const files =
+    fileCount > 0
+      ? ` (${fileCount} file${fileCount === 1 ? "" : "s"} changed in this build)`
+      : "";
+  if (headline === "code") return `Likely a code change: ${reason}${files}`;
+  if (headline === "test") return `Likely test noise: ${reason}`;
+  return `Source unclear: ${reason}`;
 }

@@ -121,6 +121,10 @@ export interface DomSnapshotElement {
   textContent?: string;
   boundingBox: { x: number; y: number; width: number; height: number };
   selectors: Array<{ type: string; value: string }>;
+  // Curated computed styles (color, padding, font, …), captured by the
+  // embedded browser only when style capture is enabled. Drives RCA CSS-delta
+  // drill-down; absent on snapshots predating the feature.
+  styles?: Record<string, string>;
 }
 
 // Full DOM snapshot with page context
@@ -200,6 +204,8 @@ export interface RcaVerdict {
   changedFiles: string[];
   /** Element-level region→cause mapping (correlation phase). */
   regionCauses?: RcaRegionCause[];
+  /** One-sentence human-readable root cause (AI, best-effort; Phase 4). */
+  narrative?: string;
   /** Schema/heuristic version, so stale verdicts can be recomputed. */
   version: number;
   computedAt: string;

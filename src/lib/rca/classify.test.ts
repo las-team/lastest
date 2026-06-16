@@ -217,6 +217,20 @@ describe("classifyDiffSource — UNCERTAIN", () => {
     expect(v.version).toBe(RCA_VERSION);
     expect(v.computedAt).toBe(NOW);
   });
+
+  it("includes a deterministic narrative matching the headline", () => {
+    const code = classify({
+      changeMap: codeAreaMap,
+      metadata: meta({ domDiff: domDiff({ added: [el("x")] }) }),
+    });
+    expect(code.narrative).toMatch(/^Likely a code change:/);
+    const test = classify({
+      changeMap: changeMap(),
+      metadata: meta({ domDiff: domDiff() }),
+      percentageDifference: "2.0",
+    });
+    expect(test.narrative).toMatch(/^Likely test noise:/);
+  });
 });
 
 describe("dynamic-text helpers", () => {
