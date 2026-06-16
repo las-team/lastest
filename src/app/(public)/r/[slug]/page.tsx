@@ -334,6 +334,23 @@ export default async function PublicSharePage({ params }: PageProps) {
       (await getBuildDemoNotes(build.id)))
     : await getBuildDemoNotes(build.id);
 
+  // Subtitle track for the recording. Captions are time-coded to THIS build's
+  // recording, so they're read from the build's OWN notes — not the repo-latest
+  // `demoNotes` (which feeds the prose panel and may belong to a sibling build
+  // whose video has different step timing). Only emit a <track> when captions
+  // exist; absent captions → no track → the player renders exactly as before.
+  const buildCaptions = (await getBuildDemoNotes(build.id))?.captions ?? [];
+  const captionTracks =
+    buildCaptions.length > 0
+      ? [
+          {
+            src: `/share/${slug}/captions.vtt`,
+            srclang: "en",
+            label: "English",
+          },
+        ]
+      : undefined;
+
   // Lastest awards: render the earned-badges + embed block when the repo has
   // a tier. Resolved by repositoryId — works for both build and test shares.
   const award: RepoAward | null = repoIdForNotes
@@ -364,7 +381,7 @@ export default async function PublicSharePage({ params }: PageProps) {
                 the page reads as a video watch page (Google's "video is the
                 main content" signal) and the player has an accessible label. */}
             <figure className="m-0 space-y-2">
-              <ShareVideoPlayer clips={clips} />
+              <ShareVideoPlayer clips={clips} tracks={captionTracks} />
               <figcaption className="text-sm text-muted-foreground">
                 Recording of the visual regression run on {displayDomain}
                 {test?.name ? ` · ${test.name}` : ""}.

@@ -13,6 +13,8 @@ import {
 } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
+  Captions,
+  CaptionsOff,
   Check,
   Maximize2,
   Minimize2,
@@ -34,6 +36,13 @@ import { cn } from "@/lib/utils";
 const RATE_OPTIONS = [0.5, 1, 1.5, 2, 3, 4] as const;
 const VOLUME_KEY = "lastest:videoplayer:volume";
 const MUTED_KEY = "lastest:videoplayer:muted";
+const CAPTIONS_KEY = "lastest:videoplayer:captions";
+
+export interface VideoTextTrack {
+  src: string;
+  srclang: string;
+  label: string;
+}
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -69,6 +78,14 @@ export interface VideoPlayerProps {
    * finite value (via `durationchange`), the real value takes over.
    */
   durationMsFallback?: number | null;
+  /**
+   * Subtitle/caption tracks attached to the `<video>` as `<track>` children
+   * (WebVTT). When present, a CC toggle appears in the controls. Same-origin
+   * sources only — no `crossorigin` is set.
+   */
+  tracks?: VideoTextTrack[];
+  /** Whether captions start visible. Overridden by the user's saved choice. */
+  captionsDefaultOn?: boolean;
 }
 
 function formatTime(s: number): string {
@@ -128,6 +145,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onReady,
       ariaLabel,
       durationMsFallback,
+      tracks,
+      captionsDefaultOn = false,
     },
     ref,
   ) {
@@ -159,6 +178,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const initialMuted = mutedProp ?? true;
     const [muted, setMuted] = useState(initialMuted);
     const [playbackRate, setPlaybackRate] = useState(defaultPlaybackRate);
+    const [captionsOn, setCaptionsOn] = useState(captionsDefaultOn);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [controlsVisible, setControlsVisible] = useState(true);
@@ -185,10 +205,36 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           const m = window.localStorage.getItem(MUTED_KEY);
           if (m !== null) setMuted(m === "1");
         }
+        const cc = window.localStorage.getItem(CAPTIONS_KEY);
+        if (cc !== null) setCaptionsOn(cc === "1");
       } catch {
         // localStorage unavailable; fall back to defaults.
       }
     }, [mutedProp]);
+
+    // Apply the captions on/off choice to the <video>'s text tracks. The
+    // browser exposes them via `video.textTracks` once the <track> children
+    // mount; flip every track's mode and persist the preference. Re-runs when
+    // the track set changes so a late-arriving track inherits the current
+    // state.
+    useEffect(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      const apply = () => {
+        for (let i = 0; i < v.textTracks.length; i++) {
+          v.textTracks[i]!.mode = captionsOn ? "showing" : "hidden";
+        }
+      };
+      apply();
+      // Tracks can register slightly after mount; `addtrack` catches that.
+      v.textTracks.addEventListener?.("addtrack", apply);
+      try {
+        window.localStorage.setItem(CAPTIONS_KEY, captionsOn ? "1" : "0");
+      } catch {
+        // noop
+      }
+      return () => v.textTracks.removeEventListener?.("addtrack", apply);
+    }, [captionsOn, tracks]);
 
     useEffect(() => {
       const v = videoRef.current;
@@ -536,6 +582,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             e.preventDefault();
             toggleMute();
             break;
+          case "c":
+          case "C":
+            if (tracks && tracks.length > 0) {
+              e.preventDefault();
+              setCaptionsOn((on) => !on);
+            }
+            break;
           case "f":
           case "F":
             e.preventDefault();
@@ -550,7 +603,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         }
         wakeControls();
       },
-      [skip, toggleFullscreen, toggleMute, togglePlay, wakeControls],
+      [skip, toggleFullscreen, toggleMute, togglePlay, wakeControls, tracks],
     );
 
     const VolumeIcon =
@@ -597,7 +650,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           muted={muted}
           onClick={togglePlay}
           className={cn("block h-full w-full object-contain", videoClassName)}
-        />
+        >
+          {tracks?.map((t) => (
+            <track
+              key={t.src}
+              kind="subtitles"
+              src={t.src}
+              srcLang={t.srclang}
+              label={t.label}
+            />
+          ))}
+        </video>
 
         {!isPlaying && duration > 0 && (
           <button
@@ -722,6 +785,26 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </span>
 
             <div className="flex-1" />
+
+            {tracks && tracks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setCaptionsOn((c) => !c)}
+                aria-label={captionsOn ? "Hide captions" : "Show captions"}
+                aria-pressed={captionsOn}
+                title={captionsOn ? "Hide captions" : "Show captions"}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md text-white transition-colors hover:bg-white/15",
+                  captionsOn && "bg-white/20",
+                )}
+              >
+                {captionsOn ? (
+                  <Captions className="h-4 w-4" />
+                ) : (
+                  <CaptionsOff className="h-4 w-4" />
+                )}
+              </button>
+            )}
 
             <Popover>
               <PopoverTrigger asChild>

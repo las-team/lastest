@@ -4155,6 +4155,29 @@ export interface DemoNoteSkippedRoute {
   reason: string;
 }
 
+// One narration cue for the share-page recording. The AI vision pass writes
+// one of these per captured step (aligned to test_results.screenshots[] order)
+// describing what the agent does and what's visible on screen. Cue timing is
+// an EVEN SPLIT of the recording's duration_ms — we don't persist a real
+// per-step video timestamp (see captions.ts / src/lib/share/vtt.ts). `focus`
+// and `annotation` are captured now but only rendered by the (planned)
+// arrow/underline overlay; the v1 subtitle track ignores them.
+export interface VideoCaption {
+  /** 0-based, aligns to test_results.screenshots[] order. */
+  stepIndex: number;
+  /** Cue start in ms (even-split approximation of duration_ms). */
+  startMs: number;
+  /** Cue end in ms. */
+  endMs: number;
+  /** One short present-tense narration line. */
+  text: string;
+  /** Normalized 0..1 region of the primary element the agent acted on.
+   *  Stored for the future annotation overlay; not rendered by the v1 track. */
+  focus?: { x: number; y: number; w: number; h: number };
+  /** How the focus region should be marked once the overlay ships. */
+  annotation?: "arrow" | "underline" | "box";
+}
+
 export interface DemoNotes {
   /** 2–3 sentence overall UI/UX impression. */
   uxSummary: string;
@@ -4166,6 +4189,10 @@ export interface DemoNotes {
   testingStruggles: DemoNoteItem[];
   /** Routes the agent tried but couldn't capture. */
   skippedRoutes?: DemoNoteSkippedRoute[];
+  /** Time-coded narration for the recording, rendered as the <video> subtitle
+   *  track on /r/<slug>. Optional — absent on notes written before captions
+   *  shipped, in which case the share renders no track. */
+  captions?: VideoCaption[];
   generatedAt: string;
   /** Provider/model id used for the AI summary, when applicable. */
   modelId?: string;

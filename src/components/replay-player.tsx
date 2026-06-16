@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player";
+import {
+  VideoPlayer,
+  type VideoPlayerHandle,
+  type VideoTextTrack,
+} from "@/components/video-player";
 
 export interface ReplayClip {
   src: string;
@@ -30,6 +34,12 @@ export interface ReplayPlayerProps {
    */
   clips: ReplayClip[];
   className?: string;
+  /**
+   * Subtitle tracks for the recording. Attached to the FIRST clip only (the
+   * hero/primary player) — the share page's caption track describes the
+   * primary test result's run.
+   */
+  tracks?: VideoTextTrack[];
 }
 
 /**
@@ -40,7 +50,7 @@ export interface ReplayPlayerProps {
  * single component means scrubber, hover-preview, and step-seek behavior
  * stay aligned across surfaces.
  */
-export function ReplayPlayer({ clips, className }: ReplayPlayerProps) {
+export function ReplayPlayer({ clips, className, tracks }: ReplayPlayerProps) {
   const handlesRef = useRef<(VideoPlayerHandle | null)[]>([]);
 
   useEffect(() => {
@@ -64,6 +74,7 @@ export function ReplayPlayer({ clips, className }: ReplayPlayerProps) {
           src={clip.src}
           poster={clip.poster ?? undefined}
           durationMsFallback={clip.durationMs ?? null}
+          tracks={i === 0 ? tracks : undefined}
           autoPlay
           loop
           playsInline
