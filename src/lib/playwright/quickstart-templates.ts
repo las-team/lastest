@@ -444,6 +444,41 @@ ${renderEbBootstrap()}
   await page.screenshot({ path: shot(1, 'home'), fullPage: true });
 
   let publicScenario = 2;
+
+  // Primary interaction for canvas / drawing apps (Excalidraw, tldraw, whiteboards,
+  // map tools): when the homepage exposes a large drawing <canvas>, perform a REAL
+  // coordinate-based action — select the rectangle tool ('r', the de-facto shortcut
+  // across drawing apps) and drag a square — so the walkthrough demonstrates the
+  // product's core function instead of only screenshotting nav pages. Best-effort:
+  // gated on a visibly large canvas and fully wrapped, so non-drawing canvases
+  // (charts, games) never break the run.
+  try {
+    const canvas = page.locator('canvas').first();
+    if (await canvas.isVisible().catch(() => false)) {
+      const box = await canvas.boundingBox().catch(() => null);
+      if (box && box.width > 300 && box.height > 200) {
+        await canvas.click({ position: { x: 30, y: 30 } }).catch(() => {});
+        await page.keyboard.press('r').catch(() => {});
+        await page.waitForTimeout(150);
+        const side = Math.min(box.width, box.height) * 0.25;
+        const x1 = box.x + box.width * 0.4;
+        const y1 = box.y + box.height * 0.35;
+        await page.mouse.move(x1, y1);
+        await page.mouse.down();
+        await page.mouse.move(x1 + side * 0.5, y1 + side * 0.5, { steps: 8 });
+        await page.mouse.move(x1 + side, y1 + side, { steps: 8 });
+        await page.mouse.up();
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(300);
+        stepLogger.log(\`Scenario \${publicScenario}: Drew a square on the canvas\`);
+        await page.screenshot({ path: shot(publicScenario, 'draw-square'), fullPage: true });
+        publicScenario++;
+      }
+    }
+  } catch (canvasErr) {
+    stepLogger.warn(\`Canvas draw step skipped: \${canvasErr && canvasErr.message}\`);
+  }
+
   const navLinks = await page.$$eval('a[href]', as => as
     .map(a => a.getAttribute('href') || '')
     .filter(h => h.startsWith('/') && h.length > 1 && !h.startsWith('/_') && !h.startsWith('/#'))
