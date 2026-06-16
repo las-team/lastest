@@ -50,6 +50,11 @@ export interface QuickstartSessionView {
     disabledReason?: string;
     streamUrl?: string;
     queuedForBrowser?: boolean;
+    demoNotes?: {
+      uxSummary: string;
+      highlights: { label: string; note: string }[];
+      frictionPoints: { label: string; note: string }[];
+    } | null;
   };
   createdAt?: string;
   completedAt?: string;

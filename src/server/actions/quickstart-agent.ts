@@ -39,6 +39,38 @@ import { publishBuildShare } from "./public-shares";
 import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
+import { db } from "@/lib/db";
+import { embeddedSessions } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { toProxyStreamUrl } from "@/lib/eb/stream-url";
+import { appendStreamToken } from "@/lib/eb/stream-token";
+
+/**
+ * Normalise a raw EB `ws://host:port` stream URL into a browser-routable form for
+ * the QuickStart panel's live view: a same-origin proxy path (works on HTTPS +
+ * k3s dev where pod IPs aren't routable) plus the stream auth token. Mirrors the
+ * build page's stream wiring.
+ */
+function proxiedStream(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const proxied = toProxyStreamUrl(raw) ?? raw;
+  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+}
+
+/** Resolve the live stream URL of the EB currently running a build's test run. */
+async function resolveBuildStreamUrl(
+  buildId: string,
+): Promise<string | undefined> {
+  const build = await queries.getBuild(buildId);
+  if (!build?.testRunId) return undefined;
+  const testRun = await queries.getTestRun(build.testRunId);
+  if (!testRun?.runnerId) return undefined;
+  const [sess] = await db
+    .select({ streamUrl: embeddedSessions.streamUrl })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.runnerId, testRun.runnerId));
+  return proxiedStream(sess?.streamUrl);
+}
 
 // ---------------------------------------------------------------------------
 // Step definitions
@@ -456,7 +488,7 @@ async function runQsScoutPublic(
   }
   // Surface the EB's live screencast so the panel can show the scout browsing.
   await mergeMetadata(sessionId, {
-    streamUrl: eb?.streamUrl,
+    streamUrl: proxiedStream(eb?.streamUrl),
     queuedForBrowser: false,
   });
   try {
@@ -679,7 +711,7 @@ async function runQsScoutAuthed(
     return false;
   }
   await mergeMetadata(sessionId, {
-    streamUrl: eb?.streamUrl,
+    streamUrl: proxiedStream(eb?.streamUrl),
     queuedForBrowser: false,
   });
   try {
@@ -872,8 +904,11 @@ async function runQsRunAndNotes(
     { stepId: "qs_run_and_notes", artifactType: "build", artifactId: buildId },
   );
 
-  // Poll for completion
+  // Poll for completion. Surface the run's live EB stream into the panel as soon
+  // as the EB picks up the test (set once), so the two-column view shows the
+  // walkthrough run — including the canvas-draw step — not just the scout phases.
   const started = Date.now();
+  let streamSurfaced = false;
   let summary = await getBuildSummary(buildId);
   while (!summary || !summary.completedAt) {
     if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
@@ -885,9 +920,18 @@ async function runQsRunAndNotes(
       return false;
     }
     if (await isCancelled(sessionId, signal)) return false;
+    if (!streamSurfaced) {
+      const live = await resolveBuildStreamUrl(buildId).catch(() => undefined);
+      if (live) {
+        await mergeMetadata(sessionId, { streamUrl: live });
+        streamSurfaced = true;
+      }
+    }
     await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
     summary = await getBuildSummary(buildId);
   }
+  // Build done — stop the panel pointing at the (about-to-be-released) build EB.
+  await mergeMetadata(sessionId, { streamUrl: undefined });
   // After the loop, summary is non-null and has a completedAt; help TS narrow.
   if (!summary) {
     await setFailed(
@@ -1149,6 +1193,7 @@ async function runQsRerunAfterApproval(
   );
 
   const started = Date.now();
+  let rerunStreamSurfaced = false;
   let summary = await getBuildSummary(rerunBuildId);
   while (!summary || !summary.completedAt) {
     if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
@@ -1160,9 +1205,19 @@ async function runQsRerunAfterApproval(
       return false;
     }
     if (await isCancelled(sessionId, signal)) return false;
+    if (!rerunStreamSurfaced) {
+      const live = await resolveBuildStreamUrl(rerunBuildId).catch(
+        () => undefined,
+      );
+      if (live) {
+        await mergeMetadata(sessionId, { streamUrl: live });
+        rerunStreamSurfaced = true;
+      }
+    }
     await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
     summary = await getBuildSummary(rerunBuildId);
   }
+  await mergeMetadata(sessionId, { streamUrl: undefined });
 
   await setCompleted(sessionId, "qs_rerun_after_approval", {
     rerunBuildId,

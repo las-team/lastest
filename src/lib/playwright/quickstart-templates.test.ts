@@ -114,11 +114,15 @@ describe("renderWalkthroughCode — authed (chained storage state) mode", () => 
     // 'auth-failed' frame just before throwing.
     expect(code).toMatch(/shot\(publicScenario, 'auth-failed'\)/);
     const markerIdx = code.indexOf(AUTH_CHAIN_FAILED_MARKER);
-    const firstTryIdx = code.indexOf("try {");
+    // The authed-phase best-effort walk is wrapped in a try/catch that opens
+    // right after the `authed = true;` gate. The marker throw must sit BEFORE
+    // that try so a failed chain reds the build instead of being swallowed.
+    // (A separate public-phase canvas-draw try exists earlier in the body — the
+    // gate is not inside it.)
+    const authedTryIdx = code.indexOf("try {", code.indexOf("authed = true;"));
     expect(markerIdx).toBeGreaterThan(-1);
-    expect(firstTryIdx).toBeGreaterThan(-1);
-    // throw appears before the first try block opens (gate runs before the walk).
-    expect(markerIdx).toBeLessThan(firstTryIdx);
+    expect(authedTryIdx).toBeGreaterThan(-1);
+    expect(markerIdx).toBeLessThan(authedTryIdx);
   });
 
   it("takes every screenshot at fullPage: true", () => {
@@ -172,6 +176,24 @@ describe("renderWalkthroughCode — public-only mode", () => {
   it("still walks the public phase", () => {
     expect(code).toMatch(/Scenario 1: Homepage/);
     expect(code).toMatch(/page\.\$\$eval\('a\[href\]'/);
+  });
+
+  it("performs a coordinate-based canvas draw when a canvas is present", () => {
+    // Drawing/canvas apps (e.g. Excalidraw) expose no form input — the walk must
+    // demonstrate the product by selecting the rectangle tool and dragging a
+    // square with real mouse coordinates, then screenshot the result.
+    expect(code).toMatch(/page\.locator\('canvas'\)/);
+    expect(code).toMatch(/page\.keyboard\.press\('r'\)/);
+    expect(code).toMatch(/page\.mouse\.down\(\)/);
+    expect(code).toMatch(/page\.mouse\.move\(/);
+    expect(code).toMatch(/page\.mouse\.up\(\)/);
+    expect(code).toMatch(/Drew a square on the canvas/);
+    expect(code).toMatch(/shot\(publicScenario, 'draw-square'\)/);
+    // Runs in the public phase (before the AUTH_AUTOMATABLE branch) so public
+    // canvas apps like Excalidraw get the interaction without auth.
+    expect(code.indexOf("Drew a square")).toBeLessThan(
+      code.indexOf("if (AUTH_AUTOMATABLE)"),
+    );
   });
 });
 
