@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Maximize2 } from "lucide-react";
 import { ScreenshotViewer } from "@/components/tests/screenshot-viewer";
 
@@ -15,6 +15,19 @@ type Step = { src: string; label: string };
  */
 export function StepStripClient({ steps }: { steps: Step[] }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+
+  // Escape closes the gallery regardless of where focus landed after the
+  // thumbnail click — the viewer's own key handler only fires while its dialog
+  // div holds focus, which isn't guaranteed. A document-level listener is the
+  // reliable path.
+  useEffect(() => {
+    if (openIndex == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenIndex(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openIndex]);
 
   return (
     <section className="space-y-2">

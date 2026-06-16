@@ -12,20 +12,39 @@ import type { DomDiffResult, DomSnapshotElement } from "@/lib/db/schema";
 
 type Tone = "added" | "removed" | "changed";
 
-const TONE_STYLE: Record<Tone, { box: string; chip: string; sign: string }> = {
+const TONE_STYLE: Record<
+  Tone,
+  {
+    box: string;
+    chip: string;
+    chipBg: string;
+    ring: string;
+    popBorder: string;
+    sign: string;
+  }
+> = {
   added: {
     box: "border-emerald-500 bg-emerald-500/15",
     chip: "text-emerald-700 dark:text-emerald-300",
+    chipBg: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    ring: "ring-emerald-500/40",
+    popBorder: "border-emerald-500",
     sign: "+",
   },
   removed: {
     box: "border-rose-500 bg-rose-500/15",
     chip: "text-rose-700 dark:text-rose-300",
+    chipBg: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    ring: "ring-rose-500/40",
+    popBorder: "border-rose-500",
     sign: "−",
   },
   changed: {
     box: "border-amber-500 bg-amber-500/15",
     chip: "text-amber-700 dark:text-amber-300",
+    chipBg: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    ring: "ring-amber-500/40",
+    popBorder: "border-amber-500",
     sign: "~",
   },
 };
@@ -70,6 +89,7 @@ export function DomOverlay({
   stepLabel: string | null;
 }) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [hovered, setHovered] = useState<number | null>(null);
 
   const added = dom.added ?? [];
   const removed = dom.removed ?? [];
@@ -118,21 +138,60 @@ export function DomOverlay({
           className="block w-full h-auto select-none"
         />
         <div className="absolute inset-0 pointer-events-none">
-          {rects.map((r, i) => (
-            <div
-              key={i}
-              className={`absolute border-2 ${TONE_STYLE[r.tone].box}`}
-              style={{
-                left: `${r.x}%`,
-                top: `${r.y}%`,
-                width: `${r.w}%`,
-                height: `${r.h}%`,
-              }}
-              title={`${TONE_STYLE[r.tone].sign} <${r.tag}>${
-                r.selector ? ` ${r.selector}` : ""
-              }${r.text ? ` — "${r.text.slice(0, 60)}"` : ""}`}
-            />
-          ))}
+          {rects.map((r, i) => {
+            const t = TONE_STYLE[r.tone];
+            const isHovered = hovered === i;
+            // Flip the popover to whichever side has more room so it never
+            // clips: rect on the left half → popover to the right, else left.
+            const pinRight = r.x < 50;
+            return (
+              <div
+                key={i}
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+                className={`absolute rounded-[2px] border-2 pointer-events-auto ${t.box} ${
+                  isHovered ? `ring-2 ${t.ring} z-20` : "z-10"
+                }`}
+                style={{
+                  left: `${r.x}%`,
+                  top: `${r.y}%`,
+                  width: `${r.w}%`,
+                  height: `${r.h}%`,
+                }}
+              >
+                {isHovered && (
+                  <div
+                    className={`absolute top-0 z-30 min-w-[220px] max-w-[320px] rounded-md border bg-card text-foreground p-2 text-[11px] leading-relaxed shadow-lg pointer-events-none ${t.popBorder} ${
+                      pinRight ? "left-full ml-1.5" : "right-full mr-1.5"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${t.chipBg}`}
+                      >
+                        {r.tone}
+                      </span>
+                      <span className="font-mono text-muted-foreground">
+                        {`<${r.tag}>`}
+                      </span>
+                    </div>
+                    {r.selector && (
+                      <div className="font-mono break-all text-[10.5px]">
+                        {r.selector}
+                      </div>
+                    )}
+                    {r.text && (
+                      <div className="mt-1 italic break-words text-muted-foreground">
+                        {r.text.length > 240
+                          ? r.text.slice(0, 237) + "…"
+                          : r.text}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </figure>

@@ -1746,23 +1746,41 @@ function buildDomOverlays(
     if (!stepByLabel.has(s.label)) stepByLabel.set(s.label, s.src);
   }
 
-  const out: DomOverlayItem[] = [];
-  for (const sc of stepComparisons) {
-    const dom = sc.layers?.dom;
-    if (!dom) continue;
-    const count =
-      (dom.added?.length ?? 0) +
+  const hasChanges = (
+    dom: DomDiffResult | null | undefined,
+  ): dom is DomDiffResult =>
+    !!dom &&
+    (dom.added?.length ?? 0) +
       (dom.removed?.length ?? 0) +
-      (dom.changed?.length ?? 0);
-    if (count === 0) continue;
-    const label = sc.stepLabel;
-    const src =
-      (label
-        ? (diffCurrentByLabel.get(label) ?? stepByLabel.get(label))
-        : null) ?? null;
-    if (!src) continue;
-    out.push({ key: sc.id, stepLabel: label, dom, src });
+      (dom.changed?.length ?? 0) >
+      0;
+
+  // DOM diff per step label, preferring the multi-layer step_comparisons
+  // .layers.dom and falling back to the legacy visual_diff.metadata.domDiff
+  // (mirrors Verify's `layers?.dom ?? domDiff`). Keyed by label so the two
+  // sources dedupe to one overlay per step.
+  const domByLabel = new Map<string, { key: string; dom: DomDiffResult }>();
+  for (const sc of stepComparisons) {
+    if (!sc.stepLabel || !hasChanges(sc.layers?.dom)) continue;
+    domByLabel.set(sc.stepLabel, { key: sc.id, dom: sc.layers.dom });
   }
+  for (const d of diffs) {
+    if (!d.stepLabel || domByLabel.has(d.stepLabel) || !hasChanges(d.domDiff))
+      continue;
+    domByLabel.set(d.stepLabel, { key: d.id, dom: d.domDiff });
+  }
+
+  const out: DomOverlayItem[] = [];
+  for (const [label, { key, dom }] of domByLabel) {
+    const src = diffCurrentByLabel.get(label) ?? stepByLabel.get(label) ?? null;
+    if (!src) continue;
+    out.push({ key, stepLabel: label, dom, src });
+  }
+  // Stable capture order so "Step 1" renders before "Step 5".
+  out.sort(
+    (a, b) =>
+      stepNumberFromLabel(a.stepLabel) - stepNumberFromLabel(b.stepLabel),
+  );
   return out;
 }
 
@@ -1872,6 +1890,10 @@ function buildSliderDiffs(
 ): SliderDiff[] {
   const out = diffs
     .map((d): SliderDiff | null => {
+      // A row with zero pixel difference isn't a visual change — auto-approved
+      // / unchanged steps still produce visual_diffs rows, but the "Visual
+      // changes" section should only surface actual pixel diffs.
+      if ((d.pixelDifference ?? 0) <= 0) return null;
       const baseline = toUrl(d.baselineImagePath);
       const current = toUrl(d.currentImagePath);
       if (!baseline || !current) return null;
