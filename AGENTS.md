@@ -34,11 +34,13 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_API_KEY
 ### Typical Workflow
 
 1. `lastest_run_tests` — start a build (`forceVideoRecording: true` if you need video for a share)
-2. `lastest_get_build_status` — poll until complete
-3. If visual changes: `lastest_get_visual_diff` — inspect diffs
-4. `lastest_approve_baseline` or `lastest_reject_baseline` — act on diffs
-5. If failures: `lastest_heal_test` — auto-fix, then re-run
-6. To share: `lastest_publish_share` → public `/r/<slug>` URL. Manage with `lastest_list_build_shares` / `lastest_revoke_share`.
+2. `lastest_build` `action:"get"` — poll until complete (`action:"review"` for failures + action items)
+3. If visual changes: `lastest_get_diffs` `scope:"build"` — inspect diffs
+4. `lastest_decide_diff` `action:"approve"|"reject"` — act on diffs/baselines
+5. If failures: `lastest_heal_test` — auto-fix the test, then re-run; or `lastest_suggest_app_fix` for an app-code fix suggestion
+6. To share: `lastest_publish_share` → public `/r/<slug>` URL. Manage with `lastest_share` `action:"list"|"revoke"`.
+
+For a fast inner-loop check after a code change, use `lastest_validate_diff` (maps a diff to the affected tests, runs only those, returns one verdict).
 
 ### Build Status Values
 
