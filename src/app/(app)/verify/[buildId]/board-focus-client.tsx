@@ -94,6 +94,9 @@ export interface VisualDiffLite {
    *  "baseline is gone" panic — the data hasn't been lost, it just hasn't
    *  been promoted to this branch yet. */
   baselineExistsOn: { branch: string; createdAt: string } | null;
+  /** RCA verdict — "is this diff the test or the code?" (Phase 1). Null on
+   *  diffs predating the feature or not yet classified. */
+  rca: import("@/lib/db/schema").RcaVerdict | null;
 }
 
 export interface TestResultLite {

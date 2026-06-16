@@ -84,6 +84,7 @@ import type {
 } from "@/lib/db/schema";
 import { deriveCaseStatus, type CaseStatus } from "@/lib/verify/case-status";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
+import { RcaBadge } from "@/components/diff/rca-badge";
 
 interface AreaLite {
   id: string;
@@ -804,6 +805,9 @@ export function FocusView(props: FocusViewProps) {
           )}
           {activeCase && <StatusChipFor status={activeCase.status} />}
           {activeCase && <ErrorChip result={activeCase.result} />}
+          {activeCase?.visual?.rca && (
+            <RcaBadge rca={activeCase.visual.rca} compact />
+          )}
           {activeCase?.step.githubIssueUrl && (
             <IssueChipReal step={activeCase.step} />
           )}

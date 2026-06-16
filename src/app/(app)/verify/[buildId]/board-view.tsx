@@ -39,6 +39,7 @@ import {
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
+import { RcaBadge } from "@/components/diff/rca-badge";
 
 export type CaseStatus = "regression" | "done" | "missed" | "unknown";
 
@@ -1334,6 +1335,7 @@ function CaseCard({
           {data.area?.name ?? "Unscoped"}
         </span>
         <span style={{ flex: 1 }} />
+        {data.visual?.rca && <RcaBadge rca={data.visual.rca} compact />}
         <ErrorChip result={data.result} />
         <IssueChipReal step={data.step} onOpenPicker={onOpenIssuePicker} />
       </div>
