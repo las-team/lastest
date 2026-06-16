@@ -232,6 +232,7 @@ export interface TestPlaywrightOverrides {
   designMode?: "enforce" | "log" | "disable";
   perfMode?: "enforce" | "log" | "disable";
   urlMode?: "enforce" | "log" | "disable";
+  apiMode?: "enforce" | "log" | "disable";
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
@@ -296,6 +297,115 @@ export const functionalAreas = pgTable("functional_areas", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// ---------------------------------------------------------------------------
+// API tests (E1) — headless HTTP test definition + assertions.
+// A standalone request executed without a browser; results flow through the
+// same test_results / step_comparisons / evidence pipeline as browser tests
+// under the `api` check layer.
+// ---------------------------------------------------------------------------
+
+export type ApiAuth =
+  | { type: "none" }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string }
+  | { type: "custom"; headers: Record<string, string> };
+
+export type ApiAssertionKind =
+  | "status"
+  | "header"
+  | "jsonPath"
+  | "jsonSchema"
+  | "bodyContains"
+  | "latencyMs";
+
+export interface ApiAssertion {
+  kind: ApiAssertionKind;
+  /** status: exact status code, or `in` for a set of acceptable codes. */
+  equals?: number;
+  in?: number[];
+  /** header: header name to assert on (case-insensitive). */
+  header?: string;
+  /** jsonPath: dot-path into the JSON response body. */
+  path?: string;
+  /** Expected value (jsonPath / header) or substring (bodyContains). */
+  value?: string | number | boolean;
+  /** jsonSchema: a JSON Schema object validated with ajv. */
+  schema?: unknown;
+  /** latencyMs: max acceptable round-trip latency. */
+  maxMs?: number;
+  /** header/jsonPath: require an exact same-type match (no string coercion).
+   *  Default comparison is type-aware, keyed off the expected value's type. */
+  strict?: boolean;
+  description?: string;
+}
+
+export interface ApiTestDefinition {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  auth?: ApiAuth;
+  assertions: ApiAssertion[];
+  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
+  timeoutMs?: number;
+}
+
+export interface ApiAssertionResultData {
+  kind: ApiAssertionKind;
+  passed: boolean;
+  description: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Persisted result of a headless API test (stored on test_results.apiResult). */
+export interface ApiTestResultData {
+  passed: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  assertionResults: ApiAssertionResultData[];
+  error?: string;
+  responseSnippet?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Load / performance testing on API tests (E3). Stored on tests.loadConfig and
+// test_results.loadResult; latency/error breaches surface on the `perf` layer.
+// ---------------------------------------------------------------------------
+
+export interface LoadTestThresholds {
+  p95Ms?: number;
+  p99Ms?: number;
+  /** Fraction 0..1 of requests allowed to fail before gating. */
+  maxErrorRate?: number;
+  minThroughputRps?: number;
+}
+
+export interface LoadTestConfig {
+  concurrency: number;
+  /** Total requests to issue. Takes precedence over durationMs when both set. */
+  totalRequests?: number;
+  /** When set (and totalRequests is not), keep firing until this wall-clock
+   *  budget elapses, capped by LOAD_TEST_MAX_DURATION_MS / total requests. */
+  durationMs?: number;
+  thresholds?: LoadTestThresholds;
+}
+
+export interface LoadTestResultData {
+  count: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  mean: number;
+  min: number;
+  max: number;
+  throughputRps: number;
+  errorRate: number;
+  passed: boolean;
+  breaches: string[];
+}
+
 export const tests = pgTable("tests", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id"),
@@ -350,6 +460,11 @@ export const tests = pgTable("tests", {
   // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
   // fall back to it when AI is misconfigured / rate-limited.
   aiVarLastValues: jsonb("ai_var_last_values").$type<Record<string, string>>(),
+  // E1: test type discriminator. 'browser' (Playwright, default) | 'api' (headless HTTP).
+  testType: text("test_type").default("browser"),
+  apiDefinition: jsonb("api_definition").$type<ApiTestDefinition>(),
+  // E3: when set on an api-type test, runs as a load test (N concurrent requests).
+  loadConfig: jsonb("load_config").$type<LoadTestConfig>(),
   executionMode: text("execution_mode").default("procedural"), // 'procedural' | 'agent'
   quarantined: boolean("quarantined").default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb("dom_snapshot").$type<DomSnapshotData>(), // DOM state captured during recording
@@ -711,6 +826,10 @@ export const testResults = pgTable("test_results", {
   testId: text("test_id").references(() => tests.id),
   testVersionId: text("test_version_id"), // links to testVersions.id — which version was executed
   status: text("status"), // 'passed', 'failed', 'skipped'
+  // E1: result of a headless API test (null for browser tests).
+  apiResult: jsonb("api_result").$type<ApiTestResultData>(),
+  // E3: load-test aggregate result (null unless the test ran as a load test).
+  loadResult: jsonb("load_result").$type<LoadTestResultData>(),
   screenshotPath: text("screenshot_path"),
   screenshots: jsonb("screenshots").$type<CapturedScreenshot[]>(),
   diffPath: text("diff_path"),
@@ -1373,6 +1492,7 @@ export const playwrightSettings = pgTable("playwright_settings", {
   designMode: text("design_mode"), // token compliance (legacy enableDesignSystem)
   perfMode: text("perf_mode"), // web vitals capture
   urlMode: text("url_mode"), // URL trajectory comparison
+  apiMode: text("api_mode"), // API-test request/response assertions (E1)
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -1512,6 +1632,21 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textDiffEnabled: false,
 };
 
+// Default settings for API tests (E1). Used when a field is unset on the
+// ApiTestDefinition.
+export const DEFAULT_API_TEST_SETTINGS = {
+  timeoutMs: 15000,
+};
+
+// Default load-test thresholds (E3) + server-side safety caps.
+export const DEFAULT_LOAD_TEST_THRESHOLDS = {
+  p95Ms: 1000,
+  maxErrorRate: 0.01,
+};
+export const LOAD_TEST_MAX_CONCURRENCY = 50;
+export const LOAD_TEST_MAX_TOTAL_REQUESTS = 2000;
+export const LOAD_TEST_MAX_DURATION_MS = 60_000;
+
 // Diff classification type
 export type DiffClassification = "unchanged" | "flaky" | "changed";
 
@@ -1532,7 +1667,12 @@ export type DiffStatus =
   | "rejected"
   | "auto_approved"
   | "todo";
-export type TriggerType = "webhook" | "manual" | "push" | "scheduled";
+export type TriggerType =
+  | "webhook"
+  | "manual"
+  | "push"
+  | "scheduled"
+  | "validate_diff";
 
 // AI Provider settings for test generation
 export type AIProvider =
@@ -1615,7 +1755,8 @@ export type AIActionType =
   | "agent_heal"
   | "agent_play"
   | "triage"
-  | "generate_var_value";
+  | "generate_var_value"
+  | "suggest_app_fix";
 export type AILogStatus = "pending" | "success" | "error";
 
 export const aiPromptLogs = pgTable("ai_prompt_logs", {
@@ -3432,7 +3573,8 @@ export type EvidenceLayer =
   | "console"
   | "url"
   | "perf"
-  | "variable";
+  | "variable"
+  | "api";
 
 export interface EvidenceItem {
   layer: EvidenceLayer;
@@ -3926,6 +4068,50 @@ export const buildDemoNotes = pgTable("build_demo_notes", {
 
 export type BuildDemoNotesRow = typeof buildDemoNotes.$inferSelect;
 export type NewBuildDemoNotesRow = typeof buildDemoNotes.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// App-fix suggestions — "Fix the app" loop (E5)
+// ---------------------------------------------------------------------------
+//
+// When a failure is classified `real_regression`, the advisor produces a
+// structured *application-code* fix recommendation that is returned to the
+// calling coding agent (never auto-applied). Distinct from the test healer,
+// which patches test code.
+
+export interface AppFixSuggestionFile {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  currentSnippet?: string;
+  suggestedSnippet?: string;
+  rationale: string;
+}
+
+export interface AppFixSuggestion {
+  summary: string;
+  classification: "real_regression";
+  confidence: number;
+  files: AppFixSuggestionFile[];
+  /** Files from the build's change map that likely introduced the regression. */
+  relatedChangeMapFiles?: string[];
+  generatedAt: string;
+  modelId: string;
+}
+
+export const appFixSuggestions = pgTable("app_fix_suggestions", {
+  id: text("id").primaryKey(),
+  buildId: text("build_id").references(() => builds.id, {
+    onDelete: "cascade",
+  }),
+  testId: text("test_id").references(() => tests.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").$type<AppFixSuggestion>().notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+export type AppFixSuggestionRow = typeof appFixSuggestions.$inferSelect;
+export type NewAppFixSuggestionRow = typeof appFixSuggestions.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Verify phase — Per-layer baselines (v1.14+)
