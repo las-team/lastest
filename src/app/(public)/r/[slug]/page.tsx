@@ -328,10 +328,6 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
-  // On-demand mp4 of the recording for native upload to X (autoplays inline
-  // there, unlike a link unfurl). Only offered when a recording exists.
-  const mp4DownloadUrl = clips.length > 0 ? `/share/${slug}/download` : null;
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
@@ -366,7 +362,6 @@ export default async function PublicSharePage({ params }: PageProps) {
             shareUrl={shareUrl}
             testName={test?.name ?? displayDomain}
             pixelsChanged={totalPixelsChanged}
-            mp4Url={mp4DownloadUrl}
             stepComparisons={scopedStepComparisons}
             demoNotes={demoNotes}
             claimLink={claimLink}
@@ -1541,7 +1536,6 @@ function TestShareBody({
   shareUrl,
   testName,
   pixelsChanged,
-  mp4Url,
   stepComparisons,
   demoNotes,
   claimLink,
@@ -1555,7 +1549,6 @@ function TestShareBody({
   shareUrl: string;
   testName: string;
   pixelsChanged: number;
-  mp4Url: string | null;
   stepComparisons: ShareStepComparison[];
   demoNotes: DemoNotes | null;
   claimLink: string;
@@ -1671,7 +1664,7 @@ function TestShareBody({
 
       {gallery.length > 0 && <GallerySection items={gallery} />}
 
-      <SocialShareRow shareUrl={shareUrl} testName={testName} mp4Url={mp4Url} />
+      <SocialShareRow shareUrl={shareUrl} testName={testName} />
     </>
   );
 }
@@ -1800,11 +1793,9 @@ function PullQuote({ text }: { text: string }) {
 function SocialShareRow({
   shareUrl,
   testName,
-  mp4Url,
 }: {
   shareUrl: string;
   testName: string;
-  mp4Url: string | null;
 }) {
   const text = `Visual regression test for ${testName} — ran on Lastest.`;
   const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
@@ -1840,19 +1831,6 @@ function SocialShareRow({
       >
         Copy link
       </a>
-      {mp4Url && (
-        // Plain download link — the route transcodes the recording to mp4 on
-        // first hit (cached after) so it can be attached natively to a tweet,
-        // where video autoplays inline. `download` hints a save rather than a
-        // navigation; the route also sets Content-Disposition: attachment.
-        <a
-          href={mp4Url}
-          download
-          className="inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
-        >
-          Download video (MP4)
-        </a>
-      )}
     </section>
   );
 }
