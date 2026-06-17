@@ -46,7 +46,13 @@ export interface QuickstartSessionView {
     };
     walkthroughTestId?: string;
     buildId?: string;
+    rerunBuildId?: string;
     demoNotesId?: string;
+    /** Founder-facing /r/<slug> public share, published by the final
+     *  qs_publish_share step. Surfaced as the terminal CTA in the panel. */
+    shareId?: string;
+    shareSlug?: string;
+    shareUrl?: string;
     disabledReason?: string;
     streamUrl?: string;
     queuedForBrowser?: boolean;
