@@ -233,8 +233,9 @@ export async function updateUser(id: string, data: Partial<NewUser>) {
 }
 
 export async function deleteUser(id: string) {
+  const user = await getUserById(id);
   await db.delete(users).where(eq(users.id, id));
-  console.log(`[audit] user.delete userId=${id}`);
+  console.log(`[audit] user.delete userId=${id} email=${user?.email}`);
 }
 
 export async function updateUserRole(id: string, role: UserRole) {
