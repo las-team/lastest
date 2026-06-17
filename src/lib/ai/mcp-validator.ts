@@ -1,16 +1,3 @@
-export interface SelectorValidationResult {
-  selector: string;
-  valid: boolean;
-  error?: string;
-  matchCount?: number;
-}
-
-export interface MCPValidationResult {
-  valid: boolean;
-  results: SelectorValidationResult[];
-  pageError?: string;
-}
-
 // ───────────────────────────────────────────────────────────────────────────
 // Selector extraction.
 //
@@ -202,70 +189,4 @@ function flush(
   const composite = segments.map((s) => s.selector).join(" >> ");
   const chainSource = code.slice(group[0].start, group[group.length - 1].end);
   out.push({ chain: chainSource, selector: composite, segments });
-}
-
-// Page-snapshot validation (validateSelectorsOnPage / validateLocatorChainsOnPage)
-// previously launched a host-process Chromium to check selectors. This was a
-// security hole — Playwright runs in the same process as Next.js. All test/setup
-// code now executes exclusively inside sandboxed Embedded Browser pods, so the
-// page-snapshot pass is skipped here. The static TS check (layer 1 in
-// validation-retry.ts) still runs; real selector feedback comes from the EB run.
-
-export async function validateSelectorsOnPage(
-  _pageUrl: string,
-  _selectors: string[],
-): Promise<MCPValidationResult> {
-  return { valid: true, results: [] };
-}
-
-export async function validateLocatorChainsOnPage(
-  _pageUrl: string,
-  _chains: {
-    chain: string;
-    selector: string;
-    segments: { method: string; args: string; selector: string }[];
-  }[],
-): Promise<MCPValidationResult> {
-  return { valid: true, results: [] };
-}
-
-export function formatValidationFeedback(result: MCPValidationResult): string {
-  if (result.pageError) {
-    return `Failed to load page: ${result.pageError}`;
-  }
-
-  if (result.valid) {
-    return "All selectors are valid.";
-  }
-
-  const invalid = result.results.filter((r) => !r.valid);
-  const invalidSelectors = invalid
-    .map((r) => `- "${r.selector}": ${r.error || "No matching elements found"}`)
-    .join("\n");
-
-  // Targeted, actionable hints for the brittle patterns that most commonly
-  // produce zero-match chains, so the regenerate() retry can fix the root cause
-  // instead of guessing.
-  const hints: string[] = [];
-  if (invalid.some((r) => /internal:has-text=\//.test(r.selector))) {
-    hints.push(
-      "A filter({ hasText: /regex/ }) matched 0 elements. Playwright matches a RegExp against RAW, non-normalized text, so whitespace/newlines between block elements break patterns like /A.*B/. Use a plain string hasText (it is whitespace-normalized) or page.getByText(), or anchor directly on the leaf element.",
-    );
-  }
-  if (
-    invalid.some(
-      (r) =>
-        /(?:^|→\s*)[a-z][a-z0-9-]*$/.test(r.selector.trim()) ||
-        /→\s*[a-z][a-z0-9-]*$/.test(r.selector),
-    )
-  ) {
-    hints.push(
-      "A structural ancestor (e.g. section/div) matched 0 elements. Drop the ancestor scope and target the leaf element directly (e.g. page.getByRole('link', { name }).first()).",
-    );
-  }
-  const hintBlock = hints.length
-    ? `\n\nHints:\n${hints.map((h) => `- ${h}`).join("\n")}`
-    : "";
-
-  return `The following selectors are invalid:\n${invalidSelectors}${hintBlock}\n\nPlease update the test code to use valid selectors.`;
 }

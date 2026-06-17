@@ -191,7 +191,6 @@ ${seed.seedPrompt}`;
 
     const validated = await runValidationWithRetry(
       initial,
-      seed.baseUrl,
       async (feedback, attempt) => {
         console.log(
           `[HealerAgent] Validation failed, retry ${attempt}/2 with feedback`,

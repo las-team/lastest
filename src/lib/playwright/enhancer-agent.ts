@@ -165,7 +165,6 @@ ${seed.seedPrompt}`;
 
     const validated = await runValidationWithRetry(
       initial,
-      seed.baseUrl,
       async (feedback, attempt) => {
         console.log(
           `[EnhancerAgent] Validation failed, retry ${attempt}/2 with feedback`,
