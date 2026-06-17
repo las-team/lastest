@@ -16,13 +16,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
-import type { GithubActionConfig, Repository } from "@/lib/db/schema";
+import type { GithubActionConfig, Repository, Runner } from "@/lib/db/schema";
 import { ConfigList } from "@/components/settings/github-actions/config-list-client";
 import { AddConfigDialog } from "@/components/settings/github-actions/add-config-dialog-client";
 import { ConnectGithubButton } from "@/components/settings/connect-github-button";
 
 interface GithubActionsCardProps {
   configs: GithubActionConfig[];
+  runners: Runner[];
   repos: Repository[];
   hasGithubAccount: boolean;
   githubUsername: string | null;
@@ -30,6 +31,7 @@ interface GithubActionsCardProps {
 
 export function GithubActionsCard({
   configs,
+  runners,
   repos,
   hasGithubAccount,
   githubUsername,
@@ -111,13 +113,18 @@ export function GithubActionsCard({
         )}
 
         {configs.length > 0 && (
-          <ConfigList configs={configs} hasGithubAccount={hasGithubAccount} />
+          <ConfigList
+            configs={configs}
+            hasGithubAccount={hasGithubAccount}
+            runners={runners}
+          />
         )}
 
         {hasGithubAccount && (
           <AddConfigDialog
             open={addOpen}
             onOpenChange={setAddOpen}
+            runners={runners}
             repos={repos}
             githubUsername={githubUsername}
           />

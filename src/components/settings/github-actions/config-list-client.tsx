@@ -8,7 +8,7 @@ import {
   Check,
   Trash2,
   Rocket,
-  Cloud,
+  Server,
   Zap,
   AlertTriangle,
   Loader2,
@@ -30,6 +30,7 @@ import type {
   GithubActionConfig,
   GithubActionMode,
   GithubActionTriggerEvent,
+  Runner,
 } from "@/lib/db/schema";
 import { WorkflowPreview } from "@/components/settings/github-actions/workflow-preview-client";
 import { DeployDialog } from "@/components/settings/github-actions/deploy-dialog-client";
@@ -41,6 +42,7 @@ import { toast } from "sonner";
 interface ConfigListProps {
   configs: GithubActionConfig[];
   hasGithubAccount: boolean;
+  runners: Runner[];
 }
 
 function CopyBlock({ label, value }: { label: string; value: string }) {
@@ -75,9 +77,11 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
 function ConfigCard({
   config,
   hasGithubAccount,
+  runners,
 }: {
   config: GithubActionConfig;
   hasGithubAccount: boolean;
+  runners: Runner[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
@@ -136,9 +140,9 @@ function ConfigCard({
                   {config.repositoryOwner}/{config.repositoryName}
                 </span>
                 <Badge variant="default" className="text-xs">
-                  {mode === "ephemeral" ? (
+                  {mode === "persistent" ? (
                     <>
-                      <Cloud className="h-3 w-3 mr-1" /> Ephemeral
+                      <Server className="h-3 w-3 mr-1" /> Persistent
                     </>
                   ) : (
                     <>
@@ -286,6 +290,7 @@ function ConfigCard({
         open={editOpen}
         onOpenChange={setEditOpen}
         config={config}
+        runners={runners}
       />
       <ValidateDialog
         open={validateOpen}
@@ -327,8 +332,9 @@ function ConfigCard({
                     <li>Remove LASTEST_TOKEN and LASTEST_URL secrets</li>
                   </>
                 )}
-                {(mode === "ephemeral" || mode === "auto") &&
-                  config.runnerId && <li>Delete the auto-created runner</li>}
+                {mode === "auto" && config.runnerId && (
+                  <li>Delete the auto-created runner</li>
+                )}
                 <li>Delete this configuration</li>
               </ul>
             </div>
@@ -357,7 +363,11 @@ function ConfigCard({
   );
 }
 
-export function ConfigList({ configs, hasGithubAccount }: ConfigListProps) {
+export function ConfigList({
+  configs,
+  hasGithubAccount,
+  runners,
+}: ConfigListProps) {
   return (
     <div className="space-y-3">
       {configs.map((config) => (
@@ -365,6 +375,7 @@ export function ConfigList({ configs, hasGithubAccount }: ConfigListProps) {
           key={config.id}
           config={config}
           hasGithubAccount={hasGithubAccount}
+          runners={runners}
         />
       ))}
     </div>

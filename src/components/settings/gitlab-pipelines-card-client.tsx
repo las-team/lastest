@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { GitlabPipelineConfig, Repository } from "@/lib/db/schema";
+import type { GitlabPipelineConfig, Repository, Runner } from "@/lib/db/schema";
 import { ConfigList } from "@/components/settings/gitlab-pipelines/config-list-client";
 import { AddConfigDialog } from "@/components/settings/gitlab-pipelines/add-config-dialog-client";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
@@ -30,12 +30,14 @@ function GitLabIcon({ className }: { className?: string }) {
 
 interface GitlabPipelinesCardProps {
   configs: GitlabPipelineConfig[];
+  runners: Runner[];
   repos: Repository[];
   hasGitlabAccount: boolean;
 }
 
 export function GitlabPipelinesCard({
   configs,
+  runners,
   repos,
   hasGitlabAccount,
 }: GitlabPipelinesCardProps) {
@@ -96,13 +98,18 @@ export function GitlabPipelinesCard({
         )}
 
         {configs.length > 0 && (
-          <ConfigList configs={configs} hasGitlabAccount={hasGitlabAccount} />
+          <ConfigList
+            configs={configs}
+            hasGitlabAccount={hasGitlabAccount}
+            runners={runners}
+          />
         )}
 
         {hasGitlabAccount && (
           <AddConfigDialog
             open={addOpen}
             onOpenChange={setAddOpen}
+            runners={runners}
             repos={repos}
           />
         )}

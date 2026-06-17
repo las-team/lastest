@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Cloud, Zap } from "lucide-react";
+import { Loader2, Server, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type {
+  Runner,
   Repository,
   GithubActionMode,
   GithubActionTriggerEvent,
@@ -34,6 +35,7 @@ import { toast } from "sonner";
 interface AddConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  runners: Runner[];
   repos: Repository[];
   githubUsername: string | null;
 }
@@ -51,6 +53,7 @@ const VERCEL_PREVIEW_URL =
 export function AddConfigDialog({
   open,
   onOpenChange,
+  runners,
   repos,
   githubUsername,
 }: AddConfigDialogProps) {
@@ -58,7 +61,7 @@ export function AddConfigDialog({
   const [manualEntry, setManualEntry] = useState(false);
   const [repoOwner, setRepoOwner] = useState(githubUsername ?? "");
   const [repoName, setRepoName] = useState("");
-  const [mode, setMode] = useState<GithubActionMode>("ephemeral");
+  const [mode, setMode] = useState<GithubActionMode>("persistent");
   const [runnerId, setRunnerId] = useState<string>("");
   const [triggerEvents, setTriggerEvents] = useState<
     GithubActionTriggerEvent[]
@@ -78,7 +81,7 @@ export function AddConfigDialog({
       setManualEntry(false);
       setRepoOwner(githubUsername ?? "");
       setRepoName("");
-      setMode("ephemeral");
+      setMode("persistent");
       setRunnerId("");
       setTriggerEvents(["push", "pull_request", "workflow_dispatch"]);
       setBranches("");
@@ -259,22 +262,44 @@ export function AddConfigDialog({
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === "ephemeral"
+                    mode === "persistent"
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-muted-foreground/50"
                   }`}
-                  onClick={() => setMode("ephemeral")}
+                  onClick={() => setMode("persistent")}
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <Cloud className="h-3.5 w-3.5" />
-                    <span className="text-sm font-medium">Ephemeral</span>
+                    <Server className="h-3.5 w-3.5" />
+                    <span className="text-sm font-medium">Persistent</span>
                   </div>
                   <p className="text-xs text-muted-foreground leading-tight">
-                    Runner inside the GH Actions job. Playwright cached.
+                    Uses an existing runner. GH Actions only triggers.
                   </p>
                 </button>
               </div>
             </div>
+
+            {/* Runner (persistent mode) */}
+            {mode === "persistent" && runners.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Runner (optional)</h4>
+                <Select value={runnerId} onValueChange={setRunnerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a runner..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {runners.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}{" "}
+                        <span className="text-muted-foreground">
+                          ({r.status})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Triggers */}
             <div className="space-y-2">

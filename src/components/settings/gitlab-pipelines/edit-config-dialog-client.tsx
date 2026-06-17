@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Loader2,
-  Cloud,
+  Server,
   Zap,
   FileCode,
   Webhook,
@@ -24,11 +24,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   GitlabPipelineConfig,
   GitlabPipelineMode,
   GitlabPipelineTriggerEvent,
   GitlabPipelineDeliveryMode,
+  Runner,
 } from "@/lib/db/schema";
 import { CiYamlPreview } from "@/components/settings/gitlab-pipelines/ci-yaml-preview-client";
 import {
@@ -41,6 +49,7 @@ interface EditConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   config: GitlabPipelineConfig;
+  runners: Runner[];
 }
 
 const TRIGGER_OPTIONS: { value: GitlabPipelineTriggerEvent; label: string }[] =
@@ -57,6 +66,7 @@ export function EditConfigDialog({
   open,
   onOpenChange,
   config,
+  runners,
 }: EditConfigDialogProps) {
   const [mode, setMode] = useState<GitlabPipelineMode>(
     config.mode as GitlabPipelineMode,
@@ -64,6 +74,7 @@ export function EditConfigDialog({
   const [deliveryMode, setDeliveryMode] = useState<GitlabPipelineDeliveryMode>(
     (config.deliveryMode as GitlabPipelineDeliveryMode) ?? "ci_file",
   );
+  const [runnerId, setRunnerId] = useState<string>(config.runnerId ?? "");
   const [triggerEvents, setTriggerEvents] = useState<
     GitlabPipelineTriggerEvent[]
   >(
@@ -95,6 +106,7 @@ export function EditConfigDialog({
       setDeliveryMode(
         (config.deliveryMode as GitlabPipelineDeliveryMode) ?? "ci_file",
       );
+      setRunnerId(config.runnerId ?? "");
       setTriggerEvents(
         (config.triggerEvents ?? [
           "push",
@@ -141,7 +153,7 @@ export function EditConfigDialog({
       await updateGitlabPipelineConfigAction(config.id, {
         mode,
         deliveryMode,
-        runnerId: null,
+        runnerId: runnerId || null,
         triggerEvents,
         branchFilter,
         cronSchedule: cronSchedule || null,
@@ -333,16 +345,37 @@ export function EditConfigDialog({
                 </button>
                 <button
                   type="button"
-                  className={`p-2.5 rounded-md border text-left transition-colors ${mode === "ephemeral" ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"}`}
-                  onClick={() => setMode("ephemeral")}
+                  className={`p-2.5 rounded-md border text-left transition-colors ${mode === "persistent" ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"}`}
+                  onClick={() => setMode("persistent")}
                 >
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <Cloud className="h-3.5 w-3.5" />
-                    <span className="text-sm font-medium">Ephemeral</span>
+                    <Server className="h-3.5 w-3.5" />
+                    <span className="text-sm font-medium">Persistent</span>
                   </div>
                 </button>
               </div>
             </div>
+
+            {mode === "persistent" && runners.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Runner (optional)</h4>
+                <Select value={runnerId} onValueChange={setRunnerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a runner..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {runners.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}{" "}
+                        <span className="text-muted-foreground">
+                          ({r.status})
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label className="text-xs">Trigger Events</Label>

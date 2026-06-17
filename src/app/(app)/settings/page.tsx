@@ -469,6 +469,7 @@ export default async function SettingsPage({
       <div id="github-actions">
         <GithubActionsCard
           configs={githubActionConfigs}
+          runners={runners}
           repos={teamRepos}
           hasGithubAccount={!!githubAccount}
           githubUsername={githubAccount?.githubUsername ?? null}
@@ -478,6 +479,7 @@ export default async function SettingsPage({
       <div id="gitlab-pipelines">
         <GitlabPipelinesCard
           configs={gitlabPipelineConfigs}
+          runners={runners}
           repos={teamRepos}
           hasGitlabAccount={!!gitlabAccount}
         />
