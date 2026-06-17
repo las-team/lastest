@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Card,
@@ -28,6 +29,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
+import { saveBranchBaseUrl } from "@/server/actions/environment";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import {
   useQuickstart,
@@ -39,6 +41,10 @@ interface QuickstartPanelProps {
   repositoryId?: string | null;
   enabled: boolean;
   reason?: "no_team" | "not_early_adopter" | "no_base_url";
+  /** Repo's default branch — the key the QuickStart gate reads a base URL from.
+   *  When present, the no_base_url empty state offers inline URL entry instead
+   *  of sending the user off to the sidebar. */
+  defaultBranch?: string | null;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -195,7 +201,9 @@ export function QuickstartPanel({
   repositoryId,
   enabled,
   reason,
+  defaultBranch,
 }: QuickstartPanelProps) {
+  const router = useRouter();
   const {
     session,
     loading,
@@ -210,8 +218,31 @@ export function QuickstartPanel({
   const [showCreds, setShowCreds] = useState(true);
   const [appEmail, setAppEmail] = useState("");
   const [appPassword, setAppPassword] = useState("");
+  const [baseUrlInput, setBaseUrlInput] = useState("");
+  const [savingBaseUrl, setSavingBaseUrl] = useState(false);
   const handleStart = () =>
     start(appEmail && appPassword ? { appEmail, appPassword } : undefined);
+
+  // Inline base-URL entry for the no_base_url empty state — saves to the repo's
+  // default-branch key (the one the gate reads) and refreshes so the server
+  // re-evaluates the gate and renders the live panel without a sidebar detour.
+  const canInlineBaseUrl = !!repositoryId && !!defaultBranch;
+  const saveBaseUrl = async () => {
+    if (!repositoryId || !defaultBranch) return;
+    let url = baseUrlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    setSavingBaseUrl(true);
+    try {
+      await saveBranchBaseUrl(repositoryId, defaultBranch, url);
+      toast.success("Base URL saved — QuickStart unlocked");
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't save base URL");
+    } finally {
+      setSavingBaseUrl(false);
+    }
+  };
 
   if (!enabled) {
     // Only render the disabled hint when the team IS early-adopter but baseUrl is missing —
@@ -228,10 +259,43 @@ export function QuickstartPanel({
             </Badge>
           </CardTitle>
           <CardDescription>
-            Set a non-local base URL for this repo in the sidebar to enable the
-            QuickStart agent. localhost URLs are skipped.
+            {canInlineBaseUrl
+              ? "Point QuickStart at your app to generate a live walkthrough + shareable report. localhost URLs are skipped."
+              : "Set a non-local base URL for this repo in the sidebar to enable the QuickStart agent. localhost URLs are skipped."}
           </CardDescription>
         </CardHeader>
+        {canInlineBaseUrl && (
+          <CardContent className="pt-0">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                type="url"
+                inputMode="url"
+                placeholder="your-app.com"
+                aria-label="App base URL"
+                value={baseUrlInput}
+                onChange={(e) => setBaseUrlInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveBaseUrl();
+                }}
+                disabled={savingBaseUrl}
+                className="h-9"
+              />
+              <Button
+                size="sm"
+                onClick={saveBaseUrl}
+                disabled={savingBaseUrl || !baseUrlInput.trim()}
+                className="shrink-0"
+              >
+                {savingBaseUrl ? (
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Rocket className="size-3.5 mr-1.5" />
+                )}
+                Save &amp; enable
+              </Button>
+            </div>
+          </CardContent>
+        )}
       </Card>
     );
   }

@@ -1245,16 +1245,22 @@ function BuildSummary({
         changed={changed}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div
+        className={`grid grid-cols-2 gap-3 ${
+          build.designSystemScore == null ? "sm:grid-cols-4" : "sm:grid-cols-5"
+        }`}
+      >
         <StatCard value={passed} label="Passed" tone="ok" />
         <StatCard value={failed} label="Failed" tone="danger" />
         <StatCard value={changed} label="Changed" tone="warn" />
-        <StatCard
-          value={a11y == null ? "—" : a11y}
-          label="A11y"
-          sublabel={a11y == null ? undefined : "WCAG 2.2"}
-          tone="neutral"
-        />
+        <GradeCard score={a11y} label="Accessible" sub="WCAG 2.2" />
+        {build.designSystemScore != null && (
+          <GradeCard
+            score={build.designSystemScore}
+            label="Design"
+            sub="Design system"
+          />
+        )}
       </div>
 
       {pending > 0 && (
@@ -1348,6 +1354,38 @@ function StatCard({
         </div>
       )}
     </div>
+  );
+}
+
+// Map a 0–100 quality score to a presentable letter grade + tone. Bands mirror
+// the internal compliance cards (90+ green, 70+ amber, else red).
+function scoreGrade(score: number): {
+  grade: string;
+  tone: "ok" | "warn" | "danger";
+} {
+  if (score >= 90) return { grade: "A", tone: "ok" };
+  if (score >= 80) return { grade: "B", tone: "ok" };
+  if (score >= 70) return { grade: "C", tone: "warn" };
+  if (score >= 60) return { grade: "D", tone: "warn" };
+  return { grade: "F", tone: "danger" };
+}
+
+// Presentable quality tile: a letter grade headline (color-toned by band) with
+// the raw score + standard label as sublabel. Renders a neutral "—" when the
+// layer didn't report a score. Reuses StatCard so it inherits share styling.
+function GradeCard({
+  score,
+  label,
+  sub,
+}: {
+  score: number | null | undefined;
+  label: string;
+  sub: string;
+}) {
+  if (score == null) return <StatCard value="—" label={label} tone="neutral" />;
+  const { grade, tone } = scoreGrade(score);
+  return (
+    <StatCard value={grade} label={label} sublabel={`${sub} · ${score}`} tone={tone} />
   );
 }
 
@@ -1475,7 +1513,11 @@ function TestShareBody({
         <StepStrip steps={steps} secPerStep={approxSecPerStep} />
       )}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div
+        className={`grid gap-3 ${
+          build.designSystemScore == null ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
+        }`}
+      >
         <StatCard
           value={pixelsChanged > 0 ? pixelsChanged.toLocaleString() : "0"}
           label="Diff px"
@@ -1490,12 +1532,14 @@ function TestShareBody({
           label="Duration"
           tone="neutral"
         />
-        <StatCard
-          value={build.a11yScore == null ? "—" : build.a11yScore}
-          label="A11y"
-          sublabel={build.a11yScore == null ? undefined : "WCAG 2.2"}
-          tone="neutral"
-        />
+        <GradeCard score={build.a11yScore} label="Accessible" sub="WCAG 2.2" />
+        {build.designSystemScore != null && (
+          <GradeCard
+            score={build.designSystemScore}
+            label="Design"
+            sub="Design system"
+          />
+        )}
       </div>
 
       {hasDemoContent(demoNotes) ? (
