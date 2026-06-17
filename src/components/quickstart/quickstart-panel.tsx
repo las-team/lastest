@@ -254,9 +254,6 @@ export function QuickstartPanel({
           <CardTitle className="flex items-center gap-2 text-base">
             <Rocket className="size-4 text-pink-600 dark:text-pink-400" />
             QuickStart
-            <Badge variant="outline" className="text-[10px]">
-              early adopter
-            </Badge>
           </CardTitle>
           <CardDescription>
             {canInlineBaseUrl
@@ -471,9 +468,6 @@ export function QuickstartPanel({
             <CardTitle className="flex items-center gap-2 text-base">
               <Rocket className="size-4 text-pink-600 dark:text-pink-400" />
               QuickStart
-              <Badge variant="outline" className="text-[10px]">
-                early adopter
-              </Badge>
             </CardTitle>
             <CardDescription>
               Spin up a 2-test demo (auth setup + app walkthrough) on this
