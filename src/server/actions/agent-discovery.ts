@@ -31,14 +31,20 @@ export async function discoverAreas(
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
     () => undefined,
   );
-  let result;
-  try {
-    result = await runAgentDiscovery(repositoryId, baseUrl, {
-      cdpEndpoint: eb?.cdpUrl,
-    });
-  } finally {
-    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
-  }
+
+  // No EB available — skip live browser exploration entirely (never fall
+  // back to a host-process Chromium) and go straight to the AI code scan.
+  const result = eb
+    ? await (async () => {
+        try {
+          return await runAgentDiscovery(repositoryId, baseUrl, {
+            cdpEndpoint: eb.cdpUrl,
+          });
+        } finally {
+          await releasePoolEB(eb.runnerId).catch(() => {});
+        }
+      })()
+    : { success: false as const, error: "No embedded browsers available" };
 
   if (result.success && result.functionalAreas) {
     revalidatePath("/areas");

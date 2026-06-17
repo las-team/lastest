@@ -1496,16 +1496,24 @@ Return ONLY the code (fixed or original), no explanations.`;
     const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
       () => undefined,
     );
+    if (!eb) {
+      return {
+        success: false,
+        passed: false,
+        error:
+          "No embedded browsers available — all browsers are busy. Please try again later.",
+      };
+    }
     let response: string;
     try {
       response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
         actionType: "fix_test",
         repositoryId,
         useMCP: true,
-        ...(eb && { mcpConfig: { cdpEndpoint: eb.cdpUrl } }),
+        mcpConfig: { cdpEndpoint: eb.cdpUrl },
       });
     } finally {
-      if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+      await releasePoolEB(eb.runnerId).catch(() => {});
     }
 
     const fixedCode = extractCodeFromResponse(response);

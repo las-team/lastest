@@ -418,16 +418,23 @@ export async function mcpExploreRoutes(
     const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
       () => undefined,
     );
+    if (!eb) {
+      return {
+        success: false,
+        error:
+          "No embedded browsers available — all browsers are busy. Please try again later.",
+      };
+    }
     let response: string;
     try {
       response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
         actionType: "mcp_explore",
         repositoryId,
         useMCP: true,
-        ...(eb && { mcpConfig: { cdpEndpoint: eb.cdpUrl } }),
+        mcpConfig: { cdpEndpoint: eb.cdpUrl },
       });
     } finally {
-      if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+      await releasePoolEB(eb.runnerId).catch(() => {});
     }
 
     // Parse JSON response - try object first (grouped or flat), fall back to flat array
