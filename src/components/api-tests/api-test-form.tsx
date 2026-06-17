@@ -388,6 +388,7 @@ export function ApiTestForm({
         {/* Headers */}
         <KeyValueEditor
           label="Headers"
+          addLabel="Add header"
           rows={headerRows}
           onChange={setHeaderRows}
           keyPlaceholder="Header"
@@ -402,7 +403,7 @@ export function ApiTestForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder='{ "name": "example" }'
-              className="font-mono text-xs min-h-20"
+              className="font-mono text-xs min-h-32 resize-y"
             />
           </div>
         )}
@@ -472,12 +473,15 @@ export function ApiTestForm({
 
 function KeyValueEditor({
   label,
+  addLabel,
   rows,
   onChange,
   keyPlaceholder,
   valuePlaceholder,
 }: {
   label: string;
+  /** Button text; defaults to `Add <label>` (which pluralizes awkwardly). */
+  addLabel?: string;
   rows: Row[];
   onChange: (r: Row[]) => void;
   keyPlaceholder: string;
@@ -520,14 +524,17 @@ function KeyValueEditor({
           </Button>
         </div>
       ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => onChange([...rows, { key: "", value: "" }])}
-      >
-        <Plus className="h-3.5 w-3.5 mr-1" /> Add {label.toLowerCase()}
-      </Button>
+      <div className="pt-0.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onChange([...rows, { key: "", value: "" }])}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />{" "}
+          {addLabel ?? `Add ${label.toLowerCase()}`}
+        </Button>
+      </div>
     </div>
   );
 }

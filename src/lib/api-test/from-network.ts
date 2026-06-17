@@ -7,6 +7,9 @@
  * Pure + isomorphic: no DB / network. Credentials in the produced definition
  * are the live values to execute against; the *displayed* copy is redacted
  * downstream by `renderApiDefinitionForCode` (./redact).
+ *
+ * Beyond the observed status, we also seed shape assertions from the captured
+ * JSON response body when one is available (see `deriveBodyAssertions`).
  */
 
 import type {
@@ -86,6 +89,43 @@ function deriveName(method: string, url: string): string {
   }
 }
 
+/** Cap on body-derived assertions so a wide response doesn't flood the form. */
+const MAX_BODY_ASSERTIONS = 6;
+
+/**
+ * Seed assertions from a captured JSON response body so the reproduced test
+ * verifies more than just the status code. We assert *presence* of top-level
+ * fields (robust to dynamic values like tokens / ids / timestamps) and pin the
+ * value only for booleans, which are usually stable flags (e.g. `success`).
+ * Non-JSON, truncated, array-root and scalar-root bodies yield nothing — the
+ * user can still add value assertions by hand in the form.
+ */
+function deriveBodyAssertions(
+  responseBody: string | undefined,
+): ApiAssertion[] {
+  if (!responseBody) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseBody);
+  } catch {
+    return []; // not JSON (or truncated past valid) — nothing safe to seed
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+
+  const out: ApiAssertion[] = [];
+  for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+    if (out.length >= MAX_BODY_ASSERTIONS) break;
+    // Dotted keys would be mis-read as nested paths by getValueByPath — skip.
+    if (key.includes(".")) continue;
+    out.push(
+      typeof val === "boolean"
+        ? { kind: "jsonPath", path: key, value: val }
+        : { kind: "jsonPath", path: key },
+    );
+  }
+  return out;
+}
+
 /** Build an editable API-test seed from a captured network request. */
 export function networkRequestToApiTest(req: NetworkRequest): ApiTestSeed {
   const upper = (req.method || "GET").toUpperCase();
@@ -134,7 +174,7 @@ export function networkRequestToApiTest(req: NetworkRequest): ApiTestSeed {
       headers: Object.keys(headers).length ? headers : undefined,
       body,
       auth,
-      assertions: [statusAssertion],
+      assertions: [statusAssertion, ...deriveBodyAssertions(req.responseBody)],
     },
   };
 }

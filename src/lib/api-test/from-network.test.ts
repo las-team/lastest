@@ -113,6 +113,47 @@ describe("networkRequestToApiTest", () => {
     expect(definition.assertions).toEqual([{ kind: "status", in: [200] }]);
   });
 
+  it("seeds jsonPath assertions from a JSON object response body", () => {
+    const { definition } = networkRequestToApiTest(
+      req({
+        status: 200,
+        responseBody: '{"success":true,"token":"abc","userId":42}',
+      }),
+    );
+    expect(definition.assertions).toEqual([
+      { kind: "status", equals: 200 },
+      // booleans get a pinned value; everything else is a presence check.
+      { kind: "jsonPath", path: "success", value: true },
+      { kind: "jsonPath", path: "token" },
+      { kind: "jsonPath", path: "userId" },
+    ]);
+  });
+
+  it("derives no body assertions for a non-JSON response body", () => {
+    const { definition } = networkRequestToApiTest(
+      req({ status: 200, responseBody: "<html>ok</html>" }),
+    );
+    expect(definition.assertions).toEqual([{ kind: "status", equals: 200 }]);
+  });
+
+  it("derives no body assertions for an array-root response body", () => {
+    const { definition } = networkRequestToApiTest(
+      req({ status: 200, responseBody: "[1,2,3]" }),
+    );
+    expect(definition.assertions).toEqual([{ kind: "status", equals: 200 }]);
+  });
+
+  it("caps body assertions at 6 fields", () => {
+    const big = JSON.stringify(
+      Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`f${i}`, i])),
+    );
+    const { definition } = networkRequestToApiTest(
+      req({ status: 200, responseBody: big }),
+    );
+    // 1 status + 6 jsonPath
+    expect(definition.assertions).toHaveLength(7);
+  });
+
   it("coerces an unsupported method to GET", () => {
     const { definition } = networkRequestToApiTest(req({ method: "HEAD" }));
     expect(definition.method).toBe("GET");
