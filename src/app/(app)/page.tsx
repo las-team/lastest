@@ -370,6 +370,7 @@ export default async function DashboardPage({
             <QuickstartPanel
               repositoryId={selectedRepo.id}
               enabled={quickstartGate.enabled}
+              defaultBranch={selectedRepo.defaultBranch}
               reason={
                 quickstartGate.enabled
                   ? undefined
