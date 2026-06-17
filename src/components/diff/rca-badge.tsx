@@ -45,29 +45,37 @@ const CATEGORY_LABEL: Record<RcaCategory, string> = {
   "test:dynamic-data": "Dynamic data",
   "test:animation": "Animation / render",
   "test:environment": "Environment",
+  "test:never-passed": "Never passed",
   uncertain: "Inconclusive",
+};
+
+/** Size scale. `xs` matches the dense verify-board micro-chips (9px); `sm` the
+ *  build-list / focus-bar chips; `md` the standalone diff-viewer header. */
+const SIZE: Record<"md" | "sm" | "xs", { wrap: string; icon: string }> = {
+  md: { wrap: "gap-1.5 px-3 py-1 text-sm", icon: "h-4 w-4" },
+  sm: { wrap: "gap-1.5 px-2 py-0.5 text-[11px]", icon: "h-3 w-3" },
+  xs: { wrap: "gap-1 px-1.5 py-0.5 text-[9px]", icon: "h-2.5 w-2.5" },
 };
 
 export function RcaBadge({
   rca,
-  compact = false,
+  size = "md",
 }: {
   rca: RcaVerdict | null | undefined;
-  compact?: boolean;
+  size?: "md" | "sm" | "xs";
 }) {
   if (!rca) return null;
   const h = HEADLINE[rca.headline];
   const top = rca.signals[0];
+  const sz = SIZE[size];
 
   return (
     <HoverCard openDelay={120}>
       <HoverCardTrigger asChild>
         <span
-          className={`inline-flex items-center gap-1.5 rounded-full font-medium ${h.className} ${
-            compact ? "px-2 py-0.5 text-xs" : "px-3 py-1 text-sm"
-          }`}
+          className={`inline-flex items-center rounded-full font-medium ${h.className} ${sz.wrap}`}
         >
-          <h.Icon className={compact ? "h-3 w-3" : "h-4 w-4"} />
+          <h.Icon className={sz.icon} />
           {h.label}
         </span>
       </HoverCardTrigger>

@@ -806,7 +806,7 @@ export function FocusView(props: FocusViewProps) {
           {activeCase && <StatusChipFor status={activeCase.status} />}
           {activeCase && <ErrorChip result={activeCase.result} />}
           {activeCase?.visual?.rca && (
-            <RcaBadge rca={activeCase.visual.rca} compact />
+            <RcaBadge rca={activeCase.visual.rca} size="sm" />
           )}
           {activeCase?.step.githubIssueUrl && (
             <IssueChipReal step={activeCase.step} />

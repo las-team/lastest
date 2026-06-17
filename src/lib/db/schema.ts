@@ -168,6 +168,7 @@ export type RcaCategory =
   | "test:dynamic-data" // dates, counters, ids, currency — data, not code
   | "test:animation" // transient/mid-animation frame or anti-aliasing
   | "test:environment" // page shift, cross-branch baseline, locale/viewport
+  | "test:never-passed" // test has no green history — its baseline isn't trustworthy
   // Not enough signal to commit to test-vs-code.
   | "uncertain";
 

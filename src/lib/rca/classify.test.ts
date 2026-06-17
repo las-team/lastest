@@ -263,3 +263,53 @@ describe("dynamic-text helpers", () => {
     expect(maskDynamic("seen 12 times")).toBe(maskDynamic("seen 9999 times"));
   });
 });
+
+describe("classifyDiffSource — never-passed signal", () => {
+  it("everPassed=false with no code → test:never-passed, headline test", () => {
+    const v = classify({
+      everPassed: false,
+      metadata: meta(),
+      percentageDifference: 0.4,
+    });
+    expect(v.signals.some((s) => s.category === "test:never-passed")).toBe(
+      true,
+    );
+    expect(v.headline).toBe("test");
+  });
+
+  it("everPassed=false but code touched the surface → uncertain (honest collision)", () => {
+    const v = classify({
+      everPassed: false,
+      changeMap: codeAreaMap,
+      metadata: meta({ domDiff: domDiff({ added: [el("New banner")] }) }),
+    });
+    // both a code:structural (0.9) and test:never-passed (0.8) signal exist
+    expect(v.signals.some((s) => s.category === "test:never-passed")).toBe(
+      true,
+    );
+    expect(v.signals.some((s) => s.category === "code:structural")).toBe(true);
+    expect(v.headline).toBe("uncertain");
+  });
+
+  it("everPassed=true → no never-passed signal (established test isn't penalized)", () => {
+    const v = classify({
+      everPassed: true,
+      metadata: meta(),
+      percentageDifference: 0.4,
+    });
+    expect(v.signals.some((s) => s.category === "test:never-passed")).toBe(
+      false,
+    );
+  });
+
+  it("everPassed unknown (undefined) → no never-passed signal", () => {
+    const v = classify({ metadata: meta(), percentageDifference: 0.4 });
+    expect(v.signals.some((s) => s.category === "test:never-passed")).toBe(
+      false,
+    );
+  });
+
+  it("RCA_VERSION bumped for the new heuristic", () => {
+    expect(RCA_VERSION).toBe(2);
+  });
+});

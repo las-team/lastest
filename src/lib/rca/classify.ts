@@ -26,7 +26,7 @@ import type {
 import { isDynamicTextChange } from "@/lib/rca/dynamic-text";
 
 /** Bump when the heuristics change so stale verdicts can be recomputed. */
-export const RCA_VERSION = 1;
+export const RCA_VERSION = 2;
 
 /** Headlines closer than this are treated as a conflict → `uncertain`. */
 const CONFLICT_MARGIN = 0.15;
@@ -42,6 +42,12 @@ export interface ClassifyDiffInput {
   areaId?: string | null;
   /** `visual_diffs.percentage_difference` (a row column, NOT in metadata). */
   percentageDifference?: string | number | null;
+  /**
+   * Has this test ever executed successfully (≥1 prior `status='passed'`
+   * result)? A test with no green history has no trustworthy baseline, so its
+   * diffs lean test-error. `undefined`/`null` = unknown → no effect.
+   */
+  everPassed?: boolean | null;
 }
 
 const isCode = (c: RcaCategory) => c.startsWith("code:");
@@ -208,6 +214,20 @@ export function classifyDiffSource(
           "A small pixel difference with no code, DOM, or content change — likely rendering noise.",
       });
     }
+  }
+
+  // ---- "Never executed successfully" -------------------------------------
+  // Independent of the code gate: a test with no green history has no
+  // trustworthy baseline, so its diff is more likely the test's own fault.
+  // Emitted at a confidence that drives `test` on its own but only collides
+  // to `uncertain` (not overrides) when the code DID touch this surface.
+  if (input.everPassed === false) {
+    signals.push({
+      category: "test:never-passed",
+      confidence: 0.8,
+      reason:
+        "This test has never executed successfully, so its baseline isn't trustworthy — the diff is likely a test problem, not a code change.",
+    });
   }
 
   // ---- Resolve headline --------------------------------------------------

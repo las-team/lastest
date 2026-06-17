@@ -41,6 +41,11 @@ export async function classifyBuildDiffs(buildId: string): Promise<number> {
     : [];
   const areaByTest = new Map(testRows.map((t) => [t.id, t.areaId]));
 
+  // Which of these tests have ever executed successfully (a green run in their
+  // history). A test with no passed result has no trustworthy baseline, so RCA
+  // leans its diffs toward test-error.
+  const everPassedTests = await queries.getTestsWithAnyPassedResult(testIds);
+
   const now = new Date().toISOString();
   let count = 0;
   for (const d of changed) {
@@ -52,6 +57,7 @@ export async function classifyBuildDiffs(buildId: string): Promise<number> {
           testId: d.testId,
           areaId: areaByTest.get(d.testId) ?? null,
           percentageDifference: d.percentageDifference,
+          everPassed: everPassedTests.has(d.testId),
         },
         now,
       );

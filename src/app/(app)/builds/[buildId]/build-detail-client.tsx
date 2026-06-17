@@ -1101,7 +1101,7 @@ function DiffRow({
             the coarse change-map "Code Change" hint for older builds. */}
         {diff.metadata?.rca ? (
           <div onClick={(e) => e.stopPropagation()}>
-            <RcaBadge rca={diff.metadata.rca} compact />
+            <RcaBadge rca={diff.metadata.rca} size="sm" />
           </div>
         ) : (
           hasCodeChange && (
