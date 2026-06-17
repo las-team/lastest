@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Cloud, Server, Zap, FileCode, Webhook } from "lucide-react";
+import { Loader2, Cloud, Zap, FileCode, Webhook } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type {
-  Runner,
   Repository,
   GitlabPipelineMode,
   GitlabPipelineTriggerEvent,
@@ -36,7 +35,6 @@ import { toast } from "sonner";
 interface AddConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  runners: Runner[];
   repos: Repository[];
 }
 
@@ -51,7 +49,6 @@ const TRIGGER_OPTIONS: { value: GitlabPipelineTriggerEvent; label: string }[] =
 export function AddConfigDialog({
   open,
   onOpenChange,
-  runners,
   repos,
 }: AddConfigDialogProps) {
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
@@ -59,10 +56,9 @@ export function AddConfigDialog({
   const [gitlabProjectId, setGitlabProjectId] = useState<number | undefined>(
     undefined,
   );
-  const [mode, setMode] = useState<GitlabPipelineMode>("persistent");
+  const [mode, setMode] = useState<GitlabPipelineMode>("ephemeral");
   const [deliveryMode, setDeliveryMode] =
     useState<GitlabPipelineDeliveryMode>("ci_file");
-  const [runnerId, setRunnerId] = useState<string>("");
   const [triggerEvents, setTriggerEvents] = useState<
     GitlabPipelineTriggerEvent[]
   >(["push", "merge_request"]);
@@ -81,9 +77,8 @@ export function AddConfigDialog({
       setSelectedRepoId("");
       setProjectPath("");
       setGitlabProjectId(undefined);
-      setMode("persistent");
+      setMode("ephemeral");
       setDeliveryMode("ci_file");
-      setRunnerId("");
       setTriggerEvents(["push", "merge_request"]);
       setBranches("main");
       setCronSchedule("");
@@ -133,7 +128,6 @@ export function AddConfigDialog({
         gitlabProjectId,
         mode,
         deliveryMode,
-        runnerId: runnerId || undefined,
         triggerEvents,
         branchFilter,
         cronSchedule: cronSchedule || undefined,
@@ -230,7 +224,7 @@ export function AddConfigDialog({
 
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Mode</h4>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
@@ -246,23 +240,6 @@ export function AddConfigDialog({
                   </div>
                   <p className="text-xs text-muted-foreground leading-tight">
                     Server picks the best available runner.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === "persistent"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-muted-foreground/50"
-                  }`}
-                  onClick={() => setMode("persistent")}
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <Server className="h-3.5 w-3.5" />
-                    <span className="text-sm font-medium">Persistent</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-tight">
-                    Uses an existing runner. Pipeline only triggers.
                   </p>
                 </button>
                 <button
@@ -284,27 +261,6 @@ export function AddConfigDialog({
                 </button>
               </div>
             </div>
-
-            {mode === "persistent" && runners.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium">Runner (optional)</h4>
-                <Select value={runnerId} onValueChange={setRunnerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a runner..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {runners.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}{" "}
-                        <span className="text-muted-foreground">
-                          ({r.status})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             <div className="space-y-2">
               <Label className="text-xs">Trigger Events</Label>

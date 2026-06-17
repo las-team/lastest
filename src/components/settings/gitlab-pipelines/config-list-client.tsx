@@ -7,7 +7,6 @@ import {
   Trash2,
   Rocket,
   Cloud,
-  Server,
   Zap,
   AlertTriangle,
   Loader2,
@@ -32,7 +31,6 @@ import type {
   GitlabPipelineMode,
   GitlabPipelineDeliveryMode,
   GitlabPipelineTriggerEvent,
-  Runner,
 } from "@/lib/db/schema";
 import { CiYamlPreview } from "@/components/settings/gitlab-pipelines/ci-yaml-preview-client";
 import { DeployDialog } from "@/components/settings/gitlab-pipelines/deploy-dialog-client";
@@ -43,17 +41,14 @@ import { toast } from "sonner";
 
 interface ConfigListProps {
   configs: GitlabPipelineConfig[];
-  runners: Runner[];
   hasGitlabAccount: boolean;
 }
 
 function ConfigCard({
   config,
-  runners,
   hasGitlabAccount,
 }: {
   config: GitlabPipelineConfig;
-  runners: Runner[];
   hasGitlabAccount: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -63,7 +58,6 @@ function ConfigCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const runner = runners.find((r) => r.id === config.runnerId);
   const mode = config.mode as GitlabPipelineMode;
   const deliveryMode = config.deliveryMode as GitlabPipelineDeliveryMode;
 
@@ -121,27 +115,14 @@ function ConfigCard({
                     </>
                   )}
                 </Badge>
-                <Badge
-                  variant={
-                    mode === "ephemeral"
-                      ? "default"
-                      : mode === "auto"
-                        ? "default"
-                        : "secondary"
-                  }
-                  className="text-xs"
-                >
+                <Badge variant="default" className="text-xs">
                   {mode === "ephemeral" ? (
                     <>
                       <Cloud className="h-3 w-3 mr-1" /> Ephemeral
                     </>
-                  ) : mode === "auto" ? (
-                    <>
-                      <Zap className="h-3 w-3 mr-1" /> Auto
-                    </>
                   ) : (
                     <>
-                      <Server className="h-3 w-3 mr-1" /> Persistent
+                      <Zap className="h-3 w-3 mr-1" /> Auto
                     </>
                   )}
                 </Badge>
@@ -154,11 +135,6 @@ function ConfigCard({
                   </Badge>
                 )}
               </div>
-              {runner && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Runner: {runner.name}
-                </p>
-              )}
             </div>
             <div
               className="flex items-center gap-0.5"
@@ -229,7 +205,6 @@ function ConfigCard({
         open={editOpen}
         onOpenChange={setEditOpen}
         config={config}
-        runners={runners}
       />
       <ValidateDialog
         open={validateOpen}
@@ -301,18 +276,13 @@ function ConfigCard({
   );
 }
 
-export function ConfigList({
-  configs,
-  runners,
-  hasGitlabAccount,
-}: ConfigListProps) {
+export function ConfigList({ configs, hasGitlabAccount }: ConfigListProps) {
   return (
     <div className="space-y-3">
       {configs.map((config) => (
         <ConfigCard
           key={config.id}
           config={config}
-          runners={runners}
           hasGitlabAccount={hasGitlabAccount}
         />
       ))}

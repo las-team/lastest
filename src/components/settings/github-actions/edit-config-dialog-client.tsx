@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Cloud, Server, Zap, Check, X, Rocket } from "lucide-react";
+import { Loader2, Cloud, Zap, Check, X, Rocket } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,18 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type {
   GithubActionConfig,
   GithubActionMode,
   GithubActionTriggerEvent,
-  Runner,
 } from "@/lib/db/schema";
 import { WorkflowPreview } from "@/components/settings/github-actions/workflow-preview-client";
 import {
@@ -39,7 +31,6 @@ interface EditConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   config: GithubActionConfig;
-  runners: Runner[];
 }
 
 const TRIGGER_OPTIONS: { value: GithubActionTriggerEvent; label: string }[] = [
@@ -58,12 +49,10 @@ export function EditConfigDialog({
   open,
   onOpenChange,
   config,
-  runners,
 }: EditConfigDialogProps) {
   const [mode, setMode] = useState<GithubActionMode>(
     config.mode as GithubActionMode,
   );
-  const [runnerId, setRunnerId] = useState<string>(config.runnerId ?? "");
   const [triggerEvents, setTriggerEvents] = useState<
     GithubActionTriggerEvent[]
   >(
@@ -97,7 +86,6 @@ export function EditConfigDialog({
   useEffect(() => {
     if (open) {
       setMode(config.mode as GithubActionMode);
-      setRunnerId(config.runnerId ?? "");
       setTriggerEvents(
         (config.triggerEvents ?? [
           "push",
@@ -148,7 +136,7 @@ export function EditConfigDialog({
     try {
       await updateGithubActionConfigAction(config.id, {
         mode,
-        runnerId: runnerId || null,
+        runnerId: null,
         triggerEvents,
         branchFilter,
         cronSchedule: cronSchedule || null,
@@ -171,10 +159,7 @@ export function EditConfigDialog({
     }
   };
 
-  const isEphemeral = config.mode === "ephemeral";
-  const isAuto = config.mode === "auto";
-  const hasPersistentRunner = !isEphemeral && !isAuto && !!config.runnerId;
-  const willSetSecrets = isEphemeral || isAuto || hasPersistentRunner;
+  const willSetSecrets = true;
 
   const handleRedeploy = async () => {
     setDeploying(true);
@@ -313,7 +298,7 @@ export function EditConfigDialog({
             {/* Mode */}
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Mode</h4>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
@@ -329,23 +314,6 @@ export function EditConfigDialog({
                   </div>
                   <p className="text-xs text-muted-foreground leading-tight">
                     Server picks the best available runner.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === "persistent"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-muted-foreground/50"
-                  }`}
-                  onClick={() => setMode("persistent")}
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <Server className="h-3.5 w-3.5" />
-                    <span className="text-sm font-medium">Persistent</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-tight">
-                    Uses an existing runner. GH Actions only triggers.
                   </p>
                 </button>
                 <button
@@ -367,28 +335,6 @@ export function EditConfigDialog({
                 </button>
               </div>
             </div>
-
-            {/* Runner (persistent mode) */}
-            {mode === "persistent" && runners.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium">Runner (optional)</h4>
-                <Select value={runnerId} onValueChange={setRunnerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a runner..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {runners.map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}{" "}
-                        <span className="text-muted-foreground">
-                          ({r.status})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             {/* Triggers */}
             <div className="space-y-2">

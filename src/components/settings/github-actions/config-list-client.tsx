@@ -9,7 +9,6 @@ import {
   Trash2,
   Rocket,
   Cloud,
-  Server,
   Zap,
   AlertTriangle,
   Loader2,
@@ -31,7 +30,6 @@ import type {
   GithubActionConfig,
   GithubActionMode,
   GithubActionTriggerEvent,
-  Runner,
 } from "@/lib/db/schema";
 import { WorkflowPreview } from "@/components/settings/github-actions/workflow-preview-client";
 import { DeployDialog } from "@/components/settings/github-actions/deploy-dialog-client";
@@ -42,7 +40,6 @@ import { toast } from "sonner";
 
 interface ConfigListProps {
   configs: GithubActionConfig[];
-  runners: Runner[];
   hasGithubAccount: boolean;
 }
 
@@ -77,11 +74,9 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
 
 function ConfigCard({
   config,
-  runners,
   hasGithubAccount,
 }: {
   config: GithubActionConfig;
-  runners: Runner[];
   hasGithubAccount: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -91,7 +86,6 @@ function ConfigCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const runner = runners.find((r) => r.id === config.runnerId);
   const mode = config.mode as GithubActionMode;
 
   const handleDelete = async () => {
@@ -141,27 +135,14 @@ function ConfigCard({
                 <span className="font-mono text-sm font-medium truncate">
                   {config.repositoryOwner}/{config.repositoryName}
                 </span>
-                <Badge
-                  variant={
-                    mode === "ephemeral"
-                      ? "default"
-                      : mode === "auto"
-                        ? "default"
-                        : "secondary"
-                  }
-                  className="text-xs"
-                >
+                <Badge variant="default" className="text-xs">
                   {mode === "ephemeral" ? (
                     <>
                       <Cloud className="h-3 w-3 mr-1" /> Ephemeral
                     </>
-                  ) : mode === "auto" ? (
-                    <>
-                      <Zap className="h-3 w-3 mr-1" /> Auto
-                    </>
                   ) : (
                     <>
-                      <Server className="h-3 w-3 mr-1" /> Persistent
+                      <Zap className="h-3 w-3 mr-1" /> Auto
                     </>
                   )}
                 </Badge>
@@ -174,11 +155,6 @@ function ConfigCard({
                   </Badge>
                 )}
               </div>
-              {runner && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Runner: {runner.name}
-                </p>
-              )}
             </div>
             <div
               className="flex items-center gap-0.5"
@@ -310,7 +286,6 @@ function ConfigCard({
         open={editOpen}
         onOpenChange={setEditOpen}
         config={config}
-        runners={runners}
       />
       <ValidateDialog
         open={validateOpen}
@@ -382,18 +357,13 @@ function ConfigCard({
   );
 }
 
-export function ConfigList({
-  configs,
-  runners,
-  hasGithubAccount,
-}: ConfigListProps) {
+export function ConfigList({ configs, hasGithubAccount }: ConfigListProps) {
   return (
     <div className="space-y-3">
       {configs.map((config) => (
         <ConfigCard
           key={config.id}
           config={config}
-          runners={runners}
           hasGithubAccount={hasGithubAccount}
         />
       ))}
