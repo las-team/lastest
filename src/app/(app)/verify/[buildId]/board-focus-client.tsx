@@ -109,6 +109,9 @@ export interface TestResultLite {
   totalSteps: number | null;
   consoleErrors: string[] | null;
   networkRequests: import("@/lib/db/schema").NetworkRequest[] | null;
+  // Request/response headers + bodies are stripped from `networkRequests` and
+  // saved to this file; the focus view lazily re-hydrates from it.
+  networkBodiesPath: string | null;
   a11yViolations: import("@/lib/db/schema").A11yViolation[] | null;
   a11yPassesCount: number | null;
   designSystemViolations:

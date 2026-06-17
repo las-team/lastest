@@ -122,6 +122,7 @@ export async function GET(
     totalSteps: r.totalSteps,
     consoleErrors: r.consoleErrors,
     networkRequests: r.networkRequests,
+    networkBodiesPath: r.networkBodiesPath,
     a11yViolations: r.a11yViolations,
     a11yPassesCount: r.a11yPassesCount,
     designSystemViolations: r.designSystemViolations,

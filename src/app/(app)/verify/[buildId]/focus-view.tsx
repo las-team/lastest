@@ -3821,8 +3821,45 @@ function NetworkPane({
   repositoryId: string | null;
 }) {
   const net = step.layers?.network;
-  const requests = useMemo(() => result?.networkRequests ?? [], [result]);
   const [apiSeed, setApiSeed] = useState<ApiTestSeed | null>(null);
+
+  // The inline `networkRequests` are summaries only — request/response headers
+  // and bodies are stripped on the EB side and saved to a separate file
+  // (networkBodiesPath). Lazily hydrate them so the panel can show payloads and
+  // "Create API test" can seed a real body. Mirrors runtime-errors-panel.
+  const baseRequests = useMemo(() => result?.networkRequests ?? [], [result]);
+  const networkBodiesPath = result?.networkBodiesPath ?? null;
+  const hasInlineBodies = useMemo(
+    () =>
+      baseRequests.some(
+        (r) =>
+          r.postData || r.responseBody || r.requestHeaders || r.responseHeaders,
+      ),
+    [baseRequests],
+  );
+  const [bodies, setBodies] = useState<
+    import("@/lib/db/schema").NetworkRequest[] | null
+  >(null);
+  useEffect(() => {
+    if (hasInlineBodies || !networkBodiesPath) return;
+    let cancelled = false;
+    fetch(`/api/media${networkBodiesPath}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
+      .then((b) => {
+        if (!cancelled && Array.isArray(b)) setBodies(b);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [hasInlineBodies, networkBodiesPath]);
+
+  // Merge file-backed bodies onto the slim summaries by index — both arrays are
+  // emitted by the EB in the same order.
+  const requests = useMemo(() => {
+    if (hasInlineBodies || !bodies) return baseRequests;
+    return baseRequests.map((r, i) => (bodies[i] ? { ...r, ...bodies[i] } : r));
+  }, [baseRequests, bodies, hasInlineBodies]);
 
   // When the test failed because of the network layer, auto-focus the table on
   // error rows so reviewers don't have to filter manually. Derived once via
