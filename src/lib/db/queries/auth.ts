@@ -74,6 +74,7 @@ export async function createTeam(data: {
 
   const team = await getTeam(id);
   if (!team) throw new Error("Failed to create team");
+  console.log(`[audit] team.create teamId=${id}`);
   return team;
 }
 
@@ -92,10 +93,12 @@ export async function updateTeam(id: string, data: Partial<NewTeam>) {
     .update(teams)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(teams.id, id));
+  console.log(`[audit] team.update teamId=${id}`);
 }
 
 export async function deleteTeam(id: string) {
   await db.delete(teams).where(eq(teams.id, id));
+  console.log(`[audit] team.delete teamId=${id}`);
 }
 
 export async function getTeamMembers(teamId: string) {
@@ -216,6 +219,7 @@ export async function createUser(
   if (!user) {
     throw new Error("Failed to create user");
   }
+  console.log(`[audit] user.create userId=${id} email=${data.email}`);
   return user;
 }
 
@@ -224,10 +228,13 @@ export async function updateUser(id: string, data: Partial<NewUser>) {
     .update(users)
     .set({ ...data, updatedAt: new Date() })
     .where(eq(users.id, id));
+  const email = data.email ?? "(unchanged)";
+  console.log(`[audit] user.update userId=${id} email=${email}`);
 }
 
 export async function deleteUser(id: string) {
   await db.delete(users).where(eq(users.id, id));
+  console.log(`[audit] user.delete userId=${id}`);
 }
 
 export async function updateUserRole(id: string, role: UserRole) {
