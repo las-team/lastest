@@ -35,7 +35,6 @@ import {
   getBaselinesByRepo,
 } from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
-import { PlayAgentTimeline } from "@/components/play-agent/play-agent-timeline";
 import { QuickstartPanel } from "@/components/quickstart/quickstart-panel";
 import { isQuickstartEnabled } from "@/lib/quickstart/gating";
 import { SelectorStatsChartClient } from "@/components/dashboard/selector-stats-chart-client";
@@ -358,30 +357,23 @@ export default async function DashboardPage({
           </Card>
         </div>
 
-        {/* Auto Setup Agent */}
-        {!session?.team?.banAiMode && (
-          <PlayAgentTimeline repositoryId={selectedRepo?.id} />
+        {/* QuickStart Agent (baseUrl required) */}
+        {!session?.team?.banAiMode && selectedRepo && (
+          <QuickstartPanel
+            repositoryId={selectedRepo.id}
+            enabled={quickstartGate.enabled}
+            defaultBranch={selectedRepo.defaultBranch}
+            reason={
+              quickstartGate.enabled
+                ? undefined
+                : (quickstartGate.reason as
+                    | "no_team"
+                    | "not_early_adopter"
+                    | "no_base_url"
+                    | undefined)
+            }
+          />
         )}
-
-        {/* QuickStart Agent (early-adopter, baseUrl required) */}
-        {!session?.team?.banAiMode &&
-          session?.team?.earlyAdopterMode &&
-          selectedRepo && (
-            <QuickstartPanel
-              repositoryId={selectedRepo.id}
-              enabled={quickstartGate.enabled}
-              defaultBranch={selectedRepo.defaultBranch}
-              reason={
-                quickstartGate.enabled
-                  ? undefined
-                  : (quickstartGate.reason as
-                      | "no_team"
-                      | "not_early_adopter"
-                      | "no_base_url"
-                      | undefined)
-              }
-            />
-          )}
 
         {/* Selector Stats */}
         {selectorStats.length > 0 && (

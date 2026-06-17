@@ -15,7 +15,12 @@ import {
   getLatestDemoNotesForRepo,
 } from "@/lib/db/queries/demo-notes";
 import { getRepoAward } from "@/lib/db/queries/awards";
-import type { DemoNotes, DomDiffResult, RepoAward } from "@/lib/db/schema";
+import type {
+  DemoNotes,
+  DomDiffResult,
+  RepoAward,
+  WebVitalsSample,
+} from "@/lib/db/schema";
 import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
@@ -239,6 +244,10 @@ export default async function PublicSharePage({ params }: PageProps) {
     0,
   );
 
+  // Absolute Core-Web-Vitals "Fast" grade for the share. Null when no vitals
+  // were captured (renders "—"); see computePerfScore.
+  const perfScore = computePerfScore(scopedResults);
+
   // Recording clips, hoisted to page level so the player renders as the FIRST
   // element in <main> — above the fold, at actual size, highest in the HTML.
   // Google only indexes videos on "watch pages" where the video is the main
@@ -358,6 +367,7 @@ export default async function PublicSharePage({ params }: PageProps) {
             results={scopedResults}
             toUrl={toUrl}
             build={build}
+            perfScore={perfScore}
             testResult={primaryResult}
             shareUrl={shareUrl}
             testName={test?.name ?? displayDomain}
@@ -382,6 +392,7 @@ export default async function PublicSharePage({ params }: PageProps) {
               build={build}
               targetDomain={share.targetDomain}
               branch={testRun?.gitBranch ?? null}
+              perfScore={perfScore}
             />
             <BuildDiffsGallery
               diffs={diffs}
@@ -1343,10 +1354,12 @@ function BuildSummary({
   build,
   targetDomain,
   branch,
+  perfScore,
 }: {
   build: Build;
   targetDomain: string | null;
   branch: string | null;
+  perfScore: number | null;
 }) {
   const total = build.totalTests ?? 0;
   const passed = build.passedCount ?? 0;
@@ -1354,6 +1367,10 @@ function BuildSummary({
   const changed = build.changesDetected ?? 0;
   const pending = Math.max(0, total - passed - failed - changed);
   const a11y = build.a11yScore;
+  const design = build.designSystemScore;
+  // passed/failed/changed + Accessible, then any of Design / Fast that reported.
+  const tileCount =
+    4 + (design != null ? 1 : 0) + (perfScore != null ? 1 : 0);
 
   const configBits: string[] = [];
   if (build.triggerType) configBits.push(humanize(build.triggerType));
@@ -1376,21 +1393,16 @@ function BuildSummary({
         changed={changed}
       />
 
-      <div
-        className={`grid grid-cols-2 gap-3 ${
-          build.designSystemScore == null ? "sm:grid-cols-4" : "sm:grid-cols-5"
-        }`}
-      >
+      <div className={`grid gap-3 ${gridColsClass(tileCount)}`}>
         <StatCard value={passed} label="Passed" tone="ok" />
         <StatCard value={failed} label="Failed" tone="danger" />
         <StatCard value={changed} label="Changed" tone="warn" />
         <GradeCard score={a11y} label="Accessible" sub="WCAG 2.2" />
-        {build.designSystemScore != null && (
-          <GradeCard
-            score={build.designSystemScore}
-            label="Design"
-            sub="Design system"
-          />
+        {design != null && (
+          <GradeCard score={design} label="Design" sub="Design system" />
+        )}
+        {perfScore != null && (
+          <GradeCard score={perfScore} label="Fast" sub="Web Vitals" />
         )}
       </div>
 
@@ -1520,6 +1532,40 @@ function GradeCard({
   );
 }
 
+// Absolute "Fast" score from captured Core Web Vitals. Each metric is scored
+// against Google's standard good/needs-improvement/poor thresholds (good=100,
+// NI=70, poor=40); we take the worst (most conservative) observed value per
+// metric across all samples, then average the metrics we have. Returns null
+// when no vitals were captured so the tile renders a neutral "—".
+function computePerfScore(results: ShareTestResult[]): number | null {
+  const samples: WebVitalsSample[] = results.flatMap((r) => r.webVitals ?? []);
+  if (samples.length === 0) return null;
+  const worst = (pick: (s: WebVitalsSample) => number | undefined) => {
+    const vals = samples
+      .map(pick)
+      .filter((v): v is number => typeof v === "number");
+    return vals.length ? Math.max(...vals) : undefined;
+  };
+  const band = (v: number | undefined, good: number, poor: number) =>
+    v == null ? null : v <= good ? 100 : v <= poor ? 70 : 40;
+  const scores = [
+    band(worst((s) => s.lcp), 2500, 4000), // LCP ms
+    band(worst((s) => s.inp), 200, 500), // INP ms
+    band(worst((s) => s.cls), 0.1, 0.25), // CLS (unitless)
+  ].filter((x): x is number => x != null);
+  if (scores.length === 0) return null;
+  return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+}
+
+// Static (Tailwind-scannable) column classes for the quality stat grid, sized
+// to the number of tiles present (3–6).
+function gridColsClass(n: number): string {
+  if (n <= 3) return "grid-cols-2 sm:grid-cols-3";
+  if (n === 4) return "grid-cols-2 sm:grid-cols-4";
+  if (n === 5) return "grid-cols-2 sm:grid-cols-5";
+  return "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6";
+}
+
 // Diffs + gallery for build-scoped shares (no video, no step strip).
 function BuildDiffsGallery({
   diffs,
@@ -1570,6 +1616,7 @@ function TestShareBody({
   results,
   toUrl,
   build,
+  perfScore,
   testResult,
   shareUrl,
   testName,
@@ -1583,6 +1630,7 @@ function TestShareBody({
   results: ShareTestResult[];
   toUrl: (p: string | null | undefined) => string | null;
   build: Build;
+  perfScore: number | null;
   testResult: ShareTestResult | null;
   shareUrl: string;
   testName: string;
@@ -1633,9 +1681,11 @@ function TestShareBody({
       {steps.length > 0 && <StepStripClient steps={steps} />}
 
       <div
-        className={`grid gap-3 ${
-          build.designSystemScore == null ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4"
-        }`}
+        className={`grid gap-3 ${gridColsClass(
+          3 +
+            (build.designSystemScore != null ? 1 : 0) +
+            (perfScore != null ? 1 : 0),
+        )}`}
       >
         <StatCard
           value={pixelsChanged > 0 ? pixelsChanged.toLocaleString() : "0"}
@@ -1658,6 +1708,9 @@ function TestShareBody({
             label="Design"
             sub="Design system"
           />
+        )}
+        {perfScore != null && (
+          <GradeCard score={perfScore} label="Fast" sub="Web Vitals" />
         )}
       </div>
 

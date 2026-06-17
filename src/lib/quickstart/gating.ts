@@ -72,10 +72,8 @@ export async function isQuickstartEnabled(
   const team = await queries.getTeam(repo.teamId);
   if (!team) return { enabled: false, reason: "no_team", repo };
 
-  if (!team.earlyAdopterMode) {
-    return { enabled: false, reason: "not_early_adopter", repo, team };
-  }
-
+  // QuickStart is generally available (promoted out of Early Adopter). The only
+  // remaining requirement is a non-local base URL to point the agent at.
   const baseUrl = pickRepoBaseUrl(repo);
   if (!baseUrl) return { enabled: false, reason: "no_base_url", repo, team };
 
