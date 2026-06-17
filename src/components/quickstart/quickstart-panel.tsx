@@ -23,7 +23,11 @@ import {
   ChevronDown,
   KeyRound,
   Monitor,
+  Share2,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
+import { toast } from "sonner";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import {
   useQuickstart,
@@ -44,6 +48,9 @@ const STEP_LABELS: Record<string, string> = {
   qs_scout_authed: "Authed scout",
   qs_generate: "Generate walkthrough",
   qs_run_and_notes: "Run & notes",
+  qs_approve_baselines: "Approve baselines",
+  qs_rerun_after_approval: "Re-run for pairing",
+  qs_publish_share: "Publish share",
 };
 
 function StepIcon({ status }: { status: QuickstartStep["status"] }) {
@@ -98,6 +105,49 @@ function NotesPanel({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Founder-facing share — the payoff. Surfaced prominently once the
+ *  qs_publish_share step writes the public /r/<slug> URL. */
+function ShareBlock({
+  shareUrl,
+  shareSlug,
+}: {
+  shareUrl: string;
+  shareSlug?: string;
+}) {
+  const pretty = shareSlug ? `/r/${shareSlug}` : shareUrl;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success("Share link copied");
+    } catch {
+      toast.error("Couldn't copy — select and copy manually");
+    }
+  };
+  return (
+    <div className="rounded-md border border-pink-500/30 bg-pink-500/5 p-3 space-y-2">
+      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-pink-600 dark:text-pink-400">
+        <Share2 className="size-3" />
+        Founder share ready
+      </p>
+      <code className="block truncate rounded bg-background/60 px-2 py-1 text-[11px] text-foreground/90">
+        {pretty}
+      </code>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" asChild>
+          <a href={shareUrl} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="size-3.5 mr-1.5" />
+            Open report
+          </a>
+        </Button>
+        <Button size="sm" variant="outline" onClick={copy}>
+          <Copy className="size-3.5 mr-1.5" />
+          Copy link
+        </Button>
+      </div>
     </div>
   );
 }
@@ -193,6 +243,8 @@ export function QuickstartPanel({
   const streamUrl = session?.metadata.streamUrl;
   const queuedForBrowser = session?.metadata.queuedForBrowser;
   const demoNotes = session?.metadata.demoNotes;
+  const shareUrl = session?.metadata.shareUrl;
+  const shareSlug = session?.metadata.shareSlug;
   const usedEmail = session?.metadata.quickstartEmail;
   const failedStep = session?.steps.find((s) => s.status === "failed");
 
@@ -315,6 +367,8 @@ export function QuickstartPanel({
   const leftColumn = session && (
     <div className="space-y-3 min-w-0">
       {stepsList}
+
+      {shareUrl && <ShareBlock shareUrl={shareUrl} shareSlug={shareSlug} />}
 
       {demoNotes && <NotesPanel notes={demoNotes} />}
 
