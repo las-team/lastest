@@ -261,6 +261,24 @@ export async function getSessionWithUser(token: string) {
   return result;
 }
 
+/**
+ * Stamp a session's `lastUsedAt` when it authenticates a request. Throttled to
+ * at most once per minute to avoid a write on every API call. Used to surface
+ * "last used" for API keys and to confirm an MCP client has connected (the
+ * onboarding "your agent is connected" check polls this).
+ */
+export async function touchSessionLastUsed(
+  token: string,
+  lastUsedAt: Date | null,
+): Promise<void> {
+  const now = new Date();
+  if (lastUsedAt && now.getTime() - lastUsedAt.getTime() < 60_000) return;
+  await db
+    .update(sessions)
+    .set({ lastUsedAt: now })
+    .where(eq(sessions.token, token));
+}
+
 export async function deleteSession(token: string) {
   await db.delete(sessions).where(eq(sessions.token, token));
 }

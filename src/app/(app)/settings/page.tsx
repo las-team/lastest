@@ -21,6 +21,10 @@ function GitLabIcon({ className }: { className?: string }) {
 import { PlaywrightSettingsCard } from "@/components/settings/playwright-settings-card";
 import { DiffSensitivityCard } from "@/components/settings/diff-sensitivity-card";
 import { AISettingsCard } from "@/components/settings/ai-settings-card";
+import { AiAdvancedSettings } from "@/components/settings/ai-advanced-settings";
+import { McpConnect } from "@/components/mcp/mcp-connect";
+import { McpPromptHints } from "@/components/mcp/mcp-prompt-hints";
+import { isByokConfigured } from "@/lib/ai/availability";
 import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
 import { NotificationSettingsCard } from "@/components/settings/notification-settings-card";
@@ -111,6 +115,10 @@ export default async function SettingsPage({
   // Masked: API-key columns are redacted before reaching the client component
   // (raw keys must never be serialized into the page payload).
   const aiSettings = await getMaskedAISettings(selectedRepo?.id);
+  // In-product AI ("agent functions") is only surfaced when BYOK is configured;
+  // otherwise the panel steers users to drive Lastest from their own MCP agent.
+  // `aiSettings` is masked, but masked-empty keys are null, so this check holds.
+  const byokConfigured = isByokConfigured(aiSettings);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
   const notificationSettings = await queries.getNotificationSettings(
     selectedRepo?.id,
@@ -551,16 +559,53 @@ export default async function SettingsPage({
         </Card>
       ) : (
         <>
-          <div id="ai-settings">
-            <AISettingsCard
-              settings={aiSettings}
-              repositoryId={selectedRepo?.id}
-            />
-          </div>
+          {/* MCP-first: the promoted way to get AI in Lastest. */}
+          <Card id="mcp-connect">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Connect your AI agent
+                <Badge variant="default">Recommended</Badge>
+              </CardTitle>
+              <CardDescription>
+                Drive Lastest from Claude Code, Cursor, or any MCP client using
+                your own model — no API keys stored here.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <McpConnect serverUrl={serverUrl} />
+            </CardContent>
+          </Card>
 
-          <div id="ai-logs">
-            <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
-          </div>
+          {byokConfigured ? (
+            // BYOK is set up → in-product agent functions are live; show their logs.
+            <div id="ai-logs">
+              <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
+            </div>
+          ) : (
+            // No BYOK → no in-product agent functions; offer MCP prompts instead.
+            <Card id="mcp-prompts">
+              <CardHeader>
+                <CardTitle>Run agent functions from your client</CardTitle>
+                <CardDescription>
+                  In-product AI is off. Paste any of these into your connected
+                  agent to generate, heal, review, or triage.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <McpPromptHints />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* BYOK provider config, demoted under an Advanced disclosure. */}
+          <AiAdvancedSettings defaultOpen={byokConfigured}>
+            <div id="ai-settings">
+              <AISettingsCard
+                settings={aiSettings}
+                repositoryId={selectedRepo?.id}
+              />
+            </div>
+          </AiAdvancedSettings>
         </>
       )}
     </>

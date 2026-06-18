@@ -14,6 +14,11 @@ export async function verifyBearerToken(
   if (!result || result.session.expiresAt < new Date()) {
     return null;
   }
+  // Stamp last-used (throttled) so the UI can show key activity and onboarding
+  // can confirm an MCP client has connected. Fire-and-forget — never block auth.
+  void queries
+    .touchSessionLastUsed(token, result.session.lastUsedAt ?? null)
+    .catch(() => {});
   const team = result.user.teamId
     ? await queries.getTeam(result.user.teamId)
     : null;

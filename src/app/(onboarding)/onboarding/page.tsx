@@ -34,11 +34,14 @@ export default async function OnboardingPage({
     return raw;
   })();
 
+  const serverUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
   return (
     <OnboardingClient
       initialStep={initialStep}
       initialPath={session.user.onboardingPath ?? null}
       userName={session.user.name ?? session.user.email.split("@")[0]}
+      serverUrl={serverUrl}
       githubAccount={
         githubAccount ? { username: githubAccount.githubUsername } : null
       }

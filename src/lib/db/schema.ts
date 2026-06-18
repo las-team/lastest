@@ -1885,7 +1885,9 @@ export const teams = pgTable("teams", {
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
-export type OnboardingPath = "manual" | "ai" | "agent";
+// "ai" / "agent" are legacy in-product-AI paths kept for back-compat with rows
+// written before the MCP-first onboarding; new onboardings pick "manual" or "mcp".
+export type OnboardingPath = "manual" | "ai" | "agent" | "mcp";
 
 // Users - Core identity
 export const users = pgTable("users", {
