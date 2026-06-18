@@ -953,7 +953,6 @@ export function TestDetailClient({
               </span>
               <span className="text-muted-foreground shrink-0">
                 · {test.apiDefinition.assertions?.length ?? 0} assertion(s)
-                {test.loadConfig ? " · load" : ""}
               </span>
             </div>
             {!test.deletedAt && (
@@ -977,7 +976,6 @@ export function TestDetailClient({
             testId={test.id}
             initialName={test.name}
             initialDefinition={test.apiDefinition}
-            initialLoadConfig={test.loadConfig ?? null}
             onSaved={() => {
               setEditApiOpen(false);
               onRefresh?.();

@@ -123,9 +123,8 @@ export interface TestResultLite {
   extractedVariables: Record<string, string> | null;
   assignedVariables: Record<string, string> | null;
   domSnapshot: import("@/lib/db/schema").DomSnapshotData | null;
-  // E1/E3: headless API + load-test results (null for browser tests).
+  // E1: headless API results (null for browser tests).
   apiResult: import("@/lib/db/schema").ApiTestResultData | null;
-  loadResult: import("@/lib/db/schema").LoadTestResultData | null;
 }
 
 export interface VerifyFilters {

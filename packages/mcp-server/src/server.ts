@@ -1,3 +1,15 @@
+/**
+ * Lastest MCP server.
+ *
+ * AUTHENTICATION: this server holds no auth logic of its own and exposes no
+ * privileged surface. Every tool delegates to `LastestClient`, which calls the
+ * Lastest REST API v1 with `Authorization: Bearer <apiKey>` (the per-user/team
+ * token configured for the MCP process). The v1 route authenticates that token
+ * on every request via `getCurrentSession` → `verifyBearerToken` and enforces
+ * team ownership per resource (401/403/404). So a tool call can only ever touch
+ * data the bearer token's team already owns — there is no ambient access. The
+ * token is the credential; protect it like any other secret.
+ */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LastestClient, type ToolResponse } from "./client.js";
@@ -749,13 +761,6 @@ export function createServer(client: LastestClient): McpServer {
         .describe(
           "For api-type tests (update): the request + assertion definition { method, url, headers?, query?, body?, auth?, assertions[] }. The code column is re-synced from this automatically.",
         ),
-      loadConfig: z
-        .record(z.unknown())
-        .nullable()
-        .optional()
-        .describe(
-          "For api-type tests (update): load-test config { concurrency, totalRequests?, durationMs?, thresholds? }. Pass null to make it a plain (single-request) api test.",
-        ),
     },
     withActivityReporting(client, "lastest_test", async (params) => {
       const action = params.action as "list" | "get" | "update" | "delete";
@@ -868,7 +873,6 @@ export function createServer(client: LastestClient): McpServer {
           "setupOverrides",
           "teardownOverrides",
           "apiDefinition",
-          "loadConfig",
         ] as const;
         const cleanUpdates = Object.fromEntries(
           updateKeys
@@ -2074,12 +2078,6 @@ export function createServer(client: LastestClient): McpServer {
         .describe(
           "API test definition for direct API mode: { method, url, headers?, query?, body?, auth?, assertions: [...] }. Assertion kinds: status|header|jsonPath|jsonSchema|bodyContains|latencyMs.",
         ),
-      loadConfig: z
-        .record(z.any())
-        .optional()
-        .describe(
-          "E3 load-test config for an api test: { concurrency, totalRequests?, durationMs?, thresholds?: { p95Ms?, p99Ms?, maxErrorRate?, minThroughputRps? } }. When set, lastest_run_tests runs this test as a load test (concurrency/total capped server-side).",
-        ),
       endpoint: z
         .string()
         .optional()
@@ -2107,12 +2105,11 @@ export function createServer(client: LastestClient): McpServer {
           name,
           testType: "api",
           apiDefinition: params.apiDefinition as Record<string, unknown>,
-          loadConfig: params.loadConfig as Record<string, unknown> | undefined,
           functionalAreaId,
         });
         const response: ToolResponse = {
           status: "test_created",
-          summary: `API test "${result.name}" created (ID: ${result.id})${params.loadConfig ? " as a load test" : ""}. Use lastest_run_tests to execute it.`,
+          summary: `API test "${result.name}" created (ID: ${result.id}). Use lastest_run_tests to execute it.`,
           actionRequired: [
             "Run the test with lastest_run_tests to verify it works",
           ],

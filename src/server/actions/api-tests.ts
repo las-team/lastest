@@ -5,11 +5,7 @@ import * as queries from "@/lib/db/queries";
 import { requireRepoCapability, requireRepoAccess } from "@/lib/auth";
 import { requireTestOwnership } from "@/lib/auth/ownership";
 import { renderApiDefinitionForCode } from "@/lib/api-test/redact";
-import {
-  LOAD_TEST_MAX_CONCURRENCY,
-  LOAD_TEST_MAX_TOTAL_REQUESTS,
-} from "@/lib/db/schema";
-import type { ApiTestDefinition, LoadTestConfig } from "@/lib/db/schema";
+import type { ApiTestDefinition } from "@/lib/db/schema";
 
 function validateDefinition(def: ApiTestDefinition): string | null {
   if (!def || typeof def !== "object") return "API definition is required.";
@@ -17,25 +13,6 @@ function validateDefinition(def: ApiTestDefinition): string | null {
   if (!Array.isArray(def.assertions) || def.assertions.length === 0)
     return "Add at least one assertion (a status check is recommended).";
   return null;
-}
-
-/** Clamp load config to the server-side safety caps before persisting. */
-function clampLoadConfig(
-  config?: LoadTestConfig | null,
-): LoadTestConfig | null {
-  if (!config) return null;
-  const concurrency = Math.max(
-    1,
-    Math.min(config.concurrency || 1, LOAD_TEST_MAX_CONCURRENCY),
-  );
-  const totalRequests =
-    config.totalRequests != null
-      ? Math.max(
-          1,
-          Math.min(config.totalRequests, LOAD_TEST_MAX_TOTAL_REQUESTS),
-        )
-      : undefined;
-  return { ...config, concurrency, totalRequests };
 }
 
 /**
@@ -48,7 +25,6 @@ export async function createApiTest(input: {
   name: string;
   apiDefinition: ApiTestDefinition;
   functionalAreaId?: string | null;
-  loadConfig?: LoadTestConfig | null;
 }): Promise<{ id: string }> {
   await requireRepoCapability(input.repositoryId, "tests:write");
   const err = validateDefinition(input.apiDefinition);
@@ -62,7 +38,6 @@ export async function createApiTest(input: {
     code: renderApiDefinitionForCode(input.apiDefinition),
     testType: "api",
     apiDefinition: input.apiDefinition,
-    loadConfig: clampLoadConfig(input.loadConfig),
     targetUrl: input.apiDefinition.url,
     functionalAreaId: input.functionalAreaId ?? null,
   });
@@ -70,13 +45,12 @@ export async function createApiTest(input: {
   return { id: created.id };
 }
 
-/** Update an existing API test's definition / load config from the UI. */
+/** Update an existing API test's definition from the UI. */
 export async function updateApiTest(
   id: string,
   input: {
     name?: string;
     apiDefinition: ApiTestDefinition;
-    loadConfig?: LoadTestConfig | null;
   },
 ): Promise<void> {
   await requireTestOwnership(id);
@@ -90,7 +64,6 @@ export async function updateApiTest(
       code: renderApiDefinitionForCode(input.apiDefinition),
       testType: "api",
       apiDefinition: input.apiDefinition,
-      loadConfig: clampLoadConfig(input.loadConfig),
       targetUrl: input.apiDefinition.url,
     },
     "manual_edit",

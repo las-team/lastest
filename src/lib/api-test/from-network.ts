@@ -2,7 +2,7 @@
  * Seed an API test (E1) from a captured network request. Bridges an observed
  * `NetworkRequest` (from a test run's network trace) into an editable
  * `ApiTestDefinition` so a user can reproduce a real call — headers, payload,
- * auth and observed status — then fine-tune it or flip it into a load test.
+ * auth and observed status — then fine-tune it before saving.
  *
  * Pure + isomorphic: no DB / network. Credentials in the produced definition
  * are the live values to execute against; the *displayed* copy is redacted

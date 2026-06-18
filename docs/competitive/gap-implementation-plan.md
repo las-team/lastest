@@ -85,19 +85,18 @@ effectiveVerdict` pipeline as UI tests:
   `tests.apiDefinition` jsonb, `DEFAULT_API_TEST_SETTINGS`.
 - Deps: `ajv`. SSRF + secret redaction on auth headers.
 
-### E3 — Load/perf on API tests (P2, new engine, depends on E1)
+### E3 — Load/perf on API tests — REMOVED (deferred)
 
-- Reuses: E1 `runApiTest`, `perf` layer + `EvidenceItem`/`effectiveVerdict`,
-  `perfBaselines` precedent, concurrency-batch idiom, `DEFAULT_*` convention.
-- New: `src/lib/api-test/{load-runner,load-evidence}.ts`; executor routes to
-  load-runner when `loadConfig` present.
-- Schema: `LoadTestThresholds`/`LoadTestResult`, `DEFAULT_LOAD_TEST_THRESHOLDS`,
-  `tests.loadConfig` + `test_results.loadResult` jsonb.
-- Folded into `lastest_run_tests { mode: 'load' }`. Async (jobId + poll) for long runs.
+Dropped from this PR. An in-process load runner that fires N concurrent requests
+at an arbitrary target turns the app server into a DoS amplifier against any URL
+a user can name, and load on the very Node process the app runs in. Re-landing it
+needs domain-ownership proof (e.g. DNS-TXT verification that the target belongs to
+the team), explicit per-run consent, and out-of-process execution — tracked
+separately. The headless single-request API engine (E1) stays.
 
 ### Build order
 
-E6 → E5 → E1 → E3, then MCP consolidation (so new verbs land against the
+E6 → E5 → E1, then MCP consolidation (so new verbs land against the
 consolidated surface where possible).
 
 ---

@@ -859,7 +859,6 @@ async function runBuildAsync(
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
     storageStateSnapshot?: import("@/lib/db/schema").StorageStateSnapshot;
     apiResult?: import("@/lib/db/schema").ApiTestResultData;
-    loadResult?: import("@/lib/db/schema").LoadTestResultData;
   }) => {
     processedCount++;
 
@@ -870,7 +869,6 @@ async function runBuildAsync(
       testVersionId: versionIdMap.get(result.testId) ?? null,
       status: result.status,
       apiResult: result.apiResult,
-      loadResult: result.loadResult,
       screenshotPath: result.screenshotPath,
       screenshots: result.screenshots,
       errorMessage: result.errorMessage,
@@ -1062,22 +1060,13 @@ async function runBuildAsync(
     // triage unit. Best-effort — failure here never blocks the build.
     try {
       const { scoreMultiLayer } = await import("@/lib/comparison/scorer");
-      // E1/E3: fold api-test assertion + load-test (perf-layer) evidence into
-      // the step verdict. Both carry their own layer, so they can share the
-      // scorer's apiEvidence channel.
+      // E1: fold api-test assertion evidence into the step verdict.
       const apiEvidence: import("@/lib/db/schema").EvidenceItem[] = [];
       if (result.apiResult) {
         apiEvidence.push(
           ...(await import("@/lib/api-test/evidence")).apiResultToEvidence(
             result.apiResult,
           ),
-        );
-      }
-      if (result.loadResult) {
-        apiEvidence.push(
-          ...(
-            await import("@/lib/api-test/load-evidence")
-          ).loadResultToEvidence(result.loadResult),
         );
       }
       const prevResult = await queries.getPreviousTestResultForTest(

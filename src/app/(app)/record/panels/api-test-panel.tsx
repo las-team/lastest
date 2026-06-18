@@ -32,8 +32,6 @@ export function ApiTestPanel({ repositoryId, areas }: ApiTestPanelProps) {
             <CardDescription>
               A headless HTTP request graded against response assertions — no
               browser. Runs in the same build pipeline as browser tests.
-              Optionally turn it into a load test with concurrency and latency /
-              error thresholds.
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -121,14 +121,10 @@ interface TestWithStatus extends Test {
 }
 
 /**
- * Distinguishes headless API tests (E1) from browser tests at a glance, and
- * flags load tests (E3). Browser tests render nothing to avoid badge noise.
+ * Distinguishes headless API tests (E1) from browser tests at a glance.
+ * Browser tests render nothing to avoid badge noise.
  */
-function TestTypeBadge({
-  test,
-}: {
-  test: Pick<Test, "testType" | "loadConfig">;
-}) {
+function TestTypeBadge({ test }: { test: Pick<Test, "testType"> }) {
   if (test.testType !== "api") return null;
   return (
     <span className="flex items-center gap-1 shrink-0">
@@ -138,14 +134,6 @@ function TestTypeBadge({
       >
         API
       </Badge>
-      {test.loadConfig && (
-        <Badge
-          variant="secondary"
-          className="h-4 px-1.5 text-[10px] font-medium uppercase tracking-wide"
-        >
-          Load
-        </Badge>
-      )}
     </span>
   );
 }
