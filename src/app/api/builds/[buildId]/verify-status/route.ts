@@ -106,6 +106,7 @@ export async function GET(
       textDiffSummary: meta?.textDiffSummary ?? null,
       baselineSourceBranch: meta?.baselineSourceBranch ?? null,
       baselineExistsOn: meta?.baselineExistsOn ?? null,
+      rca: meta?.rca ?? null,
     };
   });
 

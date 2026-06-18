@@ -20,12 +20,19 @@ demo-mode
 without link?
 
 ## security
+
 ## bugs
+
 local agent mcp
+
 ## features
+
+RCA
+docs/mcp/remote-mcp-oauth-plan.md
 Google verification for gsheets
 **Self-test**
 mcp-oauth flow
+
 - Demo mode: Esetleg a self-testünket mutassuk demonak
 - API és backend tesztelés: teljesen új funkció https://github.com/las-team/lastest/pull/22
 - Launch Your Startup: https://www.tinylaunch.com/ with automated walkthroug (pushed to TikTok and YT shorts)

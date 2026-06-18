@@ -7,21 +7,31 @@ import {
   Code2,
   Compass,
   FileText,
+  Plug,
   Telescope,
   Video,
   Webhook,
 } from "lucide-react";
 import type { FunctionalArea, PlaywrightSettings, Test } from "@/lib/db/schema";
 import { RecordingClient } from "./recording-client";
+import { McpPanel } from "./panels/mcp-panel";
 import { ExploreUrlPanel } from "./panels/explore-url-panel";
 import { AutoExplorePanel } from "./panels/auto-explore-panel";
 import { SpecPanel } from "./panels/spec-panel";
 import { ImportCodePanel } from "./panels/import-code-panel";
 import { ApiTestPanel } from "./panels/api-test-panel";
 
-type TabKey = "record" | "explore" | "auto" | "spec" | "import" | "api";
+type TabKey =
+  | "record"
+  | "mcp"
+  | "explore"
+  | "auto"
+  | "spec"
+  | "import"
+  | "api";
 const TAB_KEYS: TabKey[] = [
   "record",
+  "mcp",
   "explore",
   "auto",
   "spec",
@@ -45,6 +55,8 @@ interface TestCreationTabsProps {
   settings: PlaywrightSettings;
   repositoryId?: string | null;
   defaultBaseUrl?: string;
+  serverUrl: string;
+  repoName?: string | null;
   rerecordTest?: Test | null;
   repositorySetupSteps?: SetupStepInfo[];
   availableTests?: { id: string; name: string }[];
@@ -98,6 +110,14 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
           <TabsTrigger value="record" className={triggerClass}>
             <Video className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">Record</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="mcp"
+            disabled={rerecording}
+            className={triggerClass}
+          >
+            <Plug className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">MCP</span>
           </TabsTrigger>
           <TabsTrigger
             value="explore"
@@ -165,6 +185,14 @@ export function TestCreationTabs(props: TestCreationTabsProps) {
           availableTests={props.availableTests}
           availableScripts={props.availableScripts}
           onStepChange={setRecordingStep}
+        />
+      </TabsContent>
+
+      <TabsContent value="mcp" className="overflow-auto flex-1 flex flex-col">
+        <McpPanel
+          serverUrl={props.serverUrl}
+          repositoryId={repoId}
+          repoName={props.repoName ?? undefined}
         />
       </TabsContent>
 

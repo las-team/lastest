@@ -1068,7 +1068,7 @@ export function TestDetailClient({
                   <>
                     <div className="flex">
                       <Button
-                        onClick={() => handleRun(true)}
+                        onClick={() => handleRun(false)}
                         disabled={isRunning}
                         className="rounded-r-none"
                       >
@@ -1091,13 +1091,13 @@ export function TestDetailClient({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleRun(true)}>
-                            <Play className="h-4 w-4 mr-2" />
-                            Run (Headless)
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleRun(false)}>
                             <Monitor className="h-4 w-4 mr-2" />
                             Run Headed
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleRun(true)}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Run (Headless)
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() =>
