@@ -2,6 +2,8 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAiEnabled } from "@/components/ai/ai-availability-context";
+import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +31,7 @@ export function SpecPanel({
   defaultBranch = "main",
 }: SpecPanelProps) {
   const router = useRouter();
+  const aiEnabled = useAiEnabled();
   const [pastedText, setPastedText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -233,21 +236,25 @@ export function SpecPanel({
             </div>
 
             <div className="flex justify-end">
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  isSubmitting ||
-                  !repositoryId ||
-                  (pastedText.trim().length === 0 && files.length === 0)
-                }
-              >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <FileText className="h-4 w-4 mr-2" />
-                )}
-                Generate tests from spec
-              </Button>
+              {aiEnabled ? (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={
+                    isSubmitting ||
+                    !repositoryId ||
+                    (pastedText.trim().length === 0 && files.length === 0)
+                  }
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4 mr-2" />
+                  )}
+                  Generate tests from spec
+                </Button>
+              ) : (
+                <McpCtaHint promptKey="spec" label="Use your agent" />
+              )}
             </div>
           </CardContent>
         </Card>

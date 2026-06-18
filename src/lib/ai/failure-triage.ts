@@ -9,6 +9,7 @@
  */
 
 import { generateWithAI } from "@/lib/ai";
+import { isByokConfigured } from "@/lib/ai/availability";
 import type { AIProviderConfig } from "@/lib/ai/types";
 import { parseAiJson } from "@/lib/ai/json-parse";
 import * as queries from "@/lib/db/queries";
@@ -54,6 +55,17 @@ export async function triageTestFailure(
 ): Promise<TriageResult> {
   try {
     const settings = await queries.getAISettings(repositoryId);
+
+    // MCP-first: background AI only runs when the team has configured in-product
+    // AI (BYOK). Otherwise we stay hands-off and let the user's own agent triage
+    // over MCP. (Quickstart uses the provider directly and never reaches here.)
+    if (!isByokConfigured(settings)) {
+      return {
+        classification: "unknown",
+        confidence: 0,
+        reasoning: "AI triage skipped (in-product AI not configured)",
+      };
+    }
 
     // Skip triage if AI is not configured or is CLI-only
     if (settings.provider === "claude-cli") {
