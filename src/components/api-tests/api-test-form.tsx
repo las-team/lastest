@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -22,7 +21,6 @@ import type {
   ApiAssertionKind,
   ApiAuth,
   FunctionalArea,
-  LoadTestConfig,
 } from "@/lib/db/schema";
 import {
   createApiTest,
@@ -37,7 +35,6 @@ export interface ApiTestFormProps {
   testId?: string;
   initialName?: string;
   initialDefinition?: ApiTestDefinition;
-  initialLoadConfig?: LoadTestConfig | null;
   initialAreaId?: string | null;
   /** Called with the saved test id after a successful create/update. */
   onSaved?: (testId: string) => void;
@@ -74,7 +71,6 @@ export function ApiTestForm({
   testId,
   initialName,
   initialDefinition,
-  initialLoadConfig,
   initialAreaId,
   onSaved,
   onCancel,
@@ -108,24 +104,6 @@ export function ApiTestForm({
     initialDefinition?.assertions?.length
       ? initialDefinition.assertions
       : [{ kind: "status", in: [200] }],
-  );
-
-  const [loadEnabled, setLoadEnabled] = useState(!!initialLoadConfig);
-  const [concurrency, setConcurrency] = useState(
-    String(initialLoadConfig?.concurrency ?? 10),
-  );
-  const [totalRequests, setTotalRequests] = useState(
-    String(initialLoadConfig?.totalRequests ?? 100),
-  );
-  const [p95Ms, setP95Ms] = useState(
-    initialLoadConfig?.thresholds?.p95Ms != null
-      ? String(initialLoadConfig.thresholds.p95Ms)
-      : "1000",
-  );
-  const [maxErrorPct, setMaxErrorPct] = useState(
-    initialLoadConfig?.thresholds?.maxErrorRate != null
-      ? String(initialLoadConfig.thresholds.maxErrorRate * 100)
-      : "1",
   );
 
   const [aiPrompt, setAiPrompt] = useState("");
@@ -162,20 +140,6 @@ export function ApiTestForm({
       assertions,
     };
   };
-
-  const loadConfig = (): LoadTestConfig | null =>
-    loadEnabled
-      ? {
-          concurrency: Math.max(1, parseInt(concurrency) || 1),
-          totalRequests: Math.max(1, parseInt(totalRequests) || 1),
-          thresholds: {
-            ...(p95Ms ? { p95Ms: parseInt(p95Ms) } : {}),
-            ...(maxErrorPct
-              ? { maxErrorRate: (parseFloat(maxErrorPct) || 0) / 100 }
-              : {}),
-          },
-        }
-      : null;
 
   async function handleGenerate() {
     if (!aiPrompt.trim()) {
@@ -222,7 +186,6 @@ export function ApiTestForm({
         await updateApiTest(testId!, {
           name,
           apiDefinition: def,
-          loadConfig: loadConfig(),
         });
         toast.success("API test updated.");
         onSaved?.(testId!);
@@ -232,7 +195,6 @@ export function ApiTestForm({
           name,
           apiDefinition: def,
           functionalAreaId: areaId === NONE_AREA ? null : areaId,
-          loadConfig: loadConfig(),
         });
         toast.success("API test created.");
         onSaved?.(id);
@@ -412,48 +374,6 @@ export function ApiTestForm({
 
         {/* Assertions */}
         <AssertionsEditor value={assertions} onChange={setAssertions} />
-
-        <Separator />
-
-        {/* Load testing */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-xs">Load test</Label>
-              <p className="text-[11px] text-muted-foreground">
-                Fire N concurrent requests and gate on latency / error
-                thresholds.
-              </p>
-            </div>
-            <Switch checked={loadEnabled} onCheckedChange={setLoadEnabled} />
-          </div>
-          {loadEnabled && (
-            <div className="grid grid-cols-2 gap-3">
-              <LabeledNumber
-                label="Concurrency"
-                value={concurrency}
-                onChange={setConcurrency}
-                hint="max 50"
-              />
-              <LabeledNumber
-                label="Total requests"
-                value={totalRequests}
-                onChange={setTotalRequests}
-                hint="max 2000"
-              />
-              <LabeledNumber
-                label="p95 budget (ms)"
-                value={p95Ms}
-                onChange={setP95Ms}
-              />
-              <LabeledNumber
-                label="Max error rate (%)"
-                value={maxErrorPct}
-                onChange={setMaxErrorPct}
-              />
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
@@ -535,32 +455,6 @@ function KeyValueEditor({
           {addLabel ?? `Add ${label.toLowerCase()}`}
         </Button>
       </div>
-    </div>
-  );
-}
-
-function LabeledNumber({
-  label,
-  value,
-  onChange,
-  hint,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  hint?: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-[11px] flex justify-between">
-        <span>{label}</span>
-        {hint && <span className="text-muted-foreground">{hint}</span>}
-      </Label>
-      <Input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
     </div>
   );
 }

@@ -260,9 +260,7 @@ function classifyLayer(
         ? "clean"
         : "absent";
     case "api":
-      return result?.apiResult != null || result?.loadResult != null
-        ? "clean"
-        : "absent";
+      return result?.apiResult != null ? "clean" : "absent";
   }
 }
 
@@ -5288,9 +5286,8 @@ function PerfPane({
 }
 
 /**
- * API layer pane (E1/E3). Renders the headless HTTP result — status, latency,
- * the per-assertion pass/fail table — plus the load-test aggregate (percentiles,
- * throughput, error rate, threshold breaches) when the test ran as a load test.
+ * API layer pane (E1). Renders the headless HTTP result — status, latency,
+ * and the per-assertion pass/fail table.
  */
 function ApiPane({
   result,
@@ -5300,7 +5297,6 @@ function ApiPane({
   clean: boolean;
 }) {
   const api = result?.apiResult ?? null;
-  const load = result?.loadResult ?? null;
   const failed = api?.assertionResults.filter((a) => !a.passed).length ?? 0;
   const total = api?.assertionResults.length ?? 0;
 
@@ -5416,56 +5412,6 @@ function ApiPane({
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {load && (
-        <div className="v-card" style={{ padding: 12 }}>
-          <div className="label" style={{ fontSize: 10, marginBottom: 8 }}>
-            Load test · {load.count} request{load.count === 1 ? "" : "s"}
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-              gap: 8,
-            }}
-          >
-            <Stat label="P50" value={`${load.p50}ms`} compact />
-            <Stat
-              label="P95"
-              value={`${load.p95}ms`}
-              compact
-              tone={load.passed ? undefined : "bad"}
-            />
-            <Stat label="P99" value={`${load.p99}ms`} compact />
-            <Stat label="MEAN" value={`${load.mean}ms`} compact />
-            <Stat label="RPS" value={String(load.throughputRps)} compact />
-            <Stat
-              label="ERRORS"
-              value={`${(load.errorRate * 100).toFixed(1)}%`}
-              compact
-              tone={load.errorRate > 0 ? "bad" : "good"}
-            />
-          </div>
-          {load.breaches.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div
-                className="label"
-                style={{ fontSize: 9, marginBottom: 4, color: "var(--c-bad)" }}
-              >
-                Threshold breaches
-              </div>
-              {load.breaches.map((b, i) => (
-                <div
-                  key={i}
-                  style={{ fontSize: 11, color: "var(--c-bad, #c0392b)" }}
-                >
-                  • {b}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 

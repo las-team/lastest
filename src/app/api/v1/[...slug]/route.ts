@@ -1640,14 +1640,6 @@ export async function POST(
       const apiDefinition = body.apiDefinition as
         | import("@/lib/db/schema").ApiTestDefinition
         | undefined;
-      // E3: optional load config (api tests only). Concurrency/total are capped
-      // server-side in the load runner.
-      const loadConfig =
-        testType === "api" &&
-        body.loadConfig &&
-        typeof body.loadConfig === "object"
-          ? (body.loadConfig as import("@/lib/db/schema").LoadTestConfig)
-          : undefined;
       // API tests carry an apiDefinition; the `code` column stores a readable
       // JSON rendering of it (the column is NOT NULL). Browser tests require code.
       let code = body.code as string | undefined;
@@ -1719,7 +1711,6 @@ export async function POST(
         code,
         testType,
         apiDefinition: testType === "api" ? apiDefinition : undefined,
-        loadConfig,
         targetUrl:
           targetUrl ??
           (testType === "api" ? (apiDefinition?.url ?? null) : null),
@@ -2466,24 +2457,6 @@ export async function PUT(
           updates.code = renderApiDefinitionForCode(def);
         }
         if (body.targetUrl === undefined) updates.targetUrl = def.url;
-      }
-      // E3: per-test load config (null clears it → runs as a plain api test).
-      if (body.loadConfig !== undefined) {
-        if (
-          body.loadConfig !== null &&
-          (typeof body.loadConfig !== "object" ||
-            Array.isArray(body.loadConfig) ||
-            typeof body.loadConfig.concurrency !== "number")
-        ) {
-          return NextResponse.json(
-            {
-              error:
-                "loadConfig must be { concurrency, totalRequests?, durationMs?, thresholds? } or null",
-            },
-            { status: 400 },
-          );
-        }
-        updates.loadConfig = body.loadConfig;
       }
       if (body.quarantined !== undefined) {
         if (typeof body.quarantined !== "boolean") {

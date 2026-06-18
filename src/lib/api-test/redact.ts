@@ -60,15 +60,30 @@ export function renderApiDefinitionForCode(def: ApiTestDefinition): string {
   return JSON.stringify(redactApiDefinition(def), null, 2);
 }
 
-// Token-shaped substrings to scrub out of free response text:
+// Token-shaped substrings to scrub out of free response text. This is a
+// best-effort defense-in-depth net over the *displayed* response snippet — the
+// structured credential fields (auth/headers) are already redacted separately —
+// so it targets the high-signal, widely-issued token shapes rather than trying
+// to be exhaustive:
 //   - JWTs (three base64url segments)
-//   - "Bearer <token>" echoes
-//   - long opaque tokens (sk-, ghp_, AKIA…, 24+ char hex/base64 runs)
+//   - "Bearer <token>" / "Basic <token>" Authorization echoes
+//   - GitHub PATs (ghp_/gho_/ghs_/github_pat_), Slack (xox*), Stripe/OpenAI-style
+//     sk_/pk_/rk_ keys, Google API keys (AIza…)
+//   - AWS access key ids (AKIA…) and `aws_secret_access_key`-style assignments
+//   - generic `"api_key"/"token"/"secret"/"password": "<value>"` JSON pairs and
+//     `api_key=<value>` query/form pairs
 const RESPONSE_SECRET_PATTERNS: RegExp[] = [
   /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
-  /Bearer\s+[A-Za-z0-9._-]{8,}/gi,
-  /\b(sk|pk|rk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9]{16,}\b/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
+  /(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\b(?:sk|pk|rk|ghp|gho|ghs|ghu|ghr|xox[baprs])[-_][A-Za-z0-9]{16,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/g, // Google API key
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  // "<secret-ish key>": "<value>" JSON pairs — lookbehind so only the value is
+  // masked and the key name survives for readability.
+  /(?<="(?:[a-z_]*(?:api[_-]?key|secret|token|password|passwd|access[_-]?key)[a-z_]*)"\s*:\s*")[^"]{6,}(?=")/gi,
+  // key=value form/query pairs for the same key shapes.
+  /(?<=\b[a-z_]*(?:api[_-]?key|secret|token|password|access[_-]?key)[a-z_]*=)[^&\s"']{6,}/gi,
 ];
 
 /** Mask token-shaped secrets in a raw response body before persistence. */

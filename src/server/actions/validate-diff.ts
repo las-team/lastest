@@ -81,7 +81,15 @@ function verdictFromBuildStatus(status: BuildStatus): ValidateDiffVerdict {
 /**
  * Diff-scoped validation: map a code change → affected tests → run only those →
  * return a structured verdict. The composable core behind `lastest_validate_diff`.
- * Auth/ownership is enforced by the caller (the v1 route verifies repo ownership).
+ *
+ * SECURITY: this module is intentionally NOT a `"use server"` boundary, so
+ * `validateDiffCore` is never directly reachable from the client/network. Every
+ * entry point authenticates and authorizes the `repositoryId` before calling in:
+ *   - `POST /api/v1/validate-diff` runs `verifyAuth` + `verifyRepoOwnership`
+ *     (401/404) before invoking this (see src/app/api/v1/[...slug]/route.ts).
+ *   - `validateDiffAction` (server action) runs `requireRepoAccess` first
+ *     (see src/server/actions/api-tests.ts).
+ * Keep that invariant: any new caller MUST establish repo ownership first.
  */
 export async function validateDiffCore(
   opts: ValidateDiffOptions,

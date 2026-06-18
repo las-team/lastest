@@ -345,23 +345,6 @@ async function executeApiTests(
         screenshots: [],
         errorMessage: "API test has no apiDefinition",
       };
-    } else if (test.loadConfig) {
-      // E3: load test — N concurrent requests, threshold-gated.
-      const { runApiLoadTest } = await import("@/lib/api-test/load-runner");
-      const started = Date.now();
-      const loadResult = await runApiLoadTest(def, test.loadConfig, {
-        baseUrl,
-      });
-      result = {
-        testId: test.id,
-        status: loadResult.passed ? "passed" : "failed",
-        durationMs: Date.now() - started,
-        screenshots: [],
-        errorMessage: loadResult.passed
-          ? undefined
-          : `Load thresholds breached: ${loadResult.breaches.join("; ")}`,
-        loadResult,
-      };
     } else {
       const apiResult = await runApiTest(def, { baseUrl });
       result = {

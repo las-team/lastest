@@ -7,11 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type {
-  ApiTestDefinition,
-  FunctionalArea,
-  LoadTestConfig,
-} from "@/lib/db/schema";
+import type { ApiTestDefinition, FunctionalArea } from "@/lib/db/schema";
 import { ApiTestForm } from "./api-test-form";
 
 interface ApiTestDialogProps {
@@ -23,7 +19,6 @@ interface ApiTestDialogProps {
   testId?: string;
   initialName?: string;
   initialDefinition?: ApiTestDefinition;
-  initialLoadConfig?: LoadTestConfig | null;
   initialAreaId?: string | null;
   onSaved?: (testId: string) => void;
 }
@@ -36,7 +31,6 @@ export function ApiTestDialog({
   testId,
   initialName,
   initialDefinition,
-  initialLoadConfig,
   initialAreaId,
   onSaved,
 }: ApiTestDialogProps) {
@@ -60,7 +54,6 @@ export function ApiTestDialog({
           testId={testId}
           initialName={initialName}
           initialDefinition={initialDefinition}
-          initialLoadConfig={initialLoadConfig}
           initialAreaId={initialAreaId}
           onSaved={(id) => {
             onSaved?.(id);

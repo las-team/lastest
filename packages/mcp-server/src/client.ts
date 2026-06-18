@@ -224,7 +224,6 @@ export class LastestClient {
       targetUrl?: string;
       functionalAreaId?: string;
       apiDefinition?: Record<string, unknown>;
-      loadConfig?: Record<string, unknown> | null;
       quarantined?: boolean;
       executionMode?: "procedural" | "agent";
       viewportOverride?: { width: number; height: number } | null;
@@ -406,8 +405,6 @@ export class LastestClient {
     // E1: API tests carry a definition instead of Playwright code.
     testType?: "browser" | "api";
     apiDefinition?: Record<string, unknown>;
-    // E3: optional load-test config for api tests.
-    loadConfig?: Record<string, unknown>;
   }): Promise<{ id: string; name: string; code: string }> {
     return this.post("/api/v1/tests", opts);
   }
