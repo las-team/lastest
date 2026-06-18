@@ -1,7 +1,7 @@
 ---
 name: lastest
 slug: las-team/lastest
-version: 0.4.0
+version: 0.5.0
 description: Run visual regression tests, review screenshot diffs, and manage baselines on a Lastest instance via the @lastest/mcp-server MCP tools.
 category: testing
 tags:
@@ -99,7 +99,10 @@ Lastest no longer generates tests with its own AI by default — the calling age
 2. **Discover selectors before writing code.**
    - *Preferred:* use your own Playwright MCP — open the page, snapshot it, read
      real roles/labels/text.
-   - *Fallback:* call `lastest_scout_url` for a static (no-JS) map of the page.
+   - *Live & watchable:* `lastest_ranger` drives a Lastest Embedded Browser to
+     the URL and returns a rendered (SPA-aware) map, viewable live in the
+     activity feed. Async — poll `lastest_ranger_status` for the page map.
+   - *Static & instant:* `lastest_scout_url` for a no-browser map of an SSR page.
 3. **Wire auth/setup if needed** — discover with `lastest_list_setup_scripts` /
    `lastest_list_storage_states`, then attach via `update_test`
    (`setupScriptId` / `setupOverrides`). Don't script login inside the test.
@@ -124,7 +127,7 @@ Lastest instance has in-product AI configured; if it returns
 | Health           | `lastest_health_check`                                                             |
 | Repositories     | `list_repos`, `get_repo`                                                           |
 | Tests            | `list_tests`, `get_test`, `create_test`, `update_test`, `delete_test`, `heal_test` |
-| Authoring aids   | `lastest_scout_url` (static page map); resource `lastest://repo/{id}/authoring-guide`; prompt `author-test` |
+| Authoring aids   | `lastest_ranger` + `lastest_ranger_status` (live EB page map, watchable); `lastest_scout_url` (static page map); resource `lastest://repo/{id}/authoring-guide`; prompt `author-test` |
 | Setup / auth     | `lastest_list_setup_scripts`, `lastest_list_storage_states`                        |
 | Functional areas | `list_areas`, `create_area`, `list_tests_by_area`                                  |
 | Builds & runs    | `create_build`, `get_build`, `list_builds`, `get_run`                              |

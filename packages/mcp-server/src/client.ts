@@ -405,6 +405,37 @@ export class LastestClient {
     return this.post("/api/v1/scout", { url });
   }
 
+  // --- Ranger (EB-backed live page scout) ---
+
+  async startRanger(
+    repoId: string,
+    opts?: { url?: string; viewport?: { width: number; height: number } },
+  ): Promise<{ sessionId: string }> {
+    return this.post(`/api/v1/repos/${repoId}/ranger`, {
+      url: opts?.url,
+      viewport: opts?.viewport,
+    });
+  }
+
+  async getRangerStatus(sessionId: string): Promise<{
+    id: string;
+    status: "active" | "completed" | "failed" | "cancelled" | "paused";
+    currentStepId: string | null;
+    steps: Array<{ id: string; status: string; label: string; error?: string }>;
+    metadata: {
+      rangerUrl?: string;
+      streamUrl?: string;
+      queuedForBrowser?: boolean;
+      pageMap?: Record<string, unknown> | null;
+    };
+  }> {
+    return this.get(`/api/v1/ranger/${sessionId}`);
+  }
+
+  async cancelRanger(sessionId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/ranger/${sessionId}`);
+  }
+
   // --- QuickStart agent ---
 
   async startQuickstart(

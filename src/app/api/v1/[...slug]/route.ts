@@ -1054,6 +1054,44 @@ export async function GET(
       });
     }
 
+    // Ranger session: GET /api/v1/ranger/:sessionId
+    if (resource === "ranger" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "ranger") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      return NextResponse.json({
+        id: sessionRow.id,
+        kind: sessionRow.kind,
+        repositoryId: sessionRow.repositoryId,
+        status: sessionRow.status,
+        currentStepId: sessionRow.currentStepId,
+        steps: sessionRow.steps.map((s) => ({
+          id: s.id,
+          status: s.status,
+          label: s.label,
+          description: s.description,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+          error: s.error,
+          result: s.result,
+        })),
+        metadata: {
+          rangerUrl: sessionRow.metadata.rangerUrl,
+          // Live EB screencast — host-routable, secret-free; watch it browse.
+          streamUrl: sessionRow.metadata.streamUrl,
+          queuedForBrowser: sessionRow.metadata.queuedForBrowser,
+          pageMap: sessionRow.metadata.rangerPageMap ?? null,
+        },
+        createdAt: sessionRow.createdAt,
+        updatedAt: sessionRow.updatedAt,
+        completedAt: sessionRow.completedAt,
+      });
+    }
+
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
@@ -1912,6 +1950,32 @@ export async function POST(
       }
     }
 
+    // Ranger — EB-backed live page scout: POST /api/v1/repos/:id/ranger
+    // Body: { url?: string, viewport?: { width, height } }
+    // Returns { sessionId }; poll GET /api/v1/ranger/:sessionId for stream + map.
+    if (resource === "repos" && id && subResource === "ranger") {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        url?: string;
+        viewport?: { width: number; height: number };
+      };
+      try {
+        const { startRanger } = await import("@/server/actions/ranger-agent");
+        const result = await startRanger(id, {
+          url: typeof body.url === "string" ? body.url : undefined,
+          viewport: body.viewport,
+        });
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Ranger failed" },
+          { status: 400 },
+        );
+      }
+    }
+
     // Import tests + functional areas: POST /api/v1/repos/:id/import
     if (resource === "repos" && id && subResource === "import") {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -2615,6 +2679,20 @@ export async function DELETE(
       const { cancelQuickstart } =
         await import("@/server/actions/quickstart-agent");
       const result = await cancelQuickstart(id);
+      return NextResponse.json(result);
+    }
+
+    // Cancel Ranger session: DELETE /api/v1/ranger/:sessionId
+    if (resource === "ranger" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "ranger") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { cancelRanger } = await import("@/server/actions/ranger-agent");
+      const result = await cancelRanger(id);
       return NextResponse.json(result);
     }
 

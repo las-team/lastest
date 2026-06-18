@@ -55,7 +55,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: "lastest",
-    version: "0.4.0",
+    version: "0.5.0",
   });
 
   // ===== Health & Status =====
@@ -1586,6 +1586,79 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_ranger ---
+  server.tool(
+    "lastest_ranger",
+    "Start a 'ranger' — an Embedded Browser that navigates a URL live and returns a rendered (SPA-aware) page map: headings, landmarks, forms, inputs, buttons, links, test-ids, and candidate selectors. Unlike lastest_scout_url (static, instant), ranger drives a real browser and is WATCHABLE in the Lastest activity feed via a live stream. Async: returns a sessionId immediately — poll lastest_ranger_status for the live streamUrl and the final page map. Prefer your own Playwright MCP if you have one; use ranger when you don't, or want a watchable run on a JS-rendered page.",
+    {
+      repositoryId: z.string().describe("Repository ID (sets the default URL)"),
+      url: z
+        .string()
+        .optional()
+        .describe("URL to browse (defaults to the repo base URL)"),
+      viewport: z
+        .object({ width: z.number(), height: z.number() })
+        .optional()
+        .describe("Optional viewport size"),
+    },
+    withActivityReporting(client, "lastest_ranger", async (params) => {
+      const { sessionId } = await client.startRanger(
+        params.repositoryId as string,
+        {
+          url: params.url as string | undefined,
+          viewport: params.viewport as
+            | { width: number; height: number }
+            | undefined,
+        },
+      );
+      const response: ToolResponse = {
+        status: "ranger_started",
+        summary: `Ranger session ${sessionId} started. It is browsing in an Embedded Browser — watch it live in the Lastest activity feed.`,
+        actionRequired: [
+          `Poll lastest_ranger_status with sessionId "${sessionId}" until status is "completed", then read details.metadata.pageMap.`,
+        ],
+        details: { sessionId },
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
+  // --- lastest_ranger_status ---
+  server.tool(
+    "lastest_ranger_status",
+    "Poll a ranger session: returns its status, the live stream URL (watchable while it runs), and — once completed — the rendered page map to author tests from.",
+    {
+      sessionId: z.string().describe("Ranger session ID from lastest_ranger"),
+    },
+    withActivityReporting(client, "lastest_ranger_status", async (params) => {
+      const s = await client.getRangerStatus(params.sessionId as string);
+      const done = s.status === "completed";
+      const response: ToolResponse = {
+        status: s.status,
+        summary: done
+          ? `Ranger complete for ${s.metadata.rangerUrl ?? "the URL"} — page map ready.`
+          : s.metadata.queuedForBrowser
+            ? "Waiting for an Embedded Browser to become available…"
+            : `Ranger ${s.status} (step: ${s.currentStepId ?? "—"}).`,
+        actionRequired: done
+          ? [
+              "Use details.metadata.pageMap to write the test, then lastest_create_test (direct mode).",
+            ]
+          : s.status === "failed" || s.status === "cancelled"
+            ? [
+                "Ranger did not finish; fall back to lastest_scout_url or your own Playwright MCP.",
+              ]
+            : ["Poll again in a few seconds."],
+        details: s as unknown as Record<string, unknown>,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
   // --- lastest_create_test ---
   server.tool(
     "lastest_create_test",
@@ -2393,7 +2466,7 @@ export function createServer(client: LastestClient): McpServer {
               url
                 ? `2. Target: ${url}.`
                 : "2. Target the repo's base URL from the guide.",
-              "3. Discover real selectors BEFORE writing code: prefer your own Playwright MCP (open the page, snapshot, read roles/labels/text). If you have no live browser, call lastest_scout_url for a static map.",
+              "3. Discover real selectors BEFORE writing code: prefer your own Playwright MCP (open the page, snapshot, read roles/labels/text). No browser of your own? Use lastest_ranger (live, watchable Embedded Browser; poll lastest_ranger_status) for a rendered map, or lastest_scout_url for a fast static map.",
               spec
                 ? `4. Turn this spec into one or more tests, one concern each:\n---\n${spec}\n---`
                 : "4. Cover the primary user flow on that page; keep each test focused.",

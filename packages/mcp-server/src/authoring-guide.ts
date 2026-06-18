@@ -50,10 +50,13 @@ export async function test(page, baseUrl, screenshotPath, stepLogger) {
 1. **Preferred — Playwright MCP.** If you have @playwright/mcp configured, open
    the target URL in it, snapshot the page, and read the real roles/labels/text
    to choose selectors. This is the most reliable path.
-2. **Fallback — \`lastest_scout_url\`.** If you have no live browser, call the
-   Lastest \`lastest_scout_url\` tool for a static (no-JS) map of the page's
-   title, headings, forms, inputs, links, and candidate selectors. Treat it as a
-   starting point and verify dynamic/SPA content where possible.
+2. **Live, watchable — \`lastest_ranger\`.** No browser of your own? Start a
+   ranger: it drives a Lastest Embedded Browser to the URL and returns a
+   *rendered* (SPA-aware) page map, watchable live in the activity feed. It's
+   async — poll \`lastest_ranger_status\` for the page map.
+3. **Static, instant — \`lastest_scout_url\`.** For a quick, no-browser map of an
+   SSR/MPA page (title, headings, forms, inputs, links, candidate selectors).
+   JS-rendered content won't appear — verify dynamic pages with the options above.
 
 ## Authentication & setup
 - If the flow needs a logged-in session, do NOT script login inside the test.
