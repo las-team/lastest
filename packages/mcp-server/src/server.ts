@@ -1,8 +1,15 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LastestClient, type ToolResponse } from "./client.js";
 import { redactSecrets } from "./redact.js";
 import { summarizeTestRun, type IncludeFlag } from "./test-run-summary.js";
+import {
+  AUTHORING_CONTRACT,
+  buildRepoAuthoringGuide,
+} from "./authoring-guide.js";
 
 type ToolHandler = (
   params: Record<string, unknown>,
@@ -48,7 +55,7 @@ function withActivityReporting(
 export function createServer(client: LastestClient): McpServer {
   const server = new McpServer({
     name: "lastest",
-    version: "0.3.7",
+    version: "0.4.0",
   });
 
   // ===== Health & Status =====
@@ -1553,10 +1560,36 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_scout_url ---
+  server.tool(
+    "lastest_scout_url",
+    "Static (no-browser) scout of a URL: returns title, headings, forms, inputs, links, and candidate selectors to help you author a test. Best-effort — SPA/JS-rendered content won't appear, so prefer your own Playwright MCP for live pages and use this only as a fallback or quick map.",
+    {
+      url: z.string().describe("Absolute URL to scout (http/https)"),
+    },
+    withActivityReporting(client, "lastest_scout_url", async (params) => {
+      const scout = (await client.scoutUrl(params.url as string)) as Record<
+        string,
+        unknown
+      >;
+      const response: ToolResponse = {
+        status: "scouted",
+        summary: `Scouted ${params.url} (static HTML). Use these selectors as a starting point and verify dynamic content with Playwright MCP if you can.`,
+        actionRequired: [
+          "Write the test against lastest://authoring-guide; verify selectors on the live page where possible.",
+        ],
+        details: scout,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
   // --- lastest_create_test ---
   server.tool(
     "lastest_create_test",
-    "Create a test. Two modes: (1) **direct** — pass { name, code } to insert ready-made Playwright code. (2) **AI** — pass { url } and/or { prompt } to have the Lastest AI agent generate the test. Direct mode returns immediately with a test ID; AI mode may take longer and returns the generated code.",
+    "Create a test. **Preferred (MCP-first): DIRECT mode** — YOU write the Playwright code and pass { name, code }. First read the resource lastest://repo/{repositoryId}/authoring-guide for the exact runner contract + this repo's base URL, areas, and setup; discover selectors with your Playwright MCP (or lastest_scout_url). The `author-test` prompt walks the whole flow. AI mode ({ url }/{ prompt }) asks Lastest to generate server-side and only works if in-product AI is configured there — if it isn't, fall back to direct mode.",
     {
       repositoryId: z.string().describe("Repository ID to create the test in"),
       name: z
@@ -1664,7 +1697,7 @@ export function createServer(client: LastestClient): McpServer {
               ? "Provider is overloaded or rate-limited — retry lastest_create_test in a few seconds."
               : "AI provider is not configured or rejected the request — check Settings → AI in Lastest.",
             parsedBody.fallback ??
-              "Fallback: call lastest_create_test in direct mode with { name, code } using a Playwright snapshot you generate yourself.",
+              `MCP-first fallback: read lastest://repo/${repositoryId}/authoring-guide, scout the page (your Playwright MCP, or lastest_scout_url), then call lastest_create_test in DIRECT mode with { name, code } you write yourself.`,
           ],
           details: {
             httpStatus,
@@ -2280,6 +2313,99 @@ export function createServer(client: LastestClient): McpServer {
       return {
         content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
       };
+    }),
+  );
+
+  // ===== Resources: how to author a test the runner will accept =====
+
+  // Generic, repo-independent authoring contract.
+  server.registerResource(
+    "authoring-guide",
+    "lastest://authoring-guide",
+    {
+      title: "Lastest test authoring guide",
+      description:
+        "The contract a test must follow for the Lastest runner (signature, no-imports rule, selector + resilience rules, how to scout and wire auth). Read this before generating any test.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => ({
+      contents: [{ uri: uri.href, text: AUTHORING_CONTRACT }],
+    }),
+  );
+
+  // Repo-specific guide: the contract plus this repo's base URL, functional
+  // areas, setup scripts, and saved auth storage states.
+  server.registerResource(
+    "repo-authoring-guide",
+    new ResourceTemplate("lastest://repo/{repositoryId}/authoring-guide", {
+      list: undefined,
+    }),
+    {
+      title: "Lastest authoring guide (repo context)",
+      description:
+        "The authoring contract plus a specific repo's base URL, functional areas, reusable setup scripts, and saved auth storage states. Read this before generating a test for that repo.",
+      mimeType: "text/markdown",
+    },
+    async (uri, variables) => {
+      const repositoryId = String(variables.repositoryId);
+      const text = await buildRepoAuthoringGuide(client, repositoryId);
+      return { contents: [{ uri: uri.href, text }] };
+    },
+  );
+
+  // ===== Prompts: workflows the user invokes from their client =====
+
+  server.registerPrompt(
+    "author-test",
+    {
+      title: "Author a Lastest test (MCP-first)",
+      description:
+        "Generate a Playwright test for a Lastest repo using your own model: read the repo authoring guide, scout the page (Playwright MCP preferred), write runner-valid code, create + run it, and iterate on failures.",
+      argsSchema: {
+        repositoryId: z.string().describe("Target Lastest repository ID"),
+        url: z
+          .string()
+          .optional()
+          .describe("URL/path to test (defaults to the repo base URL)"),
+        spec: z
+          .string()
+          .optional()
+          .describe("Optional spec / acceptance criteria to turn into tests"),
+        area: z
+          .string()
+          .optional()
+          .describe(
+            "Optional functional area name or ID to file the test under",
+          ),
+      },
+    },
+    ({ repositoryId, url, spec, area }) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: [
+              `Author a Lastest test for repository ${repositoryId}.`,
+              "",
+              "Follow these steps:",
+              `1. Read the resource lastest://repo/${repositoryId}/authoring-guide and follow its contract exactly (signature, no imports, selector + resilience rules).`,
+              url
+                ? `2. Target: ${url}.`
+                : "2. Target the repo's base URL from the guide.",
+              "3. Discover real selectors BEFORE writing code: prefer your own Playwright MCP (open the page, snapshot, read roles/labels/text). If you have no live browser, call lastest_scout_url for a static map.",
+              spec
+                ? `4. Turn this spec into one or more tests, one concern each:\n---\n${spec}\n---`
+                : "4. Cover the primary user flow on that page; keep each test focused.",
+              "5. If the flow needs auth, discover setup via lastest_list_setup_scripts / lastest_list_storage_states and wire it with lastest_update_test (setupScriptId / setupOverrides) — do not script login inside the test.",
+              area
+                ? `6. File the test under functional area "${area}" (create it with lastest_create_area if missing).`
+                : "6. Assign a sensible functional area (create one if needed).",
+              "7. Create with lastest_create_test in DIRECT mode { repositoryId, name, code }, then lastest_run_tests and lastest_get_build_status. If it fails, read the error, fix, and lastest_update_test until it passes.",
+            ].join("\n"),
+          },
+        },
+      ],
     }),
   );
 

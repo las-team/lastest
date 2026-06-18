@@ -395,6 +395,16 @@ export class LastestClient {
     return this.post(`/api/v1/tests/${testId}/heal`);
   }
 
+  /**
+   * Static, no-browser scout of a URL — returns a best-effort map of the page
+   * (title, headings, forms, inputs, links, candidate selectors) so an agent
+   * with no live browser has a starting point for authoring. SPA-rendered DOM
+   * won't appear; prefer the agent's own Playwright MCP when available.
+   */
+  async scoutUrl(url: string): Promise<unknown> {
+    return this.post("/api/v1/scout", { url });
+  }
+
   // --- QuickStart agent ---
 
   async startQuickstart(

@@ -1362,6 +1362,47 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // MCP-first authoring aid — static (no-browser) scout: POST /api/v1/scout
+    // Body: { url: string }. Returns a best-effort map of the page (title,
+    // headings, forms, inputs, links, candidate selectors) so an agent without
+    // a live browser has a starting point. SPA/JS-rendered DOM won't appear —
+    // callers are told to prefer their own Playwright MCP for live pages.
+    if (resource === "scout" && !id) {
+      const sourceIp = extractSourceIp(request.headers);
+      const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
+      if (!rl.ok) {
+        return NextResponse.json(
+          { error: "Rate limit exceeded" },
+          { status: 429, headers: rl.headers },
+        );
+      }
+      const body = (await request.json().catch(() => ({}))) as { url?: string };
+      if (!body.url || typeof body.url !== "string") {
+        return NextResponse.json({ error: "url required" }, { status: 400 });
+      }
+      try {
+        await validateTargetUrl(body.url, { sourceIp });
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return NextResponse.json(
+            { error: err.message },
+            { status: 400, headers: rl.headers },
+          );
+        }
+        throw err;
+      }
+      const { scoutUrlStatic } = await import("@/lib/playwright/static-scout");
+      try {
+        const scout = await scoutUrlStatic(body.url);
+        return NextResponse.json(scout, { headers: rl.headers });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Scout failed" },
+          { status: 502, headers: rl.headers },
+        );
+      }
+    }
+
     // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
     // Body: { url: string, viewport?: { width, height } }
     // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }
