@@ -25,11 +25,19 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
   if (!diff.currentImagePath)
     throw new Error("Cannot approve diff without screenshot");
 
-  // Update diff status (preserve original baselineImagePath for historical comparison)
+  // Update diff status. For a regression we preserve the original
+  // baselineImagePath so the diff record keeps the before/after for historical
+  // comparison. For a FIRST-RUN diff (no baseline ever existed) there's nothing
+  // to preserve — point the diff at the screenshot we're promoting so the
+  // verify view reflects the now-established baseline instead of perpetually
+  // rendering "baseline missing" / a false "100% match".
   await queries.updateVisualDiff(diffId, {
     status: "approved",
     approvedBy: approvedBy || "user",
     approvedAt: new Date(),
+    ...(diff.baselineImagePath
+      ? {}
+      : { baselineImagePath: diff.currentImagePath }),
   });
 
   // Update baseline with the approved image
