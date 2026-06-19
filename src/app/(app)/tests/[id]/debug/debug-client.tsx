@@ -35,13 +35,23 @@ import {
   ChevronDown,
   ChevronRight,
   MousePointerClick,
+  Save,
 } from "lucide-react";
 import {
   startDebugSession,
   getDebugState,
   sendDebugCommand,
   stopDebugSession,
+  consumeStopRecording,
+  saveDebugSessionCode,
 } from "@/server/actions/debug";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import type { Test } from "@/lib/db/schema";
 import type {
@@ -99,6 +109,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const lastSentCodeRef = useRef<string>(test.code || "");
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // "Record from here" state
+  const [showSpliceDialog, setShowSpliceDialog] = useState(false);
+  const [recordingStopPending, setRecordingStopPending] = useState(false);
+  const [savingRecording, setSavingRecording] = useState(false);
+  // True once a splice has landed and not yet been saved or superseded by a
+  // manual edit — gates the Save button so it only appears after a real
+  // recording result, not after every keystroke in the code editor.
+  const justSplicedRef = useRef(false);
+  const [showSaveAffordance, setShowSaveAffordance] = useState(false);
 
   // Track sessionId in a ref so cleanup/effect can access latest value
   const sessionIdRef = useRef<string | null>(null);
@@ -264,6 +284,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const handleCodeChange = useCallback(
     (newCode: string) => {
       setLocalCode(newCode);
+      // A manual edit supersedes whatever a prior splice produced — the Save
+      // button should only ever offer to save an unmodified recording result.
+      if (justSplicedRef.current) {
+        justSplicedRef.current = false;
+        setShowSaveAffordance(false);
+      }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
@@ -444,6 +470,68 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Past-step edit warning
   const hasPastStepWarning = state?.error?.includes("Step back to apply");
 
+  // Preview-only: where "Record from here" will anchor if clicked right now.
+  // The server independently computes the authoritative anchor at
+  // start_recording time — this is purely for the dialog's copy.
+  const lastPassingIdx = useMemo(() => {
+    const results = state?.stepResults ?? [];
+    for (let i = results.length - 1; i >= 0; i--) {
+      if (results[i].status === "passed") return i;
+    }
+    return -1;
+  }, [state?.stepResults]);
+
+  const startRecording = useCallback(
+    (spliceMode: "replace" | "insert") => {
+      setShowSpliceDialog(false);
+      // Auto-switch to Live View so the user doesn't have to manually find
+      // the tab before clicking/typing into the page they're about to record.
+      setLeftTab("liveview");
+      sendCmd({ type: "start_recording", spliceMode });
+    },
+    [sendCmd],
+  );
+
+  const handleStopRecording = useCallback(async () => {
+    if (!sessionId) return;
+    setRecordingStopPending(true);
+    await sendCmd({ type: "stop_recording" });
+    // stop_recording only enqueues a runner command — the runner picks it up
+    // on its own poll cycle and the splice lands on a LATER debug_state tick,
+    // not synchronously. Poll consumeStopRecording until it reports spliced.
+    const start = Date.now();
+    let result: Awaited<ReturnType<typeof consumeStopRecording>> | undefined;
+    while (Date.now() - start < 10_000) {
+      result = await consumeStopRecording(sessionId);
+      if (!result.ok) break;
+      if (result.spliced) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (result && !result.ok) {
+      toast.error(result.error ?? "Failed to stop recording");
+    } else if (result?.spliced) {
+      justSplicedRef.current = true;
+      setShowSaveAffordance(true);
+    } else {
+      toast.error("Timed out waiting for recording to stop");
+    }
+    setRecordingStopPending(false);
+  }, [sessionId, sendCmd]);
+
+  const handleSaveRecording = useCallback(async () => {
+    if (!sessionId) return;
+    setSavingRecording(true);
+    const result = await saveDebugSessionCode(sessionId);
+    setSavingRecording(false);
+    if (result.ok) {
+      toast.success("Saved as a new test version");
+      justSplicedRef.current = false;
+      setShowSaveAffordance(false);
+    } else {
+      toast.error(result.error ?? "Failed to save");
+    }
+  }, [sessionId]);
+
   const statusColor = {
     initializing: "bg-yellow-500",
     paused: "bg-blue-500",
@@ -530,6 +618,34 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           >
             <Square className="h-4 w-4" />
           </Button>
+          {streamUrl && !isRecording && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSpliceDialog(true)}
+              disabled={isBusy || !(isPaused || isError)}
+              title="Record from here"
+            >
+              <Circle className="h-3 w-3 mr-1 text-red-500" />
+              Record from here
+            </Button>
+          )}
+          {showSaveAffordance && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleSaveRecording}
+              disabled={savingRecording}
+              title="Save recorded changes as a new test version"
+            >
+              {savingRecording ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-1" />
+              )}
+              Save
+            </Button>
+          )}
           {streamUrl && (
             <>
               <div className="w-px h-5 bg-border mx-1" />
@@ -598,6 +714,45 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 value="code"
                 className="flex flex-col flex-1 min-h-0 mt-0"
               >
+                {/* Recording banner */}
+                {isRecording && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border-b border-red-500/20">
+                    <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                    <p className="text-xs text-red-600 flex-1">
+                      {state?.recordingAnchorReason === "last_passing"
+                        ? `Recording from Step ${(state.recordingAnchorIndex ?? 0) + 1} (last passing)`
+                        : state?.recordingAnchorReason === "fallback_cursor"
+                          ? `No earlier passing step — recording from Step ${(state.recordingAnchorIndex ?? 0) + 1}`
+                          : `Recording from Step ${(state?.recordingAnchorIndex ?? 0) + 1}`}
+                      {" — "}
+                      {state?.recordedEventCount ?? 0} action
+                      {state?.recordedEventCount === 1 ? "" : "s"} captured
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={handleStopRecording}
+                      disabled={recordingStopPending}
+                    >
+                      {recordingStopPending ? (
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      ) : (
+                        <Square className="h-3 w-3 mr-1" />
+                      )}
+                      Stop
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs"
+                      onClick={() => sendCmd({ type: "cancel_recording" })}
+                      disabled={recordingStopPending}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
                 {/* Past-step edit warning */}
                 {hasPastStepWarning && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
@@ -631,7 +786,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       sendCmd({ type: "run_to_step", stepIndex: idx });
                     }
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || isRecording}
                 />
               </TabsContent>
 
@@ -895,6 +1050,46 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
+
+      {/* Record from here: Replace/Insert splice-mode choice */}
+      <Dialog open={showSpliceDialog} onOpenChange={setShowSpliceDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record from here</DialogTitle>
+            <DialogDescription>
+              {isError
+                ? lastPassingIdx >= 0
+                  ? `Recording will resume from Step ${lastPassingIdx + 1} (last passing). Choose how to apply the new recording when you stop.`
+                  : `No earlier passing step found — recording will start from Step ${(state?.currentStepIndex ?? 0) + 1}.`
+                : `Recording will start after Step ${(state?.currentStepIndex ?? 0) + 1}. Choose how to apply the new recording when you stop.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <button
+              type="button"
+              className="flex flex-col items-start gap-1 rounded-md border p-3 text-left hover:bg-muted/50 transition-colors"
+              onClick={() => startRecording("replace")}
+            >
+              <span className="text-sm font-medium">Replace to end</span>
+              <span className="text-xs text-muted-foreground">
+                Drop all steps from here onward and replace with the new
+                recording.
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex flex-col items-start gap-1 rounded-md border p-3 text-left hover:bg-muted/50 transition-colors"
+              onClick={() => startRecording("insert")}
+            >
+              <span className="text-sm font-medium">Insert here</span>
+              <span className="text-xs text-muted-foreground">
+                Keep existing steps after this point; insert the new recording
+                before them.
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

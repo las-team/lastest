@@ -1333,6 +1333,13 @@ async function startup(): Promise<void> {
           storageState?: string;
           setupVariables?: Record<string, unknown>;
           stabilization?: import("./protocol.js").StabilizationPayload;
+          selectorPriority?: Array<{
+            type: string;
+            enabled: boolean;
+            priority: number;
+          }>;
+          pointerGestures?: boolean;
+          cursorFPS?: number;
         };
 
         runnerClient.setStatus("busy", payload.sessionId);
@@ -1446,11 +1453,15 @@ async function startup(): Promise<void> {
             | "step_back"
             | "run_to_end"
             | "run_to_step"
-            | "update_code";
+            | "update_code"
+            | "start_recording"
+            | "stop_recording"
+            | "cancel_recording";
           stepIndex?: number;
           code?: string;
           cleanBody?: string;
           steps?: import("./debug-executor.js").DebugStep[];
+          spliceMode?: "replace" | "insert";
         };
 
         // Replays replace the BrowserContext + page (step_back, run_to_step

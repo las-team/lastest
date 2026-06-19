@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import type { DebugState, DebugCommand } from "@/lib/playwright/types";
 import {
@@ -8,12 +9,15 @@ import {
   getEnvironmentConfig,
   getRepository,
 } from "@/lib/db/queries";
+import { DEFAULT_SELECTOR_PRIORITY } from "@/lib/db/schema";
 import {
   extractTestBody,
   removeInlineLocateWithFallback,
   removeInlineReplayCursorPath,
   parseSteps,
+  spliceRecordedSteps,
 } from "@/lib/playwright/debug-parser";
+import { eventsToCodeLines } from "@/lib/playwright/event-to-code";
 import { stripTypeAnnotations } from "@/lib/playwright/types";
 import { queueCommandToDB } from "@/app/api/ws/runner/route";
 import {
@@ -184,6 +188,12 @@ export async function startDebugSession(
       storageState,
       setupVariables,
       stabilization: settings?.stabilization ?? undefined,
+      // Forwarded so "Record from here" can attach the recorder with the
+      // same selector-priority/pointer-gesture settings the full /record
+      // flow uses — settings is already loaded above for stabilization.
+      selectorPriority: settings?.selectorPriority ?? undefined,
+      pointerGestures: settings?.pointerGestures ?? undefined,
+      cursorFPS: settings?.cursorFPS ?? undefined,
     },
   } as unknown as Message);
 
@@ -214,14 +224,17 @@ export async function getDebugState(
         recordedEventCount: 0,
       } as DebugState;
     }
-    // Convert to DebugState format (add empty network/console/trace fields)
+    // Convert to DebugState format (add empty network/console/trace fields).
+    // isRecording/recordedEventCount/recordingAnchor*/spliceMode/targetUrl
+    // are real fields on the runner's payload now — the ?? fallback only
+    // guards against in-flight sessions whose state blob predates this.
     return {
       ...remoteSession.state,
       networkEntries: [],
       consoleEntries: [],
       traceUrl: undefined,
-      isRecording: false,
-      recordedEventCount: 0,
+      isRecording: remoteSession.state.isRecording ?? false,
+      recordedEventCount: remoteSession.state.recordedEventCount ?? 0,
     } as DebugState;
   }
 
@@ -267,6 +280,9 @@ export async function sendDebugCommand(
           sessionId,
           action: command.type,
           ...("stepIndex" in command ? { stepIndex: command.stepIndex } : {}),
+          ...("spliceMode" in command
+            ? { spliceMode: command.spliceMode }
+            : {}),
         },
       } as unknown as Message);
     }
@@ -274,6 +290,112 @@ export async function sendDebugCommand(
   }
 
   return { ok: false, error: "Session not found" };
+}
+
+/**
+ * Poll after sending a "stop_recording" command. The stop only enqueues a
+ * runner command — the runner's response:debug_state tick that actually
+ * carries the captured events back arrives later, asynchronously. Once
+ * `pendingRecordingEvents` shows up on the session's state, this splices the
+ * recorded code into the test body, re-parses, and pushes the result back to
+ * the runner via the existing `update_code` action (no new runner-side
+ * splice logic — same path `update_code` already takes for manual edits).
+ *
+ * Returns `{ ok: true, spliced: false }` while the runner hasn't reported
+ * the events yet — the caller should keep polling.
+ */
+export async function consumeStopRecording(
+  sessionId: string,
+): Promise<{ ok: boolean; error?: string; spliced?: boolean }> {
+  const remoteSession = await getRemoteDebugSession(sessionId);
+  if (!remoteSession) return { ok: false, error: "Session not found" };
+  await assertDebugSessionAccess(remoteSession);
+
+  const state = remoteSession.state;
+  if (!state?.pendingRecordingEvents?.length) {
+    return { ok: true, spliced: false };
+  }
+
+  if (!state.targetUrl) {
+    return { ok: false, error: "Recording session is missing a target URL" };
+  }
+  const spliceMode = state.spliceMode ?? "insert";
+
+  const settings = await getPlaywrightSettings(remoteSession.repositoryId);
+  const selectorPriority =
+    settings?.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+  const coordsEnabled =
+    selectorPriority.find((s) => s.type === "coords")?.enabled ?? true;
+  const baseOrigin = new URL(state.targetUrl).origin;
+
+  const newBodyLines = eventsToCodeLines(
+    state.pendingRecordingEvents,
+    baseOrigin,
+    coordsEnabled,
+    { indent: "  " },
+  );
+
+  const anchorIndex = state.recordingAnchorIndex ?? state.currentStepIndex;
+  const result = spliceRecordedSteps(
+    state.code,
+    anchorIndex,
+    newBodyLines,
+    spliceMode,
+  );
+  if (!result) {
+    return { ok: false, error: "Failed to splice recorded code" };
+  }
+
+  await queueCommandToDB(remoteSession.runnerId, {
+    id: crypto.randomUUID(),
+    type: "command:debug_action",
+    timestamp: Date.now(),
+    payload: {
+      sessionId,
+      action: "update_code",
+      code: result.code,
+      cleanBody: result.cleanBody,
+      steps: result.steps,
+    },
+  } as unknown as Message);
+
+  return { ok: true, spliced: true };
+}
+
+/**
+ * Persist the debug session's current code as a new test version. Modeled
+ * on updateRerecordedTest (src/server/actions/recording.ts) — the
+ * established pattern for "write a recording-session's code into a new
+ * testVersions row." Debug has no other save-back-to-test path; update_code
+ * only mutates the in-memory runner session until this is called.
+ */
+export async function saveDebugSessionCode(
+  sessionId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const remoteSession = await getRemoteDebugSession(sessionId);
+  if (!remoteSession) return { ok: false, error: "Session not found" };
+  await assertDebugSessionAccess(remoteSession);
+
+  const code = remoteSession.state?.code;
+  if (!code) return { ok: false, error: "No code to save" };
+
+  const { requireTestOwnership } = await import("@/lib/auth/ownership");
+  const { test } = await requireTestOwnership(remoteSession.testId);
+
+  const { updateTestWithVersion } = await import("@/lib/db/queries");
+  const { getCurrentBranchForRepo } = await import("@/lib/git-utils");
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+
+  await updateTestWithVersion(
+    remoteSession.testId,
+    { code },
+    "debug_rerecord",
+    branch ?? undefined,
+  );
+
+  revalidatePath("/tests");
+  revalidatePath(`/tests/${remoteSession.testId}`);
+  return { ok: true };
 }
 
 export async function stopDebugSession(sessionId: string): Promise<void> {

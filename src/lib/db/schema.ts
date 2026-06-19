@@ -1712,7 +1712,8 @@ export type TestChangeReason =
   | "restored"
   | "branch_merge"
   | "assertion_sync"
-  | "spec_regeneration";
+  | "spec_regeneration"
+  | "debug_rerecord";
 
 export const testVersions = pgTable("test_versions", {
   id: text("id").primaryKey(),

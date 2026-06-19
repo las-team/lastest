@@ -5,6 +5,7 @@ import {
   extractEditableValue,
   removeInlineLocateWithFallback,
   removeInlineReplayCursorPath,
+  spliceRecordedSteps,
   type DebugStep,
 } from "./debug-parser";
 
@@ -295,5 +296,119 @@ describe("priority ordering of selectors", () => {
       `  await locateWithFallback(page, [{"type":"css-path","value":"div > input"},{"type":"data-testid","value":"[data-testid=\\"search-input\\"]"}], 'click', null, null);`,
     );
     expect(labels[0]).toBe('Click testid "search-input"');
+  });
+});
+
+describe("spliceRecordedSteps", () => {
+  const modernCode = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  await page.goto(baseUrl);
+  await page.click('#a');
+  await page.click('#b');
+  await page.click('#c');
+}
+`;
+
+  it("replace mode drops everything from the anchor onward", () => {
+    const result = spliceRecordedSteps(
+      modernCode,
+      1,
+      ["  await page.click('#NEW');"],
+      "replace",
+    );
+    expect(result?.steps.map((s) => s.code.trim())).toEqual([
+      "await page.goto(baseUrl);",
+      "await page.click('#a');",
+      "await page.click('#NEW');",
+    ]);
+    expect(result?.code).toContain(
+      "export async function test(page, baseUrl, screenshotPath, stepLogger) {",
+    );
+  });
+
+  it("insert mode preserves downstream steps after the new code", () => {
+    const result = spliceRecordedSteps(
+      modernCode,
+      1,
+      ["  await page.click('#NEW');"],
+      "insert",
+    );
+    expect(result?.steps.map((s) => s.code.trim())).toEqual([
+      "await page.goto(baseUrl);",
+      "await page.click('#a');",
+      "await page.click('#NEW');",
+      "await page.click('#b');",
+      "await page.click('#c');",
+    ]);
+  });
+
+  it("anchor index -1 splices at the very top (no steps kept)", () => {
+    const result = spliceRecordedSteps(
+      modernCode,
+      -1,
+      ["  await page.click('#TOP');"],
+      "insert",
+    );
+    expect(result?.steps[0].code.trim()).toBe("await page.click('#TOP');");
+    // original first step (goto) still follows since insert mode keeps the tail
+    expect(result?.steps[1].code.trim()).toBe("await page.goto(baseUrl);");
+  });
+
+  it("anchor at the last step in replace mode appends with nothing to drop", () => {
+    const result = spliceRecordedSteps(
+      modernCode,
+      3,
+      ["  await page.click('#NEW');"],
+      "replace",
+    );
+    expect(result?.steps.map((s) => s.code.trim())).toEqual([
+      "await page.goto(baseUrl);",
+      "await page.click('#a');",
+      "await page.click('#b');",
+      "await page.click('#c');",
+      "await page.click('#NEW');",
+    ]);
+  });
+
+  it("round-trips the legacy test() wrapper format", () => {
+    const legacyCode = `test('name', async ({ page }) => {
+  await page.click('#a');
+  await page.click('#b');
+});
+`;
+    const result = spliceRecordedSteps(
+      legacyCode,
+      0,
+      ["  await page.click('#NEW');"],
+      "replace",
+    );
+    expect(result?.code).toContain("test('name', async ({ page }) => {");
+    expect(result?.code.trim().endsWith("});")).toBe(true);
+    expect(result?.steps.map((s) => s.code.trim())).toEqual([
+      "await page.click('#a');",
+      "await page.click('#NEW');",
+    ]);
+  });
+
+  it("round-trips raw code (no wrapper) and keeps leading imports", () => {
+    const rawCode = `import { Page } from 'playwright';
+
+await page.click('#a');
+await page.click('#b');
+`;
+    const result = spliceRecordedSteps(
+      rawCode,
+      0,
+      ["await page.click('#NEW');"],
+      "replace",
+    );
+    expect(result?.code).toContain("import { Page } from 'playwright';");
+    expect(result?.steps.map((s) => s.code.trim())).toEqual([
+      "await page.click('#a');",
+      "await page.click('#NEW');",
+    ]);
+  });
+
+  it("returns null for unparseable code", () => {
+    expect(spliceRecordedSteps("", 0, ["x();"], "replace")).toBeNull();
   });
 });
