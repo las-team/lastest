@@ -13,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm dev                        # Dev server on localhost:3000 (host Next.js)
 pnpm build                      # Production build
 pnpm lint                       # ESLint
+pnpm format                     # Prettier --write (whole repo)
+pnpm format:check               # Prettier --check (CI-style)
 pnpm test                       # Unit tests (vitest)
 pnpm test -- src/lib/diff       # Tests in specific directory
 pnpm db:push                    # Push schema changes to DB
@@ -144,6 +146,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - **Schema types:** use `$inferSelect` / `$inferInsert` patterns
 - **Monorepo:** pnpm workspaces, pnpm 10.x
 - **pnpm config:** `overrides` / `onlyBuiltDependencies` live in `pnpm-workspace.yaml` — never in a `package.json` `pnpm` block (deprecated)
+- **Formatting/lint:** husky pre-commit runs `lint-staged` → `prettier --write` then `pnpm eslint` on staged files. Prettier auto-formats (and re-stages) on every commit — never `--list-different`/`--check` in `.lintstagedrc.json`, that only checks and blocks the commit instead of fixing.
 
 ## Gotchas
 

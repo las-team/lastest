@@ -125,6 +125,26 @@ export class LastestClient {
     });
   }
 
+  async validateDiff(opts: {
+    repositoryId: string;
+    diff?: string;
+    baseBranch?: string;
+    headBranch?: string;
+    wait?: boolean;
+    maxWaitMs?: number;
+  }): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/validate-diff", opts);
+  }
+
+  async suggestAppFix(
+    testId: string,
+    opts?: { buildId?: string },
+  ): Promise<Record<string, unknown>> {
+    return this.post(`/api/v1/tests/${testId}/suggest-app-fix`, {
+      buildId: opts?.buildId,
+    });
+  }
+
   async revokeShare(shareId: string): Promise<{ success: boolean }> {
     return this.del(`/api/v1/shares/${shareId}`);
   }
@@ -203,6 +223,7 @@ export class LastestClient {
       code?: string;
       targetUrl?: string;
       functionalAreaId?: string;
+      apiDefinition?: Record<string, unknown>;
       quarantined?: boolean;
       executionMode?: "procedural" | "agent";
       viewportOverride?: { width: number; height: number } | null;
@@ -321,12 +342,6 @@ export class LastestClient {
     return this.del(`/api/v1/tests/${testId}`);
   }
 
-  // --- Test Runs ---
-
-  async getTestRun(runId: string): Promise<unknown> {
-    return this.get(`/api/v1/runs/${runId}`);
-  }
-
   // --- Diffs ---
 
   async getDiff(diffId: string): Promise<unknown> {
@@ -383,12 +398,28 @@ export class LastestClient {
   async createTestDirect(opts: {
     repositoryId: string;
     name: string;
-    code: string;
+    code?: string;
     functionalAreaId?: string;
     targetUrl?: string;
     description?: string;
+    // E1: API tests carry a definition instead of Playwright code.
+    testType?: "browser" | "api";
+    apiDefinition?: Record<string, unknown>;
   }): Promise<{ id: string; name: string; code: string }> {
     return this.post("/api/v1/tests", opts);
+  }
+
+  /** Generate an API test from a prompt/OpenAPI and persist it (E1). */
+  async generateApiTest(opts: {
+    repositoryId: string;
+    name?: string;
+    prompt?: string;
+    endpoint?: string;
+    openapiSpec?: string;
+    graphqlSchema?: string;
+    functionalAreaId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.post("/api/v1/tests/generate-api", opts);
   }
 
   async healTest(testId: string): Promise<unknown> {

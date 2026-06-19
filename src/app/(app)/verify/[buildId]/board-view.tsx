@@ -39,6 +39,7 @@ import {
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
+import { RcaBadge } from "@/components/diff/rca-badge";
 
 export type CaseStatus = "regression" | "done" | "missed" | "unknown";
 
@@ -1334,6 +1335,7 @@ function CaseCard({
           {data.area?.name ?? "Unscoped"}
         </span>
         <span style={{ flex: 1 }} />
+        {data.visual?.rca && <RcaBadge rca={data.visual.rca} size="xs" />}
         <ErrorChip result={data.result} />
         <IssueChipReal step={data.step} onOpenPicker={onOpenIssuePicker} />
       </div>
@@ -1566,6 +1568,8 @@ function wasLayerCaptured(
       return (
         result?.extractedVariables != null || result?.assignedVariables != null
       );
+    case "api":
+      return result?.apiResult != null;
   }
 }
 
@@ -1677,32 +1681,19 @@ function deltaForLayer(step: StepComparison, layer: string): string {
 function ErrorChip({ result }: { result: TestResultLite | null }) {
   if (!result || result.status !== "failed") return null;
   const msg = (result.errorMessage ?? "").trim();
-  const summary = msg.length > 0 ? firstLine(msg) : "test failed";
   const tooltip =
     msg.length > 0 ? msg : "Test failed (no error message captured)";
   return (
     <span
       className="v-chip regression"
-      style={{
-        fontSize: 9,
-        padding: "1px 6px",
-        maxWidth: 160,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-      }}
+      style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}
       title={tooltip}
       onClick={(e) => e.stopPropagation()}
     >
       <AlertOctagon size={10} />
-      {summary}
+      Error
     </span>
   );
-}
-
-function firstLine(s: string): string {
-  const line = s.split(/\r?\n/, 1)[0] ?? s;
-  return line.length > 64 ? line.slice(0, 61) + "…" : line;
 }
 
 function IssueChipReal({
@@ -1741,7 +1732,8 @@ function IssueChipReal({
         className="v-chip"
         style={{
           cursor: onOpenPicker ? "pointer" : "default",
-          minHeight: 24,
+          fontSize: 9,
+          padding: "1px 6px",
           color: "var(--fg-2)",
         }}
         title={
@@ -1750,7 +1742,7 @@ function IssueChipReal({
             : "No linked issue"
         }
       >
-        <CircleDot size={11} />
+        <CircleDot size={10} />
         no issue
       </span>
     );
@@ -1771,10 +1763,15 @@ function IssueChipReal({
       rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
       className={`v-chip ${cls}`}
-      style={{ textDecoration: "none", cursor: "pointer" }}
+      style={{
+        textDecoration: "none",
+        cursor: "pointer",
+        fontSize: 9,
+        padding: "1px 6px",
+      }}
       title="Open issue on GitHub"
     >
-      <CircleDot size={11} />#{step.githubIssueNumber} · {state ?? "linked"}
+      <CircleDot size={10} />#{step.githubIssueNumber} · {state ?? "linked"}
     </a>
   );
 }

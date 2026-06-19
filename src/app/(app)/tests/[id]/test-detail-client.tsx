@@ -28,6 +28,11 @@ import {
 } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { ReplayPlayer } from "@/components/replay-player";
+import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import {
+  networkRequestToApiTest,
+  type ApiTestSeed,
+} from "@/lib/api-test/from-network";
 import {
   Play,
   Trash2,
@@ -58,6 +63,7 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
+  Webhook,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -440,6 +446,8 @@ export function TestDetailClient({
 }: TestDetailClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
+  const [editApiOpen, setEditApiOpen] = useState(false);
+  const [apiSeed, setApiSeed] = useState<ApiTestSeed | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRestoringDeleted, setIsRestoringDeleted] = useState(false);
   const [isPermanentlyDeleting, setIsPermanentlyDeleting] = useState(false);
@@ -934,6 +942,65 @@ export function TestDetailClient({
   return (
     <div className="flex-1 p-6">
       <div className={cn("max-w-4xl mx-auto space-y-6", contentClassName)}>
+        {/* API test banner — E1 tests have no browser code; surface the request
+            shape + an editor entry point instead of the Playwright code view. */}
+        {test.testType === "api" && test.apiDefinition && (
+          <div className="flex items-center justify-between p-4 rounded-lg bg-muted/40 border">
+            <div className="flex items-center gap-2 text-sm min-w-0">
+              <Webhook className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-mono truncate">
+                {test.apiDefinition.method} {test.apiDefinition.url}
+              </span>
+              <span className="text-muted-foreground shrink-0">
+                · {test.apiDefinition.assertions?.length ?? 0} assertion(s)
+              </span>
+            </div>
+            {!test.deletedAt && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditApiOpen(true)}
+              >
+                <Edit2 className="h-3.5 w-3.5 mr-1.5" />
+                Edit request
+              </Button>
+            )}
+          </div>
+        )}
+        {editApiOpen && test.testType === "api" && test.apiDefinition && (
+          <ApiTestDialog
+            open={editApiOpen}
+            onOpenChange={setEditApiOpen}
+            repositoryId={repositoryId ?? ""}
+            areas={[]}
+            testId={test.id}
+            initialName={test.name}
+            initialDefinition={test.apiDefinition}
+            onSaved={() => {
+              setEditApiOpen(false);
+              onRefresh?.();
+            }}
+          />
+        )}
+
+        {/* Create an API test seeded from a captured network request */}
+        {apiSeed && repositoryId && (
+          <ApiTestDialog
+            open={!!apiSeed}
+            onOpenChange={(open) => {
+              if (!open) setApiSeed(null);
+            }}
+            repositoryId={repositoryId}
+            areas={[]}
+            initialName={apiSeed.name}
+            initialDefinition={apiSeed.definition}
+            onSaved={(id) => {
+              setApiSeed(null);
+              router.push(`/tests?test=${id}`);
+            }}
+          />
+        )}
+
         {/* Deleted Banner */}
         {test.deletedAt && (
           <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/10 border border-destructive/20">
@@ -1001,7 +1068,7 @@ export function TestDetailClient({
                   <>
                     <div className="flex">
                       <Button
-                        onClick={() => handleRun(true)}
+                        onClick={() => handleRun(false)}
                         disabled={isRunning}
                         className="rounded-r-none"
                       >
@@ -1024,13 +1091,13 @@ export function TestDetailClient({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleRun(true)}>
-                            <Play className="h-4 w-4 mr-2" />
-                            Run (Headless)
-                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleRun(false)}>
                             <Monitor className="h-4 w-4 mr-2" />
                             Run Headed
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleRun(true)}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Run (Headless)
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() =>
@@ -1923,6 +1990,12 @@ export function TestDetailClient({
                               networkRequests={result.networkRequests}
                               networkBodiesPath={result.networkBodiesPath}
                               downloads={result.downloads}
+                              onCreateApiTest={
+                                repositoryId
+                                  ? (req) =>
+                                      setApiSeed(networkRequestToApiTest(req))
+                                  : undefined
+                              }
                             />
 
                             {result.softErrors &&

@@ -15,17 +15,18 @@ npx @lastest/mcp-server --url http://localhost:3000 --api-key YOUR_KEY
 ### Core Tools
 
 - `lastest_run_tests` — trigger test build, returns build ID
-- `lastest_get_build_status` — poll for results (status, pass/fail, diffs)
-- `lastest_list_failing_tests` — failing tests with errors
-- `lastest_get_visual_diff` — diff details with AI classification
-- `lastest_approve_baseline` / `lastest_reject_baseline` — act on diffs
-- `lastest_create_test` — AI generates test from URL or prompt
-- `lastest_heal_test` — AI auto-fixes failing test
-- `lastest_get_coverage` — coverage by area and route
+- `lastest_build` `action:"get"` — poll for results (status, pass/fail, diffs); `action:"review"` for diffs + failures + action items
+- `lastest_test` `action:"list"` `filter:"failing"` — failing tests with errors
+- `lastest_get_diffs` `scope:"build"` — diff details with AI classification
+- `lastest_decide_diff` `action:"approve"|"reject"` — act on diffs/baselines
+- `lastest_create_test` — create a test (browser direct/AI, or `testType:"api"` for backend tests)
+- `lastest_heal_test` — AI auto-fixes a failing test; `lastest_suggest_app_fix` — advisory app-code fix
+- `lastest_validate_diff` — diff-scoped one-shot verdict for a coding-agent loop
+- `lastest_insights` `action:"coverage"` — coverage by area and route
 
 ### Workflow
 
-1. Run tests → 2. Check status → 3. Review diffs → 4. Approve/reject → 5. Heal failures
+1. `lastest_run_tests` → 2. `lastest_build action:"get"` → 3. `lastest_get_diffs scope:"build"` → 4. `lastest_decide_diff` → 5. `lastest_heal_test`
 
 ### Key Concepts
 

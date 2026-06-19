@@ -35,6 +35,7 @@ import {
 } from "@/server/actions/diffs";
 import { Input } from "@/components/ui/input";
 import { BrowserIcon } from "@/components/ui/browser-icon";
+import { RcaBadge } from "@/components/diff/rca-badge";
 
 // Filter type for the build detail page metrics
 export type FilterType =
@@ -236,6 +237,10 @@ export function BuildDetailClient({
   const [groupByArea, setGroupByArea] = useState(false);
   const [groupByTest, setGroupByTest] = useState(true);
   const [browserFilter, setBrowserFilter] = useState<string | null>(null);
+  // RCA source filter — "is this diff the test or the code?" (null = all).
+  const [sourceFilter, setSourceFilter] = useState<
+    "code" | "test" | "uncertain" | null
+  >(null);
   const [expandKey, setExpandKey] = useState(0);
   const [allExpanded, setAllExpanded] = useState(true);
   const router = useRouter();
@@ -300,7 +305,14 @@ export function BuildDetailClient({
   }, [diffs]);
   const hasMultipleBrowsers = availableBrowsers.length > 1;
 
-  // Apply filter to sorted diffs (status filter + browser filter)
+  // Whether any diff carries an RCA "test vs code" verdict (gates the Source
+  // filter so it stays hidden on older builds predating the feature).
+  const hasRcaVerdicts = useMemo(
+    () => diffs.some((d) => d.metadata?.rca),
+    [diffs],
+  );
+
+  // Apply filter to sorted diffs (status filter + browser filter + RCA source)
   const filteredDiffs = useMemo(() => {
     let result = filterDiffs(sortedDiffs, activeFilter);
     if (browserFilter) {
@@ -308,8 +320,11 @@ export function BuildDetailClient({
         (d) => (d.browser || "chromium") === browserFilter,
       );
     }
+    if (sourceFilter) {
+      result = result.filter((d) => d.metadata?.rca?.headline === sourceFilter);
+    }
     return result;
-  }, [sortedDiffs, activeFilter, browserFilter]);
+  }, [sortedDiffs, activeFilter, browserFilter, sourceFilter]);
 
   // Group diffs by functional area
   const groupedDiffs = useMemo(() => {
@@ -579,6 +594,33 @@ export function BuildDetailClient({
                   <BrowserIcon browser={browserFilter} className="w-3 h-3" />
                   <XIcon className="w-3 h-3" />
                 </Badge>
+              )}
+
+              {/* RCA source filter — test vs code */}
+              {hasRcaVerdicts && (
+                <div className="flex items-center gap-1">
+                  {(
+                    [
+                      ["code", "Code"],
+                      ["test", "Test noise"],
+                      ["uncertain", "Unclear"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() =>
+                        setSourceFilter(sourceFilter === value ? null : value)
+                      }
+                      className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                        sourceFilter === value
+                          ? "bg-accent text-accent-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </CardTitle>
@@ -1055,10 +1097,18 @@ function DiffRow({
       </div>
 
       <div className="flex items-center gap-4 shrink-0">
-        {hasCodeChange && (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
-            Code Change
-          </span>
+        {/* Prefer the richer RCA verdict when computed; otherwise fall back to
+            the coarse change-map "Code Change" hint for older builds. */}
+        {diff.metadata?.rca ? (
+          <div onClick={(e) => e.stopPropagation()}>
+            <RcaBadge rca={diff.metadata.rca} size="sm" />
+          </div>
+        ) : (
+          hasCodeChange && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
+              Code Change
+            </span>
+          )
         )}
         <span
           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${bsConfig.className}`}

@@ -25,7 +25,8 @@ export type CheckLayer =
   | "a11y"
   | "design"
   | "perf"
-  | "url";
+  | "url"
+  | "api";
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
@@ -47,6 +48,9 @@ const DEFAULTS: CheckModeMap = {
   design: "disable",
   perf: "log",
   url: "log",
+  // API request/response assertions (E1). Standalone api-type tests run a
+  // headless HTTP request; a failed status/schema/body assertion gates red.
+  api: "enforce",
 };
 
 /** Repo / global default to use when nothing is persisted. */
@@ -77,6 +81,7 @@ type LegacySource = Partial<
     | "designMode"
     | "perfMode"
     | "urlMode"
+    | "apiMode"
   >
 > & {
   textDiffEnabled?: boolean | null;
@@ -159,9 +164,10 @@ export function deriveCheckModes(
     normalizeMode(source.designMode) ??
     (source.enableDesignSystem === true ? "enforce" : DEFAULTS.design);
 
-  // --- perf / url ---
+  // --- perf / url / api ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
   out.url = normalizeMode(source.urlMode) ?? DEFAULTS.url;
+  out.api = normalizeMode(source.apiMode) ?? DEFAULTS.api;
 
   return out;
 }
@@ -183,6 +189,7 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
+  apiMode?: CheckMode;
   // legacy mirrors
   enableA11y?: boolean;
   enableDesignSystem?: boolean;
@@ -237,6 +244,9 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   }
   if (modes.url) {
     patch.urlMode = modes.url;
+  }
+  if (modes.api) {
+    patch.apiMode = modes.api;
   }
 
   return patch;
@@ -371,6 +381,7 @@ export function pickTestModeOverrides(
     "design",
     "perf",
     "url",
+    "api",
   ];
   for (const layer of layers) {
     const newKey = `${layer}Mode` as const;

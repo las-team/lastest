@@ -316,6 +316,55 @@ export interface ExecutionProgress {
 /**
  * Execute tests using the appropriate runner (remote runner or embedded browser).
  */
+/**
+ * Execute headless API tests (testType === 'api') in-process — no browser,
+ * runner, or EB dispatch. Each test issues one HTTP request, evaluates its
+ * assertions, persists a test_result (carrying the api result + evidence), and
+ * invokes onResult so the build's step-comparison/verdict pipeline runs the
+ * same way it does for browser tests.
+ */
+async function executeApiTests(
+  apiTests: Test[],
+  runId: string,
+  options: ExecutionOptions,
+  onResult?: (result: TestRunResult) => Promise<void>,
+): Promise<TestRunResult[]> {
+  if (apiTests.length === 0) return [];
+  const { runApiTest } = await import("@/lib/api-test/runner");
+  const baseUrl = options.environmentConfig?.baseUrl ?? undefined;
+  const results: TestRunResult[] = [];
+
+  for (const test of apiTests) {
+    const def = test.apiDefinition;
+    let result: TestRunResult;
+    if (!def) {
+      result = {
+        testId: test.id,
+        status: "failed",
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: "API test has no apiDefinition",
+      };
+    } else {
+      const apiResult = await runApiTest(def, { baseUrl });
+      result = {
+        testId: test.id,
+        status: apiResult.passed ? "passed" : "failed",
+        durationMs: apiResult.latencyMs,
+        screenshots: [],
+        errorMessage: apiResult.passed
+          ? undefined
+          : (apiResult.error ??
+            `${apiResult.assertionResults.filter((a) => !a.passed).length} assertion(s) failed`),
+        apiResult,
+      };
+    }
+    results.push(result);
+    if (onResult) await onResult(result);
+  }
+  return results;
+}
+
 export async function executeTests(
   tests: Test[],
   runId: string,
@@ -323,6 +372,28 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[]> {
+  // E1: API tests run in-process (no browser). Split them off the top and let
+  // the remaining browser tests flow through the normal runner/EB dispatch.
+  const apiTests = tests.filter((t) => t.testType === "api");
+  const browserTests = tests.filter((t) => t.testType !== "api");
+  if (apiTests.length > 0) {
+    const apiResults = await executeApiTests(
+      apiTests,
+      runId,
+      options,
+      onResult,
+    );
+    if (browserTests.length === 0) return apiResults;
+    const browserResults = await executeTests(
+      browserTests,
+      runId,
+      options,
+      onProgress,
+      onResult,
+    );
+    return [...apiResults, ...browserResults];
+  }
+
   // 'local' is no longer supported — redirect to fallback chain
   if (
     !options.runnerId ||

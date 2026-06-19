@@ -78,32 +78,77 @@ Restart the client.
 
 ## Tools exposed
 
-The server registers 50 MCP tools (all prefixed `lastest_`). Every tool returns a structured `{ status, summary, actionRequired?, details }` payload.
+The server registers 20 MCP tools (all prefixed `lastest_`). Every tool returns a structured `{ status, summary, actionRequired?, details }` payload.
 
-| Category                         | Tools                                                                                                                                                                            |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Health & jobs                    | `lastest_health_check`, `lastest_list_active_jobs`, `lastest_get_job_status`                                                                                                     |
-| Repositories                     | `lastest_list_repos`, `lastest_get_repo`, `lastest_create_repo`, `lastest_update_repo`                                                                                           |
-| Playwright settings (repo-level) | `lastest_get_playwright_settings`, `lastest_update_playwright_settings`                                                                                                          |
-| Functional areas                 | `lastest_list_areas`, `lastest_create_area`, `lastest_update_area`, `lastest_delete_area`, `lastest_list_tests_by_area`                                                          |
-| Tests                            | `lastest_list_tests`, `lastest_list_failing_tests`, `lastest_get_test`, `lastest_create_test`, `lastest_update_test`, `lastest_delete_test`, `lastest_heal_test`                 |
-| Setup scripts                    | `lastest_list_setup_scripts`, `lastest_get_setup_script`, `lastest_create_setup_script`, `lastest_update_setup_script`, `lastest_delete_setup_script`                            |
-| Storage states                   | `lastest_list_storage_states`, `lastest_create_storage_state`, `lastest_delete_storage_state`                                                                                    |
-| Runs & builds                    | `lastest_run_tests`, `lastest_get_test_run`, `lastest_list_builds`, `lastest_get_build_status`, `lastest_review_build`                                                           |
-| Diffs & baselines                | `lastest_get_diff`, `lastest_get_visual_diff`, `lastest_approve_diff`, `lastest_reject_diff`, `lastest_approve_all_diffs`, `lastest_approve_baseline`, `lastest_reject_baseline` |
-| Verify phase                     | `lastest_get_change_map`, `lastest_verify_build`, `lastest_approve_layer`                                                                                                        |
-| Sharing                          | `lastest_publish_share`, `lastest_list_build_shares`, `lastest_list_test_shares`, `lastest_revoke_share`                                                                         |
-| Coverage & QA                    | `lastest_get_coverage`, `lastest_qa_summary`                                                                                                                                     |
+Pure CRUD operations are consolidated into **resource tools** that take an `action` (or `scope`) discriminator; workflow verbs stay as standalone tools.
+
+### Resource tools (action-dispatched)
+
+| Tool                    | `action` (or `scope`) values                                         | Purpose                                       |
+| ----------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| `lastest_status`        | `health`, `jobs`, `job`                                              | Instance connectivity + background-job status |
+| `lastest_repo`          | `list`, `get`, `create`, `update`, `get_settings`, `update_settings` | Repositories + repo-level Playwright settings |
+| `lastest_area`          | `list`, `create`, `update`, `delete`, `list_tests`                   | Functional areas (test groupings)             |
+| `lastest_test`          | `list` (`filter: all\|failing`), `get`, `update`, `delete`           | Read/update/delete tests                      |
+| `lastest_storage_state` | `list`, `create`, `delete`                                           | Saved Playwright `storageState()` blobs       |
+| `lastest_setup_script`  | `list`, `get`, `create`, `update`, `delete`                          | Reusable Playwright/API setup blocks          |
+| `lastest_get_diffs`     | `scope: single\|build`                                               | Read visual diffs (one, or all for a build)   |
+| `lastest_decide_diff`   | `approve`, `reject` (via `diffIds` batch or `buildId` approve-all)   | Approve/reject visual diffs & baselines       |
+| `lastest_build`         | `list`, `get`, `review`                                              | Builds: list, status, comprehensive QA review |
+| `lastest_share`         | `list`, `revoke`                                                     | List/revoke existing public shares            |
+| `lastest_verify`        | `view`, `change_map`                                                 | Verify-phase view + build-level Change Map    |
+| `lastest_insights`      | `coverage`, `qa`                                                     | Repo coverage stats + QA summary              |
+
+### Workflow verbs (standalone)
+
+| Tool                        | Purpose                                                           |
+| --------------------------- | ----------------------------------------------------------------- |
+| `lastest_run_tests`         | Trigger a test build (repo / area / specific tests)               |
+| `lastest_create_test`       | Create a test (direct/AI, browser/API modes)                      |
+| `lastest_heal_test`         | AI healer agent auto-fixes a failing test                         |
+| `lastest_validate_diff`     | Diff-scoped validation: run only affected tests, return a verdict |
+| `lastest_suggest_app_fix`   | Advisory application-code fix for a real regression               |
+| `lastest_approve_layer`     | Per-layer approve/reject/snooze on a step comparison              |
+| `lastest_publish_share`     | Publish a `/r/<slug>` public share for a build/test               |
+| `lastest_quickstart`        | Spin up the productized 2-test demo (returns sessionId)           |
+| `lastest_quickstart_status` | Poll a QuickStart session                                         |
 
 ### Self-configuring tests
 
-`lastest_update_test` accepts a full override surface so an agent can shape a test without touching the UI:
+`lastest_test` (`action: "update"`) accepts a full override surface so an agent can shape a test without touching the UI:
 
 - **Setup wiring** — `setupTestId` (use another test as setup, takes precedence) or `setupScriptId`, plus `setupOverrides` / `teardownOverrides` blocks to inject/skip default steps (`test` | `script` | `storage_state`).
 - **Runtime overrides** — `playwrightOverrides` (browser, navigation/action/selector timeouts, error modes, `baseUrl`, cursor speed), `viewportOverride`, `diffOverrides`, `stabilizationOverrides`.
 - **Lifecycle** — `quarantined`, `executionMode` (`procedural` | `agent`).
 
 Pass `null` to any override block to clear it. The API validates each referenced id is in the same repo before persisting.
+
+## Migration — tool consolidation (v0.3.x)
+
+The tool surface was consolidated from ~56 discrete tools to ~21 by folding pure
+CRUD into the resource tools above. This is a **breaking change** for scripts
+that called the old per-operation tool names. The workflow verbs and the
+QuickStart chain (`lastest_quickstart` → `lastest_quickstart_status` →
+`lastest_publish_share`) kept their names and signatures. Map any removed names
+as follows:
+
+| Removed tool(s)                                                                                                                                       | Now call                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `lastest_health`, `lastest_list_jobs`, `lastest_get_job`                                                                                              | `lastest_status { health \| jobs \| job }`  |
+| `lastest_list_repos`, `lastest_get_repo`, `lastest_create_repo`, `lastest_update_repo`, `lastest_get_repo_settings`, `lastest_update_repo_settings`   | `lastest_repo { action }`                   |
+| `lastest_list_areas`, `lastest_create_area`, `lastest_update_area`, `lastest_delete_area`, `lastest_list_area_tests`                                  | `lastest_area { action }`                   |
+| `lastest_list_tests`, `lastest_get_test`, `lastest_update_test`, `lastest_delete_test`, `lastest_list_failing_tests`                                  | `lastest_test { action }`                   |
+| `lastest_list_storage_states`, `lastest_create_storage_state`, `lastest_delete_storage_state`                                                         | `lastest_storage_state { action }`          |
+| `lastest_list_setup_scripts`, `lastest_get_setup_script`, `lastest_create_setup_script`, `lastest_update_setup_script`, `lastest_delete_setup_script` | `lastest_setup_script { action }`           |
+| `lastest_get_diff`, `lastest_get_build_diffs`                                                                                                         | `lastest_get_diffs { scope }`               |
+| `lastest_approve_diff`, `lastest_reject_diff`, `lastest_approve_build_diffs`                                                                          | `lastest_decide_diff { approve \| reject }` |
+| `lastest_list_builds`, `lastest_get_build_status`, `lastest_review_build`, `lastest_get_test_run`                                                     | `lastest_build { list \| get \| review }`   |
+| `lastest_list_build_shares`, `lastest_list_test_shares`, `lastest_revoke_share`                                                                       | `lastest_share { list \| revoke }`          |
+| `lastest_get_coverage`, `lastest_get_qa_summary`                                                                                                      | `lastest_insights { coverage \| qa }`       |
+| `lastest_verify_view`, `lastest_get_change_map`                                                                                                       | `lastest_verify { view \| change_map }`     |
+
+If you need the old names temporarily, pin a `0.2.x` release of this package
+while you migrate.
 
 ## CLI
 
