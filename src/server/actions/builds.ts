@@ -1456,6 +1456,51 @@ async function runBuildAsync(
       console.error("[build] step-criteria evaluation failed:", err);
     }
 
+    // B1: If the build's job was terminated externally while executing — the
+    // build watchdog (markStaleJobsAsCrashed → "Job timed out (no progress…)")
+    // or a user cancel — do NOT run the clean, diff-driven finalize below.
+    // computeBuildStatus returns safe_to_merge for a run that recorded no diffs,
+    // so finalizing a watchdog-killed run would clobber the failure back to a
+    // false green (observed). Honor the termination instead.
+    const finalJob = await queries.getBackgroundJob(jobId);
+    if (finalJob?.error === "Cancelled by user") {
+      // cancelJob owns the statuses — mirror the post-setup early return.
+      revalidatePath("/builds");
+      revalidatePath("/");
+      if (targetRunner !== "auto") {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
+      return;
+    }
+    if (finalJob?.status === "failed") {
+      const abortErr =
+        finalJob.error || "Build job terminated before completion";
+      await queries.updateTestRun(testRunId, {
+        completedAt: new Date(),
+        status: "failed",
+      });
+      await queries.updateBuild(buildId, {
+        passedCount,
+        failedCount,
+        changesDetected,
+        flakyCount,
+        overallStatus: "blocked",
+        elapsedMs: Date.now() - startTime,
+        completedAt: new Date(),
+        executorError: abortErr,
+        executorFailedAt: new Date(),
+      });
+      console.warn(
+        `[build] ${buildId} finalized as blocked — job terminated externally: ${abortErr}`,
+      );
+      revalidatePath("/builds");
+      revalidatePath("/");
+      if (targetRunner !== "auto") {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
+      return;
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -1464,7 +1509,24 @@ async function runBuildAsync(
     });
 
     // Update build final metrics and status
-    const overallStatus = await queries.computeBuildStatus(buildId);
+    let overallStatus = await queries.computeBuildStatus(buildId);
+
+    // B2: computeBuildStatus is diff-driven — it returns safe_to_merge whenever
+    // a run produced no rejected diffs, which ALSO matches a run that dropped
+    // tests (recorded no result at all) or recorded hard failures that left no
+    // diff. Guard the false green: if fewer tests reported than were dispatched,
+    // or any reported as failed/setup_failed, the build is not safe.
+    if (
+      (processedCount < totalTestsAcrossBrowsers || failedCount > 0) &&
+      overallStatus === "safe_to_merge"
+    ) {
+      console.warn(
+        `[build] ${buildId}: escalating safe_to_merge → blocked ` +
+          `(reported ${processedCount}/${totalTestsAcrossBrowsers}, failed ${failedCount}); ` +
+          `diff-driven status would have been a false green`,
+      );
+      overallStatus = "blocked";
+    }
 
     // Aggregate a11y scores across all test results for this build (only if a11y data exists)
     let a11yUpdate: {

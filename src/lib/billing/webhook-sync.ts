@@ -53,24 +53,33 @@ export async function syncTeamPlanForBilling(
 // Narrowed shapes of the @better-auth/stripe event payloads — we only
 // read the fields we sync on, so we don't depend on the plugin's types.
 interface SubscriptionCompletePayload {
+  stripeSubscription: { id: string };
   subscription: { referenceId: string };
   plan: { name?: string | null };
 }
 interface SubscriptionUpdatePayload {
-  stripeSubscription: { items: { data: Array<{ price: { id: string } }> } };
+  stripeSubscription: {
+    id: string;
+    items: { data: Array<{ price: { id: string } }> };
+  };
   subscription: { referenceId: string; plan?: string | null };
 }
 interface SubscriptionDeletedPayload {
+  stripeSubscription: { id: string };
   subscription: { referenceId: string };
 }
 
 /** Payment landed for a fresh subscription — flip the team to the paid tier. */
 export async function handleSubscriptionComplete({
+  stripeSubscription,
   subscription,
   plan,
 }: SubscriptionCompletePayload): Promise<void> {
   const planId = (plan.name as TeamPlan) ?? "free";
   await syncTeamPlanForBilling(subscription.referenceId, planId);
+  console.log(
+    `[audit] subscription.create teamId=${subscription.referenceId} subscriptionId=${stripeSubscription.id}`,
+  );
 }
 
 /**
@@ -97,6 +106,9 @@ export async function handleSubscriptionUpdate({
     return;
   }
   await syncTeamPlanForBilling(subscription.referenceId, planId);
+  console.log(
+    `[audit] subscription.update teamId=${subscription.referenceId} subscriptionId=${stripeSubscription.id}`,
+  );
 }
 
 /**
@@ -133,8 +145,12 @@ async function survivingPaidPlan(teamId: string): Promise<TeamPlan | null> {
  * several subs) can't strip a still-paying team of its tier.
  */
 export async function handleSubscriptionDeleted({
+  stripeSubscription,
   subscription,
 }: SubscriptionDeletedPayload): Promise<void> {
   const surviving = await survivingPaidPlan(subscription.referenceId);
   await syncTeamPlanForBilling(subscription.referenceId, surviving ?? "free");
+  console.log(
+    `[audit] subscription.delete teamId=${subscription.referenceId} subscriptionId=${stripeSubscription.id}`,
+  );
 }

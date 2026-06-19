@@ -108,3 +108,6 @@ yarn-error.log*
 spawned-composer.yml
 zapic.state.raw.json
 search2.md
+
+# Personal notes
+docs/todo.md

@@ -1510,6 +1510,21 @@ function summarizeLayersForCard(
                 ? "missed"
                 : "done",
       });
+    } else if (
+      layer === "visual" &&
+      visual?.currentImagePath &&
+      !visual?.baselineImagePath
+    ) {
+      // First run: a screenshot was captured but there's no baseline to
+      // compare against. NOT a match — surface a neutral "no baseline" chip
+      // instead of a green "100% match / no diff", which falsely claims the
+      // step was verified clean against a baseline that doesn't exist.
+      out.push({
+        layer,
+        delta: "no baseline",
+        summary: "no baseline yet — approve to set",
+        tone: "unknown",
+      });
     } else {
       // Layer was captured + scored, no diff → "match" chip so the reviewer
       // can confirm at a glance the layer was actually verified.

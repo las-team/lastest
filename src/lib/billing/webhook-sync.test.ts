@@ -137,6 +137,7 @@ describe("handleSubscriptionComplete", () => {
     getTeam.mockResolvedValue({ id: "team_1", plan: "free" } as never);
 
     await handleSubscriptionComplete({
+      stripeSubscription: { id: "sub_1" },
       subscription: { referenceId: "team_1" },
       plan: { name: "starter" },
     });
@@ -151,6 +152,7 @@ describe("handleSubscriptionComplete", () => {
     getTeam.mockResolvedValue({ id: "team_1", plan: "starter" } as never);
 
     await handleSubscriptionComplete({
+      stripeSubscription: { id: "sub_1" },
       subscription: { referenceId: "team_1" },
       plan: { name: null },
     });
@@ -169,6 +171,7 @@ describe("handleSubscriptionUpdate", () => {
 
     await handleSubscriptionUpdate({
       stripeSubscription: {
+        id: "sub_1",
         items: { data: [{ price: { id: "price_growth_monthly" } }] },
       },
       // Mirror still says starter mid-proration; price ID must win.
@@ -187,6 +190,7 @@ describe("handleSubscriptionUpdate", () => {
 
     await handleSubscriptionUpdate({
       stripeSubscription: {
+        id: "sub_1",
         items: { data: [{ price: { id: "price_unrecognized" } }] },
       },
       subscription: { referenceId: "team_1", plan: "pro" },
@@ -200,7 +204,7 @@ describe("handleSubscriptionUpdate", () => {
 
   it("does nothing when neither the price ID nor the mirror resolves a plan", async () => {
     await handleSubscriptionUpdate({
-      stripeSubscription: { items: { data: [] } },
+      stripeSubscription: { id: "sub_1", items: { data: [] } },
       subscription: { referenceId: "team_1", plan: null },
     });
 
@@ -214,6 +218,7 @@ describe("handleSubscriptionDeleted", () => {
     getTeam.mockResolvedValue({ id: "team_1", plan: "pro" } as never);
 
     await handleSubscriptionDeleted({
+      stripeSubscription: { id: "sub_1" },
       subscription: { referenceId: "team_1" },
     });
 
@@ -239,6 +244,7 @@ describe("handleSubscriptionDeleted", () => {
     );
 
     await handleSubscriptionDeleted({
+      stripeSubscription: { id: "sub_1" },
       subscription: { referenceId: "team_1" },
     });
 
@@ -259,6 +265,7 @@ describe("handleSubscriptionDeleted", () => {
     );
 
     await handleSubscriptionDeleted({
+      stripeSubscription: { id: "sub_1" },
       subscription: { referenceId: "team_1" },
     });
 

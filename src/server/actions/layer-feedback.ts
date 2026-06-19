@@ -260,6 +260,10 @@ export async function approveAllVerifyCases(
       ...evidenceLayers,
       ...existingLayers,
     ]);
+    // Mirror decideAllForStep: a first-run/0px visual diff has no "visual"
+    // evidence row, so seed it whenever the step has a diff or the baseline
+    // would never get written.
+    if (step.visualDiffId) layerSet.add("visual");
     if (layerSet.size === 0) layerSet.add("visual");
 
     for (const layer of layerSet) {

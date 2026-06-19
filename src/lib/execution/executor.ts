@@ -1780,6 +1780,16 @@ async function executeViaPoolWorkers(
     isKubernetesMode,
   } = await import("@/lib/eb/provisioner");
 
+  // A1 (watchdog liveness keepalive). getRunnerById exposes the EB's DB
+  // heartbeat (last_seen, updated cross-pod on each EB poll); SESSION_TIMEOUT_MS
+  // is the unresponsive threshold we read but never mutate.
+  const { getRunnerById } = await import("@/lib/db/queries");
+  const { SESSION_TIMEOUT_MS } = await import("@/lib/eb/cleanup-loop");
+  // testId -> currently-claimed runnerId for the in-flight tests, consumed by
+  // the liveness tick below to decide whether to keep the build job alive.
+  const inFlightRunners = new Map<string, string>();
+  let livenessTimer: ReturnType<typeof setInterval> | undefined;
+
   // Suppress per-release warm-pool refill while this build is dispatching.
   // ensureWarmPool no-ops; the build's claimOrProvisionPoolEB handles
   // provisioning on demand. Without this, every test release spawns up to
@@ -1881,6 +1891,37 @@ async function executeViaPoolWorkers(
         activeTests: currentName ? [currentName] : [],
       });
     };
+
+    // A1: The build watchdog (markStaleJobsAsCrashed) fails a build after 5 min
+    // with no `backgroundJobs.lastActivityAt` tick. updateProgress (the only
+    // thing that bumps it, via onProgress -> updateJobActivity) fires on
+    // dispatch + per-test completion only — so a single long-running test
+    // freezes the clock and the whole build is killed mid-run (observed: a
+    // legitimate 10-min hold dropped at ~5 min, reported as a false green).
+    // Tick every 30s and bump WHILE at least one in-flight test's EB heartbeat
+    // is fresh; a genuinely dead EB (no heartbeat within SESSION_TIMEOUT_MS)
+    // stops the keepalive so the watchdog still reaps a stuck build. The
+    // unresponsive limit (SESSION_TIMEOUT_MS) itself is never changed.
+    livenessTimer = setInterval(() => {
+      if (inFlightRunners.size === 0) return;
+      void (async () => {
+        try {
+          const ids = [...new Set(inFlightRunners.values())];
+          const rows = await Promise.all(ids.map((id) => getRunnerById(id)));
+          const now = Date.now();
+          const anyAlive = rows.some(
+            (r) =>
+              !!r &&
+              r.status !== "offline" &&
+              r.lastSeen != null &&
+              now - new Date(r.lastSeen).getTime() < SESSION_TIMEOUT_MS,
+          );
+          if (anyAlive) updateProgress();
+        } catch (err) {
+          console.warn("[Dispatch] watchdog liveness tick failed:", err);
+        }
+      })();
+    }, 30_000);
 
     // ── One-shot broadcast setup ────────────────────────────────────────────
     // Run setup once on a dedicated EB. Capture its storageState as JSON so
@@ -2015,6 +2056,9 @@ async function executeViaPoolWorkers(
         }
         everClaimed = true;
         await recordActualRunner(eb.runnerId);
+        // A1: register the claimed EB so the liveness tick keeps the build job
+        // alive while this (possibly long) test runs on a heart-beating pod.
+        inFlightRunners.set(test.id, eb.runnerId);
         console.log(
           `[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for "${test.name}" (attempt ${attempt}/${MAX_EB_ATTEMPTS})`,
         );
@@ -2079,6 +2123,8 @@ async function executeViaPoolWorkers(
             errorMessage: msg,
           });
         } finally {
+          // A1: stop counting this EB toward the build's liveness once released.
+          inFlightRunners.delete(test.id);
           try {
             await releasePoolEB(eb.runnerId);
           } catch {
@@ -2169,6 +2215,7 @@ async function executeViaPoolWorkers(
 
     return everClaimed ? results : null;
   } finally {
+    if (livenessTimer) clearInterval(livenessTimer);
     decBuildDispatch();
     // Let the warm pool catch up exactly once after the build finishes.
     // Fire-and-forget so the build response isn't blocked on a pool refill.

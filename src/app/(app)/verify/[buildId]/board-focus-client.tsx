@@ -692,6 +692,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       ...evidenceLayers,
       ...existingLayers,
     ]);
+    // Always establish/confirm the visual baseline whenever the step has a
+    // visual diff. A first-run (no-baseline) or 0px diff carries NO "visual"
+    // evidence row (the scorer only emits one when pixelDifference > 0), so
+    // without this an approve would skip the visual layer entirely and never
+    // write the baseline — leaving the next run flagging the same "missing
+    // baseline" forever.
+    if (step.visualDiffId) layerSet.add("visual");
     if (layerSet.size === 0) layerSet.add("visual");
     const layers: EvidenceLayer[] = Array.from(layerSet);
 

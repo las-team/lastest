@@ -189,14 +189,18 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: "api", name: "API" },
 ];
 
-type LayerState = "diff" | "clean" | "absent";
+type LayerState = "diff" | "clean" | "absent" | "nobaseline";
 
 /**
  * Classify each layer for the active step:
- *   - diff:   evidence row present in step.evidence  → render diff details
- *   - clean:  layer was captured on the test result, no evidence  → render
- *             real captured data + a "no diff" affordance
- *   - absent: layer was never captured by the test run  → tab disabled
+ *   - diff:       evidence row present in step.evidence  → render diff details
+ *   - clean:      layer was captured on the test result, no evidence  → render
+ *                 real captured data + a "no diff" affordance
+ *   - nobaseline: visual-only — a current screenshot exists but there's no
+ *                 approved baseline to compare against (first run). NOT a
+ *                 match — render a neutral "no baseline yet" state, never a
+ *                 green "100% match" / "screenshots match baseline".
+ *   - absent:     layer was never captured by the test run  → tab disabled
  */
 function classifyLayer(
   layer: CompareTab,
@@ -218,6 +222,12 @@ function classifyLayer(
     case "visual":
       // Visual is captured whenever a visual diff record exists for the step
       // (even with 0 px difference) or a screenshot was taken.
+      // A current screenshot with NO baseline is a first run — there's nothing
+      // to compare against, so it's "nobaseline", not "clean". Treating it as
+      // clean is what produced the bogus "100% match / screenshots match
+      // baseline" on a missing baseline.
+      if (visual?.currentImagePath && !visual?.baselineImagePath)
+        return "nobaseline";
       if (visual?.currentImagePath || visual?.baselineImagePath) return "clean";
       return "absent";
     case "text": {
@@ -978,7 +988,7 @@ export function FocusView(props: FocusViewProps) {
                   onClick={() => setTab(k.id)}
                   title={
                     reason ??
-                    `${k.name} — ${layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : "not captured"}`
+                    `${k.name} — ${layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : layerState === "nobaseline" ? "no baseline yet" : "not captured"}`
                   }
                   style={{
                     padding: "6px 10px",
@@ -1001,7 +1011,7 @@ export function FocusView(props: FocusViewProps) {
                     fontWeight: isActive ? 600 : 400,
                     opacity: layerState === "absent" ? 0.55 : 1,
                   }}
-                  aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ""}` : warned ? `warning: ${reason ?? ""}` : layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : "not captured"}`}
+                  aria-label={`${k.name} — ${broken ? `broken: ${reason ?? ""}` : warned ? `warning: ${reason ?? ""}` : layerState === "diff" ? "diff" : layerState === "clean" ? "no diff (captured)" : layerState === "nobaseline" ? "no baseline yet" : "not captured"}`}
                 >
                   <span>{k.name}</span>
                   {/* Broken pill: red X with the evidence summary as the
@@ -2600,14 +2610,21 @@ function VisualPane({
   const diffSrc = visual?.diffImagePath;
   const hasBaseline = !!baselineSrc;
   const hasCurrent = !!currentSrc;
+  // First run: we captured a screenshot but there's no approved baseline to
+  // compare it to. The diff row reports pixelDifference 0 simply because there
+  // was nothing to diff — that is NOT a match. Suppress every "clean / 100%
+  // match" affordance and show a neutral state instead.
+  const noBaselineYet = hasCurrent && !hasBaseline;
   const visualEvidence = step.layers?.visual;
   const changedRegions = visual?.changedRegions ?? [];
   const hasChangedRegions = changedRegions.length > 0;
   const drawDisabled = !regions.hasVisual || regions.regionPending;
 
   // Overlay metric chip (rendered on top of the screenshot itself).
-  // Even with 0% diff we surface "100% match" rather than nothing.
+  // Even with 0% diff we surface "100% match" rather than nothing — but only
+  // when there's a baseline to match against.
   const metricChip = (() => {
+    if (noBaselineYet) return null;
     if (visualEvidence) {
       const pct = visualEvidence.percentageDifference ?? "?";
       const px = visualEvidence.pixelDifference;
@@ -2689,8 +2706,23 @@ function VisualPane({
             justifyContent: "flex-end",
           }}
         >
-          {clean && (
-            <CleanBanner message="No visual diff — screenshots match baseline" />
+          {noBaselineYet ? (
+            <span
+              className="v-chip"
+              style={{
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                background: "var(--c-soft-2)",
+                color: "var(--fg-3)",
+              }}
+              title="No approved baseline yet — there's nothing to compare this run against. Approve this step to set the current screenshot as the baseline."
+            >
+              no baseline yet — approve to set
+            </span>
+          ) : (
+            clean && (
+              <CleanBanner message="No visual diff — screenshots match baseline" />
+            )
           )}
           {metricChip && (
             <span
@@ -2724,7 +2756,7 @@ function VisualPane({
               baseline from {visual.baselineSourceBranch}
             </span>
           )}
-          {visual?.classification && (
+          {visual?.classification && !noBaselineYet && (
             <span
               className="v-chip"
               style={{ fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}
