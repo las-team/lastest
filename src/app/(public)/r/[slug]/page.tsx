@@ -1878,7 +1878,12 @@ function collectChapters(
 ): Chapter[] {
   const source = primary ?? all[0] ?? null;
   if (!source) return [];
-  const ordered: { path: string; label?: string; atMs?: number }[] = [];
+  const ordered: {
+    path: string;
+    label?: string;
+    atMs?: number;
+    title?: string;
+  }[] = [];
   const seen = new Set<string>();
   for (const s of source.screenshots ?? []) {
     if (!s.path || seen.has(s.path)) continue;
@@ -1904,7 +1909,13 @@ function collectChapters(
     if (atSec != null && durSec != null) {
       atSec = Math.min(atSec, Math.max(0, durSec - 0.1));
     }
-    out.push({ src: url, label: s.label || `Step ${i + 1}`, atSec });
+    // Prefer the cosmetic `title` (from the screenshot-path slug) for the
+    // chapter name; fall back to the structural `label` ("Step N").
+    out.push({
+      src: url,
+      label: s.title || s.label || `Step ${i + 1}`,
+      atSec,
+    });
   });
   return out;
 }

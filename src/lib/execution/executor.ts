@@ -1229,19 +1229,27 @@ async function executeViaRunner(
         );
       });
 
-      let allScreenshots: { path: string; label: string; atMs?: number }[] =
-        sortedScreenshots.map((r, idx) => {
-          const sp = r.payload as Record<string, unknown>;
-          // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3")
-          const filename = (sp.filename as string) || "";
-          const stepMatch = filename.match(/Step_(\d+)/);
-          const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
-          // Carry the recording offset through to test_results.screenshots so the
-          // share page's "In this video" chapter rail can seek to each step.
-          const atMs =
-            typeof sp.atMs === "number" ? (sp.atMs as number) : undefined;
-          return { path: sp.path as string, label, atMs };
-        });
+      let allScreenshots: {
+        path: string;
+        label: string;
+        atMs?: number;
+        title?: string;
+      }[] = sortedScreenshots.map((r, idx) => {
+        const sp = r.payload as Record<string, unknown>;
+        // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3").
+        // `label` is the diff/baseline + ordering key — keep it stable.
+        const filename = (sp.filename as string) || "";
+        const stepMatch = filename.match(/Step_(\d+)/);
+        const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
+        // Carry the recording offset + cosmetic chapter title through to
+        // test_results.screenshots. `title` is decorative (rail display only),
+        // never used to match baselines or order steps.
+        const atMs =
+          typeof sp.atMs === "number" ? (sp.atMs as number) : undefined;
+        const title =
+          typeof sp.title === "string" ? (sp.title as string) : undefined;
+        return { path: sp.path as string, label, atMs, title };
+      });
 
       // Fallback to disk scan if no DB screenshot entries found
       if (allScreenshots.length === 0) {

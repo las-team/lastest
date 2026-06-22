@@ -431,6 +431,7 @@ export async function POST(request: NextRequest) {
                 height: payload.height,
                 capturedAt: payload.capturedAt,
                 atMs: payload.atMs,
+                title: payload.title,
               },
             });
           }

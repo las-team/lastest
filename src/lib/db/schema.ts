@@ -533,6 +533,13 @@ export interface CapturedScreenshot {
   // distributing steps evenly across the recording duration. jsonb column, so
   // adding this field needs no migration.
   atMs?: number;
+  // Purely-cosmetic display name for the "In this video" chapter rail, derived
+  // from the test's screenshot-path slug (e.g. shot(2,'new-project') → "New
+  // project"). MUST stay decorative: the structural step key is `label`
+  // ("Step N") / the filename, which the diff pipeline uses to match baselines
+  // (baselines.stepLabel) and order steps. `title` is never read by diff/verify
+  // — overriding it can't desync pixel comparison. Absent → rail uses `label`.
+  title?: string;
 }
 
 // Accessibility violation from axe-core.

@@ -676,6 +676,8 @@ async function startup(): Promise<void> {
                       // chapters; falls back to now for any legacy/untimed shot.
                       capturedAt: screenshot.capturedAt ?? Date.now(),
                       atMs: screenshot.atMs,
+                      // Cosmetic chapter title (screenshot-path slug); not the diff key.
+                      title: screenshot.title,
                     },
                   }),
                 ),

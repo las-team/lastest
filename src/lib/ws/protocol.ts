@@ -624,6 +624,9 @@ export interface ScreenshotUploadPayload {
   // public share page's "In this video" chapter rail. Optional — absent for
   // non-recorded runs and ad-hoc/recorder captures.
   atMs?: number;
+  // Cosmetic chapter title from the test's screenshot-path slug. Decorative
+  // only — the diff/baseline key stays the filename/label.
+  title?: string;
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {

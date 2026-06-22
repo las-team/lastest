@@ -93,6 +93,19 @@ export interface EmbeddedNetworkRequest {
   responseSize?: number;
 }
 
+// Derive a cosmetic chapter title from a test's screenshot-path slug, e.g.
+// ".../<runId>-<testId>-2-new-project.png" → "New project". Returns undefined
+// when the path has no "-<n>-<slug>" suffix (the bare final screenshot). Purely
+// decorative for the share "In this video" rail — never the diff/baseline key.
+function titleFromScreenshotPath(path?: string): string | undefined {
+  if (!path) return undefined;
+  const file = path.split("/").pop() ?? "";
+  const m = file.match(/-\d{1,3}-([a-z][a-z0-9-]*)\.png$/i);
+  if (!m) return undefined;
+  const words = m[1].replace(/[-_]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : undefined;
+}
+
 export interface EmbeddedTestResult {
   status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
@@ -106,6 +119,8 @@ export interface EmbeddedTestResult {
     /** Real capture time + offset into the recording (ms) for share chapters. */
     capturedAt?: number;
     atMs?: number;
+    /** Cosmetic chapter title (screenshot-path slug); not the diff key. */
+    title?: string;
   }>;
   /** Page innerText captured alongside each screenshot when textCaptureEnabled.
    *  Filename is the screenshot's filename with `.txt` extension so the host
@@ -491,6 +506,9 @@ export class EmbeddedTestExecutor {
       // "In this video" chapter rail. EB previously dropped timing entirely.
       capturedAt?: number;
       atMs?: number;
+      // Cosmetic chapter title from the test's screenshot-path slug; NOT the
+      // diff/baseline key (that's the filename/label).
+      title?: string;
     }> = [];
     const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
@@ -1211,8 +1229,10 @@ export class EmbeddedTestExecutor {
         return rawScreenshot({ fullPage: true });
       };
 
-      // Screenshot helper with stabilization
-      const captureScreenshot = async (label: string) => {
+      // Screenshot helper with stabilization. `title` is the cosmetic chapter
+      // name (from the test's screenshot-path slug); it never touches `filename`
+      // / `label`, so the diff/baseline key is unchanged.
+      const captureScreenshot = async (label: string, title?: string) => {
         try {
           // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
           await applyPreScreenshotStabilization(page, command.stabilization);
@@ -1233,6 +1253,7 @@ export class EmbeddedTestExecutor {
             height: viewport.height,
             capturedAt,
             atMs,
+            title,
           });
 
           // Capture page text alongside the screenshot. Best-effort: failures
@@ -1292,11 +1313,17 @@ export class EmbeddedTestExecutor {
         }
       };
 
-      // Override page.screenshot to intercept screenshot calls
+      // Override page.screenshot to intercept screenshot calls. `label`
+      // ("Step N") stays the structural diff/baseline key; `title` is a cosmetic
+      // chapter name derived from the test's screenshot-path slug
+      // (e.g. shot(2,'new-project') → "New project").
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).screenshot = async (options?: any) => {
         const label = `Step ${screenshotStep++}`;
-        await captureScreenshot(label);
+        const title = titleFromScreenshotPath(
+          typeof options?.path === "string" ? options.path : undefined,
+        );
+        await captureScreenshot(label, title);
         return rawScreenshot(options);
       };
 
