@@ -339,15 +339,26 @@ async function runQsScoutPublic(
   // Claim a containerized browser from the EB pool so the scout's MCP attaches
   // to a dedicated chromium instead of fighting for the user-data-dir held by
   // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
+  // Hard-fail when no EB is available — never fall through to a host-process
+  // Chromium (applyScoutMcpWiring would launch @playwright/mcp without a
+  // --cdp-endpoint, the exact in-host execution this codebase forbids).
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
     () => undefined,
   );
+  if (!eb) {
+    await setFailed(
+      sessionId,
+      "qs_scout_public",
+      "All browsers are busy. Please try again later.",
+    );
+    return false;
+  }
   try {
     const { data, promptLogId } = await runQuickstartScoutPublic(
       repositoryId,
       gate.baseUrl,
       {
-        cdpEndpoint: eb?.cdpUrl,
+        cdpEndpoint: eb.cdpUrl,
       },
     );
     await mergeMetadata(sessionId, { publicScout: data });
@@ -510,15 +521,25 @@ async function runQsScoutAuthed(
     return true;
   }
 
+  // Hard-fail when no EB is available — never fall through to a host-process
+  // Chromium (see runQsScoutPublic for the rationale).
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
     () => undefined,
   );
+  if (!eb) {
+    await setFailed(
+      sessionId,
+      "qs_scout_authed",
+      "All browsers are busy. Please try again later.",
+    );
+    return false;
+  }
   try {
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
       gate.baseUrl,
       authTest.code,
-      { cdpEndpoint: eb?.cdpUrl },
+      { cdpEndpoint: eb.cdpUrl },
     );
     await mergeMetadata(sessionId, { authedScout: data });
     await setCompleted(sessionId, "qs_scout_authed", {

@@ -131,21 +131,22 @@ Navigate to the relevant page using MCP tools, inspect the current UI state via 
 
 ${seed.seedPrompt}`;
 
-    // Configure Playwright MCP for the AI provider (matches generator-agent pattern)
-    const mcpArgs = options?.cdpEndpoint
-      ? [
-          "@playwright/mcp@latest",
-          "--cdp-endpoint",
-          options.cdpEndpoint,
-          "--headless",
-        ]
-      : ["@playwright/mcp@latest", "--headless"];
-
-    if (options?.cdpEndpoint) {
-      console.log(
-        `[HealerAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
+    // Configure Playwright MCP for the AI provider (matches generator-agent
+    // pattern). A CDP endpoint (Embedded Browser) is mandatory — without it
+    // @playwright/mcp launches Chromium in THIS host process.
+    if (!options?.cdpEndpoint) {
+      throw new Error(
+        "[HealerAgent] cdpEndpoint is required — refusing to launch a host-process browser. Claim an Embedded Browser first.",
       );
     }
+    const mcpArgs = [
+      "@playwright/mcp@latest",
+      "--cdp-endpoint",
+      options.cdpEndpoint,
+      "--headless",
+    ];
+
+    console.log(`[HealerAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`);
 
     if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;
@@ -230,7 +231,6 @@ export async function agentHealTest(
 export async function agentHealTests(
   testIds: string[],
   repositoryId: string,
-  options?: { cdpEndpoint?: string },
 ): Promise<{
   success: boolean;
   fixed: number;
@@ -243,13 +243,35 @@ export async function agentHealTests(
   let fixed = 0;
   let failed = 0;
 
-  // Process with concurrency limit of 3
+  const { claimEmbeddedBrowserForAgent } = await import("@/server/actions/ai");
+  const { releasePoolEB } = await import("@/server/actions/embedded-sessions");
+
+  // Process with concurrency limit of 3. Each concurrent heal claims its OWN
+  // Embedded Browser — they navigate independently and cannot safely share one
+  // CDP endpoint (shared page state would interleave across heals).
   const CONCURRENCY = 3;
   for (let i = 0; i < testIds.length; i += CONCURRENCY) {
     const batch = testIds.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (testId) => {
-        const result = await agentHealTest(repositoryId, testId, options);
+        const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+          () => undefined,
+        );
+        if (!eb) {
+          return {
+            testId,
+            success: false,
+            error: "No embedded browsers available — all browsers are busy.",
+          };
+        }
+        let result: { success: boolean; code?: string; error?: string };
+        try {
+          result = await agentHealTest(repositoryId, testId, {
+            cdpEndpoint: eb.cdpUrl,
+          });
+        } finally {
+          await releasePoolEB(eb.runnerId).catch(() => {});
+        }
         if (result.success && result.code) {
           await queries.updateTestWithVersion(
             testId,

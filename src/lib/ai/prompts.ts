@@ -9,8 +9,7 @@ export const TEST_SIGNATURE = `export async function test(page: Page, baseUrl: s
  * Shared selector-robustness rules, injected into every generation/fix/heal
  * prompt. Single source of truth so the two failure classes we keep hitting
  * (regex hasText over multi-block text; brittle structural-ancestor scoping)
- * are discouraged consistently. See mcp-validator.ts for the matching
- * validation hints.
+ * are discouraged consistently.
  */
 export const SELECTOR_ROBUSTNESS_RULES = `SELECTOR ROBUSTNESS:
 - Anchor on the LEAF interactive element: prefer page.getByRole('link', { name }).first() over scoping through a structural ancestor like page.locator('section').filter({ hasText: ... }). Only add ancestor scoping when the same accessible name appears multiple times AND you verified that ancestor exists in the snapshot.

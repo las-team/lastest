@@ -154,20 +154,24 @@ export async function agentCreateTest(
     // Configure Playwright MCP for the AI provider.
     // For claude-agent-sdk: configure MCP servers directly on config (native MCP support).
     // For other providers: pass useMCP + mcpConfig to let generateWithAI use the MCP bridge.
-    const mcpArgs = options?.cdpEndpoint
-      ? [
-          "@playwright/mcp@latest",
-          "--cdp-endpoint",
-          options.cdpEndpoint,
-          "--headless",
-        ]
-      : ["@playwright/mcp@latest", "--headless"];
-
-    if (options?.cdpEndpoint) {
-      console.log(
-        `[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
+    // A CDP endpoint (Embedded Browser) is mandatory — without it
+    // @playwright/mcp launches Chromium in THIS host process, running
+    // AI-driven browser actions outside the sandbox.
+    if (!options?.cdpEndpoint) {
+      throw new Error(
+        "[GeneratorAgent] cdpEndpoint is required — refusing to launch a host-process browser. Claim an Embedded Browser first.",
       );
     }
+    const mcpArgs = [
+      "@playwright/mcp@latest",
+      "--cdp-endpoint",
+      options.cdpEndpoint,
+      "--headless",
+    ];
+
+    console.log(
+      `[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
+    );
 
     if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;

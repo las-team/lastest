@@ -36,9 +36,20 @@ function applyScoutMcpWiring(
   config: AIProviderConfig,
   cdpEndpoint: string | undefined,
 ): Pick<GenerateWithAIOptions, "useMCP" | "mcpConfig"> {
-  const mcpArgs = cdpEndpoint
-    ? ["@playwright/mcp@latest", "--cdp-endpoint", cdpEndpoint, "--headless"]
-    : ["@playwright/mcp@latest", "--headless"];
+  // A CDP endpoint (Embedded Browser) is mandatory — without it @playwright/mcp
+  // launches Chromium in THIS host process, running the scout's browser actions
+  // outside the sandbox. Callers must claim an EB first.
+  if (!cdpEndpoint) {
+    throw new Error(
+      "applyScoutMcpWiring requires a cdpEndpoint — refusing to launch a host-process browser. Claim an Embedded Browser first.",
+    );
+  }
+  const mcpArgs = [
+    "@playwright/mcp@latest",
+    "--cdp-endpoint",
+    cdpEndpoint,
+    "--headless",
+  ];
   const playwrightServer: MCPServerConfig = { command: "npx", args: mcpArgs };
 
   if (config.provider === "claude-agent-sdk") {

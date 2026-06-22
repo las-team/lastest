@@ -110,10 +110,20 @@ export function createPlaywrightMCPBridge(options?: {
   cdpEndpoint?: string;
   headless?: boolean;
 }): MCPBridge {
-  const args = ["@playwright/mcp@latest"];
-  if (options?.cdpEndpoint) {
-    args.push("--cdp-endpoint", options.cdpEndpoint);
+  // A CDP endpoint is mandatory: without it, @playwright/mcp launches its own
+  // Chromium inside THIS (host) process, running user/AI-supplied browser
+  // actions outside the sandboxed Embedded Browser. Refuse rather than silently
+  // degrade — every caller must claim an EB and pass its cdpEndpoint.
+  if (!options?.cdpEndpoint) {
+    throw new Error(
+      "createPlaywrightMCPBridge requires a cdpEndpoint — refusing to launch a host-process browser. Claim an Embedded Browser first.",
+    );
   }
+  const args = [
+    "@playwright/mcp@latest",
+    "--cdp-endpoint",
+    options.cdpEndpoint,
+  ];
   if (options?.headless !== false) {
     args.push("--headless");
   }

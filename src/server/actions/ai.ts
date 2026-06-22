@@ -871,7 +871,23 @@ export async function healTest(
     };
   }
   const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  return agentHealTest(repositoryId, testId);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentHealTest(repositoryId, testId, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 /**
