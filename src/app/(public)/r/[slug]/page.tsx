@@ -302,23 +302,27 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   // VideoObject structured data — surface the test recording to Google per
   // https://support.google.com/webmasters/answer/7552505 so /r/ pages get
-  // video-rich previews instead of plain links.
+  // video-rich previews instead of plain links. One VideoObject per clip, so
+  // every <video> element rendered on the page is described (Google flags
+  // rendered videos that lack structured data).
   const origin = await resolveRequestOrigin();
-  const primaryVideoPath = primaryResult?.videoPath
-    ? toUrl(primaryResult.videoPath)
-    : fallbackVideoUrl;
-  const videoSchema = primaryVideoPath
-    ? buildVideoSchema({
-        origin,
-        slug,
-        videoPath: primaryVideoPath,
-        displayName: test?.name ?? displayDomain,
-        domain: displayDomain,
-        durationMs: primaryResult?.durationMs ?? null,
-        uploadedAt: build.completedAt ?? build.createdAt ?? null,
-        changesDetected: build.changesDetected ?? 0,
-      })
-    : null;
+  // Stable "first published" timestamp. MUST match the sitemap's
+  // publication_date — listPublicSharesForSitemap uses the same
+  // completedAt → createdAt → share.createdAt chain, and Google merges
+  // sitemap + JSON-LD and flags inconsistent uploadDates. Never fall back to
+  // `new Date()`: with `revalidate = 0` that minted a different uploadDate on
+  // every crawl.
+  const videoUploadedAt =
+    build.completedAt ?? build.createdAt ?? share.createdAt ?? null;
+  const videoSchemas = buildVideoSchemas({
+    origin,
+    slug,
+    clips,
+    displayName: test?.name ?? displayDomain,
+    domain: displayDomain,
+    uploadedAt: videoUploadedAt,
+    changesDetected: build.changesDetected ?? 0,
+  });
 
   // Optional AI UI/UX summary captured at the end of a /gtm-lastest-saas-demo
   // run. Prefer the latest notes for the share's repo so re-runs flow into
@@ -344,7 +348,16 @@ export default async function PublicSharePage({ params }: PageProps) {
       <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-8">
         {clips.length > 0 && (
           <section className="space-y-3">
-            <ShareVideoPlayer clips={clips} />
+            {/* <figure>/<figcaption> binds descriptive text to the recording so
+                the page reads as a video watch page (Google's "video is the
+                main content" signal) and the player has an accessible label. */}
+            <figure className="m-0 space-y-2">
+              <ShareVideoPlayer clips={clips} />
+              <figcaption className="text-sm text-muted-foreground">
+                Recording of the visual regression run on {displayDomain}
+                {test?.name ? ` · ${test.name}` : ""}.
+              </figcaption>
+            </figure>
           </section>
         )}
 
@@ -438,65 +451,80 @@ export default async function PublicSharePage({ params }: PageProps) {
         nonce={nonce}
         suppressHydrationWarning
       />
-      {videoSchema && (
+      {videoSchemas.map((schema, i) => (
         <script
+          key={`video-schema-${i}`}
           type="application/ld+json"
           nonce={nonce}
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(videoSchema).replace(/</g, "\\u003c"),
+            __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
           }}
         />
-      )}
+      ))}
     </div>
   );
 }
 
-function buildVideoSchema({
+// Builds one VideoObject per rendered clip. The first clip is the canonical
+// recording and keeps the branded OG card as its thumbnail (matches the
+// sitemap's thumbnail_loc + the social card); additional clips use their own
+// first-frame poster so each VideoObject carries a unique, representative
+// thumbnail (Google wants unique text + thumbnail per video), falling back to
+// the OG card when a clip has no captured frame.
+function buildVideoSchemas({
   origin,
   slug,
-  videoPath,
+  clips,
   displayName,
   domain,
-  durationMs,
   uploadedAt,
   changesDetected,
 }: {
   origin: string;
   slug: string;
-  videoPath: string;
+  clips: { src: string; durationMs: number | null; poster: string | null }[];
   displayName: string;
   domain: string;
-  durationMs: number | null;
   uploadedAt: Date | null;
   changesDetected: number;
-}): Record<string, unknown> {
-  const absVideo = videoPath.startsWith("http")
-    ? videoPath
-    : `${origin}${videoPath}`;
-  const thumbnailUrl = `${origin}/api/og/share/${slug}`;
-  const uploadDate = (uploadedAt ?? new Date()).toISOString();
+}): Record<string, unknown>[] {
+  const abs = (p: string): string =>
+    p.startsWith("http") ? p : `${origin}${p}`;
+  const ogThumbnail = `${origin}/api/og/share/${slug}`;
+  // Single ISO 8601 instant shared by every clip; omitted entirely when no
+  // stable timestamp exists rather than emitting a moving `new Date()`.
+  const uploadDate = uploadedAt ? uploadedAt.toISOString() : null;
   const description =
     changesDetected > 0
       ? `Visual regression recording for ${domain} — ${changesDetected} change${changesDetected === 1 ? "" : "s"} detected.`
       : `Visual regression recording for ${domain} — no changes detected against baseline.`;
-  const schema: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": "VideoObject",
-    name: `${displayName} · Lastest visual regression run`,
-    description,
-    thumbnailUrl: [thumbnailUrl],
-    uploadDate,
-    // contentUrl ONLY — Google prefers it over embedUrl, and an embedUrl
-    // pointing at the page itself makes GSC report "multiple video URLs"
-    // (the page URL gets parsed as a second video). embedUrl is reserved
-    // for a dedicated iframe player URL, which we don't have.
-    contentUrl: absVideo,
-  };
-  if (durationMs && durationMs > 0) {
-    schema.duration = msToIso8601Duration(durationMs);
-  }
-  return schema;
+
+  return clips.map((clip, i) => {
+    const thumbnailUrl =
+      i === 0 ? ogThumbnail : clip.poster ? abs(clip.poster) : ogThumbnail;
+    const name =
+      i === 0
+        ? `${displayName} · Lastest visual regression run`
+        : `${displayName} · Lastest visual regression run (clip ${i + 1})`;
+    const schema: Record<string, unknown> = {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      name,
+      description,
+      thumbnailUrl: [thumbnailUrl],
+      // contentUrl ONLY — Google prefers it over embedUrl, and an embedUrl
+      // pointing at the page itself makes GSC report "multiple video URLs"
+      // (the page URL gets parsed as a second video). embedUrl is reserved
+      // for a dedicated iframe player URL, which we don't have.
+      contentUrl: abs(clip.src),
+    };
+    if (uploadDate) schema.uploadDate = uploadDate;
+    if (clip.durationMs && clip.durationMs > 0) {
+      schema.duration = msToIso8601Duration(clip.durationMs);
+    }
+    return schema;
+  });
 }
 
 function msToIso8601Duration(ms: number): string {
