@@ -151,6 +151,7 @@ export async function getPlaywrightSettings(repositoryId?: string | null) {
     designMode: null as string | null,
     perfMode: null as string | null,
     urlMode: null as string | null,
+    apiMode: null as string | null,
     createdAt: null,
     updatedAt: null,
   };

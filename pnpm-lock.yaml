@@ -117,6 +117,9 @@ importers:
       '@use-gesture/react':
         specifier: ^10.3.1
         version: 10.3.1(react@19.2.3)
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
       better-auth:
         specifier: ^1.6.14
         version: 1.6.14(better-sqlite3@12.8.0)(drizzle-kit@0.31.8)(drizzle-orm@0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8))(next@16.2.6(@babel/core@7.28.6)(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0)))
@@ -201,6 +204,9 @@ importers:
       tesseract.js:
         specifier: ^7.0.0
         version: 7.0.0
+      undici:
+        specifier: ^8.3.0
+        version: 8.4.1
       unpdf:
         specifier: ^1.4.0
         version: 1.4.0
@@ -5155,6 +5161,13 @@ packages:
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
+  undici@8.4.1:
+    resolution:
+      {
+        integrity: sha512-RNHlB4fxZK0IrkhBsxhlbx7s8kFWwr7rzzOqj5nvZugw3ig3RsB7KW3zVlV0eu8POl+rx5d1hmL7rRg0z1owow==,
+      }
+    engines: { node: ">=22.19.0" }
 
   unified@11.0.5:
     resolution: {integrity: sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==}
@@ -10415,6 +10428,8 @@ snapshots:
   underscore@1.13.8: {}
 
   undici-types@6.21.0: {}
+
+  undici@8.4.1: {}
 
   unified@11.0.5:
     dependencies:

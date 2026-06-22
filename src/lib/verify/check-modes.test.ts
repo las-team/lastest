@@ -27,6 +27,7 @@ describe("check-modes — derivation", () => {
       design: "disable",
       perf: "log",
       url: "log",
+      api: "enforce",
     } satisfies CheckModeMap);
   });
 
@@ -163,8 +164,16 @@ describe("check-modes — patch shape", () => {
       designMode: patch.designMode,
       perfMode: patch.perfMode,
       urlMode: patch.urlMode,
+      apiMode: patch.apiMode,
     });
     expect(rederived).toEqual(defaultCheckModes());
+  });
+
+  it("round-trips the api layer mode", () => {
+    expect(checkModesToSettingsPatch({ api: "log" }).apiMode).toBe("log");
+    expect(deriveCheckModes({ apiMode: "disable" }).api).toBe("disable");
+    // No stored apiMode → falls back to the enforce default.
+    expect(deriveCheckModes({}).api).toBe("enforce");
   });
 
   it("does not emit fields for layers that were not selected", () => {
@@ -378,7 +387,13 @@ describe("check-modes — per-test overrides", () => {
   });
 
   it("ignores unknown mode strings", () => {
-    expect(pickTestModeOverrides({ a11yMode: "notamode" })).toBeNull();
+    // Feeding an invalid mode at runtime — the parser drops it and returns null.
+    expect(
+      pickTestModeOverrides({ a11yMode: "notamode" } as Record<
+        string,
+        unknown
+      >),
+    ).toBeNull();
   });
 
   it("mergeWithTestOverrides: per-test wins, repo fills the gap", () => {

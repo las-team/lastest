@@ -10,7 +10,7 @@ Lastest records browser interactions, runs Playwright tests, diffs screenshots a
 
 Install: `npx @lastest/mcp-server --url <URL> --api-key <KEY>`
 
-Tools: lastest_run_tests, lastest_get_build_status, lastest_list_tests, lastest_list_failing_tests, lastest_get_visual_diff, lastest_approve_baseline, lastest_reject_baseline, lastest_create_test, lastest_get_coverage, lastest_heal_test
+Tools: lastest_run_tests, lastest_validate_diff, lastest_build (action: list|get|review), lastest_test (action: list|get|update|delete; filter: failing), lastest_get_diffs (scope: single|build), lastest_decide_diff (action: approve|reject), lastest_create_test, lastest_heal_test, lastest_suggest_app_fix, lastest_insights (action: coverage|qa)
 
 ## API
 

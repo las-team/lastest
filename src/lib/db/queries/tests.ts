@@ -1242,3 +1242,26 @@ export async function unlinkSpec(specId: string) {
     })
     .where(eq(testSpecs.id, specId));
 }
+
+/**
+ * Of the given test ids, which have ever executed successfully — i.e. have at
+ * least one `test_results` row with `status='passed'`. Used by RCA to decide
+ * whether a test's baseline is trustworthy (no green history → lean test-error).
+ */
+export async function getTestsWithAnyPassedResult(
+  testIds: string[],
+): Promise<Set<string>> {
+  if (!testIds.length) return new Set();
+  const rows = await db
+    .selectDistinct({ testId: testResults.testId })
+    .from(testResults)
+    .where(
+      and(
+        inArray(testResults.testId, testIds),
+        eq(testResults.status, "passed"),
+      ),
+    );
+  return new Set(
+    rows.map((r) => r.testId).filter((id): id is string => id != null),
+  );
+}

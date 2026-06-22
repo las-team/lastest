@@ -56,8 +56,10 @@ const dockerfile = readFileSync(dockerfilePath, "utf8");
 
 // Every pinned path appears as `.pnpm/<token>` where <token> = <name>@<version>.
 // Capture each unique token. Token runs until `/`, whitespace, or end-of-token.
+// The version must start with a digit, so illustrative placeholders in comments
+// (e.g. `.pnpm/@anthropic-ai+claude-agent-sdk@...`) are ignored, not treated as pins.
 const tokens = new Set();
-for (const m of dockerfile.matchAll(/\.pnpm\/([^/\s\\]+@[^/\s\\]+)/g))
+for (const m of dockerfile.matchAll(/\.pnpm\/([^/\s\\]+@\d[^/\s\\]*)/g))
   tokens.add(m[1]);
 
 // name = everything up to the first `@` that is followed by a digit (version start).

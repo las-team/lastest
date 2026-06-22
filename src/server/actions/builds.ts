@@ -806,7 +806,13 @@ async function runBuildAsync(
     (playwrightSettings.browsers as string[]).length > 0
       ? (playwrightSettings.browsers as string[])
       : ["chromium"];
-  const totalTestsAcrossBrowsers = tests.length * browsers.length;
+  // E1: api tests are browser-independent — they run exactly once per build,
+  // not once per browser. Partition them out of the per-browser accounting and
+  // loop so a multi-browser build doesn't duplicate api test_results.
+  const apiTestsForBuild = tests.filter((t) => t.testType === "api");
+  const browserTestsForBuild = tests.filter((t) => t.testType !== "api");
+  const totalTestsAcrossBrowsers =
+    browserTestsForBuild.length * browsers.length + apiTestsForBuild.length;
 
   // Store browsers on the build record
   await queries.updateBuild(buildId, {
@@ -852,6 +858,7 @@ async function runBuildAsync(
     urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
     storageStateSnapshot?: import("@/lib/db/schema").StorageStateSnapshot;
+    apiResult?: import("@/lib/db/schema").ApiTestResultData;
   }) => {
     processedCount++;
 
@@ -861,6 +868,7 @@ async function runBuildAsync(
       testId: result.testId,
       testVersionId: versionIdMap.get(result.testId) ?? null,
       status: result.status,
+      apiResult: result.apiResult,
       screenshotPath: result.screenshotPath,
       screenshots: result.screenshots,
       errorMessage: result.errorMessage,
@@ -1052,6 +1060,15 @@ async function runBuildAsync(
     // triage unit. Best-effort — failure here never blocks the build.
     try {
       const { scoreMultiLayer } = await import("@/lib/comparison/scorer");
+      // E1: fold api-test assertion evidence into the step verdict.
+      const apiEvidence: import("@/lib/db/schema").EvidenceItem[] = [];
+      if (result.apiResult) {
+        apiEvidence.push(
+          ...(await import("@/lib/api-test/evidence")).apiResultToEvidence(
+            result.apiResult,
+          ),
+        );
+      }
       const prevResult = await queries.getPreviousTestResultForTest(
         result.testId,
         testRunId,
@@ -1108,6 +1125,7 @@ async function runBuildAsync(
                 id: primary.id,
               }
             : null,
+          apiEvidence,
         });
         await queries.createStepComparison({
           buildId,
@@ -1184,8 +1202,29 @@ async function runBuildAsync(
       setupStatus: remoteSetupInfo ? "running" : "skipped",
     });
 
+    // E1: run api tests once, before the per-browser loop (they execute
+    // in-process — no runner/EB dispatch — and are browser-independent).
+    if (apiTestsForBuild.length > 0) {
+      currentBrowserType = browsers[0];
+      await executeTests(
+        apiTestsForBuild,
+        testRunId,
+        {
+          repositoryId,
+          teamId,
+          runnerId,
+          environmentConfig: envConfig,
+          playwrightSettings,
+          jobId,
+        },
+        onProgress,
+        onResult,
+      );
+    }
+
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
+      if (browserTestsForBuild.length === 0) break;
       currentBrowserType = browserType;
       console.log(`[build] Running tests with browser: ${browserType}`);
 
@@ -1205,7 +1244,7 @@ async function runBuildAsync(
 
       try {
         await executeTests(
-          tests,
+          browserTestsForBuild,
           testRunId,
           {
             repositoryId,
@@ -1244,6 +1283,12 @@ async function runBuildAsync(
         }
         throw error;
       }
+    }
+
+    // api-only build: the browser loop (which owns setup completion) was
+    // skipped — don't leave a resolved setup stuck in 'running'.
+    if (browserTestsForBuild.length === 0 && remoteSetupInfo) {
+      await queries.updateBuild(buildId, { setupStatus: "skipped" });
     }
 
     // Check if this build was cancelled while running
@@ -1411,6 +1456,51 @@ async function runBuildAsync(
       console.error("[build] step-criteria evaluation failed:", err);
     }
 
+    // B1: If the build's job was terminated externally while executing — the
+    // build watchdog (markStaleJobsAsCrashed → "Job timed out (no progress…)")
+    // or a user cancel — do NOT run the clean, diff-driven finalize below.
+    // computeBuildStatus returns safe_to_merge for a run that recorded no diffs,
+    // so finalizing a watchdog-killed run would clobber the failure back to a
+    // false green (observed). Honor the termination instead.
+    const finalJob = await queries.getBackgroundJob(jobId);
+    if (finalJob?.error === "Cancelled by user") {
+      // cancelJob owns the statuses — mirror the post-setup early return.
+      revalidatePath("/builds");
+      revalidatePath("/");
+      if (targetRunner !== "auto") {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
+      return;
+    }
+    if (finalJob?.status === "failed") {
+      const abortErr =
+        finalJob.error || "Build job terminated before completion";
+      await queries.updateTestRun(testRunId, {
+        completedAt: new Date(),
+        status: "failed",
+      });
+      await queries.updateBuild(buildId, {
+        passedCount,
+        failedCount,
+        changesDetected,
+        flakyCount,
+        overallStatus: "blocked",
+        elapsedMs: Date.now() - startTime,
+        completedAt: new Date(),
+        executorError: abortErr,
+        executorFailedAt: new Date(),
+      });
+      console.warn(
+        `[build] ${buildId} finalized as blocked — job terminated externally: ${abortErr}`,
+      );
+      revalidatePath("/builds");
+      revalidatePath("/");
+      if (targetRunner !== "auto") {
+        processNextQueuedBuild(repositoryId, targetRunner);
+      }
+      return;
+    }
+
     // Update test run status
     const hasFailures = failedCount > 0;
     await queries.updateTestRun(testRunId, {
@@ -1419,7 +1509,24 @@ async function runBuildAsync(
     });
 
     // Update build final metrics and status
-    const overallStatus = await queries.computeBuildStatus(buildId);
+    let overallStatus = await queries.computeBuildStatus(buildId);
+
+    // B2: computeBuildStatus is diff-driven — it returns safe_to_merge whenever
+    // a run produced no rejected diffs, which ALSO matches a run that dropped
+    // tests (recorded no result at all) or recorded hard failures that left no
+    // diff. Guard the false green: if fewer tests reported than were dispatched,
+    // or any reported as failed/setup_failed, the build is not safe.
+    if (
+      (processedCount < totalTestsAcrossBrowsers || failedCount > 0) &&
+      overallStatus === "safe_to_merge"
+    ) {
+      console.warn(
+        `[build] ${buildId}: escalating safe_to_merge → blocked ` +
+          `(reported ${processedCount}/${totalTestsAcrossBrowsers}, failed ${failedCount}); ` +
+          `diff-driven status would have been a false green`,
+      );
+      overallStatus = "blocked";
+    }
 
     // Aggregate a11y scores across all test results for this build (only if a11y data exists)
     let a11yUpdate: {
@@ -1510,9 +1617,17 @@ async function runBuildAsync(
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
     import("@/lib/change-map/compute")
-      .then(({ computeChangeMap }) => {
-        computeChangeMap(buildId).catch((e) => {
+      .then(async ({ computeChangeMap }) => {
+        await computeChangeMap(buildId).catch((e) => {
           console.error(`[change-map] compute failed for build ${buildId}:`, e);
+        });
+        // RCA verdict ("is this diff the test or the code?") fuses the change
+        // map with each diff's pixel/DOM signals, so it must run AFTER the
+        // change map is persisted. Best-effort — the UI treats a missing
+        // verdict as "unknown".
+        const { classifyBuildDiffs } = await import("@/lib/rca/run");
+        await classifyBuildDiffs(buildId).catch((e) => {
+          console.error(`[rca] classify failed for build ${buildId}:`, e);
         });
       })
       .catch(console.error);

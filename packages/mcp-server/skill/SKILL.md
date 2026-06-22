@@ -75,35 +75,39 @@ The API key is created at **Settings → Runners & API Access → Create API Key
 
 Always verify connectivity before mutating state.
 
-1. **Check health** — call `lastest_health_check`. If it fails, ask the user to verify the URL and API key, then stop.
-2. **Find the repo** — call `list_repos`. If there are multiple, ask the user which one.
+1. **Check health** — call `lastest_status` with `action: "health"`. If it fails, ask the user to verify the URL and API key, then stop.
+2. **Find the repo** — call `lastest_repo` with `action: "list"`. If there are multiple, ask the user which one.
 3. **Pick tests**:
-   - All tests in an area: call `list_tests_by_area` and skip to step 4.
-   - A subset: call `list_tests` (or `list_tests_by_area`) and confirm which ones with the user.
-4. **Run** — call `create_build` with the repo id and optional `testIds`. Poll `get_build` until the build finishes, surfacing progress to the user.
+   - All tests in an area: call `lastest_area` with `action: "list_tests"` and skip to step 4.
+   - A subset: call `lastest_test` with `action: "list"` (or `lastest_area` `action: "list_tests"`) and confirm which ones with the user.
+4. **Run** — call `lastest_run_tests` with the repo id and optional `testIds`. Poll `lastest_build` (`action: "get"`) until the build finishes, surfacing progress to the user.
 5. **Review diffs**:
-   - Call `get_build` for the finished build. If there are visual diffs, iterate through them with `get_diff`.
-   - For each diff, describe it to the user and ask whether to `approve_diff` or `reject_diff`. Do **not** approve/reject without explicit confirmation.
-6. **AI-assisted test creation or healing** — if the user wants a new test, call `create_test` with a URL and prompt. If an existing test is broken, call `heal_test` after confirming.
+   - Call `lastest_build` (`action: "get"`) for the finished build. If there are visual diffs, inspect them with `lastest_get_diffs` (`scope: "build"`, or `scope: "single"` per diff).
+   - For each diff, describe it to the user and ask whether to approve or reject via `lastest_decide_diff`. Do **not** approve/reject without explicit confirmation.
+6. **AI-assisted test creation or healing** — if the user wants a new test, call `lastest_create_test` with a URL and prompt. If an existing test is broken, call `lastest_heal_test` after confirming.
 
 ## Safety rules
 
-- **Never** call `approve_all_diffs`, `delete_test`, or `reject_diffs` (batch) without the user explicitly confirming the scope first — these operations are destructive or change shared baselines for the whole team.
+- **Never** call `lastest_decide_diff` with a `buildId` (approve-all), `lastest_test` `action: "delete"`, or `lastest_decide_diff` `action: "reject"` on a batch without the user explicitly confirming the scope first — these operations are destructive or change shared baselines for the whole team.
 - **Never** create API keys or change team settings from within this skill.
-- If `lastest_health_check` or any tool returns a 401, stop and ask the user to regenerate their API key; do not retry with a different key.
+- If `lastest_status` (`action: "health"`) or any tool returns a 401, stop and ask the user to regenerate their API key; do not retry with a different key.
 
 ## Tool reference (via @lastest/mcp-server)
 
-| Purpose          | Tools                                                                              |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| Health           | `lastest_health_check`                                                             |
-| Repositories     | `list_repos`, `get_repo`                                                           |
-| Tests            | `list_tests`, `get_test`, `create_test`, `update_test`, `delete_test`, `heal_test` |
-| Functional areas | `list_areas`, `create_area`, `list_tests_by_area`                                  |
-| Builds & runs    | `create_build`, `get_build`, `list_builds`, `get_run`                              |
-| Diffs            | `get_diff`, `approve_diff`, `reject_diff`, `approve_all_diffs`                     |
-| Jobs             | `get_active_jobs`, `get_job`                                                       |
-| Coverage         | `get_coverage`                                                                     |
+Pure CRUD lives on resource tools that take an `action` (or `scope`) discriminator; workflow verbs are standalone.
+
+| Purpose          | Tool(s)                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| Status & jobs    | `lastest_status` (`health` \| `jobs` \| `job`)                                                       |
+| Repositories     | `lastest_repo` (`list` \| `get` \| `create` \| `update` \| `get_settings` \| `update_settings`)      |
+| Functional areas | `lastest_area` (`list` \| `create` \| `update` \| `delete` \| `list_tests`)                          |
+| Tests            | `lastest_test` (`list` \| `get` \| `update` \| `delete`), `lastest_create_test`, `lastest_heal_test` |
+| Builds & runs    | `lastest_build` (`list` \| `get` \| `review`), `lastest_run_tests`, `lastest_validate_diff`          |
+| Diffs            | `lastest_get_diffs` (`single` \| `build`), `lastest_decide_diff` (`approve` \| `reject`)             |
+| Verify phase     | `lastest_verify` (`view` \| `change_map`), `lastest_approve_layer`                                   |
+| Sharing          | `lastest_publish_share`, `lastest_share` (`list` \| `revoke`)                                        |
+| Insights         | `lastest_insights` (`coverage` \| `qa`)                                                              |
+| Setup & storage  | `lastest_setup_script` (5 actions), `lastest_storage_state` (`list` \| `create` \| `delete`)         |
 
 Full docs: [Lastest MCP Server wiki](https://github.com/las-team/lastest/wiki/MCP-Server).
 

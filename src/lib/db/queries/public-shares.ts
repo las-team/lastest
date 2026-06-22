@@ -14,6 +14,7 @@ import type {
   PublicShare,
   Baseline,
   CapturedScreenshot,
+  DomDiffResult,
   StepComparisonEvidence,
   StepVerdict,
 } from "../schema";
@@ -317,6 +318,11 @@ export type ShareVisualDiff = {
   plannedDiffImagePath: string | null;
   mainBaselineImagePath: string | null;
   mainDiffImagePath: string | null;
+  // Legacy DOM-diff location: builds.ts writes the DOM diff into
+  // visual_diff.metadata.domDiff (the multi-layer scorer's step_comparisons
+  // .layers.dom is the newer home). The share page's DOM overlay falls back to
+  // this when layers.dom is absent — mirrors Verify's `layers?.dom ?? domDiff`.
+  domDiff: DomDiffResult | null;
   testResultStatus: string | null;
   testName: string | null;
 };
@@ -380,6 +386,9 @@ export async function getShareDataBySlug(
       plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
       mainBaselineImagePath: visualDiffs.mainBaselineImagePath,
       mainDiffImagePath: visualDiffs.mainDiffImagePath,
+      // Pull only the domDiff sub-object out of metadata (the rest — aiAnalysis,
+      // GH links — would bloat the payload and the share page never reads it).
+      domDiff: sql<DomDiffResult | null>`${visualDiffs.metadata}->'domDiff'`,
       testResultStatus: testResults.status,
       testName: tests.name,
     })

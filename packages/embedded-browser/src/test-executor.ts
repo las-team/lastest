@@ -814,6 +814,9 @@ export class EmbeddedTestExecutor {
         domSnapshot = await getAllDomSelectors(
           page,
           DEFAULT_DOM_SNAPSHOT_PRIORITY,
+          // Capture curated computed styles so RCA can surface per-property CSS
+          // deltas in the diff drill-down (takes effect after an EB rebuild).
+          true,
         );
       } catch (err) {
         logFn(
