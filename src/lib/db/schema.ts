@@ -526,6 +526,13 @@ export const testRuns = pgTable("test_runs", {
 export interface CapturedScreenshot {
   path: string;
   label?: string;
+  // Offset of this capture into the test recording, in milliseconds (capture
+  // wall-clock minus the video-recording start). Powers the public share page's
+  // "In this video" chapter rail, which seeks the recording to each step.
+  // Optional/back-compat: legacy rows lack it, and the share page falls back to
+  // distributing steps evenly across the recording duration. jsonb column, so
+  // adding this field needs no migration.
+  atMs?: number;
 }
 
 // Accessibility violation from axe-core.

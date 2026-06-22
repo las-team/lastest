@@ -18,7 +18,7 @@
  * - Removal of test-local function definitions
  */
 
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
 import {
   setupFreezeScripts,
@@ -103,6 +103,9 @@ export interface EmbeddedTestResult {
     data: string;
     width: number;
     height: number;
+    /** Real capture time + offset into the recording (ms) for share chapters. */
+    capturedAt?: number;
+    atMs?: number;
   }>;
   /** Page innerText captured alongside each screenshot when textCaptureEnabled.
    *  Filename is the screenshot's filename with `.txt` extension so the host
@@ -484,6 +487,10 @@ export class EmbeddedTestExecutor {
       data: string;
       width: number;
       height: number;
+      // Real capture time + offset into the recording (ms) for the share page's
+      // "In this video" chapter rail. EB previously dropped timing entirely.
+      capturedAt?: number;
+      atMs?: number;
     }> = [];
     const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
@@ -584,8 +591,13 @@ export class EmbeddedTestExecutor {
     // Limitations: per-test video + context-level stabilization overrides can't be applied.
     let testContext: BrowserContext;
     let reusedPersistentContext = false;
+    // Wall-clock anchor for per-step chapter offsets (atMs): Playwright starts
+    // the webm at context creation. Set inside buildFreshContext when recording.
+    let videoStartMs: number | null = null;
+    // Cached CDP session for resize-free full-page capture (Chromium only).
+    let cdpScreenshotSession: CDPSession | null = null;
     const buildFreshContext = async (state: unknown) => {
-      return browser.newContext({
+      const freshContext = await browser.newContext({
         viewport,
         acceptDownloads: true,
         ...(state
@@ -618,6 +630,9 @@ export class EmbeddedTestExecutor {
           ? { userAgent: command.userAgentOverride }
           : {}),
       });
+      // Anchor the recording start for chapter offsets (only when recording).
+      if (videoDir) videoStartMs = Date.now();
+      return freshContext;
     };
     if (persistentSetupId) {
       const entry = this.setupContexts.get(persistentSetupId);
@@ -1148,12 +1163,67 @@ export class EmbeddedTestExecutor {
       const rawScreenshot = page.screenshot.bind(page);
       let screenshotStep = 1;
 
+      // Resize-free full-page capture for the recording. CDP
+      // captureBeyondViewport (Chromium) renders the whole page off-surface
+      // WITHOUT resizing the live viewport the webm records — unlike
+      // page.screenshot({fullPage}), which resizes the layout to full document
+      // height (1×1 in some Playwright builds). Only used while recording; on any
+      // CDP error we fall back to page.screenshot so non-recorded runs and
+      // existing baselines are unaffected.
+      const captureFullPageBuffer = async (): Promise<Buffer> => {
+        if (videoDir) {
+          try {
+            if (!cdpScreenshotSession) {
+              cdpScreenshotSession = await page.context().newCDPSession(page);
+            }
+            const lm = (await cdpScreenshotSession.send(
+              "Page.getLayoutMetrics",
+            )) as {
+              cssContentSize?: { width: number; height: number };
+              contentSize?: { width: number; height: number };
+            };
+            const cs = lm.cssContentSize ?? lm.contentSize;
+            if (cs) {
+              const res = (await cdpScreenshotSession.send(
+                "Page.captureScreenshot",
+                {
+                  format: "png",
+                  captureBeyondViewport: true,
+                  fromSurface: true,
+                  clip: {
+                    x: 0,
+                    y: 0,
+                    width: Math.ceil(cs.width),
+                    height: Math.ceil(cs.height),
+                    scale: 1,
+                  },
+                },
+              )) as { data: string };
+              return Buffer.from(res.data, "base64");
+            }
+          } catch (cdpErr) {
+            logFn(
+              "warn",
+              `CDP full-page capture failed, using page.screenshot fallback: ${cdpErr}`,
+            );
+          }
+        }
+        return rawScreenshot({ fullPage: true });
+      };
+
       // Screenshot helper with stabilization
       const captureScreenshot = async (label: string) => {
         try {
           // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
           await applyPreScreenshotStabilization(page, command.stabilization);
-          const buffer = await rawScreenshot({ fullPage: true });
+          // Stamp at the actual capture moment (post-stabilization) so the
+          // "In this video" chapter marker lands on the settled frame.
+          const capturedAt = Date.now();
+          const atMs =
+            videoStartMs != null
+              ? Math.max(0, capturedAt - videoStartMs)
+              : undefined;
+          const buffer = await captureFullPageBuffer();
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, "_")}.png`;
           const base64 = buffer.toString("base64");
           screenshots.push({
@@ -1161,6 +1231,8 @@ export class EmbeddedTestExecutor {
             data: base64,
             width: viewport.width,
             height: viewport.height,
+            capturedAt,
+            atMs,
           });
 
           // Capture page text alongside the screenshot. Best-effort: failures

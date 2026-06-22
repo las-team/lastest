@@ -26,7 +26,7 @@ import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
-import { StepStripClient } from "@/components/share/step-strip-client";
+import { ChapterRail, type Chapter } from "@/components/share/chapter-rail";
 import { DomOverlay } from "@/components/share/dom-overlay-client";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
@@ -341,6 +341,18 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
+  // "In this video" chapters — one per captured step, seeking the recording to
+  // its `atMs` offset. Falls back to even distribution across the recording
+  // duration for legacy runs whose screenshots predate atMs capture.
+  const chapters: Chapter[] = isTestShare
+    ? collectChapters(
+        primaryResult,
+        scopedResults,
+        toUrl,
+        clips[0]?.durationMs ?? primaryResult?.durationMs ?? null,
+      )
+    : [];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
@@ -358,6 +370,7 @@ export default async function PublicSharePage({ params }: PageProps) {
                 {test?.name ? ` · ${test.name}` : ""}.
               </figcaption>
             </figure>
+            {chapters.length > 0 && <ChapterRail chapters={chapters} />}
           </section>
         )}
 
@@ -1722,7 +1735,9 @@ function TestShareBody({
         signInLink={signInLink}
       />
 
-      {steps.length > 0 && <StepStripClient steps={steps} />}
+      {/* The captured-steps strip now lives at page level as the "In this video"
+          chapter rail (ChapterRail, rendered under the player) with timecodes +
+          click-to-seek. `steps` is still computed below for the DOM overlays. */}
 
       <div
         className={`grid gap-3 ${gridColsClass(
@@ -1847,6 +1862,50 @@ function collectSteps(
     const url = toUrl(source.screenshotPath);
     if (url) out.push({ src: url, label: "Final" });
   }
+  return out;
+}
+
+// Build the "In this video" chapters: one per captured step, carrying the
+// recording offset (`atMs`) so the rail can seek the player. When a row lacks
+// `atMs` (legacy runs captured before atMs existed), distribute the steps evenly
+// across the known recording duration; if the duration is also unknown, the
+// chapter renders without a seek target (lightbox-only).
+function collectChapters(
+  primary: ShareTestResult | null,
+  all: ShareTestResult[],
+  toUrl: (p: string | null | undefined) => string | null,
+  durationMs: number | null,
+): Chapter[] {
+  const source = primary ?? all[0] ?? null;
+  if (!source) return [];
+  const ordered: { path: string; label?: string; atMs?: number }[] = [];
+  const seen = new Set<string>();
+  for (const s of source.screenshots ?? []) {
+    if (!s.path || seen.has(s.path)) continue;
+    seen.add(s.path);
+    ordered.push(s);
+  }
+  if (source.screenshotPath && !seen.has(source.screenshotPath)) {
+    ordered.push({ path: source.screenshotPath, label: "Final" });
+  }
+  const n = ordered.length;
+  const durSec = durationMs && durationMs > 0 ? durationMs / 1000 : null;
+  const out: Chapter[] = [];
+  ordered.forEach((s, i) => {
+    const url = toUrl(s.path);
+    if (!url) return;
+    let atSec: number | null = null;
+    if (typeof s.atMs === "number" && s.atMs >= 0) {
+      atSec = s.atMs / 1000;
+    } else if (durSec != null) {
+      atSec = n > 1 ? (durSec * i) / n : 0;
+    }
+    // Never seek past the very end of the clip.
+    if (atSec != null && durSec != null) {
+      atSec = Math.min(atSec, Math.max(0, durSec - 0.1));
+    }
+    out.push({ src: url, label: s.label || `Step ${i + 1}`, atSec });
+  });
   return out;
 }
 

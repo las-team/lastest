@@ -619,6 +619,11 @@ export interface ScreenshotUploadPayload {
   width: number;
   height: number;
   capturedAt: number;
+  // Offset of this capture into the recording (ms): capture time minus
+  // video-recording start. Persisted onto the screenshot row + used by the
+  // public share page's "In this video" chapter rail. Optional — absent for
+  // non-recorded runs and ad-hoc/recorder captures.
+  atMs?: number;
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {

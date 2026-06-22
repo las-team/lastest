@@ -1229,14 +1229,18 @@ async function executeViaRunner(
         );
       });
 
-      let allScreenshots: { path: string; label: string }[] =
+      let allScreenshots: { path: string; label: string; atMs?: number }[] =
         sortedScreenshots.map((r, idx) => {
           const sp = r.payload as Record<string, unknown>;
           // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3")
           const filename = (sp.filename as string) || "";
           const stepMatch = filename.match(/Step_(\d+)/);
           const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
-          return { path: sp.path as string, label };
+          // Carry the recording offset through to test_results.screenshots so the
+          // share page's "In this video" chapter rail can seek to each step.
+          const atMs =
+            typeof sp.atMs === "number" ? (sp.atMs as number) : undefined;
+          return { path: sp.path as string, label, atMs };
         });
 
       // Fallback to disk scan if no DB screenshot entries found
