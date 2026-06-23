@@ -11,7 +11,6 @@ const PUBLIC_PATHS = [
   "/cookies",
   "/dpa",
   "/r/", // Public share pages
-  "/showcase", // Dev-only "In this video" chapter-rail showcase (notFound in prod)
   "/share/", // Static share media (public/share/<slug>/...)
   "/sitemap.xml", // Crawler discovery of /r/<slug> share pages
   "/robots.txt", // Crawler directives
