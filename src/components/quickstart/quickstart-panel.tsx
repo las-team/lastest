@@ -174,12 +174,19 @@ function BrowserColumn({
           Live browser
         </p>
         {streamUrl ? (
-          <div className="rounded-md overflow-hidden border">
+          // `fit` scales the 1280×720 canvas down to the column width inside a
+          // fixed 16:9 box (matches the placeholders below — no layout shift
+          // when the stream attaches). Without it the canvas renders at native
+          // 1:1 inside `overflow-hidden`, so only the top-left corner showed.
+          <div className="overflow-hidden rounded-md border bg-muted/20">
             <BrowserViewer
               streamUrl={streamUrl}
               initialViewport={{ width: 1280, height: 720 }}
               interactive={false}
-              hideControls
+              fit
+              hideToolbar
+              hideStatusBar
+              className="aspect-video w-full"
             />
           </div>
         ) : queued ? (
@@ -454,7 +461,8 @@ export function QuickstartPanel({
           <span className="font-medium">
             {STEP_LABELS[failedStep.id] ?? failedStep.label}
           </span>
-          . Dismiss and start again to retry.
+          . Use <span className="font-medium">Retry</span> above to run again,
+          or dismiss.
         </p>
       )}
     </div>
@@ -499,6 +507,22 @@ export function QuickstartPanel({
                 Cancel
               </Button>
             )}
+            {session && isTerminal && session.status !== "completed" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleStart}
+                disabled={loading || !repositoryId}
+                title="Dismiss this run and start a fresh one"
+              >
+                {loading ? (
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Rocket className="size-3.5 mr-1.5" />
+                )}
+                Retry
+              </Button>
+            )}
             {session && isTerminal && (
               <Button
                 size="sm"
@@ -514,17 +538,25 @@ export function QuickstartPanel({
       </CardHeader>
 
       <CardContent className="pt-0 space-y-3">
-        {credsBlock}
-
-        {session &&
-          (showBrowserColumn ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        {showBrowserColumn ? (
+          // Unequal split: the live browser is the centerpiece while a run is
+          // active, so give it ~60% and the left side ~40%. The creds block
+          // moves into the left column so the browser shares the grid's first
+          // row and sits in-line with the TOP of the section, rather than being
+          // pushed down below a full-width creds block.
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <div className="space-y-3 min-w-0">
+              {credsBlock}
               {leftColumn}
-              <BrowserColumn streamUrl={streamUrl} queued={queuedForBrowser} />
             </div>
-          ) : (
-            leftColumn
-          ))}
+            <BrowserColumn streamUrl={streamUrl} queued={queuedForBrowser} />
+          </div>
+        ) : (
+          <>
+            {credsBlock}
+            {leftColumn}
+          </>
+        )}
 
         {error && <p className="text-xs text-destructive">{error}</p>}
       </CardContent>

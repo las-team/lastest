@@ -200,10 +200,26 @@ ${renderEbBootstrap()}
   const submit = page.getByRole('button', { name: /sign ?up|register|create account|get started/i }).first();
   await submit.click();
 
-  await Promise.race([
-    page.waitForURL(/dashboard|onboarding|welcome|home|app|projects/i, { timeout: 15000 }),
-    page.waitForSelector('[role="alert"]:visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
-  ]).catch(() => {});
+  // Success = left the auth page OR a session/auth cookie was set. The Lastest-
+  // style register form awaits sign-up, THEN a consent server-action, THEN
+  // redirects — so on a cold EB the navigation can lag many seconds. Poll up to
+  // 30s for EITHER signal instead of sampling the URL once (a single 15s sample
+  // false-failed slow-but-successful signups and discarded the captured session).
+  const AUTH_URL_RE = /register|signup|signin|log[\\-]?in|sign-in|sign-up/i;
+  async function hasSessionCookie() {
+    const cookies = await page.context().cookies().catch(function () { return []; });
+    return cookies.some(function (c) {
+      return c && c.value && /session|auth|token|sid|jwt/i.test(c.name || '');
+    });
+  }
+  let authed = false;
+  const authDeadline = Date.now() + 30000;
+  while (Date.now() < authDeadline) {
+    if (!AUTH_URL_RE.test(page.url()) || (await hasSessionCookie())) { authed = true; break; }
+    const rejected = await page.locator('[role="alert"]:visible, .error:visible, [data-error]:visible').first().isVisible().catch(function () { return false; });
+    if (rejected) break;
+    await page.waitForTimeout(500);
+  }
   await settle();
 
   stepLogger.log('Scenario 3: Post-signup landing');
@@ -215,8 +231,10 @@ ${renderEbBootstrap()}
     throw new Error('verify-email gate detected after submit');
   }
 
+  // A captured session means auth succeeded even if the post-signup redirect
+  // lagged — the session, not the landing URL, is what auth-setup needs.
   const url = page.url();
-  if (/register|signup|signin|log[\\-]?in|sign-in|sign-up/i.test(url)) {
+  if (!authed && AUTH_URL_RE.test(url)) {
     await page.screenshot({ path: screenshotPath, fullPage: true });
     // Scrape visible error text verbatim from the site so the user sees the
     // actual rejection (e.g. "Sign-ups from disposable email addresses are not
@@ -240,6 +258,10 @@ ${renderEbBootstrap()}
     ];
     const ERROR_HINTS = /(not allowed|not supported|invalid|required|must|cannot|disposable|business|already|exists|taken|incorrect|wrong|weak|too (short|long|weak|common)|please|try again|failed|error|denied|blocked|use a different|use another|forbidden|temporarily)/i;
     const NOISE_HINTS = /(privacy policy|terms (and|of)|cookie|all rights reserved|copyright|^\\s*\\d{1,4}\\s*$|^\\W*$)/i;
+    // Strong error verbs override the noise filter — "Please accept the Terms of
+    // Service and Privacy Policy to continue" is a real validation error, not
+    // footer boilerplate, even though it mentions "terms"/"privacy policy".
+    const STRONG_ERROR = /(please|must|required|accept|agree to|enter|provide|invalid|already|exists|disposable|not allowed|too (short|long|weak))/i;
     async function collectErrorTexts(scope) {
       const seen = new Set();
       const out = [];
@@ -252,7 +274,7 @@ ${renderEbBootstrap()}
           const t = ((await loc.textContent().catch(() => '')) || '')
             .replace(/\\s+/g, ' ').trim();
           if (t.length < 4 || t.length > 240) continue;
-          if (NOISE_HINTS.test(t)) continue;
+          if (NOISE_HINTS.test(t) && !STRONG_ERROR.test(t)) continue;
           if (!ERROR_HINTS.test(t)) continue;
           const key = t.toLowerCase();
           if (seen.has(key)) continue;
@@ -280,7 +302,7 @@ ${renderEbBootstrap()}
         for (const raw of lines) {
           const t = raw.replace(/\\s+/g, ' ').trim();
           if (t.length < 6 || t.length > 240) continue;
-          if (NOISE_HINTS.test(t)) continue;
+          if (NOISE_HINTS.test(t) && !STRONG_ERROR.test(t)) continue;
           if (!ERROR_HINTS.test(t)) continue;
           const key = t.toLowerCase();
           if (seen.has(key)) continue;

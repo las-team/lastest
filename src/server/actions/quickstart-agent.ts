@@ -37,7 +37,7 @@ import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
 import { publishBuildShare } from "./public-shares";
 import { claimEmbeddedBrowserForAgent } from "./ai";
-import { releasePoolEB } from "./embedded-sessions";
+import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { db } from "@/lib/db";
 import { embeddedSessions } from "@/lib/db/schema";
@@ -350,6 +350,37 @@ async function runBuildAndWait(
 }
 
 // ---------------------------------------------------------------------------
+// EB claim failure diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an actionable failure message for a scout step that couldn't get an
+ * Embedded Browser. `claimErr` is the error the claim path threw (usually
+ * swallowed by `.catch(() => undefined)`); when the claim merely timed out it's
+ * undefined, so we probe pool health to explain WHY. The most common dev cause
+ * is the EB image not being imported into the k3d cluster (pods stuck in
+ * ImagePullBackOff / Pending) — surfaced here instead of a bare "all browsers
+ * are busy", which sent operators chasing the wrong thing.
+ */
+async function describeEbClaimFailure(claimErr: unknown): Promise<string> {
+  if (claimErr instanceof Error && claimErr.message) {
+    return `Couldn't get a browser for the scout: ${claimErr.message}`;
+  }
+  const health = await getEbPoolHealth().catch(() => null);
+  if (!health) {
+    return "Couldn't get a browser for the scout: no Embedded Browser became available, and pool health could not be read.";
+  }
+  if (health.size > health.online) {
+    const unready = health.size - health.online;
+    return `Couldn't get a browser for the scout: ${health.online} ready, ${unready} provisioned but not ready (cap ${health.max}). EB pods are likely unhealthy — stuck pulling the image (ImagePullBackOff) or pending on resources. An operator may need to restart the EB pool (pnpm stack:refresh:eb).`;
+  }
+  if (health.size >= health.max) {
+    return `Couldn't get a browser for the scout: all ${health.max} browsers are busy and the pool is at capacity. Try again once a run finishes.`;
+  }
+  return `Couldn't get a browser for the scout: no Embedded Browser became ready (${health.online} ready, pool ${health.size}/${health.max}). The EB pool may be unhealthy — an operator may need to restart it (pnpm stack:refresh:eb).`;
+}
+
+// ---------------------------------------------------------------------------
 // Step runners
 // ---------------------------------------------------------------------------
 
@@ -474,15 +505,19 @@ async function runQsScoutPublic(
   // Chromium (applyScoutMcpWiring would launch @playwright/mcp without a
   // --cdp-endpoint, the exact in-host execution this codebase forbids). While
   // waiting, surface "queued" so the panel reflects the pool back-pressure.
+  let claimErr: unknown;
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
     mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch(() => undefined);
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
   if (!eb) {
     await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_public",
-      "All browsers are busy. Please try again later.",
+      await describeEbClaimFailure(claimErr),
     );
     return false;
   }
@@ -698,15 +733,19 @@ async function runQsScoutAuthed(
 
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (see runQsScoutPublic for the rationale).
+  let claimErr: unknown;
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
     mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch(() => undefined);
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
   if (!eb) {
     await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_authed",
-      "All browsers are busy. Please try again later.",
+      await describeEbClaimFailure(claimErr),
     );
     return false;
   }
