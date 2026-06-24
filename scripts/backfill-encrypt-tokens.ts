@@ -17,6 +17,9 @@ import {
   oauthAccounts,
   googleSheetsAccounts,
   aiSettings,
+  storageStates,
+  setupConfigs,
+  agentSessions,
 } from "../src/lib/db/schema";
 import { encrypt, ENC_PREFIX } from "../src/lib/crypto";
 import { eq } from "drizzle-orm";
@@ -151,6 +154,102 @@ async function backfillAISettings() {
   }
 }
 
+// ── User-provided app credentials (added later) ──────────────────────────────
+
+// storage_states.storageStateJson — flat text column holding a live Playwright
+// storageState() blob (cookies + localStorage = live session tokens).
+async function backfillStorageStates() {
+  console.log("\n[storageStates]");
+  const rows = await db.select().from(storageStates);
+  for (const row of rows) {
+    await encryptRow(
+      "storageState",
+      row.id,
+      { storageStateJson: row.storageStateJson },
+      async (id, updates) => {
+        await db
+          .update(storageStates)
+          .set(updates)
+          .where(eq(storageStates.id, id));
+      },
+    );
+  }
+}
+
+// setup_configs.authConfig — JSONB; encrypt token / password / header values
+// in place (username left plaintext, matching the query layer).
+async function backfillSetupConfigs() {
+  console.log("\n[setupConfigs]");
+  const rows = await db.select().from(setupConfigs);
+  for (const row of rows) {
+    const cfg = row.authConfig;
+    if (!cfg) {
+      skipped++;
+      continue;
+    }
+    const next = { ...cfg };
+    let changed = false;
+    if (needsEncryption(next.token)) {
+      next.token = encrypt(next.token);
+      changed = true;
+    }
+    if (needsEncryption(next.password)) {
+      next.password = encrypt(next.password);
+      changed = true;
+    }
+    if (next.headers) {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(next.headers)) {
+        if (needsEncryption(v)) {
+          headers[k] = encrypt(v);
+          changed = true;
+        } else {
+          headers[k] = v;
+        }
+      }
+      next.headers = headers;
+    }
+    if (!changed) {
+      skipped++;
+      continue;
+    }
+    console.log(`  setupConfig ${row.id}: encrypting authConfig secrets`);
+    if (!dryRun)
+      await db
+        .update(setupConfigs)
+        .set({ authConfig: next })
+        .where(eq(setupConfigs.id, row.id));
+    encrypted++;
+  }
+}
+
+// agent_sessions.metadata.quickstartPassword — JSONB; encrypt the password
+// sub-field (email left plaintext).
+async function backfillAgentSessions() {
+  console.log("\n[agentSessions]");
+  const rows = await db.select().from(agentSessions);
+  for (const row of rows) {
+    const meta = row.metadata;
+    if (!meta || !needsEncryption(meta.quickstartPassword)) {
+      skipped++;
+      continue;
+    }
+    const next = {
+      ...meta,
+      quickstartPassword: encrypt(meta.quickstartPassword),
+    };
+    console.log(
+      `  agentSession ${row.id}: encrypting metadata.quickstartPassword`,
+    );
+    if (!dryRun)
+      await db
+        .update(agentSessions)
+        .set({ metadata: next })
+        .where(eq(agentSessions.id, row.id));
+    encrypted++;
+  }
+}
+
 async function main() {
   if (dryRun) console.log("DRY RUN — no changes will be written\n");
 
@@ -159,6 +258,9 @@ async function main() {
   await backfillOAuthAccounts();
   await backfillGoogleSheetsAccounts();
   await backfillAISettings();
+  await backfillStorageStates();
+  await backfillSetupConfigs();
+  await backfillAgentSessions();
 
   console.log(
     `\nDone. ${encrypted} field(s) encrypted, ${skipped} already encrypted (skipped).`,

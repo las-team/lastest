@@ -53,9 +53,12 @@ export default async function OnboardingPage({
       }))}
       selectedRepoId={selectedRepo?.id ?? null}
       selectedRepoBaseUrl={
-        selectedRepo?.branchBaseUrls?.default ??
         (selectedRepo?.defaultBranch
           ? selectedRepo.branchBaseUrls?.[selectedRepo.defaultBranch]
+          : undefined) ??
+        selectedRepo?.branchBaseUrls?.main ??
+        (selectedRepo?.branchBaseUrls
+          ? Object.values(selectedRepo.branchBaseUrls)[0]
           : undefined) ??
         null
       }

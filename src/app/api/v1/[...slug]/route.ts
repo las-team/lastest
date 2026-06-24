@@ -2055,7 +2055,7 @@ export async function POST(
     }
 
     // QuickStart agent: POST /api/v1/repos/:id/quickstart
-    // Body: { emailTemplate?: string }
+    // Body: { emailTemplate?: string, appEmail?: string, appPassword?: string }
     if (resource === "repos" && id && subResource === "quickstart") {
       if (!(await verifyRepoOwnership(id, session))) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -2065,12 +2065,22 @@ export async function POST(
         typeof body?.emailTemplate === "string"
           ? body.emailTemplate
           : undefined;
+      const appEmail =
+        typeof body?.appEmail === "string" && body.appEmail.trim().length > 0
+          ? body.appEmail.trim()
+          : undefined;
+      const appPassword =
+        typeof body?.appPassword === "string" && body.appPassword.length > 0
+          ? body.appPassword
+          : undefined;
       try {
         const { startQuickstart } =
           await import("@/server/actions/quickstart-agent");
         const result = await startQuickstart(
           id,
-          emailTemplate ? { emailTemplate } : undefined,
+          emailTemplate || appEmail || appPassword
+            ? { emailTemplate, appEmail, appPassword }
+            : undefined,
         );
         return NextResponse.json(result, { status: 201 });
       } catch (err) {

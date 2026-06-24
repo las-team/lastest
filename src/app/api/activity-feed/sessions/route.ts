@@ -45,6 +45,14 @@ export async function GET(_request: NextRequest) {
     return 0;
   });
 
+  // This raw select bypasses the decrypting getStorageState/getAgentSession
+  // getters, so metadata.quickstartPassword would arrive encrypted — and the
+  // feed UI never needs it regardless. Strip it before returning.
+  const safe = sorted.map((s) => {
+    const { quickstartPassword: _omit, ...metadata } = s.metadata ?? {};
+    return { ...s, metadata };
+  });
+
   // Find a ready EB stream URL for the monitor icon
   const [eb] = await db
     .select({ streamUrl: embeddedSessions.streamUrl })
@@ -53,7 +61,7 @@ export async function GET(_request: NextRequest) {
     .limit(1);
 
   return NextResponse.json({
-    sessions: sorted,
+    sessions: safe,
     ebStreamUrl: eb?.streamUrl ?? null,
   });
 }

@@ -2677,6 +2677,7 @@ export interface QuickstartAuthClassification {
    */
   classification:
     | "email_password"
+    | "login_email_password"
     | "magic_link_only"
     | "oauth_only"
     | "captcha_gated"
@@ -2702,6 +2703,27 @@ export interface QuickstartPublicScout extends QuickstartAuthClassification {
   concept?: string;
   navLinks: Array<{ path: string; label: string }>;
   registerPath?: string | null;
+  /** Login page URL observed in the DOM (distinct from registerPath). Relative
+   *  path (starting with /) or full https URL for cross-subdomain auth. Used by
+   *  the user-credential login path when no automatable signup exists. */
+  loginPath?: string | null;
+  /** Auth library's REST sign-in endpoint when detectable (e.g.
+   *  "/api/auth/sign-in/email" for better-auth). Drives the api-login bypass in
+   *  the login template when the React form doesn't persist a session cookie. */
+  apiLoginEndpoint?: string | null;
+  /** Best-effort auth library guess (better-auth | nextauth | supabase | firebase
+   *  | clerk | lucia | unknown). Informational — surfaced in demo notes + used as
+   *  authFlavor provenance on the captured storage state. */
+  authLibrary?: string;
+  /** Where the session token persists, best-effort. Informs storage-capture and
+   *  re-auth strategy; replay accepts any of these so a precise value isn't
+   *  required for correctness. */
+  tokenLocation?:
+    | "cookie"
+    | "localstorage"
+    | "indexeddb"
+    | "sessionstorage"
+    | "unknown";
   cookieBannerSelectorHint?: string;
   friction?: Array<{ kind: string; note: string }>;
   businessInteraction?: QuickstartBusinessInteraction;
@@ -2719,6 +2741,9 @@ export interface QuickstartAuthSetupMeta {
   storageStateId?: string;
   captured: boolean;
   failureReason?: string;
+  /** Which handshake produced the session: "login" (user-supplied creds) or
+   *  "signup" (fresh demo account). Surfaced in demo notes. */
+  mode?: "login" | "signup";
 }
 
 export interface AgentSessionMetadata {
@@ -2737,12 +2762,28 @@ export interface AgentSessionMetadata {
   skipAI?: boolean;
   // QuickStart-only fields
   quickstartEmail?: string;
+  /** User's real app-login password (QuickStart against their own baseURL).
+   *  Encrypted at rest (AES-256-GCM) via the agent-session query layer in
+   *  queries/integrations.ts — callers always see the decrypted plaintext. */
   quickstartPassword?: string;
   quickstartSlug?: string;
   quickstartStamp?: string;
+  /** True when the user supplied real app login credentials for their own
+   *  baseURL (QuickStart runs against the user's own app). When set,
+   *  quickstartEmail/quickstartPassword hold those creds and the auth-setup runs
+   *  a LOGIN handshake instead of registering a fresh demo account. */
+  credsProvided?: boolean;
+  /** Resolved auth handshake for this run, decided at auth-setup time. */
+  authMode?: "login" | "signup" | "public_only";
   publicScout?: QuickstartPublicScout;
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
+  /** Live CDP screencast URL of the EB the scout is currently driving. Set while
+   *  a scout step holds an EB, cleared when it releases. Powers the panel's live
+   *  browser view. */
+  streamUrl?: string;
+  /** True while an agent step is blocked waiting for an EB from the pool. */
+  queuedForBrowser?: boolean;
   walkthroughTestId?: string;
   buildId?: string;
   /** Build id of the second walkthrough run (after baselines are approved). Replaces

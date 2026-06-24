@@ -20,6 +20,56 @@ export const DESTRUCTIVE_CTA_PATTERN =
 export const CAPTCHA_LOCATOR =
   'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="cloudflare"][src*="challenge"]';
 
+/**
+ * Stable marker thrown by the walkthrough when chained `storage_state` failed to
+ * replay an authenticated session. The orchestrator (`runQsRunAndNotes`) detects
+ * this in the failed test's error message and downgrades to a public-only rerun
+ * rather than shipping login-page screenshots as if they were authed.
+ */
+export const AUTH_CHAIN_FAILED_MARKER =
+  "QuickStart authed walkthrough: storage_state did not authenticate";
+
+/** Current stable Chrome UA. EB's default `HeadlessChrome` string is rejected by
+ *  Cloudflare Turnstile, Clerk, Supabase Auth, and several SaaS edge routers. */
+const EB_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+
+/** Known third-party console-noise scripts to abort before the first navigation.
+ *  The EB executor reds a test on ANY console error; Cloudflare's auto-injected
+ *  email-decoder is the #1 false positive across customer sites. */
+const EB_NOISE_PATTERNS = [
+  "**/cdn-cgi/scripts/**/email-decode.min.js",
+  "**/cdn-cgi/scripts/**/cloudflare-static/**",
+  "**/sentry-cdn.com/**",
+  "**/browser.sentry-cdn.com/**",
+  "**/cdn.segment.com/**",
+  "**/connect.facebook.net/**",
+];
+
+/**
+ * EB Chromium bootstrap, emitted at the top of every rendered test body (mirrors
+ * the mandatory header in the skill's `test-template.md`). Two mitigations that
+ * otherwise falsely-fail 50%+ of runs on the EB pod:
+ *   1. Override the HeadlessChrome User-Agent with a current stable Chrome string.
+ *   2. Abort known third-party console-noise scripts before the first navigation.
+ * The route loop is INLINED (run once) rather than wrapped in a `const fn = () =>`
+ * arrow — the runner's per-statement instrumentation can scope cross-statement
+ * arrow helpers out, throwing "fn is not defined" mid-walk.
+ */
+export function renderEbBootstrap(): string {
+  const patterns = EB_NOISE_PATTERNS.map((p) => `    ${jsString(p)},`).join(
+    "\n",
+  );
+  return [
+    `  await page.context().setExtraHTTPHeaders({ 'User-Agent': ${jsString(EB_USER_AGENT)} }).catch(function () {});`,
+    `  for (const pattern of [`,
+    patterns,
+    `  ]) {`,
+    `    await page.route(pattern, function (r) { return r.abort(); }).catch(function () {});`,
+    `  }`,
+  ].join("\n");
+}
+
 export interface RenderAuthSetupOptions {
   email: string;
   password: string;
@@ -28,6 +78,20 @@ export interface RenderAuthSetupOptions {
    *  for same-origin signup pages; full https:// URL for cross-subdomain auth (e.g.
    *  auth.example.com). REQUIRED — no path-guessing fallback. */
   registerUrl: string;
+}
+
+export interface RenderAuthLoginOptions {
+  /** User-supplied app credentials (QuickStart runs against the user's own app). */
+  email: string;
+  password: string;
+  /** Login URL observed by the scout in the page DOM. Relative path (starting with /)
+   *  or full https:// URL. REQUIRED — no path-guessing fallback. */
+  loginUrl: string;
+  /** Auth library REST sign-in endpoint observed by the scout (e.g.
+   *  "/api/auth/sign-in/email"). When present, the test lands the session cookie
+   *  via a direct POST (bypasses React forms that don't persist on .fill()), and
+   *  falls back to the visible form submit if the POST is rejected. */
+  apiLoginEndpoint?: string | null;
 }
 
 export interface RenderWalkthroughOptions {
@@ -76,7 +140,13 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
   const DEMO_NAME = ${jsString(name)};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const settle = () => page.waitForLoadState('networkidle').catch(() => {});
+  async function settle() {
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
 
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   const accept = page.getByRole('button', { name: /accept|allow|got it|ok$/i });
@@ -130,10 +200,26 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
   const submit = page.getByRole('button', { name: /sign ?up|register|create account|get started/i }).first();
   await submit.click();
 
-  await Promise.race([
-    page.waitForURL(/dashboard|onboarding|welcome|home|app|projects/i, { timeout: 15000 }),
-    page.waitForSelector('[role="alert"]:visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
-  ]).catch(() => {});
+  // Success = left the auth page OR a session/auth cookie was set. The Lastest-
+  // style register form awaits sign-up, THEN a consent server-action, THEN
+  // redirects — so on a cold EB the navigation can lag many seconds. Poll up to
+  // 30s for EITHER signal instead of sampling the URL once (a single 15s sample
+  // false-failed slow-but-successful signups and discarded the captured session).
+  const AUTH_URL_RE = /register|signup|signin|log[\\-]?in|sign-in|sign-up/i;
+  async function hasSessionCookie() {
+    const cookies = await page.context().cookies().catch(function () { return []; });
+    return cookies.some(function (c) {
+      return c && c.value && /session|auth|token|sid|jwt/i.test(c.name || '');
+    });
+  }
+  let authed = false;
+  const authDeadline = Date.now() + 30000;
+  while (Date.now() < authDeadline) {
+    if (!AUTH_URL_RE.test(page.url()) || (await hasSessionCookie())) { authed = true; break; }
+    const rejected = await page.locator('[role="alert"]:visible, .error:visible, [data-error]:visible').first().isVisible().catch(function () { return false; });
+    if (rejected) break;
+    await page.waitForTimeout(500);
+  }
   await settle();
 
   stepLogger.log('Scenario 3: Post-signup landing');
@@ -145,8 +231,10 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
     throw new Error('verify-email gate detected after submit');
   }
 
+  // A captured session means auth succeeded even if the post-signup redirect
+  // lagged — the session, not the landing URL, is what auth-setup needs.
   const url = page.url();
-  if (/register|signup|signin|log[\\-]?in|sign-in|sign-up/i.test(url)) {
+  if (!authed && AUTH_URL_RE.test(url)) {
     await page.screenshot({ path: screenshotPath, fullPage: true });
     // Scrape visible error text verbatim from the site so the user sees the
     // actual rejection (e.g. "Sign-ups from disposable email addresses are not
@@ -170,6 +258,10 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
     ];
     const ERROR_HINTS = /(not allowed|not supported|invalid|required|must|cannot|disposable|business|already|exists|taken|incorrect|wrong|weak|too (short|long|weak|common)|please|try again|failed|error|denied|blocked|use a different|use another|forbidden|temporarily)/i;
     const NOISE_HINTS = /(privacy policy|terms (and|of)|cookie|all rights reserved|copyright|^\\s*\\d{1,4}\\s*$|^\\W*$)/i;
+    // Strong error verbs override the noise filter — "Please accept the Terms of
+    // Service and Privacy Policy to continue" is a real validation error, not
+    // footer boilerplate, even though it mentions "terms"/"privacy policy".
+    const STRONG_ERROR = /(please|must|required|accept|agree to|enter|provide|invalid|already|exists|disposable|not allowed|too (short|long|weak))/i;
     async function collectErrorTexts(scope) {
       const seen = new Set();
       const out = [];
@@ -182,7 +274,7 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
           const t = ((await loc.textContent().catch(() => '')) || '')
             .replace(/\\s+/g, ' ').trim();
           if (t.length < 4 || t.length > 240) continue;
-          if (NOISE_HINTS.test(t)) continue;
+          if (NOISE_HINTS.test(t) && !STRONG_ERROR.test(t)) continue;
           if (!ERROR_HINTS.test(t)) continue;
           const key = t.toLowerCase();
           if (seen.has(key)) continue;
@@ -210,7 +302,7 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
         for (const raw of lines) {
           const t = raw.replace(/\\s+/g, ' ').trim();
           if (t.length < 6 || t.length > 240) continue;
-          if (NOISE_HINTS.test(t)) continue;
+          if (NOISE_HINTS.test(t) && !STRONG_ERROR.test(t)) continue;
           if (!ERROR_HINTS.test(t)) continue;
           const key = t.toLowerCase();
           if (seen.has(key)) continue;
@@ -225,6 +317,115 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
     throw new Error(joined
       ? joined
       : \`auth did not complete — still on \${url}\`);
+  }
+
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+}
+`;
+}
+
+/**
+ * Test 1 (login variant) — signs into the user's OWN app with user-supplied
+ * credentials, captures sign-in screenshots, asserts auth completed. Used when
+ * the user provided creds (QuickStart runs against their own baseURL). When the
+ * scout found an `apiLoginEndpoint`, the test lands the session cookie via a
+ * direct POST (bypasses React forms whose .fill() doesn't persist the session),
+ * then falls back to the visible form submit if the POST is rejected.
+ *
+ * SECURITY: the credentials are baked as literals into the test body, which is
+ * stored team-gated (never exposed on the public /r/ share — that renders
+ * screenshots + notes only). These are the user's own app credentials.
+ */
+export function renderAuthLoginCode(opts: RenderAuthLoginOptions): string {
+  return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  const DEMO_EMAIL = ${jsString(opts.email)};
+  const DEMO_PASSWORD = ${jsString(opts.password)};
+  const API_LOGIN = ${jsString(opts.apiLoginEndpoint ?? "")};
+
+  const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
+  async function settle() {
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
+
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  const accept = page.getByRole('button', { name: /accept|allow|got it|ok$/i });
+  if (await accept.isVisible().catch(() => false)) {
+    await accept.click();
+  }
+  await settle();
+
+  stepLogger.log('Scenario 1: Sign-in page');
+  ${gotoExpr(opts.loginUrl)}
+  await settle();
+  await page.screenshot({ path: shot(1, 'sign-in'), fullPage: true });
+
+  const captcha = page.locator(${jsString(CAPTCHA_LOCATOR)});
+  if (await captcha.first().isVisible().catch(() => false)) {
+    throw new Error('captcha-blocked on sign-in page');
+  }
+
+  stepLogger.log('Scenario 2: Submit sign-in');
+  const emailField = page.getByLabel(/email/i).first()
+    .or(page.getByPlaceholder(/email/i).first())
+    .or(page.locator('input[type="email"]').first());
+  const passField = page.getByLabel(/^password$/i).first()
+    .or(page.getByPlaceholder(/^password$/i).first())
+    .or(page.locator('input[type="password"]').first());
+
+  await emailField.click();
+  await emailField.pressSequentially(DEMO_EMAIL, { delay: 20 });
+  await passField.click();
+  await passField.pressSequentially(DEMO_PASSWORD, { delay: 20 });
+  await page.screenshot({ path: shot(2, 'sign-in-filled'), fullPage: true });
+
+  // API-login bypass: POST the credentials directly so the session cookie sticks
+  // even when the React form's submit handler swallows programmatic input.
+  let apiOk = false;
+  if (API_LOGIN) {
+    apiOk = await page.evaluate(async function (args) {
+      try {
+        const r = await fetch(args.url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: args.email, password: args.password }),
+        });
+        return r.ok;
+      } catch (e) {
+        return false;
+      }
+    }, { url: API_LOGIN, email: DEMO_EMAIL, password: DEMO_PASSWORD });
+    if (apiOk) {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    }
+  }
+  if (!apiOk) {
+    const submit = page.getByRole('button', { name: /sign ?in|log ?in|continue|submit|next/i }).first();
+    await submit.click().catch(function () {});
+    await Promise.race([
+      page.waitForURL(/dashboard|onboarding|welcome|home|app|projects|account/i, { timeout: 15000 }),
+      page.waitForSelector('[role="alert"]:visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
+    ]).catch(function () {});
+  }
+  await settle();
+
+  stepLogger.log('Scenario 3: Post-sign-in landing');
+  const url = page.url();
+  const stillSignInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
+    .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
+  const onAuthUrl = /login|signin|sign-in|log-in/i.test(url);
+  if (onAuthUrl && (await stillSignInCta.isVisible().catch(() => false))) {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    let errText = '';
+    const errLoc = page.locator('[role="alert"], [aria-live="polite"], [aria-live="assertive"], .error, .field-error, [class*="text-red"], [class*="text-destructive"]').first();
+    if (await errLoc.isVisible().catch(() => false)) {
+      errText = ((await errLoc.textContent().catch(() => '')) || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    }
+    throw new Error(errText ? ('sign-in failed: ' + errText) : ('sign-in did not complete — still on ' + url));
   }
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -247,7 +448,13 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const HAS_BIZ_INTERACTION = ${hasBizInteraction};
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const settle = () => page.waitForLoadState('networkidle').catch(() => {});
+  async function settle() {
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
+    await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
+    await page.waitForTimeout(300);
+  }
+
+${renderEbBootstrap()}
 
   stepLogger.log('Scenario 1: Homepage');
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
@@ -259,6 +466,41 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   await page.screenshot({ path: shot(1, 'home'), fullPage: true });
 
   let publicScenario = 2;
+
+  // Primary interaction for canvas / drawing apps (Excalidraw, tldraw, whiteboards,
+  // map tools): when the homepage exposes a large drawing <canvas>, perform a REAL
+  // coordinate-based action — select the rectangle tool ('r', the de-facto shortcut
+  // across drawing apps) and drag a square — so the walkthrough demonstrates the
+  // product's core function instead of only screenshotting nav pages. Best-effort:
+  // gated on a visibly large canvas and fully wrapped, so non-drawing canvases
+  // (charts, games) never break the run.
+  try {
+    const canvas = page.locator('canvas').first();
+    if (await canvas.isVisible().catch(() => false)) {
+      const box = await canvas.boundingBox().catch(() => null);
+      if (box && box.width > 300 && box.height > 200) {
+        await canvas.click({ position: { x: 30, y: 30 } }).catch(() => {});
+        await page.keyboard.press('r').catch(() => {});
+        await page.waitForTimeout(150);
+        const side = Math.min(box.width, box.height) * 0.25;
+        const x1 = box.x + box.width * 0.4;
+        const y1 = box.y + box.height * 0.35;
+        await page.mouse.move(x1, y1);
+        await page.mouse.down();
+        await page.mouse.move(x1 + side * 0.5, y1 + side * 0.5, { steps: 8 });
+        await page.mouse.move(x1 + side, y1 + side, { steps: 8 });
+        await page.mouse.up();
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(300);
+        stepLogger.log(\`Scenario \${publicScenario}: Drew a square on the canvas\`);
+        await page.screenshot({ path: shot(publicScenario, 'draw-square'), fullPage: true });
+        publicScenario++;
+      }
+    }
+  } catch (canvasErr) {
+    stepLogger.warn(\`Canvas draw step skipped: \${canvasErr && canvasErr.message}\`);
+  }
+
   const navLinks = await page.$$eval('a[href]', as => as
     .map(a => a.getAttribute('href') || '')
     .filter(h => h.startsWith('/') && h.length > 1 && !h.startsWith('/_') && !h.startsWith('/#'))
@@ -284,18 +526,23 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
 
   let authed = false;
   if (AUTH_AUTOMATABLE) {
-    try {
-      // Storage state (cookies + localStorage) was attached by the runner via
-      // setupOverrides.extraSteps. Just verify the chain actually authenticated.
-      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-      await settle();
-      const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
-        .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
-      if (await signInCta.isVisible().catch(() => false)) {
-        throw new Error('Storage state did not authenticate the browser (sign-in CTA still visible)');
-      }
-      authed = true;
+    // Hard gate (OUTSIDE the best-effort try/catch below): the runner attached
+    // the captured storage_state (cookies + localStorage) via
+    // setupOverrides.extraSteps. If it did NOT replay an authenticated session
+    // (expired, dropped, or never injected), RED the build instead of silently
+    // shipping login-page screenshots as "authed". The orchestrator detects this
+    // marker on the failed result and downgrades to a public-only rerun.
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await settle();
+    const signInCta = page.getByRole('link', { name: /sign ?in|log ?in/i }).first()
+      .or(page.getByRole('button', { name: /sign ?in|log ?in/i }).first());
+    if (await signInCta.isVisible().catch(() => false)) {
+      await page.screenshot({ path: shot(publicScenario, 'auth-failed'), fullPage: true });
+      throw new Error(${jsString(AUTH_CHAIN_FAILED_MARKER + " (sign-in CTA still visible)")});
+    }
+    authed = true;
 
+    try {
       stepLogger.log(\`Scenario \${publicScenario}: Post-auth landing\`);
       await page.screenshot({ path: shot(publicScenario, 'post-auth'), fullPage: true });
       publicScenario++;
@@ -424,10 +671,6 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
   await settle();
   await page.screenshot({ path: screenshotPath, fullPage: true });
-
-  if (AUTH_AUTOMATABLE && !authed) {
-    stepLogger.warn('Authed phase did not run — see warnings above');
-  }
 }
 `;
 }

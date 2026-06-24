@@ -32,17 +32,28 @@ export interface GenerateDemoNotesInput {
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
   runFacts: QuickstartRunFacts;
+  /** True when the captured login session was successfully captured but did NOT
+   *  replay as authenticated on the test runner, so the walkthrough was
+   *  downgraded to public-only. Distinct from authSetup.captured=false (capture
+   *  itself failed). Surfaced as a testingStruggles item. */
+  authVerificationFailed?: boolean;
 }
 
-const SYSTEM_PROMPT = `You are summarising a Lastest visual-regression baseline run for a SaaS product. Generate the demo notes.
+const SYSTEM_PROMPT = `You are writing the demo notes for a Lastest visual-regression baseline run of a SaaS product. These notes are the qualitative counterpart to the screenshots — the part that says "we actually looked, here's what we noticed." The founder reads them on a public share, so they must be specific, accurate, and genuinely useful.
+
+QUALITY BAR (this is what separates good notes from generic ones):
+- Specific over generic. "Three pricing tiers, each with one differentiator headline, no 'contact sales' tier" beats "clear pricing". Name the actual route, element, label, or count whenever the facts contain it (publicNavRoutes, businessInteraction, safeCtas, friction notes).
+- Quantify when the facts allow it (screenshot count, route count, a timing a friction note mentions). NEVER invent a number, route, or feature.
+- Where a friction point has an obvious one-line fix, say it (e.g. "/signup 404s but /sign-up works — add a redirect").
+- Conversational and concrete. No marketing fluff, no hedging, no filler.
 
 RULES:
-- Pass facts only. Do NOT invent features the input did not mention.
-- uxSummary: 2-3 sentences, conversational, in your own words. Lead with the product's concept (from publicScout.concept). Mention one strong UX signal if present.
-- highlights: 2-4 items the founder would be proud of (clear pricing, polished empty state, fast load, etc.). Safe-for-outreach quality.
-- frictionPoints: 1-3 UX issues observed during the walk. Cookie banner overlap, slow blog index, console-noisy analytics, that kind of thing.
-- testingStruggles: 0-3 items. Captcha, verify-email gates, OAuth-only flows, OTP, hung networkidle. Empty array if none.
-- skippedRoutes: 0-N items. Routes the agent intended to visit but didn't (auth blocked, 404, hang).
+- Pass facts ONLY. Do NOT invent features, routes, timings, or issues the input did not contain. If a section has little real signal, return fewer items (or an empty array) — do not pad.
+- uxSummary: 2-3 sentences. Lead with what the product actually does (from concept / businessInteraction — the primary input + CTA tell you the core job). Then point to the single strongest UX signal in the facts.
+- highlights: 1-4 things the founder should be proud of, each tied to a concrete observation and safe to quote in outreach.
+- frictionPoints: 0-3 real UX issues observed (cookie-banner overlap, slow route, console-noisy analytics, confusing empty state, guessable-URL 404). Product-facing — never shown in outreach.
+- testingStruggles: 0-3 things that made automated testing hard (captcha, verify-email gate, OAuth-only, OTP, hung networkidle, an auth session that wouldn't replay). Empty array if the run was clean.
+- skippedRoutes: 0-N routes the agent meant to visit but couldn't, each with the reason.
 
 OUTPUT STRICT JSON, no markdown, exactly this shape:
 {
@@ -51,6 +62,24 @@ OUTPUT STRICT JSON, no markdown, exactly this shape:
   "frictionPoints": [{ "label": "string", "note": "string" }],
   "testingStruggles": [{ "label": "string", "note": "string" }],
   "skippedRoutes": [{ "path": "string", "reason": "string" }]
+}
+
+EXAMPLE — match this specificity and voice, do NOT copy its content:
+{
+  "uxSummary": "Postbox is a transactional-email API for indie developers; the hero leads with a strong 'send your first email in 4 lines' tagline. The pricing table is unusually clean for an indie product, and the register page is a single minimal column.",
+  "highlights": [
+    { "label": "Pricing clarity", "note": "Three tiers, each with one differentiator headline and no 'contact sales' tier — a strong signal for an indie audience." },
+    { "label": "Empty-state copy", "note": "The /dashboard zero-state ships with working sample data, so a new user skips the 'now what?' moment." }
+  ],
+  "frictionPoints": [
+    { "label": "Cookie banner overlap", "note": "The consent banner covers the hero CTA on first paint; dismissed before the screenshot." }
+  ],
+  "testingStruggles": [
+    { "label": "Captcha on register", "note": "An hCaptcha iframe rendered after submit, so the auth phase fell back to public-only." }
+  ],
+  "skippedRoutes": [
+    { "path": "/dashboard", "reason": "Couldn't authenticate past the captcha." }
+  ]
 }`;
 
 function dedupeItems(items: DemoNoteItem[]): DemoNoteItem[] {
@@ -95,6 +124,9 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     productName: input.productName,
     concept: input.publicScout.concept ?? null,
     tagline: input.publicScout.tagline ?? null,
+    // The primary input + CTA the product is built around — the single best
+    // "what does this actually do" signal for the uxSummary lead sentence.
+    businessInteraction: input.publicScout.businessInteraction ?? null,
     authClassification: input.publicScout.classification,
     authAutomatable: input.publicScout.authAutomatable,
     publicNavRoutes: input.publicScout.navLinks.map((n) => n.path),
@@ -105,7 +137,9 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     safeCtas: input.authedScout?.safeCtaCandidates.map((c) => c.label) ?? [],
     authedFriction: input.authedScout?.friction ?? [],
     authSetupCaptured: input.authSetup?.captured ?? false,
+    authSetupMode: input.authSetup?.mode ?? null,
     authSetupFailureReason: input.authSetup?.failureReason ?? null,
+    authVerificationFailed: input.authVerificationFailed ?? false,
     runResults: {
       passed: input.runFacts.passedCount,
       failed: input.runFacts.failedCount,
@@ -164,6 +198,12 @@ Produce the demo notes JSON.`;
     fallbackTesting.push({
       label: "Auth setup blocked",
       note: input.authSetup.failureReason,
+    });
+  }
+  if (input.authVerificationFailed) {
+    fallbackTesting.push({
+      label: "Login session could not be verified",
+      note: "The captured login session did not replay as authenticated on the test runner, so the walkthrough ran in public-only mode. This usually means the session expired or is stored where replay can't reach it (e.g. IndexedDB). Re-run, or supply working login credentials for the app.",
     });
   }
   if (

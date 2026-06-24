@@ -88,6 +88,9 @@ Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_cl
    - demoInputValue: a SAFE additive demo string to type into primaryInputLabel that exercises the product's core function. Examples: "AI-powered birthday-card generator for parents of 3-7 year olds" for an idea-validator, "https://example.com/article" for a URL summariser, "best coffee shops in Berlin" for a search tool. NEVER pick a value that triggers destructive actions, real payments, outbound messaging on the founder's behalf, or scans of real third-party accounts.
 5. Find the registration page by examining the landing page DOM ONLY. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. NEVER guess paths like /signup, /register, /join — if no CTA exists in the DOM, return registerPath: null and classification: "no_public_register". Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"). NEVER mix the two formats (do not prefix a path with a partial URL).
 6. Snapshot the register page and classify the sign-up flow.
+7. Find the LOGIN page the same DOM-only way (link/button whose visible text matches /sign ?in|log ?in/i). Record loginPath as either a relative path starting with / OR the FULL absolute URL — same format rules as registerPath; null if none found. Note whether the login form exposes email + password fields.
+8. Detect the auth library + its REST sign-in endpoint when actually visible: footer text like "SECURED BY BETTER AUTH", a login form whose action is under /api/auth/, or SDK hints in the page source (Firebase, Supabase, Clerk, NextAuth, Lucia). Report authLibrary (one of better-auth | nextauth | supabase | firebase | clerk | lucia | unknown) and apiLoginEndpoint (the sign-in REST path you SAW, e.g. "/api/auth/sign-in/email" for better-auth; null if you didn't see one — never guess).
+9. Report tokenLocation best-effort from the detected library: better-auth/nextauth/lucia → cookie; firebase/clerk → indexeddb; supabase → localstorage; otherwise unknown.
 
 CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick the first match):
 
@@ -100,6 +103,9 @@ CLASSIFICATION TABLE (pick ONE, in priority order — if multiple apply, pick th
 | Only OAuth buttons (Google / GitHub / Apple / SSO) | oauth_only | false |
 | textbox "Email" only + button "Send magic link" / "Continue" | magic_link_only | false |
 | textbox "Email" + textbox "Password" + submit button | email_password | true |
+| Register is oauth-only / magic-link / gated / unreachable, BUT a conventional email + password LOGIN form exists | login_email_password | false |
+
+OVERRIDE: if you would otherwise classify the REGISTER flow as oauth_only / magic_link_only / captcha_gated / otp / no_public_register, but the site ALSO has a standard email + password LOGIN form, classify as "login_email_password" instead. Signup is not automatable there, but login IS — when the user supplies their own credentials.
 
 You MUST have actually loaded a register page (or confirmed no such page exists by following step 4) before classifying as anything other than "no_public_register" or "unknown". If the browser failed, you could not snapshot the landing page, or you have no concrete observations, return "classification": "unknown".
 
@@ -109,7 +115,11 @@ Return STRICT JSON (no markdown, no prose), shape:
   "concept": "1-2 sentence description, no marketing fluff",
   "navLinks": [{ "path": "/features", "label": "Features" }, ...],
   "registerPath": "/sign-up | https://auth.example.com/register | null",
-  "classification": "email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
+  "loginPath": "/login | https://auth.example.com/sign-in | null",
+  "apiLoginEndpoint": "/api/auth/sign-in/email | null",
+  "authLibrary": "better-auth | nextauth | supabase | firebase | clerk | lucia | unknown",
+  "tokenLocation": "cookie | localstorage | indexeddb | sessionstorage | unknown",
+  "classification": "email_password | login_email_password | magic_link_only | oauth_only | captcha_gated | otp | no_public_register | unknown",
   "authAutomatable": true | false,
   "cookieBannerSelectorHint": "optional — if you saw a cookie banner, the button label that dismisses it",
   "businessInteraction": {
@@ -137,10 +147,53 @@ Return STRICT JSON (no markdown), shape:
   "friction": [{ "kind": "string", "note": "string" }]
 }`;
 
+/** Return the first balanced {...} or [...] substring, honoring string literals
+ *  and escapes so braces inside strings don't throw off the depth count. Returns
+ *  null when no balanced object/array is present. */
+function firstBalancedJson(text: string): string | null {
+  const start = text.search(/[{[]/);
+  if (start === -1) return null;
+  const open = text[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === open) depth++;
+    else if (ch === close && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+/**
+ * Extract a JSON value from a model response. The response may wrap the JSON in
+ * a markdown fence and/or append a trailing summary sentence after the closing
+ * brace — the claude-agent-sdk final message routinely does the latter, which a
+ * strict `JSON.parse` rejects with "Unexpected non-whitespace character after
+ * JSON". Strategy:
+ *   1. Prefer fenced ```json … ``` content when present.
+ *   2. Try a strict parse of the trimmed candidate (clean case).
+ *   3. Fall back to the first balanced {...}/[...] slice — tolerates leading
+ *      AND trailing prose around an otherwise-valid object.
+ */
 function extractJson(response: string): unknown {
   const fence = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  const raw = (fence?.[1] ?? response).trim();
-  return JSON.parse(raw);
+  const candidate = (fence?.[1] ?? response).trim();
+  try {
+    return JSON.parse(candidate);
+  } catch (err) {
+    const sliced = firstBalancedJson(candidate);
+    if (sliced === null) throw err;
+    return JSON.parse(sliced);
+  }
 }
 
 function safeArray<T>(
@@ -210,6 +263,7 @@ function asBusinessInteraction(
 function classify(value: unknown): QuickstartPublicScout["classification"] {
   const allowed = [
     "email_password",
+    "login_email_password",
     "magic_link_only",
     "oauth_only",
     "captcha_gated",
@@ -220,6 +274,30 @@ function classify(value: unknown): QuickstartPublicScout["classification"] {
   return (allowed as readonly string[]).includes(value as string)
     ? (value as QuickstartPublicScout["classification"])
     : "unknown";
+}
+
+function asTokenLocation(
+  value: unknown,
+): QuickstartPublicScout["tokenLocation"] {
+  const allowed = [
+    "cookie",
+    "localstorage",
+    "indexeddb",
+    "sessionstorage",
+    "unknown",
+  ] as const;
+  return (allowed as readonly string[]).includes(value as string)
+    ? (value as QuickstartPublicScout["tokenLocation"])
+    : undefined;
+}
+
+/** Normalise a scout-reported path/URL: a relative path (starts with /) or a full
+ *  https URL passes through; anything else (guessed bare word, partial URL) → null. */
+function asPathOrUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (value.startsWith("/")) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  return null;
 }
 
 export interface QuickstartScoutPublicResult {
@@ -336,8 +414,14 @@ export async function runQuickstartScoutPublic(
     tagline,
     concept,
     navLinks,
-    registerPath:
-      typeof parsed.registerPath === "string" ? parsed.registerPath : null,
+    registerPath: asPathOrUrl(parsed.registerPath),
+    loginPath: asPathOrUrl(parsed.loginPath),
+    apiLoginEndpoint: asPathOrUrl(parsed.apiLoginEndpoint),
+    authLibrary:
+      typeof parsed.authLibrary === "string" && parsed.authLibrary.length > 0
+        ? parsed.authLibrary
+        : undefined,
+    tokenLocation: asTokenLocation(parsed.tokenLocation),
     cookieBannerSelectorHint:
       typeof parsed.cookieBannerSelectorHint === "string"
         ? parsed.cookieBannerSelectorHint
@@ -353,13 +437,25 @@ export async function runQuickstartScoutAuthed(
   repositoryId: string,
   baseUrl: string,
   authSetupCode: string,
-  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
+  options?: {
+    onLogCreated?: (logId: string) => void;
+    cdpEndpoint?: string;
+    /** When true, the EB already has the captured session cookies/localStorage
+     *  injected — skip the seed replay entirely and start scouting authed. */
+    preAuthenticated?: boolean;
+  },
 ): Promise<QuickstartScoutAuthedResult> {
   const settings = await queries.getAISettings(repositoryId);
   const config = getAIConfig(settings);
   const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
 
-  const prompt = `Walk the authenticated app at ${baseUrl}.
+  // Pre-authenticated: the session was injected into this browser out-of-band,
+  // so skip step 1 (the seed sign-in) — re-driving the login form through the
+  // model is what made this step take minutes. Otherwise fall back to handing
+  // the seed to the agent to replay.
+  const prompt = options?.preAuthenticated
+    ? `Walk the authenticated app at ${baseUrl}. You are ALREADY signed in — the session has been injected into this browser. Do NOT sign in again and SKIP step 1 (the seed) of the workflow. Navigate directly to ${baseUrl} and proceed from step 2 of the workflow in the system prompt. Return strict JSON.`
+    : `Walk the authenticated app at ${baseUrl}.
 
 ## Seed (run this FIRST using MCP browser tools to authenticate)
 \`\`\`javascript

@@ -46,8 +46,21 @@ export interface QuickstartSessionView {
     };
     walkthroughTestId?: string;
     buildId?: string;
+    rerunBuildId?: string;
     demoNotesId?: string;
+    /** Founder-facing /r/<slug> public share, published by the final
+     *  qs_publish_share step. Surfaced as the terminal CTA in the panel. */
+    shareId?: string;
+    shareSlug?: string;
+    shareUrl?: string;
     disabledReason?: string;
+    streamUrl?: string;
+    queuedForBrowser?: boolean;
+    demoNotes?: {
+      uxSummary: string;
+      highlights: { label: string; note: string }[];
+      frictionPoints: { label: string; note: string }[];
+    } | null;
   };
   createdAt?: string;
   completedAt?: string;
@@ -105,36 +118,43 @@ export function useQuickstart(repositoryId?: string | null) {
     return stopPolling;
   }, [storageKey, poll, stopPolling]);
 
-  const start = useCallback(async () => {
-    if (!repositoryId || !storageKey) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/v1/repos/${repositoryId}/quickstart`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          hint?: string;
-          reason?: string;
-        };
-        setError(body.hint ?? body.error ?? `HTTP ${res.status}`);
-        return;
+  const start = useCallback(
+    async (creds?: { appEmail?: string; appPassword?: string }) => {
+      if (!repositoryId || !storageKey) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const reqBody =
+          creds?.appEmail && creds?.appPassword
+            ? { appEmail: creds.appEmail, appPassword: creds.appPassword }
+            : {};
+        const res = await fetch(`/api/v1/repos/${repositoryId}/quickstart`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(reqBody),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            hint?: string;
+            reason?: string;
+          };
+          setError(body.hint ?? body.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        const { sessionId } = (await res.json()) as { sessionId: string };
+        localStorage.setItem(storageKey, sessionId);
+        stopPolling();
+        await poll(sessionId);
+        pollRef.current = setInterval(() => poll(sessionId), POLL_INTERVAL_MS);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
       }
-      const { sessionId } = (await res.json()) as { sessionId: string };
-      localStorage.setItem(storageKey, sessionId);
-      stopPolling();
-      await poll(sessionId);
-      pollRef.current = setInterval(() => poll(sessionId), POLL_INTERVAL_MS);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [repositoryId, storageKey, poll, stopPolling]);
+    },
+    [repositoryId, storageKey, poll, stopPolling],
+  );
 
   const cancel = useCallback(async () => {
     if (!session?.id) return;

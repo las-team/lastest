@@ -17,6 +17,7 @@ import type {
   DomDiffResult,
   StepComparisonEvidence,
   StepVerdict,
+  WebVitalsSample,
 } from "../schema";
 import { eq, and, desc, sql, isNotNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
@@ -334,6 +335,7 @@ export type ShareTestResult = {
   videoPath: string | null;
   durationMs: number | null;
   screenshots: CapturedScreenshot[] | null;
+  webVitals: WebVitalsSample[] | null;
 };
 
 // Slim step-comparison projection for share rendering. Drops issue/reviewer
@@ -407,6 +409,7 @@ export async function getShareDataBySlug(
           videoPath: testResults.videoPath,
           durationMs: testResults.durationMs,
           screenshots: testResults.screenshots,
+          webVitals: testResults.webVitals,
         })
         .from(testResults)
         .where(

@@ -464,6 +464,33 @@ export async function isPoolBusy(): Promise<boolean> {
 }
 
 /**
+ * Snapshot of EB pool health for diagnostics. `online` is the number of idle,
+ * claimable system EBs; `size` is the total provisioned (online + busy + any
+ * in-flight provisions); `max` is the cluster cap. When a claim times out, a
+ * caller can render this to explain WHY (e.g. "0 online, 4 provisioned but not
+ * ready" → pods stuck pulling the image / pending) instead of a generic
+ * "all browsers busy". Internal/read-only — no auth, no sensitive data.
+ */
+export async function getEbPoolHealth(): Promise<{
+  online: number;
+  size: number;
+  max: number;
+}> {
+  const onlineRows = await db
+    .select({ id: runners.id })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.isSystem, true),
+        eq(runners.status, "online"),
+        eq(runners.type, "embedded"),
+      ),
+    );
+  const [size, max] = await Promise.all([currentPoolSize(), poolMax()]);
+  return { online: onlineRows.length, size, max };
+}
+
+/**
  * Atomically claim an idle system EB from the pool.
  * Uses optimistic locking: SELECT one online EB, then UPDATE with WHERE status='online'
  * to prevent races. Retries up to 3 times if another caller grabs it first.

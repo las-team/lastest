@@ -16,11 +16,13 @@ import type {
 import { isQuickstartEnabled, gateReasonHint } from "@/lib/quickstart/gating";
 import {
   renderAuthSetupCode,
+  renderAuthLoginCode,
   renderWalkthroughCode,
   renderQuickstartEmail,
   renderQuickstartPassword,
   utcStamp,
   slugify,
+  AUTH_CHAIN_FAILED_MARKER,
 } from "@/lib/playwright/quickstart-templates";
 import {
   runQuickstartScoutPublic,
@@ -35,8 +37,41 @@ import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
 import { publishBuildShare } from "./public-shares";
 import { claimEmbeddedBrowserForAgent } from "./ai";
-import { releasePoolEB } from "./embedded-sessions";
+import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
+import { db } from "@/lib/db";
+import { embeddedSessions } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { toProxyStreamUrl } from "@/lib/eb/stream-url";
+import { appendStreamToken } from "@/lib/eb/stream-token";
+import { chromium, type Browser } from "playwright";
+
+/**
+ * Normalise a raw EB `ws://host:port` stream URL into a browser-routable form for
+ * the QuickStart panel's live view: a same-origin proxy path (works on HTTPS +
+ * k3s dev where pod IPs aren't routable) plus the stream auth token. Mirrors the
+ * build page's stream wiring.
+ */
+function proxiedStream(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const proxied = toProxyStreamUrl(raw) ?? raw;
+  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+}
+
+/** Resolve the live stream URL of the EB currently running a build's test run. */
+async function resolveBuildStreamUrl(
+  buildId: string,
+): Promise<string | undefined> {
+  const build = await queries.getBuild(buildId);
+  if (!build?.testRunId) return undefined;
+  const testRun = await queries.getTestRun(build.testRunId);
+  if (!testRun?.runnerId) return undefined;
+  const [sess] = await db
+    .select({ streamUrl: embeddedSessions.streamUrl })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.runnerId, testRun.runnerId));
+  return proxiedStream(sess?.streamUrl);
+}
 
 // ---------------------------------------------------------------------------
 // Step definitions
@@ -258,6 +293,95 @@ async function isCancelled(
 }
 
 // ---------------------------------------------------------------------------
+// Build helper — create a build and poll to completion. Used for the public-only
+// downgrade rerun inside runQsRunAndNotes. The primary run + the pairing rerun
+// keep their inline loops (they emit progress-specific activity between create
+// and poll); this helper is for the conditional auth-downgrade path only.
+// ---------------------------------------------------------------------------
+
+type QsBuildSummary = NonNullable<Awaited<ReturnType<typeof getBuildSummary>>>;
+
+async function runBuildAndWait(
+  repositoryId: string,
+  testIds: string[],
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<
+  | { ok: true; buildId: string; summary: QsBuildSummary }
+  | { ok: false; error: string }
+> {
+  let buildId: string;
+  try {
+    const result = await createAndRunBuildCore(
+      "manual",
+      testIds,
+      repositoryId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    if (!result.buildId) {
+      return {
+        ok: false,
+        error: `Build was queued (EB pool busy). Job ID: ${(result as { jobId?: string }).jobId ?? "unknown"}.`,
+      };
+    }
+    buildId = result.buildId;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const started = Date.now();
+  let summary = await getBuildSummary(buildId);
+  while (!summary || !summary.completedAt) {
+    if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
+      return { ok: false, error: "Build timed out (>8 min)." };
+    }
+    if (await isCancelled(sessionId, signal)) {
+      return { ok: false, error: "cancelled" };
+    }
+    await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
+    summary = await getBuildSummary(buildId);
+  }
+  return { ok: true, buildId, summary };
+}
+
+// ---------------------------------------------------------------------------
+// EB claim failure diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an actionable failure message for a scout step that couldn't get an
+ * Embedded Browser. `claimErr` is the error the claim path threw (usually
+ * swallowed by `.catch(() => undefined)`); when the claim merely timed out it's
+ * undefined, so we probe pool health to explain WHY. The most common dev cause
+ * is the EB image not being imported into the k3d cluster (pods stuck in
+ * ImagePullBackOff / Pending) — surfaced here instead of a bare "all browsers
+ * are busy", which sent operators chasing the wrong thing.
+ */
+async function describeEbClaimFailure(claimErr: unknown): Promise<string> {
+  if (claimErr instanceof Error && claimErr.message) {
+    return `Couldn't get a browser for the scout: ${claimErr.message}`;
+  }
+  const health = await getEbPoolHealth().catch(() => null);
+  if (!health) {
+    return "Couldn't get a browser for the scout: no Embedded Browser became available, and pool health could not be read.";
+  }
+  if (health.size > health.online) {
+    const unready = health.size - health.online;
+    return `Couldn't get a browser for the scout: ${health.online} ready, ${unready} provisioned but not ready (cap ${health.max}). EB pods are likely unhealthy — stuck pulling the image (ImagePullBackOff) or pending on resources. An operator may need to restart the EB pool (pnpm stack:refresh:eb).`;
+  }
+  if (health.size >= health.max) {
+    return `Couldn't get a browser for the scout: all ${health.max} browsers are busy and the pool is at capacity. Try again once a run finishes.`;
+  }
+  return `Couldn't get a browser for the scout: no Embedded Browser became ready (${health.online} ready, pool ${health.size}/${health.max}). The EB pool may be unhealthy — an operator may need to restart it (pnpm stack:refresh:eb).`;
+}
+
+// ---------------------------------------------------------------------------
 // Step runners
 // ---------------------------------------------------------------------------
 
@@ -292,22 +416,61 @@ async function runQsPreflight(
 
   const stamp = utcStamp();
   const slug = slugify(gate.repo.name);
-  const template =
-    gate.team.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
-  const email = renderQuickstartEmail(template, slug, stamp);
-  const password = renderQuickstartPassword(stamp);
+
+  // QuickStart runs against the user's OWN app. If they supplied real login
+  // credentials (set on the session at start), use those for a LOGIN handshake
+  // and skip generating a throwaway demo account. Otherwise fall back to a fresh
+  // demo signup via the team email template.
+  const preMeta = (await queries.getAgentSession(sessionId))?.metadata;
+  const credsProvided =
+    preMeta?.credsProvided === true &&
+    !!preMeta?.quickstartEmail &&
+    !!preMeta?.quickstartPassword;
+
+  let email: string;
+  let password: string;
+  if (credsProvided) {
+    email = preMeta!.quickstartEmail!;
+    password = preMeta!.quickstartPassword!;
+  } else {
+    const template =
+      gate.team.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
+    email = renderQuickstartEmail(template, slug, stamp);
+    password = renderQuickstartPassword(stamp);
+  }
 
   await mergeMetadata(sessionId, {
     quickstartEmail: email,
     quickstartPassword: password,
     quickstartSlug: slug,
     quickstartStamp: stamp,
+    credsProvided,
   });
+
+  // Force the repo's EB error gates to "warn" before the first run. Founder
+  // sites almost always emit benign console/network noise (analytics 401s,
+  // third-party scripts); with the default "fail" mode every clean screenshot
+  // reds the walk. The walkthrough template also route-blocks known noise, but
+  // this is the belt to that suspenders. Best-effort — never fail preflight on it.
+  let errorModesSet = false;
+  try {
+    await queries.upsertPlaywrightSettings(repositoryId, {
+      consoleErrorMode: "warn",
+      networkErrorMode: "warn",
+    });
+    errorModesSet = true;
+  } catch (err) {
+    console.warn(
+      "[QuickStart] could not set console/network error modes:",
+      err,
+    );
+  }
 
   await setCompleted(sessionId, "qs_preflight", {
     baseUrl: gate.baseUrl,
     slug,
     stamp,
+    errorModesSet,
   });
   emitActivity(
     teamId,
@@ -341,18 +504,29 @@ async function runQsScoutPublic(
   // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (applyScoutMcpWiring would launch @playwright/mcp without a
-  // --cdp-endpoint, the exact in-host execution this codebase forbids).
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  // --cdp-endpoint, the exact in-host execution this codebase forbids). While
+  // waiting, surface "queued" so the panel reflects the pool back-pressure.
+  let claimErr: unknown;
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
   if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_public",
-      "All browsers are busy. Please try again later.",
+      await describeEbClaimFailure(claimErr),
     );
     return false;
   }
+  // Surface the EB's live screencast so the panel can show the scout browsing.
+  await mergeMetadata(sessionId, {
+    streamUrl: proxiedStream(eb?.streamUrl),
+    queuedForBrowser: false,
+  });
   try {
     const { data, promptLogId } = await runQuickstartScoutPublic(
       repositoryId,
@@ -401,6 +575,8 @@ async function runQsScoutPublic(
     return false;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    // Stop the panel pointing at a released EB.
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 
@@ -420,8 +596,8 @@ async function runQsAuthSetup(
 
   const meta = session.metadata;
   const publicScout = meta.publicScout;
-  if (!publicScout || !publicScout.authAutomatable) {
-    await setSkipped(sessionId, "qs_auth_setup", "auth flow not automatable");
+  if (!publicScout) {
+    await setSkipped(sessionId, "qs_auth_setup", "no public scout output");
     return true;
   }
 
@@ -429,49 +605,84 @@ async function runQsAuthSetup(
   const password = meta.quickstartPassword!;
   const stamp = meta.quickstartStamp!;
   const slug = meta.quickstartSlug!;
+  const credsProvided = meta.credsProvided === true;
 
-  if (!publicScout.registerPath) {
-    await setFailed(
-      sessionId,
-      "qs_auth_setup",
-      "Scout did not observe a register URL in the page DOM. Auth setup cannot proceed without one — no path guessing.",
-    );
-    return false;
+  // Decide the handshake. QuickStart runs against the user's OWN app:
+  //  - creds provided + a login surface exists  -> LOGIN (real creds, most reliable)
+  //  - else automatable email+password register -> SIGNUP (fresh demo account)
+  //  - else                                      -> skip (public-only walkthrough)
+  const canLogin =
+    credsProvided &&
+    !!publicScout.loginPath &&
+    (publicScout.classification === "email_password" ||
+      publicScout.classification === "login_email_password");
+  const canSignup = publicScout.authAutomatable && !!publicScout.registerPath;
+
+  let authMode: "login" | "signup";
+  let code: string;
+  let testName: string;
+  if (canLogin) {
+    authMode = "login";
+    code = renderAuthLoginCode({
+      email,
+      password,
+      loginUrl: publicScout.loginPath!,
+      apiLoginEndpoint: publicScout.apiLoginEndpoint ?? undefined,
+    });
+    testName = `${slug} — auth login`;
+  } else if (canSignup) {
+    authMode = "signup";
+    code = renderAuthSetupCode({
+      email,
+      password,
+      registerUrl: publicScout.registerPath!,
+    });
+    testName = `${slug} — auth setup`;
+  } else {
+    const reason = credsProvided
+      ? "Credentials were provided but the scout found no usable login form on the site — running public-only."
+      : publicScout.authAutomatable
+        ? "Scout did not observe a register URL in the page DOM — running public-only (no path guessing)."
+        : "auth flow not automatable — running public-only";
+    await mergeMetadata(sessionId, { authMode: "public_only" });
+    await setSkipped(sessionId, "qs_auth_setup", reason);
+    return true;
   }
 
-  const code = renderAuthSetupCode({
-    email,
-    password,
-    registerUrl: publicScout.registerPath,
-  });
-
-  // Persist the auth setup test so the founder-facing share carries it too.
+  // Persist the auth test so the authed scout can replay it and (in non-chained
+  // mode) the build includes it. Test code is team-gated; the public /r/ share
+  // renders screenshots + notes only, never code.
   const created = await queries.createTest({
     repositoryId,
-    name: `${slug} — auth setup`,
+    name: testName,
     code,
   });
   const testId = created.id;
 
-  // Capture storage state in a transient browser context.
+  // Capture storage state in a disposable runner/EB (or transient host browser).
   const captured = await captureStorageState({
     repositoryId,
     baseUrl: gate.baseUrl,
     testCode: code,
     name: `QuickStart auth ${slug} ${stamp}`,
+    tokenLocation: publicScout.tokenLocation,
+    authFlavor: publicScout.authLibrary,
   });
 
   await mergeMetadata(sessionId, {
+    authMode,
     authSetup: {
       testId,
       storageStateId: captured.storageStateId,
       captured: captured.captured,
       failureReason: captured.failureReason,
+      mode: authMode,
     },
   });
 
   await setCompleted(sessionId, "qs_auth_setup", {
     testId,
+    mode: authMode,
     captured: captured.captured,
     storageStateId: captured.storageStateId,
     failureReason: captured.failureReason,
@@ -488,6 +699,90 @@ async function runQsAuthSetup(
     { stepId: "qs_auth_setup", agentType: "quickstart" },
   );
   return true;
+}
+
+/**
+ * Inject a captured storage_state (cookies + localStorage) into the EB's default
+ * browser context over CDP, so the authed scout starts already-signed-in. This
+ * removes the LLM-driven login replay that made `qs_scout_authed` the slowest
+ * step (~3.5min): the session was already captured 16s earlier in `qs_auth_setup`,
+ * so re-driving the form through the model is pure waste.
+ *
+ * Targets `browser.contexts()[0]` — the persistent default context that
+ * `@playwright/mcp --cdp-endpoint` reuses — NOT a fresh `newContext` (which MCP
+ * would never see). `browser.close()` over connectOverCDP only disconnects the
+ * CDP session; it does not terminate the EB's Chromium (mirrors play-agent.ts).
+ *
+ * Returns whether enough session material (cookies and/or localStorage) was
+ * injected to consider the browser pre-authenticated. IndexedDB-only captures
+ * (e.g. Firebase) inject nothing here → caller falls back to seed replay.
+ */
+async function injectStorageStateIntoEb(
+  cdpUrl: string,
+  storageStateJson: string,
+): Promise<boolean> {
+  let browser: Browser | null = null;
+  try {
+    const parsed = JSON.parse(storageStateJson) as {
+      cookies?: Array<Record<string, unknown>>;
+      origins?: Array<{
+        origin?: string;
+        localStorage?: Array<{ name: string; value: string }>;
+      }>;
+    };
+    const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : [];
+    const origins = Array.isArray(parsed.origins) ? parsed.origins : [];
+    const hasLocalStorage = origins.some(
+      (o) => Array.isArray(o.localStorage) && o.localStorage.length > 0,
+    );
+    // Nothing cookie/localStorage-shaped to inject (e.g. IndexedDB-only Firebase
+    // capture) — let the caller fall back to LLM seed replay.
+    if (cookies.length === 0 && !hasLocalStorage) return false;
+
+    browser = await chromium.connectOverCDP(cdpUrl);
+    const ctx = browser.contexts()[0];
+    if (!ctx) return false;
+
+    if (cookies.length > 0) {
+      // Cookies come straight from Playwright's own storageState() capture, so
+      // they already match addCookies' param shape — route through `unknown` to
+      // satisfy the structural check on the loosely-parsed JSON.
+      await ctx.addCookies(
+        cookies as unknown as Parameters<typeof ctx.addCookies>[0],
+      );
+    }
+    for (const o of origins) {
+      const ls = Array.isArray(o.localStorage) ? o.localStorage : [];
+      if (!o.origin || ls.length === 0) continue;
+      const page = await ctx.newPage();
+      try {
+        await page
+          .goto(o.origin, { waitUntil: "domcontentloaded", timeout: 10000 })
+          .catch(() => {});
+        await page.evaluate((items) => {
+          for (const it of items) {
+            try {
+              window.localStorage.setItem(it.name, it.value);
+            } catch {
+              /* quota / opaque origin — best effort */
+            }
+          }
+        }, ls);
+      } finally {
+        await page.close().catch(() => {});
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      `[QuickStart authed-scout] storage_state injection failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
 }
 
 async function runQsScoutAuthed(
@@ -523,23 +818,46 @@ async function runQsScoutAuthed(
 
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (see runQsScoutPublic for the rationale).
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  let claimErr: unknown;
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
   if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
     await setFailed(
       sessionId,
       "qs_scout_authed",
-      "All browsers are busy. Please try again later.",
+      await describeEbClaimFailure(claimErr),
     );
     return false;
   }
+  await mergeMetadata(sessionId, {
+    streamUrl: proxiedStream(eb?.streamUrl),
+    queuedForBrowser: false,
+  });
   try {
+    // Pre-authenticate the EB by injecting the storage_state captured in
+    // qs_auth_setup, so the scout never re-drives the sign-in form through the
+    // model. Falls back to seed replay when nothing injectable was captured.
+    let preAuthenticated = false;
+    if (authSetup.storageStateId) {
+      const ss = await queries.getStorageState(authSetup.storageStateId);
+      if (ss?.storageStateJson) {
+        preAuthenticated = await injectStorageStateIntoEb(
+          eb.cdpUrl,
+          ss.storageStateJson,
+        );
+      }
+    }
+
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
       gate.baseUrl,
       authTest.code,
-      { cdpEndpoint: eb.cdpUrl },
+      { cdpEndpoint: eb.cdpUrl, preAuthenticated },
     );
     await mergeMetadata(sessionId, { authedScout: data });
     await setCompleted(sessionId, "qs_scout_authed", {
@@ -568,6 +886,7 @@ async function runQsScoutAuthed(
     return true;
   } finally {
     if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
 }
 
@@ -592,13 +911,13 @@ async function runQsGenerate(
   }
 
   const slug = meta.quickstartSlug!;
-  // Authed walkthrough requires both: scout said automatable AND storage state
-  // was actually captured AND we have a storageStateId to chain. No fallback to
-  // inline-login (we don't guess login URLs).
+  // Authed walkthrough is driven purely by whether the auth-setup actually
+  // captured a chainable storage_state — true for BOTH the signup path
+  // (classification email_password) and the user-creds login path
+  // (login_email_password, where publicScout.authAutomatable is false). No
+  // fallback to inline-login (we don't guess login URLs).
   const authAutomatable =
-    publicScout.authAutomatable &&
-    (meta.authSetup?.captured ?? false) &&
-    !!meta.authSetup?.storageStateId;
+    (meta.authSetup?.captured ?? false) && !!meta.authSetup?.storageStateId;
 
   const biz = publicScout.businessInteraction;
   const code = renderWalkthroughCode({
@@ -723,8 +1042,11 @@ async function runQsRunAndNotes(
     { stepId: "qs_run_and_notes", artifactType: "build", artifactId: buildId },
   );
 
-  // Poll for completion
+  // Poll for completion. Surface the run's live EB stream into the panel as soon
+  // as the EB picks up the test (set once), so the two-column view shows the
+  // walkthrough run — including the canvas-draw step — not just the scout phases.
   const started = Date.now();
+  let streamSurfaced = false;
   let summary = await getBuildSummary(buildId);
   while (!summary || !summary.completedAt) {
     if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
@@ -736,9 +1058,18 @@ async function runQsRunAndNotes(
       return false;
     }
     if (await isCancelled(sessionId, signal)) return false;
+    if (!streamSurfaced) {
+      const live = await resolveBuildStreamUrl(buildId).catch(() => undefined);
+      if (live) {
+        await mergeMetadata(sessionId, { streamUrl: live });
+        streamSurfaced = true;
+      }
+    }
     await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
     summary = await getBuildSummary(buildId);
   }
+  // Build done — stop the panel pointing at the (about-to-be-released) build EB.
+  await mergeMetadata(sessionId, { streamUrl: undefined });
   // After the loop, summary is non-null and has a completedAt; help TS narrow.
   if (!summary) {
     await setFailed(
@@ -750,10 +1081,74 @@ async function runQsRunAndNotes(
   }
 
   // Build run facts from the summary + test results
-  const build = await queries.getBuild(buildId);
-  const testResults = build?.testRunId
+  let build = await queries.getBuild(buildId);
+  let testResults = build?.testRunId
     ? await queries.getTestResultsWithTestInfo(build.testRunId).catch(() => [])
     : [];
+
+  // ── Post-run auth verification (the skill's "is the authed frame real?" gate) ──
+  // The walkthrough throws AUTH_CHAIN_FAILED_MARKER when the chained storage_state
+  // didn't replay an authenticated session. Rather than publish a red build (or
+  // login-page screenshots dressed up as authed), downgrade the walkthrough to
+  // public-only and rerun ONCE so the user still gets a clean public share, with
+  // the reason recorded in the demo notes.
+  const chainedAuth0 = !!meta.authSetup?.storageStateId;
+  let authDowngraded = false;
+  if (chainedAuth0) {
+    const wt = testResults.find((r) => r.testId === walkthroughTestId);
+    const wtFailed =
+      !!wt && (wt.status === "failed" || wt.status === "setup_failed");
+    const authChainFailed =
+      wtFailed && (wt?.errorMessage ?? "").includes(AUTH_CHAIN_FAILED_MARKER);
+    if (authChainFailed) {
+      emitActivity(
+        teamId,
+        repositoryId,
+        sessionId,
+        "step:start",
+        "Login session did not verify — downgrading walkthrough to public-only and re-running",
+        { stepId: "qs_run_and_notes" },
+      );
+      const biz = meta.publicScout?.businessInteraction;
+      const publicOnlyCode = renderWalkthroughCode({
+        authAutomatable: false,
+        chainedAuth: false,
+        primaryInputLabel: biz?.primaryInputLabel,
+        primaryCtaLabel: biz?.primaryCtaLabel,
+        demoInputValue: biz?.demoInputValue,
+      });
+      await queries.updateTest(walkthroughTestId, {
+        code: publicOnlyCode,
+        setupOverrides: null,
+      });
+      const rerun = await runBuildAndWait(
+        repositoryId,
+        [walkthroughTestId],
+        sessionId,
+        signal,
+      );
+      if (rerun.ok) {
+        buildId = rerun.buildId;
+        summary = rerun.summary;
+        build = await queries.getBuild(buildId);
+        testResults = build?.testRunId
+          ? await queries
+              .getTestResultsWithTestInfo(build.testRunId)
+              .catch(() => [])
+          : [];
+        authDowngraded = true;
+        await mergeMetadata(sessionId, { buildId });
+      } else {
+        // Downgrade rerun failed to start/complete; keep the original (red)
+        // build so the failure stays visible rather than vanishing.
+        console.warn(
+          "[QuickStart] public-only downgrade rerun failed:",
+          rerun.error,
+        );
+      }
+    }
+  }
+
   const runFacts: QuickstartRunFacts = {
     passedCount: summary.passedCount,
     failedCount: summary.failedCount,
@@ -781,6 +1176,7 @@ async function runQsRunAndNotes(
       authedScout: meta.authedScout,
       authSetup: meta.authSetup,
       runFacts,
+      authVerificationFailed: authDowngraded,
     });
     await queries.upsertBuildDemoNotes(buildId, notes);
     demoNotesPersisted = true;
@@ -797,6 +1193,7 @@ async function runQsRunAndNotes(
     failed: summary.failedCount,
     changes: summary.changesDetected,
     demoNotesPersisted,
+    authDowngraded,
   });
 
   emitActivity(
@@ -934,6 +1331,7 @@ async function runQsRerunAfterApproval(
   );
 
   const started = Date.now();
+  let rerunStreamSurfaced = false;
   let summary = await getBuildSummary(rerunBuildId);
   while (!summary || !summary.completedAt) {
     if (Date.now() - started > BUILD_POLL_TIMEOUT_MS) {
@@ -945,9 +1343,19 @@ async function runQsRerunAfterApproval(
       return false;
     }
     if (await isCancelled(sessionId, signal)) return false;
+    if (!rerunStreamSurfaced) {
+      const live = await resolveBuildStreamUrl(rerunBuildId).catch(
+        () => undefined,
+      );
+      if (live) {
+        await mergeMetadata(sessionId, { streamUrl: live });
+        rerunStreamSurfaced = true;
+      }
+    }
     await new Promise((r) => setTimeout(r, BUILD_POLL_INTERVAL_MS));
     summary = await getBuildSummary(rerunBuildId);
   }
+  await mergeMetadata(sessionId, { streamUrl: undefined });
 
   await setCompleted(sessionId, "qs_rerun_after_approval", {
     rerunBuildId,
@@ -1147,7 +1555,7 @@ async function executeQuickstart(
 
 export async function startQuickstart(
   repositoryId: string,
-  opts?: { emailTemplate?: string },
+  opts?: { emailTemplate?: string; appEmail?: string; appPassword?: string },
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(repositoryId);
 
@@ -1159,6 +1567,16 @@ export async function startQuickstart(
       "quickstart_disabled";
     (err as Error & { code?: string; reason?: string }).reason = reason;
     throw err;
+  }
+
+  // Optional user-supplied login credentials for their own app. Both or neither.
+  const appEmail = opts?.appEmail?.trim();
+  const appPassword = opts?.appPassword;
+  const credsProvided = !!appEmail && !!appPassword;
+  if ((appEmail && !appPassword) || (!appEmail && appPassword)) {
+    throw new Error(
+      "Provide both an email and a password to use your app login, or neither.",
+    );
   }
 
   if (opts?.emailTemplate) {
@@ -1196,7 +1614,15 @@ export async function startQuickstart(
     status: "active",
     currentStepId: "qs_preflight",
     steps: buildInitialQsSteps(),
-    metadata: {},
+    // Seed user creds into metadata so preflight uses them for a LOGIN handshake.
+    // quickstartPassword is never returned by the GET /quickstart API (curated).
+    metadata: credsProvided
+      ? {
+          credsProvided: true,
+          quickstartEmail: appEmail,
+          quickstartPassword: appPassword,
+        }
+      : {},
   });
 
   emitActivity(

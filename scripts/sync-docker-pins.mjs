@@ -56,11 +56,20 @@ const dockerfile = readFileSync(dockerfilePath, "utf8");
 
 // Every pinned path appears as `.pnpm/<token>` where <token> = <name>@<version>.
 // Capture each unique token. Token runs until `/`, whitespace, or end-of-token.
-// The version must start with a digit, so illustrative placeholders in comments
-// (e.g. `.pnpm/@anthropic-ai+claude-agent-sdk@...`) are ignored, not treated as pins.
+//
+// Two guards keep prose out of the token set:
+//   1. Skip whole-comment lines. The explanatory comments in this Dockerfile
+//      reference `.pnpm/<pkg>@...` with a literal `...` placeholder (not a real
+//      pin); real pins only ever live on COPY/RUN lines.
+//   2. Require the version to start with a digit (`@\d`). Every pnpm store dir is
+//      `<name>@<semver>` so the version begins with a digit — this rejects the
+//      `@...` placeholder even if it ever appears outside a comment.
 const tokens = new Set();
-for (const m of dockerfile.matchAll(/\.pnpm\/([^/\s\\]+@\d[^/\s\\]*)/g))
-  tokens.add(m[1]);
+for (const line of dockerfile.split("\n")) {
+  if (/^\s*#/.test(line)) continue; // Dockerfile comment — never a real pin
+  for (const m of line.matchAll(/\.pnpm\/([^/\s\\]+@\d[^/\s\\]*)/g))
+    tokens.add(m[1]);
+}
 
 // name = everything up to the first `@` that is followed by a digit (version start).
 // Handles scoped/peer-hashed names like `@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3`.
