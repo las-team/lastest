@@ -362,6 +362,9 @@ export default async function DashboardPage({
           <QuickstartPanel
             repositoryId={selectedRepo.id}
             enabled={quickstartGate.enabled}
+            baseUrl={
+              "baseUrl" in quickstartGate ? quickstartGate.baseUrl : null
+            }
             defaultBranch={selectedRepo.defaultBranch}
             reason={
               quickstartGate.enabled
