@@ -212,6 +212,86 @@ function NotesBody({
   );
 }
 
+/** Brand marks (lucide dropped its brand icons, so inline the SVGs). */
+function XLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+function LinkedInLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z" />
+    </svg>
+  );
+}
+
+/** X/Twitter-style link unfurl — mirrors how the published /r/ share appears
+ *  when pasted into a social timeline: OG card image + domain + title + blurb. */
+function ShareEmbed({
+  shareUrl,
+  shareSlug,
+  title,
+  description,
+}: {
+  shareUrl: string;
+  shareSlug?: string;
+  title: string;
+  description?: string;
+}) {
+  const domain = hostOf(shareUrl) ?? "lastest.cloud";
+  return (
+    <a
+      href={shareUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md"
+    >
+      {shareSlug && (
+        // Twitter "summary"-card layout: a ~1/2-width thumbnail on the left,
+        // text on the right (not the full-bleed banner).
+        <div className="w-1/2 shrink-0 self-stretch border-r bg-muted">
+          {/* The exact OG card the share serves — same image a social unfurl
+              renders. Plain <img>: the OG route is a public, already-optimized
+              1200×630 PNG, so next/image would just add an optimizer hop. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/og/share/${shareSlug}`}
+            alt={`${title} preview`}
+            className="size-full object-cover"
+            loading="lazy"
+          />
+        </div>
+      )}
+      <div className="min-w-0 flex-1 space-y-0.5 p-3">
+        <div className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground">
+          {domain}
+        </div>
+        <div className="truncate text-sm font-semibold text-foreground">
+          {title}
+        </div>
+        {description && (
+          <div className="line-clamp-3 text-xs text-muted-foreground">
+            {description}
+          </div>
+        )}
+      </div>
+    </a>
+  );
+}
+
 export function QuickstartPanel({
   repositoryId,
   enabled,
@@ -546,17 +626,28 @@ export function QuickstartPanel({
             </div>
           )}
         </>
-      ) : demoNotes ? (
+      ) : shareUrl || demoNotes ? (
         <>
           <Eyebrow>Report preview</Eyebrow>
-          <Chrome
-            url={shareSlug ? `${host ?? "lastest.cloud"}/r/${shareSlug}` : host}
-            trailing="external"
-          >
-            <div className="max-h-[360px] overflow-auto">
-              <NotesBody notes={demoNotes} />
-            </div>
-          </Chrome>
+          {shareUrl ? (
+            <ShareEmbed
+              shareUrl={shareUrl}
+              shareSlug={shareSlug}
+              title={host ? `${host} · Lastest` : "Lastest visual QA report"}
+              description={
+                demoNotes?.uxSummary ??
+                "Visual QA baseline — screenshots, layer checks, and demo notes."
+              }
+            />
+          ) : (
+            demoNotes && (
+              <div className="overflow-hidden rounded-md border bg-card shadow-sm">
+                <div className="max-h-[360px] overflow-auto">
+                  <NotesBody notes={demoNotes} />
+                </div>
+              </div>
+            )
+          )}
           {(buildId || walkthroughTestId) && (
             <div className="flex flex-wrap items-center gap-2">
               {buildId && (
@@ -639,16 +730,40 @@ export function QuickstartPanel({
                 : shareUrl}
             </div>
           </div>
-          <Button size="sm" variant="outline" onClick={copyShare}>
-            <Copy className="mr-1.5 size-3.5" />
-            Copy link
-          </Button>
-          <Button size="sm" asChild>
-            <a href={shareUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-1.5 size-3.5" />
-              Open report
-            </a>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={copyShare}>
+              <Copy className="mr-1.5 size-3.5" />
+              Copy link
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <a
+                href={`https://x.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(host ? `Visual QA report for ${host}` : "Visual QA report")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Share on X"
+              >
+                <XLogo className="mr-1.5 size-3" />
+                Share on X
+              </a>
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <a
+                href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Share on LinkedIn"
+              >
+                <LinkedInLogo className="mr-1.5 size-3" />
+                LinkedIn
+              </a>
+            </Button>
+            <Button size="sm" asChild>
+              <a href={shareUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-1.5 size-3.5" />
+                Open report
+              </a>
+            </Button>
+          </div>
         </div>
       ) : isActive ? (
         <div className="flex items-center gap-3 border-t bg-muted/20 p-4">

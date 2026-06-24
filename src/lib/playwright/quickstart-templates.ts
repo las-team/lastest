@@ -141,7 +141,7 @@ export function renderAuthSetupCode(opts: RenderAuthSetupOptions): string {
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   async function settle() {
-    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
     await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
     await page.waitForTimeout(300);
   }
@@ -344,7 +344,7 @@ export function renderAuthLoginCode(opts: RenderAuthLoginOptions): string {
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   async function settle() {
-    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
     await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
     await page.waitForTimeout(300);
   }
@@ -449,7 +449,7 @@ export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
 
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   async function settle() {
-    await page.waitForLoadState('networkidle').catch(function () {});
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(function () {});
     await page.locator('h1, h2, main, [role="main"]').first().waitFor({ state: 'visible', timeout: 5000 }).catch(function () {});
     await page.waitForTimeout(300);
   }

@@ -97,8 +97,12 @@ const nextConfig: NextConfig = {
           source: "/_umami/recorder.js",
           destination: `${umamiUrl}/recorder.js`,
         },
-        { source: "/_umami/api/send", destination: `${umamiUrl}/api/send` },
-        { source: "/_umami/api/record", destination: `${umamiUrl}/api/record` },
+        // Ingest beacons go through a resilient route handler that ACKs the
+        // browser immediately and forwards to umami in the background, so a slow
+        // umami can never stall navigation (e.g. submitting the login form).
+        // The handler reads UMAMI_INTERNAL_URL itself at runtime.
+        { source: "/_umami/api/send", destination: "/api/umami/send" },
+        { source: "/_umami/api/record", destination: "/api/umami/record" },
       );
     }
 

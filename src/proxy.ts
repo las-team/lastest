@@ -39,6 +39,7 @@ const PUBLIC_PATHS = [
   "/planned/",
   "/bug-reports/",
   "/_umami/",
+  "/api/umami/", // resilient umami ingest forwarder (rewrite target of /_umami/api/*)
 ];
 
 const isDev = process.env.NODE_ENV !== "production";
