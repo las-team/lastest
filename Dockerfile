@@ -132,6 +132,19 @@ COPY --from=deps --chown=nextjs:nodejs \
   ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk
 RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
+# The SDK spawns a platform-native CLI binary shipped as an optionalDependency
+# (@anthropic-ai/claude-agent-sdk-linux-x64). The selective COPY above only pulls
+# the JS package, so without this the AI "Generate Test" path fails at runtime with
+# "Native CLI binary for linux-x64 not found". sdk.mjs resolves
+# `@anthropic-ai/claude-agent-sdk-linux-x64/claude` relative to itself, so the binary
+# package must sit as a sibling in the same .pnpm node_modules dir (Node finds it via
+# the .pnpm/@anthropic-ai+claude-agent-sdk@...  ancestor). The COPY also fails the
+# build loudly if the optional dep ever stops resolving, instead of failing silently
+# at runtime. Runner is glibc (playwright:noble) so only the linux-x64 (non-musl)
+# variant is needed.
+COPY --from=deps --chown=nextjs:nodejs \
+  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-x64@0.2.141/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64 \
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64
 
 # Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)
 # Each subdep is a separate pnpm dir that tesseract.js symlinks to
@@ -163,8 +176,10 @@ RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tes
     ln -sf .pnpm/tesseract.js-core@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
 
 # Install Claude Code CLI globally (for `docker exec ... claude login`)
+# Fallback symlinks the SDK's native binary — agent-sdk >=0.2.x ships the CLI as a
+# platform package (claude-agent-sdk-linux-x64/claude), not the old cli.js entrypoint.
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
-    ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js /usr/local/bin/claude
+    ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude /usr/local/bin/claude
 
 # Copy ws (used by activity-feed-server + embedded-browser)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.21.0/node_modules/ws ./node_modules/.pnpm/ws@8.21.0/node_modules/ws

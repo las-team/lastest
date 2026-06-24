@@ -31,6 +31,8 @@ import { extractText } from "unpdf";
 import mammoth from "mammoth";
 import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
+import { claimEmbeddedBrowserForAgent } from "./ai";
+import { releasePoolEB } from "./embedded-sessions";
 
 // ============================================
 // Types
@@ -1491,11 +1493,28 @@ If fixes are needed, return the FIXED code.
 
 Return ONLY the code (fixed or original), no explanations.`;
 
-    const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
-      actionType: "fix_test",
-      repositoryId,
-      useMCP: true,
-    });
+    const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+      () => undefined,
+    );
+    if (!eb) {
+      return {
+        success: false,
+        passed: false,
+        error:
+          "No embedded browsers available — all browsers are busy. Please try again later.",
+      };
+    }
+    let response: string;
+    try {
+      response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
+        actionType: "fix_test",
+        repositoryId,
+        useMCP: true,
+        mcpConfig: { cdpEndpoint: eb.cdpUrl },
+      });
+    } finally {
+      await releasePoolEB(eb.runnerId).catch(() => {});
+    }
 
     const fixedCode = extractCodeFromResponse(response);
     const codeChanged = fixedCode !== test.code;

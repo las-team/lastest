@@ -94,6 +94,9 @@ export interface VisualDiffLite {
    *  "baseline is gone" panic — the data hasn't been lost, it just hasn't
    *  been promoted to this branch yet. */
   baselineExistsOn: { branch: string; createdAt: string } | null;
+  /** RCA verdict — "is this diff the test or the code?" (Phase 1). Null on
+   *  diffs predating the feature or not yet classified. */
+  rca: import("@/lib/db/schema").RcaVerdict | null;
 }
 
 export interface TestResultLite {
@@ -109,6 +112,9 @@ export interface TestResultLite {
   totalSteps: number | null;
   consoleErrors: string[] | null;
   networkRequests: import("@/lib/db/schema").NetworkRequest[] | null;
+  // Request/response headers + bodies are stripped from `networkRequests` and
+  // saved to this file; the focus view lazily re-hydrates from it.
+  networkBodiesPath: string | null;
   a11yViolations: import("@/lib/db/schema").A11yViolation[] | null;
   a11yPassesCount: number | null;
   designSystemViolations:
@@ -120,6 +126,8 @@ export interface TestResultLite {
   extractedVariables: Record<string, string> | null;
   assignedVariables: Record<string, string> | null;
   domSnapshot: import("@/lib/db/schema").DomSnapshotData | null;
+  // E1: headless API results (null for browser tests).
+  apiResult: import("@/lib/db/schema").ApiTestResultData | null;
 }
 
 export interface VerifyFilters {
@@ -311,6 +319,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     design: CheckModeT;
     perf: CheckModeT;
     url: CheckModeT;
+    api: CheckModeT;
   };
   const DEFAULT_CHECK_MODES: CheckModeMapT = {
     visual: "enforce",
@@ -322,6 +331,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     design: "disable",
     perf: "log",
     url: "log",
+    api: "enforce",
   };
   const [checkModes, setCheckModes] =
     useState<CheckModeMapT>(DEFAULT_CHECK_MODES);
@@ -682,6 +692,13 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       ...evidenceLayers,
       ...existingLayers,
     ]);
+    // Always establish/confirm the visual baseline whenever the step has a
+    // visual diff. A first-run (no-baseline) or 0px diff carries NO "visual"
+    // evidence row (the scorer only emits one when pixelDifference > 0), so
+    // without this an approve would skip the visual layer entirely and never
+    // write the baseline — leaving the next run flagging the same "missing
+    // baseline" forever.
+    if (step.visualDiffId) layerSet.add("visual");
     if (layerSet.size === 0) layerSet.add("visual");
     const layers: EvidenceLayer[] = Array.from(layerSet);
 

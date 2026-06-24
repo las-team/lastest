@@ -1,6 +1,10 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
 import {
+  encryptSessionMetadata,
+  decryptSessionMetadata,
+} from "@/lib/crypto-fields";
+import {
   specImports,
   googleSheetsAccounts,
   googleSheetsDataSources,
@@ -337,11 +341,24 @@ export async function upsertComposeConfig(
 // Agent Sessions
 // ============================================
 
+// QuickStart can run against the user's OWN app with their real login. When
+// supplied, the password lands in agent_sessions.metadata.quickstartPassword,
+// so it is encrypted at rest via the shared helpers in @/lib/crypto-fields —
+// encrypt on write, decrypt on read at this query layer so every consumer (and
+// mergeMetadata's read-merge-rewrite cycle) works with plaintext. The email is
+// left plaintext (low-sensitivity identifier shown in the QuickStart UI).
+function decryptAgentSessionRow<T extends { metadata: AgentSessionMetadata }>(
+  row: T,
+): T {
+  return { ...row, metadata: decryptSessionMetadata(row.metadata) };
+}
+
 export async function createAgentSession(data: Omit<NewAgentSession, "id">) {
   const id = uuid();
   const now = new Date();
   await db.insert(agentSessions).values({
     ...data,
+    metadata: encryptSessionMetadata(data.metadata),
     id,
     createdAt: now,
     updatedAt: now,
@@ -350,7 +367,7 @@ export async function createAgentSession(data: Omit<NewAgentSession, "id">) {
     .select()
     .from(agentSessions)
     .where(eq(agentSessions.id, id));
-  return row!;
+  return decryptAgentSessionRow(row!);
 }
 
 export async function getAgentSession(id: string) {
@@ -358,7 +375,7 @@ export async function getAgentSession(id: string) {
     .select()
     .from(agentSessions)
     .where(eq(agentSessions.id, id));
-  return row;
+  return row ? decryptAgentSessionRow(row) : row;
 }
 
 export async function getActiveAgentSession(
@@ -385,7 +402,7 @@ export async function getActiveAgentSession(
       ),
     )
     .orderBy(desc(agentSessions.createdAt));
-  return row;
+  return row ? decryptAgentSessionRow(row) : row;
 }
 
 export async function updateAgentSession(
@@ -398,9 +415,13 @@ export async function updateAgentSession(
     completedAt?: Date;
   },
 ) {
+  const patch =
+    data.metadata !== undefined
+      ? { ...data, metadata: encryptSessionMetadata(data.metadata) }
+      : data;
   await db
     .update(agentSessions)
-    .set({ ...data, updatedAt: new Date() })
+    .set({ ...patch, updatedAt: new Date() })
     .where(eq(agentSessions.id, id));
 }
 

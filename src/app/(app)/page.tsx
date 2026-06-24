@@ -180,8 +180,11 @@ export default async function DashboardPage({
           latestBuildId={recentBuilds[0]?.id ?? null}
         />
 
-        {/* Health Score + Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
+        {/* Health Score + Stats Cards — auto-fit so the row always spans full
+            width whether 4 or 5 cards render (the Health Score card is the only
+            tooltip-wrapped one and can be absent, which left an empty column
+            under the old fixed 5-col grid). */}
+        <div className="grid grid-cols-2 gap-3 md:gap-4 md:[grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
           {/* Health Score */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -313,6 +316,27 @@ export default async function DashboardPage({
           </Card>
         </div>
 
+        {/* QuickStart Agent (baseUrl required) — surfaced high, above coverage */}
+        {!session?.team?.banAiMode && selectedRepo && (
+          <QuickstartPanel
+            repositoryId={selectedRepo.id}
+            enabled={quickstartGate.enabled}
+            baseUrl={
+              "baseUrl" in quickstartGate ? quickstartGate.baseUrl : null
+            }
+            defaultBranch={selectedRepo.defaultBranch}
+            reason={
+              quickstartGate.enabled
+                ? undefined
+                : (quickstartGate.reason as
+                    | "no_team"
+                    | "not_early_adopter"
+                    | "no_base_url"
+                    | undefined)
+            }
+          />
+        )}
+
         {/* Coverage + Last Build Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
           <Card>
@@ -356,24 +380,6 @@ export default async function DashboardPage({
             )}
           </Card>
         </div>
-
-        {/* QuickStart Agent (baseUrl required) */}
-        {!session?.team?.banAiMode && selectedRepo && (
-          <QuickstartPanel
-            repositoryId={selectedRepo.id}
-            enabled={quickstartGate.enabled}
-            defaultBranch={selectedRepo.defaultBranch}
-            reason={
-              quickstartGate.enabled
-                ? undefined
-                : (quickstartGate.reason as
-                    | "no_team"
-                    | "not_early_adopter"
-                    | "no_base_url"
-                    | undefined)
-            }
-          />
-        )}
 
         {/* Selector Stats */}
         {selectorStats.length > 0 && (

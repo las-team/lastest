@@ -282,6 +282,29 @@ function normalizePlaywrightOverrides(
     }
     out[key] = r[key];
   }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    "visualMode",
+    "textMode",
+    "domMode",
+    "networkMode",
+    "consoleMode",
+    "a11yMode",
+    "designMode",
+    "perfMode",
+    "urlMode",
+    "apiMode",
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== "enforce" && r[key] !== "log" && r[key] !== "disable") {
+      return {
+        ok: false,
+        error: `${key} must be "enforce" | "log" | "disable"`,
+      };
+    }
+    out[key] = r[key];
+  }
   if (r.acceptAnyCertificate !== undefined) {
     if (typeof r.acceptAnyCertificate !== "boolean") {
       return { ok: false, error: "acceptAnyCertificate must be boolean" };
@@ -365,6 +388,29 @@ function normalizePlaywrightSettingsPatch(
     if (r[key] === undefined) continue;
     if (r[key] !== "fail" && r[key] !== "warn" && r[key] !== "ignore") {
       return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
+    }
+    out[key] = r[key];
+  }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    "visualMode",
+    "textMode",
+    "domMode",
+    "networkMode",
+    "consoleMode",
+    "a11yMode",
+    "designMode",
+    "perfMode",
+    "urlMode",
+    "apiMode",
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== "enforce" && r[key] !== "log" && r[key] !== "disable") {
+      return {
+        ok: false,
+        error: `${key} must be "enforce" | "log" | "disable"`,
+      };
     }
     out[key] = r[key];
   }
@@ -1003,6 +1049,21 @@ export async function GET(
       if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
+      // Surface demo notes inline once written, so the panel can auto-show them
+      // without a second round-trip. Curated to the founder-safe fields the panel
+      // renders (uxSummary + highlights + frictionPoints).
+      const demoNotesRow = sessionRow.metadata.demoNotesId
+        ? await queries
+            .getBuildDemoNotes(sessionRow.metadata.demoNotesId)
+            .catch(() => null)
+        : null;
+      const demoNotes = demoNotesRow
+        ? {
+            uxSummary: demoNotesRow.uxSummary,
+            highlights: demoNotesRow.highlights ?? [],
+            frictionPoints: demoNotesRow.frictionPoints ?? [],
+          }
+        : null;
       return NextResponse.json({
         id: sessionRow.id,
         kind: sessionRow.kind,
@@ -1047,6 +1108,7 @@ export async function GET(
           // panel can render the scout's live browsing.
           streamUrl: sessionRow.metadata.streamUrl,
           queuedForBrowser: sessionRow.metadata.queuedForBrowser,
+          demoNotes,
         },
         createdAt: sessionRow.createdAt,
         updatedAt: sessionRow.updatedAt,
@@ -1441,6 +1503,47 @@ export async function POST(
       }
     }
 
+    // Diff-scoped validation: POST /api/v1/validate-diff
+    // Body: { repositoryId, diff?, baseBranch?, headBranch?, wait?, maxWaitMs? }
+    // Maps a code change → affected tests → runs only those → returns a verdict.
+    if (resource === "validate-diff" && !id) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string;
+        diff?: string;
+        baseBranch?: string;
+        headBranch?: string;
+        wait?: boolean;
+        maxWaitMs?: number;
+      };
+      if (!body.repositoryId || typeof body.repositoryId !== "string") {
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { validateDiffCore, VALIDATE_DIFF_REQUEST_MAX_WAIT_MS } =
+        await import("@/server/actions/validate-diff");
+      // Cap the synchronous wait so a slow build can't hold the HTTP request
+      // past proxy/ingress timeouts — past the cap the caller gets a
+      // `build_running` verdict + buildId to poll.
+      const maxWaitMs = Math.min(
+        body.maxWaitMs ?? VALIDATE_DIFF_REQUEST_MAX_WAIT_MS,
+        VALIDATE_DIFF_REQUEST_MAX_WAIT_MS,
+      );
+      const result = await validateDiffCore({
+        repositoryId: body.repositoryId,
+        diff: body.diff,
+        baseBranch: body.baseBranch,
+        headBranch: body.headBranch,
+        wait: body.wait,
+        maxWaitMs,
+      });
+      return NextResponse.json(result);
+    }
+
     // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
     // Body: { url: string, viewport?: { width, height } }
     // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }
@@ -1628,16 +1731,50 @@ export async function POST(
     }
 
     // Create test directly with raw code: POST /api/v1/tests
+    // For API tests (E1) pass `testType: 'api'` + `apiDefinition` instead of code.
     if (resource === "tests" && !slug[1]) {
       const body = await request.json();
-      const {
-        repositoryId,
-        name,
-        code,
-        functionalAreaId,
-        targetUrl,
-        description,
-      } = body;
+      const { repositoryId, name, functionalAreaId, targetUrl, description } =
+        body;
+      const testType = body.testType === "api" ? "api" : "browser";
+      const apiDefinition = body.apiDefinition as
+        | import("@/lib/db/schema").ApiTestDefinition
+        | undefined;
+      // API tests carry an apiDefinition; the `code` column stores a readable
+      // JSON rendering of it (the column is NOT NULL). Browser tests require code.
+      let code = body.code as string | undefined;
+      if (testType === "api") {
+        if (
+          !apiDefinition ||
+          typeof apiDefinition !== "object" ||
+          !apiDefinition.method ||
+          !apiDefinition.url
+        ) {
+          return NextResponse.json(
+            {
+              error: "apiDefinition with method and url required for api tests",
+            },
+            { status: 400 },
+          );
+        }
+        if (
+          !Array.isArray(apiDefinition.assertions) ||
+          apiDefinition.assertions.length === 0
+        ) {
+          return NextResponse.json(
+            { error: "apiDefinition.assertions must be a non-empty array" },
+            { status: 400 },
+          );
+        }
+        // The `code` column is human-visible and snapshotted into
+        // test_versions — never let credentials land in it.
+        const { renderApiDefinitionForCode } =
+          await import("@/lib/api-test/redact");
+        code =
+          code && typeof code === "string"
+            ? code
+            : renderApiDefinitionForCode(apiDefinition);
+      }
       if (!repositoryId) {
         return NextResponse.json(
           { error: "repositoryId required" },
@@ -1672,7 +1809,11 @@ export async function POST(
         repositoryId,
         name,
         code,
-        targetUrl: targetUrl ?? null,
+        testType,
+        apiDefinition: testType === "api" ? apiDefinition : undefined,
+        targetUrl:
+          targetUrl ??
+          (testType === "api" ? (apiDefinition?.url ?? null) : null),
         functionalAreaId: functionalAreaId ?? null,
         createdByBotId: mcpBot?.id ?? null,
         createdByUserId: mcpBot ? null : (session.user?.id ?? null),
@@ -1768,6 +1909,97 @@ export async function POST(
       const { agentHealTestCore } =
         await import("@/lib/playwright/healer-agent");
       const result = await agentHealTestCore(test.repositoryId!, testId);
+      return NextResponse.json(result);
+    }
+
+    // Generate an API test via AI and persist it: POST /api/v1/tests/generate-api
+    // Body: { repositoryId, name?, prompt?, endpoint?, openapiSpec?, graphqlSchema?, functionalAreaId? }
+    if (resource === "tests" && slug[1] === "generate-api" && !slug[2]) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string;
+        name?: string;
+        prompt?: string;
+        endpoint?: string;
+        openapiSpec?: string;
+        graphqlSchema?: string;
+        functionalAreaId?: string;
+      };
+      if (!body.repositoryId) {
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { generateApiTest } = await import("@/lib/api-test/generator");
+      const gen = await generateApiTest({
+        repositoryId: body.repositoryId,
+        prompt: body.prompt,
+        endpoint: body.endpoint,
+        openapiSpec: body.openapiSpec,
+        graphqlSchema: body.graphqlSchema,
+      });
+      if (gen.status !== "generated" || !gen.definition) {
+        return NextResponse.json(
+          { status: gen.status, error: gen.summary },
+          { status: 422 },
+        );
+      }
+      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const name =
+        body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
+      const { renderApiDefinitionForCode } =
+        await import("@/lib/api-test/redact");
+      const created = await queries.createTest({
+        repositoryId: body.repositoryId,
+        name,
+        code: renderApiDefinitionForCode(gen.definition),
+        testType: "api",
+        apiDefinition: gen.definition,
+        targetUrl: gen.definition.url,
+        functionalAreaId: body.functionalAreaId ?? null,
+        createdByBotId: mcpBot?.id ?? null,
+        createdByUserId: mcpBot ? null : (session.user?.id ?? null),
+      });
+      return NextResponse.json(
+        {
+          status: "generated",
+          summary: gen.summary,
+          test: created,
+          definition: gen.definition,
+        },
+        { status: 201 },
+      );
+    }
+
+    // Suggest an application-code fix for a real_regression failure:
+    // POST /api/v1/tests/:id/suggest-app-fix   Body: { buildId? }
+    // Returns a recommendation only — never applies changes.
+    if (resource === "tests" && slug[2] === "suggest-app-fix") {
+      const testId = slug[1];
+      if (!testId) {
+        return NextResponse.json({ error: "testId required" }, { status: 400 });
+      }
+      const test = await queries.getTest(testId);
+      if (!test) {
+        return NextResponse.json({ error: "Test not found" }, { status: 404 });
+      }
+      if (test.repositoryId) {
+        if (!(await verifyRepoOwnership(test.repositoryId, session))) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        buildId?: string;
+      };
+      const { suggestAppFix } = await import("@/lib/ai/app-fix-advisor");
+      const result = await suggestAppFix({
+        repositoryId: test.repositoryId!,
+        testId,
+        buildId: typeof body.buildId === "string" ? body.buildId : undefined,
+      });
       return NextResponse.json(result);
     }
 
@@ -2332,6 +2564,36 @@ export async function PUT(
       if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
       if (body.functionalAreaId !== undefined)
         updates.functionalAreaId = body.functionalAreaId;
+      // E1: api tests are edited via their definition; keep the code column (a
+      // readable, credential-free JSON rendering) in sync unless code was set
+      // explicitly. The column is snapshotted into test_versions, so never
+      // write raw auth material into it.
+      if (body.apiDefinition !== undefined) {
+        const def = body.apiDefinition;
+        if (
+          def === null ||
+          typeof def !== "object" ||
+          Array.isArray(def) ||
+          !def.method ||
+          !def.url ||
+          !Array.isArray(def.assertions)
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "apiDefinition must be an object with method, url, and assertions[]",
+            },
+            { status: 400 },
+          );
+        }
+        updates.apiDefinition = def;
+        if (body.code === undefined) {
+          const { renderApiDefinitionForCode } =
+            await import("@/lib/api-test/redact");
+          updates.code = renderApiDefinitionForCode(def);
+        }
+        if (body.targetUrl === undefined) updates.targetUrl = def.url;
+      }
       if (body.quarantined !== undefined) {
         if (typeof body.quarantined !== "boolean") {
           return NextResponse.json(

@@ -36,9 +36,20 @@ function applyScoutMcpWiring(
   config: AIProviderConfig,
   cdpEndpoint: string | undefined,
 ): Pick<GenerateWithAIOptions, "useMCP" | "mcpConfig"> {
-  const mcpArgs = cdpEndpoint
-    ? ["@playwright/mcp@latest", "--cdp-endpoint", cdpEndpoint, "--headless"]
-    : ["@playwright/mcp@latest", "--headless"];
+  // A CDP endpoint (Embedded Browser) is mandatory — without it @playwright/mcp
+  // launches Chromium in THIS host process, running the scout's browser actions
+  // outside the sandbox. Callers must claim an EB first.
+  if (!cdpEndpoint) {
+    throw new Error(
+      "applyScoutMcpWiring requires a cdpEndpoint — refusing to launch a host-process browser. Claim an Embedded Browser first.",
+    );
+  }
+  const mcpArgs = [
+    "@playwright/mcp@latest",
+    "--cdp-endpoint",
+    cdpEndpoint,
+    "--headless",
+  ];
   const playwrightServer: MCPServerConfig = { command: "npx", args: mcpArgs };
 
   if (config.provider === "claude-agent-sdk") {
@@ -426,13 +437,25 @@ export async function runQuickstartScoutAuthed(
   repositoryId: string,
   baseUrl: string,
   authSetupCode: string,
-  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
+  options?: {
+    onLogCreated?: (logId: string) => void;
+    cdpEndpoint?: string;
+    /** When true, the EB already has the captured session cookies/localStorage
+     *  injected — skip the seed replay entirely and start scouting authed. */
+    preAuthenticated?: boolean;
+  },
 ): Promise<QuickstartScoutAuthedResult> {
   const settings = await queries.getAISettings(repositoryId);
   const config = getAIConfig(settings);
   const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
 
-  const prompt = `Walk the authenticated app at ${baseUrl}.
+  // Pre-authenticated: the session was injected into this browser out-of-band,
+  // so skip step 1 (the seed sign-in) — re-driving the login form through the
+  // model is what made this step take minutes. Otherwise fall back to handing
+  // the seed to the agent to replay.
+  const prompt = options?.preAuthenticated
+    ? `Walk the authenticated app at ${baseUrl}. You are ALREADY signed in — the session has been injected into this browser. Do NOT sign in again and SKIP step 1 (the seed) of the workflow. Navigate directly to ${baseUrl} and proceed from step 2 of the workflow in the system prompt. Return strict JSON.`
+    : `Walk the authenticated app at ${baseUrl}.
 
 ## Seed (run this FIRST using MCP browser tools to authenticate)
 \`\`\`javascript

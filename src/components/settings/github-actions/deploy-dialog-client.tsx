@@ -28,9 +28,8 @@ export function DeployDialog({
   onOpenChange,
   config,
 }: DeployDialogProps) {
-  const isEphemeral = config.mode === "ephemeral";
   const isAuto = config.mode === "auto";
-  const hasPersistentRunner = !isEphemeral && !isAuto && !!config.runnerId;
+  const hasPersistentRunner = !isAuto && !!config.runnerId;
   const [deploying, setDeploying] = useState(false);
   const [steps, setSteps] = useState<{
     workflow: StepStatus;
@@ -38,7 +37,7 @@ export function DeployDialog({
     urlSecret: StepStatus;
   }>({ workflow: "pending", tokenSecret: "pending", urlSecret: "pending" });
 
-  const willSetSecrets = isEphemeral || isAuto || hasPersistentRunner;
+  const willSetSecrets = isAuto || hasPersistentRunner;
 
   const handleDeploy = async () => {
     setDeploying(true);

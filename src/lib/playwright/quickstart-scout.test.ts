@@ -53,6 +53,7 @@ describe("runQuickstartScoutPublic — happy path", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
@@ -118,6 +119,7 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
@@ -133,7 +135,9 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
       .mockResolvedValueOnce("Still locked, sorry.");
 
     await expect(
-      runQuickstartScoutPublic("repo-1", "https://example.com"),
+      runQuickstartScoutPublic("repo-1", "https://example.com", {
+        cdpEndpoint: "http://eb.test:9222",
+      }),
     ).rejects.toThrow(/non-JSON on both attempts/i);
     expect(mockGen).toHaveBeenCalledTimes(2);
   });
@@ -154,6 +158,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -175,6 +180,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("no_public_register");
@@ -196,6 +202,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -214,6 +221,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -234,6 +242,7 @@ describe("runQuickstartScoutPublic — authAutomatable guard", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("oauth_only");

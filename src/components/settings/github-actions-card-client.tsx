@@ -16,7 +16,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
-import type { GithubActionConfig, Runner, Repository } from "@/lib/db/schema";
+import type { GithubActionConfig, Repository, Runner } from "@/lib/db/schema";
 import { ConfigList } from "@/components/settings/github-actions/config-list-client";
 import { AddConfigDialog } from "@/components/settings/github-actions/add-config-dialog-client";
 import { ConnectGithubButton } from "@/components/settings/connect-github-button";
@@ -115,8 +115,8 @@ export function GithubActionsCard({
         {configs.length > 0 && (
           <ConfigList
             configs={configs}
-            runners={runners}
             hasGithubAccount={hasGithubAccount}
+            runners={runners}
           />
         )}
 

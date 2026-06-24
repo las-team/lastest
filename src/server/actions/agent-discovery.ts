@@ -5,6 +5,8 @@ import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
 import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
+import { claimEmbeddedBrowserForAgent } from "./ai";
+import { releasePoolEB } from "./embedded-sessions";
 
 /**
  * Unified area discovery server action.
@@ -26,7 +28,23 @@ export async function discoverAreas(
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
-  const result = await runAgentDiscovery(repositoryId, baseUrl);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+
+  // No EB available — skip live browser exploration entirely (never fall
+  // back to a host-process Chromium) and go straight to the AI code scan.
+  const result = eb
+    ? await (async () => {
+        try {
+          return await runAgentDiscovery(repositoryId, baseUrl, {
+            cdpEndpoint: eb.cdpUrl,
+          });
+        } finally {
+          await releasePoolEB(eb.runnerId).catch(() => {});
+        }
+      })()
+    : { success: false as const, error: "No embedded browsers available" };
 
   if (result.success && result.functionalAreas) {
     revalidatePath("/areas");

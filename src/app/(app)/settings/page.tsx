@@ -805,43 +805,25 @@ export default async function SettingsPage({
                   />
                   <div>
                     <p className="font-medium mb-1">
-                      1. Install Playwright browser:
+                      1. Create an embedded browser above to get a token, then
+                      start the container:
                     </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx playwright install chromium
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">
-                      2. Start as background daemon:
-                    </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}
-                    </pre>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono whitespace-pre-wrap break-all">{`docker run -d --name lastest-eb \\
+  -e LASTEST_TOKEN=YOUR_TOKEN \\
+  -e LASTEST_URL=${serverUrl} \\
+  -p 9223:9223 -p 9224:9224 \\
+  ewyc/lastest-eb:latest`}</pre>
                     <p className="text-[11px] mt-1 opacity-75">
-                      Logs: ~/.lastest/runner.log · Config saved for subsequent
-                      runs
+                      It registers over WebSocket and executes tests for your
+                      team — no local Playwright install needed.
                     </p>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">
-                      3. Or run in foreground (Docker / CI):
-                    </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">Manage daemon:</p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
-npx @lastest/runner status    # Check if running
-npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                   </div>
                   <div>
                     <p className="font-medium mb-1">Trigger builds from CI:</p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -r owner/repo -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
                     <p className="text-[11px] mt-1 opacity-75">
-                      Options:{" "}
+                      Creates a build on the server (executed by your registered
+                      embedded browsers) and waits for results. Options:{" "}
                       <code className="bg-muted px-1 py-0.5 rounded">
                         --timeout
                       </code>{" "}
@@ -864,20 +846,9 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                       List available repositories:
                     </p>
                     <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner repos
+                      npx @lastest/runner repos -t YOUR_TOKEN -s {serverUrl}
                     </pre>
                   </div>
-                  <p className="pt-1">
-                    Options:{" "}
-                    <code className="bg-muted px-1 py-0.5 rounded">
-                      -b, --base-url
-                    </code>{" "}
-                    override target URL,{" "}
-                    <code className="bg-muted px-1 py-0.5 rounded">
-                      -i, --interval
-                    </code>{" "}
-                    poll frequency (ms, default 5000)
-                  </p>
                 </div>
               </details>
             </div>

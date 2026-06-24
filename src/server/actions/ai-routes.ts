@@ -22,6 +22,8 @@ import {
 } from "@/lib/github/content";
 import { createJob, completeJob, failJob } from "./jobs";
 import { requireRepoAccess } from "@/lib/auth";
+import { claimEmbeddedBrowserForAgent } from "./ai";
+import { releasePoolEB } from "./embedded-sessions";
 
 /** Extract first valid JSON array from text, handling nested brackets correctly */
 function extractJsonArray(text: string): string | null {
@@ -413,11 +415,27 @@ export async function mcpExploreRoutes(
       existingPaths,
       intelligence,
     );
-    const response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
-      actionType: "mcp_explore",
-      repositoryId,
-      useMCP: true,
-    });
+    const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+      () => undefined,
+    );
+    if (!eb) {
+      return {
+        success: false,
+        error:
+          "No embedded browsers available — all browsers are busy. Please try again later.",
+      };
+    }
+    let response: string;
+    try {
+      response = await generateWithAI(config, prompt, MCP_SYSTEM_PROMPT, {
+        actionType: "mcp_explore",
+        repositoryId,
+        useMCP: true,
+        mcpConfig: { cdpEndpoint: eb.cdpUrl },
+      });
+    } finally {
+      await releasePoolEB(eb.runnerId).catch(() => {});
+    }
 
     // Parse JSON response - try object first (grouped or flat), fall back to flat array
     const objStr = extractJsonObject(response);

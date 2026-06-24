@@ -37,13 +37,14 @@ import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
 import { publishBuildShare } from "./public-shares";
 import { claimEmbeddedBrowserForAgent } from "./ai";
-import { releasePoolEB } from "./embedded-sessions";
+import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { db } from "@/lib/db";
 import { embeddedSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { appendStreamToken } from "@/lib/eb/stream-token";
+import { chromium, type Browser } from "playwright";
 
 /**
  * Normalise a raw EB `ws://host:port` stream URL into a browser-routable form for
@@ -350,6 +351,37 @@ async function runBuildAndWait(
 }
 
 // ---------------------------------------------------------------------------
+// EB claim failure diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an actionable failure message for a scout step that couldn't get an
+ * Embedded Browser. `claimErr` is the error the claim path threw (usually
+ * swallowed by `.catch(() => undefined)`); when the claim merely timed out it's
+ * undefined, so we probe pool health to explain WHY. The most common dev cause
+ * is the EB image not being imported into the k3d cluster (pods stuck in
+ * ImagePullBackOff / Pending) — surfaced here instead of a bare "all browsers
+ * are busy", which sent operators chasing the wrong thing.
+ */
+async function describeEbClaimFailure(claimErr: unknown): Promise<string> {
+  if (claimErr instanceof Error && claimErr.message) {
+    return `Couldn't get a browser for the scout: ${claimErr.message}`;
+  }
+  const health = await getEbPoolHealth().catch(() => null);
+  if (!health) {
+    return "Couldn't get a browser for the scout: no Embedded Browser became available, and pool health could not be read.";
+  }
+  if (health.size > health.online) {
+    const unready = health.size - health.online;
+    return `Couldn't get a browser for the scout: ${health.online} ready, ${unready} provisioned but not ready (cap ${health.max}). EB pods are likely unhealthy — stuck pulling the image (ImagePullBackOff) or pending on resources. An operator may need to restart the EB pool (pnpm stack:refresh:eb).`;
+  }
+  if (health.size >= health.max) {
+    return `Couldn't get a browser for the scout: all ${health.max} browsers are busy and the pool is at capacity. Try again once a run finishes.`;
+  }
+  return `Couldn't get a browser for the scout: no Embedded Browser became ready (${health.online} ready, pool ${health.size}/${health.max}). The EB pool may be unhealthy — an operator may need to restart it (pnpm stack:refresh:eb).`;
+}
+
+// ---------------------------------------------------------------------------
 // Step runners
 // ---------------------------------------------------------------------------
 
@@ -470,9 +502,26 @@ async function runQsScoutPublic(
   // Claim a containerized browser from the EB pool so the scout's MCP attaches
   // to a dedicated chromium instead of fighting for the user-data-dir held by
   // any ambient @playwright/mcp process. Mirrors healer/generator pattern.
+  // Hard-fail when no EB is available — never fall through to a host-process
+  // Chromium (applyScoutMcpWiring would launch @playwright/mcp without a
+  // --cdp-endpoint, the exact in-host execution this codebase forbids). While
+  // waiting, surface "queued" so the panel reflects the pool back-pressure.
+  let claimErr: unknown;
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
     mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch(() => undefined);
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
+  if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
+    await setFailed(
+      sessionId,
+      "qs_scout_public",
+      await describeEbClaimFailure(claimErr),
+    );
+    return false;
+  }
   // Surface the EB's live screencast so the panel can show the scout browsing.
   await mergeMetadata(sessionId, {
     streamUrl: proxiedStream(eb?.streamUrl),
@@ -483,7 +532,7 @@ async function runQsScoutPublic(
       repositoryId,
       gate.baseUrl,
       {
-        cdpEndpoint: eb?.cdpUrl,
+        cdpEndpoint: eb.cdpUrl,
       },
     );
     await mergeMetadata(sessionId, { publicScout: data });
@@ -652,6 +701,90 @@ async function runQsAuthSetup(
   return true;
 }
 
+/**
+ * Inject a captured storage_state (cookies + localStorage) into the EB's default
+ * browser context over CDP, so the authed scout starts already-signed-in. This
+ * removes the LLM-driven login replay that made `qs_scout_authed` the slowest
+ * step (~3.5min): the session was already captured 16s earlier in `qs_auth_setup`,
+ * so re-driving the form through the model is pure waste.
+ *
+ * Targets `browser.contexts()[0]` — the persistent default context that
+ * `@playwright/mcp --cdp-endpoint` reuses — NOT a fresh `newContext` (which MCP
+ * would never see). `browser.close()` over connectOverCDP only disconnects the
+ * CDP session; it does not terminate the EB's Chromium (mirrors play-agent.ts).
+ *
+ * Returns whether enough session material (cookies and/or localStorage) was
+ * injected to consider the browser pre-authenticated. IndexedDB-only captures
+ * (e.g. Firebase) inject nothing here → caller falls back to seed replay.
+ */
+async function injectStorageStateIntoEb(
+  cdpUrl: string,
+  storageStateJson: string,
+): Promise<boolean> {
+  let browser: Browser | null = null;
+  try {
+    const parsed = JSON.parse(storageStateJson) as {
+      cookies?: Array<Record<string, unknown>>;
+      origins?: Array<{
+        origin?: string;
+        localStorage?: Array<{ name: string; value: string }>;
+      }>;
+    };
+    const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : [];
+    const origins = Array.isArray(parsed.origins) ? parsed.origins : [];
+    const hasLocalStorage = origins.some(
+      (o) => Array.isArray(o.localStorage) && o.localStorage.length > 0,
+    );
+    // Nothing cookie/localStorage-shaped to inject (e.g. IndexedDB-only Firebase
+    // capture) — let the caller fall back to LLM seed replay.
+    if (cookies.length === 0 && !hasLocalStorage) return false;
+
+    browser = await chromium.connectOverCDP(cdpUrl);
+    const ctx = browser.contexts()[0];
+    if (!ctx) return false;
+
+    if (cookies.length > 0) {
+      // Cookies come straight from Playwright's own storageState() capture, so
+      // they already match addCookies' param shape — route through `unknown` to
+      // satisfy the structural check on the loosely-parsed JSON.
+      await ctx.addCookies(
+        cookies as unknown as Parameters<typeof ctx.addCookies>[0],
+      );
+    }
+    for (const o of origins) {
+      const ls = Array.isArray(o.localStorage) ? o.localStorage : [];
+      if (!o.origin || ls.length === 0) continue;
+      const page = await ctx.newPage();
+      try {
+        await page
+          .goto(o.origin, { waitUntil: "domcontentloaded", timeout: 10000 })
+          .catch(() => {});
+        await page.evaluate((items) => {
+          for (const it of items) {
+            try {
+              window.localStorage.setItem(it.name, it.value);
+            } catch {
+              /* quota / opaque origin — best effort */
+            }
+          }
+        }, ls);
+      } finally {
+        await page.close().catch(() => {});
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      `[QuickStart authed-scout] storage_state injection failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 async function runQsScoutAuthed(
   sessionId: string,
   repositoryId: string,
@@ -683,19 +816,48 @@ async function runQsScoutAuthed(
     return true;
   }
 
+  // Hard-fail when no EB is available — never fall through to a host-process
+  // Chromium (see runQsScoutPublic for the rationale).
+  let claimErr: unknown;
   const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
     mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch(() => undefined);
+  }).catch((e) => {
+    claimErr = e;
+    return undefined;
+  });
+  if (!eb) {
+    await mergeMetadata(sessionId, { queuedForBrowser: false }).catch(() => {});
+    await setFailed(
+      sessionId,
+      "qs_scout_authed",
+      await describeEbClaimFailure(claimErr),
+    );
+    return false;
+  }
   await mergeMetadata(sessionId, {
     streamUrl: proxiedStream(eb?.streamUrl),
     queuedForBrowser: false,
   });
   try {
+    // Pre-authenticate the EB by injecting the storage_state captured in
+    // qs_auth_setup, so the scout never re-drives the sign-in form through the
+    // model. Falls back to seed replay when nothing injectable was captured.
+    let preAuthenticated = false;
+    if (authSetup.storageStateId) {
+      const ss = await queries.getStorageState(authSetup.storageStateId);
+      if (ss?.storageStateJson) {
+        preAuthenticated = await injectStorageStateIntoEb(
+          eb.cdpUrl,
+          ss.storageStateJson,
+        );
+      }
+    }
+
     const { data, promptLogId } = await runQuickstartScoutAuthed(
       repositoryId,
       gate.baseUrl,
       authTest.code,
-      { cdpEndpoint: eb?.cdpUrl },
+      { cdpEndpoint: eb.cdpUrl, preAuthenticated },
     );
     await mergeMetadata(sessionId, { authedScout: data });
     await setCompleted(sessionId, "qs_scout_authed", {

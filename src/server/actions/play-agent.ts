@@ -2457,14 +2457,17 @@ async function runFixTests(
             () => undefined,
           );
           let healResult: { success: boolean; code?: string; error?: string };
-          try {
-            healResult = await agentHealTest(
-              repositoryId,
-              testId,
-              eb ? { cdpEndpoint: eb.cdpUrl } : undefined,
-            );
-          } finally {
-            if (eb) {
+          if (!eb) {
+            healResult = {
+              success: false,
+              error: "No embedded browsers available — all browsers are busy.",
+            };
+          } else {
+            try {
+              healResult = await agentHealTest(repositoryId, testId, {
+                cdpEndpoint: eb.cdpUrl,
+              });
+            } finally {
               await releasePoolEB(eb.runnerId).catch(() => {});
             }
           }
@@ -3260,13 +3263,27 @@ export async function rerunPlanner(
 
       const { runDeepDiveExploration } =
         await import("@/lib/playwright/planner-agent");
-      const areas = await runDeepDiveExploration(
-        areaName,
-        scoutArea?.routes || [],
-        scoutArea?.focusPoints,
-        session.repositoryId,
-        baseUrl,
+      const diveEB = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+        () => undefined,
       );
+      if (!diveEB) {
+        throw new Error(
+          "No embedded browsers available — all browsers are busy. Please try again later.",
+        );
+      }
+      let areas;
+      try {
+        areas = await runDeepDiveExploration(
+          areaName,
+          scoutArea?.routes || [],
+          scoutArea?.focusPoints,
+          session.repositoryId,
+          baseUrl,
+          { cdpEndpoint: diveEB.cdpUrl },
+        );
+      } finally {
+        await releasePoolEB(diveEB.runnerId).catch(() => {});
+      }
       result = {
         source: "browser",
         areas,

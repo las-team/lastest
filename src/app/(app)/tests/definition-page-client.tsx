@@ -52,6 +52,7 @@ import { ImportFromSpecDialog } from "@/components/ai/import-from-spec-dialog";
 import { CodeDiffScanDialog } from "@/components/ai/code-diff-scan-dialog";
 import { useAiEnabled } from "@/components/ai/ai-availability-context";
 import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
+import { ValidateDiffDialog } from "@/components/api-tests/validate-diff-dialog";
 import {
   createArea,
   deleteArea,
@@ -89,6 +90,7 @@ import {
   Loader2,
   BookOpen,
   GitCompare,
+  ShieldCheck,
   Download,
   FlaskConical,
   Plus,
@@ -118,6 +120,24 @@ interface TestWithStatus extends Test {
   lastRunAt: Date | null;
   // Denormalized from test_specs.title (1:1 LEFT JOIN). Short-form display string.
   specTitle?: string | null;
+}
+
+/**
+ * Distinguishes headless API tests (E1) from browser tests at a glance.
+ * Browser tests render nothing to avoid badge noise.
+ */
+function TestTypeBadge({ test }: { test: Pick<Test, "testType"> }) {
+  if (test.testType !== "api") return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      <Badge
+        variant="outline"
+        className="h-4 px-1.5 text-[10px] font-medium uppercase tracking-wide"
+      >
+        API
+      </Badge>
+    </span>
+  );
 }
 
 interface DefinitionPageClientProps {
@@ -224,6 +244,7 @@ export function DefinitionPageClient({
     null,
   );
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
+  const [showValidateDiffDialog, setShowValidateDiffDialog] = useState(false);
 
   // --- Area CRUD state ---
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -1212,6 +1233,19 @@ export function DefinitionPageClient({
             </TooltipTrigger>
             <TooltipContent side="bottom">Code Diff</TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setShowValidateDiffDialog(true)}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Validate a diff</TooltipContent>
+          </Tooltip>
         </>
       ) : (
         <McpCtaHint
@@ -1967,8 +2001,11 @@ export function DefinitionPageClient({
                                   }}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
-                                    {test.name}
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
+                                      {test.name}
+                                    </div>
+                                    <TestTypeBadge test={test} />
                                   </div>
                                   {!treeSelection?.type &&
                                     getAreaName(test.functionalAreaId) && (
@@ -2186,6 +2223,15 @@ export function DefinitionPageClient({
       </ResizablePanel>
 
       {/* ─── Dialogs ─── */}
+
+      {/* Validate a diff */}
+      {showValidateDiffDialog && (
+        <ValidateDiffDialog
+          open={showValidateDiffDialog}
+          onOpenChange={setShowValidateDiffDialog}
+          repositoryId={repositoryId}
+        />
+      )}
 
       {/* New Area */}
       <Dialog open={isNewAreaOpen} onOpenChange={setIsNewAreaOpen}>
