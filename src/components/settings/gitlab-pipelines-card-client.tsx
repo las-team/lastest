@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { GitlabPipelineConfig, Runner, Repository } from "@/lib/db/schema";
+import type { GitlabPipelineConfig, Repository, Runner } from "@/lib/db/schema";
 import { ConfigList } from "@/components/settings/gitlab-pipelines/config-list-client";
 import { AddConfigDialog } from "@/components/settings/gitlab-pipelines/add-config-dialog-client";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
@@ -100,8 +100,8 @@ export function GitlabPipelinesCard({
         {configs.length > 0 && (
           <ConfigList
             configs={configs}
-            runners={runners}
             hasGitlabAccount={hasGitlabAccount}
+            runners={runners}
           />
         )}
 

@@ -163,7 +163,7 @@ export async function triggerScheduleNowAction(
   const result = await createAndRunBuildFromCI({
     triggerType: "scheduled",
     repositoryId: schedule.repositoryId,
-    runnerId: schedule.runnerId || "local",
+    runnerId: schedule.runnerId || "auto",
     gitBranch: schedule.gitBranch || undefined,
   });
 

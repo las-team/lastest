@@ -135,7 +135,7 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
 export async function agentDiscoverAreas(
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void },
+  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
 ): Promise<{
   success: boolean;
   functionalAreas?: Array<{
@@ -151,6 +151,16 @@ export async function agentDiscoverAreas(
   error?: string;
 }> {
   await requireRepoAccess(repositoryId);
+
+  // A CDP endpoint (Embedded Browser) is mandatory — MCP exploration must run
+  // against the sandboxed EB, never a host-process Chromium.
+  if (!options?.cdpEndpoint) {
+    return {
+      success: false,
+      error:
+        "No embedded browser available — cdpEndpoint is required for live exploration.",
+    };
+  }
 
   try {
     const settings = await queries.getAISettings(repositoryId);
@@ -173,6 +183,7 @@ export async function agentDiscoverAreas(
         actionType: "agent_discover",
         onLogCreated: options?.onLogCreated,
         responseFormat: "json_object",
+        mcpConfig: { cdpEndpoint: options.cdpEndpoint },
       },
     );
 
@@ -381,8 +392,15 @@ export async function runDeepDiveExploration(
   focusPoints: string[] | undefined,
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void },
+  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
 ): Promise<PlannerArea[]> {
+  // A CDP endpoint (Embedded Browser) is mandatory — never explore via a
+  // host-process Chromium.
+  if (!options?.cdpEndpoint) {
+    throw new Error(
+      "runDeepDiveExploration requires a cdpEndpoint (Embedded Browser) — refusing to launch a host-process browser.",
+    );
+  }
   const settings = await queries.getAISettings(repositoryId);
   const config = getAIConfig(settings);
   const seed = await buildSeedFixture(repositoryId);
@@ -412,6 +430,7 @@ export async function runDeepDiveExploration(
       actionType: "agent_discover",
       onLogCreated: options?.onLogCreated,
       responseFormat: "json_object",
+      mcpConfig: { cdpEndpoint: options.cdpEndpoint },
     },
   );
 

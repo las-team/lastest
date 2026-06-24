@@ -132,9 +132,9 @@ export async function deleteGitlabPipelineConfigAction(id: string) {
     }
   }
 
-  // Auto-created runners are owned by ephemeral/auto modes
+  // Auto-created runners are owned by auto mode
   const mode = config.mode as GitlabPipelineMode;
-  if ((mode === "ephemeral" || mode === "auto") && config.runnerId) {
+  if (mode === "auto" && config.runnerId) {
     await deleteRunnerInternal(config.runnerId, session.team.id);
   }
 
@@ -157,7 +157,6 @@ export async function deployPipelineToGitlab(configId: string) {
   if (!config.gitlabProjectId)
     throw new Error("Config is missing gitlabProjectId");
 
-  const isEphemeral = config.mode === "ephemeral";
   const isAuto = config.mode === "auto";
 
   const results = {
@@ -197,15 +196,15 @@ export async function deployPipelineToGitlab(configId: string) {
   let runnerToken: string | null = null;
   let runnerId: string | null = config.runnerId ?? null;
 
-  if (isEphemeral || isAuto) {
+  if (isAuto) {
     if (!runnerId) {
       const result = await createRunnerInternal(
-        isAuto ? `glp-auto-${config.projectPath}` : `glp-${config.projectPath}`,
+        `glp-auto-${config.projectPath}`,
         session.team.id,
         session.user.id,
         ["run"],
-        "remote",
-        isAuto, // authOnly for auto mode
+        "embedded",
+        true, // authOnly for auto mode
       );
       if ("error" in result)
         throw new Error(`Failed to create runner: ${result.error}`);

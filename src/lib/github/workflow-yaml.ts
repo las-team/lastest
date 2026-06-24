@@ -84,74 +84,10 @@ function buildPersistentSteps(config: WorkflowConfig): string {
           ${runCmd}`;
 }
 
-function buildEphemeralSteps(config: WorkflowConfig): string {
-  const repo = `${config.repositoryOwner}/${config.repositoryName}`;
-  const flags: string[] = [];
-  flags.push('-t "$LASTEST_TOKEN"');
-  flags.push('-s "$LASTEST_URL"');
-  flags.push(`--repo "${repo}"`);
-  flags.push(`--branch "$\{{ github.head_ref || github.ref_name }}"`);
-  flags.push(`--commit "$\{{ github.sha }}"`);
-  if (config.failOnChanges) flags.push("--fail-on-changes");
-  flags.push(`--timeout ${config.timeout}`);
-  if (config.targetUrl) flags.push(`--target-url "${config.targetUrl}"`);
-
-  const triggerFlags = flags
-    .map((f, i) =>
-      i === 0
-        ? `npx @lastest/runner@${RUNNER_VERSION} trigger \\\n            ${f}`
-        : `            ${f}`,
-    )
-    .join(" \\\n");
-
-  return `      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Get Playwright version
-        id: playwright-version
-        run: echo "version=$(npx @lastest/runner@${RUNNER_VERSION} playwright-version)" >> $GITHUB_OUTPUT
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: \${{ runner.os }}-playwright-\${{ steps.playwright-version.outputs.version }}
-
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium --with-deps
-
-      - name: Install Playwright OS deps (cached)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
-
-      - name: Run visual tests
-        env:
-          LASTEST_TOKEN: \${{ secrets.LASTEST_TOKEN }}
-          LASTEST_URL: \${{ secrets.LASTEST_URL }}
-        run: |
-          npx @lastest/runner@${RUNNER_VERSION} run \\
-            -t "$LASTEST_TOKEN" \\
-            -s "$LASTEST_URL" &
-          RUNNER_PID=$!
-          sleep 3
-
-          ${triggerFlags}
-
-          kill $RUNNER_PID || true`;
-}
-
 export function generateWorkflowYaml(config: WorkflowConfig): string {
-  const timeoutMinutes =
-    Math.ceil(config.timeout / 60000) + (config.mode === "ephemeral" ? 5 : 0);
+  const timeoutMinutes = Math.ceil(config.timeout / 60000);
   const onBlock = buildOnBlock(config);
-  const steps =
-    config.mode === "ephemeral"
-      ? buildEphemeralSteps(config)
-      : buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
+  const steps = buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 
   return `name: Lastest Visual Tests
 ${onBlock}

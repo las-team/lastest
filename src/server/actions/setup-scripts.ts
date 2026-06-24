@@ -9,15 +9,11 @@ import {
 } from "@/lib/auth/ownership";
 import type { SetupScriptType } from "@/lib/db/schema";
 import { validateApiScript } from "@/lib/setup/api-seeder";
-import { chromium } from "playwright";
-import { runPlaywrightSetup } from "@/lib/setup/script-runner";
-import type { SetupScript, SetupContext } from "@/lib/setup/types";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
 import {
   claimOrProvisionPoolEB,
   releasePoolEB,
 } from "@/server/actions/embedded-sessions";
-import { isKubernetesMode } from "@/lib/eb/provisioner";
 
 export interface CreateSetupScriptInput {
   repositoryId: string;
@@ -130,7 +126,7 @@ export async function duplicateSetupScript(id: string) {
 }
 
 /**
- * Test a setup script by running it in a temporary browser
+ * Test a setup script by running it via a sandboxed Embedded Browser pod.
  */
 export async function testSetupScript(
   id: string,
@@ -143,8 +139,6 @@ export async function testSetupScript(
 }> {
   const { script } = await requireSetupScriptOwnership(id);
 
-  // Only test Playwright scripts directly
-  // API scripts need a config and actual API endpoint
   if (script.type !== "playwright") {
     return {
       success: false,
@@ -165,50 +159,8 @@ export async function testSetupScript(
       ? { width: settings.viewportWidth, height: settings.viewportHeight }
       : { width: 1280, height: 720 };
 
-  // SECURITY: setup scripts are arbitrary customer-authored Playwright code.
-  // Prefer running them in a disposable runner/EB pod so they never `eval` in
-  // the host process (which holds DATABASE_URL / STRIPE_* / SYSTEM_EB_TOKEN).
-  // On a provisioned (Kubernetes) deployment this path is mandatory; only a
-  // self-hosted single-tenant install with no pool falls back to host execution.
-  let runnerId: string | null = null;
-  try {
-    const poolEB = await claimOrProvisionPoolEB({ purpose: "interactive" });
-    runnerId = poolEB?.runnerId ?? null;
-  } catch {
-    runnerId = null;
-  }
-
-  if (runnerId) {
-    const start = Date.now();
-    try {
-      const result = await executeSetupViaRunner(
-        code,
-        script.id,
-        runnerId,
-        targetUrl,
-        viewport,
-        settings?.navigationTimeout ?? undefined,
-        settings,
-      );
-      return {
-        success: true,
-        duration: Date.now() - start,
-        variables: result.variables,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        duration: Date.now() - start,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      await releasePoolEB(runnerId).catch(() => {});
-    }
-  }
-
-  // No pooled browser was available. In a provisioned deployment we must NOT
-  // fall back to in-process eval — return a transient busy error instead.
-  if (isKubernetesMode()) {
+  const poolEB = await claimOrProvisionPoolEB({ purpose: "interactive" });
+  if (!poolEB) {
     return {
       success: false,
       duration: 0,
@@ -216,46 +168,30 @@ export async function testSetupScript(
     };
   }
 
-  // Self-hosted / local-dev fallback: no runner pool is configured, so there is
-  // no disposable sandbox to use. Execute in-process. This is acceptable only
-  // because such deployments are single-tenant (every team member is already
-  // trusted with the host); a multi-tenant deployment always runs a pool above.
-  let browser = null;
-  let page = null;
-
+  const start = Date.now();
   try {
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ viewport });
-    page = await context.newPage();
-
-    const setupContext: SetupContext = {
-      baseUrl: targetUrl,
-      page,
-      variables: {},
-      repositoryId: script.repositoryId,
-    };
-
-    const result = await runPlaywrightSetup(
-      page,
-      script as SetupScript,
-      setupContext,
+    const result = await executeSetupViaRunner(
+      code,
+      script.id,
+      poolEB.runnerId,
+      targetUrl,
+      viewport,
+      settings?.navigationTimeout ?? undefined,
+      settings,
     );
-
     return {
-      success: result.success,
-      duration: result.duration,
-      error: result.error,
+      success: true,
+      duration: Date.now() - start,
       variables: result.variables,
     };
   } catch (error) {
     return {
       success: false,
-      duration: 0,
+      duration: Date.now() - start,
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    if (page) await page.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    await releasePoolEB(poolEB.runnerId).catch(() => {});
   }
 }
 

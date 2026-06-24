@@ -42,8 +42,7 @@ export function DeployDialog({
   });
 
   const isCi = config.deliveryMode === "ci_file";
-  const willSetVars =
-    config.mode === "ephemeral" || config.mode === "auto" || !!config.runnerId;
+  const willSetVars = config.mode === "auto" || !!config.runnerId;
 
   const handleDeploy = async () => {
     setDeploying(true);

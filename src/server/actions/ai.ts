@@ -159,7 +159,7 @@ export async function aiFixTest(
 
     // Validate against runner API surface; aiFixTest has no MCP loop so we
     // surface validation errors directly rather than retrying.
-    const validated = await runValidation(code, test.targetUrl);
+    const validated = await runValidation(code);
     if (!validated.valid) {
       return {
         success: false,
@@ -185,7 +185,23 @@ export async function aiEnhanceTest(
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  return agentEnhanceTest(repositoryId, testId, userPrompt);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentEnhanceTest(repositoryId, testId, userPrompt, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 export async function saveGeneratedTest(data: {
@@ -197,9 +213,6 @@ export async function saveGeneratedTest(data: {
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   await requireRepoAccess(data.repositoryId);
   try {
-    // Static-only validation here — UI save action runs synchronously so we
-    // skip the 2-5s headless-chromium pass. The page-snapshot check belongs
-    // upstream on the agentic generator that produced this code.
     const parseCheck = validateTestCode(data.code);
     if (!parseCheck.valid) {
       return {
@@ -207,9 +220,7 @@ export async function saveGeneratedTest(data: {
         error: `Test code failed parse check: ${parseCheck.error}`,
       };
     }
-    const validated = await runValidation(data.code, null, {
-      skipPageCheck: true,
-    });
+    const validated = await runValidation(data.code);
     if (!validated.valid) {
       return {
         success: false,
@@ -860,7 +871,23 @@ export async function healTest(
     };
   }
   const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  return agentHealTest(repositoryId, testId);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentHealTest(repositoryId, testId, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 /**
@@ -1090,5 +1117,21 @@ export async function createTest(
   context: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  return agentCreateTest(repositoryId, context);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentCreateTest(repositoryId, context, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }

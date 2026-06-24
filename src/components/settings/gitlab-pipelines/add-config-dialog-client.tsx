@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Cloud, Server, Zap, FileCode, Webhook } from "lucide-react";
+import { Loader2, Server, Zap, FileCode, Webhook } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -230,7 +230,7 @@ export function AddConfigDialog({
 
             <div className="space-y-2">
               <h4 className="text-sm font-medium">Mode</h4>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   className={`p-2.5 rounded-md border text-left transition-colors ${
@@ -263,23 +263,6 @@ export function AddConfigDialog({
                   </div>
                   <p className="text-xs text-muted-foreground leading-tight">
                     Uses an existing runner. Pipeline only triggers.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  className={`p-2.5 rounded-md border text-left transition-colors ${
-                    mode === "ephemeral"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-muted-foreground/50"
-                  }`}
-                  onClick={() => setMode("ephemeral")}
-                >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <Cloud className="h-3.5 w-3.5" />
-                    <span className="text-sm font-medium">Ephemeral</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-tight">
-                    Runner inside the GitLab job.
                   </p>
                 </button>
               </div>

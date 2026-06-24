@@ -12,9 +12,7 @@ describe("runValidationWithRetry", () => {
       }
     `;
     const regen = vi.fn();
-    const result = await runValidationWithRetry(goodCode, null, regen, {
-      skipPageCheck: true,
-    });
+    const result = await runValidationWithRetry(goodCode, regen);
     expect(result.valid).toBe(true);
     expect(regen).not.toHaveBeenCalled();
   });
@@ -31,9 +29,7 @@ describe("runValidationWithRetry", () => {
       }
     `;
     const regen = vi.fn().mockResolvedValueOnce(goodCode);
-    const result = await runValidationWithRetry(badCode, null, regen, {
-      skipPageCheck: true,
-    });
+    const result = await runValidationWithRetry(badCode, regen);
     expect(result.valid).toBe(true);
     expect(regen).toHaveBeenCalledTimes(1);
   });
@@ -50,9 +46,7 @@ describe("runValidationWithRetry", () => {
       }
     `;
     const regen = vi.fn().mockResolvedValue(stillBadCode);
-    const result = await runValidationWithRetry(badCode, null, regen, {
-      skipPageCheck: true,
-    });
+    const result = await runValidationWithRetry(badCode, regen);
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.feedback).toBeTruthy();
@@ -67,7 +61,7 @@ describe("runValidationWithRetry", () => {
       }
     `;
     const regen = vi.fn().mockResolvedValue(badCode);
-    await runValidationWithRetry(badCode, null, regen, { skipPageCheck: true });
+    await runValidationWithRetry(badCode, regen);
     expect(regen).toHaveBeenCalled();
     const [feedback, attempt] = regen.mock.calls[0];
     expect(typeof feedback).toBe("string");
@@ -82,10 +76,7 @@ describe("runValidationWithRetry", () => {
       }
     `;
     const regen = vi.fn().mockResolvedValue(badCode);
-    await runValidationWithRetry(badCode, null, regen, {
-      skipPageCheck: true,
-      maxRetries: 0,
-    });
+    await runValidationWithRetry(badCode, regen, { maxRetries: 0 });
     expect(regen).not.toHaveBeenCalled();
   });
 });

@@ -2968,7 +2968,7 @@ export type NewRemoteRecordingEventRow =
 // GitHub Actions Configs
 // ============================================
 
-export type GithubActionMode = "persistent" | "ephemeral" | "auto";
+export type GithubActionMode = "persistent" | "auto";
 export type GithubActionTriggerEvent =
   | "push"
   | "pull_request"
@@ -3012,7 +3012,7 @@ export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
 // GitLab Pipeline Configs
 // ============================================
 
-export type GitlabPipelineMode = "persistent" | "ephemeral" | "auto";
+export type GitlabPipelineMode = "persistent" | "auto";
 export type GitlabPipelineTriggerEvent =
   | "push"
   | "merge_request"

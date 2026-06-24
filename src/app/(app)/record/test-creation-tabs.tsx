@@ -21,14 +21,7 @@ import { SpecPanel } from "./panels/spec-panel";
 import { ImportCodePanel } from "./panels/import-code-panel";
 import { ApiTestPanel } from "./panels/api-test-panel";
 
-type TabKey =
-  | "record"
-  | "mcp"
-  | "explore"
-  | "auto"
-  | "spec"
-  | "import"
-  | "api";
+type TabKey = "record" | "mcp" | "explore" | "auto" | "spec" | "import" | "api";
 const TAB_KEYS: TabKey[] = [
   "record",
   "mcp",

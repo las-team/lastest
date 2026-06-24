@@ -28,6 +28,28 @@ export interface BrowserPlannerOptions {
   onLogCreated?: (logId: string) => void;
 }
 
+async function claimEB(): Promise<
+  { cdpUrl: string; runnerId: string } | undefined
+> {
+  try {
+    const { claimEmbeddedBrowserForAgent } =
+      await import("@/server/actions/ai");
+    return (await claimEmbeddedBrowserForAgent(5 * 60 * 1000)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function releaseEB(runnerId: string): Promise<void> {
+  try {
+    const { releasePoolEB } =
+      await import("@/server/actions/embedded-sessions");
+    await releasePoolEB(runnerId);
+  } catch {
+    // non-fatal
+  }
+}
+
 export async function runBrowserPlanner(
   repositoryId: string,
   baseUrl: string,
@@ -121,6 +143,29 @@ export async function runBrowserPlanner(
           const diveStart = Date.now();
           let diveLogId: string | undefined;
 
+          // Each diver gets its own EB — they navigate concurrently and
+          // cannot safely share one browser/CDP endpoint.
+          const eb = await claimEB();
+
+          const fallbackPlan = () =>
+            [
+              {
+                name: area.name,
+                routes: area.routes,
+                testPlan: buildFallbackPlanFromFocusPoints(
+                  area.name,
+                  area.routes,
+                  area.focusPoints,
+                ),
+              },
+            ] as PlannerArea[];
+
+          if (!eb) {
+            const diveDuration = Date.now() - diveStart;
+            options?.onDeepDiveComplete?.(area.name, 0, diveDuration);
+            return fallbackPlan();
+          }
+
           try {
             const areas = await runDeepDiveExploration(
               area.name,
@@ -132,6 +177,7 @@ export async function runBrowserPlanner(
                 onLogCreated: (id) => {
                   diveLogId = id;
                 },
+                cdpEndpoint: eb.cdpUrl,
               },
             );
             const diveDuration = Date.now() - diveStart;
@@ -151,17 +197,9 @@ export async function runBrowserPlanner(
               diveLogId,
             );
             // On failure, create a basic plan from scout's focus points
-            return [
-              {
-                name: area.name,
-                routes: area.routes,
-                testPlan: buildFallbackPlanFromFocusPoints(
-                  area.name,
-                  area.routes,
-                  area.focusPoints,
-                ),
-              },
-            ] as PlannerArea[];
+            return fallbackPlan();
+          } finally {
+            await releaseEB(eb.runnerId);
           }
         }),
       );
@@ -194,6 +232,16 @@ async function runFallbackExploration(
   const start = Date.now();
   let promptLogId: string | undefined;
 
+  const eb = await claimEB();
+  if (!eb) {
+    return {
+      source: "browser",
+      areas: [],
+      error: "No embedded browsers available — all browsers are busy.",
+      durationMs: Date.now() - start,
+      inputSummary: `Fallback: baseUrl=${baseUrl}`,
+    };
+  }
   try {
     const { agentDiscoverAreas } =
       await import("@/lib/playwright/planner-agent");
@@ -202,6 +250,7 @@ async function runFallbackExploration(
         promptLogId = id;
         options?.onLogCreated?.(id);
       },
+      cdpEndpoint: eb.cdpUrl,
     });
     const durationMs = Date.now() - start;
 
@@ -245,6 +294,8 @@ async function runFallbackExploration(
       durationMs: Date.now() - start,
       inputSummary: `Fallback: baseUrl=${baseUrl}`,
     };
+  } finally {
+    await releaseEB(eb.runnerId);
   }
 }
 
