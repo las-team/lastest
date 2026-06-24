@@ -1,13 +1,25 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { storageStates } from "@/lib/db/schema";
+import { encryptField, decryptField } from "@/lib/crypto";
+
+type StorageStateRow = typeof storageStates.$inferSelect;
+
+// storageStateJson holds a live Playwright storageState() blob (cookies +
+// localStorage = live auth tokens), so it is encrypted at rest. Decrypt on the
+// way out so every consumer sees the plaintext blob; legacy plaintext rows pass
+// through unchanged (decrypt() is a no-op without the enc:v1: prefix).
+function decryptStorageStateRow<T extends StorageStateRow>(row: T): T {
+  return { ...row, storageStateJson: decryptField(row.storageStateJson) };
+}
 
 export async function getStorageStates(repositoryId: string | null) {
   if (!repositoryId) return [];
-  return db
+  const rows = await db
     .select()
     .from(storageStates)
     .where(eq(storageStates.repositoryId, repositoryId));
+  return rows.map(decryptStorageStateRow);
 }
 
 export async function getStorageState(id: string) {
@@ -15,7 +27,7 @@ export async function getStorageState(id: string) {
     .select()
     .from(storageStates)
     .where(eq(storageStates.id, id));
-  return rows[0] ?? null;
+  return rows[0] ? decryptStorageStateRow(rows[0]) : null;
 }
 
 export async function createStorageState(data: {
@@ -52,7 +64,9 @@ export async function createStorageState(data: {
     .values({
       repositoryId: data.repositoryId,
       name: data.name,
-      storageStateJson: data.storageStateJson,
+      // Counts above are derived from the plaintext blob; encrypt only the
+      // stored value. Returned row is decrypted below so callers get plaintext.
+      storageStateJson: encryptField(data.storageStateJson),
       cookieCount,
       originCount,
       includesIndexedDB,
@@ -62,7 +76,7 @@ export async function createStorageState(data: {
       expiresAt: data.expiresAt ?? null,
     })
     .returning();
-  return rows[0];
+  return rows[0] ? decryptStorageStateRow(rows[0]) : rows[0];
 }
 
 export async function deleteStorageState(id: string) {

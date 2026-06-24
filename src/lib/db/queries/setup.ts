@@ -14,6 +14,7 @@ import type {
   NewDefaultSetupStep,
   NewDefaultTeardownStep,
   SetupScriptType,
+  SetupAuthConfig,
   TestSetupOverrides,
   TestTeardownOverrides,
   StabilizationSettings,
@@ -23,8 +24,18 @@ import type {
 import { getTest } from "./tests";
 import { getRepository } from "./repositories";
 import { getStorageState } from "./storage-states";
+import { encryptAuthConfig, decryptAuthConfig } from "@/lib/crypto-fields";
 import { eq, desc, and, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+
+// Setup-config auth (bearer token / basic-auth password / custom header values)
+// is encrypted at rest via the shared helpers in @/lib/crypto-fields — encrypt
+// on write, decrypt on read, so every consumer sees plaintext.
+function decryptSetupConfigRow<
+  T extends { authConfig: SetupAuthConfig | null },
+>(row: T): T {
+  return { ...row, authConfig: decryptAuthConfig(row.authConfig) };
+}
 
 // ============================================
 // Setup Scripts
@@ -92,11 +103,12 @@ export async function duplicateSetupScript(id: string) {
 // ============================================
 
 export async function getSetupConfigs(repositoryId: string) {
-  return db
+  const rows = await db
     .select()
     .from(setupConfigs)
     .where(eq(setupConfigs.repositoryId, repositoryId))
     .orderBy(desc(setupConfigs.createdAt));
+  return rows.map(decryptSetupConfigRow);
 }
 
 export async function getSetupConfig(id: string) {
@@ -104,7 +116,7 @@ export async function getSetupConfig(id: string) {
     .select()
     .from(setupConfigs)
     .where(eq(setupConfigs.id, id));
-  return row;
+  return row ? decryptSetupConfigRow(row) : row;
 }
 
 export async function createSetupConfig(
@@ -114,10 +126,12 @@ export async function createSetupConfig(
   const now = new Date();
   await db.insert(setupConfigs).values({
     ...data,
+    authConfig: encryptAuthConfig(data.authConfig),
     id,
     createdAt: now,
     updatedAt: now,
   });
+  // Return the plaintext shape callers passed in (DB holds the encrypted copy).
   return { id, ...data, createdAt: now, updatedAt: now };
 }
 
@@ -125,9 +139,15 @@ export async function updateSetupConfig(
   id: string,
   data: Partial<NewSetupConfig>,
 ) {
+  // Only re-encrypt authConfig when the caller actually supplied it, so a patch
+  // that omits it doesn't wipe the stored credentials.
+  const patch: Partial<NewSetupConfig> = { ...data };
+  if (data.authConfig !== undefined) {
+    patch.authConfig = encryptAuthConfig(data.authConfig);
+  }
   await db
     .update(setupConfigs)
-    .set({ ...data, updatedAt: new Date() })
+    .set({ ...patch, updatedAt: new Date() })
     .where(eq(setupConfigs.id, id));
 }
 

@@ -25,6 +25,9 @@ import {
   oauthAccounts,
   googleSheetsAccounts,
   aiSettings,
+  storageStates,
+  setupConfigs,
+  agentSessions,
 } from "../src/lib/db/schema";
 import { encrypt, decryptWithKey, ENC_PREFIX } from "../src/lib/crypto";
 import { eq } from "drizzle-orm";
@@ -183,6 +186,101 @@ async function rotateAISettings(oldKey: Buffer) {
   }
 }
 
+// ── User-provided app credentials (added later) ──────────────────────────────
+
+// storage_states.storageStateJson — flat text column.
+async function rotateStorageStates(oldKey: Buffer) {
+  console.log("\n[storageStates]");
+  const rows = await db.select().from(storageStates);
+  for (const row of rows) {
+    await rotateRow(
+      "storageState",
+      row.id,
+      { storageStateJson: row.storageStateJson },
+      oldKey,
+      async (id, updates) => {
+        await db
+          .update(storageStates)
+          .set(updates)
+          .where(eq(storageStates.id, id));
+      },
+    );
+  }
+}
+
+// setup_configs.authConfig — JSONB; re-encrypt token / password / header values.
+async function rotateSetupConfigs(oldKey: Buffer) {
+  console.log("\n[setupConfigs]");
+  const rows = await db.select().from(setupConfigs);
+  for (const row of rows) {
+    const cfg = row.authConfig;
+    if (!cfg) {
+      skipped++;
+      continue;
+    }
+    const next = { ...cfg };
+    let changed = false;
+    const token = reEncryptField(next.token, oldKey);
+    if (token != null) {
+      next.token = token;
+      changed = true;
+    }
+    const password = reEncryptField(next.password, oldKey);
+    if (password != null) {
+      next.password = password;
+      changed = true;
+    }
+    if (next.headers) {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(next.headers)) {
+        const re = reEncryptField(v, oldKey);
+        if (re != null) {
+          headers[k] = re;
+          changed = true;
+        } else {
+          headers[k] = v;
+        }
+      }
+      next.headers = headers;
+    }
+    if (!changed) {
+      skipped++;
+      continue;
+    }
+    console.log(`  setupConfig ${row.id}: rotating authConfig secrets`);
+    if (!dryRun)
+      await db
+        .update(setupConfigs)
+        .set({ authConfig: next })
+        .where(eq(setupConfigs.id, row.id));
+    rotated++;
+  }
+}
+
+// agent_sessions.metadata.quickstartPassword — JSONB.
+async function rotateAgentSessions(oldKey: Buffer) {
+  console.log("\n[agentSessions]");
+  const rows = await db.select().from(agentSessions);
+  for (const row of rows) {
+    const meta = row.metadata;
+    const re = reEncryptField(meta?.quickstartPassword, oldKey);
+    if (!meta || re == null) {
+      skipped++;
+      continue;
+    }
+    const next = { ...meta, quickstartPassword: re };
+    console.log(
+      `  agentSession ${row.id}: rotating metadata.quickstartPassword`,
+    );
+    if (!dryRun)
+      await db
+        .update(agentSessions)
+        .set({ metadata: next })
+        .where(eq(agentSessions.id, row.id));
+    rotated++;
+  }
+}
+
 async function main() {
   const oldKey = getOldKey();
   if (dryRun) console.log("DRY RUN — no changes will be written\n");
@@ -192,6 +290,9 @@ async function main() {
   await rotateOAuthAccounts(oldKey);
   await rotateGoogleSheetsAccounts(oldKey);
   await rotateAISettings(oldKey);
+  await rotateStorageStates(oldKey);
+  await rotateSetupConfigs(oldKey);
+  await rotateAgentSessions(oldKey);
 
   console.log(
     `\nDone. ${rotated} row(s) re-encrypted, ${skipped} skipped (already rotated or plaintext).`,

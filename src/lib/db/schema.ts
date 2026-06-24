@@ -2762,6 +2762,9 @@ export interface AgentSessionMetadata {
   skipAI?: boolean;
   // QuickStart-only fields
   quickstartEmail?: string;
+  /** User's real app-login password (QuickStart against their own baseURL).
+   *  Encrypted at rest (AES-256-GCM) via the agent-session query layer in
+   *  queries/integrations.ts — callers always see the decrypted plaintext. */
   quickstartPassword?: string;
   quickstartSlug?: string;
   quickstartStamp?: string;
