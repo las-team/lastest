@@ -1261,11 +1261,38 @@ export class EmbeddedTestExecutor {
       const POST_GOTO_TRACK_MS = 3000;
       const MAX_SUBRESOURCE_RELOADS = 2;
 
+      // Registrable domain (eTLD+1, approximated by the last two labels) of a
+      // host. Used to decide whether a failed sub-resource is FIRST-PARTY to
+      // the page under test. A third-party host failing DNS (analytics, ads,
+      // external CDNs) says nothing about whether the EB's network is healthy
+      // — only first-party failures should condemn the pod. Without this, a
+      // fire-and-forget tracker beacon (e.g. *.log.optimizely.com on
+      // the-internet.herokuapp.com) re-fires on every reload, never resolves,
+      // and falsely trips "EB network unhealthy". The eTLD+1 approximation is
+      // intentional: it errs toward treating more hosts as first-party
+      // (keeping the safety check strict), which is the safe direction.
+      const baseDomain = (host: string): string =>
+        host.split(".").slice(-2).join(".").toLowerCase();
+      // Set per-navigation inside the goto wrapper below, so the first-party
+      // check always reflects the page currently being navigated to.
+      let pageBaseDomain = "";
+      const isFirstParty = (reqUrl: string): boolean => {
+        if (!pageBaseDomain) return true; // can't tell — stay strict
+        try {
+          return baseDomain(new URL(reqUrl).hostname) === pageBaseDomain;
+        } catch {
+          return true;
+        }
+      };
+
       let trackingActive = false;
       let criticalSubresourceFailures: string[] = [];
       page.on("requestfailed", (req) => {
         if (!trackingActive) return;
         if (!CRITICAL_RESOURCE_TYPES.has(req.resourceType())) return;
+        // Only first-party sub-resource failures indicate a broken EB network.
+        // Third-party hosts (trackers/ads/CDNs) failing DNS are ignorable.
+        if (!isFirstParty(req.url())) return;
         const failure = req.failure();
         if (failure && TRANSIENT_NET_RX.test(failure.errorText)) {
           criticalSubresourceFailures.push(
@@ -1277,6 +1304,11 @@ export class EmbeddedTestExecutor {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn("info", `Navigating to ${url}...`);
+        try {
+          pageBaseDomain = baseDomain(new URL(url).hostname);
+        } catch {
+          pageBaseDomain = "";
+        }
         const delays = [1000, 2000, 4000];
         let lastErr: unknown;
         let response: Awaited<ReturnType<typeof originalGoto>> | null = null;
