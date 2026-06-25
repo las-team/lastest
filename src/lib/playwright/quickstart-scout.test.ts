@@ -73,6 +73,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
@@ -89,6 +90,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
@@ -101,6 +103,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");

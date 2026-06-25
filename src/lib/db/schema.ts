@@ -2050,7 +2050,9 @@ export const teams = pgTable("teams", {
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
-export type OnboardingPath = "manual" | "ai" | "agent";
+// "ai" / "agent" are legacy in-product-AI paths kept for back-compat with rows
+// written before the MCP-first onboarding; new onboardings pick "manual" or "mcp".
+export type OnboardingPath = "manual" | "ai" | "agent" | "mcp";
 
 // Users - Core identity
 export const users = pgTable("users", {
@@ -2542,7 +2544,7 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart";
+export type AgentSessionKind = "play" | "quickstart" | "ranger";
 
 export type AgentStepId =
   | "settings_check"
@@ -2566,7 +2568,10 @@ export type AgentStepId =
   | "qs_run_and_notes"
   | "qs_approve_baselines"
   | "qs_rerun_after_approval"
-  | "qs_publish_share";
+  | "qs_publish_share"
+  // Ranger (EB-backed live page scout, MCP-driven)
+  | "ranger_provision"
+  | "ranger_browse";
 
 export type AgentStepStatus =
   | "pending"
@@ -2583,7 +2588,8 @@ export type PwAgentType =
   | "diver"
   | "generator"
   | "healer"
-  | "quickstart";
+  | "quickstart"
+  | "ranger";
 
 export interface AgentSubstep {
   label: string;
@@ -2796,6 +2802,11 @@ export interface AgentSessionMetadata {
   shareSlug?: string;
   shareUrl?: string;
   disabledReason?: string;
+  // Ranger-only fields
+  /** URL the ranger session is browsing. */
+  rangerUrl?: string;
+  /** Deterministic rendered page map produced by the ranger EB browse. */
+  rangerPageMap?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

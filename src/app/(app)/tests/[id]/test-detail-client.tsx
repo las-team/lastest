@@ -101,6 +101,8 @@ import {
 } from "@/server/actions/ai";
 import { toast } from "sonner";
 import { useNotifyJobStarted } from "@/components/queue/job-polling-context";
+import { useAiEnabled } from "@/components/ai/ai-availability-context";
+import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
 import { ScreenshotTimeline } from "@/components/tests/screenshot-timeline";
 import { TestSetupOverrides } from "@/components/setup/test-setup-overrides";
 import type {
@@ -434,7 +436,6 @@ export function TestDetailClient({
   csvDataSources = [],
   googleSheetsAccount = null,
   stabilizationDefaults,
-  banAiMode = false,
   earlyAdopterMode = false,
   diffDefaults,
   playwrightDefaults,
@@ -445,6 +446,9 @@ export function TestDetailClient({
   aiAvailable = false,
 }: TestDetailClientProps) {
   const router = useRouter();
+  // In-product AI gate (MCP-first): true only when AI isn't banned AND BYOK is
+  // configured (folded in server-side via the layout's availability context).
+  const aiEnabled = useAiEnabled();
   const notifyJobStarted = useNotifyJobStarted();
   const [editApiOpen, setEditApiOpen] = useState(false);
   const [apiSeed, setApiSeed] = useState<ApiTestSeed | null>(null);
@@ -1110,21 +1114,31 @@ export function TestDetailClient({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                    {!banAiMode && repositoryId && (
-                      <Button
-                        variant="outline"
-                        onClick={handleFix}
-                        disabled={isFixing}
-                        title="Fix with AI"
-                      >
-                        {isFixing ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Wrench className="h-4 w-4 mr-2" />
-                        )}
-                        {isFixing ? "Fixing..." : "Fix"}
-                      </Button>
-                    )}
+                    {repositoryId &&
+                      (aiEnabled ? (
+                        <Button
+                          variant="outline"
+                          onClick={handleFix}
+                          disabled={isFixing}
+                          title="Fix with AI"
+                        >
+                          {isFixing ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Wrench className="h-4 w-4 mr-2" />
+                          )}
+                          {isFixing ? "Fixing..." : "Fix"}
+                        </Button>
+                      ) : (
+                        <McpCtaHint
+                          promptKey="heal"
+                          label="Fix with agent"
+                          testId={test.id}
+                          testName={test.name}
+                          targetUrl={test.targetUrl}
+                          repositoryId={repositoryId}
+                        />
+                      ))}
                     <Button
                       variant="outline"
                       size="icon"
@@ -1295,7 +1309,15 @@ export function TestDetailClient({
                   <Video className="h-4 w-4 mr-2" />
                   Record Now
                 </Button>
-                {!banAiMode && repositoryId && (
+                {repositoryId && !aiEnabled && (
+                  <McpCtaHint
+                    promptKey="generate"
+                    label="Generate with agent"
+                    repositoryId={repositoryId}
+                    targetUrl={test.targetUrl}
+                  />
+                )}
+                {aiEnabled && repositoryId && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -1605,7 +1627,7 @@ export function TestDetailClient({
               )}
 
             {/* Inline AI Enhance */}
-            {!banAiMode && repositoryId && !isEditing && (
+            {aiEnabled && repositoryId && !isEditing && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -1635,6 +1657,30 @@ export function TestDetailClient({
                   <p className="text-xs text-muted-foreground mt-2">
                     Leave empty for general improvements
                   </p>
+                </CardContent>
+              </Card>
+            )}
+            {!aiEnabled && repositoryId && !isEditing && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Wand2 className="h-4 w-4" />
+                    Enhance this test
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    In-product AI is off — enhance this test from your own AI
+                    agent over MCP.
+                  </p>
+                  <McpCtaHint
+                    promptKey="enhance"
+                    label="Use your agent"
+                    testId={test.id}
+                    testName={test.name}
+                    targetUrl={test.targetUrl}
+                    repositoryId={repositoryId}
+                  />
                 </CardContent>
               </Card>
             )}
@@ -1763,7 +1809,7 @@ export function TestDetailClient({
               assignedValues={latestResult?.assignedVariables ?? null}
               code={test.code ?? null}
               onRefresh={onRefresh}
-              aiAvailable={aiAvailable}
+              aiAvailable={aiAvailable && aiEnabled}
               aiVarLastValues={test.aiVarLastValues ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } =

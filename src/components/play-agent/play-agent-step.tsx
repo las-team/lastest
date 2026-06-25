@@ -58,6 +58,11 @@ const AGENT_BADGE_STYLES: Record<
     text: "text-pink-600 dark:text-pink-400",
     label: "QuickStart",
   },
+  ranger: {
+    bg: "bg-teal-500/15",
+    text: "text-teal-600 dark:text-teal-400",
+    label: "Ranger",
+  },
 };
 
 export function AgentBadge({ agent }: { agent: PwAgentType }) {

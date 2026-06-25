@@ -580,6 +580,39 @@ async function runQsScoutPublic(
   }
 }
 
+/** Reuse window for a prior QuickStart auth capture. Long enough to skip
+ *  re-auth on a same-day re-run; a stale pick still degrades to a public-only
+ *  walkthrough via the walkthrough's hard auth-gate, so this can be generous. */
+const QS_STORAGE_REUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Find a recent, same-mode QuickStart auth capture for this repo so the
+ * auth-setup step can skip re-running the handshake. Matches on the mode-tagged
+ * storage-state name (`QuickStart login …` / `QuickStart signup …`), skips
+ * captures past their estimated TTL, and returns the newest within the reuse
+ * window. Returns null when nothing reusable exists (the caller then captures).
+ */
+async function findReusableQsStorageState(
+  repositoryId: string,
+  mode: "login" | "signup",
+): Promise<{ id: string } | null> {
+  const prefix = `QuickStart ${mode} `;
+  const now = Date.now();
+  const rows = await queries.getStorageStates(repositoryId);
+  const candidate = rows
+    .filter((r) => r.name.startsWith(prefix))
+    .filter((r) => !r.expiresAt || r.expiresAt.getTime() > now)
+    .filter(
+      (r) =>
+        !!r.createdAt &&
+        now - r.createdAt.getTime() < QS_STORAGE_REUSE_WINDOW_MS,
+    )
+    .sort(
+      (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0),
+    )[0];
+  return candidate ? { id: candidate.id } : null;
+}
+
 async function runQsAuthSetup(
   sessionId: string,
   repositoryId: string,
@@ -608,29 +641,28 @@ async function runQsAuthSetup(
   const credsProvided = meta.credsProvided === true;
 
   // Decide the handshake. QuickStart runs against the user's OWN app:
-  //  - creds provided + a login surface exists  -> LOGIN (real creds, most reliable)
-  //  - else automatable email+password register -> SIGNUP (fresh demo account)
-  //  - else                                      -> skip (public-only walkthrough)
-  const canLogin =
-    credsProvided &&
-    !!publicScout.loginPath &&
-    (publicScout.classification === "email_password" ||
-      publicScout.classification === "login_email_password");
-  const canSignup = publicScout.authAutomatable && !!publicScout.registerPath;
-
+  //  - creds provided -> LOGIN. The user already has an account, so we sign in
+  //    with their credentials and NEVER register. The auth-setup start URL is
+  //    RESET to the login page the scout learned (or the base URL when no
+  //    distinct login page was observed), independent of wherever the public
+  //    scout happened to stop (often /register). Routing login creds at the
+  //    register page is what produced "auth did not complete, still on /register".
+  //  - else automatable email+password register -> SIGNUP (fresh demo account).
+  //  - else -> skip (public-only walkthrough).
   let authMode: "login" | "signup";
   let code: string;
   let testName: string;
-  if (canLogin) {
+  if (credsProvided) {
     authMode = "login";
+    const loginUrl = publicScout.loginPath || gate.baseUrl;
     code = renderAuthLoginCode({
       email,
       password,
-      loginUrl: publicScout.loginPath!,
+      loginUrl,
       apiLoginEndpoint: publicScout.apiLoginEndpoint ?? undefined,
     });
     testName = `${slug} — auth login`;
-  } else if (canSignup) {
+  } else if (publicScout.authAutomatable && !!publicScout.registerPath) {
     authMode = "signup";
     code = renderAuthSetupCode({
       email,
@@ -639,13 +671,43 @@ async function runQsAuthSetup(
     });
     testName = `${slug} — auth setup`;
   } else {
-    const reason = credsProvided
-      ? "Credentials were provided but the scout found no usable login form on the site — running public-only."
-      : publicScout.authAutomatable
-        ? "Scout did not observe a register URL in the page DOM — running public-only (no path guessing)."
-        : "auth flow not automatable — running public-only";
+    const reason = publicScout.authAutomatable
+      ? "Scout did not observe a register URL in the page DOM — running public-only (no path guessing)."
+      : "Sign-up is not automatable and no app login was provided — running public-only. Add your app login in QuickStart to capture an authenticated walkthrough.";
     await mergeMetadata(sessionId, { authMode: "public_only" });
     await setSkipped(sessionId, "qs_auth_setup", reason);
+    return true;
+  }
+
+  // Skip the handshake when this repo already has a recent, same-mode QuickStart
+  // auth capture — the credentials (or throwaway account) are already set up.
+  // The walkthrough only needs a session to chain; a stale reuse degrades
+  // gracefully (its hard auth-gate downgrades to a public-only rerun), so we
+  // don't have to be perfect about freshness.
+  const reusable = await findReusableQsStorageState(repositoryId, authMode);
+  if (reusable) {
+    await mergeMetadata(sessionId, {
+      authMode,
+      authSetup: {
+        storageStateId: reusable.id,
+        captured: true,
+        mode: authMode,
+      },
+    });
+    await setCompleted(sessionId, "qs_auth_setup", {
+      mode: authMode,
+      captured: true,
+      storageStateId: reusable.id,
+      reused: true,
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "step:complete",
+      `Auth setup reused (${authMode}, existing session)`,
+      { stepId: "qs_auth_setup", agentType: "quickstart" },
+    );
     return true;
   }
 
@@ -664,7 +726,7 @@ async function runQsAuthSetup(
     repositoryId,
     baseUrl: gate.baseUrl,
     testCode: code,
-    name: `QuickStart auth ${slug} ${stamp}`,
+    name: `QuickStart ${authMode} ${slug} ${stamp}`,
     tokenLocation: publicScout.tokenLocation,
     authFlavor: publicScout.authLibrary,
   });

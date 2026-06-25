@@ -9,7 +9,10 @@ import { ActivityFeedProvider } from "@/components/activity-feed/activity-feed-p
 import { ActivityFeedPanel } from "@/components/activity-feed/activity-feed-panel-client";
 import { CelebrationListener } from "@/components/gamification/celebration-listener-client";
 import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
+import { AiAvailabilityProvider } from "@/components/ai/ai-availability-context";
 import { getCurrentSession } from "@/lib/auth";
+import * as queries from "@/lib/db/queries";
+import { isByokConfigured } from "@/lib/ai/availability";
 
 export default async function AppLayout({
   children,
@@ -40,37 +43,52 @@ export default async function AppLayout({
     MobileTopBarServer(),
   ]);
 
+  // In-product AI ("agent functions") is available only when the team hasn't
+  // banned AI and has configured in-product AI (BYOK). Otherwise CTAs across the
+  // app render an MCP hint instead. MCP-first; see docs/specs/25-mcp-first.md.
+  const teamId = session?.team?.id;
+  const userId = session?.user?.id;
+  const selectedRepo =
+    teamId && userId
+      ? await queries.getSelectedRepository(userId, teamId)
+      : null;
+  const aiEnabled =
+    !session?.team?.banAiMode &&
+    isByokConfigured(await queries.getAISettings(selectedRepo?.id));
+
   return (
-    <JobPollingProvider>
-      <ContextCollectorProvider>
-        <ActivityFeedProvider>
-          <div className="flex h-screen">
-            {/* Desktop rail wrapper is a static <div> now — safe because the
-             *  async <SidebarServer /> has already been resolved above, so
-             *  the wrapper no longer creates a nested async boundary inside
-             *  the client provider chain (which was the SSR/client hydration
-             *  hazard the previous "merge class onto <aside>" hack was
-             *  working around). */}
-            <div className="hidden md:flex">{sidebarEl}</div>
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {mobileTopBarEl}
-              <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
-                {children}
-              </main>
-              <MobileBottomNav sidebar={sidebarEl} />
+    <AiAvailabilityProvider aiEnabled={aiEnabled}>
+      <JobPollingProvider>
+        <ContextCollectorProvider>
+          <ActivityFeedProvider>
+            <div className="flex h-screen">
+              {/* Desktop rail wrapper is a static <div> now — safe because the
+               *  async <SidebarServer /> has already been resolved above, so
+               *  the wrapper no longer creates a nested async boundary inside
+               *  the client provider chain (which was the SSR/client hydration
+               *  hazard the previous "merge class onto <aside>" hack was
+               *  working around). */}
+              <div className="hidden md:flex">{sidebarEl}</div>
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {mobileTopBarEl}
+                <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
+                  {children}
+                </main>
+                <MobileBottomNav sidebar={sidebarEl} />
+              </div>
             </div>
-          </div>
-          <BugReportWidget />
-          <ActivityFeedPanel />
-          <CelebrationListener />
-          {session?.user && (
-            <UmamiIdentifyClient
-              userId={session.user.id}
-              teamId={session.team?.id ?? null}
-            />
-          )}
-        </ActivityFeedProvider>
-      </ContextCollectorProvider>
-    </JobPollingProvider>
+            <BugReportWidget />
+            <ActivityFeedPanel />
+            <CelebrationListener />
+            {session?.user && (
+              <UmamiIdentifyClient
+                userId={session.user.id}
+                teamId={session.team?.id ?? null}
+              />
+            )}
+          </ActivityFeedProvider>
+        </ContextCollectorProvider>
+      </JobPollingProvider>
+    </AiAvailabilityProvider>
   );
 }

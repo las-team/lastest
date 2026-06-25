@@ -1369,8 +1369,7 @@ function BuildSummary({
   const a11y = build.a11yScore;
   const design = build.designSystemScore;
   // passed/failed/changed + Accessible, then any of Design / Fast that reported.
-  const tileCount =
-    4 + (design != null ? 1 : 0) + (perfScore != null ? 1 : 0);
+  const tileCount = 4 + (design != null ? 1 : 0) + (perfScore != null ? 1 : 0);
 
   const configBits: string[] = [];
   if (build.triggerType) configBits.push(humanize(build.triggerType));
@@ -1528,7 +1527,12 @@ function GradeCard({
   if (score == null) return <StatCard value="—" label={label} tone="neutral" />;
   const { grade, tone } = scoreGrade(score);
   return (
-    <StatCard value={grade} label={label} sublabel={`${sub} · ${score}`} tone={tone} />
+    <StatCard
+      value={grade}
+      label={label}
+      sublabel={`${sub} · ${score}`}
+      tone={tone}
+    />
   );
 }
 
@@ -1549,9 +1553,21 @@ function computePerfScore(results: ShareTestResult[]): number | null {
   const band = (v: number | undefined, good: number, poor: number) =>
     v == null ? null : v <= good ? 100 : v <= poor ? 70 : 40;
   const scores = [
-    band(worst((s) => s.lcp), 2500, 4000), // LCP ms
-    band(worst((s) => s.inp), 200, 500), // INP ms
-    band(worst((s) => s.cls), 0.1, 0.25), // CLS (unitless)
+    band(
+      worst((s) => s.lcp),
+      2500,
+      4000,
+    ), // LCP ms
+    band(
+      worst((s) => s.inp),
+      200,
+      500,
+    ), // INP ms
+    band(
+      worst((s) => s.cls),
+      0.1,
+      0.25,
+    ), // CLS (unitless)
   ].filter((x): x is number => x != null);
   if (scores.length === 0) return null;
   return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
