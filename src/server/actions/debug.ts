@@ -24,6 +24,7 @@ import {
   createRemoteDebugSession,
   getRemoteDebugSession,
   clearRemoteDebugSession,
+  markRecordingEventsConsumed,
 } from "@/app/api/ws/runner/route";
 import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
@@ -358,6 +359,12 @@ export async function consumeStopRecording(
       steps: result.steps,
     },
   } as unknown as Message);
+
+  // Mark events consumed immediately. The runner keeps reporting
+  // pendingRecordingEvents until the spliced update_code round-trips, so
+  // without this a second poll in that window would splice on top of the
+  // already-spliced code. This closes the window server-side.
+  await markRecordingEventsConsumed(sessionId);
 
   return { ok: true, spliced: true };
 }

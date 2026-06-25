@@ -419,9 +419,10 @@ export class EmbeddedDebugExecutor {
     if (!this.recorder) return;
     const events = await this.recorder.stop(false);
     this.pendingRecordingEvents = events;
-    this.spliceMode = null;
-    // recordingAnchorIndex/Reason intentionally retained — getState() needs
-    // them alongside pendingRecordingEvents so the server can splice.
+    // spliceMode + recordingAnchorIndex/Reason are intentionally retained —
+    // getState() must report them alongside pendingRecordingEvents so the
+    // server's consumeStopRecording knows whether to replace or insert. They
+    // are cleared on the next start_recording / cancel, not here.
   }
 
   private async cancelRecording(): Promise<void> {
@@ -498,6 +499,13 @@ export class EmbeddedDebugExecutor {
           this.cleanBody = payload.cleanBody;
           if (payload.code) this.code = payload.code;
           this.codeVersion++;
+          // The spliced code has now round-tripped back from the server — the
+          // recording is consumed. Clear the splice metadata so getState() stops
+          // re-reporting the events (which would make the server re-splice).
+          this.pendingRecordingEvents = null;
+          this.spliceMode = null;
+          this.recordingAnchorIndex = -1;
+          this.recordingAnchorReason = null;
           // The live execution (if any) was instrumented from the OLD body —
           // resuming it would silently run stale code. Any subsequent control
           // action replays with the new code instead (see staleCode checks).
@@ -573,11 +581,13 @@ export class EmbeddedDebugExecutor {
   }
 
   getState(): DebugStatePayload {
-    // One-shot: drain pendingRecordingEvents so it's reported exactly once,
-    // on the first getState() tick after stop_recording finishes.
-    const drained = this.pendingRecordingEvents;
-    this.pendingRecordingEvents = null;
-
+    // pendingRecordingEvents is reported on EVERY tick until the splice lands.
+    // It used to be drained here (one-shot), but the server reads state on its
+    // own poll cycle that races the runner's WS push — a single drained push
+    // could be missed or overwritten by a later null push, so the splice never
+    // ran. The events are now cleared deterministically when the spliced
+    // update_code round-trips back (handleAction "update_code"), or on the next
+    // start_recording / cancel_recording.
     return {
       sessionId: this.sessionId,
       testId: this.testId,
@@ -595,7 +605,7 @@ export class EmbeddedDebugExecutor {
       recordingAnchorReason: this.recordingAnchorReason ?? undefined,
       spliceMode: this.spliceMode ?? undefined,
       targetUrl: this.targetUrl || undefined,
-      pendingRecordingEvents: drained ?? undefined,
+      pendingRecordingEvents: this.pendingRecordingEvents ?? undefined,
     };
   }
 

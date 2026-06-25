@@ -1294,3 +1294,28 @@ export async function clearRemoteDebugSession(
     .delete(remoteDebugSessions)
     .where(drizzleEq(remoteDebugSessions.sessionId, sessionId));
 }
+
+/**
+ * Mark a stop-recording's events as consumed in the DB-backed session state,
+ * so a repeated consumeStopRecording poll (the runner keeps reporting the
+ * events until its spliced update_code round-trips) won't splice twice.
+ * No-op if the session is gone or already cleared.
+ */
+export async function markRecordingEventsConsumed(
+  sessionId: string,
+): Promise<void> {
+  const [row] = await db
+    .select({ state: remoteDebugSessions.state })
+    .from(remoteDebugSessions)
+    .where(drizzleEq(remoteDebugSessions.sessionId, sessionId))
+    .limit(1);
+  const state = row?.state as DebugStateResponsePayload | null;
+  if (!state?.pendingRecordingEvents?.length) return;
+  await db
+    .update(remoteDebugSessions)
+    .set({
+      state: { ...state, pendingRecordingEvents: undefined },
+      updatedAt: new Date(),
+    })
+    .where(drizzleEq(remoteDebugSessions.sessionId, sessionId));
+}

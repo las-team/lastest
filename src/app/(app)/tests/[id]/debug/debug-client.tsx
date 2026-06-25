@@ -510,6 +510,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     if (result && !result.ok) {
       toast.error(result.error ?? "Failed to stop recording");
     } else if (result?.spliced) {
+      // Cancel any in-flight debounced update_code: it carries the PRE-splice
+      // localCode and would clobber the freshly-spliced runner code (with a
+      // newer codeVersion) on the next poll, leaving the removed steps
+      // visible. Pin codeVersionRef back so the next poll re-syncs localCode
+      // from the spliced server state.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      codeVersionRef.current = -1;
       justSplicedRef.current = true;
       setShowSaveAffordance(true);
     } else {
@@ -630,6 +640,38 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               Record from here
             </Button>
           )}
+          {isRecording && (
+            <>
+              <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0 ml-2" />
+              <span className="text-xs text-red-600 mr-1">
+                Recording — {state?.recordedEventCount ?? 0} action
+                {state?.recordedEventCount === 1 ? "" : "s"}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleStopRecording}
+                disabled={recordingStopPending}
+                title="Stop recording and splice the new actions in"
+              >
+                {recordingStopPending ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4 mr-1" />
+                )}
+                Stop recording
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => sendCmd({ type: "cancel_recording" })}
+                disabled={recordingStopPending}
+                title="Discard the recording"
+              >
+                Cancel
+              </Button>
+            </>
+          )}
           {showSaveAffordance && (
             <Button
               variant="default"
@@ -714,7 +756,9 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 value="code"
                 className="flex flex-col flex-1 min-h-0 mt-0"
               >
-                {/* Recording banner */}
+                {/* Recording banner — informational; Stop/Cancel live in the
+                    always-visible toolbar so they survive the auto-switch to
+                    Live View. */}
                 {isRecording && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border-b border-red-500/20">
                     <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
@@ -728,29 +772,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       {state?.recordedEventCount ?? 0} action
                       {state?.recordedEventCount === 1 ? "" : "s"} captured
                     </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-xs"
-                      onClick={handleStopRecording}
-                      disabled={recordingStopPending}
-                    >
-                      {recordingStopPending ? (
-                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <Square className="h-3 w-3 mr-1" />
-                      )}
-                      Stop
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs"
-                      onClick={() => sendCmd({ type: "cancel_recording" })}
-                      disabled={recordingStopPending}
-                    >
-                      Cancel
-                    </Button>
                   </div>
                 )}
                 {/* Past-step edit warning */}
@@ -795,6 +816,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   value="liveview"
                   className="flex flex-col flex-1 min-h-0 mt-0"
                 >
+                  {isRecording && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border-b border-red-500/20">
+                      <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                      <p className="text-xs text-red-600 flex-1">
+                        {state?.recordingAnchorReason === "last_passing"
+                          ? `Recording from Step ${(state.recordingAnchorIndex ?? 0) + 1} (last passing)`
+                          : state?.recordingAnchorReason === "fallback_cursor"
+                            ? `No earlier passing step — recording from Step ${(state.recordingAnchorIndex ?? 0) + 1}`
+                            : `Recording from Step ${(state?.recordingAnchorIndex ?? 0) + 1}`}
+                        {" — "}
+                        {state?.recordedEventCount ?? 0} action
+                        {state?.recordedEventCount === 1 ? "" : "s"} captured.
+                        Drive the browser, then{" "}
+                        <span className="font-medium">Stop recording</span> in
+                        the toolbar.
+                      </p>
+                    </div>
+                  )}
                   <BrowserViewer
                     ref={browserViewerRef}
                     streamUrl={streamUrl}
