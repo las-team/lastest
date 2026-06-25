@@ -1130,7 +1130,14 @@ export function TestDetailClient({
                           {isFixing ? "Fixing..." : "Fix"}
                         </Button>
                       ) : (
-                        <McpCtaHint promptKey="heal" label="Fix with agent" />
+                        <McpCtaHint
+                          promptKey="heal"
+                          label="Fix with agent"
+                          testId={test.id}
+                          testName={test.name}
+                          targetUrl={test.targetUrl}
+                          repositoryId={repositoryId}
+                        />
                       ))}
                     <Button
                       variant="outline"
@@ -1306,6 +1313,8 @@ export function TestDetailClient({
                   <McpCtaHint
                     promptKey="generate"
                     label="Generate with agent"
+                    repositoryId={repositoryId}
+                    targetUrl={test.targetUrl}
                   />
                 )}
                 {aiEnabled && repositoryId && (
@@ -1664,7 +1673,14 @@ export function TestDetailClient({
                     In-product AI is off — enhance this test from your own AI
                     agent over MCP.
                   </p>
-                  <McpCtaHint promptKey="enhance" label="Use your agent" />
+                  <McpCtaHint
+                    promptKey="enhance"
+                    label="Use your agent"
+                    testId={test.id}
+                    testName={test.name}
+                    targetUrl={test.targetUrl}
+                    repositoryId={repositoryId}
+                  />
                 </CardContent>
               </Card>
             )}

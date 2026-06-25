@@ -1254,6 +1254,8 @@ export function DefinitionPageClient({
           label=""
           variant="ghost"
           className="h-6 w-6"
+          repositoryId={repositoryId}
+          targetUrl={baseUrl}
         />
       )}
     </>
@@ -1434,7 +1436,11 @@ export function DefinitionPageClient({
                               : `Fix Failed (${failedScopedTests.length})`}
                           </Button>
                         ) : (
-                          <McpCtaHint promptKey="heal" label="Fix with agent" />
+                          <McpCtaHint
+                            promptKey="heal"
+                            label="Fix with agent"
+                            repositoryId={repositoryId}
+                          />
                         ))}
                       <Button
                         variant="outline"
@@ -1460,6 +1466,8 @@ export function DefinitionPageClient({
                         <McpCtaHint
                           promptKey="generate"
                           label="Generate with agent"
+                          repositoryId={repositoryId}
+                          targetUrl={baseUrl}
                         />
                       )}
                       <Button

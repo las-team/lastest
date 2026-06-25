@@ -253,7 +253,11 @@ export function SpecPanel({
                   Generate tests from spec
                 </Button>
               ) : (
-                <McpCtaHint promptKey="spec" label="Use your agent" />
+                <McpCtaHint
+                  promptKey="spec"
+                  label="Use your agent"
+                  repositoryId={repositoryId}
+                />
               )}
             </div>
           </CardContent>

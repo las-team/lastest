@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,23 +11,57 @@ import {
 import { Check, Copy, Plug } from "lucide-react";
 
 /**
+ * Live page context interpolated into the copied prompt so the user's agent can
+ * act on the exact entity (the specific test to heal, the repo to scope to, the
+ * build to review) without a discovery round-trip.
+ */
+export type McpPromptContext = {
+  testId?: string | null;
+  testName?: string | null;
+  targetUrl?: string | null;
+  repositoryId?: string | null;
+  buildId?: string | null;
+};
+
+const url = (c: McpPromptContext) => c.targetUrl || "<URL>";
+const at = (c: McpPromptContext) => (c.targetUrl ? ` at ${c.targetUrl}` : "");
+const inRepo = (c: McpPromptContext) =>
+  c.repositoryId ? ` in repo ${c.repositoryId}` : "";
+const named = (c: McpPromptContext) => {
+  if (c.testName && c.testId) return `"${c.testName}" (id ${c.testId})`;
+  if (c.testId) return `id ${c.testId}`;
+  if (c.testName) return `"${c.testName}"`;
+  return "<NAME>";
+};
+
+/**
  * Drop-in replacement for an in-product AI button when in-product AI (BYOK) is
  * not configured. Shows a small "Use your agent" affordance; the popover gives a
  * copy-paste MCP prompt that reproduces the action in the user's own AI client,
- * plus a link to connect an agent.
+ * plus a link to connect an agent. Each prompt embeds the live context it was
+ * given, so the copied text names the exact test/build/repo/URL instead of a
+ * placeholder. Prompts stay tool-name-agnostic ("Using the Lastest MCP
+ * server, …") so they survive MCP tool consolidation.
  */
-const PROMPTS: Record<string, string> = {
-  generate:
-    "Using the Lastest MCP server, create a Playwright test for <URL> that covers the main flow, then run it and show me the result.",
-  heal: "Using the Lastest MCP server, list my failing tests, heal each against the live page, re-run them, and summarize what changed.",
-  enhance:
-    "Using the Lastest MCP server, open test <NAME>, add meaningful assertions and edge cases against the live page, and save it.",
-  discover:
-    "Using the Lastest MCP server, explore <URL>, propose functional areas to cover, create them, and scaffold a starter test per area.",
-  routes:
-    "Using the Lastest MCP server, discover the testable routes of <URL> and create functional areas for them.",
-  spec: "Using the Lastest MCP server, turn this spec into Playwright tests and add them to the right functional areas.",
-  diff: "Using the Lastest MCP server, review the latest build's visual diffs, tell me which are real regressions vs. noise, and approve the safe ones.",
+const PROMPTS: Record<string, (c: McpPromptContext) => string> = {
+  generate: (c) =>
+    `Using the Lastest MCP server, create a Playwright test${inRepo(c)} for ${url(c)} that covers the main flow, then run it and show me the result.`,
+  heal: (c) =>
+    c.testId
+      ? `Using the Lastest MCP server, heal test ${named(c)}${at(c)}, re-run it, and summarize what changed.`
+      : `Using the Lastest MCP server, list my failing tests${inRepo(c)}, heal each against the live page, re-run them, and summarize what changed.`,
+  enhance: (c) =>
+    `Using the Lastest MCP server, open test ${named(c)}, add meaningful assertions and edge cases against the live page${at(c)}, and save it.`,
+  discover: (c) =>
+    `Using the Lastest MCP server, explore ${url(c)}, propose functional areas to cover${inRepo(c)}, create them, and scaffold a starter test per area.`,
+  routes: (c) =>
+    `Using the Lastest MCP server, discover the testable routes of ${url(c)} and create functional areas for them${inRepo(c)}.`,
+  spec: (c) =>
+    `Using the Lastest MCP server, turn this spec into Playwright tests and add them to the right functional areas${inRepo(c)}.`,
+  diff: (c) =>
+    c.buildId
+      ? `Using the Lastest MCP server, review build ${c.buildId}'s visual diffs, tell me which are real regressions vs. noise, and approve the safe ones.`
+      : `Using the Lastest MCP server, review the latest build's visual diffs${inRepo(c)}, tell me which are real regressions vs. noise, and approve the safe ones.`,
 };
 
 export function McpCtaHint({
@@ -36,15 +70,23 @@ export function McpCtaHint({
   size = "sm",
   variant = "outline",
   className,
+  testId,
+  testName,
+  targetUrl,
+  repositoryId,
+  buildId,
 }: {
   promptKey: keyof typeof PROMPTS | string;
   label?: string;
   size?: "sm" | "default" | "lg" | "icon";
   variant?: "outline" | "ghost" | "secondary" | "default";
   className?: string;
-}) {
+} & McpPromptContext) {
   const [copied, setCopied] = useState(false);
-  const prompt = PROMPTS[promptKey] ?? PROMPTS.generate;
+  const prompt = useMemo(() => {
+    const build = PROMPTS[promptKey] ?? PROMPTS.generate;
+    return build({ testId, testName, targetUrl, repositoryId, buildId });
+  }, [promptKey, testId, testName, targetUrl, repositoryId, buildId]);
   const copy = useCallback(async () => {
     await navigator.clipboard.writeText(prompt);
     setCopied(true);

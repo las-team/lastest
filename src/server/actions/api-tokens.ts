@@ -55,7 +55,7 @@ export async function createApiToken(
  */
 export async function getMcpConnectionStatus(
   since?: number,
-): Promise<{ connected: boolean; lastUsedAt: string | null }> {
+): Promise<{ connected: boolean; lastUsedAt: string | null; hasKey: boolean }> {
   const session = await requireAuth();
   const tokens = await queries.listApiTokensByUser(session.user.id);
   let latest: Date | null = null;
@@ -65,7 +65,11 @@ export async function getMcpConnectionStatus(
     }
   }
   const connected = !!latest && (since ? latest.getTime() >= since : true);
-  return { connected, lastUsedAt: latest ? latest.toISOString() : null };
+  return {
+    connected,
+    lastUsedAt: latest ? latest.toISOString() : null,
+    hasKey: tokens.length > 0,
+  };
 }
 
 export async function revokeApiToken(

@@ -24,6 +24,7 @@ import { AISettingsCard } from "@/components/settings/ai-settings-card";
 import { AiAdvancedSettings } from "@/components/settings/ai-advanced-settings";
 import { McpConnect } from "@/components/mcp/mcp-connect";
 import { McpPromptHints } from "@/components/mcp/mcp-prompt-hints";
+import { McpStatusBadge } from "@/components/mcp/mcp-status-badge";
 import { isByokConfigured } from "@/lib/ai/availability";
 import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
@@ -565,6 +566,7 @@ export default async function SettingsPage({
               <CardTitle className="flex items-center gap-2">
                 Connect your AI agent
                 <Badge variant="default">Recommended</Badge>
+                <McpStatusBadge className="ml-auto" />
               </CardTitle>
               <CardDescription>
                 Drive Lastest from Claude Code, Cursor, or any MCP client using
@@ -592,7 +594,7 @@ export default async function SettingsPage({
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <McpPromptHints />
+                <McpPromptHints repositoryId={selectedRepo?.id} />
               </CardContent>
             </Card>
           )}

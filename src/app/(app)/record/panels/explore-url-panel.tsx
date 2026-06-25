@@ -191,7 +191,12 @@ export function ExploreUrlPanel({
                   Generate test
                 </Button>
               ) : (
-                <McpCtaHint promptKey="generate" label="Generate with agent" />
+                <McpCtaHint
+                  promptKey="generate"
+                  label="Generate with agent"
+                  repositoryId={repositoryId}
+                  targetUrl={targetUrl}
+                />
               )}
             </div>
           </CardContent>
