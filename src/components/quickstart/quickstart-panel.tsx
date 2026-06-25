@@ -316,6 +316,7 @@ export function QuickstartPanel({
   const [appPassword, setAppPassword] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
   const [savingBaseUrl, setSavingBaseUrl] = useState(false);
+  const [editingUrl, setEditingUrl] = useState(false);
   const handleStart = () =>
     start(appEmail && appPassword ? { appEmail, appPassword } : undefined);
 
@@ -323,18 +324,20 @@ export function QuickstartPanel({
   // default-branch key (the one the gate reads) and refreshes so the server
   // re-evaluates the gate and renders the live panel without a sidebar detour.
   const canInlineBaseUrl = !!repositoryId && !!defaultBranch;
-  const saveBaseUrl = async () => {
-    if (!repositoryId || !defaultBranch) return;
+  const saveBaseUrl = async (): Promise<boolean> => {
+    if (!repositoryId || !defaultBranch) return false;
     let url = baseUrlInput.trim();
-    if (!url) return;
+    if (!url) return false;
     if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
     setSavingBaseUrl(true);
     try {
       await saveBranchBaseUrl(repositoryId, defaultBranch, url);
       toast.success("Base URL saved — QuickStart unlocked");
       router.refresh();
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't save base URL");
+      return false;
     } finally {
       setSavingBaseUrl(false);
     }
@@ -864,8 +867,86 @@ export function QuickstartPanel({
           {contentColumn}
         </div>
       ) : (
-        // Pre-run: optional app-login config.
-        <div className="space-y-2 p-5">
+        // Pre-run: target URL (visible + editable) + optional app-login config.
+        <div className="space-y-3 p-5">
+          {/* Target URL — what QuickStart runs against. Editable inline so the
+              user can see/change it without a sidebar detour. */}
+          <div className="rounded-md border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <Eyebrow>Target URL</Eyebrow>
+                <div className="mt-0.5 truncate text-[13px]">
+                  {host ? (
+                    <>
+                      QuickStart will run against{" "}
+                      <span className="font-mono text-foreground">{host}</span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      No base URL set
+                    </span>
+                  )}
+                </div>
+              </div>
+              {canInlineBaseUrl && !editingUrl && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 shrink-0"
+                  onClick={() => {
+                    setBaseUrlInput(host ?? "");
+                    setEditingUrl(true);
+                  }}
+                >
+                  {host ? "Change" : "Set URL"}
+                </Button>
+              )}
+            </div>
+            {canInlineBaseUrl && editingUrl && (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="url"
+                  inputMode="url"
+                  placeholder="your-app.com"
+                  aria-label="App base URL"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter")
+                      saveBaseUrl().then((ok) => ok && setEditingUrl(false));
+                  }}
+                  disabled={savingBaseUrl}
+                  className="h-8"
+                  autoFocus
+                />
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    onClick={() =>
+                      saveBaseUrl().then((ok) => ok && setEditingUrl(false))
+                    }
+                    disabled={savingBaseUrl || !baseUrlInput.trim()}
+                  >
+                    {savingBaseUrl ? (
+                      <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                    ) : null}
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8"
+                    onClick={() => setEditingUrl(false)}
+                    disabled={savingBaseUrl}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={() => setShowCreds((v) => !v)}
