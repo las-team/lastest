@@ -292,6 +292,14 @@ export async function updateBanAiMode(enabled: boolean) {
   revalidatePath("/");
 }
 
+// AI mode: MCP (default, false) ↔ built-in AI (true)
+export async function updateBuiltInAiEnabled(enabled: boolean) {
+  const session = await requireTeamAccess();
+  await queries.updateTeam(session.team.id, { builtInAiEnabled: enabled });
+  revalidatePath("/settings");
+  revalidatePath("/");
+}
+
 // Selector Stats
 export async function getSelectorStatsAction(repositoryId: string) {
   await requireRepoAccess(repositoryId);

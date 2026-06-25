@@ -2032,6 +2032,12 @@ export const teams = pgTable("teams", {
     "viktor+{slug}{stamp}@lastest.cloud",
   ),
   banAiMode: boolean("ban_ai_mode").default(false),
+  /** AI mode switch (MCP-first). false = MCP mode: in-product AI CTAs +
+   *  background AI are hidden and users drive Lastest from their own agent over
+   *  MCP. true = built-in AI: Lastest runs AI server-side. Default MCP.
+   *  This is the dedicated gate; it replaces inferring availability from whether
+   *  an AI key/provider happens to be configured. */
+  builtInAiEnabled: boolean("built_in_ai_enabled").default(false),
   gamificationEnabled: boolean("gamification_enabled").default(true),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
