@@ -105,14 +105,17 @@ export function ChapterRail({ chapters }: { chapters: Chapter[] }) {
                     {c.label}
                   </div>
                 </button>
-                {/* Enlarge → fullscreen viewer (sibling button, not nested). */}
+                {/* Enlarge → fullscreen viewer (sibling button, not nested).
+                    Always visible (not hover-gated) so the fullscreen
+                    affordance is discoverable on desktop and on touch, where
+                    there's no hover. */}
                 <button
                   type="button"
                   onClick={() => setOpenIndex(i)}
                   aria-label={`View ${c.label} fullscreen`}
-                  className="absolute top-1 right-1 rounded bg-background/85 border p-0.5 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="absolute top-1 right-1 rounded-md bg-background/90 border shadow-sm p-1 text-foreground/80 transition hover:bg-background hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 >
-                  <Maximize2 className="h-3.5 w-3.5" />
+                  <Maximize2 className="h-4 w-4" />
                 </button>
               </div>
             </li>

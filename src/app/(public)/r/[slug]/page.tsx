@@ -1706,6 +1706,22 @@ function TestShareBody({
   // DOM-change overlays (Verify > DOM tab, ported): annotated screenshots for
   // steps whose recorded DOM diff has added/removed/changed elements.
   const domOverlays = buildDomOverlays(stepComparisons, diffs, steps, toUrl);
+  // Merge DOM overlays into the matching visual diff: when a step has BOTH a
+  // pixel diff and DOM changes, the overlay renders directly under that step's
+  // slider (same coordinate space — both use the diff's current screenshot)
+  // instead of repeating the step in a separate "DOM changes" section. Only
+  // overlays whose step has no slider diff render standalone below.
+  const domByStepLabel = new Map<string, DomOverlayItem>();
+  for (const o of domOverlays) {
+    if (o.stepLabel && !domByStepLabel.has(o.stepLabel))
+      domByStepLabel.set(o.stepLabel, o);
+  }
+  const sliderLabels = new Set(
+    sliderDiffs.map((d) => d.stepLabel).filter((l): l is string => !!l),
+  );
+  const standaloneDomOverlays = domOverlays.filter(
+    (o) => !o.stepLabel || !sliderLabels.has(o.stepLabel),
+  );
   // No diffs → there's no comparison to show (the step strip, now clickable to
   // fullscreen, is the screenshot surface) so render the captured shots large
   // in the gallery instead of deduping them against the strip.
@@ -1786,28 +1802,41 @@ function TestShareBody({
               ? "Visual change"
               : `${sliderDiffs.length} visual changes`}
           </h2>
-          {sliderDiffs.map((d) => (
-            <DiffSlider
-              key={d.id}
-              baseline={d.baseline}
-              current={d.current}
-              diff={d.diff}
-              stepLabel={d.stepLabel}
-              pixelDifference={d.pixelDifference}
-              stepNumber={d.stepNumber}
-            />
-          ))}
+          {sliderDiffs.map((d) => {
+            const dom = d.stepLabel
+              ? domByStepLabel.get(d.stepLabel)
+              : undefined;
+            return (
+              <div key={d.id} className="space-y-3">
+                <DiffSlider
+                  baseline={d.baseline}
+                  current={d.current}
+                  diff={d.diff}
+                  stepLabel={d.stepLabel}
+                  pixelDifference={d.pixelDifference}
+                  stepNumber={d.stepNumber}
+                />
+                {dom && (
+                  <DomOverlay
+                    screenshotSrc={dom.src}
+                    dom={dom.dom}
+                    stepLabel="DOM"
+                  />
+                )}
+              </div>
+            );
+          })}
         </section>
       )}
 
-      {domOverlays.length > 0 && (
+      {standaloneDomOverlays.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            {domOverlays.length === 1
+            {standaloneDomOverlays.length === 1
               ? "DOM change"
-              : `${domOverlays.length} DOM changes`}
+              : `${standaloneDomOverlays.length} DOM changes`}
           </h2>
-          {domOverlays.map((o) => (
+          {standaloneDomOverlays.map((o) => (
             <DomOverlay
               key={o.key}
               screenshotSrc={o.src}
@@ -1850,7 +1879,10 @@ function collectSteps(
   if (!source) return [];
   const out: Step[] = [];
   const seen = new Set<string>();
-  const captured = source.screenshots ?? [];
+  // Capture uploads can persist out of execution order; the step index in each
+  // label ("Step N") is authoritative, so order by it (see also collectChapters
+  // and the host-side screenshot sort in executor.ts).
+  const captured = [...(source.screenshots ?? [])].sort(byStepLabel);
   for (const s of captured) {
     if (!s.path || seen.has(s.path)) continue;
     seen.add(s.path);
@@ -1893,6 +1925,10 @@ function collectChapters(
   if (source.screenshotPath && !seen.has(source.screenshotPath)) {
     ordered.push({ path: source.screenshotPath, label: "Final" });
   }
+  // Render the rail in execution order even when the stored screenshots array
+  // is scrambled (parallel-upload arrival order). "Final"/unparseable rows sort
+  // last and keep their relative position.
+  ordered.sort(byStepLabel);
   const n = ordered.length;
   const durSec = durationMs && durationMs > 0 ? durationMs / 1000 : null;
   const out: Chapter[] = [];
@@ -2068,6 +2104,18 @@ function stepNumberFromLabel(label: string | null | undefined): number {
   if (!label) return Number.POSITIVE_INFINITY;
   const m = label.match(/(\d+)/);
   return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+}
+
+/** Ascending sort comparator on the step index parsed from each item's label
+ *  ("Step N"). Unparseable / "Final" rows sort last and keep relative order.
+ *  The equality short-circuit guards the +Infinity − +Infinity → NaN case. */
+function byStepLabel(
+  a: { label?: string | null },
+  b: { label?: string | null },
+): number {
+  const an = stepNumberFromLabel(a.label);
+  const bn = stepNumberFromLabel(b.label);
+  return an === bn ? 0 : an - bn;
 }
 
 // For passing tests — no visual_diffs rows exist, so synthesize sliders from
