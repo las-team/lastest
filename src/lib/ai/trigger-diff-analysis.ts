@@ -4,7 +4,6 @@ import {
   analyzeDiff,
   type DiffingProviderConfig,
 } from "@/lib/ai/diff-analyzer";
-import { isByokConfigured } from "@/lib/ai/availability";
 import type { AIDiffingProvider } from "@/lib/db/schema";
 import { createChildJob, completeJob, failJob } from "@/server/actions/jobs";
 
@@ -46,8 +45,11 @@ export async function triggerAIDiffAnalysis(
     try {
       // Check if AI diffing is enabled
       const settings = await queries.getAISettings(repositoryId);
-      // MCP-first: background AI only runs when in-product AI (BYOK) is set up.
-      if (!settings.aiDiffingEnabled || !isByokConfigured(settings)) {
+      // MCP-first: background AI only runs when built-in AI is switched on.
+      if (
+        !settings.aiDiffingEnabled ||
+        !(await queries.getInProductAiEnabled(repositoryId))
+      ) {
         await queries.updateVisualDiff(diffId, { aiAnalysisStatus: "skipped" });
         return;
       }

@@ -24,7 +24,7 @@ const TONE_STYLE: Record<
   }
 > = {
   added: {
-    box: "border-emerald-500 bg-emerald-500/15",
+    box: "border-emerald-500 bg-emerald-500/25",
     chip: "text-emerald-700 dark:text-emerald-300",
     chipBg: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
     ring: "ring-emerald-500/40",
@@ -32,7 +32,7 @@ const TONE_STYLE: Record<
     sign: "+",
   },
   removed: {
-    box: "border-rose-500 bg-rose-500/15",
+    box: "border-rose-500 bg-rose-500/25",
     chip: "text-rose-700 dark:text-rose-300",
     chipBg: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
     ring: "ring-rose-500/40",
@@ -40,7 +40,7 @@ const TONE_STYLE: Record<
     sign: "−",
   },
   changed: {
-    box: "border-amber-500 bg-amber-500/15",
+    box: "border-amber-500 bg-amber-500/25",
     chip: "text-amber-700 dark:text-amber-300",
     chipBg: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
     ring: "ring-amber-500/40",
@@ -91,18 +91,47 @@ export function DomOverlay({
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
 
+  // Read the image's intrinsic size and recompute the overlay. Driven by BOTH
+  // a ref callback and onLoad: a cached/already-decoded <img> finishes loading
+  // before React attaches the onLoad handler, so the load event never fires —
+  // the ref callback's `complete` check is what guarantees `size` gets set in
+  // that case (otherwise every rect collapsed to nothing and the boxes were
+  // invisible). The guard avoids redundant state churn / render loops.
+  const measure = (img: HTMLImageElement | null) => {
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    setSize((s) =>
+      s && s.w === img.naturalWidth && s.h === img.naturalHeight
+        ? s
+        : { w: img.naturalWidth, h: img.naturalHeight },
+    );
+  };
+
   const added = dom.added ?? [];
   const removed = dom.removed ?? [];
   const changed = dom.changed ?? [];
 
-  const rects: Rect[] = [];
+  const allRects: Rect[] = [];
   if (size) {
     for (const el of removed)
-      rects.push(rectFor(el, "removed", size.w, size.h));
-    for (const el of added) rects.push(rectFor(el, "added", size.w, size.h));
+      allRects.push(rectFor(el, "removed", size.w, size.h));
+    for (const el of added) allRects.push(rectFor(el, "added", size.w, size.h));
     for (const c of changed)
-      rects.push(rectFor(c.current, "changed", size.w, size.h));
+      allRects.push(rectFor(c.current, "changed", size.w, size.h));
   }
+  // DOM snapshots cover the whole document, but the compared screenshot is
+  // frequently just the viewport — so a change below the fold has a bounding
+  // box past the image bottom and would render as an invisible div positioned
+  // at e.g. top:181%. Keep only boxes that overlap the captured frame; count
+  // the rest so the figure can say so instead of looking empty.
+  const rects = allRects.filter(
+    (r) => r.x < 100 && r.y < 100 && r.x + r.w > 0 && r.y + r.h > 0,
+  );
+  const offFrameCount = allRects.length - rects.length;
+  // Once measured, if every change is off-frame there's nothing to annotate —
+  // hide the (redundant, identical-to-the-slider) screenshot and let the
+  // footnote carry the count. Kept mounted (display:none, not unmounted) so the
+  // measured size sticks and there's no re-measure flicker.
+  const hideFrame = size != null && rects.length === 0;
 
   return (
     <figure className="space-y-2">
@@ -122,19 +151,19 @@ export function DomOverlay({
           ~{changed.length} changed
         </span>
       </header>
-      <div className="relative rounded-md border bg-muted overflow-hidden">
+      <div
+        className={`relative rounded-md border bg-muted overflow-hidden ${
+          hideFrame ? "hidden" : ""
+        }`}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          ref={measure}
           src={screenshotSrc}
           alt={stepLabel ? `DOM changes for ${stepLabel}` : "DOM changes"}
           loading="lazy"
           decoding="async"
-          onLoad={(e) =>
-            setSize({
-              w: e.currentTarget.naturalWidth,
-              h: e.currentTarget.naturalHeight,
-            })
-          }
+          onLoad={(e) => measure(e.currentTarget)}
           className="block w-full h-auto select-none"
         />
         <div className="absolute inset-0 pointer-events-none">
@@ -150,7 +179,9 @@ export function DomOverlay({
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 className={`absolute rounded-[2px] border-2 pointer-events-auto ${t.box} ${
-                  isHovered ? `ring-2 ${t.ring} z-20` : "z-10"
+                  isHovered
+                    ? `ring-2 ${t.ring} z-20`
+                    : "ring-1 ring-black/25 z-10"
                 }`}
                 style={{
                   left: `${r.x}%`,
@@ -194,6 +225,12 @@ export function DomOverlay({
           })}
         </div>
       </div>
+      {offFrameCount > 0 && (
+        <figcaption className="text-[11px] text-muted-foreground">
+          {offFrameCount} {rects.length > 0 ? "more " : ""}change
+          {offFrameCount === 1 ? "" : "s"} below the captured frame
+        </figcaption>
+      )}
     </figure>
   );
 }

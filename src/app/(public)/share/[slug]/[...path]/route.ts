@@ -31,13 +31,18 @@ function normalize(p: string): string {
 // captured-step screenshots, plus active baselines for the passing-test
 // fallback. Anything outside this set is rejected so a slug can't be used
 // to read arbitrary storage files.
-async function buildAllowedPaths(share: PublicShare): Promise<Set<string>> {
+async function buildAllowedPaths(
+  share: PublicShare,
+  build: Awaited<ReturnType<typeof queries.resolveShareBuild>>,
+): Promise<Set<string>> {
   const allowed = new Set<string>();
 
-  const build = await queries.getBuild(share.buildId);
+  // `build` is the share's RESOLVED build (test-scoped shares auto-follow the
+  // latest run — see resolveShareBuild), NOT share.buildId. The share page
+  // resolves the same build, so the allow-list and the page's image URLs agree.
   if (!build) return allowed;
 
-  const diffsRaw = await queries.getVisualDiffsByBuild(share.buildId);
+  const diffsRaw = await queries.getVisualDiffsByBuild(build.id);
   const diffs = share.testId
     ? diffsRaw.filter((d) => d.testId === share.testId)
     : diffsRaw;
@@ -129,10 +134,19 @@ async function getAllowedPaths(
   slug: string,
   share: PublicShare,
 ): Promise<Set<string>> {
-  const hit = allowedPathsCache.get(slug);
+  // Resolve the build per request and key the cache by it. Test-scoped shares
+  // auto-follow the latest run, so a re-run swaps the resolved build — keying
+  // by build id means the new run's allow-list takes effect immediately rather
+  // than 404ing every fresh image until the TTL lapses. The resolver is a
+  // single indexed query, far cheaper than the per-request scan this cache
+  // was introduced to avoid.
+  const build = await queries.resolveShareBuild(share);
+  const cacheKey = `${slug}:${build?.id ?? "none"}`;
+
+  const hit = allowedPathsCache.get(cacheKey);
   if (hit && hit.expiresAt > Date.now()) return hit.paths;
 
-  const paths = await buildAllowedPaths(share);
+  const paths = await buildAllowedPaths(share, build);
 
   // Bounded eviction: Map preserves insertion order, so the first key is the
   // oldest. Keeps the cache from growing unbounded across many distinct slugs.
@@ -140,7 +154,7 @@ async function getAllowedPaths(
     const oldest = allowedPathsCache.keys().next().value;
     if (oldest !== undefined) allowedPathsCache.delete(oldest);
   }
-  allowedPathsCache.set(slug, {
+  allowedPathsCache.set(cacheKey, {
     paths,
     expiresAt: Date.now() + ALLOW_CACHE_TTL_MS,
   });

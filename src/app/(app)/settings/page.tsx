@@ -48,6 +48,7 @@ import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
 import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
 import { QuickstartEmailTemplateInput } from "@/components/settings/quickstart-email-template-input";
 import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
+import { AiModeToggle } from "@/components/settings/ai-mode-toggle";
 import { GamificationToggle } from "@/components/settings/gamification-toggle";
 import { VerifyPhaseToggle } from "@/components/settings/verify-phase-toggle";
 import { GamificationAdminCard } from "@/components/settings/gamification-admin-card";
@@ -193,6 +194,7 @@ export default async function SettingsPage({
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
   const banAiMode = session?.team?.banAiMode ?? false;
+  const builtInAiEnabled = session?.team?.builtInAiEnabled ?? false;
 
   const generalTab = (
     <>
@@ -560,6 +562,28 @@ export default async function SettingsPage({
         </Card>
       ) : (
         <>
+          {/* Dedicated AI-mode switch — the single gate for in-product +
+           *  background AI. Default MCP; flip to built-in AI to run server-side. */}
+          <Card id="ai-mode">
+            <CardHeader>
+              <CardTitle>AI mode</CardTitle>
+              <CardDescription>
+                MCP mode (default) keeps AI out of the product so you drive it
+                from your own agent. Built-in AI runs AI server-side using the
+                provider configured under Advanced.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <AiModeToggle enabled={builtInAiEnabled} />
+              {builtInAiEnabled && !byokConfigured && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  Built-in AI is on, but no AI provider is configured. Set one
+                  up under Advanced below or AI features will not run.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* MCP-first: the promoted way to get AI in Lastest. */}
           <Card id="mcp-connect">
             <CardHeader>
@@ -578,8 +602,8 @@ export default async function SettingsPage({
             </CardContent>
           </Card>
 
-          {byokConfigured ? (
-            // BYOK is set up → in-product agent functions are live; show their logs.
+          {builtInAiEnabled ? (
+            // Built-in AI is on → in-product agent functions are live; show logs.
             <div id="ai-logs">
               <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
             </div>
@@ -600,7 +624,7 @@ export default async function SettingsPage({
           )}
 
           {/* BYOK provider config, demoted under an Advanced disclosure. */}
-          <AiAdvancedSettings defaultOpen={byokConfigured}>
+          <AiAdvancedSettings defaultOpen={builtInAiEnabled}>
             <div id="ai-settings">
               <AISettingsCard
                 settings={aiSettings}

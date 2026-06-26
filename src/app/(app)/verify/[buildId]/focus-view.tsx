@@ -82,7 +82,11 @@ import type {
   EvidenceLayer,
   StepIssueState,
 } from "@/lib/db/schema";
-import { deriveCaseStatus, type CaseStatus } from "@/lib/verify/case-status";
+import {
+  deriveCaseStatus,
+  isVisualBaselineMissing,
+  type CaseStatus,
+} from "@/lib/verify/case-status";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
 
@@ -336,6 +340,9 @@ export function FocusView(props: FocusViewProps) {
         props.checkModes,
         test?.id ? props.checkModesByTestId[test.id] : null,
       );
+      const visual =
+        props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ??
+        null;
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
@@ -343,13 +350,11 @@ export function FocusView(props: FocusViewProps) {
         testFailed:
           result?.status === "failed" || result?.status === "setup_failed",
         verdictOverride: effectiveVerdict(step.evidence, modes),
+        visualBaselineMissing: isVisualBaselineMissing(visual, modes.visual),
       });
       const area = test?.functionalAreaId
         ? (props.areaById.get(test.functionalAreaId) ?? null)
         : null;
-      const visual =
-        props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ??
-        null;
       return { step, test, area, status, feedback: stepFb, visual, result };
     });
     // Keep all steps of a single test contiguous: sort by (testName ASC,

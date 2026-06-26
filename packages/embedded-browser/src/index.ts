@@ -671,7 +671,15 @@ async function startup(): Promise<void> {
                       data: screenshot.data,
                       width: screenshot.width,
                       height: screenshot.height,
-                      capturedAt: Date.now(),
+                      // Real capture time + recording offset (set by the EB test
+                      // executor) — NOT upload time. Powers share "In this video"
+                      // chapters; falls back to now for any legacy/untimed shot.
+                      capturedAt: screenshot.capturedAt ?? Date.now(),
+                      atMs: screenshot.atMs,
+                      // Cosmetic chapter title (screenshot-path slug); not the diff key.
+                      title: screenshot.title,
+                      // Per-step DOM snapshot for the aligned per-step DOM diff.
+                      domSnapshot: screenshot.domSnapshot,
                     },
                   }),
                 ),

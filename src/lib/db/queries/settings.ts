@@ -7,6 +7,8 @@ import {
   aiSettings,
   aiPromptLogs,
   notificationSettings,
+  repositories,
+  teams,
 } from "../schema";
 import {
   DEFAULT_SELECTOR_PRIORITY,
@@ -469,6 +471,28 @@ export async function getAISettings(repositoryId?: string | null) {
     createdAt: null,
     updatedAt: null,
   };
+}
+
+/**
+ * Resolve whether in-product AI is active for a repo's team. This is the single
+ * gate that replaces inferring availability from key/provider presence: it folds
+ * the team-level `banAiMode` kill-switch and the `builtInAiEnabled` mode flag.
+ * Returns false when the repo (or its team) can't be resolved. MCP-first: false
+ * means hide in-product AI + background AI and steer the user to their own agent.
+ */
+export async function getInProductAiEnabled(
+  repositoryId?: string | null,
+): Promise<boolean> {
+  if (!repositoryId) return false;
+  const [row] = await db
+    .select({
+      banAiMode: teams.banAiMode,
+      builtInAiEnabled: teams.builtInAiEnabled,
+    })
+    .from(repositories)
+    .innerJoin(teams, eq(repositories.teamId, teams.id))
+    .where(eq(repositories.id, repositoryId));
+  return !!row && !row.banAiMode && !!row.builtInAiEnabled;
 }
 
 export async function createAISettings(

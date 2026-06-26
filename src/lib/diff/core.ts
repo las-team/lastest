@@ -65,6 +65,12 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
     branch,
     browser,
   );
+  // Per-step DOM snapshot for the approved step rides onto the new baseline so
+  // later runs compute an aligned per-step DOM diff against it. Matched on the
+  // step label from the run that produced this diff.
+  const approvedDomSnapshot = testResult?.screenshots?.find(
+    (s) => (s.label ?? null) === (diff.stepLabel ?? null),
+  )?.domSnapshot;
   await queries.createBaseline({
     testId: diff.testId,
     stepLabel: diff.stepLabel,
@@ -73,6 +79,7 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
     branch,
     browser,
     approvedFromDiffId: diffId,
+    domSnapshot: approvedDomSnapshot,
   });
 
   // Update build status

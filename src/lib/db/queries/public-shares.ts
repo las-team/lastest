@@ -272,16 +272,53 @@ export async function getActiveBaselinesForTest(
     .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
 }
 
+/**
+ * Resolve which build a share renders. Test-scoped shares auto-follow the
+ * latest completed build that actually ran the test, so re-running the test
+ * surfaces on the existing /r/<slug> without a manual republish —
+ * share.buildId is just the initial anchor. Build-wide shares (share.testId
+ * null) stay pinned to their immutable snapshot. See publishBuildShare() for
+ * the matching intent.
+ *
+ * SINGLE SOURCE OF TRUTH: the share page (getPublicShareContext) AND the
+ * /share/<slug>/<path> media route must resolve the SAME build, or the page
+ * emits image URLs that the media allow-list rejects with 404.
+ */
+export async function resolveShareBuild(
+  share: Pick<PublicShare, "testId" | "buildId">,
+): Promise<typeof builds.$inferSelect | null> {
+  if (share.testId) {
+    const [latest] = await db
+      .select({ build: builds })
+      .from(builds)
+      .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+      .innerJoin(testResults, eq(testResults.testRunId, testRuns.id))
+      .where(
+        and(
+          eq(testResults.testId, share.testId),
+          isNotNull(builds.completedAt),
+        ),
+      )
+      .orderBy(desc(builds.createdAt))
+      .limit(1);
+    if (latest?.build) return latest.build;
+  }
+  // Fallback: build-wide shares, or a test-scoped share whose test has no
+  // surviving completed run — render the originally-pinned build.
+  const [pinned] = await db
+    .select()
+    .from(builds)
+    .where(eq(builds.id, share.buildId));
+  return pinned ?? null;
+}
+
 export async function getPublicShareContext(
   slug: string,
 ): Promise<PublicShareContext | null> {
   const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== "public") return null;
 
-  const [build] = await db
-    .select()
-    .from(builds)
-    .where(eq(builds.id, share.buildId));
+  const build = await resolveShareBuild(share);
   if (!build) return null;
 
   const test = share.testId
